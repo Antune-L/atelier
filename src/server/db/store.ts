@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
+import { AUTO_RECLAIM_EVENT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import type { Comment, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
@@ -67,16 +68,18 @@ const COLUMN_TO_DB = "column_name";
 export class Store {
   constructor(private readonly db: Database) {}
 
-  private pendingQuestions(ticketId: string): number {
-    const row = this.db
-      .query(
-        "SELECT COUNT(*) AS n FROM comments WHERE ticket_id = ? AND author = 'agent' AND question_id IS NOT NULL AND answered = 0",
-      )
-      .get(ticketId);
-    if (row && typeof row === "object" && "n" in row && typeof row.n === "number") {
-      return row.n;
-    }
+  /** Run a `SELECT … AS n` aggregate and return the numeric scalar (0 when absent). */
+  private scalar(sql: string, ...params: (string | number)[]): number {
+    const row = this.db.query(sql).get(...params);
+    if (row && typeof row === "object" && "n" in row && typeof row.n === "number") return row.n;
     return 0;
+  }
+
+  private pendingQuestions(ticketId: string): number {
+    return this.scalar(
+      "SELECT COUNT(*) AS n FROM comments WHERE ticket_id = ? AND author = 'agent' AND question_id IS NOT NULL AND answered = 0",
+      ticketId,
+    );
   }
 
   getTicket(id: string): Ticket | null {
@@ -200,15 +203,19 @@ export class Store {
 
   /** Raw nudge counter (not exposed in Ticket type). */
   getNudgeCount(id: string): number {
-    const row = this.db.query("SELECT nudge_count AS n FROM tickets WHERE id = ?").get(id);
-    if (row && typeof row === "object" && "n" in row && typeof row.n === "number") return row.n;
-    return 0;
+    return this.scalar("SELECT nudge_count AS n FROM tickets WHERE id = ?", id);
+  }
+
+  /**
+   * Count of auto-reclaim relaunches for this ticket. Event-based on purpose: only the
+   * auto-reclaim paths log AUTO_RECLAIM_EVENT, so manual retries/relaunches never inflate it.
+   */
+  getReclaimCount(id: string): number {
+    return this.scalar("SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND type = ?", id, AUTO_RECLAIM_EVENT);
   }
 
   getLastProgressAt(id: string): number {
-    const row = this.db.query("SELECT last_progress_at AS n FROM tickets WHERE id = ?").get(id);
-    if (row && typeof row === "object" && "n" in row && typeof row.n === "number") return row.n;
-    return 0;
+    return this.scalar("SELECT last_progress_at AS n FROM tickets WHERE id = ?", id);
   }
 
   // ---- Comments ----

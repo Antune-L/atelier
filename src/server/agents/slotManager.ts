@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import type { Column } from "../../shared/constants.ts";
+import { AUTO_RECLAIM_EVENT, AUTO_RECLAIM_MAX, type Column } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
@@ -38,6 +38,14 @@ const CONTRACT_REPUSH_MAX_ATTEMPTS = 3;
 
 /** Audit event logged on the agent's first protocol tool call; gates the contract re-push. */
 export const CONTRACT_ACKED_EVENT = "contract_acked";
+
+/**
+ * Outcome of an auto-reclaim attempt:
+ * - `reclaimed`: relaunched in place; caller does nothing.
+ * - `escalate`: cap hit or relaunch failed; caller marks stalled/interrupted + notifies.
+ * - `ignore`: no slot held or a launch is already in flight; caller does nothing (no escalation).
+ */
+export type ReclaimOutcome = "reclaimed" | "escalate" | "ignore";
 
 const log = createLogger("slot");
 
@@ -409,7 +417,12 @@ export class SlotManager {
       if (!slot.ticketId || !slot.tmuxSession) continue;
       const alive = await this.system.hasSession(slot.tmuxSession);
       if (alive) continue;
-      const ticket = this.store.getTicket(slot.ticketId);
+      const ticketId = slot.ticketId;
+
+      // Under the cap, relaunch in place (keeps the worktree); otherwise leave interrupted + notify.
+      if ((await this.tryAutoReclaim(ticketId, "session tmux disparue")) !== "escalate") continue;
+
+      const ticket = this.store.getTicket(ticketId);
       if (ticket) {
         this.touch(
           this.store.updateTicket(ticket.id, {
@@ -420,8 +433,9 @@ export class SlotManager {
         );
       }
       this.store.updateSlot(slot.id, { status: "interrupted" });
-      this.store.logEvent(slot.ticketId, "interrupted", {});
-      log.warn("session tmux disparue à la reprise", { ticketId: slot.ticketId, slotId: slot.id });
+      this.store.logEvent(ticketId, "interrupted", {});
+      log.warn("session tmux disparue à la reprise", { ticketId, slotId: slot.id });
+      void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session tmux disparue`);
     }
     this.hub.pushSlots(this.store.listSlots());
   }
@@ -465,6 +479,39 @@ export class SlotManager {
     }
     await this.startTicket(ticketId);
     return true;
+  }
+
+  /**
+   * Auto-reclaim a dead/stalled turn: relaunch in the held slot (preserves the worktree — never
+   * falls back to a fresh worktree, so uncommitted work is safe), bounded by AUTO_RECLAIM_MAX.
+   *
+   * The cap check, the launch claim (setPhase) and the AUTO_RECLAIM_EVENT log all run
+   * synchronously before the first await. `onStop` is fire-and-forget and can be re-entered by a
+   * concurrent stop frame (WS stop + HTTP stop-hook); claiming synchronously makes that second
+   * entrant observe both `isLaunching` and the incremented count, so the cap can't be exceeded and
+   * the session can't be double-spawned.
+   */
+  async tryAutoReclaim(ticketId: string, reason: string): Promise<ReclaimOutcome> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.slotId === null) return "ignore";
+    if (this.isLaunching(ticketId)) {
+      log.warn("auto-reclaim ignoré : lancement déjà en cours", { ticketId });
+      return "ignore";
+    }
+    const reclaims = this.store.getReclaimCount(ticketId);
+    if (reclaims >= AUTO_RECLAIM_MAX) return "escalate";
+
+    this.setPhase(ticketId, SETUP_PHASES.spawning);
+    this.store.logEvent(ticketId, AUTO_RECLAIM_EVENT, { attempt: reclaims + 1, reason });
+    log.warn("auto-reclaim", { ticketId, slotId: ticket.slotId, attempt: reclaims + 1, reason });
+    try {
+      await this.relaunchInPlace(ticket.slotId, ticketId);
+    } catch (error) {
+      this.clearPhase(ticketId);
+      log.error("auto-reclaim échoué", { ticketId, error: error instanceof Error ? error.message : String(error) });
+      return "escalate";
+    }
+    return "reclaimed";
   }
 
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {

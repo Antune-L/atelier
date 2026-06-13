@@ -53,6 +53,14 @@ const ghPrSchema = z.object({
   deletions: z.number(),
 });
 
+/** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
+const ghPrStateSchema = z.object({ state: z.string() });
+/** GitHub PR state that proves the merge completed (vs. OPEN/CLOSED). */
+const PR_STATE_MERGED = "MERGED";
+/** A synchronous merge is occasionally not yet visible on the immediate read; poll a few times. */
+const PR_MERGE_CONFIRM_ATTEMPTS = 3;
+const PR_MERGE_CONFIRM_DELAY_MS = 1000;
+
 // `claude -p --output-format stream-json` emits one JSON event per line. We only
 // care about assistant turns (text + tool_use, for the live view) and the final
 // result event (the verdict text to parse). Everything else (hooks, rate limits)
@@ -251,12 +259,48 @@ export class RealSystemAdapter implements SystemAdapter {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       return { ok: false, reason: `gh pr merge a échoué (code ${res.exitCode}) : ${detail}` };
     }
+    // `gh pr merge` can exit 0 without the PR landing on the base branch: with required
+    // checks still pending it silently enables auto-merge instead, and GitHub may queue
+    // or later reject the merge (e.g. a conflict). Trusting the exit code alone produced
+    // false "PR mergée" badges, so confirm the real state before reporting success.
+    const state = await this.confirmMerged(slotPath, prUrl);
+    if (state !== PR_STATE_MERGED) {
+      const hint = res.stdout.toString().trim() || res.stderr.toString().trim();
+      return { ok: false, reason: `PR non mergée (état GitHub : ${state || "indéterminé"})${hint ? ` — ${hint}` : ""}` };
+    }
     // Best-effort remote branch cleanup: the merge already succeeded, so a failed
     // deletion (e.g. branch protection) must not turn into a merge failure. We can't
     // use `gh pr merge --delete-branch` because its local cleanup checks out the base
     // branch, which is already checked out in the main worktree and would error.
     await $`git push origin --delete ${branch}`.cwd(slotPath).nothrow().quiet();
     return { ok: true, reason: "" };
+  }
+
+  /**
+   * Resolve the PR's true merge state, polling briefly to absorb GitHub read lag so a
+   * synchronous merge isn't misread as unmerged. Returns the last seen state ("MERGED"
+   * once confirmed, otherwise "OPEN"/"CLOSED", or "" when it can't be read).
+   */
+  private async confirmMerged(slotPath: string, prUrl: string): Promise<string> {
+    let state = "";
+    for (let attempt = 0; attempt < PR_MERGE_CONFIRM_ATTEMPTS; attempt++) {
+      if (attempt > 0) await Bun.sleep(PR_MERGE_CONFIRM_DELAY_MS);
+      state = await this.prState(slotPath, prUrl);
+      if (state === PR_STATE_MERGED) return state;
+    }
+    return state;
+  }
+
+  /** Read a PR's GitHub state ("OPEN" | "MERGED" | "CLOSED"); "" when it can't be read. */
+  private async prState(slotPath: string, prUrl: string): Promise<string> {
+    const res = await $`gh pr view ${prUrl} --json state`.cwd(slotPath).nothrow().quiet();
+    if (res.exitCode !== 0) return "";
+    try {
+      const parsed = ghPrStateSchema.safeParse(JSON.parse(res.stdout.toString()));
+      return parsed.success ? parsed.data.state : "";
+    } catch {
+      return "";
+    }
   }
 
   async notify(title: string, body: string): Promise<void> {

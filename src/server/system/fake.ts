@@ -184,10 +184,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
-  async notify(title: string, body: string): Promise<void> {
-    this.log("notify", { title, body });
-  }
-
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
     this.log("runProjectScript", { slotPath, command, timeoutMs });
     return { ok: true, output: "[dry-run] skipped" };

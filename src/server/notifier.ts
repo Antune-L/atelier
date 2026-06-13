@@ -1,15 +1,15 @@
 import type { ClientHub } from "./hub.ts";
-import type { SystemAdapter } from "./system/index.ts";
 
-/** Fans a notification out to macOS (osascript) and the UI toast channel. */
+/**
+ * Fans a notification out to the UI, which raises a toast and a desktop
+ * notification. A native OS notification is intentionally avoided: clicking it
+ * focuses the emitting process (e.g. Script Editor) instead of the browser.
+ */
 export class Notifier {
-  constructor(
-    private readonly system: SystemAdapter,
-    private readonly hub: ClientHub,
-  ) {}
+  constructor(private readonly hub: ClientHub) {}
 
-  async notify(title: string, body: string): Promise<void> {
+  notify(title: string, body: string): Promise<void> {
     this.hub.pushNotification(title, body);
-    await this.system.notify(title, body);
+    return Promise.resolve();
   }
 }

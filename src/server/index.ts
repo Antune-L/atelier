@@ -36,7 +36,7 @@ const store = new Store(db);
 const system = createSystemAdapter();
 const clientHub = new ClientHub(store);
 const workerHub = new WorkerHub();
-const notifier = new Notifier(system, clientHub);
+const notifier = new Notifier(clientHub);
 const triageLog = new LiveLog();
 
 const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {

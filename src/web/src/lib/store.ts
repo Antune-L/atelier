@@ -1,6 +1,8 @@
 import type { Slot, Ticket, WsClientEvent } from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
 
+import { ensureNotificationPermission, showDesktopNotification } from "./notifications";
+
 const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const RECONNECT_DELAY_MS = 1500;
 const TOAST_TTL_MS = 6000;
@@ -40,6 +42,7 @@ class BoardStore {
 
   connect(): void {
     if (this.ws) return;
+    ensureNotificationPermission();
     const socket = new WebSocket(WS_URL);
     this.ws = socket;
     socket.addEventListener("open", () => this.set({ connected: true }));
@@ -78,6 +81,7 @@ class BoardStore {
         break;
       case "notification":
         this.pushToast(event.title, event.body);
+        showDesktopNotification(event.title, event.body);
         break;
     }
   }

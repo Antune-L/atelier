@@ -346,11 +346,6 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
-  async notify(title: string, body: string): Promise<void> {
-    const escaped = (s: string): string => s.replace(/"/g, '\\"');
-    await $`osascript -e ${`display notification "${escaped(body)}" with title "${escaped(title)}"`}`.nothrow().quiet();
-  }
-
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
     const res = await withTimeout($`sh -c ${command}`.cwd(slotPath).nothrow().quiet(), timeoutMs, command);
     return { ok: res.exitCode === 0, output: res.stdout.toString() + res.stderr.toString() };

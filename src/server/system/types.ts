@@ -86,9 +86,6 @@ export interface SystemAdapter {
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
   mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
 
-  // ---- notifications ----
-  notify(title: string, body: string): Promise<void>;
-
   // ---- project test commands ----
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
 

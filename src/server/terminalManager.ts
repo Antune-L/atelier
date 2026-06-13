@@ -11,6 +11,9 @@ import type { PaneStream } from "./system/types.ts";
 export interface TerminalSocketData {
   kind: "terminal";
   ticketId: string;
+  /** Viewer's initial xterm geometry; the pane is reflowed to it before the first capture. */
+  cols: number;
+  rows: number;
 }
 
 export type TerminalSocket = ServerWebSocket<TerminalSocketData>;
@@ -134,12 +137,15 @@ export class TerminalSessionManager {
   ) {}
 
   async handleOpen(ws: TerminalSocket): Promise<void> {
-    const { ticketId } = ws.data;
+    const { ticketId, cols, rows } = ws.data;
     const sessionName = this.resolveSession(ticketId);
     if (!sessionName) {
       send(ws, { type: "exit" });
       return;
     }
+    // Reflow the pane to this viewer's geometry before seeding: a full-screen TUI positions
+    // by absolute coordinates, so a capture taken at a different width renders garbled in xterm.
+    await this.system.resizePane(sessionName, cols, rows);
     const session = this.sessions.get(ticketId) ?? this.createSession(ticketId, sessionName);
     session.viewers.add(ws);
     await session.attach(ws);

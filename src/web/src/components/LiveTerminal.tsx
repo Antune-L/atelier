@@ -30,9 +30,10 @@ const TERMINAL_THEME = {
 
 const textEncoder = new TextEncoder();
 
-function wsUrl(ticketId: string): string {
+function wsUrl(ticketId: string, cols: number, rows: number): string {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${location.host}/ws/terminal?ticketId=${encodeURIComponent(ticketId)}`;
+  const params = new URLSearchParams({ ticketId, cols: String(cols), rows: String(rows) });
+  return `${protocol}://${location.host}/ws/terminal?${params.toString()}`;
 }
 
 /** UTF-8 string of keystrokes → hex byte string for `tmux send-keys -H`. */
@@ -91,7 +92,9 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
     termRef.current = term;
     fitRef.current = fit;
 
-    const ws = new WebSocket(wsUrl(ticketId));
+    // term.cols/rows reflect the just-fitted geometry; carry it so the server reflows the pane
+    // to this viewport before its first capture (no resize message fires when fit is a no-op).
+    const ws = new WebSocket(wsUrl(ticketId, term.cols, term.rows));
     wsRef.current = ws;
     setExited(false);
 

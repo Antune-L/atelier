@@ -1,0 +1,100 @@
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { AlertTriangle, ExternalLink, MessageCircleQuestion, Palette } from "lucide-react";
+
+import { extractFigmaUrls } from "@shared/figma";
+import type { ProjectInfo, Ticket } from "@shared/schemas";
+
+import { Badge } from "@/components/ui/badge";
+import { isStageAnimated, stageLabel, stageVariant, triageVerdictDot } from "@/lib/display";
+import { cn } from "@/lib/utils";
+
+interface TicketCardProps {
+  ticket: Ticket;
+  projectLabel: string;
+  onOpen: (ticket: Ticket) => void;
+}
+
+export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: ticket.id,
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={() => onOpen(ticket)}
+      className={cn(
+        "cursor-grab rounded-lg border bg-card p-3 shadow-sm transition-colors hover:border-ring active:cursor-grabbing",
+        ticket.stage === "failed" && "border-destructive/60",
+        ticket.watchdogFlagged && "border-warning/60",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-sm font-medium leading-snug">{ticket.title}</h3>
+        <div className="flex shrink-0 items-center gap-1">
+          {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
+          <Badge variant="outline" className="text-[10px]">
+            {projectLabel}
+          </Badge>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {ticket.stage && (
+          <Badge variant={stageVariant(ticket.stage)} className={cn(isStageAnimated(ticket.stage) && "animate-pulse")}>
+            {stageLabel(ticket.stage)}
+          </Badge>
+        )}
+        {ticket.watchdogFlagged && (
+          <Badge variant="warning" className="gap-1">
+            <AlertTriangle className="h-3 w-3" /> Inactif
+          </Badge>
+        )}
+        {ticket.pendingQuestions > 0 && (
+          <Badge variant="warning" className="gap-1">
+            <MessageCircleQuestion className="h-3 w-3" /> {ticket.pendingQuestions}
+          </Badge>
+        )}
+        {extractFigmaUrls(ticket.description).length > 0 && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Palette className="h-3 w-3" /> UI
+          </Badge>
+        )}
+        {ticket.prUrl && (
+          <a
+            href={ticket.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" /> PR
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TriageDot({ verdict }: { verdict: NonNullable<Ticket["triageVerdict"]> }) {
+  const { glyph, className, title } = triageVerdictDot(verdict);
+  return (
+    <span className={cn("text-xs font-bold leading-none", className)} title={title} aria-label={title}>
+      {glyph}
+    </span>
+  );
+}
+
+export function resolveProjectLabel(projects: ProjectInfo[], key: string): string {
+  return projects.find((p) => p.key === key)?.label ?? key;
+}

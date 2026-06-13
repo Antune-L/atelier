@@ -1,0 +1,3 @@
+# Keep `bun test` out of the slot worktrees (slots/ holds other repos' checkouts).
+[test]
+root = "src"

@@ -1,0 +1,139 @@
+import { Maximize2, Minimize2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
+
+type TerminalVariant = "agent" | "triage";
+
+interface TerminalViewProps {
+  ticketId: string;
+  /** "agent" = live tmux pane (with setup phase); "triage" = read-only analysis stream. */
+  variant?: TerminalVariant;
+  /** Stretch to fill the parent's height instead of capping at 60vh. */
+  fill?: boolean;
+}
+
+interface TerminalData {
+  output: string;
+  phase: string | null;
+}
+
+const POLL_INTERVAL_MS = 2000;
+
+const TITLES: Record<TerminalVariant, string> = {
+  agent: "Terminal",
+  triage: "Analyse en direct",
+};
+
+const EMPTY_HINTS: Record<TerminalVariant, string> = {
+  agent: "La session démarre, en attente de la première sortie de l'agent…",
+  triage: "Démarrage de l'analyse…",
+};
+
+async function fetchTerminal(variant: TerminalVariant, ticketId: string): Promise<TerminalData> {
+  if (variant === "triage") {
+    const data = await api.triageOutput(ticketId);
+    return { output: data.output, phase: null };
+  }
+  return api.terminal(ticketId);
+}
+
+/** Read-only live view of an agent tmux pane or a triage analysis stream. */
+export function TerminalView({ ticketId, variant = "agent", fill = false }: TerminalViewProps) {
+  const [data, setData] = useState<TerminalData>({ output: "", phase: null });
+  const [error, setError] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
+
+  // Poll the relevant endpoint every 2s while this component is mounted (visible).
+  useEffect(() => {
+    let active = true;
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await fetchTerminal(variant, ticketId);
+        if (!active) return;
+        setError(null);
+        setData(next);
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : "Terminal indisponible");
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [ticketId, variant]);
+
+  // Auto-scroll to bottom on each update.
+  useEffect(() => {
+    const el = preRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [data.output]);
+
+  // Escape exits fullscreen without bubbling to the drawer's own Escape handler.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [fullscreen]);
+
+  // While a setup phase shows, the phase line already explains the empty pane.
+  const placeholder = data.phase ? "" : EMPTY_HINTS[variant];
+
+  return (
+    <section
+      className={cn(
+        fill && "flex h-full min-h-0 flex-col",
+        fullscreen && "fixed inset-0 z-[60] flex flex-col bg-background p-4",
+      )}
+    >
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">{TITLES[variant]}</h3>
+        <div className="flex items-center gap-2">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+            lecture seule
+          </span>
+          <button
+            type="button"
+            onClick={() => setFullscreen((v) => !v)}
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            aria-label={fullscreen ? "Réduire le terminal" : "Agrandir le terminal"}
+            title={fullscreen ? "Réduire" : "Plein écran"}
+          >
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      {error ? (
+        <p className="text-xs text-muted-foreground">{error}</p>
+      ) : (
+        <>
+          {data.phase && (
+            <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-info" />
+              {data.phase}
+            </div>
+          )}
+          <pre
+            ref={preRef}
+            className={cn(
+              "overflow-auto rounded-md bg-[#001219] p-3 font-mono text-xs leading-relaxed text-[#94d2bd]",
+              fullscreen || fill ? "min-h-0 flex-1" : "max-h-[60vh] min-h-[12rem]",
+            )}
+          >
+            {data.output || placeholder}
+          </pre>
+        </>
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,21 @@
+{
+  "projects": {
+    "mon-projet": {
+      "label": "Mon Projet",
+      "repoPath": "/Users/moi/mon-projet",
+      "baseBranch": "main",
+      "commitTimeoutMs": 120000,
+      "scripts": {
+        "typecheck": "npm run typecheck",
+        "lint": "npm run lint",
+        "test": "npm test"
+      },
+      "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent"
+    }
+  },
+  "models": {
+    "implement": "opus",
+    "triage": "sonnet"
+  },
+  "slotsRoot": "slots"
+}

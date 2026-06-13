@@ -1,0 +1,12 @@
+node_modules
+dist
+*.log
+data/
+kanban.db
+kanban.db-*
+uploads/
+.DS_Store
+kanban-real.db
+kanban-real.db-*
+slots/
+config.json

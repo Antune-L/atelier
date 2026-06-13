@@ -1,0 +1,684 @@
+import { PanelRightClose, PanelRightOpen, Rocket, X } from "lucide-react";
+import { useCallback, useState } from "react";
+
+import type {
+  Comment,
+  ProjectInfo,
+  Ticket,
+  TriageResult,
+} from "@shared/schemas";
+import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, triageResultSchema } from "@shared/schemas";
+import {
+  ACTIVE_STAGES,
+  AGENT_EFFORTS,
+  AGENT_EFFORT_LABELS,
+  AGENT_MODELS,
+  AGENT_MODEL_LABELS,
+} from "@shared/constants";
+import { extractFigmaUrls } from "@shared/figma";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
+import { Input, Label, Textarea } from "@/components/ui/input";
+import { Markdown } from "@/components/ui/markdown";
+import {
+  Modal,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
+import { TerminalView } from "@/components/TerminalView";
+import {
+  finishedKindLabel,
+  formatDateTime,
+  isStageAnimated,
+  stageLabel,
+  stageVariant,
+  triageVerdictVariant,
+} from "@/lib/display";
+import { api } from "@/lib/api";
+import { handleMediaPaste } from "@/lib/paste";
+import { cn } from "@/lib/utils";
+import { resolveProjectLabel } from "@/components/TicketCard";
+
+const TERMINAL_VISIBLE_KEY = "ticket-terminal-visible";
+
+function parseTriageReport(report: string | null): TriageResult | null {
+  if (!report) return null;
+  try {
+    const parsed = triageResultSchema.safeParse(JSON.parse(report));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+interface TicketDetailProps {
+  ticket: Ticket | null;
+  projects: ProjectInfo[];
+  onClose: () => void;
+}
+
+function isLocked(ticket: Ticket): boolean {
+  if (ticket.stage === null) return false;
+  if (ticket.stage === "awaiting_answers") return true;
+  return ACTIVE_STAGES.includes(ticket.stage);
+}
+
+export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [reply, setReply] = useState<Record<string, string>>({});
+  const [newComment, setNewComment] = useState("");
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const [confirmMerged, setConfirmMerged] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
+
+  // Load comments when a new ticket is opened (render-phase guard, no useEffect).
+  // Ticket fields come from the prop: App keeps it fresh via WS pushes.
+  const load = useCallback(async (id: string) => {
+    const data = await api.ticketDetail(id);
+    setComments(data.comments);
+  }, []);
+
+  if (ticket && ticket.id !== loadedId) {
+    setLoadedId(ticket.id);
+    setEditing(false);
+    setEditError(null);
+    void load(ticket.id);
+  }
+  if (!ticket && loadedId !== null) {
+    setLoadedId(null);
+    setComments([]);
+    setReply({});
+    setNewComment("");
+    setEditing(false);
+    setEditError(null);
+  }
+
+  if (!ticket) return null;
+  const current = ticket;
+  const locked = isLocked(current);
+  const showTerminal =
+    current.slotId !== null &&
+    current.stage !== null &&
+    current.stage !== "done";
+  const terminalPaneVisible = showTerminal && terminalVisible;
+
+  // Escape must not silently discard uncommitted comment/answer/edit text.
+  const editDirty =
+    editing &&
+    (editTitle !== current.title || editDescription !== current.description);
+  const hasUncommittedText =
+    newComment.trim().length > 0 ||
+    Object.values(reply).some((v) => v.trim().length > 0) ||
+    editDirty;
+
+  const refresh = (): void => void load(ticket.id);
+
+  const toggleTerminal = (): void => {
+    const next = !terminalVisible;
+    setTerminalVisible(next);
+    localStorage.setItem(TERMINAL_VISIBLE_KEY, next ? "1" : "0");
+  };
+
+  // Agent model/effort are picked before launch (TODO column) and stored on the ticket;
+  // the spawn reads them, falling back to the server config when null.
+  const setAgentModel = (raw: string): void => {
+    const model = raw === "" ? null : agentModelSchema.parse(raw);
+    void api.updateTicket(current.id, { model }).catch(() => undefined);
+  };
+
+  const setAgentEffort = (raw: string): void => {
+    const effort = raw === "" ? null : agentEffortSchema.parse(raw);
+    void api.updateTicket(current.id, { effort }).catch(() => undefined);
+  };
+
+  const startEdit = (): void => {
+    setEditTitle(current.title);
+    setEditDescription(current.description);
+    setEditError(null);
+    setEditing(true);
+  };
+
+  const saveEdit = async (): Promise<void> => {
+    setEditError(null);
+    try {
+      await api.updateTicket(ticket.id, {
+        title: editTitle.trim(),
+        description: editDescription,
+      });
+      setEditing(false);
+    } catch (e) {
+      setEditError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const appendToEditDescription = (markdown: string): void => {
+    setEditDescription((prev) =>
+      prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`,
+    );
+  };
+
+  const onEditPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    void handleMediaPaste(event, appendToEditDescription).catch((e) =>
+      setEditError(e instanceof Error ? e.message : "Échec de l'upload"),
+    );
+  };
+
+  const descriptionView = current.description ? (
+    <Markdown content={current.description} />
+  ) : (
+    <p className="text-sm text-muted-foreground">(vide)</p>
+  );
+
+  const answer = async (questionId: string): Promise<void> => {
+    const body = reply[questionId]?.trim();
+    if (!body) return;
+    await api.addComment(ticket.id, { body, questionId });
+    setReply((prev) => ({ ...prev, [questionId]: "" }));
+    refresh();
+  };
+
+  const comment = async (): Promise<void> => {
+    if (!newComment.trim()) return;
+    await api.addComment(ticket.id, { body: newComment, questionId: null });
+    setNewComment("");
+    refresh();
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      side="right"
+      fullWidth
+      disableEscape={hasUncommittedText}
+    >
+      <ModalHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <ModalTitle>{current.title}</ModalTitle>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {current.stage && (
+                <Badge
+                  variant={stageVariant(current.stage)}
+                  className={cn(isStageAnimated(current.stage) && "animate-pulse")}
+                >
+                  {stageLabel(current.stage)}
+                </Badge>
+              )}
+              {extractFigmaUrls(current.description).length > 0 && (
+                <Badge variant="secondary">UI</Badge>
+              )}
+              {locked && (
+                <span className="text-xs text-muted-foreground">
+                  verrouillé (en traitement)
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Badge variant="outline">{resolveProjectLabel(projects, current.project)}</Badge>
+            {showTerminal && (
+              <Button variant="ghost" size="sm" onClick={toggleTerminal}>
+                {terminalVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+                {terminalVisible ? "Masquer le terminal" : "Afficher le terminal"}
+              </Button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fermer"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+      </ModalHeader>
+
+      <div className="flex flex-1 overflow-hidden">
+        <div
+          className={cn(
+            "min-w-0 flex-1 space-y-4 overflow-y-auto px-6 py-4",
+            !terminalPaneVisible && "mx-auto w-full max-w-4xl",
+          )}
+        >
+        {current.error && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {current.error}
+          </div>
+        )}
+
+        {current.finishedAt !== null && (
+          <p className="text-xs text-muted-foreground">
+            {finishedKindLabel(current)} le {formatDateTime(current.finishedAt)}
+          </p>
+        )}
+
+        <section>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">Description</h3>
+            {!locked && !editing && (
+              <Button variant="ghost" size="sm" onClick={startEdit}>
+                Modifier
+              </Button>
+            )}
+          </div>
+          {editing ? (
+            <div className="space-y-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-title">Titre</Label>
+                <Input
+                  id="edit-title"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="Titre du ticket"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-description">Description (markdown)</Label>
+                <Textarea
+                  id="edit-description"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  onPaste={onEditPaste}
+                  className="min-h-[200px]"
+                  placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
+                />
+              </div>
+              {editError && (
+                <p className="text-sm text-destructive">{editError}</p>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => void saveEdit()}
+                  disabled={!editTitle.trim()}
+                >
+                  Enregistrer
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                  Annuler
+                </Button>
+              </div>
+            </div>
+          ) : (
+            descriptionView
+          )}
+        </section>
+
+        {current.column === "todo" && (
+          <section className="rounded-md border p-3">
+            <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
+            <div className="flex flex-wrap gap-4">
+              <div className="flex flex-col items-start gap-1.5">
+                <Label htmlFor="agent-model">Modèle</Label>
+                <Select id="agent-model" value={current.model ?? ""} onChange={(e) => setAgentModel(e.target.value)}>
+                  <option value="">Défaut (config)</option>
+                  {AGENT_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {AGENT_MODEL_LABELS[m]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex flex-col items-start gap-1.5">
+                <Label htmlFor="agent-effort">Effort</Label>
+                <Select id="agent-effort" value={current.effort ?? ""} onChange={(e) => setAgentEffort(e.target.value)}>
+                  <option value="">Défaut</option>
+                  {AGENT_EFFORTS.map((eff) => (
+                    <option key={eff} value={eff}>
+                      {AGENT_EFFORT_LABELS[eff]}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+            <div className="mt-3">
+              <Button
+                size="sm"
+                disabled={current.triageStatus === "running"}
+                onClick={async () => {
+                  await api.moveTicket(current.id, "implementing");
+                }}
+              >
+                <Rocket className="h-4 w-4" />
+                Lancer l'implémentation
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {current.column === "todo" && !locked && (
+          <TriageSection
+            ticket={current}
+            onTriage={async () => {
+              await api.triage(ticket.id);
+            }}
+          />
+        )}
+
+        {current.column === "prd" && current.prdMarkdown && (
+          <section className="rounded-md border bg-muted/30 p-3">
+            <h3 className="mb-1 text-sm font-semibold">PRD proposé</h3>
+            <div className="max-h-64 overflow-y-auto">
+              <Markdown content={current.prdMarkdown} />
+            </div>
+            <Button
+              size="sm"
+              className="mt-2"
+              onClick={async () => {
+                await api.validatePrd(ticket.id);
+                refresh();
+              }}
+            >
+              Valider le PRD
+            </Button>
+          </section>
+        )}
+
+        <section>
+          <h3 className="mb-2 text-sm font-semibold">Commentaires</h3>
+          <div className="space-y-2">
+            {comments.length === 0 && (
+              <p className="text-xs text-muted-foreground">Aucun commentaire</p>
+            )}
+            {comments.map((c) => (
+              <CommentRow
+                key={c.id}
+                comment={c}
+                reply={reply[c.questionId ?? ""] ?? ""}
+                onReplyChange={(v) =>
+                  c.questionId &&
+                  setReply((prev) => ({ ...prev, [c.questionId!]: v }))
+                }
+                onAnswer={() => c.questionId && answer(c.questionId)}
+              />
+            ))}
+          </div>
+          {current.column !== "todo" && (
+            <div className="mt-3 space-y-1.5">
+              <Label htmlFor="new-comment">Ajouter un commentaire</Label>
+              <Input
+                id="new-comment"
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Votre message…"
+                onKeyDown={(e) => e.key === "Enter" && comment()}
+              />
+            </div>
+          )}
+        </section>
+
+        <section className="flex flex-wrap gap-2 border-t pt-4">
+          {(current.stage === "failed" ||
+            current.stage === "interrupted" ||
+            current.stage === "stalled") && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={async () => {
+                await api.retry(ticket.id);
+                refresh();
+              }}
+            >
+              Relancer
+            </Button>
+          )}
+          {current.column === "done" && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setConfirmMerged(true)}
+            >
+              PR mergée
+            </Button>
+          )}
+          {current.column !== "abandoned" && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmAbandon(true)}
+            >
+              Abandonner
+            </Button>
+          )}
+          {current.slotId === null && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Supprimer
+            </Button>
+          )}
+        </section>
+        </div>
+        {terminalPaneVisible && (
+          <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
+            <TerminalView ticketId={current.id} fill />
+          </div>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmAbandon}
+        title="Abandonner le ticket"
+        description="Action destructive : la session est tuée, le worktree et la branche locale sont supprimés."
+        confirmLabel="Abandonner"
+        destructive
+        onCancel={() => setConfirmAbandon(false)}
+        onConfirm={async () => {
+          setConfirmAbandon(false);
+          await api.moveTicket(ticket.id, "abandoned", true);
+          onClose();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmMerged}
+        title="Marquer la PR comme mergée"
+        description="La carte sera archivée et le worktree/branche nettoyés."
+        confirmLabel="PR mergée"
+        onCancel={() => setConfirmMerged(false)}
+        onConfirm={async () => {
+          setConfirmMerged(false);
+          await api.markMerged(ticket.id);
+          onClose();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Supprimer le ticket"
+        description="Suppression définitive du ticket et de ses commentaires. Action irréversible."
+        confirmLabel="Supprimer"
+        destructive
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={async () => {
+          setConfirmDelete(false);
+          await api.deleteTicket(ticket.id);
+          onClose();
+        }}
+      />
+    </Modal>
+  );
+}
+
+interface TriageSectionProps {
+  ticket: Ticket;
+  onTriage: () => Promise<void>;
+}
+
+function TriageSection({ ticket, onTriage }: TriageSectionProps) {
+  const running = ticket.triageStatus === "running";
+  const result = parseTriageReport(ticket.triageReport);
+
+  return (
+    <section className="rounded-md border p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Faisabilité</h3>
+        {ticket.triageStatus === "done" && ticket.triageVerdict && (
+          <Badge variant={triageVerdictVariant(ticket.triageVerdict)}>
+            {TRIAGE_VERDICT_LABELS[ticket.triageVerdict]}
+          </Badge>
+        )}
+      </div>
+
+      {ticket.triageStatus === "done" && result && (
+        <div className="space-y-2 text-sm">
+          <p>{result.summary}</p>
+          {result.reasons.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">
+                Raisons
+              </p>
+              <ul className="list-disc pl-5">
+                {result.reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.questions.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">
+                Questions
+              </p>
+              <ul className="list-disc pl-5">
+                {result.questions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.files.length > 0 && (
+            <ul className="font-mono text-xs text-muted-foreground">
+              {result.files.map((file) => (
+                <li key={file}>{file}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {ticket.triageStatus === "failed" && (
+        <div className="space-y-2 text-sm">
+          <p className="text-destructive">L'analyse a échoué.</p>
+          {ticket.triageReport && (
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                Détails
+              </summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 text-xs">
+                {ticket.triageReport}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+
+      {running && (
+        <div className="mt-2">
+          <TerminalView ticketId={ticket.id} variant="triage" />
+        </div>
+      )}
+
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mt-2"
+        disabled={running}
+        onClick={() => void onTriage()}
+      >
+        {running
+          ? "Analyse en cours…"
+          : ticket.triageStatus === "none"
+            ? "Analyser"
+            : "Re-analyser"}
+      </Button>
+    </section>
+  );
+}
+
+interface CommentRowProps {
+  comment: Comment;
+  reply: string;
+  onReplyChange: (value: string) => void;
+  onAnswer: () => void;
+}
+
+const AUTHOR_BADGES: Record<
+  Comment["author"],
+  { label: string; glyph: string | null; className: string }
+> = {
+  agent: { label: "Agent", glyph: "🤖", className: "bg-info/15 text-info" },
+  user: { label: "Toi", glyph: "🧑", className: "bg-primary/15 text-primary" },
+  system: {
+    label: "Système",
+    glyph: null,
+    className: "bg-muted text-muted-foreground",
+  },
+};
+
+function AuthorBadge({ author }: { author: Comment["author"] }) {
+  const { label, glyph, className } = AUTHOR_BADGES[author];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+        className,
+      )}
+    >
+      {glyph && <span aria-hidden>{glyph}</span>} {label}
+    </span>
+  );
+}
+
+function CommentRow({
+  comment,
+  reply,
+  onReplyChange,
+  onAnswer,
+}: CommentRowProps) {
+  const isQuestion =
+    comment.author === "agent" &&
+    comment.questionId !== null &&
+    !comment.answered;
+  return (
+    <div
+      className={cn(
+        "rounded-md border p-2 text-sm",
+        comment.author === "agent" && "border-info/40 bg-info/5",
+        comment.author === "system" && "bg-muted/30 text-muted-foreground",
+        comment.author === "user" && "border-primary/30 bg-primary/5",
+        isQuestion && "border-warning/50 bg-warning/10",
+      )}
+    >
+      <div className="mb-1 flex items-center gap-2">
+        <AuthorBadge author={comment.author} />
+        {isQuestion && <Badge variant="warning">Question</Badge>}
+      </div>
+      <Markdown content={comment.body} />
+      {isQuestion && (
+        <div className="mt-2 flex gap-2">
+          <Input
+            value={reply}
+            onChange={(e) => onReplyChange(e.target.value)}
+            placeholder="Votre réponse…"
+            onKeyDown={(e) => e.key === "Enter" && onAnswer()}
+          />
+          <Button size="sm" onClick={onAnswer}>
+            Répondre
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}

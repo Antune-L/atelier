@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme built on the brand palette (#001219 … #9b2226). */
+    --background: 45 50% 97%;
+    --foreground: 197 100% 5%;
+    --card: 45 33% 99%;
+    --card-foreground: 197 100% 5%;
+    --popover: 45 33% 99%;
+    --popover-foreground: 197 100% 5%;
+
+    /* Primary actions / in-progress: teal range. */
+    --primary: 190 100% 23%;
+    --primary-foreground: 45 50% 97%;
+    --secondary: 45 44% 89%;
+    --secondary-foreground: 197 60% 12%;
+    --muted: 45 35% 92%;
+    --muted-foreground: 197 22% 33%;
+    --accent: 160 41% 88%;
+    --accent-foreground: 190 100% 18%;
+
+    /* Danger / failed: red range. */
+    --destructive: 5 81% 38%;
+    --destructive-foreground: 45 50% 97%;
+
+    --border: 45 28% 84%;
+    --input: 45 28% 84%;
+    --ring: 181 88% 31%;
+    --radius: 0.5rem;
+
+    /* Semantic status tokens (used by badges / stage colors). */
+    --success: 160 50% 36%; /* done */
+    --success-foreground: 45 50% 97%;
+    --info: 181 88% 31%; /* active / in-progress */
+    --info-foreground: 45 50% 97%;
+    --warning: 30 98% 40%; /* waiting on user */
+    --warning-foreground: 45 50% 97%;
+    --danger: 358 64% 37%; /* failed / interrupted */
+    --danger-foreground: 45 50% 97%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Markdown rendering (PRD / comments). Prose-like spacing on a light surface. */
+@layer components {
+  .markdown {
+    @apply text-sm leading-relaxed text-foreground;
+  }
+  .markdown > :first-child {
+    @apply mt-0;
+  }
+  .markdown h1 {
+    @apply mb-2 mt-4 text-lg font-semibold;
+  }
+  .markdown h2 {
+    @apply mb-2 mt-4 text-base font-semibold;
+  }
+  .markdown h3 {
+    @apply mb-1 mt-3 text-sm font-semibold;
+  }
+  .markdown p {
+    @apply my-2;
+  }
+  .markdown ul {
+    @apply my-2 list-disc space-y-1 pl-5;
+  }
+  .markdown ol {
+    @apply my-2 list-decimal space-y-1 pl-5;
+  }
+  .markdown a {
+    @apply font-medium text-primary underline underline-offset-2;
+  }
+  .markdown code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.8em];
+  }
+  .markdown pre {
+    @apply my-2 overflow-x-auto rounded-md bg-foreground/90 p-3 text-xs text-background;
+  }
+  .markdown pre code {
+    @apply bg-transparent p-0 text-inherit;
+  }
+  .markdown blockquote {
+    @apply my-2 border-l-2 border-border pl-3 text-muted-foreground;
+  }
+  .markdown img {
+    @apply my-2 max-w-full rounded-md border;
+  }
+  .markdown table {
+    @apply my-2 w-full border-collapse text-xs;
+  }
+  .markdown th,
+  .markdown td {
+    @apply border border-border px-2 py-1 text-left;
+  }
+  .markdown hr {
+    @apply my-3 border-border;
+  }
+}

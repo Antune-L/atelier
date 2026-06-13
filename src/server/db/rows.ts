@@ -1,0 +1,136 @@
+import { z } from "zod";
+
+import type { Comment, Slot, Ticket } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
+import { isProjectKey } from "../config.ts";
+
+/**
+ * SQLite returns `unknown`-shaped rows. We validate them with zod (no casting)
+ * so the DB boundary is type-safe like every other input boundary.
+ */
+
+const ticketRowSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  project: z.string(),
+  prd_enabled: z.number(),
+  prd_markdown: z.string().nullable(),
+  column_name: z.string(),
+  stage: z.string().nullable(),
+  model: z.string().nullable(),
+  effort: z.string().nullable(),
+  review_rounds: z.number(),
+  nudge_count: z.number(),
+  session_id: z.string().nullable(),
+  slot_id: z.number().nullable(),
+  branch: z.string().nullable(),
+  pr_url: z.string().nullable(),
+  error: z.string().nullable(),
+  archived: z.number(),
+  watchdog_flagged: z.number(),
+  last_progress_at: z.number(),
+  triage_status: z.string(),
+  triage_verdict: z.string().nullable(),
+  triage_report: z.string().nullable(),
+  finished_at: z.number().nullable(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type TicketRow = z.infer<typeof ticketRowSchema>;
+
+const commentRowSchema = z.object({
+  id: z.string(),
+  ticket_id: z.string(),
+  author: z.string(),
+  body: z.string(),
+  question_id: z.string().nullable(),
+  answered: z.number(),
+  created_at: z.number(),
+});
+export type CommentRow = z.infer<typeof commentRowSchema>;
+
+const slotRowSchema = z.object({
+  id: z.number(),
+  ticket_id: z.string().nullable(),
+  repo_path: z.string().nullable(),
+  tmux_session: z.string().nullable(),
+  status: z.string(),
+});
+export type SlotRow = z.infer<typeof slotRowSchema>;
+
+const ticketColumnSchema = z.enum(["todo", "implementing", "prd", "done", "merged", "abandoned"]);
+const ticketStageSchema = z
+  .enum([
+    "queued",
+    "planning",
+    "awaiting_answers",
+    "implementing",
+    "reviewing",
+    "fixing",
+    "testing",
+    "opening_pr",
+    "done",
+    "failed",
+    "interrupted",
+    "stalled",
+  ])
+  .nullable();
+const projectSchema = z.string().refine(isProjectKey, { message: "projet inconnu" });
+const slotStatusSchema = z.enum(["free", "busy", "stalled", "interrupted", "failed"]);
+
+export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
+  const row = ticketRowSchema.parse(raw);
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    project: projectSchema.parse(row.project),
+    prdEnabled: row.prd_enabled === 1,
+    prdMarkdown: row.prd_markdown,
+    column: ticketColumnSchema.parse(row.column_name),
+    stage: ticketStageSchema.parse(row.stage),
+    model: row.model === null ? null : agentModelSchema.parse(row.model),
+    effort: row.effort === null ? null : agentEffortSchema.parse(row.effort),
+    reviewRounds: row.review_rounds,
+    sessionId: row.session_id,
+    slotId: row.slot_id,
+    branch: row.branch,
+    prUrl: row.pr_url,
+    error: row.error,
+    archived: row.archived === 1,
+    watchdogFlagged: row.watchdog_flagged === 1,
+    pendingQuestions,
+    triageStatus: triageStatusSchema.parse(row.triage_status),
+    triageVerdict: row.triage_verdict === null ? null : triageVerdictSchema.parse(row.triage_verdict),
+    triageReport: row.triage_report,
+    finishedAt: row.finished_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapCommentRow(raw: unknown): Comment {
+  const row = commentRowSchema.parse(raw);
+  const authorSchema = z.enum(["user", "agent", "system"]);
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    author: authorSchema.parse(row.author),
+    body: row.body,
+    questionId: row.question_id,
+    answered: row.answered === 1,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapSlotRow(raw: unknown): Slot {
+  const row = slotRowSchema.parse(raw);
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    repoPath: row.repo_path,
+    tmuxSession: row.tmux_session,
+    status: slotStatusSchema.parse(row.status),
+  };
+}

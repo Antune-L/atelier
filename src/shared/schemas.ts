@@ -1,0 +1,225 @@
+import { z } from "zod";
+
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, STAGES } from "./constants.ts";
+
+// Project keys are validated server-side against the loaded config (src/server/config.ts);
+// the shared schema only enforces a non-empty string so it stays runtime-agnostic.
+const projectKeySchema = z.string().min(1);
+export const columnSchema = z.enum(COLUMNS);
+export const stageSchema = z.enum(STAGES);
+export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
+export const agentModelSchema = z.enum(AGENT_MODELS);
+export const agentEffortSchema = z.enum(AGENT_EFFORTS);
+
+// ---- Implementability triage ("Analyser") ----
+
+export const TRIAGE_STATUSES = ["none", "running", "done", "failed"] as const;
+export const triageStatusSchema = z.enum(TRIAGE_STATUSES);
+export type TriageStatus = z.infer<typeof triageStatusSchema>;
+
+export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+export const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
+export type TriageVerdict = z.infer<typeof triageVerdictSchema>;
+
+/** Shape the triage agent must emit (and we re-parse on both server and client). */
+export const triageResultSchema = z.object({
+  verdict: triageVerdictSchema,
+  summary: z.string(),
+  reasons: z.array(z.string()),
+  questions: z.array(z.string()),
+  files: z.array(z.string()),
+});
+export type TriageResult = z.infer<typeof triageResultSchema>;
+
+export const TRIAGE_VERDICT_LABELS: Record<TriageVerdict, string> = {
+  implementable: "Implémentable",
+  needs_info: "Questions à répondre",
+  needs_rework: "À retravailler",
+};
+
+export const ticketSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  project: projectKeySchema,
+  prdEnabled: z.boolean(),
+  prdMarkdown: z.string().nullable(),
+  column: columnSchema,
+  stage: stageSchema.nullable(),
+  /** Implementation agent overrides (null = fall back to the server config defaults). */
+  model: agentModelSchema.nullable(),
+  effort: agentEffortSchema.nullable(),
+  reviewRounds: z.number().int(),
+  sessionId: z.string().nullable(),
+  slotId: z.number().int().nullable(),
+  branch: z.string().nullable(),
+  prUrl: z.string().nullable(),
+  error: z.string().nullable(),
+  archived: z.boolean(),
+  watchdogFlagged: z.boolean(),
+  pendingQuestions: z.number().int(),
+  triageStatus: triageStatusSchema,
+  triageVerdict: triageVerdictSchema.nullable(),
+  triageReport: z.string().nullable(),
+  /** Epoch ms when the ticket reached a terminal state (done/failed/stalled/interrupted/abandoned); null otherwise. */
+  finishedAt: z.number().int().nullable(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+});
+export type Ticket = z.infer<typeof ticketSchema>;
+
+export const commentSchema = z.object({
+  id: z.string(),
+  ticketId: z.string(),
+  author: commentAuthorSchema,
+  body: z.string(),
+  questionId: z.string().nullable(),
+  answered: z.boolean(),
+  createdAt: z.number().int(),
+});
+export type Comment = z.infer<typeof commentSchema>;
+
+export const slotSchema = z.object({
+  id: z.number().int(),
+  ticketId: z.string().nullable(),
+  repoPath: z.string().nullable(),
+  tmuxSession: z.string().nullable(),
+  status: z.enum(["free", "busy", "stalled", "interrupted", "failed"]),
+});
+export type Slot = z.infer<typeof slotSchema>;
+
+export const projectInfoSchema = z.object({
+  key: projectKeySchema,
+  label: z.string(),
+  baseBranch: z.string(),
+});
+export type ProjectInfo = z.infer<typeof projectInfoSchema>;
+
+// ---- API input schemas ----
+
+export const createTicketSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().default(""),
+  project: projectKeySchema,
+  prdEnabled: z.boolean().default(false),
+});
+export type CreateTicketInput = z.infer<typeof createTicketSchema>;
+
+export const updateTicketSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  prdEnabled: z.boolean().optional(),
+  model: agentModelSchema.nullable().optional(),
+  effort: agentEffortSchema.nullable().optional(),
+});
+export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+
+export const moveTicketSchema = z.object({
+  column: columnSchema,
+  confirmed: z.boolean().default(false),
+});
+export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
+
+export const createCommentSchema = z.object({
+  body: z.string().min(1),
+  questionId: z.string().nullable().default(null),
+});
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const terminalOutputSchema = z.object({
+  output: z.string(),
+  /** Pre-output setup phase (worktree/install/spawn/waiting), or null once the agent streams. */
+  phase: z.string().nullable(),
+});
+export type TerminalOutput = z.infer<typeof terminalOutputSchema>;
+
+/** Live triage transcript (read-only feasibility analysis stream). */
+export const triageOutputSchema = z.object({ output: z.string() });
+export type TriageOutput = z.infer<typeof triageOutputSchema>;
+
+export const uploadResultSchema = z.object({ path: z.string(), url: z.string() });
+export type UploadResult = z.infer<typeof uploadResultSchema>;
+
+// ---- WebSocket (backend → client) ----
+
+export const wsClientEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("snapshot"), tickets: z.array(ticketSchema), slots: z.array(slotSchema) }),
+  z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
+  z.object({ type: z.literal("ticket_removed"), ticketId: z.string() }),
+  z.object({ type: z.literal("comment"), comment: commentSchema }),
+  z.object({ type: z.literal("slots"), slots: z.array(slotSchema) }),
+  z.object({ type: z.literal("notification"), title: z.string(), body: z.string() }),
+]);
+export type WsClientEvent = z.infer<typeof wsClientEventSchema>;
+
+// ---- Worker channel: agent → backend (tool calls over WS) ----
+
+export const workerToolNameSchema = z.enum([
+  "update_stage",
+  "ask_user",
+  "submit_prd",
+  "done",
+  "fail",
+]);
+export type WorkerToolName = z.infer<typeof workerToolNameSchema>;
+
+export const updateStageArgsSchema = z.object({
+  stage: stageSchema,
+});
+export const askUserArgsSchema = z.object({
+  question: z.string().min(1),
+});
+export const submitPrdArgsSchema = z.object({
+  markdown: z.string().min(1),
+});
+export const doneArgsSchema = z.object({
+  pr_url: z.string().url(),
+});
+export const failArgsSchema = z.object({
+  reason: z.string().min(1),
+  findings: z.string().default(""),
+});
+
+// ---- Worker channel: WS frames worker.ts ↔ backend ----
+
+export const workerHelloSchema = z.object({
+  type: z.literal("hello"),
+  ticketId: z.string(),
+  slotId: z.number().int(),
+});
+
+export const workerToolCallSchema = z.object({
+  type: z.literal("tool_call"),
+  id: z.string(),
+  name: workerToolNameSchema,
+  args: z.unknown(),
+});
+
+export const workerStopSchema = z.object({
+  type: z.literal("stop"),
+  sessionId: z.string().nullable().default(null),
+});
+
+export const workerInboundSchema = z.discriminatedUnion("type", [
+  workerHelloSchema,
+  workerToolCallSchema,
+  workerStopSchema,
+]);
+export type WorkerInbound = z.infer<typeof workerInboundSchema>;
+
+/** backend → worker.ts → injected as channel notification into the Claude session. */
+export const channelEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("ticket"), payload: z.string() }),
+  z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
+  z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
+  z.object({ type: z.literal("nudge"), message: z.string() }),
+  z.object({ type: z.literal("user_comment"), body: z.string() }),
+]);
+export type ChannelEvent = z.infer<typeof channelEventSchema>;
+
+/** backend → worker.ts: either a channel event, or a tool result for a pending tool_call. */
+export const workerOutboundSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("event"), event: channelEventSchema }),
+  z.object({ type: z.literal("tool_result"), id: z.string(), ok: z.boolean(), result: z.string() }),
+]);
+export type WorkerOutbound = z.infer<typeof workerOutboundSchema>;

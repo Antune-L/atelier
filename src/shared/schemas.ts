@@ -205,7 +205,7 @@ export const capabilitiesSchema = z.object({
   composerAvailable: z.boolean(),
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),
-  /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "xhigh"). */
+  /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultEffort: z.string(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;

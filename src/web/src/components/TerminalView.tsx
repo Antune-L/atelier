@@ -21,6 +21,9 @@ interface TerminalData {
 
 const POLL_INTERVAL_MS = 2000;
 
+/** Distance (px) from the bottom within which the view is still considered "pinned". */
+const BOTTOM_THRESHOLD_PX = 24;
+
 const TITLES: Record<TerminalVariant, string> = {
   agent: "Terminal",
   triage: "Analyse en direct",
@@ -45,9 +48,19 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
+  // Stay pinned to the bottom only while the user hasn't scrolled up to read.
+  const pinnedToBottom = useRef(true);
+
+  const handleScroll = (): void => {
+    const el = preRef.current;
+    if (!el) return;
+    pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
+  };
 
   // Poll the relevant endpoint every 2s while this component is mounted (visible).
   useEffect(() => {
+    // A fresh stream starts pinned so its first output scrolls into view.
+    pinnedToBottom.current = true;
     let active = true;
     const poll = async (): Promise<void> => {
       try {
@@ -67,10 +80,10 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
     };
   }, [ticketId, variant]);
 
-  // Auto-scroll to bottom on each update.
+  // Follow new output only when the user is still pinned to the bottom.
   useEffect(() => {
     const el = preRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [data.output]);
 
   // Escape exits fullscreen without bubbling to the drawer's own Escape handler.
@@ -125,6 +138,10 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
           )}
           <pre
             ref={preRef}
+            onScroll={handleScroll}
+            tabIndex={0}
+            role="log"
+            aria-label={`${TITLES[variant]} (sortie, lecture seule)`}
             className={cn(
               "overflow-auto rounded-md bg-[#001219] p-3 font-mono text-xs leading-relaxed text-[#94d2bd]",
               fullscreen || fill ? "min-h-0 flex-1" : "max-h-[60vh] min-h-[12rem]",

@@ -55,7 +55,7 @@ export function NewTicketDialog({
     autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
-  const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const [effort, setEffort] = useState<AgentEffort | null>("medium");
   const [implementer, setImplementer] = useState<Implementer>("claude");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

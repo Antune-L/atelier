@@ -10,6 +10,8 @@ import type {
 import { TRIAGE_VERDICT_LABELS, columnSchema, triageResultSchema } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
+  AGENT_EFFORT_LABELS,
+  AGENT_MODEL_LABELS,
   COLUMN_LABELS,
   COLUMN_ORDER,
   type AgentEffort,
@@ -645,6 +647,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 onTriage={async () => {
                   await api.triage(ticket.id);
                 }}
+                onApplySuggestion={(model, effort) => {
+                  void api.updateTicket(current.id, { model, effort }).catch(() => undefined);
+                }}
               />
             )}
           </div>
@@ -748,11 +753,18 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 interface TriageSectionProps {
   ticket: Ticket;
   onTriage: () => Promise<void>;
+  onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
 }
 
-function TriageSection({ ticket, onTriage }: TriageSectionProps) {
+function TriageSection({ ticket, onTriage, onApplySuggestion }: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
+  const suggestion =
+    ticket.triageVerdict === "implementable" && result?.suggestedModel && result.suggestedEffort
+      ? { model: result.suggestedModel, effort: result.suggestedEffort }
+      : null;
+  const suggestionApplied =
+    suggestion !== null && ticket.model === suggestion.model && ticket.effort === suggestion.effort;
 
   return (
     <section className="rounded-md border p-3">
@@ -799,6 +811,26 @@ function TriageSection({ ticket, onTriage }: TriageSectionProps) {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {suggestion && (
+        <div className="mt-2 rounded border border-dashed p-2 text-sm">
+          <p className="text-xs font-semibold text-muted-foreground">Suggestion agent d'implémentation</p>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span>
+              Modèle <strong>{AGENT_MODEL_LABELS[suggestion.model]}</strong> · Effort{" "}
+              <strong>{AGENT_EFFORT_LABELS[suggestion.effort]}</strong>
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={suggestionApplied}
+              onClick={() => onApplySuggestion(suggestion.model, suggestion.effort)}
+            >
+              {suggestionApplied ? "Appliquée" : "Appliquer"}
+            </Button>
+          </div>
         </div>
       )}
 

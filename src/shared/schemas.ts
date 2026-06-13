@@ -37,6 +37,12 @@ export const triageResultSchema = z.object({
   reasons: z.array(z.string()),
   questions: z.array(z.string()),
   files: z.array(z.string()),
+  // Suggestion fields fall back to null on a missing OR invalid value (.catch), so a malformed
+  // suggestion never rejects the whole report — verdict/summary/reasons stay intact.
+  /** Suggested implementation-agent model (verdict=implementable only; null = no suggestion). */
+  suggestedModel: agentModelSchema.nullable().default(null).catch(null),
+  /** Suggested implementation-agent effort (verdict=implementable only; null = no suggestion). */
+  suggestedEffort: agentEffortSchema.nullable().default(null).catch(null),
 });
 export type TriageResult = z.infer<typeof triageResultSchema>;
 

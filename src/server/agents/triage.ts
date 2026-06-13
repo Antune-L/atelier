@@ -1,5 +1,6 @@
 import type { Ticket, TriageResult } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
+import { AGENT_EFFORTS, AGENT_MODELS } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
 
@@ -46,6 +47,8 @@ export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): strin
         reasons: ["…"],
         questions: ["…"],
         files: ["chemins réellement lus qui fondent l'analyse"],
+        suggestedModel: null,
+        suggestedEffort: null,
       },
       null,
       2,
@@ -57,6 +60,11 @@ export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): strin
     "- `verdict` = `needs_rework` si le ticket contredit le code existant ou est impossible en l'état :",
     "  `reasons` doit alors expliquer pourquoi (contradiction, périmètre infaisable…).",
     "- `files` liste les chemins réellement lus.",
+    "- `suggestedModel` / `suggestedEffort` : UNIQUEMENT si `verdict` = `implementable`, juge le modèle",
+    `  (${AGENT_MODELS.join(", ")}) et l'effort (${AGENT_EFFORTS.join(", ")}) que l'agent d'implémentation`,
+    "  devrait utiliser, en fonction de la complexité réelle du ticket (ampleur du diff, subtilité de la",
+    "  logique, surface touchée). Plus c'est simple/mécanique, plus le modèle et l'effort peuvent être bas.",
+    "  Sinon (verdict non implementable, ou aucune suggestion fiable), mets les deux à `null`.",
   ];
 
   return lines.filter((line) => line !== "").join("\n");

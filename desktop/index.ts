@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import Electrobun, { BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
 import { repairPath } from "./repairPath.ts";
@@ -42,6 +42,57 @@ function resolveRoots(): DesktopRoots {
     "kanban-agents",
   );
   return { resourcesRoot, dataRoot };
+}
+
+/**
+ * Standard macOS application menu. Electrobun (WKWebView) drives system shortcuts — fullscreen
+ * (Ctrl+Cmd+F), clipboard, undo/redo, window close/quit — off menu items keyed by `role`. Without
+ * a menu none of those accelerators fire, so we install the conventional App/Edit/View/Window
+ * structure; macOS supplies the canonical accelerators for each role automatically.
+ */
+function installApplicationMenu(): void {
+  ApplicationMenu.setApplicationMenu([
+    {
+      label: WINDOW_TITLE,
+      submenu: [
+        { role: "about" },
+        { type: "divider" },
+        { role: "hide", accelerator: "Command+H" },
+        { role: "hideOthers", accelerator: "Option+Command+H" },
+        { role: "showAll" },
+        { type: "divider" },
+        { role: "quit", accelerator: "Command+Q" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo", accelerator: "Command+Z" },
+        { role: "redo", accelerator: "Shift+Command+Z" },
+        { type: "divider" },
+        { role: "cut", accelerator: "Command+X" },
+        { role: "copy", accelerator: "Command+C" },
+        { role: "paste", accelerator: "Command+V" },
+        { role: "pasteAndMatchStyle", accelerator: "Shift+Option+Command+V" },
+        { role: "delete" },
+        { role: "selectAll", accelerator: "Command+A" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [{ role: "toggleFullScreen", accelerator: "Control+Command+F" }],
+    },
+    {
+      label: "Window",
+      submenu: [
+        { role: "minimize", accelerator: "Command+M" },
+        { role: "zoom" },
+        { type: "divider" },
+        { role: "close", accelerator: "Command+W" },
+        { role: "bringAllToFront" },
+      ],
+    },
+  ]);
 }
 
 async function waitForHealth(port: number): Promise<void> {
@@ -93,7 +144,10 @@ async function boot(): Promise<void> {
   try {
     await waitForHealth(server.port);
 
-    // 4. Same-origin window: http://, never views://.
+    // 4. Install the native menu so macOS wires up clipboard/fullscreen/window accelerators.
+    installApplicationMenu();
+
+    // 5. Same-origin window: http://, never views://.
     new BrowserWindow({
       title: WINDOW_TITLE,
       url: `http://localhost:${server.port}`,

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { Comment, Slot, Ticket } from "../../shared/schemas.ts";
-import { agentEffortSchema, agentModelSchema, implementerSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, implementerSchema, kindSchema, reviewDepthSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
 import { isProjectKey } from "../config.ts";
 
 /**
@@ -14,6 +14,11 @@ const ticketRowSchema = z.object({
   title: z.string(),
   description: z.string(),
   project: z.string(),
+  kind: z.string(),
+  review_depth: z.string().nullable(),
+  pr_number: z.number().nullable(),
+  pr_head_branch: z.string().nullable(),
+  post_comments: z.number(),
   prd_enabled: z.number(),
   pr_draft: z.number(),
   auto_merge: z.number(),
@@ -89,6 +94,11 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     title: row.title,
     description: row.description,
     project: projectSchema.parse(row.project),
+    kind: kindSchema.parse(row.kind),
+    reviewDepth: row.review_depth === null ? null : reviewDepthSchema.parse(row.review_depth),
+    prNumber: row.pr_number,
+    prHeadBranch: row.pr_head_branch,
+    postComments: row.post_comments === 1,
     prdEnabled: row.prd_enabled === 1,
     prDraft: row.pr_draft === 1,
     autoMerge: row.auto_merge === 1,

@@ -87,3 +87,57 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
 
   return lines.filter((line) => line !== "").join("\n");
 }
+
+/**
+ * Builds the `ticket` channel payload for a review ticket: drive the argus skill
+ * over an open PR, optionally posting findings inline via gh, then done().
+ */
+export function buildReviewContract(ticket: Ticket): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const depth = ticket.reviewDepth ?? "light";
+  const fullFlag = depth === "full" ? " --full" : "";
+  const postFlag = ticket.postComments && ticket.prNumber !== null ? ` --post=${ticket.prNumber}` : "";
+  const branch = ticket.prHeadBranch ?? "";
+  const argusCmd = `argus ${branch} --base ${project.baseBranch}${fullFlag}${postFlag}`;
+
+  const lines: string[] = [
+    `# Revue de PR #${ticket.prNumber} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${branch}`,
+    `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
+    `Poster les commentaires sur GitHub : ${ticket.postComments ? "OUI" : "NON"}`,
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à la REVUE d'une PR (lecture seule). Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision te dépasse (ex. PR introuvable ou ambiguë).",
+    "- `done(pr_url)` UNIQUEMENT une fois la revue terminée (et postée si demandé).",
+    "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans la revue en cours.",
+    "",
+    "## Étapes",
+    '1. `update_stage("reviewing")`.',
+    `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
+    "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais,",
+    ticket.postComments
+      ? "   puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`)."
+      : "   et te renvoie le verdict (aucun postage : `--post` est volontairement absent).",
+    `3. \`done(${ticket.prUrl})\` une fois la revue (et le postage le cas échéant) terminée.`,
+    "",
+    "## Interdits",
+    "- Ne modifie AUCUN fichier : argus est en lecture seule, cette session ne produit pas de diff.",
+    "- N'approuve JAMAIS, ne demande pas de changements via l'API, ne merge pas la PR (`event: COMMENT` uniquement).",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}

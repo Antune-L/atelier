@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
+import type { OpenPr } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 
 import type {
@@ -32,6 +33,25 @@ const PR_MERGE_STRATEGY = "--rebase";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
+/** `gh pr list --json` fields surfaced to the review picker. */
+const PR_LIST_FIELDS = "number,title,url,headRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
+/** Cap the review picker to the most recent open PRs. */
+const PR_LIST_LIMIT = "50";
+
+/** Shape of one `gh pr list --json` entry (mapped to the shared OpenPr). */
+const ghPrSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  url: z.string(),
+  headRefName: z.string(),
+  isDraft: z.boolean(),
+  // gh returns "" for "no decision"; tolerate null too so one odd PR never 502s the list.
+  reviewDecision: z.string().nullable().default(""),
+  updatedAt: z.string(),
+  author: z.object({ login: z.string() }).nullable(),
+  additions: z.number(),
+  deletions: z.number(),
+});
 
 // `claude -p --output-format stream-json` emits one JSON event per line. We only
 // care about assistant turns (text + tool_use, for the live view) and the final
@@ -193,6 +213,34 @@ export class RealSystemAdapter implements SystemAdapter {
     const pr = await $`gh pr view ${prUrl} --json url`.nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
     return { ok: true, reason: "" };
+  }
+
+  async verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+    const pr = await $`gh pr view ${prUrl} --json url`.cwd(slotPath).nothrow().quiet();
+    if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
+    return { ok: true, reason: "" };
+  }
+
+  async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
+    const res = await $`gh pr list --json ${PR_LIST_FIELDS} --limit ${PR_LIST_LIMIT}`.cwd(repoPath).nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`gh pr list a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+    const parsed = z.array(ghPrSchema).safeParse(JSON.parse(res.stdout.toString()));
+    if (!parsed.success) throw new Error(`gh pr list: sortie inattendue (${parsed.error.message})`);
+    return parsed.data.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      headBranch: pr.headRefName,
+      isDraft: pr.isDraft,
+      reviewDecision: pr.reviewDecision ?? "",
+      updatedAt: pr.updatedAt,
+      author: pr.author?.login ?? "?",
+      additions: pr.additions,
+      deletions: pr.deletions,
+    }));
   }
 
   async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {

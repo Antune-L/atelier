@@ -5,10 +5,12 @@ import { ACTIVE_STAGES, TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../shar
 import type { Stage } from "../shared/constants.ts";
 import {
   createCommentSchema,
+  createReviewSchema,
   createTicketSchema,
   moveTicketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
+import type { OpenPr, Ticket } from "../shared/schemas.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
@@ -26,6 +28,7 @@ const log = createLogger("triage");
 interface TriageRunner {
   capturePane(sessionName: string): Promise<string>;
   runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
+  listOpenPrs(repoPath: string): Promise<OpenPr[]>;
 }
 
 interface RouteDeps {
@@ -48,6 +51,19 @@ const stopHookSchema = z.object({
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
+const HTTP_BAD_GATEWAY = 502;
+
+/** Markdown body shown on a review card, summarizing the target PR. */
+function reviewDescription(pr: OpenPr): string {
+  return [
+    `Revue autonome (argus) de [PR #${pr.number}](${pr.url})`,
+    "",
+    `- **Titre** : ${pr.title}`,
+    `- **Branche** : \`${pr.headBranch}\``,
+    `- **Auteur** : ${pr.author}`,
+    `- **Diff** : +${pr.additions} / -${pr.deletions}`,
+  ].join("\n");
+}
 
 function jsonError(set: { status?: number | string }, status: number, message: string): { error: string } {
   set.status = status;
@@ -116,6 +132,15 @@ export function createApiRoutes(deps: RouteDeps) {
         };
       }),
     )
+    .get("/projects/:key/prs", async ({ params, set }) => {
+      if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(params.key);
+      try {
+        return await deps.system.listOpenPrs(project.repoPath);
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec gh pr list");
+      }
+    })
     .get("/capabilities", () => ({
       composerAvailable: deps.composerAvailable,
       defaultModel: MODELS.implement,
@@ -141,6 +166,28 @@ export function createApiRoutes(deps: RouteDeps) {
       });
       hub.pushTicket(ticket);
       return ticket;
+    })
+    .post("/reviews", async ({ body, set }) => {
+      const parsed = createReviewSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const created: Ticket[] = [];
+      for (const pr of parsed.data.prs) {
+        const ticket = store.createReview({
+          title: `Review PR #${pr.number} — ${pr.title}`,
+          description: reviewDescription(pr),
+          project: parsed.data.project,
+          prNumber: pr.number,
+          prHeadBranch: pr.headBranch,
+          prUrl: pr.url,
+          reviewDepth: parsed.data.depth,
+          postComments: parsed.data.postComments,
+        });
+        hub.pushTicket(ticket);
+        await slots.startTicket(ticket.id);
+        created.push(ticket);
+      }
+      return created;
     })
     .patch("/tickets/:id", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);

@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
-import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, Stage } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import type { Comment, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
@@ -16,6 +16,17 @@ export interface NewTicket {
   prdEnabled: boolean;
   prDraft: boolean;
   autoMerge: boolean;
+}
+
+export interface NewReview {
+  title: string;
+  description: string;
+  project: ProjectKey;
+  prNumber: number;
+  prHeadBranch: string;
+  prUrl: string;
+  reviewDepth: ReviewDepth;
+  postComments: boolean;
 }
 
 export interface TicketPatch {
@@ -103,6 +114,35 @@ export class Store {
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error("createTicket: ticket vanished after insert");
     this.logEvent(id, "created", { title: input.title });
+    return ticket;
+  }
+
+  /** Create a review ticket: straight into "À implémenter", carrying the target PR + argus knobs. */
+  createReview(input: NewReview): Ticket {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, post_comments, pr_url, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.title,
+        input.description,
+        input.project,
+        input.reviewDepth,
+        input.prNumber,
+        input.prHeadBranch,
+        input.postComments ? 1 : 0,
+        input.prUrl,
+        now,
+        now,
+        now,
+      );
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error("createReview: ticket vanished after insert");
+    this.logEvent(id, "created", { title: input.title, kind: "review", prNumber: input.prNumber });
     return ticket;
   }
 

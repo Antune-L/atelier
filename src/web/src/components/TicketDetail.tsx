@@ -1,4 +1,4 @@
-import { PanelRightClose, PanelRightOpen, Rocket, X } from "lucide-react";
+import { Eye, PanelRightClose, PanelRightOpen, Rocket, X } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import type {
@@ -225,6 +225,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           <div className="min-w-0">
             <ModalTitle>{current.title}</ModalTitle>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {current.kind === "review" && (
+                <Badge variant="secondary" className="gap-1">
+                  <Eye className="h-3 w-3" /> Review
+                </Badge>
+              )}
               {current.stage && (
                 <Badge
                   variant={stageVariant(current.stage)}
@@ -496,7 +501,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               Relancer
             </Button>
           )}
-          {current.column === "done" && (
+          {current.column === "done" && current.kind !== "review" && (
             <Button
               variant="default"
               size="sm"

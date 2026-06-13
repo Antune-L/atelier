@@ -4,6 +4,8 @@
  * and run end-to-end with a fake implementation (dry-run) during dev/test.
  */
 
+import type { OpenPr } from "../../shared/schemas.ts";
+
 export interface GitWorktreeAddOptions {
   repoPath: string;
   slotPath: string;
@@ -61,6 +63,12 @@ export interface SystemAdapter {
 
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
+  /** Review done() gate: the reviewed PR still exists (no branch push / clean-tree check). */
+  verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult>;
+
+  // ---- PR listing (review entry point) ----
+  /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */
+  listOpenPrs(repoPath: string): Promise<OpenPr[]>;
 
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already) and merge it into its base branch. */

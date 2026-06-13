@@ -56,6 +56,19 @@ export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   composer: "Composer 2.5",
 };
 
+/** What a ticket delivers: a feature implementation (default) or an autonomous PR review. */
+export const KINDS = ["feature", "review"] as const;
+export type Kind = (typeof KINDS)[number];
+
+/** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
+export const REVIEW_DEPTHS = ["light", "full"] as const;
+export type ReviewDepth = (typeof REVIEW_DEPTHS)[number];
+
+export const REVIEW_DEPTH_LABELS: Record<ReviewDepth, string> = {
+  light: "Light",
+  full: "Complet",
+};
+
 export const STAGES = [
   "queued",
   "planning",

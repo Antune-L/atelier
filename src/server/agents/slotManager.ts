@@ -12,7 +12,7 @@ import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
-import { buildTicketContract } from "./contract.ts";
+import { buildReviewContract, buildTicketContract } from "./contract.ts";
 import {
   buildMcpJson,
   buildSettingsJson,
@@ -218,12 +218,13 @@ export class SlotManager {
     if (last !== "session_spawned") return last === "contract_delivered";
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return false;
-    const sent = this.workerHub.sendEvent(ticketId, {
-      type: "ticket",
-      payload: buildTicketContract(ticket, {
-        composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
-      }),
-    });
+    const payload =
+      ticket.kind === "review"
+        ? buildReviewContract(ticket)
+        : buildTicketContract(ticket, {
+            composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+          });
+    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload });
     if (sent) {
       this.store.logEvent(ticketId, "contract_delivered", {});
       this.clearPhase(ticketId);
@@ -247,8 +248,11 @@ export class SlotManager {
     if (!ticket || !ticket.branch) return { ok: false, reason: "ticket ou branche introuvable" };
     const path = slotPath(slotId);
 
-    log.info("vérification de la gate done", { ticketId, slotId, prUrl });
-    const gate = await this.system.verifyDone(path, ticket.branch, prUrl);
+    log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
+    const gate =
+      ticket.kind === "review"
+        ? await this.system.verifyReviewDone(path, prUrl)
+        : await this.system.verifyDone(path, ticket.branch, prUrl);
     if (!gate.ok) {
       this.touch(this.store.updateTicket(ticketId, { stage: "stalled", error: gate.reason, finishedAt: Date.now() }));
       this.store.updateSlot(slotId, { status: "stalled" });

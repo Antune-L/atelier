@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -116,7 +117,11 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async excludeAgentFilesInRepo(repoPath: string): Promise<void> {
-    const excludePath = join(repoPath, ".git", "info", "exclude");
+    const infoDir = join(repoPath, ".git", "info");
+    // A configured repo may be missing (placeholder/example config) or not a git checkout; skip
+    // rather than abort first-boot setup. Bun.write would otherwise ENOENT on a missing parent.
+    if (!existsSync(infoDir)) return;
+    const excludePath = join(infoDir, "exclude");
     const file = Bun.file(excludePath);
     const current = (await file.exists()) ? await file.text() : "";
     const lines = new Set(current.split("\n").map((l) => l.trim()).filter(Boolean));

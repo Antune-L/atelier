@@ -48,6 +48,32 @@ bun run start        # backend en mode production
 | `BACKEND_WS` / `BACKEND_HTTP` | dérivés du port | injectés dans les slots/worker                                   |
 | `CURSOR_API_KEY`              | non défini      | auth Cursor headless (alternative à `agent login`) pour la délégation à Composer |
 
+## App desktop (macOS, Electrobun)
+
+L'app est packageable en application desktop macOS via [Electrobun](https://github.com/blackboardsh/electrobun) (WebKit, pas Electron/CEF). Le wrapper (`desktop/index.ts`) démarre le backend Bun **in-process** puis ouvre une fenêtre WebKit sur `http://localhost:52817` — `/api` et `/ws` restent same-origin, le front est inchangé.
+
+```bash
+bun run dev:desktop    # build web + agents, puis electrobun dev (fenêtre de dev)
+bun run build:desktop  # build le .app → build/dev-macos-arm64/Kanban Agents-dev.app
+```
+
+L'app n'est pas signée (usage local) : au premier lancement, clic droit → **Ouvrir**. L'icône est générée depuis `src/web/public/favicon.svg` vers `icon.iconset/` (converti en `.icns` par Electrobun).
+
+### Données desktop & synchronisation
+
+Contrairement au mode web, l'app desktop lit/écrit son **propre** `config.json` + `kanban.db` sous `~/Library/Application Support/kanban-agents/` (mode réel, `KANBAN_DRY_RUN=0`). Au premier lancement, `config.json` est seedé depuis le placeholder `config.example.json` → board vide et un seul projet `mon-projet`.
+
+Pour partager les données avec `bun run real` (même base + même config) :
+
+```bash
+bun run link:desktop-data   # symlink AppSupport → config.json + kanban-real.db du repo
+```
+
+- L'app desktop et `bun run real` partagent alors `kanban-real.db` (le WAL SQLite suit le symlink).
+- ⚠️ Les deux + `bun run dev` veulent **le port 52817** : un seul process à la fois → la base partagée fait office de sync.
+- `bun run dev` reste un bac à sable dry-run séparé sur `./kanban.db`.
+- Les symlinks utilisent des chemins absolus : relancer le script si le repo est déplacé.
+
 ## Mode dry-run (défaut, sans effet de bord)
 
 Toute la couche à effets de bord (git, tmux, `gh`, `osascript`, `~/.claude.json`, `bun install`) passe par une interface injectable (`src/server/system/types.ts`). Deux implémentations :

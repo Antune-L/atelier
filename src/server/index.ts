@@ -1,4 +1,4 @@
-import { dirname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Elysia } from "elysia";
@@ -82,6 +82,37 @@ function isTerminalSocket(ws: { data: SocketData }): ws is TerminalSocket {
 const HTTP_NOT_FOUND = 404;
 
 /**
+ * Content-Type by extension for the static SPA. Elysia's onError re-wraps a raw Response and drops
+ * Bun.file's auto-derived type, so WebKit (the desktop webview) would reject `<script type=module>`
+ * served without a JS MIME → blank screen. We set it explicitly here.
+ */
+const STATIC_CONTENT_TYPES: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".wasm": "application/wasm",
+};
+const DEFAULT_CONTENT_TYPE = "application/octet-stream";
+
+function staticResponse(file: ReturnType<typeof Bun.file>, name: string): Response {
+  const type = STATIC_CONTENT_TYPES[extname(name).toLowerCase()] ?? DEFAULT_CONTENT_TYPE;
+  return new Response(file, { headers: { "content-type": type } });
+}
+
+/**
  * Serve the built SPA from <resourcesRoot>/dist/web as the LAST fallback, after every
  * API/WS/uploads/health route has been ruled out. A miss falls back to index.html so the
  * client-side router owns deep links. Path is normalized + scoped to webDist to bar traversal.
@@ -91,10 +122,10 @@ async function serveStaticAsset(webDist: string, pathname: string): Promise<Resp
   const candidate = normalize(join(webDist, relative));
   if (candidate === webDist || candidate.startsWith(`${webDist}/`)) {
     const file = Bun.file(candidate);
-    if (await file.exists()) return new Response(file);
+    if (await file.exists()) return staticResponse(file, candidate);
   }
   const fallback = Bun.file(join(webDist, SPA_FALLBACK_FILE));
-  if (await fallback.exists()) return new Response(fallback);
+  if (await fallback.exists()) return staticResponse(fallback, SPA_FALLBACK_FILE);
   return new Response("not found", { status: HTTP_NOT_FOUND });
 }
 

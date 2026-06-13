@@ -108,7 +108,7 @@ Un `.app` packagé est **read-only** : tout ce qui s'écrit doit sortir du bundl
 ## Lot 3 — Le wrapper Electrobun
 
 1. **Scaffolding** : `bun add -d electrobun`, init du projet (dossier `desktop/`), config `electrobun.config.ts` (appId, nom, icône, build macOS, WebKit).
-2. **Main process** (`desktop/main.ts`) :
+2. **Main process** (`desktop/index.ts`) :
    ```
    // 1. bootstrap config + env AVANT tout import du serveur (cf. Lot 2)
    ensureConfig(dataRoot); process.env.KANBAN_CONFIG = ...; process.env.KANBAN_DB = ...

@@ -89,6 +89,11 @@ class BoardStore {
     return [...this.state.tickets, ticket];
   }
 
+  /** Show a transient toast triggered by the UI (not from a server event). */
+  notify(title: string, body: string): void {
+    this.pushToast(title, body);
+  }
+
   private pushToast(title: string, body: string): void {
     this.toastSeq += 1;
     const id = this.toastSeq;

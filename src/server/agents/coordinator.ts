@@ -193,9 +193,18 @@ export class AgentCoordinator {
     this.markProgress(ticketId);
   }
 
-  /** User validated the PRD → resume implementation in the same session. */
+  /**
+   * User validated the PRD. The session stays alive but, for a Claude implementer,
+   * the contract has it delegate the implementation to a fresh-context sub-agent
+   * rather than coding inline — the note reinforces that at the moment it acts.
+   */
   validatePrd(ticketId: string): void {
-    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note: "" });
+    const existing = this.store.getTicket(ticketId);
+    const note =
+      existing?.implementer === "claude"
+        ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
+        : "";
+    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note });
     const ticket = this.store.updateTicket(ticketId, { column: "implementing", stage: "implementing" });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "prd_validated", {});

@@ -11,14 +11,11 @@ import {
   type AgentModel,
   type Implementer,
 } from "@shared/constants";
+import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
 
 import { Label } from "@/components/ui/input";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
-import { defaultEffortOptionLabel, defaultModelOptionLabel } from "@/lib/display";
 import { useCapabilities } from "@/hooks/useCapabilities";
-
-/** Empty string is the "fall back to server default" tab for the nullable model/effort knobs. */
-const DEFAULT_VALUE = "";
 
 function Field({ labelId, label, children }: { labelId: string; label: string; children: React.ReactNode }) {
   return (
@@ -53,14 +50,14 @@ export function ImplementationAgentFields({
   const effortLabelId = `${id}-effort`;
   const implementerLabelId = `${id}-implementer`;
 
-  const modelOptions: TabOption<AgentModel | "">[] = [
-    { value: DEFAULT_VALUE, label: defaultModelOptionLabel(defaultModel) },
-    ...AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] })),
-  ];
-  const effortOptions: TabOption<AgentEffort | "">[] = [
-    { value: DEFAULT_VALUE, label: defaultEffortOptionLabel(defaultEffort) },
-    ...AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] })),
-  ];
+  // A null per-ticket knob follows the configured orchestrator default, so highlight that tab directly.
+  const parsedDefaultModel = agentModelSchema.safeParse(defaultModel);
+  const resolvedDefaultModel = parsedDefaultModel.success ? parsedDefaultModel.data : null;
+  const parsedDefaultEffort = agentEffortSchema.safeParse(defaultEffort);
+  const resolvedDefaultEffort = parsedDefaultEffort.success ? parsedDefaultEffort.data : null;
+
+  const modelOptions: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
+  const effortOptions: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
   const implementerOptions: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
     value: i,
     label: i === "composer" && !composerAvailable ? `${IMPLEMENTER_LABELS[i]} — Cursor non détecté` : IMPLEMENTER_LABELS[i],
@@ -72,16 +69,16 @@ export function ImplementationAgentFields({
       <Field labelId={modelLabelId} label="Modèle (orchestrateur)">
         <Tabs
           options={modelOptions}
-          value={model ?? DEFAULT_VALUE}
-          onChange={(value) => onModelChange(value === DEFAULT_VALUE ? null : value)}
+          value={model ?? resolvedDefaultModel}
+          onChange={(value) => onModelChange(value === resolvedDefaultModel ? null : value)}
           aria-labelledby={modelLabelId}
         />
       </Field>
       <Field labelId={effortLabelId} label="Effort (orchestrateur)">
         <Tabs
           options={effortOptions}
-          value={effort ?? DEFAULT_VALUE}
-          onChange={(value) => onEffortChange(value === DEFAULT_VALUE ? null : value)}
+          value={effort ?? resolvedDefaultEffort}
+          onChange={(value) => onEffortChange(value === resolvedDefaultEffort ? null : value)}
           aria-labelledby={effortLabelId}
         />
       </Field>

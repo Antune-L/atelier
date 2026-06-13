@@ -17,7 +17,7 @@
   "models": {
     "implement": "opus",
     "triage": "sonnet",
-    "implementEffort": "xhigh"
+    "implementEffort": "medium"
   },
   "slotsRoot": "slots"
 }

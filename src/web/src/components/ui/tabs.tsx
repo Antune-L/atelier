@@ -8,7 +8,8 @@ export interface TabOption<T extends string> {
 
 interface TabsProps<T extends string> {
   options: readonly TabOption<T>[];
-  value: T;
+  /** null leaves no tab highlighted (e.g. while the default is still loading). */
+  value: T | null;
   onChange: (value: T) => void;
   "aria-label"?: string;
   "aria-labelledby"?: string;

@@ -7,7 +7,13 @@ import { ImplementationAgentFields } from "@/components/ImplementationAgentField
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
+import {
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
@@ -22,7 +28,11 @@ interface NewTicketDialogProps {
   onClose: () => void;
 }
 
-export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProps) {
+export function NewTicketDialog({
+  open,
+  projects,
+  onClose,
+}: NewTicketDialogProps) {
   const [tab, setTab] = useState<Tab>("ticket");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -41,7 +51,8 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
+  const autoMerge =
+    autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -86,7 +97,11 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   };
 
   const appendToDescription = (markdown: string): void => {
-    setDescription((prev) => (prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`));
+    setDescription((prev) =>
+      prev.endsWith("\n") || prev === ""
+        ? `${prev}${markdown}\n`
+        : `${prev}\n${markdown}\n`,
+    );
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -104,7 +119,10 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     setBusy(true);
     try {
       // Send null when the choice matches (or has no) project default → keep "no override" semantics.
-      const baseBranchOverride = baseBranch && baseBranch !== selectedProject?.baseBranch ? baseBranch : null;
+      const baseBranchOverride =
+        baseBranch && baseBranch !== selectedProject?.baseBranch
+          ? baseBranch
+          : null;
       await api.createTicket({
         title,
         description,
@@ -130,13 +148,15 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   return (
     <Modal open={open} onClose={onClose} className="max-w-3xl">
       <ModalHeader>
-        <ModalTitle>{tab === "ticket" ? "Nouveau ticket" : "Reviewer une PR"}</ModalTitle>
+        <ModalTitle>
+          {tab === "ticket" ? "Nouveau ticket" : "Reviewer une PR"}
+        </ModalTitle>
         <div className="mt-3 flex gap-1">
           <TabButton active={tab === "ticket"} onClick={() => setTab("ticket")}>
             Nouveau ticket
           </TabButton>
           <TabButton active={tab === "review"} onClick={() => setTab("review")}>
-            Reviewer une PR
+            PR Review
           </TabButton>
         </div>
       </ModalHeader>
@@ -146,92 +166,121 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
         </ModalBody>
       ) : (
         <>
-      <ModalBody>
-        <div className="space-y-1.5">
-          <Label htmlFor="title">Titre</Label>
-          <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titre du ticket" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="description">Description (markdown)</Label>
-          <Textarea
-            id="description"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            onPaste={onPaste}
-            className="min-h-[320px]"
-            placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="project">Projet</Label>
-          <Select id="project" value={project} onChange={(e) => setProjectChoice(e.target.value)} className="w-full">
-            {projects.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="base-branch">Branche de base du worktree</Label>
-          <Select
-            id="base-branch"
-            value={baseBranch}
-            onChange={(e) => setBaseBranchChoice(e.target.value)}
-            disabled={branches === null}
-            className="w-full"
-          >
-            {branchOptions.map((b) => (
-              <option key={b} value={b}>
-                {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="space-y-2 rounded-md border p-3">
-          <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
-          <ImplementationAgentFields
-            model={model}
-            effort={effort}
-            implementer={implementer}
-            onModelChange={setModel}
-            onEffortChange={setEffort}
-            onImplementerChange={setImplementer}
-          />
-        </div>
-        <label className="flex items-center justify-between gap-2 text-sm">
-          <span>PRD à implémenter (planification avant code)</span>
-          <Switch checked={prdEnabled} onCheckedChange={setPrdEnabled} aria-label="PRD à implémenter" />
-        </label>
-        <label className="flex items-center justify-between gap-2 text-sm">
-          <span>
-            Ouvrir la PR en draft
-            {autoMerge && <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>}
-          </span>
-          <Switch
-            checked={prDraft && !autoMerge}
-            disabled={autoMerge}
-            onCheckedChange={setPrDraft}
-            aria-label="Ouvrir la PR en draft"
-          />
-        </label>
-        <label className="flex items-center justify-between gap-2 text-sm">
-          <span>Merger automatiquement la PR après ouverture</span>
-          <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-label="Merge automatique de la PR" />
-        </label>
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </ModalBody>
-      <ModalFooter>
-        <Button variant="outline" onClick={onClose}>
-          Annuler
-        </Button>
-        <Button variant="outline" onClick={() => void submit(false)} disabled={busy || !title.trim() || !project}>
-          Créer
-        </Button>
-        <Button onClick={() => void submit(true)} disabled={busy || !title.trim() || !project}>
-          Créer et lancer
-        </Button>
-      </ModalFooter>
+          <ModalBody>
+            <div className="space-y-1.5">
+              <Label htmlFor="title">Titre</Label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Titre du ticket"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="description">Description (markdown)</Label>
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                onPaste={onPaste}
+                className="min-h-[320px]"
+                placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="project">Projet</Label>
+              <Select
+                id="project"
+                value={project}
+                onChange={(e) => setProjectChoice(e.target.value)}
+                className="w-full"
+              >
+                {projects.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="base-branch">Branche de base du worktree</Label>
+              <Select
+                id="base-branch"
+                value={baseBranch}
+                onChange={(e) => setBaseBranchChoice(e.target.value)}
+                disabled={branches === null}
+                className="w-full"
+              >
+                {branchOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-2 rounded-md border p-3">
+              <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
+              <ImplementationAgentFields
+                model={model}
+                effort={effort}
+                implementer={implementer}
+                onModelChange={setModel}
+                onEffortChange={setEffort}
+                onImplementerChange={setImplementer}
+              />
+            </div>
+            <label className="flex items-center justify-between gap-2 text-sm">
+              <span>PRD à implémenter (planification avant code)</span>
+              <Switch
+                checked={prdEnabled}
+                onCheckedChange={setPrdEnabled}
+                aria-label="PRD à implémenter"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 text-sm">
+              <span>
+                Ouvrir la PR en draft
+                {autoMerge && (
+                  <span className="ml-1 text-xs text-muted-foreground">
+                    (forcé non-draft pour le merge auto)
+                  </span>
+                )}
+              </span>
+              <Switch
+                checked={prDraft && !autoMerge}
+                disabled={autoMerge}
+                onCheckedChange={setPrDraft}
+                aria-label="Ouvrir la PR en draft"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-2 text-sm">
+              <span>Merger automatiquement la PR après ouverture</span>
+              <Switch
+                checked={autoMerge}
+                onCheckedChange={setAutoMergeChoice}
+                aria-label="Merge automatique de la PR"
+              />
+            </label>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="outline" onClick={onClose}>
+              Annuler
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => void submit(false)}
+              disabled={busy || !title.trim() || !project}
+            >
+              Créer
+            </Button>
+            <Button
+              onClick={() => void submit(true)}
+              disabled={busy || !title.trim() || !project}
+            >
+              Créer et lancer
+            </Button>
+          </ModalFooter>
         </>
       )}
     </Modal>
@@ -251,7 +300,9 @@ function TabButton({ active, onClick, children }: TabButtonProps) {
       onClick={onClick}
       className={cn(
         "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:bg-muted",
       )}
     >
       {children}

@@ -52,6 +52,8 @@ export interface StartServerOptions {
   resourcesRoot?: string;
   /** Writable data: kanban.db, uploads/, config.json, slots/ (default: repo root). */
   dataRoot?: string;
+  /** Native OS notification sink (desktop app only; WKWebView has no web Notification API). */
+  onNotify?: (title: string, body: string) => void;
 }
 
 export interface RunningServer {
@@ -152,7 +154,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const system = createSystemAdapter();
   const clientHub = new ClientHub(store);
   const workerHub = new WorkerHub();
-  const notifier = new Notifier(clientHub);
+  const notifier = new Notifier(clientHub, opts.onNotify);
   const triageLog = new LiveLog();
   const terminalManager = new TerminalSessionManager(store, system);
 

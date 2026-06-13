@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import Electrobun, { BrowserWindow, PATHS, app } from "electrobun/bun";
+import Electrobun, { BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
 import { repairPath } from "./repairPath.ts";
@@ -71,7 +71,13 @@ async function boot(): Promise<void> {
 
   // 3. Dynamic import only now that config + env are in place.
   const { startServer } = await import("../src/server/index.ts");
-  const server = await startServer({ resourcesRoot: roots.resourcesRoot, dataRoot: roots.dataRoot });
+  const server = await startServer({
+    resourcesRoot: roots.resourcesRoot,
+    dataRoot: roots.dataRoot,
+    // WKWebView has no web Notification API, so the front's desktop notifications are inert here.
+    // Fire a native notification attributed to the app instead (clicking focuses the app window).
+    onNotify: (title, body) => Utils.showNotification({ title, body }),
+  });
 
   let tornDown = false;
   const teardown = async (): Promise<void> => {

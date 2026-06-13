@@ -267,8 +267,37 @@ export class SlotManager {
       this.scheduleContractAckCheck(ticketId);
       return;
     }
-    if (attempt >= CONTRACT_DELIVER_MAX_ATTEMPTS) return;
+    if (attempt >= CONTRACT_DELIVER_MAX_ATTEMPTS) {
+      await this.handleWorkerConnectTimeout(ticketId);
+      return;
+    }
     setTimeout(() => void this.deliverContractWhenReady(ticketId, attempt + 1), CONTRACT_DELIVER_DELAY_MS);
+  }
+
+  /**
+   * The worker never connected within the poll window (~2 min): claude most likely crashed at
+   * boot, so the contract was never delivered and the session is dead weight. Auto-reclaim
+   * (relaunch in place, reusing the Task 1 counter) instead of letting the card sit in
+   * "implementing" until the 45 min progress watchdog. Past the reclaim cap → fail + notify.
+   *
+   * The poll only resolves false while the worker is disconnected, so reaching here means no
+   * worker_connected event. A connect that has already completed before the synchronous guard is
+   * caught here; one that lands later (a still-booting claude) is fenced off in the escalation
+   * branch by killing the session before markFailed.
+   */
+  private async handleWorkerConnectTimeout(ticketId: string): Promise<void> {
+    if (this.workerHub.isConnected(ticketId)) return;
+    log.warn("worker jamais connecté dans la fenêtre de spawn", { ticketId });
+    const outcome = await this.tryAutoReclaim(ticketId, "worker jamais connecté au spawn");
+    if (outcome !== "escalate") return;
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket?.slotId == null) return;
+    // Past the reclaim cap: tear down the (possibly still-booting) session before marking failed.
+    // Otherwise a late worker hello would reach deliverContractIfPending — which has no terminal
+    // stage guard — and start the agent working on a card the UI already shows as failed.
+    await this.system.killSession(`ticket-${ticketId}`);
+    this.workerHub.disconnect(ticketId);
+    this.markFailed(ticketId, ticket.slotId, "worker jamais connecté après reclaim");
   }
 
   private scheduleContractAckCheck(ticketId: string, attempt = 0): void {

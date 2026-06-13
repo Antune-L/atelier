@@ -16,6 +16,9 @@ export interface NewTicket {
   prdEnabled: boolean;
   prDraft: boolean;
   autoMerge: boolean;
+  model: AgentModel | null;
+  effort: AgentEffort | null;
+  implementer: Implementer;
 }
 
 export interface NewReview {
@@ -96,8 +99,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, model, effort, implementer, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -107,6 +110,9 @@ export class Store {
         input.prdEnabled ? 1 : 0,
         input.prDraft ? 1 : 0,
         input.autoMerge ? 1 : 0,
+        input.model,
+        input.effort,
+        input.implementer,
         now,
         now,
         now,

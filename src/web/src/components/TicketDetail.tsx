@@ -7,18 +7,15 @@ import type {
   Ticket,
   TriageResult,
 } from "@shared/schemas";
-import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, columnSchema, implementerSchema, triageResultSchema } from "@shared/schemas";
+import { TRIAGE_VERDICT_LABELS, columnSchema, triageResultSchema } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
-  AGENT_EFFORTS,
-  AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
-  AGENT_MODEL_LABELS,
   COLUMN_LABELS,
   COLUMN_ORDER,
-  IMPLEMENTERS,
-  IMPLEMENTER_LABELS,
+  type AgentEffort,
+  type AgentModel,
   type Column,
+  type Implementer,
 } from "@shared/constants";
 import { extractFigmaUrls } from "@shared/figma";
 
@@ -34,10 +31,9 @@ import {
 } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
 import { TerminalView } from "@/components/TerminalView";
 import {
-  defaultEffortOptionLabel,
-  defaultModelOptionLabel,
   finishedKindLabel,
   formatDateTime,
   isStageAnimated,
@@ -46,7 +42,6 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { api } from "@/lib/api";
-import { useCapabilities } from "@/hooks/useCapabilities";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import { resolveProjectLabel } from "@/components/TicketCard";
@@ -90,7 +85,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
-  const { composerAvailable, defaultModel, defaultEffort } = useCapabilities();
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -146,18 +140,16 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   // Agent model/effort are picked before launch (TODO column) and stored on the ticket;
   // the spawn reads them, falling back to the server config when null.
-  const setAgentModel = (raw: string): void => {
-    const model = raw === "" ? null : agentModelSchema.parse(raw);
+  const setAgentModel = (model: AgentModel | null): void => {
     void api.updateTicket(current.id, { model }).catch(() => undefined);
   };
 
-  const setAgentEffort = (raw: string): void => {
-    const effort = raw === "" ? null : agentEffortSchema.parse(raw);
+  const setAgentEffort = (effort: AgentEffort | null): void => {
     void api.updateTicket(current.id, { effort }).catch(() => undefined);
   };
 
-  const setImplementer = (raw: string): void => {
-    void api.updateTicket(current.id, { implementer: implementerSchema.parse(raw) }).catch(() => undefined);
+  const setImplementer = (implementer: Implementer): void => {
+    void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
   const moveTo = async (target: Column): Promise<void> => {
@@ -411,48 +403,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         {current.column === "todo" && (
           <section className="rounded-md border p-3">
             <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
-            <div className="flex flex-wrap gap-4">
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-model">Modèle (orchestrateur)</Label>
-                <Select id="agent-model" value={current.model ?? ""} onChange={(e) => setAgentModel(e.target.value)}>
-                  <option value="">{defaultModelOptionLabel(defaultModel)}</option>
-                  {AGENT_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {AGENT_MODEL_LABELS[m]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-effort">Effort (orchestrateur)</Label>
-                <Select id="agent-effort" value={current.effort ?? ""} onChange={(e) => setAgentEffort(e.target.value)}>
-                  <option value="">{defaultEffortOptionLabel(defaultEffort)}</option>
-                  {AGENT_EFFORTS.map((eff) => (
-                    <option key={eff} value={eff}>
-                      {AGENT_EFFORT_LABELS[eff]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-implementer">Implémenté par</Label>
-                <Select id="agent-implementer" value={current.implementer} onChange={(e) => setImplementer(e.target.value)}>
-                  {IMPLEMENTERS.map((i) => (
-                    <option key={i} value={i} disabled={i === "composer" && !composerAvailable}>
-                      {IMPLEMENTER_LABELS[i]}
-                      {i === "composer" && !composerAvailable ? " — Cursor non détecté" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            {current.implementer === "composer" && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {composerAvailable
-                  ? "Composer 2.5 écrit le code ; le modèle orchestrateur (Claude) planifie, relit et ouvre la PR."
-                  : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
-              </p>
-            )}
+            <ImplementationAgentFields
+              model={current.model}
+              effort={current.effort}
+              implementer={current.implementer}
+              onModelChange={setAgentModel}
+              onEffortChange={setAgentEffort}
+              onImplementerChange={setImplementer}
+            />
             <div className="mt-3">
               <Button
                 size="sm"

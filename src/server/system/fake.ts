@@ -173,8 +173,8 @@ export class FakeSystemAdapter implements SystemAdapter {
     return FAKE_OPEN_PRS;
   }
 
-  async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {
-    this.log("mergePr", { slotPath, prUrl });
+  async mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+    this.log("mergePr", { slotPath, branch, prUrl });
     return { ok: true, reason: "" };
   }
 

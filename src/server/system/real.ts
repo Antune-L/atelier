@@ -243,7 +243,7 @@ export class RealSystemAdapter implements SystemAdapter {
     }));
   }
 
-  async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+  async mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     // A draft PR can't be merged; mark it ready first (harmless if already ready).
     await $`gh pr ready ${prUrl}`.cwd(slotPath).nothrow().quiet();
     const res = await $`gh pr merge ${prUrl} ${PR_MERGE_STRATEGY}`.cwd(slotPath).nothrow().quiet();
@@ -251,6 +251,11 @@ export class RealSystemAdapter implements SystemAdapter {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       return { ok: false, reason: `gh pr merge a échoué (code ${res.exitCode}) : ${detail}` };
     }
+    // Best-effort remote branch cleanup: the merge already succeeded, so a failed
+    // deletion (e.g. branch protection) must not turn into a merge failure. We can't
+    // use `gh pr merge --delete-branch` because its local cleanup checks out the base
+    // branch, which is already checked out in the main worktree and would error.
+    await $`git push origin --delete ${branch}`.cwd(slotPath).nothrow().quiet();
     return { ok: true, reason: "" };
   }
 

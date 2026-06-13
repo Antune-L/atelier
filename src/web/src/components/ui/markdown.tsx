@@ -11,6 +11,15 @@ interface MarkdownProps {
 
 marked.setOptions({ breaks: true, gfm: true });
 
+// Render links (e.g. a PR url posted in a comment) in a new tab so clicking one
+// never navigates the board away from itself.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noreferrer noopener");
+  }
+});
+
 /** Renders trusted-but-sanitized markdown as styled HTML. Storage stays markdown. */
 export function Markdown({ content, className }: MarkdownProps) {
   const html = useMemo(() => {

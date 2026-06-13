@@ -18,7 +18,7 @@ import type { ElectrobunConfig } from "electrobun";
  */
 export default {
   app: {
-    name: "Kanban Agents",
+    name: "Atelier",
     identifier: "dev.kanban-agents.desktop",
     version: "0.0.0",
   },

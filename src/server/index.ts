@@ -3,7 +3,14 @@ import { fileURLToPath } from "node:url";
 
 import { Elysia } from "elysia";
 
-import { WS_PATH_CLIENT, WS_PATH_TERMINAL, WS_PATH_WORKER } from "../shared/constants.ts";
+import {
+  TERMINAL_DEFAULT_COLS,
+  TERMINAL_DEFAULT_ROWS,
+  WS_PATH_CLIENT,
+  WS_PATH_TERMINAL,
+  WS_PATH_WORKER,
+} from "../shared/constants.ts";
+import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SlotManager } from "./agents/slotManager.ts";
@@ -63,7 +70,7 @@ createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable
 type SocketData =
   | { kind: "client" }
   | { kind: "worker"; ticketId: string | null; slotId: number | null }
-  | { kind: "terminal"; ticketId: string };
+  | { kind: "terminal"; ticketId: string; cols: number; rows: number };
 
 function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
   return ws.data.kind === "worker";
@@ -119,7 +126,15 @@ const server = Bun.serve<SocketData>({
     if (url.pathname === WS_PATH_TERMINAL) {
       const ticketId = url.searchParams.get("ticketId");
       if (!ticketId) return new Response("ticketId requis", { status: 400 });
-      if (srv.upgrade(request, { data: { kind: "terminal", ticketId } })) return undefined;
+      // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
+      const viewport = terminalViewportSchema.safeParse({
+        cols: url.searchParams.get("cols"),
+        rows: url.searchParams.get("rows"),
+      });
+      const { cols, rows } = viewport.success
+        ? viewport.data
+        : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
+      if (srv.upgrade(request, { data: { kind: "terminal", ticketId, cols, rows } })) return undefined;
       return new Response("upgrade failed", { status: 426 });
     }
     if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {

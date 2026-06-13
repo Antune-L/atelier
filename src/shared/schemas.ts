@@ -332,13 +332,25 @@ const HEX_BYTES_RE = /^([0-9a-fA-F]{2})*$/;
 /** Sanity ceiling on a requested pane size so a bad client can't ask for an absurd geometry. */
 const TERMINAL_MAX_DIMENSION = 1000;
 
+const terminalDimensionSchema = z.number().int().positive().max(TERMINAL_MAX_DIMENSION);
+
+/**
+ * Viewer's initial xterm geometry, carried as `/ws/terminal` query params (strings) so the
+ * pane can be reflowed to match before its first frame is captured. Coerces "120" → 120.
+ */
+export const terminalViewportSchema = z.object({
+  cols: z.coerce.number().pipe(terminalDimensionSchema),
+  rows: z.coerce.number().pipe(terminalDimensionSchema),
+});
+export type TerminalViewport = z.infer<typeof terminalViewportSchema>;
+
 /** browser → backend: a keystroke (raw bytes, hex) or a viewport resize. */
 export const terminalClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("input"), hex: z.string().regex(HEX_BYTES_RE) }),
   z.object({
     type: z.literal("resize"),
-    cols: z.number().int().positive().max(TERMINAL_MAX_DIMENSION),
-    rows: z.number().int().positive().max(TERMINAL_MAX_DIMENSION),
+    cols: terminalDimensionSchema,
+    rows: terminalDimensionSchema,
   }),
 ]);
 export type TerminalClientMessage = z.infer<typeof terminalClientMessageSchema>;

@@ -6,13 +6,45 @@ import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { Badge } from "@/components/ui/badge";
-import { isStageAnimated, stageLabel, stageVariant, triageVerdictDot } from "@/lib/display";
+import { isStageAnimated, stageLabel, stageProgress, triageVerdictDot, type ProgressColor } from "@/lib/display";
 import { cn } from "@/lib/utils";
 
 interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
   onOpen: (ticket: Ticket) => void;
+}
+
+const PROGRESS_BAR_COLORS: Record<ProgressColor, string> = {
+  info: "bg-info",
+  success: "bg-success",
+  destructive: "bg-destructive",
+  warning: "bg-warning",
+};
+
+function StageProgressBar({ stage, animated }: { stage: NonNullable<Ticket["stage"]>; animated: boolean }) {
+  const { percent, color } = stageProgress(stage);
+  return (
+    <div className="mt-2 space-y-1">
+      <div
+        role="progressbar"
+        aria-valuenow={Math.round(percent)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          className={cn(
+            "h-full rounded-full transition-all duration-500",
+            PROGRESS_BAR_COLORS[color],
+            animated && "animate-pulse",
+          )}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <p className="text-[10px] text-muted-foreground">{stageLabel(stage)}</p>
+    </div>
+  );
 }
 
 export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
@@ -55,11 +87,6 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
             <Eye className="h-3 w-3" /> Review
           </Badge>
         )}
-        {ticket.stage && (
-          <Badge variant={stageVariant(ticket.stage)} className={cn(isStageAnimated(ticket.stage) && "animate-pulse")}>
-            {stageLabel(ticket.stage)}
-          </Badge>
-        )}
         {ticket.watchdogFlagged && (
           <Badge variant="warning" className="gap-1">
             <AlertTriangle className="h-3 w-3" /> Inactif
@@ -92,6 +119,8 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
           </a>
         )}
       </div>
+
+      {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
     </div>
   );
 }

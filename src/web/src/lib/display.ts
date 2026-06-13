@@ -60,6 +60,35 @@ export function isStageAnimated(stage: Stage): boolean {
   return ANIMATED_STAGES.includes(stage);
 }
 
+const PROGRESS_STAGES: Stage[] = [
+  "queued",
+  "planning",
+  "implementing",
+  "reviewing",
+  "fixing",
+  "testing",
+  "opening_pr",
+  "done",
+];
+
+export type ProgressColor = "info" | "success" | "destructive" | "warning";
+
+export type StageProgress = { percent: number; color: ProgressColor };
+
+export function stageProgress(stage: Stage): StageProgress {
+  if (stage === "failed" || stage === "interrupted" || stage === "stalled") {
+    return { percent: 0, color: "destructive" };
+  }
+  if (stage === "awaiting_answers") {
+    const planningIdx = PROGRESS_STAGES.indexOf("planning");
+    return { percent: (planningIdx / (PROGRESS_STAGES.length - 1)) * 100, color: "warning" };
+  }
+  const idx = PROGRESS_STAGES.indexOf(stage);
+  const percent = idx < 0 ? 0 : (idx / (PROGRESS_STAGES.length - 1)) * 100;
+  const color: ProgressColor = stage === "done" ? "success" : "info";
+  return { percent, color };
+}
+
 const DATETIME_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
 
 export function formatDateTime(ms: number): string {

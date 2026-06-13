@@ -4,19 +4,30 @@
 >
 > Cible actuelle : **macOS uniquement**. Windows/Linux hors scope (voir [Évolutions](#évolutions-multi-os)).
 >
-> _Révisé juin 2026 — refs `file:line` re-vérifiées ; ajout des prérequis Bun 1.3 / option CEF / sidecar / pré-build worker / piège d'ordre d'import / tmux._
+> _Révisé juin 2026 — refs `file:line` re-vérifiées + **passe de validation empirique** (DnD WebKit, PATH, Bun 1.3, in-process). Voir [Validé empiriquement](#validé-empiriquement-juin-2026)._
 
 ## Pourquoi Electrobun (et pas Electron)
 
 Le backend est 100 % Bun (`bun:sqlite`, `Bun.serve`, `Bun.spawn`, `Bun.file/Glob/which`, shell `$`). Electrobun **tourne sur Bun** → tout le backend reste valide, zéro réécriture Bun→Node. Webview système (WebKit) → binaire minuscule (~12 MB).
 
-**Avantage décisif vs Electron/Tauri** : Electrobun embarque un **CEF (Chromium) optionnel** (v125) en plus du WebKit système. Si le drag-and-drop casse sous WebKit (risque réel, cf. Lot 1 + pièges), on bascule en rendu Chromium **sans réécrire le backend** — ce que Tauri (WebKit-only) ne peut pas, et qu'Electron n'offre qu'au prix d'une réécriture Bun→Node.
+**Avantage théorique vs Electron/Tauri** : Electrobun embarque un **CEF (Chromium) optionnel** (v125) en plus du WebKit système. C'était le filet anti-régression-DnD. ✅ **Mais le test empirique (juin 2026) montre 0 régression DnD sous WebKit** (cf. validation) → **CEF non nécessaire**, on garde WebKit. Le filet reste disponible si un futur composant casse sous WebKit.
 
 ### Statut Electrobun (juin 2026)
 
 - **v1 sortie le 6 fév. 2026**, série v1.18.x livrée en mai–juin 2026 (cadence active). « Production-ready » revendiqué pour **outils internes / utilitaires dev** = pile notre catégorie.
 - ⚠️ **Jeune, mono-éditeur** (Blackboard), doc parfois désynchronisée de l'implémentation, marketplace de plugins prévue Q3 2026. Sur un edge case WebKit, on est seul.
-- ⚠️ **Prérequis runtime : Bun ≥ 1.3.0** ([compat](https://blackboard.sh/electrobun/docs/guides/compatability/)). Le projet tourne en **1.2.21** (`bun --version`) → upgrade obligatoire. Bonne nouvelle : `@types/bun` est **déjà en 1.3.14** (`bun.lock`), le code est déjà typé contre 1.3 → l'upgrade ≈ `bun upgrade` + un run de tests, pas une migration.
+- ⚠️ **Electrobun 2.0 en réécriture Rust** (runtime « cottontail »), **découplé de Bun** (annoncé par le créateur sur HN, ~mai 2026). Risque stratégique moyen terme : notre avantage « 100 % Bun » pourrait s'éroder en v2 → garder la logique backend modulaire.
+
+### Validé empiriquement (juin 2026)
+
+| Point | Méthode | Résultat |
+|---|---|---|
+| **Bun 1.3** (prérequis Electrobun) | upgrade → 1.3.14, `typecheck`, smoke runtime | ✅ typecheck OK ; boot + `Bun.serve` + `bun:sqlite` OK, 0 erreur. `@types/bun` aligné (1.3.14) |
+| **DnD sous WebKit** | Playwright **WebKit 26.4** (= moteur Safari) vs **Chromium 148**, board réel en dry-run | ✅ rendu parfait ; carte suit le curseur (transforms **pixel-identiques**) ; un drag a persisté ; **0 erreur** ; **delta WebKit/Chromium = 0** → pas la régression dnd-kit redoutée (le board n'utilise pas `DragOverlay`) |
+| **PATH apps GUI** (le piège #1) | `env -i` (simule launchd) + login shell | ✅ env vidé → aucun CLI ; `zsh -ilc` récupère **tous** les binaires (tmux/claude/gh/cursor-agent) |
+| **`process.execPath` réutilisable** | recherche code/docs Electrobun | ✅ Electrobun bundle un **bun STOCK** à `/Contents/MacOS/bun` (pas un `--compile`) → réutilisable pour spawn le worker via `process.argv0` |
+
+**Reste à prouver** (nécessite un build packagé) : `Bun.serve` **in-process** dans une app Electrobun (aucun précédent — voir Architecture + L0.3).
 
 ## Principe directeur : same-origin = zéro changement front
 
@@ -25,11 +36,11 @@ Le front utilise **uniquement des chemins relatifs** :
 - API : `fetch("/api/…")` (`src/web/src/lib/api.ts:18`, upload `:63`)
 - WebSocket : `` `${proto}://${location.host}/ws` `` (`src/web/src/lib/store.ts:4`)
 
-Vérifié : un `grep import.meta.env|VITE_|http://|localhost|process.env` sur `src/web/src/` ne renvoie **aucun** hit — aucune URL absolue ni variable de build ne peut fuiter. Donc **tant que l'UI est servie sur la même origine que le backend**, le front marche tel quel, sans build conditionnel ni variable d'environnement. La clé du plan est donc :
+Vérifié : un `grep import.meta.env|VITE_|http://|localhost|process.env` sur `src/web/src/` ne renvoie **aucun** hit. Donc **tant que l'UI est servie sur la même origine que le backend**, le front marche tel quel. La clé du plan :
 
-> **Servir l'UI buildée (`dist/web`) directement depuis `Bun.serve`**, pour que `http://localhost:52817` rende l'app complète (UI + `/api` + `/ws` same-origine).
+> **Servir l'UI buildée (`dist/web`) depuis `Bun.serve`** et **charger la fenêtre sur `http://localhost:52817`**.
 
-Une fois ça en place, « web » et « app » chargent **la même URL servie par le même backend**. La seule différence est le contenant (onglet vs fenêtre Electrobun) — invisible pour le code front.
+⚠️ **Ne PAS utiliser le protocole idiomatique `views://` d'Electrobun** pour charger l'UI : ça mettrait l'UI sur l'origine `views://` et casserait le same-origin (`/api` et `/ws` deviendraient cross-origin). On charge délibérément via `http://localhost` (notre `Bun.serve`) — Electrobun accepte une `url` http dans `BrowserWindow` (le starter officiel charge déjà un Vite sur `localhost`).
 
 ### État actuel à corriger
 
@@ -52,124 +63,124 @@ Aujourd'hui le backend **ne sert pas** l'UI buildée : `Bun.serve` (`src/server/
 - **Mode web** : `bun start` → ouvrir `http://localhost:52817` dans un navigateur.
 - **Mode app** : le main process Electrobun (lui-même Bun) lance `startServer()`, attend `/health`, puis ouvre une fenêtre sur `http://localhost:52817`.
 
-⚠️ **In-process vs sidecar — à trancher par un spike, penche sidecar.** Electrobun exécute ton code dans un **Bun Worker thread** relié au natif par FFI, et **les précédents réels font tourner le backend en sidecar** (process séparé sur un port), pas in-process. L'hypothèse initiale — `process.execPath` = Bun embarqué réutilisable pour spawn les workers (`bunPath = process.execPath`, `src/server/index.ts:32`, injecté dans `.mcp.json` `slotTemplates.ts:78`) — **n'est pas vérifiée depuis le worker thread**. Décision :
+**In-process vs sidecar — penche désormais in-process (de-risqué).** Electrobun exécute ton code dans un **Bun Worker thread** (main thread = boucle GUI native via FFI) et **spawn lui-même des sous-process** (`spawn(process.argv0, …)`). Comme le runtime bundlé est un **bun stock** (`/Contents/MacOS/bun`), `process.argv0` est réutilisable → le spawn des workers (`bunPath`, `src/server/index.ts:32`, injecté dans `.mcp.json` `slotTemplates.ts:78`) **fonctionnera**. Le **seul** inconnu restant :
 
-> Partir en **sidecar** (un `Bun.spawn` du serveur sur un port libre, fenêtre pointée dessus) sauf si le spike L0.3 confirme que l'in-process spawn les workers correctement. Le sidecar isole aussi les crashs serveur de l'UI.
+> ⚠️ **Aucun précédent public de `Bun.serve` in-process** dans une app Electrobun (les apps servent l'UI via `views://` ou un Vite ; un exemple tiers met même son backend en **sidecar**). `Bun.serve` n'est pas bloqué (API Bun standard, dispo dans le Worker), juste jamais démontré → **à valider sur un build packagé (L0.3)**. Repli si KO : **sidecar** (`Bun.spawn` du serveur sur un port libre), qui isole aussi les crashs.
 
-Indépendamment de ce choix : le **spawn du worker** (`<bunPath> worker.js`, déclenché par *claude* via `.mcp.json`, **pas** par notre backend) est une **chaîne séparée** → voir Lot 3 (worker pré-buildé).
+⚠️ **`bunPath` en mode app** : utiliser **`process.argv0`** (convention Electrobun) plutôt que `process.execPath` ; les deux devraient pointer `/Contents/MacOS/bun`, à confirmer au spike.
+
+Indépendamment : le **spawn du worker** (`<bunPath> worker.js`, déclenché par *claude* via `.mcp.json`, **pas** par notre backend) est une chaîne séparée → voir Lot 3 (worker pré-buildé).
 
 ## Lot 1 — Backend : servir l'UI buildée (partagé web + app)
 
 Bénéficie aussi au déploiement web (qui n'a aujourd'hui pas de service statique de prod, cf. `portability.md`).
 
-1. **Refactor `src/server/index.ts`** : extraire la séquence de boot (création db/store/hubs/slotManager + `Bun.serve`) dans une fonction exportable `startServer(opts?): Promise<{ port: number; stop(): void }>`. Le top-level actuel devient `await startServer()` (mode web inchangé, `bun start` marche pareil).
-2. **Ajouter le service statique** dans le `fetch` de `Bun.serve`, en **dernier fallback** (après `/ws`, `/workers`, `/uploads/*`, et après `app.handle` pour `/api` + `/health`) :
-   - GET d'un chemin non-API → `Bun.file(join(webDist, pathname))` ; si absent → `dist/web/index.html` (fallback SPA pour le routing client).
+1. **Refactor `src/server/index.ts`** : extraire la séquence de boot (création db/store/hubs/slotManager + `Bun.serve`) dans une fonction exportable `startServer(opts?): Promise<{ port: number; stop(): void }>`. Le top-level actuel devient `await startServer()` (mode web inchangé).
+2. **Ajouter le service statique** dans le `fetch` de `Bun.serve`, en **dernier fallback** (après `/ws`, `/workers`, `/uploads/*`, et après `app.handle`) :
+   - GET d'un chemin non-API → `Bun.file(join(webDist, pathname))` ; si absent → `dist/web/index.html` (fallback SPA).
    - `webDist = join(resourcesRoot, "dist", "web")`.
-   - ⚠️ Ne pas court-circuiter `/api`, `/health`, `/ws`, `/workers`, `/uploads/*` : garder l'ordre actuel, le static est le **else** final.
-3. **`build:web`** existe déjà (`dist/web/`, `package.json`). Ajouter un script `start:prod` = `build:web` puis `bun start`, pour tester le mode web unifié.
+   - ⚠️ Ne pas court-circuiter `/api`, `/health`, `/ws`, `/workers`, `/uploads/*` : le static est le **else** final.
+3. **`build:web`** existe déjà. Ajouter un script `start:prod` = `build:web` puis `bun start`.
 
-> Test de validation lot 1 : `bun run build:web && bun start`, puis ouvrir `http://localhost:52817` dans Chrome → l'app doit fonctionner **sans Vite** (DnD, WS temps réel, uploads). Si OK, la moitié app est déjà gagnée.
+> Test de validation lot 1 : `bun run build:web && bun start`, ouvrir `http://localhost:52817` dans **Safari** → l'app doit fonctionner **sans Vite** (DnD ✅ déjà validé sous WebKit, WS temps réel, uploads).
 
 ## Lot 2 — Séparer ressources (read-only) et données (writable)
 
-Un `.app` packagé est **read-only** : tout ce qui s'écrit doit sortir du bundle. Aujourd'hui tout est rooté sur un unique `PROJECT_ROOT` (`src/server/config.ts:18`, `src/server/index.ts:26`), ce qui va casser en mode app.
-
-Introduire deux racines distinctes (en mode web/dev, les deux = racine repo → comportement inchangé) :
+Un `.app` packagé est **read-only** : tout ce qui s'écrit doit sortir du bundle. Aujourd'hui tout est rooté sur un unique `PROJECT_ROOT` (`src/server/config.ts:18`, `src/server/index.ts:26`).
 
 | Racine | Contenu | Mode web (défaut) | Mode app |
 |---|---|---|---|
 | **`resourcesRoot`** (read-only) | `dist/web`, `worker.js`, hooks buildés, `templates/run_composer.sh` | racine repo | `<bundle>/Resources` |
 | **`dataRoot`** (writable) | `kanban.db`, `uploads/`, `config.json`, `slots/` | racine repo | `~/Library/Application Support/kanban-agents` |
 
-État du câblage existant (bonne nouvelle, presque tout est déjà surchargeable) :
+État du câblage existant (presque tout déjà surchargeable) :
 
 - **DB** : `KANBAN_DB` env ✅ (`src/server/index.ts:29`)
 - **config.json** : `KANBAN_CONFIG` env ✅ (`src/server/config.ts:62`)
-- **slots** : clé `slotsRoot` de la config, accepte un chemin absolu ✅ (`src/server/config.ts:57,97`)
-- **uploads** : `saveUpload`/`serveUpload` prennent déjà `projectRoot` en **argument** (`src/server/uploads.ts:36,48`) — rien à changer dans le module. **Seul point à modifier : les 2 appelants**, leur passer `dataRoot` au lieu de `PROJECT_ROOT` (`src/server/routes.ts:374` `saveUpload`, `src/server/index.ts:110` `serveUpload`).
-- **templates/worker** : `resolveTemplatePaths(projectRoot)` (`src/server/agents/slotTemplates.ts:122`) → faire pointer sur `resourcesRoot`.
+- **slots** : clé `slotsRoot`, chemin absolu accepté ✅ (`src/server/config.ts:57,97`)
+- **uploads** : `saveUpload`/`serveUpload` prennent déjà `projectRoot` en **argument** (`src/server/uploads.ts:36,48`). **Seul point à modifier : les 2 appelants** → leur passer `dataRoot` (`src/server/routes.ts:374`, `src/server/index.ts:110`).
+- **templates/worker** : `resolveTemplatePaths(projectRoot)` (`src/server/agents/slotTemplates.ts:122`) → pointer sur `resourcesRoot`.
 
-Implémentation : `startServer(opts)` accepte `{ resourcesRoot, dataRoot }` (défaut tous deux = `PROJECT_ROOT`). Le mode app passe les deux racines + les env (`KANBAN_DB`, `KANBAN_CONFIG`) calés sur `dataRoot`.
+`startServer(opts)` accepte `{ resourcesRoot, dataRoot }` (défaut = `PROJECT_ROOT`). Le mode app passe les deux + les env calés sur `dataRoot`.
 
-> ⚠️ **Bootstrap + ordre d'import (piège subtil).** `config = loadConfig()` est un **const top-level** (`src/server/config.ts:89`) évalué **à l'import**, qui **throw si le fichier manque** (`config.ts:70`). Or les imports ES sont hoistés **avant** le corps de `main.ts` → un `import { startServer }` statique crashe **avant** que `main.ts` ait pu créer `config.json`. Fix : dans `main.ts`, (1) copier `config.example.json` → `<dataRoot>/config.json` si absent, (2) poser `process.env.KANBAN_CONFIG`/`KANBAN_DB`, **puis** (3) `const { startServer } = await import(...)` — l'import **dynamique** s'évalue après, fichier + env en place.
+> ⚠️ **Bootstrap + ordre d'import (piège subtil).** `config = loadConfig()` est un **const top-level** (`src/server/config.ts:89`) évalué **à l'import**, qui **throw si le fichier manque** (`config.ts:70`). Les imports ES sont hoistés **avant** le corps de `main.ts` → un `import { startServer }` statique crashe **avant** le bootstrap. Fix : dans `main.ts`, (1) copier `config.example.json` → `<dataRoot>/config.json` si absent, (2) poser `process.env.KANBAN_CONFIG`/`KANBAN_DB`, **puis** (3) `const { startServer } = await import(...)` (import **dynamique**).
 
 ## Lot 3 — Le wrapper Electrobun
 
-1. **Scaffolding** : `bun add -d electrobun`, init du projet Electrobun (dossier `desktop/`), config `electrobun.config.ts` (appId, nom, icône, build macOS, WebKit ou CEF).
+1. **Scaffolding** : `bun add -d electrobun`, init du projet (dossier `desktop/`), config `electrobun.config.ts` (appId, nom, icône, build macOS, WebKit).
 2. **Main process** (`desktop/main.ts`) :
    ```
    // 1. bootstrap config + env AVANT tout import du serveur (cf. Lot 2)
    ensureConfig(dataRoot); process.env.KANBAN_CONFIG = ...; process.env.KANBAN_DB = ...
-   process.env.PATH = await repairPath()        // cf. Lot 4 (piège #1)
+   process.env.PATH = await repairPath()        // cf. Lot 4 (piège #1, ✅ validé)
    // 2. import DYNAMIQUE (sinon loadConfig throw à l'import)
    const { startServer } = await import("../src/server/index.ts")
-   const { port } = await startServer({ resourcesRoot, dataRoot })   // ou sidecar : Bun.spawn
-   // 3. attendre /health OK (poll court), puis :
-   new BrowserWindow({ url: `http://localhost:${port}` })
+   const { port } = await startServer({ resourcesRoot, dataRoot })   // ou sidecar si L0.3 KO
+   // 3. attendre /health OK, puis :
+   new BrowserWindow({ url: `http://localhost:${port}` })            // http://, PAS views://
    ```
-   - `resourcesRoot` = dossier ressources du bundle ; `dataRoot` = `~/Library/Application Support/kanban-agents` (créer si absent).
    - À la fermeture : `stop()` le serveur **et** tuer les sessions tmux détachées (sinon fuite de process `claude`, cf. Lot 4).
-3. **Ressources à embarquer** : `dist/web/`, `templates/run_composer.sh`, et les **entrypoints de sous-process pré-buildés** (voir point 4). Les déclarer comme fichiers de ressources dans la config Electrobun.
-4. ⚠️ **Pré-builder worker + hooks (sinon deps non résolues).** `worker/worker.ts`, `templates/preToolUse.ts`, `templates/stopHook.ts` importent des deps npm (`@modelcontextprotocol/sdk`, `zod`) — dans un bundle **read-only sans `node_modules`**, `bun <script.ts>` échouera à résoudre les imports. Avant packaging : `bun build worker/worker.ts --target=bun --outfile worker.js` (deps inlinées en 1 fichier), idem hooks, puis pointer `.mcp.json`/hooks (`slotTemplates.ts:78,109,114`) sur les `.js` buildés. Alternative : `bun build --compile` en binaires autonomes (supprime la dépendance à `bunPath`, mais ~90 MB/binaire).
+3. **Ressources à embarquer** : `dist/web/`, `templates/run_composer.sh`, et les **entrypoints de sous-process pré-buildés** (point 4).
+4. ⚠️ **Pré-builder worker + hooks (sinon deps non résolues).** `worker/worker.ts`, `templates/preToolUse.ts`, `templates/stopHook.ts` importent `@modelcontextprotocol/sdk`, `zod` — dans un bundle **read-only sans `node_modules`**, `bun <script.ts>` échouera à résoudre les imports. Avant packaging : `bun build worker/worker.ts --target=bun --outfile worker.js` (deps inlinées), idem hooks ; pointer `.mcp.json`/hooks (`slotTemplates.ts:78,109,114`) sur les `.js`. Le bun bundlé étant **stock**, il exécute ces `.js` sans souci. (Alternative : `bun build --compile` en binaires autonomes, ~90 MB/binaire.)
 
 ## Lot 4 — Spécificités macOS à régler
 
-1. **PATH des apps GUI** ⚠️ (piège majeur) : une app lancée depuis le Finder **n'hérite pas du PATH du shell**. Donc `Bun.which(...)` (`src/server/system/real.ts:418`) **et** tous les spawns (`tmux`, `claude`, `gh`, `git`, `cursor-agent`) échoueront alors que ça marche en terminal.
-   - Fix : reconstruire le PATH **une seule fois au boot du main process** (login shell `zsh -ilc 'echo $PATH'`, ou préfixer `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/.bun/bin`) et l'écrire dans `process.env.PATH`. ✅ **Aucun changement par-spawn** : `spawnSession` ne passe à tmux que 4 `-e` (`real.ts:183`) et les `Bun.spawn` n'ont pas d'`env:` explicite → **tout hérite de `process.env`**.
-2. **Notifications** : `osascript` (`src/server/system/real.ts:351`) fonctionne en mode app sur macOS → **on garde** (mono-OS). Option : notifications natives Electrobun plus tard.
-3. **Binaires externes requis** : `tmux`, `claude`, `cursor-agent`, `gh`, `git` doivent être installés + authentifiés. ⚠️ **tmux** porte tout le cycle de vie agent (`real.ts:182-216`) — homebrew, **jamais dans le PATH launchd par défaut** → couvert par le fix #1, mais à lister dans l'onboarding. L'app ne fournit aucun de ces binaires → au boot, vérifier leur présence (`checkComposerAvailable` existe déjà) et afficher un onboarding clair si absent.
-4. **Teardown tmux** ⚠️ : tmux crée un serveur détaché + état dans `/tmp` **hors bundle**. À la fermeture de l'app, tuer les sessions (`killSession`, `real.ts:205`) sinon les process `claude` fuient après la fermeture de la fenêtre.
-5. **Effet de bord `~/.claude.json`** : `seedTrustForSlots` écrit dans le `~/.claude.json` de l'utilisateur (`real.ts:113`). OK, mais c'est une mutation d'état global partagé avec son CLI — à documenter (pas de surprise silencieuse).
-6. **Code signing + notarization** : nécessaire pour distribuer hors « app non identifiée ». Electrobun fournit le pipeline. ⚠️ **Piège app qui spawn des binaires non-signés** (`claude`/`bun`/`tmux`) : le hardened runtime peut exiger des entitlements (`com.apple.security.cs.allow-unsigned-executable-memory` ou disable-library-validation) — risque notarization réel et non vérifié. Pour usage perso, différer (clic-droit → Ouvrir).
+1. **PATH des apps GUI** ⚠️ (piège majeur) — ✅ **fix validé (juin 2026)** : une app Finder n'hérite pas du PATH shell → `Bun.which(...)` (`real.ts:418`) et les spawns (`tmux`, `claude`, `gh`, `git`, `cursor-agent`) échouent. Fix prouvé : reconstruire le PATH **une fois au boot** via `zsh -ilc 'echo $PATH'` et l'écrire dans `process.env.PATH`. ✅ Aucun changement par-spawn : `spawnSession` ne passe que 4 `-e` à tmux (`real.ts:183`), les `Bun.spawn` n'ont pas d'`env:` → **tout hérite de `process.env`**.
+2. **Notifications** : `osascript` (`real.ts:351`) fonctionne en mode app sur macOS → **on garde** (mono-OS).
+3. **Binaires externes requis** : `tmux`, `claude`, `cursor-agent`, `gh`, `git` installés + authentifiés. ⚠️ **tmux** porte tout le cycle de vie agent (`real.ts:182-216`) — couvert par le fix #1, à lister dans l'onboarding. Vérifier la présence au boot (`checkComposerAvailable` existe) + onboarding si absent.
+4. **Teardown tmux** ⚠️ : tmux crée un serveur détaché + état dans `/tmp` **hors bundle**. À la fermeture, tuer les sessions (`killSession`, `real.ts:205`) sinon les process `claude` fuient.
+5. **Effet de bord `~/.claude.json`** : `seedTrustForSlots` écrit dans le `~/.claude.json` de l'utilisateur (`real.ts:113`) — mutation d'état global partagé avec son CLI, à documenter.
+6. **Code signing + notarization** : la CLI Electrobun **auto-signe chaque binaire** de `/Contents/MacOS` + pose 3 entitlements (`allow-jit`, `allow-unsigned-executable-memory`, `disable-library-validation`). Un binaire **bundlé** passe la notarization. ⚠️ **Inconnu réel** : spawn d'un binaire **non-signé résolu via PATH** (notre cas : `claude`/`tmux` homebrew) sous hardened runtime — **pas de précédent**, à tester (L0.3). Pour usage perso : différer (clic-droit → Ouvrir).
 
 ## Checklist d'exécution
 
-**Spikes bloquants (AVANT de packager) :**
+**Spikes (dé-risquer AVANT de packager) :**
 
-- [ ] **L0.1** `bun upgrade` → 1.3.x + `bun test` (types déjà 1.3.14 → faible friction).
-- [ ] **L0.2** `build:web` + piloter le **board DnD en WKWebView** (Safari). Si KO → option **CEF/Chromium** d'Electrobun (pas un abandon).
-- [ ] **L0.3** Spike Electrobun minimal : `process.execPath` pointe-t-il un Bun réutilisable depuis le worker thread ? → tranche **in-process vs sidecar**.
+- [x] **L0.1** ✅ Bun → **1.3.14** ; `typecheck` OK ; smoke runtime (boot + `Bun.serve` + `bun:sqlite`) OK.
+- [x] **L0.2** ✅ **DnD validé sous WebKit 26.4** (parité Chromium 148, 0 erreur, rendu parfait).
+- [ ] **L0.3** ⏳ **LE spike restant** — sur une app Electrobun **buildée + notarisée** (le dev mode ne révèle pas les blocages hardened-runtime), confirmer en un run : (a) `Bun.serve({port:0})` bind et sert depuis le Worker thread ; (b) `Bun.spawn` de `tmux`/`claude` (bundlé **et** résolu via PATH) non bloqué par Gatekeeper ; (c) `process.argv0` → `/Contents/MacOS/bun`.
 
 **Backend (partagé web + app) :**
 
-- [ ] **L1.1** Refactor `index.ts` → `startServer(opts)` exportable ; top-level = `await startServer()`.
-- [ ] **L1.2** Service statique `dist/web` + fallback SPA dans `Bun.serve` (else final).
+- [ ] **L1.1** Refactor `index.ts` → `startServer(opts)` exportable.
+- [ ] **L1.2** Service statique `dist/web` + fallback SPA (else final).
 - [ ] **L1.3** Script `start:prod` ; valider l'app **sans Vite** sur `:52817`.
 - [ ] **L2.1** Introduire `resourcesRoot` / `dataRoot` dans `startServer`.
-- [ ] **L2.2** Router `uploads` sur `dataRoot` (changer les 2 appelants : `routes.ts:374`, `index.ts:110`).
-- [ ] **L2.3** Bootstrap `config.json` + **import dynamique** de `startServer` (piège ordre d'import).
+- [ ] **L2.2** Router `uploads` sur `dataRoot` (2 appelants : `routes.ts:374`, `index.ts:110`).
+- [ ] **L2.3** Bootstrap `config.json` + **import dynamique** de `startServer`.
 
 **Wrapper Electrobun :**
 
 - [ ] **L3.1** Scaffolding Electrobun + config build macOS.
-- [ ] **L3.2** `main.ts` : bootstrap → PATH → import dynamique → serveur (in-process **ou sidecar** selon L0.3) → fenêtre.
-- [ ] **L3.3** `bun build` de `worker.ts` + hooks en `.js` (deps inlinées) ; repointer `.mcp.json`/hooks.
+- [ ] **L3.2** `main.ts` : bootstrap → PATH → import dynamique → serveur (in-process, repli sidecar) → fenêtre `http://localhost`.
+- [ ] **L3.3** `bun build` de `worker.ts` + hooks en `.js` ; repointer `.mcp.json`/hooks ; utiliser `process.argv0`.
 - [ ] **L3.4** Embarquer `dist/web`, `templates/`, scripts buildés comme ressources.
 
 **macOS :**
 
-- [ ] **L4.1** Résolution PATH au boot (piège #1) — couvre tmux/claude/gh/git/cursor-agent.
-- [ ] **L4.2** Onboarding si CLI externes absents (inclure **tmux**) + teardown tmux à la fermeture.
-- [ ] **L4.3** (Optionnel) Signature/notarization (+ entitlements spawn de binaires non-signés).
+- [x] **L4.1** ✅ Résolution PATH au boot (`zsh -ilc`) — validée empiriquement.
+- [ ] **L4.2** Onboarding si CLI absents (inclure **tmux**) + teardown tmux à la fermeture.
+- [ ] **L4.3** (Optionnel) Signature/notarization + tester spawn de binaires PATH non-signés.
 
 ## Pièges connus
 
-- **DnD-kit sous WebKit** ⚠️ : Electrobun rend via WebKit (= moteur Safari). Régressions **ouvertes** en 2026 sur ce moteur : offset du drag overlay au coin haut-gauche ([dnd-kit #1910](https://github.com/clauderic/dnd-kit/issues/1910)), désync autoscroll ([#1825](https://github.com/clauderic/dnd-kit/issues/1825)). Le board n'a **aucun `touch-action: none`**. À tester **en premier** (L0.2). Filet : `touch-action: none` + drag handle, sinon **CEF/Chromium**.
-- **Bun 1.3.0 requis** : Electrobun v1 ne tourne pas sous le 1.2.21 actuel (cf. prérequis). Faire L0.1 avant tout.
-- **Deps des sous-process** : `worker.ts`/hooks ne se résolvent pas depuis un bundle read-only → `bun build` préalable (L3.3), ne pas embarquer le `.ts` brut.
-- **`location.host` en mode app** : la fenêtre charge `http://localhost:52817` → `/ws` et `/api` same-origine résolvent correctement, **sans changement front**. ✅
-- **Bundle read-only** : ne jamais écrire dans `resourcesRoot` en mode app (cf. lot 2).
-- **Dev inchangé** : `bun dev` (Vite + proxy) reste le workflow de développement ; le service statique ne sert qu'en prod/app.
-- **Double `Bun.serve`** : ne pas lancer à la fois le mode web (`bun start`) et l'app sur le même port 52817 → conflit.
+- **DnD-kit sous WebKit** — ✅ **validé juin 2026** : WebKit 26.4 = **parité totale** avec Chromium, 0 régression (le board n'utilise pas `DragOverlay`, cible des bugs Safari [#1910](https://github.com/clauderic/dnd-kit/issues/1910)). CEF **non nécessaire**.
+- **Bun 1.3.0 requis** — ✅ **fait** (1.3.14, typecheck + smoke OK).
+- **`Bun.serve` in-process** ⚠️ : aucun précédent Electrobun → **seul vrai inconnu**, valider sur build (L0.3).
+- **Deps des sous-process** : `worker.ts`/hooks ne se résolvent pas depuis un bundle read-only → `bun build` préalable (L3.3).
+- **Electrobun 2.0 / découplage Bun** ⚠️ : réécriture Rust annoncée — garder le backend modulaire.
+- **`location.host` en mode app** : la fenêtre charge `http://localhost:52817` → `/ws` et `/api` same-origine ✅ (à condition de charger en `http://`, pas `views://`).
+- **Bundle read-only** : ne jamais écrire dans `resourcesRoot` (cf. lot 2).
+- **Dev inchangé** : `bun dev` (Vite + proxy) reste le workflow de dev.
+- **Double `Bun.serve`** : ne pas lancer mode web (`bun start`) et app sur le même port 52817.
 
 ## Évolutions multi-OS
 
-Hors scope actuel, mais sans dette bloquante : Electrobun cible déjà Windows (WebView2) et Linux (WebKitGTK). Pour y aller plus tard, traiter (1) le rendu sur chaque moteur webview, (2) remplacer `osascript` par les notifications natives Electrobun, (3) la résolution PATH par OS, (4) le pré-build worker/hooks par plateforme.
+Hors scope actuel, sans dette bloquante : Electrobun cible Windows (WebView2) et Linux (WebKitGTK). Plus tard : (1) rendu par moteur webview, (2) remplacer `osascript` par les notifications natives Electrobun, (3) résolution PATH par OS, (4) pré-build worker/hooks par plateforme.
 
 ## Questions ouvertes
 
-1. **In-process vs sidecar** : le plan penche désormais **sidecar** (précédents Electrobun + worker thread non vérifié) — à confirmer par le spike L0.3. OK pour partir sidecar par défaut ?
-2. **Rendu WebKit vs CEF** : on tente WebKit (bundle ~12 MB) et on bascule CEF seulement si le DnD casse (L0.2) — OK, ou tu veux CEF d'emblée pour sécuriser le rendu ?
+1. **In-process vs sidecar** : le plan penche **in-process** (bun stock + worker thread spawn déjà des sous-process) ; seul `Bun.serve` in-process reste à prouver (spike L0.3). OK pour partir in-process avec repli sidecar ?
+2. ~~**WebKit vs CEF**~~ ✅ **résolu** : DnD validé sous WebKit → on reste WebKit, CEF inutile.
 3. **`dataRoot`** : `~/Library/Application Support/kanban-agents` convient, ou garder les données à la racine repo même en mode app (dev perso) ?
 4. **Signature Apple** dans le scope v1, ou clic-droit→Ouvrir suffit pour l'instant ?

@@ -24,8 +24,13 @@ const WINDOW_HEIGHT = 900;
 const HEALTH_POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_TIMEOUT_MS = 30_000;
 
-/** Bundled bun is a stock binary reachable via argv0 (Electrobun does not --compile the entrypoint). */
-const BUN_PATH = process.argv0;
+/**
+ * Absolute path to the bundled bun. MUST be execPath, not argv0: the Electrobun launcher spawns the
+ * worker as `./bun main.js`, so process.argv0 is the relative "./bun". That relative path is written
+ * into each slot's .mcp.json (worker server) and .claude/settings.json (hooks) and breaks when claude
+ * spawns them from the worktree cwd. execPath always resolves to the absolute bundled binary.
+ */
+const BUN_PATH = process.execPath;
 
 /** resourcesRoot = bundle's read-only Resources/app (where electrobun.config `copy` lands files). */
 function resolveRoots(): DesktopRoots {

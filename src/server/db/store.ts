@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
-import type { AgentEffort, AgentModel, Column, CommentAuthor, Stage } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, Stage } from "../../shared/constants.ts";
 import type { Comment, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
@@ -14,17 +14,22 @@ export interface NewTicket {
   description: string;
   project: ProjectKey;
   prdEnabled: boolean;
+  prDraft: boolean;
+  autoMerge: boolean;
 }
 
 export interface TicketPatch {
   title?: string;
   description?: string;
   prdEnabled?: boolean;
+  prDraft?: boolean;
+  autoMerge?: boolean;
   prdMarkdown?: string | null;
   column?: Column;
   stage?: Stage | null;
   model?: AgentModel | null;
   effort?: AgentEffort | null;
+  implementer?: Implementer;
   reviewRounds?: number;
   nudgeCount?: number;
   sessionId?: string | null;
@@ -80,8 +85,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -89,6 +94,8 @@ export class Store {
         input.description,
         input.project,
         input.prdEnabled ? 1 : 0,
+        input.prDraft ? 1 : 0,
+        input.autoMerge ? 1 : 0,
         now,
         now,
         now,
@@ -110,11 +117,14 @@ export class Store {
     if (patch.title !== undefined) set("title", patch.title);
     if (patch.description !== undefined) set("description", patch.description);
     if (patch.prdEnabled !== undefined) set("prd_enabled", patch.prdEnabled ? 1 : 0);
+    if (patch.prDraft !== undefined) set("pr_draft", patch.prDraft ? 1 : 0);
+    if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
     if (patch.column !== undefined) set(COLUMN_TO_DB, patch.column);
     if (patch.stage !== undefined) set("stage", patch.stage);
     if (patch.model !== undefined) set("model", patch.model);
     if (patch.effort !== undefined) set("effort", patch.effort);
+    if (patch.implementer !== undefined) set("implementer", patch.implementer);
     if (patch.reviewRounds !== undefined) set("review_rounds", patch.reviewRounds);
     if (patch.nudgeCount !== undefined) set("nudge_count", patch.nudgeCount);
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);

@@ -2,22 +2,20 @@
 
 ## TODO
 
-### P1
-
 ### BACKLOG :
 
 - Pouvoir exporter une colonne Kanban (Notion / Trello) côté utilisateur et l'importer dans l'outil, afin de vérifier que chaque ticket est implémentable comme ça sans inventer, sans supposer ou qu'il faut retravailler -> Réutiliser ce qu'on a fait au niveau de l'analyse
-- Pouvoir déléguer l'implémentation à Composer 2.5 (option qu'on pourrait choisir, genre combo)
+- Pouvoir importer des cartes
 - L'analyse doit pouvoir être configuré afin d'utiliser Composer 2.5 via CLI Cursor (Option pour choisir Sonnet ou Composer)
 - Quid si y'a plusieurs questions c'est quoi l'UI ?
 - Au sein d'une carte, on devrait pouvoir changer le statut, c'est à dire si elle est dans TODO, la mettre dans à implémenter etc...
 - Quand on appuie sur le bouton pour copier le nom du slot, y'a pas de toast pour dire que c'est bien copié.
   - Est-ce que c'est possible d'ouvrir directement le terminal ? Ou c'est bloqué par le navigateur ? (ça serait top de pouvoir ouvrir le terminal directement depuis l'interface)
-- Ajouter le projet kanban-agents dans le projet, la contrainte c'est qu'il y a pas de repo Github, donc la partie PR n'est pas à faire.
 - Si le ticket failed, le mettre directement dans la bonne colonne.
 - Lorsque je clique la notification, ça doit focus sur le navigateur.
-- Dans les commentaires : mettre le timestamp
 - Après implémentation du PRD : envoyer un message (via Slack, Email, à voir) qui contient le contenu du PRD afin d'avoir une sauvegarde du plan
+- PRD : envoyer toutes les questions ou 10 par 10
+- Dans TODO: ajouter un + à côté du nombre de ticket pour ajouter un nouveau ticket
 
 #### V1.01
 
@@ -38,6 +36,12 @@
 
 ## DONE
 
+- (DONE) Ports atypiques pour éviter les conflits → backend `52817` (`DEFAULT_PORT`), frontend Vite `52818` (`DEV_PORT`), proxy `/api` + `/ws` câblés
+- (DONE) Timestamp dans les commentaires → `formatDateTime(createdAt)` affiché dans l'en-tête de chaque commentaire (`CommentRow`)
+- (DONE) Favicon en lien avec le projet → `src/web/public/favicon.svg` (kanban dans la palette Atelier), lié dans `index.html`
+- (DONE) Ajouter le projet kanban-agents dans l'outil → entrée `kanban-agents` dans `config.json` (dogfooding sur `main`)
+  - (DONE) Option « PR en draft » (cochée par défaut, par ticket) → colonne `pr_draft` (+ migration), le contrat choisit `gh pr create --draft` vs `gh pr create`
+  - (DONE) Option « merge auto de la PR » (par ticket) → colonne `auto_merge` (+ migration) ; après la gate `done`, le backend fait `gh pr ready` + `gh pr merge --rebase` (`SystemAdapter.mergePr`), carte → « PR mergée ». Le merge auto force la PR non-draft
 - (DONE) PRD en format HTML, lisible sur l'interface
 - (DONE) Augmenter le nombre de slot → 5, configurable via KANBAN_SLOTS
 - (DONE) Faire un skill ou autre qui détermine si un ticket est implémentable ou pas, et qui explique pourquoi (sans inventer, sans supposer, sans retravailler) → bouton « Analyser » sur la carte (claude -p sonnet read-only, verdict implémentable / questions / à retravailler)
@@ -64,3 +68,4 @@
 - (DONE) Choisir le modèle + l'effort de l'agent qui orchestre → sélecteur par ticket (colonne TODO), stocké en DB (`model`/`effort` + migration), lu au spawn (`claude --model … --effort …`) au lancement et au retry ; `null` = défaut `config.json`. Fast mode écarté (pas de flag CLI ; `--model` opus/sonnet/haiku + `--effort` low→max)
 - (DONE) Colonne « PR mergée » repliable → nouvelle colonne `merged` (le bouton « PR mergée » y range la carte au lieu de l'archiver, elle reste visible), repli persistant (`localStorage`), repliée par défaut ; toutes les colonnes repliables (barre verticale étroite, reste cible de drop)
 - (DONE) Drawer de suivi en pleine page, 2 colonnes → `Modal` `fullWidth`, infos à gauche / terminal à droite (`TerminalView` `fill` pleine hauteur), bouton masquer/afficher le terminal (persisté, infos centrées quand masqué) + bouton ✕ fermer (le clic sur le fond ne ferme plus en pleine largeur)
+- (DONE) Pouvoir déléguer l'implémentation à Composer 2.5 (option qu'on pourrait choisir, genre combo)

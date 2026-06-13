@@ -4,6 +4,7 @@
       "label": "Mon Projet",
       "repoPath": "/Users/moi/mon-projet",
       "baseBranch": "main",
+      "defaultAutoMerge": false,
       "commitTimeoutMs": 120000,
       "scripts": {
         "typecheck": "npm run typecheck",
@@ -15,7 +16,8 @@
   },
   "models": {
     "implement": "opus",
-    "triage": "sonnet"
+    "triage": "sonnet",
+    "implementEffort": "xhigh"
   },
   "slotsRoot": "slots"
 }

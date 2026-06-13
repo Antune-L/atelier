@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, IMPLEMENTERS, STAGES } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -10,6 +10,7 @@ export const stageSchema = z.enum(STAGES);
 export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
 export const agentModelSchema = z.enum(AGENT_MODELS);
 export const agentEffortSchema = z.enum(AGENT_EFFORTS);
+export const implementerSchema = z.enum(IMPLEMENTERS);
 
 // ---- Implementability triage ("Analyser") ----
 
@@ -43,12 +44,17 @@ export const ticketSchema = z.object({
   description: z.string(),
   project: projectKeySchema,
   prdEnabled: z.boolean(),
+  /** Open the PR as a draft (default true). Forced off when autoMerge is on. */
+  prDraft: z.boolean(),
+  /** Auto-merge the PR into the base branch once the done() gate passes. */
+  autoMerge: z.boolean(),
   prdMarkdown: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
   /** Implementation agent overrides (null = fall back to the server config defaults). */
   model: agentModelSchema.nullable(),
   effort: agentEffortSchema.nullable(),
+  implementer: implementerSchema,
   reviewRounds: z.number().int(),
   sessionId: z.string().nullable(),
   slotId: z.number().int().nullable(),
@@ -92,6 +98,8 @@ export const projectInfoSchema = z.object({
   key: projectKeySchema,
   label: z.string(),
   baseBranch: z.string(),
+  /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
+  defaultAutoMerge: z.boolean(),
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
@@ -102,6 +110,8 @@ export const createTicketSchema = z.object({
   description: z.string().default(""),
   project: projectKeySchema,
   prdEnabled: z.boolean().default(false),
+  prDraft: z.boolean().default(true),
+  autoMerge: z.boolean().default(false),
 });
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
@@ -109,8 +119,11 @@ export const updateTicketSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   prdEnabled: z.boolean().optional(),
+  prDraft: z.boolean().optional(),
+  autoMerge: z.boolean().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),
+  implementer: implementerSchema.optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 
@@ -139,6 +152,17 @@ export type TriageOutput = z.infer<typeof triageOutputSchema>;
 
 export const uploadResultSchema = z.object({ path: z.string(), url: z.string() });
 export type UploadResult = z.infer<typeof uploadResultSchema>;
+
+/** Backend-provided client config: capability flags + orchestrator defaults (UI gating/labels). */
+export const capabilitiesSchema = z.object({
+  /** The Cursor headless CLI (Composer driver) is installed and authenticated. */
+  composerAvailable: z.boolean(),
+  /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
+  defaultModel: z.string(),
+  /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "xhigh"). */
+  defaultEffort: z.string(),
+});
+export type Capabilities = z.infer<typeof capabilitiesSchema>;
 
 // ---- WebSocket (backend → client) ----
 

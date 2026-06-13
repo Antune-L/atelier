@@ -9,7 +9,7 @@ import {
   moveTicketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
-import { PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
+import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
@@ -36,6 +36,8 @@ interface RouteDeps {
   system: TriageRunner;
   triageLog: LiveLog;
   projectRoot: string;
+  /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
+  composerAvailable: boolean;
 }
 
 const stopHookSchema = z.object({
@@ -106,9 +108,19 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/projects", () =>
       PROJECT_KEYS.map((key) => {
         const project = getProject(key);
-        return { key, label: project.label, baseBranch: project.baseBranch };
+        return {
+          key,
+          label: project.label,
+          baseBranch: project.baseBranch,
+          defaultAutoMerge: project.defaultAutoMerge,
+        };
       }),
     )
+    .get("/capabilities", () => ({
+      composerAvailable: deps.composerAvailable,
+      defaultModel: MODELS.implement,
+      defaultEffort: MODELS.implementEffort,
+    }))
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
@@ -124,6 +136,8 @@ export function createApiRoutes(deps: RouteDeps) {
         description: parsed.data.description,
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,
+        prDraft: parsed.data.prDraft,
+        autoMerge: parsed.data.autoMerge,
       });
       hub.pushTicket(ticket);
       return ticket;

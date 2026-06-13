@@ -1,4 +1,5 @@
-import { STAGE_LABELS, type Stage } from "@shared/constants";
+import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, STAGE_LABELS, type Stage } from "@shared/constants";
+import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "warning" | "success" | "info";
@@ -63,6 +64,20 @@ const DATETIME_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeS
 
 export function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DATETIME_FORMAT);
+}
+
+/** Label for the model select's "default" option, surfacing the configured orchestrator default. */
+export function defaultModelOptionLabel(defaultModel: string): string {
+  if (!defaultModel) return "Défaut";
+  const parsed = agentModelSchema.safeParse(defaultModel);
+  return `Défaut (${parsed.success ? AGENT_MODEL_LABELS[parsed.data] : defaultModel})`;
+}
+
+/** Label for the effort select's "default" option, surfacing the configured orchestrator default. */
+export function defaultEffortOptionLabel(defaultEffort: string): string {
+  if (!defaultEffort) return "Défaut";
+  const parsed = agentEffortSchema.safeParse(defaultEffort);
+  return `Défaut (${parsed.success ? AGENT_EFFORT_LABELS[parsed.data] : defaultEffort})`;
 }
 
 /** Verb describing how a ticket ended, for the finished-at line. */

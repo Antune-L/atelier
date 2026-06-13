@@ -47,6 +47,15 @@ export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {
   max: "Max",
 };
 
+/** Who writes the implementation code (the CLI driver for the implementing stage). */
+export const IMPLEMENTERS = ["claude", "composer"] as const;
+export type Implementer = (typeof IMPLEMENTERS)[number];
+
+export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
+  claude: "Claude",
+  composer: "Composer 2.5",
+};
+
 export const STAGES = [
   "queued",
   "planning",

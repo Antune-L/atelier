@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Atelier">
+  <rect width="32" height="32" rx="7" fill="#001219" />
+  <!-- column "todo" -->
+  <rect x="4" y="7" width="6" height="6" rx="1.5" fill="#0a9396" />
+  <rect x="4" y="15" width="6" height="6" rx="1.5" fill="#005f73" />
+  <!-- column "implementing" -->
+  <rect x="13" y="7" width="6" height="6" rx="1.5" fill="#94d2bd" />
+  <rect x="13" y="15" width="6" height="6" rx="1.5" fill="#ee9b00" />
+  <!-- column "done" -->
+  <rect x="22" y="7" width="6" height="6" rx="1.5" fill="#e9d8a6" />
+  <rect x="22" y="15" width="6" height="6" rx="1.5" fill="#bb3e03" opacity="0.55" />
+</svg>

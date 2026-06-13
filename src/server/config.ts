@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
+import { AGENT_EFFORTS } from "../shared/constants.ts";
+
 /**
  * Single source of machine-specific configuration. Everything that used to be
  * hardcoded in `src/shared` (project repo paths, base branches, claude models,
@@ -20,6 +22,8 @@ const projectConfigSchema = z.object({
   repoPath: z.string().min(1),
   /** Base branch and PR target. */
   baseBranch: z.string().min(1),
+  /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
+  defaultAutoMerge: z.boolean().default(false),
   commitTimeoutMs: z.number().int().positive(),
   /** Optional overrides for test/lint/typecheck commands (default: read project package.json scripts). */
   scripts: z
@@ -35,7 +39,7 @@ const projectConfigSchema = z.object({
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
-const DEFAULT_MODELS = { implement: "opus", triage: "sonnet" } as const;
+const DEFAULT_MODELS = { implement: "opus", triage: "sonnet", implementEffort: "xhigh" } as const;
 
 const configSchema = z.object({
   projects: z.record(z.string(), projectConfigSchema),
@@ -45,6 +49,8 @@ const configSchema = z.object({
       implement: z.string().min(1),
       /** Model used for the read-only feasibility triage. */
       triage: z.string().min(1),
+      /** Default reasoning effort of the orchestrator session (per-ticket override wins). */
+      implementEffort: z.enum(AGENT_EFFORTS).default("xhigh"),
     })
     .default(DEFAULT_MODELS),
   /** Root holding the fixed per-slot worktrees (default: <repo>/slots). */

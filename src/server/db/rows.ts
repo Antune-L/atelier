@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { Comment, Slot, Ticket } from "../../shared/schemas.ts";
-import { agentEffortSchema, agentModelSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, implementerSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
 import { isProjectKey } from "../config.ts";
 
 /**
@@ -15,11 +15,14 @@ const ticketRowSchema = z.object({
   description: z.string(),
   project: z.string(),
   prd_enabled: z.number(),
+  pr_draft: z.number(),
+  auto_merge: z.number(),
   prd_markdown: z.string().nullable(),
   column_name: z.string(),
   stage: z.string().nullable(),
   model: z.string().nullable(),
   effort: z.string().nullable(),
+  implementer: z.string(),
   review_rounds: z.number(),
   nudge_count: z.number(),
   session_id: z.string().nullable(),
@@ -87,11 +90,14 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     description: row.description,
     project: projectSchema.parse(row.project),
     prdEnabled: row.prd_enabled === 1,
+    prDraft: row.pr_draft === 1,
+    autoMerge: row.auto_merge === 1,
     prdMarkdown: row.prd_markdown,
     column: ticketColumnSchema.parse(row.column_name),
     stage: ticketStageSchema.parse(row.stage),
     model: row.model === null ? null : agentModelSchema.parse(row.model),
     effort: row.effort === null ? null : agentEffortSchema.parse(row.effort),
+    implementer: implementerSchema.parse(row.implementer),
     reviewRounds: row.review_rounds,
     sessionId: row.session_id,
     slotId: row.slot_id,

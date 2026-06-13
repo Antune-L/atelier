@@ -122,6 +122,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+    this.log("mergePr", { slotPath, prUrl });
+    return { ok: true, reason: "" };
+  }
+
   async notify(title: string, body: string): Promise<void> {
     this.log("notify", { title, body });
   }
@@ -139,6 +144,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     }
     this.triageCounter += 1;
     return { ok: true, output: fakeTriageVerdict(this.triageCounter % TRIAGE_VERDICT_CYCLE) };
+  }
+
+  async checkComposerAvailable(): Promise<boolean> {
+    // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
+    return true;
   }
 }
 

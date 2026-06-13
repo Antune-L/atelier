@@ -22,7 +22,7 @@ import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
 import type { WorkerSocket } from "./workerHub.ts";
 import { WorkerHub } from "./workerHub.ts";
 
-const DEFAULT_PORT = 3001;
+const DEFAULT_PORT = 52817;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const port = Number(process.env.PORT ?? DEFAULT_PORT);
@@ -52,6 +52,9 @@ await runFirstBootSetup(store, system);
 await slotManager.recover();
 watchdog.start();
 
+const composerAvailable = await system.checkComposerAvailable();
+createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
+
 // ---- WebSocket data discriminator ----
 
 type SocketData = { kind: "client" } | { kind: "worker"; ticketId: string | null; slotId: number | null };
@@ -72,6 +75,7 @@ const api = createApiRoutes({
   system,
   triageLog,
   projectRoot: PROJECT_ROOT,
+  composerAvailable,
 });
 
 const app = new Elysia()

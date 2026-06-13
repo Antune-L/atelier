@@ -7,13 +7,15 @@ import type {
   Ticket,
   TriageResult,
 } from "@shared/schemas";
-import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, triageResultSchema } from "@shared/schemas";
+import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, implementerSchema, triageResultSchema } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
   AGENT_EFFORTS,
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  IMPLEMENTERS,
+  IMPLEMENTER_LABELS,
 } from "@shared/constants";
 import { extractFigmaUrls } from "@shared/figma";
 
@@ -28,8 +30,11 @@ import {
   ModalTitle,
 } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { TerminalView } from "@/components/TerminalView";
 import {
+  defaultEffortOptionLabel,
+  defaultModelOptionLabel,
   finishedKindLabel,
   formatDateTime,
   isStageAnimated,
@@ -38,6 +43,7 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { api } from "@/lib/api";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import { resolveProjectLabel } from "@/components/TicketCard";
@@ -79,6 +85,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
+  const { composerAvailable, defaultModel, defaultEffort } = useCapabilities();
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -138,6 +145,18 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const setAgentEffort = (raw: string): void => {
     const effort = raw === "" ? null : agentEffortSchema.parse(raw);
     void api.updateTicket(current.id, { effort }).catch(() => undefined);
+  };
+
+  const setImplementer = (raw: string): void => {
+    void api.updateTicket(current.id, { implementer: implementerSchema.parse(raw) }).catch(() => undefined);
+  };
+
+  const setPrDraft = (checked: boolean): void => {
+    void api.updateTicket(current.id, { prDraft: checked }).catch(() => undefined);
+  };
+
+  const setAutoMerge = (checked: boolean): void => {
+    void api.updateTicket(current.id, { autoMerge: checked }).catch(() => undefined);
   };
 
   const startEdit = (): void => {
@@ -320,9 +339,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
             <div className="flex flex-wrap gap-4">
               <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-model">Modèle</Label>
+                <Label htmlFor="agent-model">Modèle (orchestrateur)</Label>
                 <Select id="agent-model" value={current.model ?? ""} onChange={(e) => setAgentModel(e.target.value)}>
-                  <option value="">Défaut (config)</option>
+                  <option value="">{defaultModelOptionLabel(defaultModel)}</option>
                   {AGENT_MODELS.map((m) => (
                     <option key={m} value={m}>
                       {AGENT_MODEL_LABELS[m]}
@@ -331,9 +350,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 </Select>
               </div>
               <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-effort">Effort</Label>
+                <Label htmlFor="agent-effort">Effort (orchestrateur)</Label>
                 <Select id="agent-effort" value={current.effort ?? ""} onChange={(e) => setAgentEffort(e.target.value)}>
-                  <option value="">Défaut</option>
+                  <option value="">{defaultEffortOptionLabel(defaultEffort)}</option>
                   {AGENT_EFFORTS.map((eff) => (
                     <option key={eff} value={eff}>
                       {AGENT_EFFORT_LABELS[eff]}
@@ -341,7 +360,25 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   ))}
                 </Select>
               </div>
+              <div className="flex flex-col items-start gap-1.5">
+                <Label htmlFor="agent-implementer">Implémenté par</Label>
+                <Select id="agent-implementer" value={current.implementer} onChange={(e) => setImplementer(e.target.value)}>
+                  {IMPLEMENTERS.map((i) => (
+                    <option key={i} value={i} disabled={i === "composer" && !composerAvailable}>
+                      {IMPLEMENTER_LABELS[i]}
+                      {i === "composer" && !composerAvailable ? " — Cursor non détecté" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </div>
             </div>
+            {current.implementer === "composer" && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {composerAvailable
+                  ? "Composer 2.5 écrit le code ; le modèle orchestrateur (Claude) planifie, relit et ouvre la PR."
+                  : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
+              </p>
+            )}
             <div className="mt-3">
               <Button
                 size="sm"
@@ -353,6 +390,32 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 <Rocket className="h-4 w-4" />
                 Lancer l'implémentation
               </Button>
+            </div>
+          </section>
+        )}
+
+        {current.column === "todo" && (
+          <section className="rounded-md border p-3">
+            <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
+            <div className="space-y-3">
+              <label className="flex items-center justify-between gap-2 text-sm">
+                <span>
+                  Ouvrir la PR en draft
+                  {current.autoMerge && (
+                    <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>
+                  )}
+                </span>
+                <Switch
+                  checked={current.prDraft && !current.autoMerge}
+                  disabled={current.autoMerge}
+                  onCheckedChange={setPrDraft}
+                  aria-label="Ouvrir la PR en draft"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
+                <span>Merger automatiquement la PR après ouverture</span>
+                <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
+              </label>
             </div>
           </section>
         )}
@@ -664,6 +727,7 @@ function CommentRow({
       <div className="mb-1 flex items-center gap-2">
         <AuthorBadge author={comment.author} />
         {isQuestion && <Badge variant="warning">Question</Badge>}
+        <span className="ml-auto text-[10px] text-muted-foreground">{formatDateTime(comment.createdAt)}</span>
       </div>
       <Markdown content={comment.body} />
       {isQuestion && (

@@ -26,6 +26,12 @@ const DIALOG_POLL_INTERVAL_MS = 500;
 const DIALOG_POLL_ATTEMPTS = 120;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
+/** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
+const PR_MERGE_STRATEGY = "--rebase";
+/** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
+const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
+/** Bound the boot-time auth probe so a hanging `status` can never block server start. */
+const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 
 // `claude -p --output-format stream-json` emits one JSON event per line. We only
 // care about assistant turns (text + tool_use, for the live view) and the final
@@ -189,6 +195,17 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+    // A draft PR can't be merged; mark it ready first (harmless if already ready).
+    await $`gh pr ready ${prUrl}`.cwd(slotPath).nothrow().quiet();
+    const res = await $`gh pr merge ${prUrl} ${PR_MERGE_STRATEGY}`.cwd(slotPath).nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      return { ok: false, reason: `gh pr merge a échoué (code ${res.exitCode}) : ${detail}` };
+    }
+    return { ok: true, reason: "" };
+  }
+
   async notify(title: string, body: string): Promise<void> {
     const escaped = (s: string): string => s.replace(/"/g, '\\"');
     await $`osascript -e ${`display notification "${escaped(body)}" with title "${escaped(title)}"`}`.nothrow().quiet();
@@ -254,6 +271,22 @@ export class RealSystemAdapter implements SystemAdapter {
       clearTimeout(killTimer);
       return { ok: false, output: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  async checkComposerAvailable(): Promise<boolean> {
+    for (const bin of COMPOSER_BINARIES) {
+      if (!Bun.which(bin)) continue;
+      // An exported API key authenticates headless runs without an interactive `agent login` session.
+      if (process.env.CURSOR_API_KEY) return true;
+      const proc = Bun.spawn([bin, "status"], { stdout: "ignore", stderr: "ignore" });
+      const killTimer = setTimeout(() => proc.kill(), COMPOSER_PROBE_TIMEOUT_MS);
+      try {
+        return (await proc.exited) === 0;
+      } finally {
+        clearTimeout(killTimer);
+      }
+    }
+    return false;
   }
 }
 

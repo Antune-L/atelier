@@ -20,10 +20,11 @@ Variante **« sans SDK »** : les agents sont de vraies sessions Claude Code int
 
 ```bash
 bun install
-bun run dev          # backend (:3001) + frontend Vite (:5173) en parallèle
+bun run dev          # backend (:52817) + frontend Vite (:52818) en parallèle
 ```
 
-Puis ouvre http://localhost:5173. Le frontend proxifie `/api` et `/ws` vers le backend.
+Puis ouvre http://localhost:52818. Le frontend proxifie `/api` et `/ws` vers le backend.
+Les ports sont volontairement atypiques pour éviter les conflits avec d'autres services.
 
 Scripts utiles :
 
@@ -40,11 +41,12 @@ bun run start        # backend en mode production
 
 | Var                           | Défaut          | Rôle                                                             |
 | ----------------------------- | --------------- | ---------------------------------------------------------------- |
-| `PORT`                        | `3001`          | port du backend                                                  |
+| `PORT`                        | `52817`         | port du backend (port atypique pour éviter les conflits)         |
 | `KANBAN_DB`                   | `./kanban.db`   | chemin de la base SQLite                                         |
 | `KANBAN_DRY_RUN`              | `1` (activé)    | **dry-run par défaut**. Mettre `0` pour les vrais effets de bord |
 | `KANBAN_SETUP`                | non défini      | mettre `1` pour exécuter le setup premier-boot (effets de bord)  |
 | `BACKEND_WS` / `BACKEND_HTTP` | dérivés du port | injectés dans les slots/worker                                   |
+| `CURSOR_API_KEY`              | non défini      | auth Cursor headless (alternative à `agent login`) pour la délégation à Composer |
 
 ## Mode dry-run (défaut, sans effet de bord)
 
@@ -65,6 +67,27 @@ Désactivé par défaut. Quand `KANBAN_SETUP=1` ET `KANBAN_DRY_RUN=0` :
 2. Ajoute `.claude/` et `.mcp.json` au `.git/info/exclude` de chaque repo de `PROJECTS`.
 
 Prérequis manuels : `tmux` et `gh` installés/authentifiés.
+
+## Délégation à Composer 2.5 (option par ticket)
+
+Sur chaque carte en TODO, un sélecteur **Agent** choisit qui écrit le code de l'étape *implementing* :
+
+- **Claude** (défaut) : la session Claude Code implémente elle-même.
+- **Composer 2.5** : la session Claude **planifie**, délègue l'écriture du code à Cursor headless (`cursor-agent`, modèle `composer-2.5`), puis **reprend la main** pour relire, tester, committer, pousser et ouvrir la PR. Composer ne commit jamais — Claude possède tout le git.
+
+Prérequis (sinon l'option est grisée ; détectée au boot via `GET /api/capabilities`) :
+
+- `cursor-agent` (ou `agent`) installé : `curl https://cursor.com/install -fsS | bash`.
+- Authentifié : `agent login` **ou** `CURSOR_API_KEY` exporté. Plan Cursor payant (chaque run est facturé).
+
+Le script pilote est vendoré dans `templates/run_composer.sh` (le contrat le lance en arrière-plan et poll sans terminer le tour).
+
+## Options de PR (par ticket)
+
+À la création et sur chaque carte en TODO :
+
+- **PR en draft** (coché par défaut) : le contrat injecté ouvre la PR via `gh pr create --draft`. Décoché → `gh pr create` (PR prête).
+- **Merge automatique** : une fois la gate `done()` validée (arbre propre, branche poussée, PR existante), le backend marque la PR prête puis la merge (`gh pr merge --rebase`) dans la branche de base. La carte va alors en **PR mergée**. Un merge auto force la PR en non-draft (une draft n'est pas mergeable) ; en cas d'échec, la carte reste en **Fini** avec l'erreur affichée et la PR ouverte à merger manuellement.
 
 ## Architecture
 
@@ -92,6 +115,7 @@ worker/worker.ts     serveur MCP channel (stdio) → WS sortant vers le backend
 templates/
   preToolUse.ts      hook PreToolUse : deny --no-verify & co
   stopHook.ts        hook Stop : POST /api/internal/stop
+  run_composer.sh    driver Cursor headless (Composer 2.5) pour la délégation d'implémentation
 ```
 
 ### Flux d'un ticket

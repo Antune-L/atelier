@@ -9,11 +9,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   description TEXT NOT NULL DEFAULT '',
   project TEXT NOT NULL,
   prd_enabled INTEGER NOT NULL DEFAULT 0,
+  pr_draft INTEGER NOT NULL DEFAULT 1,
+  auto_merge INTEGER NOT NULL DEFAULT 0,
   prd_markdown TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
   model TEXT,
   effort TEXT,
+  implementer TEXT NOT NULL DEFAULT 'claude',
   review_rounds INTEGER NOT NULL DEFAULT 0,
   nudge_count INTEGER NOT NULL DEFAULT 0,
   session_id TEXT,
@@ -77,6 +80,9 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "finished_at", ddl: "ALTER TABLE tickets ADD COLUMN finished_at INTEGER" },
   { column: "model", ddl: "ALTER TABLE tickets ADD COLUMN model TEXT" },
   { column: "effort", ddl: "ALTER TABLE tickets ADD COLUMN effort TEXT" },
+  { column: "implementer", ddl: "ALTER TABLE tickets ADD COLUMN implementer TEXT NOT NULL DEFAULT 'claude'" },
+  { column: "pr_draft", ddl: "ALTER TABLE tickets ADD COLUMN pr_draft INTEGER NOT NULL DEFAULT 1" },
+  { column: "auto_merge", ddl: "ALTER TABLE tickets ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0" },
 ];
 
 export function createDatabase(path: string): Database {

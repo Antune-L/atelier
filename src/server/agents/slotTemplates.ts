@@ -16,6 +16,8 @@ export interface SlotTemplateContext {
   preToolUseHookPath: string;
   /** Absolute path to the Stop hook script. */
   stopHookPath: string;
+  /** Absolute path to the vendored Composer driver script. */
+  composerScriptPath: string;
   backendHttp: string;
   backendWs: string;
   ticketId: string;
@@ -43,6 +45,8 @@ const BASH_ALLOWLIST = [
   "Bash(pnpm:*)",
   "Bash(yarn:*)",
   "Bash(node:*)",
+  "Bash(sleep:*)",
+  "Bash(tail:*)",
   "Bash(gh pr create:*)",
   "Bash(gh pr view:*)",
   "Bash(ls:*)",
@@ -74,7 +78,7 @@ export function buildSettingsJson(ctx: SlotTemplateContext): string {
     // Skip the interactive "enable MCP servers?" dialog: the session is headless.
     enableAllProjectMcpServers: true,
     permissions: {
-      allow: BASH_ALLOWLIST,
+      allow: [...BASH_ALLOWLIST, `Bash(${ctx.composerScriptPath}:*)`],
     },
     env: {
       TICKET_ID: ctx.ticketId,
@@ -104,10 +108,12 @@ export function resolveTemplatePaths(projectRoot: string): {
   workerScriptPath: string;
   preToolUseHookPath: string;
   stopHookPath: string;
+  composerScriptPath: string;
 } {
   return {
     workerScriptPath: join(projectRoot, "worker", "worker.ts"),
     preToolUseHookPath: join(projectRoot, "templates", "preToolUse.ts"),
     stopHookPath: join(projectRoot, "templates", "stopHook.ts"),
+    composerScriptPath: join(projectRoot, "templates", "run_composer.sh"),
   };
 }

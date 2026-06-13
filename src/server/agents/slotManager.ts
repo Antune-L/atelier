@@ -1,5 +1,6 @@
 import { join } from "node:path";
 
+import type { Column } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
@@ -167,7 +168,7 @@ export class SlotManager {
         sessionName,
         cwd: path,
         model: ticket.model ?? MODELS.implement,
-        effort: ticket.effort,
+        effort: ticket.effort ?? MODELS.implementEffort,
         env: {
           TICKET_ID: ticket.id,
           SLOT_ID: String(slotId),
@@ -217,7 +218,12 @@ export class SlotManager {
     if (last !== "session_spawned") return last === "contract_delivered";
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return false;
-    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: buildTicketContract(ticket) });
+    const sent = this.workerHub.sendEvent(ticketId, {
+      type: "ticket",
+      payload: buildTicketContract(ticket, {
+        composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+      }),
+    });
     if (sent) {
       this.store.logEvent(ticketId, "contract_delivered", {});
       this.clearPhase(ticketId);
@@ -253,21 +259,47 @@ export class SlotManager {
     }
     log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
 
+    // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
+    let column: Column = "done";
+    let mergeError: string | null = null;
+    if (ticket.autoMerge) {
+      log.info("auto-merge de la PR", { ticketId, prUrl });
+      const merge = await this.system.mergePr(path, prUrl);
+      if (merge.ok) {
+        column = "merged";
+        this.store.logEvent(ticketId, "auto_merged", { prUrl });
+      } else {
+        mergeError = merge.reason;
+        this.store.logEvent(ticketId, "auto_merge_failed", { reason: merge.reason });
+        log.warn("auto-merge échoué", { ticketId, reason: merge.reason });
+      }
+    }
+
     await this.releaseSlot(slotId, ticket);
     this.touch(
       this.store.updateTicket(ticketId, {
-        column: "done",
+        column,
         stage: "done",
         prUrl,
         slotId: null,
-        error: null,
+        error: mergeError,
         finishedAt: Date.now(),
       }),
     );
     this.store.logEvent(ticketId, "done", { prUrl });
-    await this.notifier.notify("Ticket terminé", `${ticket.title} → PR draft ouverte`);
+    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
     this.pumpQueue();
     return { ok: true, reason: "" };
+  }
+
+  /** Notification line summarizing how the PR ended (draft / open / auto-merged / merge failed). */
+  private doneNotifyBody(ticket: Ticket, mergeError: string | null): string {
+    if (ticket.autoMerge) {
+      return mergeError
+        ? `${ticket.title} → PR ouverte mais auto-merge échoué`
+        : `${ticket.title} → PR mergée automatiquement`;
+    }
+    return `${ticket.title} → PR ${ticket.prDraft ? "draft " : ""}ouverte`;
   }
 
   /** Cleanup tmux + worktree + local branch. Called on done and on abandon. */
@@ -364,7 +396,7 @@ export class SlotManager {
       sessionName,
       cwd: path,
       model: ticket.model ?? MODELS.implement,
-      effort: ticket.effort,
+      effort: ticket.effort ?? MODELS.implementEffort,
       env: {
         TICKET_ID: ticketId,
         SLOT_ID: String(slotId),

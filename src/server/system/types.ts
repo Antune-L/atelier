@@ -62,6 +62,10 @@ export interface SystemAdapter {
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
 
+  // ---- auto-merge (opt-in per ticket) ----
+  /** Mark the PR ready (no-op if already) and merge it into its base branch. */
+  mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult>;
+
   // ---- notifications ----
   notify(title: string, body: string): Promise<void>;
 
@@ -70,6 +74,10 @@ export interface SystemAdapter {
 
   // ---- implementability triage (read-only, against the real repo) ----
   runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
+
+  // ---- capability probe ----
+  /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
+  checkComposerAvailable(): Promise<boolean>;
 }
 
 export interface TriageOptions {

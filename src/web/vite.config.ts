@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-const BACKEND_PORT = process.env.PORT ?? "3001";
-const DEV_PORT = 5173;
+const BACKEND_PORT = process.env.PORT ?? "52817";
+const DEV_PORT = 52818;
 
 export default defineConfig({
   root: resolve(import.meta.dirname, "."),

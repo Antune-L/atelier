@@ -1,4 +1,5 @@
 import type {
+  Capabilities,
   Comment,
   CreateCommentInput,
   CreateTicketInput,
@@ -26,6 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
+  capabilities: (): Promise<Capabilities> => request("/api/capabilities"),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),

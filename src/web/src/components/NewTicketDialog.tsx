@@ -22,7 +22,12 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = projectChoice ?? projects[0]?.key ?? "";
+  const selectedProject = projects.find((p) => p.key === project);
   const [prdEnabled, setPrdEnabled] = useState(false);
+  const [prDraft, setPrDraft] = useState(true);
+  // null = untouched → fall back to the selected project's configured default.
+  const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
+  const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,6 +35,8 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     setTitle("");
     setDescription("");
     setPrdEnabled(false);
+    setPrDraft(true);
+    setAutoMergeChoice(null);
     setError(null);
   };
 
@@ -51,7 +58,7 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     }
     setBusy(true);
     try {
-      await api.createTicket({ title, description, project, prdEnabled });
+      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge });
       reset();
       onClose();
     } catch (e) {
@@ -95,6 +102,22 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
         <label className="flex items-center justify-between gap-2 text-sm">
           <span>PRD à implémenter (planification avant code)</span>
           <Switch checked={prdEnabled} onCheckedChange={setPrdEnabled} aria-label="PRD à implémenter" />
+        </label>
+        <label className="flex items-center justify-between gap-2 text-sm">
+          <span>
+            Ouvrir la PR en draft
+            {autoMerge && <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>}
+          </span>
+          <Switch
+            checked={prDraft && !autoMerge}
+            disabled={autoMerge}
+            onCheckedChange={setPrDraft}
+            aria-label="Ouvrir la PR en draft"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-2 text-sm">
+          <span>Merger automatiquement la PR après ouverture</span>
+          <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-label="Merge automatique de la PR" />
         </label>
         {error && <p className="text-sm text-destructive">{error}</p>}
       </ModalBody>

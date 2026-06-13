@@ -26,7 +26,7 @@ Réseau privé chiffré (overlay WireGuard) entre les appareils explicitement aj
 
 `tailscale serve` met un proxy HTTPS devant l'app et fournit un **certificat valide** `*.ts.net` automatiquement.
 
-- Faire pointer `tailscale serve` vers le serveur Bun (port 3001).
+- Faire pointer `tailscale serve` vers le serveur Bun (port 52817).
 - HTTPS propre côté appareils, données chiffrées en transit, WebSockets supportés.
 - ⚠️ **Piège** : `tailscale serve` = privé (tailnet seulement, ce qu'on veut). Ne **jamais** utiliser `tailscale funnel` → expose à l'Internet public.
 
@@ -38,7 +38,7 @@ Réseau privé chiffré (overlay WireGuard) entre les appareils explicitement aj
 
 ## Changements app nécessaires (le vrai travail technique)
 
-Tailscale gère réseau/chiffrement/auth-appareil, mais l'archi **2 ports en dev** (Vite 5173 + Bun 3001) ne se met pas proprement derrière un seul proxy HTTPS.
+Tailscale gère réseau/chiffrement/auth-appareil, mais l'archi **2 ports en dev** (Vite 52818 + Bun 52817) ne se met pas proprement derrière un seul proxy HTTPS.
 
 1. **Servir le front buildé depuis le serveur Bun** (`build:web` → statique servi par Bun) → une seule origine derrière `tailscale serve`. **Changement principal** et prérequis au reste. (Alternative dev-only : `server.host: true` + `allowedHosts` incluant le nom `.ts.net`, mais 1 seul port est plus propre.)
 2. **Resserrer le CORS** : remplacer `access-control-allow-origin: *` (`src/server/index.ts:84`) par l'origine `.ts.net` connue.

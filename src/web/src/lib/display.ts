@@ -109,6 +109,21 @@ export function defaultEffortOptionLabel(defaultEffort: string): string {
   return `Défaut (${parsed.success ? AGENT_EFFORT_LABELS[parsed.data] : defaultEffort})`;
 }
 
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const LABEL_INSTANT = "à l'instant";
+
+/** Returns a short human-readable duration since `startMs` (e.g. "2h", "3j", "à l'instant"). */
+export function formatRelativeDuration(startMs: number, nowMs: number): string {
+  const delta = nowMs - startMs;
+  if (delta <= 0) return LABEL_INSTANT;
+  if (delta < MINUTE_MS) return LABEL_INSTANT;
+  if (delta < HOUR_MS) return `${Math.floor(delta / MINUTE_MS)}m`;
+  if (delta < DAY_MS) return `${Math.floor(delta / HOUR_MS)}h`;
+  return `${Math.floor(delta / DAY_MS)}j`;
+}
+
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";

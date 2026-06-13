@@ -33,6 +33,7 @@ import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
+import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { LiveTerminal } from "@/components/LiveTerminal";
 import { TerminalView } from "@/components/TerminalView";
 import {
@@ -391,6 +392,8 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             </span>
           )}
         </section>
+
+        {!isTodoSplit && <TicketConfigSummary ticket={current} />}
 
         <section>
           <div className="mb-1 flex items-center justify-between gap-2">

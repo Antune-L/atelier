@@ -112,10 +112,12 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   if (!ticket) return null;
   const current = ticket;
   const locked = isLocked(current);
-  // "merged" is reserved for feature PRs (mirrors the "PR mergée" button's kind gate).
-  const statusOptions = COLUMN_ORDER.filter(
-    (col) => col !== "merged" || current.kind !== "review",
-  );
+  // "merged" is reserved for feature PRs, "reviewed" for review tickets (kind gate).
+  const statusOptions = COLUMN_ORDER.filter((col) => {
+    if (col === "merged") return current.kind !== "review";
+    if (col === "reviewed") return current.kind === "review";
+    return true;
+  });
   const showTerminal =
     current.slotId !== null &&
     current.stage !== null &&

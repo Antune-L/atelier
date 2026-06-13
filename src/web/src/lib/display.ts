@@ -83,6 +83,7 @@ export function defaultEffortOptionLabel(defaultEffort: string): string {
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";
+  if (ticket.column === "reviewed") return "PR reviewed";
   if (ticket.column === "done") return "Terminé";
   if (ticket.column === "abandoned") return "Abandonné";
   if (ticket.stage === "failed") return "Échec";

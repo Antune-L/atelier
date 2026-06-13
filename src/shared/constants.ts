@@ -143,3 +143,9 @@ export const TRIAGE_RAW_REPORT_MAX = 4000;
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 export const WS_PATH_WORKER = "/workers";
+/** Interactive PTY stream for an agent's tmux pane (output + bidirectional input). */
+export const WS_PATH_TERMINAL = "/ws/terminal";
+
+/** Default tmux pane size for a detached agent session (unattached sessions default to 80×24). */
+export const TERMINAL_DEFAULT_COLS = 120;
+export const TERMINAL_DEFAULT_ROWS = 32;

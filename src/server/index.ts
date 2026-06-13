@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { Elysia } from "elysia";
 
-import { WS_PATH_CLIENT, WS_PATH_WORKER } from "../shared/constants.ts";
+import { WS_PATH_CLIENT, WS_PATH_TERMINAL, WS_PATH_WORKER } from "../shared/constants.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SlotManager } from "./agents/slotManager.ts";
@@ -18,6 +18,8 @@ import { createLogger } from "./logger.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { createSystemAdapter } from "./system/index.ts";
+import type { TerminalSocket } from "./terminalManager.ts";
+import { TerminalSessionManager } from "./terminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
 import type { WorkerSocket } from "./workerHub.ts";
 import { WorkerHub } from "./workerHub.ts";
@@ -38,6 +40,7 @@ const clientHub = new ClientHub(store);
 const workerHub = new WorkerHub();
 const notifier = new Notifier(clientHub);
 const triageLog = new LiveLog();
+const terminalManager = new TerminalSessionManager(store, system);
 
 const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
   backendHttp,
@@ -57,7 +60,10 @@ createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable
 
 // ---- WebSocket data discriminator ----
 
-type SocketData = { kind: "client" } | { kind: "worker"; ticketId: string | null; slotId: number | null };
+type SocketData =
+  | { kind: "client" }
+  | { kind: "worker"; ticketId: string | null; slotId: number | null }
+  | { kind: "terminal"; ticketId: string };
 
 function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
   return ws.data.kind === "worker";
@@ -65,6 +71,10 @@ function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
 
 function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
   return ws.data.kind === "client";
+}
+
+function isTerminalSocket(ws: { data: SocketData }): ws is TerminalSocket {
+  return ws.data.kind === "terminal";
 }
 
 const api = createApiRoutes({
@@ -106,6 +116,12 @@ const server = Bun.serve<SocketData>({
       if (srv.upgrade(request, { data: { kind: "worker", ticketId: null, slotId: null } })) return undefined;
       return new Response("upgrade failed", { status: 426 });
     }
+    if (url.pathname === WS_PATH_TERMINAL) {
+      const ticketId = url.searchParams.get("ticketId");
+      if (!ticketId) return new Response("ticketId requis", { status: 400 });
+      if (srv.upgrade(request, { data: { kind: "terminal", ticketId } })) return undefined;
+      return new Response("upgrade failed", { status: 426 });
+    }
     if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
       return serveUpload(PROJECT_ROOT, url.pathname);
     }
@@ -114,18 +130,21 @@ const server = Bun.serve<SocketData>({
   websocket: {
     open(ws) {
       if (isClientSocket(ws)) clientHub.add(ws);
+      if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
     },
     message(ws, message) {
       const text = typeof message === "string" ? message : message.toString();
       if (isWorkerSocket(ws)) void workerHub.handleMessage(ws, text);
+      if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
     },
     close(ws) {
       if (isClientSocket(ws)) clientHub.remove(ws);
       if (isWorkerSocket(ws)) workerHub.handleClose(ws);
+      if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
     },
   },
 });
 
 const log = createLogger("server");
 log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
-log.info("WebSocket prêts", { client: WS_PATH_CLIENT, worker: WS_PATH_WORKER });
+log.info("WebSocket prêts", { client: WS_PATH_CLIENT, worker: WS_PATH_WORKER, terminal: WS_PATH_TERMINAL });

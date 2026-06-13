@@ -325,6 +325,31 @@ export const channelEventSchema = z.discriminatedUnion("type", [
 ]);
 export type ChannelEvent = z.infer<typeof channelEventSchema>;
 
+// ---- Interactive terminal channel: browser ↔ backend (xterm.js ↔ tmux pane) ----
+
+/** Hex-encoded byte string (pairs of hex digits), as produced from xterm.js raw key bytes. */
+const HEX_BYTES_RE = /^([0-9a-fA-F]{2})*$/;
+/** Sanity ceiling on a requested pane size so a bad client can't ask for an absurd geometry. */
+const TERMINAL_MAX_DIMENSION = 1000;
+
+/** browser → backend: a keystroke (raw bytes, hex) or a viewport resize. */
+export const terminalClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("input"), hex: z.string().regex(HEX_BYTES_RE) }),
+  z.object({
+    type: z.literal("resize"),
+    cols: z.number().int().positive().max(TERMINAL_MAX_DIMENSION),
+    rows: z.number().int().positive().max(TERMINAL_MAX_DIMENSION),
+  }),
+]);
+export type TerminalClientMessage = z.infer<typeof terminalClientMessageSchema>;
+
+/** backend → browser: a base64 chunk of pane output, or the pane process exit. */
+export const terminalServerMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("data"), chunk: z.string() }),
+  z.object({ type: z.literal("exit") }),
+]);
+export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
+
 /** backend → worker.ts: either a channel event, or a tool result for a pending tool_call. */
 export const workerOutboundSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("event"), event: channelEventSchema }),

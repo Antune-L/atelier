@@ -4,6 +4,7 @@ import { createLogger } from "../logger.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
   SpawnTmuxOptions,
@@ -79,6 +80,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   readonly dryRun = true;
   private readonly liveSessions = new Set<string>();
   private readonly captureCounters = new Map<string, number>();
+  private readonly paneStreams = new Map<string, FakePaneStream>();
   private triageCounter = 0;
 
   private log(action: string, detail: Record<string, unknown> = {}): void {
@@ -159,6 +161,29 @@ export class FakeSystemAdapter implements SystemAdapter {
     return lines.join("\n");
   }
 
+  async capturePaneAnsi(sessionName: string): Promise<string> {
+    return this.capturePane(sessionName);
+  }
+
+  async openPaneStream(sessionName: string): Promise<PaneStream> {
+    this.log("openPaneStream", { sessionName });
+    const stream = new FakePaneStream(() => this.paneStreams.delete(sessionName));
+    this.paneStreams.set(sessionName, stream);
+    stream.push(`\r\n[dry-run] flux terminal interactif pour ${sessionName}\r\n`);
+    return stream;
+  }
+
+  async sendKeysRaw(sessionName: string, hexBytes: string): Promise<void> {
+    this.log("sendKeysRaw", { sessionName, hexBytes });
+    // Co-control echo: surface the injected bytes back so the viewer sees its own input.
+    const stream = this.paneStreams.get(sessionName);
+    if (stream) stream.push(hexToBytes(hexBytes));
+  }
+
+  async resizePane(sessionName: string, cols: number, rows: number): Promise<void> {
+    this.log("resizePane", { sessionName, cols, rows });
+  }
+
   async verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     this.log("verifyDone", { slotPath, branch, prUrl });
     return { ok: true, reason: "" };
@@ -202,6 +227,66 @@ export class FakeSystemAdapter implements SystemAdapter {
   async checkComposerAvailable(): Promise<boolean> {
     // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
     return true;
+  }
+}
+
+/** Decode a hex byte string ("41 → 0x41…") to bytes; ignores any trailing odd nibble. */
+function hexToBytes(hex: string): Uint8Array {
+  const pairs = hex.match(/.{2}/g) ?? [];
+  return Uint8Array.from(pairs, (pair) => Number.parseInt(pair, 16));
+}
+
+const fakeEncoder = new TextEncoder();
+
+/**
+ * Dry-run pane stream: a pushable async queue. `openPaneStream` seeds a banner and
+ * `sendKeysRaw` echoes input back here, so the live terminal works end-to-end without tmux.
+ */
+class FakePaneStream implements PaneStream {
+  private readonly queue: Uint8Array[] = [];
+  private pending: ((result: IteratorResult<Uint8Array>) => void) | null = null;
+  private closed = false;
+
+  constructor(private readonly onClose: () => void) {}
+
+  push(data: Uint8Array | string): void {
+    if (this.closed) return;
+    const bytes = typeof data === "string" ? fakeEncoder.encode(data) : data;
+    if (this.pending) {
+      const resolve = this.pending;
+      this.pending = null;
+      resolve({ value: bytes, done: false });
+    } else {
+      this.queue.push(bytes);
+    }
+  }
+
+  get chunks(): AsyncIterable<Uint8Array> {
+    return { [Symbol.asyncIterator]: () => this.iterator() };
+  }
+
+  private iterator(): AsyncIterator<Uint8Array> {
+    return {
+      next: (): Promise<IteratorResult<Uint8Array>> => {
+        const buffered = this.queue.shift();
+        if (buffered) return Promise.resolve({ value: buffered, done: false });
+        if (this.closed) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => {
+          this.pending = resolve;
+        });
+      },
+    };
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    this.onClose();
+    if (this.pending) {
+      const resolve = this.pending;
+      this.pending = null;
+      resolve({ value: undefined, done: true });
+    }
   }
 }
 

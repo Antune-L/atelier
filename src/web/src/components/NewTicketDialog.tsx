@@ -64,7 +64,7 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     );
   };
 
-  const submit = async (): Promise<void> => {
+  const submit = async (start: boolean): Promise<void> => {
     setError(null);
     if (!projects.some((p) => p.key === project)) {
       setError("Projet invalide");
@@ -72,7 +72,7 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     }
     setBusy(true);
     try {
-      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge, model, effort, implementer });
+      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge, model, effort, implementer, start });
       reset();
       onClose();
     } catch (e) {
@@ -164,8 +164,11 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
         <Button variant="outline" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={submit} disabled={busy || !title.trim() || !project}>
+        <Button variant="outline" onClick={() => void submit(false)} disabled={busy || !title.trim() || !project}>
           Créer
+        </Button>
+        <Button onClick={() => void submit(true)} disabled={busy || !title.trim() || !project}>
+          Créer et lancer
         </Button>
       </ModalFooter>
         </>

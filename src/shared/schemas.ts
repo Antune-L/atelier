@@ -128,6 +128,8 @@ export const createTicketSchema = z.object({
   model: agentModelSchema.nullable().default(null),
   effort: agentEffortSchema.nullable().default(null),
   implementer: implementerSchema.default("claude"),
+  /** Launch the ticket straight into implementation instead of parking it in "todo". */
+  start: z.boolean().default(false),
 });
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 

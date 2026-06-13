@@ -23,6 +23,6 @@
       "@/*": ["src/web/src/*"]
     }
   },
-  "include": ["src", "worker"],
+  "include": ["src", "worker", "desktop", "electrobun.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

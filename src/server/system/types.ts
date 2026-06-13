@@ -78,6 +78,10 @@ export interface SystemAdapter {
   /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
 
+  // ---- branch listing (base branch picker) ----
+  /** Remote branch names of the project repo (`git ls-remote --heads origin`). Throws on CLI failure. */
+  listBranches(repoPath: string): Promise<string[]>;
+
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
   mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;

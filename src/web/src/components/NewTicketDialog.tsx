@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
 import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
@@ -30,6 +30,13 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = projectChoice ?? projects[0]?.key ?? "";
   const selectedProject = projects.find((p) => p.key === project);
+  // null = untouched → fall back to the selected project's default branch.
+  const [baseBranchChoice, setBaseBranchChoice] = useState<string | null>(null);
+  const baseBranch = baseBranchChoice ?? selectedProject?.baseBranch ?? "";
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [branchesKey, setBranchesKey] = useState<string | null>(null);
+  // Tracks the latest requested project so an out-of-order branch fetch is dropped.
+  const latestBranchKey = useRef<string | null>(null);
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
@@ -42,9 +49,33 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Load the project's branches for the base-branch picker on open and on each
+  // project change (mirrors ReviewPrPanel's no-useEffect load-on-render pattern).
+  if (open && project && project !== branchesKey) {
+    const key = project;
+    latestBranchKey.current = key;
+    setBranchesKey(key);
+    setBranches(null);
+    setBaseBranchChoice(null);
+    void api
+      .projectBranches(key)
+      // Ignore a stale response if the project changed again before it resolved.
+      .then((list) => latestBranchKey.current === key && setBranches(list))
+      .catch(() => latestBranchKey.current === key && setBranches([]));
+  }
+
+  // The configured default always selectable, even while the remote list loads or fails.
+  const branchOptions = (() => {
+    const list = branches ?? [];
+    const fallback = selectedProject?.baseBranch;
+    if (!fallback) return list;
+    return list.includes(fallback) ? list : [fallback, ...list];
+  })();
+
   const reset = (): void => {
     setTitle("");
     setDescription("");
+    setBaseBranchChoice(null);
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
@@ -72,7 +103,21 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     }
     setBusy(true);
     try {
-      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge, model, effort, implementer, start });
+      // Send null when the choice matches (or has no) project default → keep "no override" semantics.
+      const baseBranchOverride = baseBranch && baseBranch !== selectedProject?.baseBranch ? baseBranch : null;
+      await api.createTicket({
+        title,
+        description,
+        project,
+        prdEnabled,
+        prDraft,
+        autoMerge,
+        baseBranch: baseBranchOverride,
+        model,
+        effort,
+        implementer,
+        start,
+      });
       reset();
       onClose();
     } catch (e) {
@@ -123,6 +168,22 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
             {projects.map((p) => (
               <option key={p.key} value={p.key}>
                 {p.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="base-branch">Branche de base du worktree</Label>
+          <Select
+            id="base-branch"
+            value={baseBranch}
+            onChange={(e) => setBaseBranchChoice(e.target.value)}
+            disabled={branches === null}
+            className="w-full"
+          >
+            {branchOptions.map((b) => (
+              <option key={b} value={b}>
+                {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
               </option>
             ))}
           </Select>

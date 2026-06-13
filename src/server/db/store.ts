@@ -16,6 +16,7 @@ export interface NewTicket {
   prdEnabled: boolean;
   prDraft: boolean;
   autoMerge: boolean;
+  baseBranch: string | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementer: Implementer;
@@ -38,6 +39,7 @@ export interface TicketPatch {
   prdEnabled?: boolean;
   prDraft?: boolean;
   autoMerge?: boolean;
+  baseBranch?: string | null;
   prdMarkdown?: string | null;
   column?: Column;
   stage?: Stage | null;
@@ -99,8 +101,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, model, effort, implementer, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, base_branch, model, effort, implementer, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -110,6 +112,7 @@ export class Store {
         input.prdEnabled ? 1 : 0,
         input.prDraft ? 1 : 0,
         input.autoMerge ? 1 : 0,
+        input.baseBranch,
         input.model,
         input.effort,
         input.implementer,
@@ -165,6 +168,7 @@ export class Store {
     if (patch.prdEnabled !== undefined) set("prd_enabled", patch.prdEnabled ? 1 : 0);
     if (patch.prDraft !== undefined) set("pr_draft", patch.prDraft ? 1 : 0);
     if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);
+    if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
     if (patch.column !== undefined) set(COLUMN_TO_DB, patch.column);
     if (patch.stage !== undefined) set("stage", patch.stage);

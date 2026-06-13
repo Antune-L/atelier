@@ -174,6 +174,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return FAKE_OPEN_PRS;
   }
 
+  async listBranches(repoPath: string): Promise<string[]> {
+    this.log("listBranches", { repoPath });
+    return ["main", "develop", "staging"];
+  }
+
   async mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     this.log("mergePr", { slotPath, branch, prUrl });
     return { ok: true, reason: "" };

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, IMPLEMENTERS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, IMPLEMENTERS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -11,6 +11,8 @@ export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
 export const agentModelSchema = z.enum(AGENT_MODELS);
 export const agentEffortSchema = z.enum(AGENT_EFFORTS);
 export const implementerSchema = z.enum(IMPLEMENTERS);
+export const kindSchema = z.enum(KINDS);
+export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
 
 // ---- Implementability triage ("Analyser") ----
 
@@ -43,6 +45,16 @@ export const ticketSchema = z.object({
   title: z.string(),
   description: z.string(),
   project: projectKeySchema,
+  /** What the ticket delivers: a feature implementation or an autonomous PR review. */
+  kind: kindSchema,
+  /** Argus depth for review tickets (null for feature tickets). */
+  reviewDepth: reviewDepthSchema.nullable(),
+  /** Number of the reviewed PR (review tickets only). */
+  prNumber: z.number().int().nullable(),
+  /** Head branch of the reviewed PR, passed to argus (review tickets only). */
+  prHeadBranch: z.string().nullable(),
+  /** Whether the review posts its findings inline on GitHub (argus --post). */
+  postComments: z.boolean(),
   prdEnabled: z.boolean(),
   /** Open the PR as a draft (default true). Forced off when autoMerge is on. */
   prDraft: z.boolean(),
@@ -132,6 +144,30 @@ export const moveTicketSchema = z.object({
   confirmed: z.boolean().default(false),
 });
 export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
+
+/** One open GitHub PR surfaced by `gh pr list` (and the unit the user picks to review). */
+export const openPrSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  url: z.string().url(),
+  headBranch: z.string(),
+  isDraft: z.boolean(),
+  /** "", "REVIEW_REQUIRED", "APPROVED", "CHANGES_REQUESTED" — drives the "needs attention" highlight. */
+  reviewDecision: z.string(),
+  updatedAt: z.string(),
+  author: z.string(),
+  additions: z.number().int(),
+  deletions: z.number().int(),
+});
+export type OpenPr = z.infer<typeof openPrSchema>;
+
+export const createReviewSchema = z.object({
+  project: projectKeySchema,
+  depth: reviewDepthSchema.default("light"),
+  postComments: z.boolean().default(true),
+  prs: z.array(openPrSchema).min(1),
+});
+export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 
 export const createCommentSchema = z.object({
   body: z.string().min(1),

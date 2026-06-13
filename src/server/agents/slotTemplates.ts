@@ -49,11 +49,26 @@ const BASH_ALLOWLIST = [
   "Bash(tail:*)",
   "Bash(gh pr create:*)",
   "Bash(gh pr view:*)",
+  // Review pipeline (argus): list/diff PRs, post one inline review via the API.
+  "Bash(gh pr list:*)",
+  "Bash(gh pr diff:*)",
+  "Bash(gh pr comment:*)",
+  "Bash(gh api:*)",
+  "Bash(gh repo view:*)",
   "Bash(ls:*)",
   "Bash(cat:*)",
   "Bash(grep:*)",
   "Bash(rg:*)",
   "Bash(find:*)",
+  // Shell helpers argus uses to build the commentable-line set for inline posting.
+  "Bash(awk:*)",
+  "Bash(sed:*)",
+  "Bash(cut:*)",
+  "Bash(sort:*)",
+  "Bash(head:*)",
+  "Bash(wc:*)",
+  "Bash(mktemp:*)",
+  "Bash(echo:*)",
 ];
 
 export function buildMcpJson(ctx: SlotTemplateContext): string {

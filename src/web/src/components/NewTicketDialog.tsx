@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
 
+import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
@@ -9,6 +10,9 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { handleMediaPaste } from "@/lib/paste";
+import { cn } from "@/lib/utils";
+
+type Tab = "ticket" | "review";
 
 interface NewTicketDialogProps {
   open: boolean;
@@ -17,6 +21,7 @@ interface NewTicketDialogProps {
 }
 
 export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProps) {
+  const [tab, setTab] = useState<Tab>("ticket");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   // null = no explicit choice yet → fall back to the first loaded project.
@@ -71,8 +76,22 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   return (
     <Modal open={open} onClose={onClose} className="max-w-3xl">
       <ModalHeader>
-        <ModalTitle>Nouveau ticket</ModalTitle>
+        <ModalTitle>{tab === "ticket" ? "Nouveau ticket" : "Reviewer une PR"}</ModalTitle>
+        <div className="mt-3 flex gap-1">
+          <TabButton active={tab === "ticket"} onClick={() => setTab("ticket")}>
+            Nouveau ticket
+          </TabButton>
+          <TabButton active={tab === "review"} onClick={() => setTab("review")}>
+            Reviewer une PR
+          </TabButton>
+        </div>
       </ModalHeader>
+      {tab === "review" ? (
+        <ModalBody>
+          <ReviewPrPanel projects={projects} onClose={onClose} />
+        </ModalBody>
+      ) : (
+        <>
       <ModalBody>
         <div className="space-y-1.5">
           <Label htmlFor="title">Titre</Label>
@@ -129,6 +148,29 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
           Créer
         </Button>
       </ModalFooter>
+        </>
+      )}
     </Modal>
+  );
+}
+
+interface TabButtonProps {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+function TabButton({ active, onClick, children }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+        active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
   );
 }

@@ -2,7 +2,9 @@ import type {
   Capabilities,
   Comment,
   CreateCommentInput,
+  CreateReviewInput,
   CreateTicketInput,
+  OpenPr,
   ProjectInfo,
   TerminalOutput,
   Ticket,
@@ -33,6 +35,9 @@ export const api = {
     request(`/api/tickets/${id}`),
   createTicket: (input: CreateTicketInput): Promise<Ticket> =>
     request("/api/tickets", { method: "POST", body: JSON.stringify(input) }),
+  projectPrs: (key: string): Promise<OpenPr[]> => request(`/api/projects/${key}/prs`),
+  createReviews: (input: CreateReviewInput): Promise<Ticket[]> =>
+    request("/api/reviews", { method: "POST", body: JSON.stringify(input) }),
   updateTicket: (id: string, input: UpdateTicketInput): Promise<Ticket> =>
     request(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   moveTicket: (id: string, column: Column, confirmed = false): Promise<Ticket> =>

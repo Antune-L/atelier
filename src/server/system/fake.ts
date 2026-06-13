@@ -1,3 +1,4 @@
+import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
 import type {
@@ -14,6 +15,46 @@ const dryRunLog = createLogger("dry-run");
 const FAKE_SETTLE_MS = 50;
 const FAKE_TRIAGE_STEP_MS = 400;
 const TRIAGE_VERDICT_CYCLE = 3;
+
+/** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
+const FAKE_OPEN_PRS: OpenPr[] = [
+  {
+    number: 142,
+    title: "feat: panier multi-devises",
+    url: "https://github.com/acme/repo/pull/142",
+    headBranch: "feat/panier-devises",
+    isDraft: false,
+    reviewDecision: "REVIEW_REQUIRED",
+    updatedAt: "2026-06-12T09:30:00Z",
+    author: "alice",
+    additions: 320,
+    deletions: 45,
+  },
+  {
+    number: 137,
+    title: "fix: race condition au checkout",
+    url: "https://github.com/acme/repo/pull/137",
+    headBranch: "fix/checkout-race",
+    isDraft: false,
+    reviewDecision: "",
+    updatedAt: "2026-06-11T14:05:00Z",
+    author: "bob",
+    additions: 28,
+    deletions: 12,
+  },
+  {
+    number: 130,
+    title: "chore: bump des dépendances",
+    url: "https://github.com/acme/repo/pull/130",
+    headBranch: "chore/bump-deps",
+    isDraft: true,
+    reviewDecision: "APPROVED",
+    updatedAt: "2026-06-09T08:00:00Z",
+    author: "carol",
+    additions: 980,
+    deletions: 970,
+  },
+];
 
 /** Simulated read-only analysis steps streamed to the live triage view in dry-run. */
 const FAKE_TRIAGE_STEPS = [
@@ -120,6 +161,16 @@ export class FakeSystemAdapter implements SystemAdapter {
   async verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     this.log("verifyDone", { slotPath, branch, prUrl });
     return { ok: true, reason: "" };
+  }
+
+  async verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+    this.log("verifyReviewDone", { slotPath, prUrl });
+    return { ok: true, reason: "" };
+  }
+
+  async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
+    this.log("listOpenPrs", { repoPath });
+    return FAKE_OPEN_PRS;
   }
 
   async mergePr(slotPath: string, prUrl: string): Promise<DoneGateResult> {

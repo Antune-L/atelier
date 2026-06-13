@@ -1,6 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -14,6 +14,8 @@ interface BoardColumnProps {
   tickets: Ticket[];
   projects: ProjectInfo[];
   onOpenTicket: (ticket: Ticket) => void;
+  /** When set on the TODO column, renders a "+" beside the count to create a ticket. */
+  onAddTicket?: () => void;
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
@@ -31,7 +33,7 @@ function writeCollapsed(column: Column, collapsed: boolean): void {
   localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${column}`, collapsed ? "1" : "0");
 }
 
-export function BoardColumn({ column, tickets, projects, onOpenTicket }: BoardColumnProps) {
+export function BoardColumn({ column, tickets, projects, onOpenTicket, onAddTicket }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
   const label = COLUMN_LABELS[column];
@@ -46,6 +48,24 @@ export function BoardColumn({ column, tickets, projects, onOpenTicket }: BoardCo
     <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
       {tickets.length}
     </span>
+  );
+
+  const canAdd = column === "todo" && onAddTicket !== undefined;
+  const headerTrailing = canAdd ? (
+    <div className="flex items-center gap-1">
+      {countBadge}
+      <button
+        type="button"
+        onClick={onAddTicket}
+        className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        title="Nouveau ticket"
+        aria-label="Nouveau ticket"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  ) : (
+    countBadge
   );
 
   if (collapsed) {
@@ -87,7 +107,7 @@ export function BoardColumn({ column, tickets, projects, onOpenTicket }: BoardCo
           </button>
           <h2 className="text-sm font-semibold text-foreground">{label}</h2>
         </div>
-        {countBadge}
+        {headerTrailing}
       </div>
       <div
         ref={setNodeRef}

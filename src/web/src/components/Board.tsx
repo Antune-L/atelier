@@ -20,6 +20,7 @@ interface BoardProps {
   projectFilter: string;
   searchQuery: string;
   onOpenTicket: (ticket: Ticket) => void;
+  onAddTicket: () => void;
 }
 
 const DRAG_ACTIVATION_DISTANCE = 6;
@@ -42,7 +43,7 @@ function isColumn(value: string): value is Column {
   return COLUMNS.some((c) => c === value);
 }
 
-export function Board({ projects, projectFilter, searchQuery, onOpenTicket }: BoardProps) {
+export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAddTicket }: BoardProps) {
   const { tickets } = useBoard();
   const [pendingAbandon, setPendingAbandon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +92,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket }: Bo
             tickets={ticketsByColumn(column)}
             projects={projects}
             onOpenTicket={onOpenTicket}
+            onAddTicket={onAddTicket}
           />
         ))}
       </div>

@@ -45,7 +45,12 @@ export function SlotsBar({ slots }: SlotsBarProps) {
       <span className="text-xs font-semibold text-muted-foreground">Slots</span>
 
       <div className="flex items-center gap-3 text-xs">
-        <Stat dot="bg-success" count={available} singular="disponible" plural="disponibles" />
+        <Stat
+          dot="bg-success"
+          count={available}
+          singular="disponible"
+          plural="disponibles"
+        />
         <Stat dot="bg-info" count={used} singular="utilisé" plural="utilisés" />
       </div>
 
@@ -61,7 +66,7 @@ export function SlotsBar({ slots }: SlotsBarProps) {
         }}
       >
         <option value={COPY_PLACEHOLDER} disabled>
-          Copier un terminal…
+          Slots
         </option>
         {slots.map((slot) => {
           const ticketSuffix = slot.ticketId ? ` · ${slot.ticketId}` : "";
@@ -89,7 +94,9 @@ function Stat({ dot, count, singular, plural }: StatProps) {
     <span className="flex items-center gap-1.5">
       <span className={cn("h-2 w-2 rounded-full", dot)} />
       <span className="font-semibold tabular-nums">{count}</span>
-      <span className="text-muted-foreground">{count === 1 ? singular : plural}</span>
+      <span className="text-muted-foreground">
+        {count === 1 ? singular : plural}
+      </span>
     </span>
   );
 }

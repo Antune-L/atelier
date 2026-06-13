@@ -1,4 +1,4 @@
-import { Eye, PanelRightClose, PanelRightOpen, Rocket, X } from "lucide-react";
+import { Cpu, Eye, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import type {
@@ -82,6 +82,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [confirmMerged, setConfirmMerged] = useState(false);
   const [confirmImplement, setConfirmImplement] = useState(false);
+  const [confirmRelaunch, setConfirmRelaunch] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -126,6 +127,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.stage !== null &&
     current.stage !== "done";
   const terminalPaneVisible = showTerminal && terminalVisible;
+  // Escape hatch for a stuck "À implémenter" card: the session spawned but its
+  // contract/instruction never landed. Only while actively running — terminal
+  // (failed/interrupted/stalled) states already have the "Relancer" button below.
+  const canRelaunch =
+    current.column === "implementing" &&
+    current.slotId !== null &&
+    current.stage !== null &&
+    ACTIVE_STAGES.includes(current.stage);
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -277,6 +286,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   className={cn(isStageAnimated(current.stage) && "animate-pulse")}
                 >
                   {stageLabel(current.stage)}
+                </Badge>
+              )}
+              {current.slotId !== null && (
+                <Badge variant="info" className="gap-1">
+                  <Cpu className="h-3 w-3" /> slot-{current.slotId}
                 </Badge>
               )}
               {extractFigmaUrls(current.description).length > 0 && (
@@ -591,6 +605,17 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               Relancer
             </Button>
           )}
+          {canRelaunch && (
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Tuer la session et la relancer dans le même slot (réenvoie l'instruction)"
+              onClick={() => setConfirmRelaunch(true)}
+            >
+              <RotateCw className="h-4 w-4" />
+              Relancer la session
+            </Button>
+          )}
           {current.column === "done" && current.kind !== "review" && (
             <Button
               variant="default"
@@ -661,6 +686,22 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         onConfirm={async () => {
           setConfirmImplement(false);
           await moveTo("implementing");
+        }}
+      />
+      <ConfirmDialog
+        open={confirmRelaunch}
+        title="Relancer la session"
+        description="La session en cours est tuée et relancée dans le même slot, et l'instruction est renvoyée. Le travail non commité de la session en cours sera perdu."
+        confirmLabel="Relancer"
+        onCancel={() => setConfirmRelaunch(false)}
+        onConfirm={async () => {
+          setConfirmRelaunch(false);
+          try {
+            await api.relaunch(ticket.id);
+            refresh();
+          } catch {
+            // Lost a race with an in-flight launch; the board reflects the real state via WS.
+          }
         }}
       />
       <ConfirmDialog

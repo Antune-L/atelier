@@ -49,6 +49,7 @@ export const api = {
   markMerged: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/merged`, { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
+  relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
   triage: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage`, { method: "POST" }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>

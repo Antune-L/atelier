@@ -26,8 +26,8 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
               ? "reprends le PRD validé tel quel."
               : "rédige un plan concis et complet depuis la description."
           } Le script attend un CHEMIN de fichier, donc le plan doit exister sur disque.`,
-          "   b. Lance Composer en ARRIÈRE-PLAN (il écrit le code dans le worktree courant et ne commit JAMAIS) :",
-          `      ${opts.composerScriptPath} "$(pwd)" /tmp/composer-plan-${ticket.id}.md > /tmp/composer-${ticket.id}.log 2>&1 ; echo $? > /tmp/composer-${ticket.id}.rc &`,
+          "   b. Lance le script Composer EN ARRIÈRE-PLAN sur le worktree courant (il écrit le code dans le worktree et ne commit JAMAIS). Le run dure 10–25 min : démarre-le en tâche de fond, ne le lance pas en appel synchrone bloquant.",
+          `      Script à invoquer : ${opts.composerScriptPath}, avec en premier argument le répertoire de travail courant, et en second le fichier de plan /tmp/composer-plan-${ticket.id}.md. Redirige stdout et stderr vers /tmp/composer-${ticket.id}.log, puis écris son code de retour dans /tmp/composer-${ticket.id}.rc une fois terminé — c'est ce fichier .rc que tu surveilleras (étape c).`,
           `   c. SURVEILLE SANS TERMINER TON TOUR : boucle avec \`sleep 60\` puis teste l'existence de /tmp/composer-${ticket.id}.rc. NE termine PAS ton tour tant que le fichier .rc n'existe pas (sinon le pipeline croit que tu es bloqué et t'escalade en stalled). Toutes les ~3 minutes pendant l'attente, appelle update_stage("implementing") comme heartbeat (sinon le watchdog te marquera inactif — le sleep ne le rafraîchit pas).`,
           "   d. Quand le .rc existe, lis le code de retour :",
           "      - 0 : relis le diff produit (git diff) et vérifie que le projet typecheck. Si l'implémentation est partielle (build cassé, fichiers orphelins) → fais UNE seule passe ciblée (réécris un gaps file listant les manques précis puis relance le script sur le même worktree) OU termine le câblage toi-même. Ne boucle JAMAIS Composer plus d'une passe.",

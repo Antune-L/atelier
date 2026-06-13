@@ -10,3 +10,5 @@ kanban-real.db
 kanban-real.db-*
 slots/
 config.json
+.env
+.env.local

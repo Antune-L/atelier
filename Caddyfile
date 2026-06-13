@@ -1,0 +1,6 @@
+# Reverse proxy HTTPS local pour le domaine custom (cf. DEV_HOST dans .env).
+# Domaine lu depuis l'environnement → rien de personnel n'est versionné ici.
+{$DEV_HOST} {
+	tls internal
+	reverse_proxy localhost:52818
+}

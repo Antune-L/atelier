@@ -18,7 +18,7 @@ import { repairPath } from "./repairPath.ts";
  * is the chosen path. TODO(ali): validate L0.3 on a real notarized build before relying on either.
  */
 
-const WINDOW_TITLE = "Kanban Agents";
+const WINDOW_TITLE = "Atelier";
 const WINDOW_WIDTH = 1440;
 const WINDOW_HEIGHT = 900;
 const HEALTH_POLL_INTERVAL_MS = 150;

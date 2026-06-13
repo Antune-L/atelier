@@ -229,7 +229,9 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (target === "implementing") {
         hub.pushTicket(store.updateTicket(params.id, { column: "implementing" }));
-        await slots.startTicket(params.id);
+        // retry() relaunches a failed/stalled/interrupted ticket in its held slot;
+        // for a fresh ticket (no slot) it falls through to a normal startTicket.
+        await slots.retry(params.id);
         return store.getTicket(params.id);
       }
       const moved = store.updateTicket(params.id, { column: target });

@@ -72,6 +72,7 @@ export function App() {
         projectFilter={filter}
         searchQuery={search}
         onOpenTicket={(t) => setOpenTicketId(t.id)}
+        onAddTicket={() => setCreating(true)}
       />
 
       <NewTicketDialog

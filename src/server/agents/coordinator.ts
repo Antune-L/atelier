@@ -126,6 +126,7 @@ export class AgentCoordinator {
     const body = `**Échec**: ${parsed.data.reason}\n\n${parsed.data.findings}`;
     const comment = this.store.addComment(ctx.ticketId, "agent", body, null);
     const ticket = this.store.updateTicket(ctx.ticketId, {
+      column: "failed",
       stage: "failed",
       error: parsed.data.reason,
       finishedAt: Date.now(),

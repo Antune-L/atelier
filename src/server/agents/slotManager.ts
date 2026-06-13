@@ -337,7 +337,9 @@ export class SlotManager {
 
   private markFailed(ticketId: string, slotId: number, reason: string): void {
     this.clearPhase(ticketId);
-    this.touch(this.store.updateTicket(ticketId, { stage: "failed", error: reason, finishedAt: Date.now() }));
+    this.touch(
+      this.store.updateTicket(ticketId, { column: "failed", stage: "failed", error: reason, finishedAt: Date.now() }),
+    );
     this.store.updateSlot(slotId, { status: "failed" });
     this.hub.pushSlots(this.store.listSlots());
     this.store.logEvent(ticketId, "failed", { reason });
@@ -412,6 +414,7 @@ export class SlotManager {
     this.store.updateSlot(slotId, { status: "busy", tmuxSession: sessionName });
     this.touch(
       this.store.updateTicket(ticketId, {
+        column: "implementing",
         stage: "implementing",
         error: null,
         finishedAt: null,

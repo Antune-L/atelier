@@ -15,11 +15,14 @@ const badgeVariants = cva(
         warning: "border-transparent bg-warning/15 text-warning",
         success: "border-transparent bg-success/15 text-success",
         info: "border-transparent bg-info/15 text-info",
+        danger: "border-transparent bg-danger/15 text-danger",
       },
     },
     defaultVariants: { variant: "default" },
   },
 );
+
+export type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
 export interface BadgeProps
   extends HTMLAttributes<HTMLDivElement>,

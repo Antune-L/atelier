@@ -438,6 +438,33 @@ export class SlotManager {
     await this.startTicket(ticketId);
   }
 
+  /** True while a (re)launch is mid-setup, when a concurrent spawn would race the in-flight one. */
+  private isLaunching(ticketId: string): boolean {
+    const phase = this.setupPhase.get(ticketId);
+    return phase === SETUP_PHASES.worktree || phase === SETUP_PHASES.deps || phase === SETUP_PHASES.spawning;
+  }
+
+  /**
+   * Force a full re-spawn in the ticket's current slot, regardless of slot status.
+   * UI escape hatch for a stuck "implementing" card whose session started but never
+   * received the contract; falls back to a fresh launch if no slot is held.
+   * No-ops (returns false) while a launch is still in setup, to avoid a double spawn.
+   */
+  async relaunch(ticketId: string): Promise<boolean> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return false;
+    if (this.isLaunching(ticketId)) {
+      log.warn("relance ignorée : lancement déjà en cours", { ticketId });
+      return false;
+    }
+    if (ticket.slotId !== null) {
+      await this.relaunchInPlace(ticket.slotId, ticketId);
+      return true;
+    }
+    await this.startTicket(ticketId);
+    return true;
+  }
+
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) return;
@@ -445,6 +472,10 @@ export class SlotManager {
     const path = slotPath(slotId);
     log.info("relance en place", { ticketId, slotId });
 
+    // Drop any live/stale session so the re-spawn below can claim the tmux name,
+    // and evict its worker socket now so the contract re-delivers to the fresh one.
+    await this.system.killSession(sessionName);
+    this.workerHub.disconnect(ticketId);
     await this.depositSlotFiles(path, ticketId, slotId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     await this.system.spawnSession({
@@ -461,6 +492,10 @@ export class SlotManager {
     });
     this.setPhase(ticketId, SETUP_PHASES.waiting);
     this.store.updateSlot(slotId, { status: "busy", tmuxSession: sessionName });
+    // Re-arm contract delivery: deliverContractIfPending keys off the latest
+    // session_spawned marker, so re-logging it makes the contract re-send to the
+    // fresh session (the whole point of a relaunch).
+    this.store.logEvent(ticketId, "session_spawned", { slotId, sessionName });
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "implementing",

@@ -48,6 +48,23 @@ export class WorkerHub {
     }
   }
 
+  /**
+   * Drop a ticket's worker socket now, without waiting for the async WS close.
+   * Called before re-spawning a session so the immediate contract re-delivery
+   * can't target the dying worker (it sees isConnected === false and waits for
+   * the fresh worker's hello).
+   */
+  disconnect(ticketId: string): void {
+    const ws = this.byTicket.get(ticketId);
+    if (!ws) return;
+    this.byTicket.delete(ticketId);
+    try {
+      ws.close();
+    } catch {
+      // Socket already tearing down; the map eviction above is what matters.
+    }
+  }
+
   async handleMessage(ws: WorkerSocket, raw: string): Promise<void> {
     const parsed = workerInboundSchema.safeParse(JSON.parse(raw));
     if (!parsed.success || !this.handlers) return;

@@ -286,6 +286,16 @@ export function createApiRoutes(deps: RouteDeps) {
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })
+    .post("/tickets/:id/relaunch", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (ticket.column !== "implementing" || ticket.slotId === null) {
+        return jsonError(set, HTTP_CONFLICT, "relance réservée aux cartes en cours d'implémentation dans un slot");
+      }
+      const relaunched = await slots.relaunch(params.id);
+      if (!relaunched) return jsonError(set, HTTP_CONFLICT, "lancement déjà en cours");
+      return store.getTicket(params.id);
+    })
     .post("/tickets/:id/triage", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

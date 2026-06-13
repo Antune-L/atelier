@@ -7,15 +7,18 @@ import type {
   Ticket,
   TriageResult,
 } from "@shared/schemas";
-import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, implementerSchema, triageResultSchema } from "@shared/schemas";
+import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, columnSchema, implementerSchema, triageResultSchema } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
   AGENT_EFFORTS,
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  COLUMN_LABELS,
+  COLUMN_ORDER,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
+  type Column,
 } from "@shared/constants";
 import { extractFigmaUrls } from "@shared/figma";
 
@@ -78,12 +81,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [newComment, setNewComment] = useState("");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [confirmMerged, setConfirmMerged] = useState(false);
+  const [confirmImplement, setConfirmImplement] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
   const { composerAvailable, defaultModel, defaultEffort } = useCapabilities();
 
@@ -112,6 +117,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   if (!ticket) return null;
   const current = ticket;
   const locked = isLocked(current);
+  // "merged" is reserved for feature PRs (mirrors the "PR mergée" button's kind gate).
+  const statusOptions = COLUMN_ORDER.filter(
+    (col) => col !== "merged" || current.kind !== "review",
+  );
   const showTerminal =
     current.slotId !== null &&
     current.stage !== null &&
@@ -149,6 +158,34 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   const setImplementer = (raw: string): void => {
     void api.updateTicket(current.id, { implementer: implementerSchema.parse(raw) }).catch(() => undefined);
+  };
+
+  const moveTo = async (target: Column): Promise<void> => {
+    try {
+      await api.moveTicket(current.id, target);
+    } catch (e) {
+      setMoveError(e instanceof Error ? e.message : "Déplacement refusé");
+    }
+  };
+
+  // Manual status change from the detail drawer. Honors the same lock rule as the board
+  // but is stricter: side-effecting/destructive targets go through a confirm dialog (abandon
+  // kills the session, merged archives, implementing (re)launches the agent); rest move directly.
+  const changeStatus = (target: Column): void => {
+    if (target === current.column) return;
+    if (target === "abandoned") {
+      setConfirmAbandon(true);
+      return;
+    }
+    if (target === "merged") {
+      setConfirmMerged(true);
+      return;
+    }
+    if (target === "implementing") {
+      setConfirmImplement(true);
+      return;
+    }
+    void moveTo(target);
   };
 
   const setPrdEnabled = (checked: boolean): void => {
@@ -293,6 +330,31 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             {finishedKindLabel(current)} le {formatDateTime(current.finishedAt)}
           </p>
         )}
+
+        <section className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="ticket-status" className="text-sm font-semibold">
+            Statut
+          </Label>
+          <Select
+            id="ticket-status"
+            className="w-auto"
+            value={current.column}
+            disabled={locked}
+            title={locked ? "Carte verrouillée (en traitement)" : undefined}
+            onChange={(e) => changeStatus(columnSchema.parse(e.target.value))}
+          >
+            {statusOptions.map((col) => (
+              <option key={col} value={col}>
+                {COLUMN_LABELS[col]}
+              </option>
+            ))}
+          </Select>
+          {locked && (
+            <span className="text-xs text-muted-foreground">
+              verrouillé (en traitement) — utilise « Abandonner » ci-dessous
+            </span>
+          )}
+        </section>
 
         <section>
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -591,6 +653,17 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         }}
       />
       <ConfirmDialog
+        open={confirmImplement}
+        title="Lancer l'implémentation"
+        description="L'agent d'implémentation va être (re)lancé sur cette carte et occupera un slot."
+        confirmLabel="Lancer"
+        onCancel={() => setConfirmImplement(false)}
+        onConfirm={async () => {
+          setConfirmImplement(false);
+          await moveTo("implementing");
+        }}
+      />
+      <ConfirmDialog
         open={confirmDelete}
         title="Supprimer le ticket"
         description="Suppression définitive du ticket et de ses commentaires. Action irréversible."
@@ -602,6 +675,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           await api.deleteTicket(ticket.id);
           onClose();
         }}
+      />
+      <ConfirmDialog
+        open={moveError !== null}
+        title="Déplacement refusé"
+        description={moveError ?? ""}
+        confirmLabel="Compris"
+        onCancel={() => setMoveError(null)}
+        onConfirm={() => setMoveError(null)}
       />
     </Modal>
   );

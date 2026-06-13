@@ -30,6 +30,7 @@ interface TriageRunner {
   capturePane(sessionName: string): Promise<string>;
   runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
+  listBranches(repoPath: string): Promise<string[]>;
 }
 
 interface RouteDeps {
@@ -142,6 +143,15 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec gh pr list");
       }
     })
+    .get("/projects/:key/branches", async ({ params, set }) => {
+      if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(params.key);
+      try {
+        return await deps.system.listBranches(project.repoPath);
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec listing branches");
+      }
+    })
     .get("/capabilities", () => ({
       composerAvailable: deps.composerAvailable,
       defaultModel: MODELS.implement,
@@ -164,6 +174,7 @@ export function createApiRoutes(deps: RouteDeps) {
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
+        baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,
         implementer: parsed.data.implementer,

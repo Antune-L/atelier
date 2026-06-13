@@ -53,18 +53,19 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
   const project = getProject(ticket.project);
+  const baseBranch = ticket.baseBranch ?? project.baseBranch;
   const figmaUrls = extractFigmaUrls(ticket.description);
   const isUi = figmaUrls.length > 0;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
-  const prCreateCmd = prIsDraft ? "gh pr create --draft" : "gh pr create";
+  const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
 
   const lines: string[] = [
     `# Ticket ${ticket.id} — ${ticket.title}`,
     "",
-    `Projet : ${project.label} (branche de base et cible : ${project.baseBranch})`,
+    `Projet : ${project.label} (branche de base et cible : ${baseBranch})`,
     isUi ? "Type : ticket UI (maquettes Figma référencées dans la description, comparaison requise)" : "",
     "",
     "## Description",
@@ -99,10 +100,10 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
       : []),
     "4. fixing : corrige les findings, puis re-review. Max 2 boucles, sinon fail().",
     "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
-    `6. opening_pr : commit (conventions du projet), push, \`${prCreateCmd}\` vers ${project.baseBranch}.`,
+    `6. opening_pr : commit (conventions du projet), push, \`${prCreateCmd}\` vers ${baseBranch}.`,
     "7. done(pr_url).",
     ticket.autoMerge
-      ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${project.baseBranch}.`
+      ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
       : "",
     "",
     "## Interdits",

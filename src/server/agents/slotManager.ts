@@ -133,6 +133,7 @@ export class SlotManager {
       return;
     }
     const project = getProject(ticket.project);
+    const baseBranch = ticket.baseBranch ?? project.baseBranch;
     const path = slotPath(slotId);
     const slug = slugify(ticket.title);
     const branch = `feat/${ticket.id}-${slug}`;
@@ -165,12 +166,12 @@ export class SlotManager {
         // then aborts (git exits 255, "branch already exists"). Drop the leftover first —
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
-        await this.system.fetch(project.repoPath, project.baseBranch);
+        await this.system.fetch(project.repoPath, baseBranch);
         await this.system.worktreeAdd({
           repoPath: project.repoPath,
           slotPath: path,
           branch,
-          baseBranch: project.baseBranch,
+          baseBranch,
         });
       });
 

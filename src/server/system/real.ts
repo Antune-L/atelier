@@ -278,6 +278,22 @@ export class RealSystemAdapter implements SystemAdapter {
     }));
   }
 
+  async listBranches(repoPath: string): Promise<string[]> {
+    // Hit the remote so the picker reflects branches that exist on GitHub right now,
+    // not just whatever this clone last fetched.
+    const res = await $`git -C ${repoPath} ls-remote --heads origin`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`git ls-remote a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+    return res.stdout
+      .toString()
+      .split("\n")
+      .map((line) => line.split("\t")[1]?.replace(/^refs\/heads\//, "").trim() ?? "")
+      .filter((name) => name !== "")
+      .sort();
+  }
+
   async mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     // A draft PR can't be merged; mark it ready first (harmless if already ready).
     await $`gh pr ready ${prUrl}`.cwd(slotPath).nothrow().quiet();

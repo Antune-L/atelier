@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   prd_enabled INTEGER NOT NULL DEFAULT 0,
   pr_draft INTEGER NOT NULL DEFAULT 1,
   auto_merge INTEGER NOT NULL DEFAULT 0,
+  base_branch TEXT,
   prd_markdown TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
@@ -93,6 +94,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "pr_number", ddl: "ALTER TABLE tickets ADD COLUMN pr_number INTEGER" },
   { column: "pr_head_branch", ddl: "ALTER TABLE tickets ADD COLUMN pr_head_branch TEXT" },
   { column: "post_comments", ddl: "ALTER TABLE tickets ADD COLUMN post_comments INTEGER NOT NULL DEFAULT 1" },
+  { column: "base_branch", ddl: "ALTER TABLE tickets ADD COLUMN base_branch TEXT" },
 ];
 
 export function createDatabase(path: string): Database {

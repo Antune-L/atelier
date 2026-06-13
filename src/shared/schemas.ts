@@ -5,6 +5,12 @@ import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, IMPLEMENTERS, KI
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
 const projectKeySchema = z.string().min(1);
+
+// A git branch name accepted as a base-branch override. Restricted to safe ref
+// characters (no leading dash, no shell metacharacters) because the value is
+// interpolated into the `gh pr create --base <branch>` command the agent runs.
+const BRANCH_NAME_RE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
+const baseBranchSchema = z.string().regex(BRANCH_NAME_RE, "nom de branche invalide");
 export const columnSchema = z.enum(COLUMNS);
 export const stageSchema = z.enum(STAGES);
 export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
@@ -60,6 +66,8 @@ export const ticketSchema = z.object({
   prDraft: z.boolean(),
   /** Auto-merge the PR into the base branch once the done() gate passes. */
   autoMerge: z.boolean(),
+  /** Branch the worktree forks from and the PR targets (null = project default). */
+  baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
@@ -124,6 +132,8 @@ export const createTicketSchema = z.object({
   prdEnabled: z.boolean().default(false),
   prDraft: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
+  // Branch the worktree forks from and the PR targets (null = project default).
+  baseBranch: baseBranchSchema.nullable().default(null),
   // Implementation agent knobs picked at creation (null = fall back to server config).
   model: agentModelSchema.nullable().default(null),
   effort: agentEffortSchema.nullable().default(null),
@@ -137,6 +147,7 @@ export const updateTicketSchema = z.object({
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),
   implementer: implementerSchema.optional(),

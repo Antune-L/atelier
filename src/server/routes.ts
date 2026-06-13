@@ -7,6 +7,7 @@ import {
   createCommentSchema,
   createReviewSchema,
   createTicketSchema,
+  deriveTitleFromDescription,
   moveTicketSchema,
   updateTicketSchema,
   validatePrdSchema,
@@ -167,8 +168,11 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      // Title is optional: fall back to a slice of the description when left blank.
+      const title =
+        parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
       const ticket = store.createTicket({
-        title: parsed.data.title,
+        title,
         description: parsed.data.description,
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,

@@ -125,22 +125,45 @@ export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
 // ---- API input schemas ----
 
-export const createTicketSchema = z.object({
-  title: z.string().min(1),
-  description: z.string().default(""),
-  project: projectKeySchema,
-  prdEnabled: z.boolean().default(false),
-  prDraft: z.boolean().default(true),
-  autoMerge: z.boolean().default(false),
-  // Branch the worktree forks from and the PR targets (null = project default).
-  baseBranch: baseBranchSchema.nullable().default(null),
-  // Implementation agent knobs picked at creation (null = fall back to server config).
-  model: agentModelSchema.nullable().default(null),
-  effort: agentEffortSchema.nullable().default(null),
-  implementer: implementerSchema.default("claude"),
-  /** Launch the ticket straight into implementation instead of parking it in "todo". */
-  start: z.boolean().default(false),
-});
+/** Max length of a title auto-derived from the description. */
+const DERIVED_TITLE_MAX_LENGTH = 80;
+
+/**
+ * Derive a non-empty title from a ticket's description: first meaningful line,
+ * stripped of leading markdown markers and truncated. Used when the user leaves
+ * the title blank (the description is always provided).
+ */
+export function deriveTitleFromDescription(description: string): string {
+  const firstLine =
+    description
+      .split("\n")
+      .map((line) => line.replace(/^[#>\-*\s]+/, "").trim())
+      .find((line) => line.length > 0) ?? "";
+  if (firstLine.length <= DERIVED_TITLE_MAX_LENGTH) return firstLine;
+  return `${firstLine.slice(0, DERIVED_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
+}
+
+export const createTicketSchema = z
+  .object({
+    title: z.string().default(""),
+    description: z.string().default(""),
+    project: projectKeySchema,
+    prdEnabled: z.boolean().default(false),
+    prDraft: z.boolean().default(true),
+    autoMerge: z.boolean().default(false),
+    // Branch the worktree forks from and the PR targets (null = project default).
+    baseBranch: baseBranchSchema.nullable().default(null),
+    // Implementation agent knobs picked at creation (null = fall back to server config).
+    model: agentModelSchema.nullable().default(null),
+    effort: agentEffortSchema.nullable().default(null),
+    implementer: implementerSchema.default("claude"),
+    /** Launch the ticket straight into implementation instead of parking it in "todo". */
+    start: z.boolean().default(false),
+  })
+  .refine(
+    (data) => data.title.trim().length > 0 || data.description.trim().length > 0,
+    { message: "Titre ou description requis", path: ["title"] },
+  );
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
 export const updateTicketSchema = z.object({

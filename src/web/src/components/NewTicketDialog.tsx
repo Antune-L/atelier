@@ -170,12 +170,12 @@ export function NewTicketDialog({
             <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
               <div className="flex flex-col space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="title">Titre</Label>
+                  <Label htmlFor="title">Titre (optionnel)</Label>
                   <Input
                     id="title"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Titre du ticket"
+                    placeholder="Titre du ticket (déduit de la description si vide)"
                   />
                 </div>
                 <div className="flex flex-1 flex-col space-y-1.5">
@@ -282,13 +282,13 @@ export function NewTicketDialog({
             <Button
               variant="outline"
               onClick={() => void submit(false)}
-              disabled={busy || !title.trim() || !project}
+              disabled={busy || (!title.trim() && !description.trim()) || !project}
             >
               Créer
             </Button>
             <Button
               onClick={() => void submit(true)}
-              disabled={busy || !title.trim() || !project}
+              disabled={busy || (!title.trim() && !description.trim()) || !project}
             >
               Créer et lancer
             </Button>

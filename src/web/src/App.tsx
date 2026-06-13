@@ -16,7 +16,7 @@ import { useProjects } from "@/hooks/useProjects";
 
 export function App() {
   const projects = useProjects();
-  const { slots, connected } = useBoard();
+  const { slots } = useBoard();
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -32,10 +32,6 @@ export function App() {
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold">Atelier</h1>
-          <span
-            className={`h-2 w-2 rounded-full ${connected ? "bg-success" : "bg-destructive"}`}
-            title={connected ? "Connecté" : "Déconnecté"}
-          />
         </div>
         <div className="flex items-center gap-2">
           <Input

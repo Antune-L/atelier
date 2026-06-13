@@ -151,6 +151,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { implementer: implementerSchema.parse(raw) }).catch(() => undefined);
   };
 
+  const setPrdEnabled = (checked: boolean): void => {
+    void api.updateTicket(current.id, { prdEnabled: checked }).catch(() => undefined);
+  };
+
   const setPrDraft = (checked: boolean): void => {
     void api.updateTicket(current.id, { prDraft: checked }).catch(() => undefined);
   };
@@ -240,6 +244,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               )}
               {extractFigmaUrls(current.description).length > 0 && (
                 <Badge variant="secondary">UI</Badge>
+              )}
+              {current.prdEnabled && (
+                <Badge variant="secondary">PRD</Badge>
               )}
               {locked && (
                 <span className="text-xs text-muted-foreground">
@@ -404,6 +411,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
             <div className="space-y-3">
               <label className="flex items-center justify-between gap-2 text-sm">
+                <span>PRD à implémenter (planification avant code)</span>
+                <Switch
+                  checked={current.prdEnabled}
+                  onCheckedChange={setPrdEnabled}
+                  aria-label="PRD à implémenter"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
                 <span>
                   Ouvrir la PR en draft
                   {current.autoMerge && (
@@ -434,22 +449,35 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           />
         )}
 
-        {current.column === "prd" && current.prdMarkdown && (
+        {current.prdMarkdown && (
           <section className="rounded-md border bg-muted/30 p-3">
-            <h3 className="mb-1 text-sm font-semibold">PRD proposé</h3>
-            <div className="max-h-64 overflow-y-auto">
-              <Markdown content={current.prdMarkdown} />
-            </div>
-            <Button
-              size="sm"
-              className="mt-2"
-              onClick={async () => {
-                await api.validatePrd(ticket.id);
-                refresh();
-              }}
-            >
-              Valider le PRD
-            </Button>
+            {current.column === "prd" ? (
+              <>
+                <h3 className="mb-1 text-sm font-semibold">PRD proposé</h3>
+                <div className="max-h-64 overflow-y-auto">
+                  <Markdown content={current.prdMarkdown} />
+                </div>
+                <Button
+                  size="sm"
+                  className="mt-2"
+                  onClick={async () => {
+                    await api.validatePrd(ticket.id);
+                    refresh();
+                  }}
+                >
+                  Valider le PRD
+                </Button>
+              </>
+            ) : (
+              <details>
+                <summary className="cursor-pointer text-sm font-semibold">
+                  PRD validé
+                </summary>
+                <div className="mt-2 max-h-64 overflow-y-auto">
+                  <Markdown content={current.prdMarkdown} />
+                </div>
+              </details>
+            )}
           </section>
         )}
 

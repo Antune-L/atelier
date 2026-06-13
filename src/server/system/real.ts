@@ -10,6 +10,7 @@ import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   PrepareSlotFiles,
+  ReviewDoneOptions,
   SpawnTmuxOptions,
   SystemAdapter,
   TriageOptions,
@@ -37,6 +38,13 @@ const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 const PR_LIST_FIELDS = "number,title,url,headRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
+
+/** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
+const ghReviewSchema = z.object({
+  author: z.object({ login: z.string() }).nullable(),
+  submittedAt: z.string().nullable(),
+});
+const ghReviewsSchema = z.object({ reviews: z.array(ghReviewSchema) });
 
 /** Shape of one `gh pr list --json` entry (mapped to the shared OpenPr). */
 const ghPrSchema = z.object({
@@ -215,9 +223,28 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
-  async verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult> {
+  async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
     const pr = await $`gh pr view ${prUrl} --json url`.cwd(slotPath).nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
+    if (opts.requirePostedSince === null) return { ok: true, reason: "" };
+    return this.verifyReviewPosted(slotPath, prUrl, opts.requirePostedSince);
+  }
+
+  /** Confirm the current gh user posted a review on the PR at or after `since` (epoch ms). */
+  private async verifyReviewPosted(slotPath: string, prUrl: string, since: number): Promise<DoneGateResult> {
+    const me = await $`gh api user -q .login`.cwd(slotPath).nothrow().quiet();
+    const login = me.stdout.toString().trim();
+    if (me.exitCode !== 0 || !login) {
+      return { ok: false, reason: "postage demandé mais utilisateur gh courant indéterminé" };
+    }
+    const res = await $`gh pr view ${prUrl} --json reviews`.cwd(slotPath).nothrow().quiet();
+    if (res.exitCode !== 0) return { ok: false, reason: "postage demandé mais lecture des reviews échouée" };
+    const parsed = ghReviewsSchema.safeParse(safeJsonParse(res.stdout.toString()));
+    if (!parsed.success) return { ok: false, reason: "postage demandé mais sortie gh inattendue" };
+    const posted = parsed.data.reviews.some(
+      (review) => review.author?.login === login && review.submittedAt !== null && Date.parse(review.submittedAt) >= since,
+    );
+    if (!posted) return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
     return { ok: true, reason: "" };
   }
 
@@ -411,6 +438,15 @@ async function detectInstallCommand(slotPath: string): Promise<string> {
     if (await Bun.file(join(slotPath, lockfile)).exists()) return command;
   }
   return "bun install";
+}
+
+/** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {

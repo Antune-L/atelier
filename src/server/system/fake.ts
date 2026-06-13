@@ -5,6 +5,7 @@ import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   PrepareSlotFiles,
+  ReviewDoneOptions,
   SpawnTmuxOptions,
   SystemAdapter,
   TriageOptions,
@@ -163,8 +164,8 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
-  async verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult> {
-    this.log("verifyReviewDone", { slotPath, prUrl });
+  async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
+    this.log("verifyReviewDone", { slotPath, prUrl, requirePostedSince: opts.requirePostedSince });
     return { ok: true, reason: "" };
   }
 

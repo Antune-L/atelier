@@ -44,8 +44,8 @@ export const api = {
     request(`/api/tickets/${id}/move`, { method: "POST", body: JSON.stringify({ column, confirmed }) }),
   addComment: (id: string, input: CreateCommentInput): Promise<Comment> =>
     request(`/api/tickets/${id}/comments`, { method: "POST", body: JSON.stringify(input) }),
-  validatePrd: (id: string): Promise<Ticket> =>
-    request(`/api/tickets/${id}/validate-prd`, { method: "POST" }),
+  validatePrd: (id: string, note = ""): Promise<Ticket> =>
+    request(`/api/tickets/${id}/validate-prd`, { method: "POST", body: JSON.stringify({ note }) }),
   markMerged: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/merged`, { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),

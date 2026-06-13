@@ -83,6 +83,9 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours (ce n'est PAS une réponse à une question `ask_user`).",
+    ticket.prdEnabled
+      ? "Pendant l'attente de `prd_validated`, un `user_comment` contenant des retours sur le PRD (souvent des annotations citant des passages) signifie que le PRD doit être corrigé : révise-le en conséquence puis appelle de nouveau `submit_prd` avec la version corrigée. N'implémente qu'après `prd_validated` (dont le champ note peut porter des retours mineurs à appliquer pendant l'implémentation)."
+      : "",
     "",
     "## Étapes",
     ticket.prdEnabled ? "1. planning → submit_prd → (attente prd_validated)" : "1. implementing",

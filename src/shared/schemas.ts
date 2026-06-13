@@ -179,6 +179,12 @@ export const createCommentSchema = z.object({
 });
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
 
+/** Optional note carried by PRD validation (compiled annotations the agent applies while implementing). */
+export const validatePrdSchema = z.object({
+  note: z.string().default(""),
+});
+export type ValidatePrdInput = z.infer<typeof validatePrdSchema>;
+
 export const terminalOutputSchema = z.object({
   output: z.string(),
   /** Pre-output setup phase (worktree/install/spawn/waiting), or null once the agent streams. */

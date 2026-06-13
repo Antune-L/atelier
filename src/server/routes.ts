@@ -9,6 +9,7 @@ import {
   createTicketSchema,
   moveTicketSchema,
   updateTicketSchema,
+  validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { OpenPr, Ticket } from "../shared/schemas.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
@@ -265,11 +266,13 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       return comment;
     })
-    .post("/tickets/:id/validate-prd", ({ params, set }) => {
+    .post("/tickets/:id/validate-prd", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.column !== "prd") return jsonError(set, HTTP_CONFLICT, "le ticket n'est pas en colonne PRD");
-      coordinator.validatePrd(params.id);
+      const parsed = validatePrdSchema.safeParse(body ?? {});
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      coordinator.validatePrd(params.id, parsed.data.note);
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/merged", ({ params, set }) => {

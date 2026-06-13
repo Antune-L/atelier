@@ -163,7 +163,7 @@ export type OpenPr = z.infer<typeof openPrSchema>;
 
 export const createReviewSchema = z.object({
   project: projectKeySchema,
-  depth: reviewDepthSchema.default("light"),
+  depth: reviewDepthSchema.default("full"),
   postComments: z.boolean().default(true),
   prs: z.array(openPrSchema).min(1),
 });

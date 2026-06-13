@@ -15,7 +15,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
 
-import type { SlotManager } from "./slotManager.ts";
+import { CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
 
 const log = createLogger("coordinator");
 
@@ -54,6 +54,7 @@ export class AgentCoordinator {
 
   private async onToolCall(ctx: ToolCallContext): Promise<ToolResult> {
     this.markProgress(ctx.ticketId);
+    this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
     switch (ctx.name) {
       case "update_stage":
@@ -192,9 +193,18 @@ export class AgentCoordinator {
     this.markProgress(ticketId);
   }
 
-  /** User validated the PRD → resume implementation in the same session. */
+  /**
+   * User validated the PRD. The session stays alive but, for a Claude implementer,
+   * the contract has it delegate the implementation to a fresh-context sub-agent
+   * rather than coding inline — the note reinforces that at the moment it acts.
+   */
   validatePrd(ticketId: string): void {
-    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note: "" });
+    const existing = this.store.getTicket(ticketId);
+    const note =
+      existing?.implementer === "claude"
+        ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
+        : "";
+    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note });
     const ticket = this.store.updateTicket(ticketId, { column: "implementing", stage: "implementing" });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "prd_validated", {});
@@ -205,6 +215,12 @@ export class AgentCoordinator {
   forwardComment(ticketId: string, body: string): void {
     const delivered = this.workerHub.sendEvent(ticketId, { type: "user_comment", body });
     if (delivered) this.store.logEvent(ticketId, "user_comment_forwarded", {});
+  }
+
+  /** Ack contract delivery on the first protocol tool call; idempotent (logged once per ticket). */
+  private ackContract(ticketId: string): void {
+    if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
+    this.store.logEvent(ticketId, CONTRACT_ACKED_EVENT, {});
   }
 
   private markProgress(ticketId: string): void {

@@ -1,4 +1,4 @@
-import { Eye, PanelRightClose, PanelRightOpen, Rocket, X } from "lucide-react";
+import { Cpu, Eye, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import type {
@@ -7,18 +7,15 @@ import type {
   Ticket,
   TriageResult,
 } from "@shared/schemas";
-import { TRIAGE_VERDICT_LABELS, agentEffortSchema, agentModelSchema, columnSchema, implementerSchema, triageResultSchema } from "@shared/schemas";
+import { TRIAGE_VERDICT_LABELS, columnSchema, triageResultSchema } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
-  AGENT_EFFORTS,
-  AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
-  AGENT_MODEL_LABELS,
   COLUMN_LABELS,
   COLUMN_ORDER,
-  IMPLEMENTERS,
-  IMPLEMENTER_LABELS,
+  type AgentEffort,
+  type AgentModel,
   type Column,
+  type Implementer,
 } from "@shared/constants";
 import { extractFigmaUrls } from "@shared/figma";
 
@@ -34,10 +31,9 @@ import {
 } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
 import { TerminalView } from "@/components/TerminalView";
 import {
-  defaultEffortOptionLabel,
-  defaultModelOptionLabel,
   finishedKindLabel,
   formatDateTime,
   isStageAnimated,
@@ -46,7 +42,6 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { api } from "@/lib/api";
-import { useCapabilities } from "@/hooks/useCapabilities";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import { resolveProjectLabel } from "@/components/TicketCard";
@@ -82,6 +77,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [confirmMerged, setConfirmMerged] = useState(false);
   const [confirmImplement, setConfirmImplement] = useState(false);
+  const [confirmRelaunch, setConfirmRelaunch] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -90,7 +86,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
-  const { composerAvailable, defaultModel, defaultEffort } = useCapabilities();
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -126,6 +121,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.stage !== null &&
     current.stage !== "done";
   const terminalPaneVisible = showTerminal && terminalVisible;
+  // Escape hatch for a stuck "À implémenter" card: the session spawned but its
+  // contract/instruction never landed. Only while actively running — terminal
+  // (failed/interrupted/stalled) states already have the "Relancer" button below.
+  const canRelaunch =
+    current.column === "implementing" &&
+    current.slotId !== null &&
+    current.stage !== null &&
+    ACTIVE_STAGES.includes(current.stage);
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -146,18 +149,16 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   // Agent model/effort are picked before launch (TODO column) and stored on the ticket;
   // the spawn reads them, falling back to the server config when null.
-  const setAgentModel = (raw: string): void => {
-    const model = raw === "" ? null : agentModelSchema.parse(raw);
+  const setAgentModel = (model: AgentModel | null): void => {
     void api.updateTicket(current.id, { model }).catch(() => undefined);
   };
 
-  const setAgentEffort = (raw: string): void => {
-    const effort = raw === "" ? null : agentEffortSchema.parse(raw);
+  const setAgentEffort = (effort: AgentEffort | null): void => {
     void api.updateTicket(current.id, { effort }).catch(() => undefined);
   };
 
-  const setImplementer = (raw: string): void => {
-    void api.updateTicket(current.id, { implementer: implementerSchema.parse(raw) }).catch(() => undefined);
+  const setImplementer = (implementer: Implementer): void => {
+    void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
   const moveTo = async (target: Column): Promise<void> => {
@@ -277,6 +278,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   className={cn(isStageAnimated(current.stage) && "animate-pulse")}
                 >
                   {stageLabel(current.stage)}
+                </Badge>
+              )}
+              {current.slotId !== null && (
+                <Badge variant="info" className="gap-1">
+                  <Cpu className="h-3 w-3" /> slot-{current.slotId}
                 </Badge>
               )}
               {extractFigmaUrls(current.description).length > 0 && (
@@ -411,48 +417,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         {current.column === "todo" && (
           <section className="rounded-md border p-3">
             <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
-            <div className="flex flex-wrap gap-4">
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-model">Modèle (orchestrateur)</Label>
-                <Select id="agent-model" value={current.model ?? ""} onChange={(e) => setAgentModel(e.target.value)}>
-                  <option value="">{defaultModelOptionLabel(defaultModel)}</option>
-                  {AGENT_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {AGENT_MODEL_LABELS[m]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-effort">Effort (orchestrateur)</Label>
-                <Select id="agent-effort" value={current.effort ?? ""} onChange={(e) => setAgentEffort(e.target.value)}>
-                  <option value="">{defaultEffortOptionLabel(defaultEffort)}</option>
-                  {AGENT_EFFORTS.map((eff) => (
-                    <option key={eff} value={eff}>
-                      {AGENT_EFFORT_LABELS[eff]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="flex flex-col items-start gap-1.5">
-                <Label htmlFor="agent-implementer">Implémenté par</Label>
-                <Select id="agent-implementer" value={current.implementer} onChange={(e) => setImplementer(e.target.value)}>
-                  {IMPLEMENTERS.map((i) => (
-                    <option key={i} value={i} disabled={i === "composer" && !composerAvailable}>
-                      {IMPLEMENTER_LABELS[i]}
-                      {i === "composer" && !composerAvailable ? " — Cursor non détecté" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-            {current.implementer === "composer" && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {composerAvailable
-                  ? "Composer 2.5 écrit le code ; le modèle orchestrateur (Claude) planifie, relit et ouvre la PR."
-                  : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
-              </p>
-            )}
+            <ImplementationAgentFields
+              model={current.model}
+              effort={current.effort}
+              implementer={current.implementer}
+              onModelChange={setAgentModel}
+              onEffortChange={setAgentEffort}
+              onImplementerChange={setImplementer}
+            />
             <div className="mt-3">
               <Button
                 size="sm"
@@ -591,6 +563,17 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               Relancer
             </Button>
           )}
+          {canRelaunch && (
+            <Button
+              variant="secondary"
+              size="sm"
+              title="Tuer la session et la relancer dans le même slot (réenvoie l'instruction)"
+              onClick={() => setConfirmRelaunch(true)}
+            >
+              <RotateCw className="h-4 w-4" />
+              Relancer la session
+            </Button>
+          )}
           {current.column === "done" && current.kind !== "review" && (
             <Button
               variant="default"
@@ -661,6 +644,22 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         onConfirm={async () => {
           setConfirmImplement(false);
           await moveTo("implementing");
+        }}
+      />
+      <ConfirmDialog
+        open={confirmRelaunch}
+        title="Relancer la session"
+        description="La session en cours est tuée et relancée dans le même slot, et l'instruction est renvoyée. Le travail non commité de la session en cours sera perdu."
+        confirmLabel="Relancer"
+        onCancel={() => setConfirmRelaunch(false)}
+        onConfirm={async () => {
+          setConfirmRelaunch(false);
+          try {
+            await api.relaunch(ticket.id);
+            refresh();
+          } catch {
+            // Lost a race with an in-flight launch; the board reflects the real state via WS.
+          }
         }}
       />
       <ConfirmDialog

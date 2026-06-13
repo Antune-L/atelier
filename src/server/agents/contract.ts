@@ -3,6 +3,48 @@ import { extractFigmaUrls } from "../../shared/figma.ts";
 import { getProject, isProjectKey } from "../config.ts";
 
 /**
+ * Builds the `implementing` step(s) of the contract. Three modes:
+ * Composer delegates code-writing to Cursor headless; a PRD-enabled Claude ticket
+ * delegates it to a fresh-context sub-agent (kept separate from the planning
+ * session, with the validated PRD as its contract); otherwise Claude implements inline.
+ */
+function buildImplementingSteps(
+  ticket: Ticket,
+  opts: { composerScriptPath: string },
+  prdPath: string,
+): string[] {
+  if (ticket.implementer === "composer") {
+    return [
+      "2. implementing (délégué à Composer 2.5) :",
+      `   a. Écris le plan à coder dans /tmp/composer-plan-${ticket.id}.md : ${
+        ticket.prdEnabled
+          ? "reprends le PRD validé tel quel."
+          : "rédige un plan concis et complet depuis la description."
+      } Le script attend un CHEMIN de fichier, donc le plan doit exister sur disque.`,
+      "   b. Lance le script Composer EN ARRIÈRE-PLAN sur le worktree courant (il écrit le code dans le worktree et ne commit JAMAIS). Le run dure 10–25 min : démarre-le en tâche de fond, ne le lance pas en appel synchrone bloquant.",
+      `      Script à invoquer : ${opts.composerScriptPath}, avec en premier argument le répertoire de travail courant, et en second le fichier de plan /tmp/composer-plan-${ticket.id}.md. Redirige stdout et stderr vers /tmp/composer-${ticket.id}.log, puis écris son code de retour dans /tmp/composer-${ticket.id}.rc une fois terminé — c'est ce fichier .rc que tu surveilleras (étape c).`,
+      `   c. SURVEILLE SANS TERMINER TON TOUR : boucle avec \`sleep 60\` puis teste l'existence de /tmp/composer-${ticket.id}.rc. NE termine PAS ton tour tant que le fichier .rc n'existe pas (sinon le pipeline croit que tu es bloqué et t'escalade en stalled). Toutes les ~3 minutes pendant l'attente, appelle update_stage("implementing") comme heartbeat (sinon le watchdog te marquera inactif — le sleep ne le rafraîchit pas).`,
+      "   d. Quand le .rc existe, lis le code de retour :",
+      "      - 0 : relis le diff produit (git diff) et vérifie que le projet typecheck. Si l'implémentation est partielle (build cassé, fichiers orphelins) → fais UNE seule passe ciblée (réécris un gaps file listant les manques précis puis relance le script sur le même worktree) OU termine le câblage toi-même. Ne boucle JAMAIS Composer plus d'une passe.",
+      "      - 3 ou 4 : Cursor absent ou non authentifié → appelle fail(\"Composer indisponible : binaire Cursor absent ou non authentifié\"). N'implémente PAS toi-même en silence.",
+      "      - 5 : échec ou timeout de Composer → fail avec la raison.",
+      "      - 6 : Composer n'a produit aucun changement (probable limite de contexte) → implémente toi-même OU fail.",
+      "   e. Tu reprends la main pour la suite : c'est TOI (Claude) qui review, corrige, teste, commit, push et ouvre la PR. Composer n'a rien committé.",
+    ];
+  }
+  if (ticket.prdEnabled) {
+    return [
+      "2. implementing (délégué à un sous-agent à contexte frais) :",
+      `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
+      "   b. Lance un sous-agent à CONTEXTE FRAIS (outil Agent) dédié à l'implémentation, distinct de cette session de planification : toi (session principale) tu gardes la main sur git, review, tests et PR ; le sous-agent écrit le code dans le worktree courant et ne commit JAMAIS.",
+      `      Dans son prompt, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et la consigne d'implémenter intégralement la fonctionnalité décrite.`,
+      "   c. Quand le sous-agent rend la main, relis son diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+    ];
+  }
+  return ["2. implementing : implémente la fonctionnalité dans le worktree courant."];
+}
+
+/**
  * Builds the `ticket` channel payload: the full pipeline contract injected into
  * the session at startup. Describes the steps, the tools to call, and the bans.
  */
@@ -16,27 +58,8 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
   const prCreateCmd = prIsDraft ? "gh pr create --draft" : "gh pr create";
-
-  const implementingSteps: string[] =
-    ticket.implementer === "composer"
-      ? [
-          "2. implementing (délégué à Composer 2.5) :",
-          `   a. Écris le plan à coder dans /tmp/composer-plan-${ticket.id}.md : ${
-            ticket.prdEnabled
-              ? "reprends le PRD validé tel quel."
-              : "rédige un plan concis et complet depuis la description."
-          } Le script attend un CHEMIN de fichier, donc le plan doit exister sur disque.`,
-          "   b. Lance le script Composer EN ARRIÈRE-PLAN sur le worktree courant (il écrit le code dans le worktree et ne commit JAMAIS). Le run dure 10–25 min : démarre-le en tâche de fond, ne le lance pas en appel synchrone bloquant.",
-          `      Script à invoquer : ${opts.composerScriptPath}, avec en premier argument le répertoire de travail courant, et en second le fichier de plan /tmp/composer-plan-${ticket.id}.md. Redirige stdout et stderr vers /tmp/composer-${ticket.id}.log, puis écris son code de retour dans /tmp/composer-${ticket.id}.rc une fois terminé — c'est ce fichier .rc que tu surveilleras (étape c).`,
-          `   c. SURVEILLE SANS TERMINER TON TOUR : boucle avec \`sleep 60\` puis teste l'existence de /tmp/composer-${ticket.id}.rc. NE termine PAS ton tour tant que le fichier .rc n'existe pas (sinon le pipeline croit que tu es bloqué et t'escalade en stalled). Toutes les ~3 minutes pendant l'attente, appelle update_stage("implementing") comme heartbeat (sinon le watchdog te marquera inactif — le sleep ne le rafraîchit pas).`,
-          "   d. Quand le .rc existe, lis le code de retour :",
-          "      - 0 : relis le diff produit (git diff) et vérifie que le projet typecheck. Si l'implémentation est partielle (build cassé, fichiers orphelins) → fais UNE seule passe ciblée (réécris un gaps file listant les manques précis puis relance le script sur le même worktree) OU termine le câblage toi-même. Ne boucle JAMAIS Composer plus d'une passe.",
-          "      - 3 ou 4 : Cursor absent ou non authentifié → appelle fail(\"Composer indisponible : binaire Cursor absent ou non authentifié\"). N'implémente PAS toi-même en silence.",
-          "      - 5 : échec ou timeout de Composer → fail avec la raison.",
-          "      - 6 : Composer n'a produit aucun changement (probable limite de contexte) → implémente toi-même OU fail.",
-          "   e. Tu reprends la main pour la suite : c'est TOI (Claude) qui review, corrige, teste, commit, push et ouvre la PR. Composer n'a rien committé.",
-        ]
-      : ["2. implementing : implémente la fonctionnalité dans le worktree courant."];
+  const prdPath = `/tmp/prd-${ticket.id}.md`;
+  const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
 
   const lines: string[] = [
     `# Ticket ${ticket.id} — ${ticket.title}`,
@@ -53,7 +76,7 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` dès qu'une décision te dépasse (ne devine jamais une exigence critique).",
     ticket.prdEnabled
-      ? "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant d'implémenter."
+      ? "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification)."
       : "- (Option PRD désactivée : implémente directement.)",
     `- \`done(pr_url)\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",

@@ -23,6 +23,22 @@ import {
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
 
+/** Worker-connect poll: ~2 min total (claude boot + MCP connect can exceed 20 s on a cold start). */
+const CONTRACT_DELIVER_MAX_ATTEMPTS = 240;
+const CONTRACT_DELIVER_DELAY_MS = 500;
+/**
+ * Delay before checking the agent acked the contract. Kept ABOVE the normal
+ * init→first-tool-call latency (~13 s observed) so a healthy review session — whose contract
+ * mandates update_stage("reviewing") as step 1 — acks before the check and is never re-pushed.
+ * Only a dropped contract leaves no ack within this window.
+ */
+const CONTRACT_ACK_CHECK_DELAY_MS = 15_000;
+/** Cap on forced re-pushes when delivery is never acked (≈45 s of dropped-contract recovery). */
+const CONTRACT_REPUSH_MAX_ATTEMPTS = 3;
+
+/** Audit event logged on the agent's first protocol tool call; gates the contract re-push. */
+export const CONTRACT_ACKED_EVENT = "contract_acked";
+
 const log = createLogger("slot");
 
 /** Human-readable setup phases surfaced to the terminal view before the agent produces output. */
@@ -218,13 +234,7 @@ export class SlotManager {
     if (last !== "session_spawned") return last === "contract_delivered";
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return false;
-    const payload =
-      ticket.kind === "review"
-        ? buildReviewContract(ticket)
-        : buildTicketContract(ticket, {
-            composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
-          });
-    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload });
+    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
     if (sent) {
       this.store.logEvent(ticketId, "contract_delivered", {});
       this.clearPhase(ticketId);
@@ -233,13 +243,50 @@ export class SlotManager {
     return sent;
   }
 
+  private buildContractPayload(ticket: Ticket): string {
+    return ticket.kind === "review"
+      ? buildReviewContract(ticket)
+      : buildTicketContract(ticket, {
+          composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+        });
+  }
+
   private async deliverContractWhenReady(ticketId: string, attempt = 0): Promise<void> {
-    // 2 min: claude boot + MCP connect can exceed 20 s on a cold start.
-    const MAX_ATTEMPTS = 240;
-    const DELAY_MS = 500;
-    if (this.deliverContractIfPending(ticketId)) return;
-    if (attempt >= MAX_ATTEMPTS) return;
-    setTimeout(() => void this.deliverContractWhenReady(ticketId, attempt + 1), DELAY_MS);
+    if (this.deliverContractIfPending(ticketId)) {
+      // Delivery over WS is fire-and-forget: the contract can be dropped if it lands before
+      // Claude's conversation loop is ready. Gate on the agent's ack and re-push if it never comes.
+      this.scheduleContractAckCheck(ticketId);
+      return;
+    }
+    if (attempt >= CONTRACT_DELIVER_MAX_ATTEMPTS) return;
+    setTimeout(() => void this.deliverContractWhenReady(ticketId, attempt + 1), CONTRACT_DELIVER_DELAY_MS);
+  }
+
+  private scheduleContractAckCheck(ticketId: string, attempt = 0): void {
+    setTimeout(() => this.repushContractIfUnacked(ticketId, attempt), CONTRACT_ACK_CHECK_DELAY_MS);
+  }
+
+  /**
+   * Re-push the contract when a review agent never acked it (no protocol tool call → dropped contract).
+   * The ack lands well before the first check in the nominal case, so this fires only on a real drop;
+   * the re-push then arrives once the session is ready. Bounded by CONTRACT_REPUSH_MAX_ATTEMPTS.
+   *
+   * Scoped to review tickets: their contract mandates update_stage("reviewing") as step 1, so a
+   * missing ack within the window is a genuine drop. Feature tickets have no early-mandated protocol
+   * call (a late first ack is normal work), so re-pushing them would re-inject the contract spuriously.
+   */
+  private repushContractIfUnacked(ticketId: string, attempt: number): void {
+    if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
+    if (!this.workerHub.isConnected(ticketId)) return;
+    if (attempt >= CONTRACT_REPUSH_MAX_ATTEMPTS) return;
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.kind !== "review") return;
+    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
+    if (sent) {
+      this.store.logEvent(ticketId, "contract_repushed", { attempt: attempt + 1 });
+      log.warn("contrat re-poussé (ack absent)", { ticketId, attempt: attempt + 1 });
+    }
+    this.scheduleContractAckCheck(ticketId, attempt + 1);
   }
 
   /** Verify and release a slot on done(pr_url). */
@@ -251,7 +298,9 @@ export class SlotManager {
     log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
     const gate =
       ticket.kind === "review"
-        ? await this.system.verifyReviewDone(path, prUrl)
+        ? await this.system.verifyReviewDone(path, prUrl, {
+            requirePostedSince: ticket.postComments ? ticket.createdAt : null,
+          })
         : await this.system.verifyDone(path, ticket.branch, prUrl);
     if (!gate.ok) {
       this.touch(this.store.updateTicket(ticketId, { stage: "stalled", error: gate.reason, finishedAt: Date.now() }));
@@ -389,6 +438,33 @@ export class SlotManager {
     await this.startTicket(ticketId);
   }
 
+  /** True while a (re)launch is mid-setup, when a concurrent spawn would race the in-flight one. */
+  private isLaunching(ticketId: string): boolean {
+    const phase = this.setupPhase.get(ticketId);
+    return phase === SETUP_PHASES.worktree || phase === SETUP_PHASES.deps || phase === SETUP_PHASES.spawning;
+  }
+
+  /**
+   * Force a full re-spawn in the ticket's current slot, regardless of slot status.
+   * UI escape hatch for a stuck "implementing" card whose session started but never
+   * received the contract; falls back to a fresh launch if no slot is held.
+   * No-ops (returns false) while a launch is still in setup, to avoid a double spawn.
+   */
+  async relaunch(ticketId: string): Promise<boolean> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return false;
+    if (this.isLaunching(ticketId)) {
+      log.warn("relance ignorée : lancement déjà en cours", { ticketId });
+      return false;
+    }
+    if (ticket.slotId !== null) {
+      await this.relaunchInPlace(ticket.slotId, ticketId);
+      return true;
+    }
+    await this.startTicket(ticketId);
+    return true;
+  }
+
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) return;
@@ -396,6 +472,10 @@ export class SlotManager {
     const path = slotPath(slotId);
     log.info("relance en place", { ticketId, slotId });
 
+    // Drop any live/stale session so the re-spawn below can claim the tmux name,
+    // and evict its worker socket now so the contract re-delivers to the fresh one.
+    await this.system.killSession(sessionName);
+    this.workerHub.disconnect(ticketId);
     await this.depositSlotFiles(path, ticketId, slotId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     await this.system.spawnSession({
@@ -412,6 +492,10 @@ export class SlotManager {
     });
     this.setPhase(ticketId, SETUP_PHASES.waiting);
     this.store.updateSlot(slotId, { status: "busy", tmuxSession: sessionName });
+    // Re-arm contract delivery: deliverContractIfPending keys off the latest
+    // session_spawned marker, so re-logging it makes the contract re-send to the
+    // fresh session (the whole point of a relaunch).
+    this.store.logEvent(ticketId, "session_spawned", { slotId, sessionName });
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "implementing",

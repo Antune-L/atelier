@@ -238,6 +238,15 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = updateTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const patch: TicketPatch = { ...parsed.data };
+      // A blank title is not rejected: derive one from the (new or existing)
+      // description so the title stays genuinely optional, as on creation.
+      if (parsed.data.title !== undefined && parsed.data.title.trim() === "") {
+        const derived = deriveTitleFromDescription(
+          parsed.data.description ?? ticket.description,
+        );
+        // Never blank an existing title: fall back to it when nothing derivable.
+        patch.title = derived || ticket.title;
+      }
       const textChanged =
         (parsed.data.title !== undefined && parsed.data.title !== ticket.title) ||
         (parsed.data.description !== undefined && parsed.data.description !== ticket.description);

@@ -163,6 +163,9 @@ export function createApiRoutes(deps: RouteDeps) {
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
+        model: parsed.data.model,
+        effort: parsed.data.effort,
+        implementer: parsed.data.implementer,
       });
       hub.pushTicket(ticket);
       return ticket;

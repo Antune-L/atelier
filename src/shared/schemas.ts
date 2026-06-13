@@ -124,6 +124,10 @@ export const createTicketSchema = z.object({
   prdEnabled: z.boolean().default(false),
   prDraft: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
+  // Implementation agent knobs picked at creation (null = fall back to server config).
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
+  implementer: implementerSchema.default("claude"),
 });
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 

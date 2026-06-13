@@ -1,7 +1,9 @@
 import { useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
+import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
+import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -33,6 +35,10 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
   // null = untouched → fall back to the selected project's configured default.
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
   const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
+  // Implementation agent knobs stored on the ticket (null = fall back to server config).
+  const [model, setModel] = useState<AgentModel | null>(null);
+  const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const [implementer, setImplementer] = useState<Implementer>("claude");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,6 +48,9 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
+    setModel(null);
+    setEffort(null);
+    setImplementer("claude");
     setError(null);
   };
 
@@ -63,7 +72,7 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
     }
     setBusy(true);
     try {
-      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge });
+      await api.createTicket({ title, description, project, prdEnabled, prDraft, autoMerge, model, effort, implementer });
       reset();
       onClose();
     } catch (e) {
@@ -117,6 +126,17 @@ export function NewTicketDialog({ open, projects, onClose }: NewTicketDialogProp
               </option>
             ))}
           </Select>
+        </div>
+        <div className="space-y-2 rounded-md border p-3">
+          <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
+          <ImplementationAgentFields
+            model={model}
+            effort={effort}
+            implementer={implementer}
+            onModelChange={setModel}
+            onEffortChange={setEffort}
+            onImplementerChange={setImplementer}
+          />
         </div>
         <label className="flex items-center justify-between gap-2 text-sm">
           <span>PRD à implémenter (planification avant code)</span>

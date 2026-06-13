@@ -153,6 +153,11 @@ export const WS_PATH_WORKER = "/workers";
 /** Interactive PTY stream for an agent's tmux pane (output + bidirectional input). */
 export const WS_PATH_TERMINAL = "/ws/terminal";
 
-/** Default tmux pane size for a detached agent session (unattached sessions default to 80×24). */
-export const TERMINAL_DEFAULT_COLS = 120;
+/**
+ * Default tmux pane size for a detached agent session. Spawn NARROW on purpose: a viewer almost
+ * always attaches wider, and tmux reflows scrollback UP (widening) without wrapping. Spawning
+ * wider than the viewer makes tmux wrap claude's right-aligned TUI lines when reflowing DOWN to
+ * the viewer width — garbled history that no client-side fit can recover. 80 is claude's floor.
+ */
+export const TERMINAL_DEFAULT_COLS = 80;
 export const TERMINAL_DEFAULT_ROWS = 32;

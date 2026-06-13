@@ -1,5 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDisposable } from "@xterm/xterm";
 import { Keyboard, Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -66,7 +66,6 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const inputEnabledRef = useRef(false);
 
   const [inputEnabled, setInputEnabled] = useState(false);
@@ -88,59 +87,73 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
-    fit.fit();
     termRef.current = term;
     fitRef.current = fit;
-
-    // term.cols/rows reflect the just-fitted geometry; carry it so the server reflows the pane
-    // to this viewport before its first capture (no resize message fires when fit is a no-op).
-    const ws = new WebSocket(wsUrl(ticketId, term.cols, term.rows));
-    wsRef.current = ws;
     setExited(false);
 
-    ws.addEventListener("open", () => fit.fit());
-    ws.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return;
-      let payload: unknown;
-      try {
-        payload = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      const parsed = terminalServerMessageSchema.safeParse(payload);
-      if (!parsed.success) return;
-      if (parsed.data.type === "data") term.write(fromBase64(parsed.data.chunk));
-      else setExited(true);
-    });
-    // A dropped socket must disable input and reflect the lost connection, not freeze silently.
-    ws.addEventListener("close", () => setExited(true));
+    let socket: WebSocket | null = null;
+    let dataSub: IDisposable | null = null;
+    let resizeSub: IDisposable | null = null;
 
-    const dataSub = term.onData((data) => {
-      if (!inputEnabledRef.current || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "input", hex: toHex(data) }));
-    });
-    const resizeSub = term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
-    });
+    // Connect only once the pane has a real box. A full-screen TUI is captured by absolute
+    // coordinates, so fitting/seeding while the container is still unsized (detail panel not
+    // laid out yet) makes xterm render the seed and the live stream at the wrong geometry —
+    // garbled and seemingly frozen until a manual resize/remount. Deferring to the first real
+    // size makes the very first frame correct.
+    const connect = (): void => {
+      fit.fit();
+      // term.cols/rows now hold the real viewport; carry it so the server reflows the pane to
+      // this geometry before its first capture (no resize message fires when fit is a no-op).
+      const ws = new WebSocket(wsUrl(ticketId, term.cols, term.rows));
+      socket = ws;
+
+      ws.addEventListener("message", (event) => {
+        if (typeof event.data !== "string") return;
+        let payload: unknown;
+        try {
+          payload = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        const parsed = terminalServerMessageSchema.safeParse(payload);
+        if (!parsed.success) return;
+        if (parsed.data.type === "data") term.write(fromBase64(parsed.data.chunk));
+        else setExited(true);
+      });
+      // A dropped socket must disable input and reflect the lost connection, not freeze silently.
+      ws.addEventListener("close", () => setExited(true));
+
+      dataSub = term.onData((data) => {
+        if (!inputEnabledRef.current || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: "input", hex: toHex(data) }));
+      });
+      resizeSub = term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
+      });
+    };
 
     const observer = new ResizeObserver(() => {
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
+      if (!socket) {
+        connect();
+        return;
+      }
       try {
         fit.fit();
       } catch {
-        // xterm not measurable yet (hidden/zero-size); the next observation refits.
+        // Not measurable this frame; the next observation refits.
       }
     });
     observer.observe(container);
 
     return () => {
       observer.disconnect();
-      dataSub.dispose();
-      resizeSub.dispose();
-      ws.close();
+      dataSub?.dispose();
+      resizeSub?.dispose();
+      socket?.close();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
-      wsRef.current = null;
     };
   }, [ticketId]);
 

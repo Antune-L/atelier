@@ -146,7 +146,7 @@ export function NewTicketDialog({
   };
 
   return (
-    <Modal open={open} onClose={onClose} className="max-w-3xl">
+    <Modal open={open} onClose={onClose} className="max-w-5xl">
       <ModalHeader>
         <ModalTitle>
           {tab === "ticket" ? "Nouveau ticket" : "Reviewer une PR"}
@@ -167,101 +167,107 @@ export function NewTicketDialog({
       ) : (
         <>
           <ModalBody>
-            <div className="space-y-1.5">
-              <Label htmlFor="title">Titre</Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Titre du ticket"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="description">Description (markdown)</Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                onPaste={onPaste}
-                className="min-h-[320px]"
-                placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="project">Projet</Label>
-              <Select
-                id="project"
-                value={project}
-                onChange={(e) => setProjectChoice(e.target.value)}
-                className="w-full"
-              >
-                {projects.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="base-branch">Branche de base du worktree</Label>
-              <Select
-                id="base-branch"
-                value={baseBranch}
-                onChange={(e) => setBaseBranchChoice(e.target.value)}
-                disabled={branches === null}
-                className="w-full"
-              >
-                {branchOptions.map((b) => (
-                  <option key={b} value={b}>
-                    {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2 rounded-md border p-3">
-              <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
-              <ImplementationAgentFields
-                model={model}
-                effort={effort}
-                implementer={implementer}
-                onModelChange={setModel}
-                onEffortChange={setEffort}
-                onImplementerChange={setImplementer}
-              />
-            </div>
-            <label className="flex items-center justify-between gap-2 text-sm">
-              <span>PRD à implémenter (planification avant code)</span>
-              <Switch
-                checked={prdEnabled}
-                onCheckedChange={setPrdEnabled}
-                aria-label="PRD à implémenter"
-              />
-            </label>
-            <label className="flex items-center justify-between gap-2 text-sm">
-              <span>
-                Ouvrir la PR en draft
-                {autoMerge && (
-                  <span className="ml-1 text-xs text-muted-foreground">
-                    (forcé non-draft pour le merge auto)
+            <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
+              <div className="flex flex-col space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="title">Titre</Label>
+                  <Input
+                    id="title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Titre du ticket"
+                  />
+                </div>
+                <div className="flex flex-1 flex-col space-y-1.5">
+                  <Label htmlFor="description">Description (markdown)</Label>
+                  <Textarea
+                    id="description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    onPaste={onPaste}
+                    className="min-h-[320px] flex-1"
+                    placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
+                  />
+                </div>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="project">Projet</Label>
+                  <Select
+                    id="project"
+                    value={project}
+                    onChange={(e) => setProjectChoice(e.target.value)}
+                    className="w-full"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="base-branch">Branche de base du worktree</Label>
+                  <Select
+                    id="base-branch"
+                    value={baseBranch}
+                    onChange={(e) => setBaseBranchChoice(e.target.value)}
+                    disabled={branches === null}
+                    className="w-full"
+                  >
+                    {branchOptions.map((b) => (
+                      <option key={b} value={b}>
+                        {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-2 rounded-md border p-3">
+                  <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
+                  <ImplementationAgentFields
+                    model={model}
+                    effort={effort}
+                    implementer={implementer}
+                    onModelChange={setModel}
+                    onEffortChange={setEffort}
+                    onImplementerChange={setImplementer}
+                  />
+                </div>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>PRD à implémenter (planification avant code)</span>
+                  <Switch
+                    checked={prdEnabled}
+                    onCheckedChange={setPrdEnabled}
+                    aria-label="PRD à implémenter"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ouvrir la PR en draft
+                    {autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        (forcé non-draft pour le merge auto)
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-              <Switch
-                checked={prDraft && !autoMerge}
-                disabled={autoMerge}
-                onCheckedChange={setPrDraft}
-                aria-label="Ouvrir la PR en draft"
-              />
-            </label>
-            <label className="flex items-center justify-between gap-2 text-sm">
-              <span>Merger automatiquement la PR après ouverture</span>
-              <Switch
-                checked={autoMerge}
-                onCheckedChange={setAutoMergeChoice}
-                aria-label="Merge automatique de la PR"
-              />
-            </label>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+                  <Switch
+                    checked={prDraft && !autoMerge}
+                    disabled={autoMerge}
+                    onCheckedChange={setPrDraft}
+                    aria-label="Ouvrir la PR en draft"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Merger automatiquement la PR après ouverture</span>
+                  <Switch
+                    checked={autoMerge}
+                    onCheckedChange={setAutoMergeChoice}
+                    aria-label="Merge automatique de la PR"
+                  />
+                </label>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+              </div>
+            </div>
           </ModalBody>
           <ModalFooter>
             <Button variant="outline" onClick={onClose}>

@@ -106,7 +106,8 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
     <section
       className={cn(
         fill && "flex h-full min-h-0 flex-col",
-        fullscreen && "fixed inset-0 z-[60] flex flex-col bg-background p-4",
+        fullscreen &&
+          "fixed inset-0 z-[60] flex flex-col bg-background p-4 duration-300 animate-in fade-in zoom-in-95",
       )}
     >
       <div className="mb-1 flex items-center justify-between">

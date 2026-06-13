@@ -1,4 +1,4 @@
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Elysia } from "elysia";
@@ -34,38 +34,33 @@ import { WorkerHub } from "./workerHub.ts";
 const DEFAULT_PORT = 52817;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const port = Number(process.env.PORT ?? DEFAULT_PORT);
-const dbPath = process.env.KANBAN_DB ?? join(PROJECT_ROOT, "kanban.db");
-const backendHttp = process.env.BACKEND_HTTP ?? `http://localhost:${port}`;
-const backendWs = process.env.BACKEND_WS ?? `ws://localhost:${port}${WS_PATH_WORKER}`;
-const bunPath = process.execPath;
+/** Subpath, relative to resourcesRoot, holding the built web UI served as a static SPA. */
+const WEB_DIST_SUBPATH = join("dist", "web");
+const SPA_FALLBACK_FILE = "index.html";
 
-const db = createDatabase(dbPath);
-const store = new Store(db);
-const system = createSystemAdapter();
-const clientHub = new ClientHub(store);
-const workerHub = new WorkerHub();
-const notifier = new Notifier(clientHub);
-const triageLog = new LiveLog();
-const terminalManager = new TerminalSessionManager(store, system);
+/**
+ * Boot options. Defaults keep the web/dev path on the repo root for both roots.
+ *
+ * Only the filesystem roots flow through here. The rest of the desktop boot contract is read from
+ * env (set by desktop/bootstrap.applyDesktopEnv before this module is dynamically imported), because
+ * config.ts / system / boot.ts read their env at import time, before opts exist: KANBAN_CONFIG +
+ * KANBAN_DB (writable paths), KANBAN_AGENT_DIST (spawn the bundled worker/hook .js), KANBAN_BUN_PATH
+ * (stock bun via argv0). Web mode leaves all of these unset and inherits the repo-root defaults.
+ */
+export interface StartServerOptions {
+  /** Read-only assets: dist/web, worker.js, hooks, templates (default: repo root). */
+  resourcesRoot?: string;
+  /** Writable data: kanban.db, uploads/, config.json, slots/ (default: repo root). */
+  dataRoot?: string;
+}
 
-const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
-  backendHttp,
-  backendWs,
-  projectRoot: PROJECT_ROOT,
-  bunPath,
-});
-const coordinator = new AgentCoordinator(store, clientHub, workerHub, notifier, slotManager);
-const watchdog = new Watchdog(store, clientHub, notifier);
-
-await runFirstBootSetup(store, system);
-await slotManager.recover();
-watchdog.start();
-
-const composerAvailable = await system.checkComposerAvailable();
-createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
-
-// ---- WebSocket data discriminator ----
+export interface RunningServer {
+  port: number;
+  /** Kill detached tmux sessions backing occupied slots (desktop shutdown only). */
+  teardownSessions(): Promise<void>;
+  /** Stop the HTTP/WS server, the watchdog timer, and close the database. */
+  stop(): void;
+}
 
 type SocketData =
   | { kind: "client" }
@@ -84,82 +79,175 @@ function isTerminalSocket(ws: { data: SocketData }): ws is TerminalSocket {
   return ws.data.kind === "terminal";
 }
 
-const api = createApiRoutes({
-  store,
-  hub: clientHub,
-  slots: slotManager,
-  coordinator,
-  system,
-  triageLog,
-  projectRoot: PROJECT_ROOT,
-  composerAvailable,
-});
+const HTTP_NOT_FOUND = 404;
 
-const app = new Elysia()
-  .use(api)
-  .get("/health", () => ({ ok: true, dryRun: system.dryRun }))
-  .onError(({ error, set }) => {
-    set.status = 500;
-    return { error: error instanceof Error ? error.message : String(error) };
+/**
+ * Serve the built SPA from <resourcesRoot>/dist/web as the LAST fallback, after every
+ * API/WS/uploads/health route has been ruled out. A miss falls back to index.html so the
+ * client-side router owns deep links. Path is normalized + scoped to webDist to bar traversal.
+ */
+async function serveStaticAsset(webDist: string, pathname: string): Promise<Response> {
+  const relative = pathname === "/" ? SPA_FALLBACK_FILE : pathname.replace(/^\/+/, "");
+  const candidate = normalize(join(webDist, relative));
+  if (candidate === webDist || candidate.startsWith(`${webDist}/`)) {
+    const file = Bun.file(candidate);
+    if (await file.exists()) return new Response(file);
+  }
+  const fallback = Bun.file(join(webDist, SPA_FALLBACK_FILE));
+  if (await fallback.exists()) return new Response(fallback);
+  return new Response("not found", { status: HTTP_NOT_FOUND });
+}
+
+/**
+ * Boot the full backend (db/store/hubs/slotManager + Bun.serve) and return the live port plus a
+ * stop() handle. Top-level `await startServer()` keeps the web mode unchanged; the desktop wrapper
+ * calls it with explicit roots after bootstrapping config + env.
+ */
+export async function startServer(opts: StartServerOptions = {}): Promise<RunningServer> {
+  const resourcesRoot = opts.resourcesRoot ?? PROJECT_ROOT;
+  const dataRoot = opts.dataRoot ?? PROJECT_ROOT;
+  const webDist = join(resourcesRoot, WEB_DIST_SUBPATH);
+
+  const port = Number(process.env.PORT ?? DEFAULT_PORT);
+  const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");
+  const backendHttp = process.env.BACKEND_HTTP ?? `http://localhost:${port}`;
+  const backendWs = process.env.BACKEND_WS ?? `ws://localhost:${port}${WS_PATH_WORKER}`;
+  // The bundled Electrobun bun is a stock binary reachable via argv0; the desktop main exports
+  // KANBAN_BUN_PATH so spawned worker/hook processes run under it. Falls back to this runtime.
+  const bunPath = process.env.KANBAN_BUN_PATH ?? process.execPath;
+
+  const db = createDatabase(dbPath);
+  const store = new Store(db);
+  const system = createSystemAdapter();
+  const clientHub = new ClientHub(store);
+  const workerHub = new WorkerHub();
+  const notifier = new Notifier(clientHub);
+  const triageLog = new LiveLog();
+  const terminalManager = new TerminalSessionManager(store, system);
+
+  const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
+    backendHttp,
+    backendWs,
+    projectRoot: resourcesRoot,
+    bunPath,
+  });
+  const coordinator = new AgentCoordinator(store, clientHub, workerHub, notifier, slotManager);
+  const watchdog = new Watchdog(store, clientHub, notifier);
+
+  await runFirstBootSetup(store, system);
+  await slotManager.recover();
+  watchdog.start();
+
+  const composerAvailable = await system.checkComposerAvailable();
+  createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
+
+  const api = createApiRoutes({
+    store,
+    hub: clientHub,
+    slots: slotManager,
+    coordinator,
+    system,
+    triageLog,
+    projectRoot: dataRoot,
+    composerAvailable,
   });
 
-// CORS for the Vite dev server.
-app.onRequest(({ set }) => {
-  set.headers["access-control-allow-origin"] = "*";
-  set.headers["access-control-allow-methods"] = "GET, POST, PATCH, DELETE, OPTIONS";
-  set.headers["access-control-allow-headers"] = "content-type";
-});
-app.options("/*", () => new Response(null, { status: 204 }));
+  const app = new Elysia()
+    .use(api)
+    .get("/health", () => ({ ok: true, dryRun: system.dryRun }))
+    .onError(({ code, error, set, request }) => {
+      // Unmatched GET outside /api → serve the built SPA (static + client-side routing). This is the
+      // final else: /api misses keep their JSON 404, and /ws|/workers|/uploads never reach Elysia.
+      const pathname = new URL(request.url).pathname;
+      if (code === "NOT_FOUND" && request.method === "GET" && !pathname.startsWith("/api")) {
+        return serveStaticAsset(webDist, pathname);
+      }
+      if (code === "NOT_FOUND") {
+        set.status = HTTP_NOT_FOUND;
+        return { error: "NOT_FOUND" };
+      }
+      set.status = 500;
+      return { error: error instanceof Error ? error.message : String(error) };
+    });
 
-const server = Bun.serve<SocketData>({
-  port,
-  async fetch(request, srv) {
-    const url = new URL(request.url);
-    if (url.pathname === WS_PATH_CLIENT) {
-      if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;
-      return new Response("upgrade failed", { status: 426 });
-    }
-    if (url.pathname === WS_PATH_WORKER) {
-      if (srv.upgrade(request, { data: { kind: "worker", ticketId: null, slotId: null } })) return undefined;
-      return new Response("upgrade failed", { status: 426 });
-    }
-    if (url.pathname === WS_PATH_TERMINAL) {
-      const ticketId = url.searchParams.get("ticketId");
-      if (!ticketId) return new Response("ticketId requis", { status: 400 });
-      // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
-      const viewport = terminalViewportSchema.safeParse({
-        cols: url.searchParams.get("cols"),
-        rows: url.searchParams.get("rows"),
-      });
-      const { cols, rows } = viewport.success
-        ? viewport.data
-        : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
-      if (srv.upgrade(request, { data: { kind: "terminal", ticketId, cols, rows } })) return undefined;
-      return new Response("upgrade failed", { status: 426 });
-    }
-    if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
-      return serveUpload(PROJECT_ROOT, url.pathname);
-    }
-    return app.handle(request);
-  },
-  websocket: {
-    open(ws) {
-      if (isClientSocket(ws)) clientHub.add(ws);
-      if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
-    },
-    message(ws, message) {
-      const text = typeof message === "string" ? message : message.toString();
-      if (isWorkerSocket(ws)) void workerHub.handleMessage(ws, text);
-      if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
-    },
-    close(ws) {
-      if (isClientSocket(ws)) clientHub.remove(ws);
-      if (isWorkerSocket(ws)) workerHub.handleClose(ws);
-      if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
-    },
-  },
-});
+  // CORS for the Vite dev server.
+  app.onRequest(({ set }) => {
+    set.headers["access-control-allow-origin"] = "*";
+    set.headers["access-control-allow-methods"] = "GET, POST, PATCH, DELETE, OPTIONS";
+    set.headers["access-control-allow-headers"] = "content-type";
+  });
+  app.options("/*", () => new Response(null, { status: 204 }));
 
-const log = createLogger("server");
-log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
-log.info("WebSocket prêts", { client: WS_PATH_CLIENT, worker: WS_PATH_WORKER, terminal: WS_PATH_TERMINAL });
+  const server = Bun.serve<SocketData>({
+    port,
+    async fetch(request, srv) {
+      const url = new URL(request.url);
+      if (url.pathname === WS_PATH_CLIENT) {
+        if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;
+        return new Response("upgrade failed", { status: 426 });
+      }
+      if (url.pathname === WS_PATH_WORKER) {
+        if (srv.upgrade(request, { data: { kind: "worker", ticketId: null, slotId: null } })) return undefined;
+        return new Response("upgrade failed", { status: 426 });
+      }
+      if (url.pathname === WS_PATH_TERMINAL) {
+        const ticketId = url.searchParams.get("ticketId");
+        if (!ticketId) return new Response("ticketId requis", { status: 400 });
+        // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
+        const viewport = terminalViewportSchema.safeParse({
+          cols: url.searchParams.get("cols"),
+          rows: url.searchParams.get("rows"),
+        });
+        const { cols, rows } = viewport.success
+          ? viewport.data
+          : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
+        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, cols, rows } })) return undefined;
+        return new Response("upgrade failed", { status: 426 });
+      }
+      if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
+        return serveUpload(dataRoot, url.pathname);
+      }
+      // Elysia owns /api, /health and every declared route; an unmatched non-API GET is served the
+      // built SPA from its NOT_FOUND onError handler (the final static fallback).
+      return app.handle(request);
+    },
+    websocket: {
+      open(ws) {
+        if (isClientSocket(ws)) clientHub.add(ws);
+        if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
+      },
+      message(ws, message) {
+        const text = typeof message === "string" ? message : message.toString();
+        if (isWorkerSocket(ws)) void workerHub.handleMessage(ws, text);
+        if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
+      },
+      close(ws) {
+        if (isClientSocket(ws)) clientHub.remove(ws);
+        if (isWorkerSocket(ws)) workerHub.handleClose(ws);
+        if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
+      },
+    },
+  });
+
+  const log = createLogger("server");
+  log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
+  log.info("WebSocket prêts", { client: WS_PATH_CLIENT, worker: WS_PATH_WORKER, terminal: WS_PATH_TERMINAL });
+
+  return {
+    // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
+    port: server.port ?? port,
+    async teardownSessions() {
+      await slotManager.teardownSessions();
+    },
+    stop() {
+      watchdog.stop();
+      server.stop(true);
+      db.close();
+    },
+  };
+}
+
+// Web mode: boot on the repo root. The desktop wrapper imports startServer dynamically instead.
+if (import.meta.main) {
+  await startServer();
+}

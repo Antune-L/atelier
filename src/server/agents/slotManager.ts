@@ -439,6 +439,16 @@ export class SlotManager {
     this.hub.pushTicket(ticket);
   }
 
+  /**
+   * Kill every live tmux session backing an occupied slot. Called on desktop app shutdown so the
+   * detached tmux server (and the `claude` processes it holds) do not leak past the window close.
+   */
+  async teardownSessions(): Promise<void> {
+    for (const slot of this.store.listSlots()) {
+      if (slot.tmuxSession) await this.system.killSession(slot.tmuxSession);
+    }
+  }
+
   // ---- Recovery on boot ----
 
   async recover(): Promise<void> {

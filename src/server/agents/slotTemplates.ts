@@ -119,16 +119,40 @@ export function buildSettingsJson(ctx: SlotTemplateContext): string {
   return JSON.stringify(config, null, 2);
 }
 
-export function resolveTemplatePaths(projectRoot: string): {
+/**
+ * Subdir, relative to resourcesRoot, holding the pre-built worker/hook bundles used in app mode.
+ * A read-only bundle has no node_modules, so `bun <script.ts>` cannot resolve the SDK/zod imports;
+ * we run the deps-inlined `.js` bundles instead. KANBAN_AGENT_DIST opts in (set by the desktop main).
+ */
+const AGENT_DIST_SUBPATH = join("dist", "agents");
+
+interface TemplatePaths {
   workerScriptPath: string;
   preToolUseHookPath: string;
   stopHookPath: string;
   composerScriptPath: string;
-} {
+}
+
+/**
+ * Resolve the agent entrypoints. In dev/web mode they are the source `.ts` (bun resolves deps from
+ * node_modules). When KANBAN_AGENT_DIST=1 (packaged app), the worker + hooks point at the bundled
+ * `.js` under resourcesRoot/dist/agents so they run without a node_modules tree.
+ */
+export function resolveTemplatePaths(projectRoot: string): TemplatePaths {
+  const composerScriptPath = join(projectRoot, "templates", "run_composer.sh");
+  if (process.env.KANBAN_AGENT_DIST === "1") {
+    const agentDist = join(projectRoot, AGENT_DIST_SUBPATH);
+    return {
+      workerScriptPath: join(agentDist, "worker.js"),
+      preToolUseHookPath: join(agentDist, "preToolUse.js"),
+      stopHookPath: join(agentDist, "stopHook.js"),
+      composerScriptPath,
+    };
+  }
   return {
     workerScriptPath: join(projectRoot, "worker", "worker.ts"),
     preToolUseHookPath: join(projectRoot, "templates", "preToolUse.ts"),
     stopHookPath: join(projectRoot, "templates", "stopHook.ts"),
-    composerScriptPath: join(projectRoot, "templates", "run_composer.sh"),
+    composerScriptPath,
   };
 }

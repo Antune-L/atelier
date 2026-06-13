@@ -1,5 +1,7 @@
 node_modules
 dist
+build
+artifacts
 *.log
 data/
 kanban.db

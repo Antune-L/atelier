@@ -149,7 +149,7 @@ export function NewTicketDialog({
     <Modal open={open} onClose={onClose} className="max-w-5xl">
       <ModalHeader>
         <ModalTitle>
-          {tab === "ticket" ? "Nouveau ticket" : "Reviewer une PR"}
+          {tab === "ticket" ? "Nouveau ticket" : "Review une PR"}
         </ModalTitle>
         <div className="mt-3 flex gap-1">
           <TabButton active={tab === "ticket"} onClick={() => setTab("ticket")}>
@@ -207,7 +207,9 @@ export function NewTicketDialog({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="base-branch">Branche de base du worktree</Label>
+                  <Label htmlFor="base-branch">
+                    Branche de base du worktree
+                  </Label>
                   <Select
                     id="base-branch"
                     value={baseBranch}
@@ -217,13 +219,17 @@ export function NewTicketDialog({
                   >
                     {branchOptions.map((b) => (
                       <option key={b} value={b}>
-                        {b === selectedProject?.baseBranch ? `${b} (défaut)` : b}
+                        {b === selectedProject?.baseBranch
+                          ? `${b} (défaut)`
+                          : b}
                       </option>
                     ))}
                   </Select>
                 </div>
                 <div className="space-y-2 rounded-md border p-3">
-                  <h3 className="text-sm font-semibold">Agent d'implémentation</h3>
+                  <h3 className="text-sm font-semibold">
+                    Agent d'implémentation
+                  </h3>
                   <ImplementationAgentFields
                     model={model}
                     effort={effort}

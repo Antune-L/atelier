@@ -168,8 +168,21 @@ export function createApiRoutes(deps: RouteDeps) {
         effort: parsed.data.effort,
         implementer: parsed.data.implementer,
       });
-      hub.pushTicket(ticket);
-      return ticket;
+      if (!parsed.data.start) {
+        hub.pushTicket(ticket);
+        return ticket;
+      }
+      const started = store.updateTicket(ticket.id, { column: "implementing", stage: "queued" });
+      hub.pushTicket(started);
+      // Slot launch does slow git worktree setup; don't block the HTTP response on it.
+      // Kick it off in the background and let the board update live (mirrors the review path).
+      void slots.startTicket(ticket.id).catch((e) => {
+        log.error("démarrage du ticket échoué", {
+          ticketId: ticket.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
+      return started;
     })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);

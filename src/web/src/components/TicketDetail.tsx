@@ -125,6 +125,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.stage !== null &&
     current.stage !== "done";
   const terminalPaneVisible = showTerminal && terminalVisible;
+  // A "todo" card carries config sections (agent, PR options, feasibility) and
+  // never has a terminal: lay it out on two columns so it breathes.
+  const isTodoSplit = current.column === "todo";
   // Escape hatch for a stuck "À implémenter" card: the session spawned but its
   // contract/instruction never landed. Only while actively running — terminal
   // (failed/interrupted/stalled) states already have the "Relancer" button below.
@@ -335,10 +338,18 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
       <div className="flex flex-1 overflow-hidden">
         <div
           className={cn(
-            "min-w-0 flex-1 space-y-4 overflow-y-auto px-6 py-4",
-            !terminalPaneVisible && "mx-auto w-full max-w-4xl",
+            "min-w-0 flex-1 overflow-y-auto px-6 py-4",
+            !terminalPaneVisible && !isTodoSplit && "mx-auto w-full max-w-4xl",
           )}
         >
+        <div
+          className={cn(
+            isTodoSplit
+              ? "grid grid-cols-1 items-start gap-x-6 gap-y-4 lg:grid-cols-2"
+              : "space-y-4",
+          )}
+        >
+        <div className="min-w-0 space-y-4">
         {current.error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
             {current.error}
@@ -392,12 +403,12 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           {editing ? (
             <div className="space-y-2">
               <div className="space-y-1.5">
-                <Label htmlFor="edit-title">Titre</Label>
+                <Label htmlFor="edit-title">Titre (optionnel)</Label>
                 <Input
                   id="edit-title"
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Titre du ticket"
+                  placeholder="Titre du ticket (déduit de la description si vide)"
                 />
               </div>
               <div className="space-y-1.5">
@@ -415,11 +426,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 <p className="text-sm text-destructive">{editError}</p>
               )}
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => void saveEdit()}
-                  disabled={!editTitle.trim()}
-                >
+                <Button size="sm" onClick={() => void saveEdit()}>
                   Enregistrer
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
@@ -431,75 +438,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             descriptionView
           )}
         </section>
-
-        {current.column === "todo" && (
-          <section className="rounded-md border p-3">
-            <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
-            <ImplementationAgentFields
-              model={current.model}
-              effort={current.effort}
-              implementer={current.implementer}
-              onModelChange={setAgentModel}
-              onEffortChange={setAgentEffort}
-              onImplementerChange={setImplementer}
-            />
-            <div className="mt-3">
-              <Button
-                size="sm"
-                disabled={current.triageStatus === "running"}
-                onClick={async () => {
-                  await api.moveTicket(current.id, "implementing");
-                }}
-              >
-                <Rocket className="h-4 w-4" />
-                Lancer l'implémentation
-              </Button>
-            </div>
-          </section>
-        )}
-
-        {current.column === "todo" && (
-          <section className="rounded-md border p-3">
-            <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
-            <div className="space-y-3">
-              <label className="flex items-center justify-between gap-2 text-sm">
-                <span>PRD à implémenter (planification avant code)</span>
-                <Switch
-                  checked={current.prdEnabled}
-                  onCheckedChange={setPrdEnabled}
-                  aria-label="PRD à implémenter"
-                />
-              </label>
-              <label className="flex items-center justify-between gap-2 text-sm">
-                <span>
-                  Ouvrir la PR en draft
-                  {current.autoMerge && (
-                    <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>
-                  )}
-                </span>
-                <Switch
-                  checked={current.prDraft && !current.autoMerge}
-                  disabled={current.autoMerge}
-                  onCheckedChange={setPrDraft}
-                  aria-label="Ouvrir la PR en draft"
-                />
-              </label>
-              <label className="flex items-center justify-between gap-2 text-sm">
-                <span>Merger automatiquement la PR après ouverture</span>
-                <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
-              </label>
-            </div>
-          </section>
-        )}
-
-        {current.column === "todo" && !locked && (
-          <TriageSection
-            ticket={current}
-            onTriage={async () => {
-              await api.triage(ticket.id);
-            }}
-          />
-        )}
 
         {current.prdMarkdown && (
           <section className="rounded-md border bg-muted/30 p-3">
@@ -637,6 +575,77 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             </Button>
           )}
         </section>
+        </div>
+
+        {isTodoSplit && (
+          <div className="min-w-0 space-y-4">
+            <section className="rounded-md border p-3">
+              <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
+              <ImplementationAgentFields
+                model={current.model}
+                effort={current.effort}
+                implementer={current.implementer}
+                onModelChange={setAgentModel}
+                onEffortChange={setAgentEffort}
+                onImplementerChange={setImplementer}
+              />
+              <div className="mt-3">
+                <Button
+                  size="sm"
+                  disabled={current.triageStatus === "running"}
+                  onClick={async () => {
+                    await api.moveTicket(current.id, "implementing");
+                  }}
+                >
+                  <Rocket className="h-4 w-4" />
+                  Lancer l'implémentation
+                </Button>
+              </div>
+            </section>
+
+            <section className="rounded-md border p-3">
+              <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
+              <div className="space-y-3">
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>PRD à implémenter (planification avant code)</span>
+                  <Switch
+                    checked={current.prdEnabled}
+                    onCheckedChange={setPrdEnabled}
+                    aria-label="PRD à implémenter"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ouvrir la PR en draft
+                    {current.autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>
+                    )}
+                  </span>
+                  <Switch
+                    checked={current.prDraft && !current.autoMerge}
+                    disabled={current.autoMerge}
+                    onCheckedChange={setPrDraft}
+                    aria-label="Ouvrir la PR en draft"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Merger automatiquement la PR après ouverture</span>
+                  <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
+                </label>
+              </div>
+            </section>
+
+            {!locked && (
+              <TriageSection
+                ticket={current}
+                onTriage={async () => {
+                  await api.triage(ticket.id);
+                }}
+              />
+            )}
+          </div>
+        )}
+        </div>
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">

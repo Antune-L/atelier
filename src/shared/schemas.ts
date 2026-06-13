@@ -167,7 +167,9 @@ export const createTicketSchema = z
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
 export const updateTicketSchema = z.object({
-  title: z.string().min(1).optional(),
+  // Optional and may be blank: a blank title is derived from the description
+  // server-side, mirroring creation (see deriveTitleFromDescription).
+  title: z.string().optional(),
   description: z.string().optional(),
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),

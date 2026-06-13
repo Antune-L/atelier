@@ -4,6 +4,7 @@ export const COLUMNS = [
   "prd",
   "done",
   "merged",
+  "failed",
   "abandoned",
 ] as const;
 export type Column = (typeof COLUMNS)[number];
@@ -14,6 +15,7 @@ export const COLUMN_LABELS: Record<Column, string> = {
   prd: "PRD à implémenter",
   done: "Fini",
   merged: "PR mergée",
+  failed: "Échec",
   abandoned: "Abandonnés",
 };
 
@@ -23,6 +25,7 @@ export const COLUMN_ORDER: Column[] = [
   "prd",
   "done",
   "merged",
+  "failed",
   "abandoned",
 ];
 

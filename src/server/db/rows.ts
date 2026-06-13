@@ -1,7 +1,15 @@
 import { z } from "zod";
 
 import type { Comment, Slot, Ticket } from "../../shared/schemas.ts";
-import { agentEffortSchema, agentModelSchema, implementerSchema, triageStatusSchema, triageVerdictSchema } from "../../shared/schemas.ts";
+import {
+  agentEffortSchema,
+  agentModelSchema,
+  columnSchema,
+  implementerSchema,
+  stageSchema,
+  triageStatusSchema,
+  triageVerdictSchema,
+} from "../../shared/schemas.ts";
 import { isProjectKey } from "../config.ts";
 
 /**
@@ -62,23 +70,8 @@ const slotRowSchema = z.object({
 });
 export type SlotRow = z.infer<typeof slotRowSchema>;
 
-const ticketColumnSchema = z.enum(["todo", "implementing", "prd", "done", "merged", "abandoned"]);
-const ticketStageSchema = z
-  .enum([
-    "queued",
-    "planning",
-    "awaiting_answers",
-    "implementing",
-    "reviewing",
-    "fixing",
-    "testing",
-    "opening_pr",
-    "done",
-    "failed",
-    "interrupted",
-    "stalled",
-  ])
-  .nullable();
+const ticketColumnSchema = columnSchema;
+const ticketStageSchema = stageSchema.nullable();
 const projectSchema = z.string().refine(isProjectKey, { message: "projet inconnu" });
 const slotStatusSchema = z.enum(["free", "busy", "stalled", "interrupted", "failed"]);
 

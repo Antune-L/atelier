@@ -313,9 +313,10 @@ export class SlotManager {
     log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
-    let column: Column = "done";
+    // Review tickets land in their own "PR reviewed" column instead of the generic "done".
+    let column: Column = ticket.kind === "review" ? "reviewed" : "done";
     let mergeError: string | null = null;
-    if (ticket.autoMerge) {
+    if (ticket.autoMerge && ticket.kind !== "review") {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl);
       if (merge.ok) {

@@ -268,7 +268,7 @@ export class SlotManager {
     let mergeError: string | null = null;
     if (ticket.autoMerge) {
       log.info("auto-merge de la PR", { ticketId, prUrl });
-      const merge = await this.system.mergePr(path, prUrl);
+      const merge = await this.system.mergePr(path, ticket.branch, prUrl);
       if (merge.ok) {
         column = "merged";
         this.store.logEvent(ticketId, "auto_merged", { prUrl });

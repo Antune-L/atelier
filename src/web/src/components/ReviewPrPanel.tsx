@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -30,8 +29,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const [prs, setPrs] = useState<OpenPr[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [depth, setDepth] = useState<ReviewDepth>("light");
-  const [postComments, setPostComments] = useState(true);
+  const [depth, setDepth] = useState<ReviewDepth>("full");
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (key: string): Promise<void> => {
@@ -76,7 +74,8 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
     setError(null);
     try {
       const chosen = prs.filter((p) => selected.has(p.number));
-      await api.createReviews({ project, depth, postComments, prs: chosen });
+      // Posting inline comments on GitHub is now the default behaviour for every review.
+      await api.createReviews({ project, depth, postComments: true, prs: chosen });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec du lancement de la revue");
@@ -125,25 +124,15 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
 
       <div className="max-h-[320px] overflow-y-auto">{list}</div>
 
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="space-y-1.5">
-          <Label htmlFor="review-depth">Profondeur</Label>
-          <Select
-            id="review-depth"
-            value={depth}
-            onChange={(e) => setDepth(reviewDepthSchema.parse(e.target.value))}
-          >
-            {REVIEW_DEPTHS.map((d) => (
-              <option key={d} value={d}>
-                {REVIEW_DEPTH_LABELS[d]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Switch checked={postComments} onCheckedChange={setPostComments} aria-label="Poster sur GitHub" />
-          <span>Poster les commentaires sur GitHub</span>
-        </label>
+      <div className="space-y-1.5">
+        <Label htmlFor="review-depth">Profondeur</Label>
+        <Select id="review-depth" value={depth} onChange={(e) => setDepth(reviewDepthSchema.parse(e.target.value))}>
+          {REVIEW_DEPTHS.map((d) => (
+            <option key={d} value={d}>
+              {REVIEW_DEPTH_LABELS[d]}
+            </option>
+          ))}
+        </Select>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

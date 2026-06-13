@@ -167,7 +167,7 @@ export function createApiRoutes(deps: RouteDeps) {
       hub.pushTicket(ticket);
       return ticket;
     })
-    .post("/reviews", async ({ body, set }) => {
+    .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
@@ -184,7 +184,14 @@ export function createApiRoutes(deps: RouteDeps) {
           postComments: parsed.data.postComments,
         });
         hub.pushTicket(ticket);
-        await slots.startTicket(ticket.id);
+        // Slot launch does slow git worktree setup; don't block the HTTP response on it
+        // (it kept the dialog open). Kick it off in the background and let the board update live.
+        void slots.startTicket(ticket.id).catch((e) => {
+          log.error("démarrage de la review échoué", {
+            ticketId: ticket.id,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
         created.push(ticket);
       }
       return created;

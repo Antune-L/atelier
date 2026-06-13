@@ -22,7 +22,7 @@
     "build:agents": "bun run build:worker && bun run build:hooks",
     "build:desktop": "bun run build:web && bun run build:agents && electrobun build",
     "dev:desktop": "bun run build:web && bun run build:agents && electrobun dev",
-    "link:desktop-data": "DATA=\"$HOME/Library/Application Support/kanban-agents\"; mkdir -p \"$DATA\" && rm -f \"$DATA/config.json\" \"$DATA/kanban.db\" \"$DATA/kanban.db-wal\" \"$DATA/kanban.db-shm\" && ln -s \"$PWD/config.json\" \"$DATA/config.json\" && ln -s \"$PWD/kanban-real.db\" \"$DATA/kanban.db\" && echo \"Linked desktop data to repo: config.json + kanban-real.db\"",
+    "link:desktop-data": "DATA=\"$HOME/Library/Application Support/kanban-agents\"; mkdir -p \"$DATA\" uploads && rm -f \"$DATA/config.json\" \"$DATA/kanban.db\" \"$DATA/kanban.db-wal\" \"$DATA/kanban.db-shm\" && rm -rf \"$DATA/uploads\" && ln -s \"$PWD/config.json\" \"$DATA/config.json\" && ln -s \"$PWD/kanban-real.db\" \"$DATA/kanban.db\" && ln -s \"$PWD/uploads\" \"$DATA/uploads\" && echo \"Linked desktop data to repo: config.json + kanban-real.db + uploads/\"",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "bun test"

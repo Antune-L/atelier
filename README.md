@@ -66,10 +66,10 @@ Contrairement au mode web, l'app desktop lit/écrit son **propre** `config.json`
 Pour partager les données avec `bun run real` (même base + même config) :
 
 ```bash
-bun run link:desktop-data   # symlink AppSupport → config.json + kanban-real.db du repo
+bun run link:desktop-data   # symlink AppSupport → config.json + kanban-real.db + uploads/ du repo
 ```
 
-- L'app desktop et `bun run real` partagent alors `kanban-real.db` (le WAL SQLite suit le symlink).
+- L'app desktop et `bun run real` partagent alors `kanban-real.db` (le WAL SQLite suit le symlink), la config et le dossier `uploads/` (les chemins d'upload stockés en base sont absolus, donc le partage du dossier est nécessaire).
 - ⚠️ Les deux + `bun run dev` veulent **le port 52817** : un seul process à la fois → la base partagée fait office de sync.
 - `bun run dev` reste un bac à sable dry-run séparé sur `./kanban.db`.
 - Les symlinks utilisent des chemins absolus : relancer le script si le repo est déplacé.

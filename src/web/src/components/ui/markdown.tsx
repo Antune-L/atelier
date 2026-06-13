@@ -20,12 +20,15 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
+/** Parses markdown to sanitized HTML. Exposed so annotation overlays can post-process the same output. */
+export function renderMarkdownToSafeHtml(content: string): string {
+  const parsed = marked.parse(content, { async: false });
+  return DOMPurify.sanitize(parsed);
+}
+
 /** Renders trusted-but-sanitized markdown as styled HTML. Storage stays markdown. */
 export function Markdown({ content, className }: MarkdownProps) {
-  const html = useMemo(() => {
-    const parsed = marked.parse(content, { async: false });
-    return DOMPurify.sanitize(parsed);
-  }, [content]);
+  const html = useMemo(() => renderMarkdownToSafeHtml(content), [content]);
 
   return (
     <div

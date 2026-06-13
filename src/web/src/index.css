@@ -107,4 +107,15 @@
   .markdown hr {
     @apply my-3 border-border;
   }
+
+  /* PRD annotation markers (PrdReviewDialog): highlighted quote + numbered pin. */
+  .prd-annotation {
+    @apply cursor-pointer rounded bg-warning/30 px-0.5 text-foreground transition-colors;
+  }
+  .prd-annotation.is-active {
+    @apply bg-warning/60;
+  }
+  .prd-annotation-pin {
+    @apply ml-0.5 rounded-full bg-warning px-1 align-super text-[10px] font-semibold text-warning-foreground no-underline;
+  }
 }

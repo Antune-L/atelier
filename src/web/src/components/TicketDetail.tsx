@@ -1,4 +1,4 @@
-import { Cpu, Eye, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Cpu, Eye, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useState } from "react";
 
 import type {
@@ -29,6 +29,7 @@ import {
   ModalHeader,
   ModalTitle,
 } from "@/components/ui/modal";
+import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
@@ -86,6 +87,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
+  const [prdDialogOpen, setPrdDialogOpen] = useState(false);
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -256,13 +258,23 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     refresh();
   };
 
+  const validatePrdWithNote = async (note: string): Promise<void> => {
+    await api.validatePrd(ticket.id, note);
+    refresh();
+  };
+
+  const requestPrdChanges = async (message: string): Promise<void> => {
+    await api.addComment(ticket.id, { body: message, questionId: null });
+    refresh();
+  };
+
   return (
     <Modal
       open
       onClose={onClose}
       side="right"
       fullWidth
-      disableEscape={hasUncommittedText}
+      disableEscape={hasUncommittedText || prdDialogOpen}
     >
       <ModalHeader>
         <div className="flex items-start justify-between gap-3">
@@ -489,7 +501,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           <section className="rounded-md border bg-muted/30 p-3">
             {current.column === "prd" ? (
               <>
-                <h3 className="mb-1 text-sm font-semibold">PRD proposé</h3>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold">PRD proposé</h3>
+                  <Button variant="ghost" size="sm" onClick={() => setPrdDialogOpen(true)}>
+                    <Maximize2 className="h-4 w-4" />
+                    Agrandir & annoter
+                  </Button>
+                </div>
                 <div className="max-h-64 overflow-y-auto">
                   <Markdown content={current.prdMarkdown} />
                 </div>
@@ -506,8 +524,19 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               </>
             ) : (
               <details>
-                <summary className="cursor-pointer text-sm font-semibold">
+                <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
                   PRD validé
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setPrdDialogOpen(true);
+                    }}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                    Agrandir
+                  </Button>
                 </summary>
                 <div className="mt-2 max-h-64 overflow-y-auto">
                   <Markdown content={current.prdMarkdown} />
@@ -685,6 +714,16 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         onCancel={() => setMoveError(null)}
         onConfirm={() => setMoveError(null)}
       />
+      {prdDialogOpen && current.prdMarkdown && (
+        <PrdReviewDialog
+          open
+          prdMarkdown={current.prdMarkdown}
+          actionable={current.column === "prd"}
+          onClose={() => setPrdDialogOpen(false)}
+          onValidate={validatePrdWithNote}
+          onRequestChanges={requestPrdChanges}
+        />
+      )}
     </Modal>
   );
 }

@@ -155,8 +155,12 @@ export class AgentCoordinator {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;
 
-    // A turn that legitimately parks on an unanswered question is not stalled.
-    const waitingOnUser = ticket.stage === "awaiting_answers" && ticket.pendingQuestions > 0;
+    // A turn that legitimately parks on the user is not stalled: either an unanswered
+    // question, or a submitted PRD awaiting validation/feedback (column "prd"). The
+    // watchdog (lastProgressAt) still catches a genuinely dead session.
+    const waitingOnUser =
+      ticket.stage === "awaiting_answers" &&
+      (ticket.pendingQuestions > 0 || ticket.column === "prd");
     if (waitingOnUser) return;
 
     // Otherwise the turn must have ended in an active/awaiting stage to warrant escalation.
@@ -195,16 +199,18 @@ export class AgentCoordinator {
 
   /**
    * User validated the PRD. The session stays alive but, for a Claude implementer,
-   * the contract has it delegate the implementation to a fresh-context sub-agent
-   * rather than coding inline — the note reinforces that at the moment it acts.
+   * the contract has it delegate the implementation to a fresh-context sub-agent.
+   * If the user provided a note (annotations), it takes priority; otherwise the
+   * delegation instruction is used for Claude implementers.
    */
-  validatePrd(ticketId: string): void {
+  validatePrd(ticketId: string, note = ""): void {
     const existing = this.store.getTicket(ticketId);
-    const note =
-      existing?.implementer === "claude"
+    const resolvedNote =
+      note ||
+      (existing?.implementer === "claude"
         ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
-        : "";
-    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note });
+        : "");
+    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
     const ticket = this.store.updateTicket(ticketId, { column: "implementing", stage: "implementing" });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "prd_validated", {});

@@ -39,7 +39,7 @@ const projectConfigSchema = z.object({
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
-const DEFAULT_MODELS = { implement: "opus", triage: "sonnet", implementEffort: "xhigh" } as const;
+const DEFAULT_MODELS = { implement: "opus", triage: "sonnet", implementEffort: "medium" } as const;
 
 const configSchema = z.object({
   projects: z.record(z.string(), projectConfigSchema),
@@ -50,7 +50,7 @@ const configSchema = z.object({
       /** Model used for the read-only feasibility triage. */
       triage: z.string().min(1),
       /** Default reasoning effort of the orchestrator session (per-ticket override wins). */
-      implementEffort: z.enum(AGENT_EFFORTS).default("xhigh"),
+      implementEffort: z.enum(AGENT_EFFORTS).default("medium"),
     })
     .default(DEFAULT_MODELS),
   /** Root holding the fixed per-slot worktrees (default: <repo>/slots). */

@@ -15,7 +15,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
 
-import type { SlotManager } from "./slotManager.ts";
+import { CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
 
 const log = createLogger("coordinator");
 
@@ -54,6 +54,7 @@ export class AgentCoordinator {
 
   private async onToolCall(ctx: ToolCallContext): Promise<ToolResult> {
     this.markProgress(ctx.ticketId);
+    this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
     switch (ctx.name) {
       case "update_stage":
@@ -205,6 +206,12 @@ export class AgentCoordinator {
   forwardComment(ticketId: string, body: string): void {
     const delivered = this.workerHub.sendEvent(ticketId, { type: "user_comment", body });
     if (delivered) this.store.logEvent(ticketId, "user_comment_forwarded", {});
+  }
+
+  /** Ack contract delivery on the first protocol tool call; idempotent (logged once per ticket). */
+  private ackContract(ticketId: string): void {
+    if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
+    this.store.logEvent(ticketId, CONTRACT_ACKED_EVENT, {});
   }
 
   private markProgress(ticketId: string): void {

@@ -36,6 +36,14 @@ export interface PrepareSlotFiles {
   settingsJson: string;
 }
 
+export interface ReviewDoneOptions {
+  /**
+   * When set, the gate also requires a review posted by the current gh user at or after this
+   * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
+   */
+  requirePostedSince: number | null;
+}
+
 export interface SystemAdapter {
   readonly dryRun: boolean;
 
@@ -63,8 +71,8 @@ export interface SystemAdapter {
 
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
-  /** Review done() gate: the reviewed PR still exists (no branch push / clean-tree check). */
-  verifyReviewDone(slotPath: string, prUrl: string): Promise<DoneGateResult>;
+  /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
+  verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult>;
 
   // ---- PR listing (review entry point) ----
   /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */

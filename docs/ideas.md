@@ -16,17 +16,6 @@
 - Après implémentation du PRD : envoyer un message (via Slack, Email, à voir) qui contient le contenu du PRD afin d'avoir une sauvegarde du plan
 - PRD : envoyer toutes les questions ou 10 par 10
 - Dans TODO: ajouter un + à côté du nombre de ticket pour ajouter un nouveau ticket
-
-#### V1.01
-
-- Nouvelle tab qui permet de lancer argus en autonomie sur les PRs qui ont besoin de review
-  - Pour Sofrapa ou FFTir pour l'instant. Les variables doivent être configurables dans un fichier de config assez facilement ou importés depuis un fichier d'env, à trancher.
-  - Récupérer les PRs ouvertes sur GitHub via l'API ou CLI
-  - Chaque review occupe un slot afin d'avoir un worktree et pouvoir faire l'analyse du code.
-  - Pouvoir choisir ou non de mettre en light ou full
-  - Mettre directement les commentaires sur GitHub via CLI
-  - Choisir quel PR on veut reviewer
-  - Voir la progression
 - Avoir un menu actions avec plusieurs boutons "généraux"
   - Avoir un bouton qui envoie un agent avec un skill très précis qui analyse les dernières utilisations des différents skills afin de les améliorer et les rendre plus performants. ie argus : regarder les dernières PRs et les résultats.
 
@@ -69,3 +58,11 @@
 - (DONE) Colonne « PR mergée » repliable → nouvelle colonne `merged` (le bouton « PR mergée » y range la carte au lieu de l'archiver, elle reste visible), repli persistant (`localStorage`), repliée par défaut ; toutes les colonnes repliables (barre verticale étroite, reste cible de drop)
 - (DONE) Drawer de suivi en pleine page, 2 colonnes → `Modal` `fullWidth`, infos à gauche / terminal à droite (`TerminalView` `fill` pleine hauteur), bouton masquer/afficher le terminal (persisté, infos centrées quand masqué) + bouton ✕ fermer (le clic sur le fond ne ferme plus en pleine largeur)
 - (DONE) Pouvoir déléguer l'implémentation à Composer 2.5 (option qu'on pourrait choisir, genre combo)
+- (DONE) Nouvelle tab qui permet de lancer argus en autonomie sur les PRs qui ont besoin de review
+  - Pour Sofrapa ou FFTir pour l'instant. Les variables doivent être configurables dans un fichier de config assez facilement ou importés depuis un fichier d'env, à trancher.
+  - Récupérer les PRs ouvertes sur GitHub via l'API ou CLI
+  - Chaque review occupe un slot afin d'avoir un worktree et pouvoir faire l'analyse du code.
+  - Pouvoir choisir ou non de mettre en light ou full
+  - Mettre directement les commentaires sur GitHub via CLI
+  - Choisir quel PR on veut reviewer
+  - Voir la progression

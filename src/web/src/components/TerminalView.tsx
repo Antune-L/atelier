@@ -12,6 +12,8 @@ interface TerminalViewProps {
   variant?: TerminalVariant;
   /** Stretch to fill the parent's height instead of capping at 60vh. */
   fill?: boolean;
+  /** Chrome-less, non-interactive thumbnail (no header, no fullscreen) for embedding in a card. */
+  compact?: boolean;
 }
 
 interface TerminalData {
@@ -20,6 +22,8 @@ interface TerminalData {
 }
 
 const POLL_INTERVAL_MS = 2000;
+/** Compact previews are glanceable thumbnails, and several render at once — poll them less often. */
+const COMPACT_POLL_INTERVAL_MS = 4000;
 
 /** Distance (px) from the bottom within which the view is still considered "pinned". */
 const BOTTOM_THRESHOLD_PX = 24;
@@ -43,7 +47,7 @@ async function fetchTerminal(variant: TerminalVariant, ticketId: string): Promis
 }
 
 /** Read-only live view of an agent tmux pane or a triage analysis stream. */
-export function TerminalView({ ticketId, variant = "agent", fill = false }: TerminalViewProps) {
+export function TerminalView({ ticketId, variant = "agent", fill = false, compact = false }: TerminalViewProps) {
   const [data, setData] = useState<TerminalData>({ output: "", phase: null });
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -57,12 +61,14 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
   };
 
-  // Poll the relevant endpoint every 2s while this component is mounted (visible).
+  // Poll the relevant endpoint while mounted; skip while the tab is hidden so a backgrounded
+  // Agents view (many previews) issues no requests, and refetch immediately on return.
   useEffect(() => {
     // A fresh stream starts pinned so its first output scrolls into view.
     pinnedToBottom.current = true;
     let active = true;
     const poll = async (): Promise<void> => {
+      if (document.hidden) return;
       try {
         const next = await fetchTerminal(variant, ticketId);
         if (!active) return;
@@ -73,12 +79,17 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), POLL_INTERVAL_MS);
+    const timer = setInterval(() => void poll(), compact ? COMPACT_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
+    const onVisible = (): void => {
+      if (!document.hidden) void poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [ticketId, variant]);
+  }, [ticketId, variant, compact]);
 
   // Follow new output only when the user is still pinned to the bottom.
   useEffect(() => {
@@ -101,6 +112,18 @@ export function TerminalView({ ticketId, variant = "agent", fill = false }: Term
 
   // While a setup phase shows, the phase line already explains the empty pane.
   const placeholder = data.phase ? "" : EMPTY_HINTS[variant];
+
+  if (compact) {
+    return (
+      <pre
+        ref={preRef}
+        aria-label={`${TITLES[variant]} (aperçu)`}
+        className="pointer-events-none h-full min-h-0 w-full flex-1 overflow-hidden rounded-md bg-[#001219] p-2 font-mono text-[10px] leading-snug text-[#94d2bd]"
+      >
+        {error ?? (data.output || placeholder)}
+      </pre>
+    );
+  }
 
   return (
     <section

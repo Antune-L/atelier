@@ -106,6 +106,9 @@ export const STAGE_LABELS: Record<Stage, string> = {
   stalled: "Bloqué",
 };
 
+/** Stages where the pipeline has stopped: the run is over or dead (slot may still be held). */
+export const TERMINAL_STAGES: Stage[] = ["done", "failed", "interrupted", "stalled"];
+
 /** Stages where the pipeline is actively running (not terminal, not waiting on user). */
 export const ACTIVE_STAGES: Stage[] = [
   "queued",

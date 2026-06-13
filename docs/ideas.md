@@ -12,10 +12,8 @@
 - Quand on appuie sur le bouton pour copier le nom du slot, y'a pas de toast pour dire que c'est bien copié.
   - Est-ce que c'est possible d'ouvrir directement le terminal ? Ou c'est bloqué par le navigateur ? (ça serait top de pouvoir ouvrir le terminal directement depuis l'interface)
 - Si le ticket failed, le mettre directement dans la bonne colonne.
-- Lorsque je clique la notification, ça doit focus sur le navigateur.
 - Après implémentation du PRD : envoyer un message (via Slack, Email, à voir) qui contient le contenu du PRD afin d'avoir une sauvegarde du plan
 - PRD : envoyer toutes les questions ou 10 par 10
-- Dans TODO: ajouter un + à côté du nombre de ticket pour ajouter un nouveau ticket
 - Avoir un menu actions avec plusieurs boutons "généraux"
   - Avoir un bouton qui envoie un agent avec un skill très précis qui analyse les dernières utilisations des différents skills afin de les améliorer et les rendre plus performants. ie argus : regarder les dernières PRs et les résultats.
 
@@ -25,6 +23,8 @@
 
 ## DONE
 
+- (DONE) Dans TODO: ajouter un + à côté du nombre de ticket pour ajouter un nouveau ticket
+- (DONE) Lorsque je clique la notification, ça doit focus sur le navigateur.
 - (DONE) Ports atypiques pour éviter les conflits → backend `52817` (`DEFAULT_PORT`), frontend Vite `52818` (`DEV_PORT`), proxy `/api` + `/ws` câblés
 - (DONE) Timestamp dans les commentaires → `formatDateTime(createdAt)` affiché dans l'en-tête de chaque commentaire (`CommentRow`)
 - (DONE) Favicon en lien avec le projet → `src/web/public/favicon.svg` (kanban dans la palette Atelier), lié dans `index.html`

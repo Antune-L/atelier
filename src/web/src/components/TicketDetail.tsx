@@ -33,6 +33,7 @@ import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
+import { LiveTerminal } from "@/components/LiveTerminal";
 import { TerminalView } from "@/components/TerminalView";
 import {
   finishedKindLabel,
@@ -640,7 +641,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
-            <TerminalView ticketId={current.id} fill />
+            <LiveTerminal ticketId={current.id} fill />
           </div>
         )}
       </div>

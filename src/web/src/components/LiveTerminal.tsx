@@ -1,0 +1,233 @@
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import { Keyboard, Maximize2, Minimize2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+import "@xterm/xterm/css/xterm.css";
+
+import { terminalServerMessageSchema } from "@shared/schemas";
+
+import { cn } from "@/lib/utils";
+
+interface LiveTerminalProps {
+  ticketId: string;
+  /** Stretch to fill the parent's height instead of capping at 60vh. */
+  fill?: boolean;
+}
+
+const TITLE = "Terminal";
+const TERMINAL_FONT_SIZE = 12;
+const TERMINAL_SCROLLBACK = 5000;
+/** Shared background so the xterm theme and the wrapper never desync. */
+const TERMINAL_BG = "#001219";
+
+const TERMINAL_THEME = {
+  background: TERMINAL_BG,
+  foreground: "#94d2bd",
+  cursor: "#94d2bd",
+  cursorAccent: TERMINAL_BG,
+} as const;
+
+const textEncoder = new TextEncoder();
+
+function wsUrl(ticketId: string): string {
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${location.host}/ws/terminal?ticketId=${encodeURIComponent(ticketId)}`;
+}
+
+/** UTF-8 string of keystrokes → hex byte string for `tmux send-keys -H`. */
+function toHex(data: string): string {
+  let hex = "";
+  for (const byte of textEncoder.encode(data)) hex += byte.toString(16).padStart(2, "0");
+  return hex;
+}
+
+function badgeLabelFor(exited: boolean, inputActive: boolean): string {
+  if (exited) return "session terminée";
+  if (inputActive) return "saisie active";
+  return "lecture seule";
+}
+
+/** base64 pane chunk → bytes for xterm.write (handles partial UTF-8 across writes). */
+function fromBase64(chunk: string): Uint8Array {
+  const binary = atob(chunk);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Interactive live view of an agent's tmux pane over `/ws/terminal`: streams ANSI output
+ * into xterm.js and relays keystrokes/resize back. Input is off by default (co-control,
+ * so toggling it sends no signal to the agent); the pane keeps running either way.
+ */
+export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const inputEnabledRef = useRef(false);
+
+  const [inputEnabled, setInputEnabled] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [exited, setExited] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const term = new Terminal({
+      convertEol: false,
+      fontSize: TERMINAL_FONT_SIZE,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      theme: { ...TERMINAL_THEME },
+      scrollback: TERMINAL_SCROLLBACK,
+      cursorBlink: true,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.open(container);
+    fit.fit();
+    termRef.current = term;
+    fitRef.current = fit;
+
+    const ws = new WebSocket(wsUrl(ticketId));
+    wsRef.current = ws;
+    setExited(false);
+
+    ws.addEventListener("open", () => fit.fit());
+    ws.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") return;
+      let payload: unknown;
+      try {
+        payload = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const parsed = terminalServerMessageSchema.safeParse(payload);
+      if (!parsed.success) return;
+      if (parsed.data.type === "data") term.write(fromBase64(parsed.data.chunk));
+      else setExited(true);
+    });
+    // A dropped socket must disable input and reflect the lost connection, not freeze silently.
+    ws.addEventListener("close", () => setExited(true));
+
+    const dataSub = term.onData((data) => {
+      if (!inputEnabledRef.current || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "input", hex: toHex(data) }));
+    });
+    const resizeSub = term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    });
+
+    const observer = new ResizeObserver(() => {
+      try {
+        fit.fit();
+      } catch {
+        // xterm not measurable yet (hidden/zero-size); the next observation refits.
+      }
+    });
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+      dataSub.dispose();
+      resizeSub.dispose();
+      ws.close();
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      wsRef.current = null;
+    };
+  }, [ticketId]);
+
+  // Refit after the layout settles when toggling fullscreen.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        fitRef.current?.fit();
+      } catch {
+        // Not measurable yet; ResizeObserver will catch up.
+      }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fullscreen]);
+
+  // Keep the onData handler's flag current and focus the pane when input is enabled.
+  useEffect(() => {
+    inputEnabledRef.current = inputEnabled && !exited;
+    if (inputEnabled && !exited) termRef.current?.focus();
+  }, [inputEnabled, exited]);
+
+  // Escape exits fullscreen without bubbling to the drawer's own Escape handler.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [fullscreen]);
+
+  const inputActive = inputEnabled && !exited;
+  const badgeLabel = badgeLabelFor(exited, inputActive);
+
+  return (
+    <section
+      className={cn(
+        fill && "flex h-full min-h-0 flex-col",
+        fullscreen && "fixed inset-0 z-[60] flex flex-col bg-background p-4",
+      )}
+    >
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold">{TITLE}</h3>
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase",
+              inputActive ? "bg-info/20 text-info" : "bg-muted text-muted-foreground",
+            )}
+          >
+            {badgeLabel}
+          </span>
+          <button
+            type="button"
+            onClick={() => setInputEnabled((v) => !v)}
+            disabled={exited}
+            className={cn(
+              "transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40",
+              inputActive ? "text-info" : "text-muted-foreground",
+            )}
+            aria-label={inputActive ? "Désactiver la saisie" : "Activer la saisie"}
+            aria-pressed={inputActive}
+            title={inputActive ? "Saisie active (cliquer pour repasser en lecture seule)" : "Activer la saisie"}
+          >
+            <Keyboard className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setFullscreen((v) => !v)}
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            aria-label={fullscreen ? "Réduire le terminal" : "Agrandir le terminal"}
+            title={fullscreen ? "Réduire" : "Plein écran"}
+          >
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+      <div
+        ref={containerRef}
+        role="group"
+        aria-label={`${TITLE} interactif`}
+        style={{ backgroundColor: TERMINAL_BG }}
+        className={cn(
+          "overflow-hidden rounded-md p-2",
+          fullscreen || fill ? "min-h-0 flex-1" : "h-[60vh] min-h-[12rem]",
+        )}
+      />
+    </section>
+  );
+}

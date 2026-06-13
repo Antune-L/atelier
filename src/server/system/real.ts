@@ -1,14 +1,16 @@
 import { $ } from "bun";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
   SpawnTmuxOptions,
@@ -186,7 +188,9 @@ export class RealSystemAdapter implements SystemAdapter {
     // tmux kills the session when its root command exits, taking the error output
     // with it. Keep the pane alive after a crash so capture-pane can show why.
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
-    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} ${envFlags} ${wrapped}`.quiet();
+    // -x/-y fix the detached pane size; without it an unattached session is 80×24
+    // and the live terminal can't reflow to the viewer's xterm width.
+    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
     void this.acceptDevChannelsDialog(opts.sessionName);
   }
 
@@ -214,6 +218,27 @@ export class RealSystemAdapter implements SystemAdapter {
   async capturePane(sessionName: string): Promise<string> {
     const res = await $`tmux capture-pane -pt ${sessionName} -S -200`.nothrow().quiet();
     return res.exitCode === 0 ? res.stdout.toString() : "";
+  }
+
+  async capturePaneAnsi(sessionName: string): Promise<string> {
+    const res = await $`tmux capture-pane -e -p -t ${sessionName} -S -200`.nothrow().quiet();
+    return res.exitCode === 0 ? res.stdout.toString() : "";
+  }
+
+  async openPaneStream(sessionName: string): Promise<PaneStream> {
+    return RealPaneStream.open(sessionName);
+  }
+
+  async sendKeysRaw(sessionName: string, hexBytes: string): Promise<void> {
+    const pairs = hexBytes.match(/.{2}/g);
+    if (!pairs || pairs.length === 0) return;
+    // `-H` reads each argument as a literal hex byte, so multi-byte UTF-8 and control
+    // keys (arrows, Ctrl-C, Esc) reach the pane process without any key-name mapping.
+    await $`tmux send-keys -H -t ${sessionName} ${pairs}`.nothrow().quiet();
+  }
+
+  async resizePane(sessionName: string, cols: number, rows: number): Promise<void> {
+    await $`tmux resize-window -t ${sessionName} -x ${cols} -y ${rows}`.nothrow().quiet();
   }
 
   async verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
@@ -422,6 +447,73 @@ export class RealSystemAdapter implements SystemAdapter {
       }
     }
     return false;
+  }
+}
+
+/** Monotonic suffix so concurrent streams on the same session never collide on a FIFO path. */
+let fifoSeq = 0;
+
+/**
+ * Live pane output via `pipe-pane`. tmux writes to a FIFO through a shell it owns
+ * (not a child of this process), so output must transit the FIFO: a `cat` reader
+ * here drains it. `close()` stops the pipe, kills the reader, and unlinks the FIFO.
+ */
+class RealPaneStream implements PaneStream {
+  private closed = false;
+
+  private constructor(
+    private readonly sessionName: string,
+    private readonly fifoPath: string,
+    private readonly proc: Bun.Subprocess<"ignore", "pipe", "ignore">,
+    private readonly stdout: ReadableStream<Uint8Array>,
+  ) {}
+
+  static async open(sessionName: string): Promise<RealPaneStream> {
+    fifoSeq += 1;
+    const fifoPath = join(tmpdir(), `kanban-term-${sessionName}-${process.pid}-${fifoSeq}.fifo`);
+    await $`rm -f ${fifoPath}`.nothrow().quiet();
+    await $`mkfifo ${fifoPath}`.quiet();
+    // The pane may leak secrets/env; on a shared /tmp keep the FIFO owner-only.
+    await $`chmod 600 ${fifoPath}`.nothrow().quiet();
+    try {
+      // Without `-o` this always replaces any stale pipe, so a crashed prior viewer
+      // can't leave a dangling writer attached to the pane.
+      await $`tmux pipe-pane -t ${sessionName} ${`cat >> ${fifoPath}`}`.nothrow().quiet();
+      const proc = Bun.spawn(["cat", fifoPath], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+      return new RealPaneStream(sessionName, fifoPath, proc, proc.stdout);
+    } catch (error) {
+      // Spawn failed after pipe-pane attached: detach it and remove the FIFO so nothing leaks.
+      await $`tmux pipe-pane -t ${sessionName}`.nothrow().quiet();
+      await $`rm -f ${fifoPath}`.nothrow().quiet();
+      throw error;
+    }
+  }
+
+  get chunks(): AsyncIterable<Uint8Array> {
+    const stream = this.stdout;
+    return {
+      async *[Symbol.asyncIterator]() {
+        const reader = stream.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) yield value;
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    };
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    // No argument = stop piping this pane (closes tmux's FIFO writer → our reader gets EOF).
+    await $`tmux pipe-pane -t ${this.sessionName}`.nothrow().quiet();
+    this.proc.kill();
+    await $`rm -f ${this.fifoPath}`.nothrow().quiet();
   }
 }
 

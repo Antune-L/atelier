@@ -23,6 +23,18 @@ export interface SpawnTmuxOptions {
   effort: string | null;
 }
 
+/**
+ * A live byte stream of a tmux pane's output. Backed by `pipe-pane` → FIFO → `cat`
+ * in the real adapter, or a synthetic echo queue in the fake. The boundary keeps all
+ * tmux/FIFO plumbing inside the adapter so the terminal manager runs in dry-run too.
+ */
+export interface PaneStream {
+  /** Raw output chunks as they are produced; ends when the pane closes or `close()` runs. */
+  readonly chunks: AsyncIterable<Uint8Array>;
+  /** Stop the pipe, kill the reader, and remove the FIFO. Idempotent. */
+  close(): Promise<void>;
+}
+
 export interface DoneGateResult {
   ok: boolean;
   /** Human-readable reason when ok === false. */
@@ -68,6 +80,16 @@ export interface SystemAdapter {
   hasSession(sessionName: string): Promise<boolean>;
   /** Last ~200 lines of the session's pane (read-only). Empty string if missing. */
   capturePane(sessionName: string): Promise<string>;
+
+  // ---- interactive terminal (live PTY stream + co-control) ----
+  /** Like capturePane but keeps ANSI escapes (`-e`), to seed an xterm viewer. */
+  capturePaneAnsi(sessionName: string): Promise<string>;
+  /** Open a live byte stream of the pane's output (pipe-pane → FIFO in the real adapter). */
+  openPaneStream(sessionName: string): Promise<PaneStream>;
+  /** Inject raw key bytes (hex pairs) into the pane verbatim (`send-keys -H`). */
+  sendKeysRaw(sessionName: string, hexBytes: string): Promise<void>;
+  /** Resize the pane's window to cols×rows (`resize-window -x -y`). */
+  resizePane(sessionName: string, cols: number, rows: number): Promise<void>;
 
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;

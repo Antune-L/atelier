@@ -176,6 +176,12 @@ export class AgentCoordinator {
       return;
     }
 
+    // Turn ended without protocol after the nudge cap: relaunch in place (keeps the worktree)
+    // up to AUTO_RECLAIM_MAX times before giving up. The slot stays busy across the respawn.
+    // Only a hit cap (escalate) falls through to stalled; a concurrent in-flight reclaim (ignore)
+    // must not clobber the recovering session.
+    if ((await this.slots.tryAutoReclaim(ticketId, "tour terminé sans protocole")) !== "escalate") return;
+
     const stalled = this.store.updateTicket(ticketId, { stage: "stalled", finishedAt: Date.now() });
     if (stalled.slotId !== null) this.store.updateSlot(stalled.slotId, { status: "stalled" });
     this.hub.pushTicket(stalled);

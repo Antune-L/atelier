@@ -134,6 +134,10 @@ export const SLOT_COUNT = resolveSlotCount();
 export const MAX_REVIEW_ROUNDS = 2;
 export const WATCHDOG_TIMEOUT_MS = 45 * 60 * 1000;
 export const AUTO_NUDGE_MAX = 1;
+/** Max in-place relaunches of a dead/stalled session before giving up (preserves the worktree). */
+export const AUTO_RECLAIM_MAX = 2;
+/** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */
+export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 
 /** Implementability triage ("Analyser"): read-only, fast, user-initiated. */
 export const TRIAGE_TIMEOUT_MS = 5 * 60 * 1000;

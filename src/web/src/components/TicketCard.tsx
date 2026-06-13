@@ -1,12 +1,13 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, ExternalLink, Eye, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { AlertTriangle, Clock, ExternalLink, Eye, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { Badge } from "@/components/ui/badge";
-import { isStageAnimated, stageLabel, stageProgress, triageVerdictDot, type ProgressColor } from "@/lib/display";
+import { formatRelativeDuration, isStageAnimated, stageLabel, stageProgress, triageVerdictDot, type ProgressColor } from "@/lib/display";
+import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
 
 interface TicketCardProps {
@@ -48,6 +49,7 @@ function StageProgressBar({ stage, animated }: { stage: NonNullable<Ticket["stag
 }
 
 export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
+  const now = useTickTimer();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
   });
@@ -121,6 +123,11 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
       </div>
 
       {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
+
+      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+        <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span>{formatRelativeDuration(ticket.createdAt, now)}</span>
+      </div>
     </div>
   );
 }

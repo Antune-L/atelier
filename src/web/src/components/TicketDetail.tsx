@@ -345,6 +345,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           </div>
         )}
 
+        <p className="text-xs text-muted-foreground">
+          Créé le {formatDateTime(current.createdAt)}
+        </p>
+
         {current.finishedAt !== null && (
           <p className="text-xs text-muted-foreground">
             {finishedKindLabel(current)} le {formatDateTime(current.finishedAt)}

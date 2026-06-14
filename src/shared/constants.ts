@@ -5,6 +5,7 @@ export const COLUMNS = [
   "done",
   "merged",
   "reviewed",
+  "answered",
   "failed",
   "abandoned",
 ] as const;
@@ -17,6 +18,7 @@ export const COLUMN_LABELS: Record<Column, string> = {
   done: "Fini",
   merged: "PR mergée",
   reviewed: "PR reviewed",
+  answered: "Répondu",
   failed: "Échec",
   abandoned: "Abandonnés",
 };
@@ -28,6 +30,7 @@ export const COLUMN_ORDER: Column[] = [
   "done",
   "merged",
   "reviewed",
+  "answered",
   "failed",
   "abandoned",
 ];
@@ -101,8 +104,11 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
 export const CUSTOM_PROFILE_ID = "custom";
 export const CUSTOM_PROFILE_LABEL = "Personnalisé";
 
-/** What a ticket delivers: a feature implementation (default) or an autonomous PR review. */
-export const KINDS = ["feature", "review"] as const;
+/**
+ * What a ticket delivers: a feature implementation (default), an autonomous PR review, or a
+ * read-only answer to a question about a project (ask — no branch, no PR, surfaces a comment).
+ */
+export const KINDS = ["feature", "review", "ask"] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */

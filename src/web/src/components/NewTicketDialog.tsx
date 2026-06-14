@@ -4,6 +4,7 @@ import type { ProjectInfo } from "@shared/schemas";
 import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
+import { AskPanel } from "@/components/AskPanel";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -20,7 +21,13 @@ import { api } from "@/lib/api";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
-type Tab = "ticket" | "review";
+type Tab = "ticket" | "review" | "ask";
+
+const TAB_TITLES: Record<Tab, string> = {
+  ticket: "Nouveau ticket",
+  review: "Review une PR",
+  ask: "Poser une question",
+};
 
 interface NewTicketDialogProps {
   open: boolean;
@@ -173,9 +180,7 @@ export function NewTicketDialog({
   return (
     <Modal open={open} onClose={onClose} className="max-w-5xl">
       <ModalHeader>
-        <ModalTitle>
-          {tab === "ticket" ? "Nouveau ticket" : "Review une PR"}
-        </ModalTitle>
+        <ModalTitle>{TAB_TITLES[tab]}</ModalTitle>
         <div className="mt-3 flex gap-1">
           <TabButton active={tab === "ticket"} onClick={() => setTab("ticket")}>
             Nouveau ticket
@@ -183,13 +188,22 @@ export function NewTicketDialog({
           <TabButton active={tab === "review"} onClick={() => setTab("review")}>
             PR Review
           </TabButton>
+          <TabButton active={tab === "ask"} onClick={() => setTab("ask")}>
+            Ask
+          </TabButton>
         </div>
       </ModalHeader>
-      {tab === "review" ? (
+      {tab === "review" && (
         <ModalBody>
           <ReviewPrPanel projects={projects} onClose={onClose} />
         </ModalBody>
-      ) : (
+      )}
+      {tab === "ask" && (
+        <ModalBody>
+          <AskPanel projects={projects} onClose={onClose} />
+        </ModalBody>
+      )}
+      {tab === "ticket" && (
         <>
           <ModalBody>
             <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">

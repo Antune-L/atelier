@@ -151,6 +151,7 @@ export function ticketImplementationDuration(
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";
   if (ticket.column === "reviewed") return "PR reviewed";
+  if (ticket.column === "answered") return "Répondu";
   if (ticket.column === "done") return "Terminé";
   if (ticket.column === "abandoned") return "Abandonné";
   if (ticket.stage === "failed") return "Échec";

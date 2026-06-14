@@ -247,3 +247,47 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
 
   return lines.filter((line) => line !== "").join("\n");
 }
+
+/**
+ * Builds the `ticket` channel payload for an ask ticket: a read-only session that explores the
+ * project to answer a question, then surfaces the answer via submit_answer. No diff, commit or PR.
+ */
+export function buildAskContract(ticket: Ticket): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+
+  const lines: string[] = [
+    `# Question ${ticket.id} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (worktree en LECTURE SEULE sur ${ticket.baseBranch ?? project.baseBranch})`,
+    "",
+    "## Question",
+    ticket.description || "(vide)",
+    "La question peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à RÉPONDRE à une question (lecture seule, aucune modification). Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    '- `update_stage("implementing")` dès le début (accuse réception du contrat et signale l\'activité).',
+    "- `ask_user(question)` UNIQUEMENT si la question est ambiguë au point de t'empêcher de répondre (ne devine pas une intention critique).",
+    "- `submit_answer(answer)` avec ta réponse complète en markdown une fois ton analyse terminée. Ceci clôt le ticket.",
+    "- `fail(reason, findings)` si tu ne peux pas répondre après avoir épuisé tes options.",
+    "- Réponds dans la même langue que la question.",
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une précision ou réorientation de l'utilisateur à prendre en compte dans ta réponse en cours.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    "2. Explore le projet en lecture seule (Read, Grep, Glob, et `git log`/`git diff` si utile) pour répondre précisément, en citant les fichiers/chemins pertinents.",
+    "3. `submit_answer(<réponse markdown>)`. Ne termine pas ton tour avant d'avoir appelé `submit_answer`, `ask_user` ou `fail` (sinon le pipeline te relancera).",
+    "",
+    "## Interdits",
+    "- Ne modifie, ne crée ni ne supprime AUCUN fichier ; ne commit pas, ne push pas, n'ouvre pas de PR.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}

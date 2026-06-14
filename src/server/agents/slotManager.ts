@@ -12,7 +12,12 @@ import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
-import { buildConflictResolutionContract, buildReviewContract, buildTicketContract } from "./contract.ts";
+import {
+  buildAskContract,
+  buildConflictResolutionContract,
+  buildReviewContract,
+  buildTicketContract,
+} from "./contract.ts";
 import {
   buildImplementerAgentMd,
   buildMcpJson,
@@ -231,8 +236,12 @@ export class SlotManager {
 
       await this.depositSlotFiles(path, ticket, slotId);
       await this.system.copyEnvFiles(project.repoPath, path);
-      this.setPhase(ticketId, SETUP_PHASES.deps);
-      await this.system.installDeps(path, project.commitTimeoutMs);
+      // An ask ticket is read-only (explore + answer); installing deps is pure overhead, so skip it
+      // to start answering faster. Feature/review tickets need a built tree for typecheck/lint/argus.
+      if (ticket.kind !== "ask") {
+        this.setPhase(ticketId, SETUP_PHASES.deps);
+        await this.system.installDeps(path, project.commitTimeoutMs);
+      }
 
       this.setPhase(ticketId, SETUP_PHASES.spawning);
       await this.system.spawnSession({
@@ -304,12 +313,12 @@ export class SlotManager {
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
     if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
-    return ticket.kind === "review"
-      ? buildReviewContract(ticket, { commitLanguage })
-      : buildTicketContract(ticket, {
-          composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
-          commitLanguage,
-        });
+    if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
+    if (ticket.kind === "ask") return buildAskContract(ticket);
+    return buildTicketContract(ticket, {
+      composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+      commitLanguage,
+    });
   }
 
   private async deliverContractWhenReady(ticketId: string, attempt = 0): Promise<void> {
@@ -357,20 +366,20 @@ export class SlotManager {
   }
 
   /**
-   * Re-push the contract when a review agent never acked it (no protocol tool call → dropped contract).
+   * Re-push the contract when an agent never acked it (no protocol tool call → dropped contract).
    * The ack lands well before the first check in the nominal case, so this fires only on a real drop;
    * the re-push then arrives once the session is ready. Bounded by CONTRACT_REPUSH_MAX_ATTEMPTS.
    *
-   * Scoped to review tickets: their contract mandates update_stage("reviewing") as step 1, so a
-   * missing ack within the window is a genuine drop. Feature tickets have no early-mandated protocol
-   * call (a late first ack is normal work), so re-pushing them would re-inject the contract spuriously.
+   * Scoped to review + ask tickets: their contract mandates update_stage(...) as step 1, so a missing
+   * ack within the window is a genuine drop. Feature tickets have no early-mandated protocol call
+   * (a late first ack is normal work), so re-pushing them would re-inject the contract spuriously.
    */
   private repushContractIfUnacked(ticketId: string, attempt: number): void {
     if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
     if (!this.workerHub.isConnected(ticketId)) return;
     if (attempt >= CONTRACT_REPUSH_MAX_ATTEMPTS) return;
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket || ticket.kind !== "review") return;
+    if (!ticket || ticket.kind === "feature") return;
     const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
     if (sent) {
       this.store.logEvent(ticketId, "contract_repushed", { attempt: attempt + 1 });
@@ -437,6 +446,35 @@ export class SlotManager {
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
     this.pumpQueue();
     return { ok: true, reason: "" };
+  }
+
+  /**
+   * Close an ask ticket once the agent submitted its answer: no gate to verify (the answer is
+   * already persisted as a comment by the coordinator), so just release the slot and land the card
+   * in the "Répondu" column.
+   */
+  async completeAsk(ticketId: string, slotId: number): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return;
+    // Ownership guard (the ask path has no done()-style gate): a stale/double submit_answer carries
+    // the slotId baked at the worker hello. If that slot was already freed and handed to another
+    // ticket by pumpQueue, releasing it here would tear down the victim's worktree — so only release
+    // a slot we still own. This also makes the close idempotent (a second call finds slot.ticketId null).
+    const slot = this.store.getSlot(slotId);
+    if (slot?.ticketId !== ticketId) return;
+    await this.releaseSlot(slotId, ticket);
+    this.touch(
+      this.store.updateTicket(ticketId, {
+        column: "answered",
+        stage: "done",
+        slotId: null,
+        finishedAt: Date.now(),
+      }),
+    );
+    this.store.logEvent(ticketId, "answered", {});
+    log.info("question répondue, slot libéré", { ticketId, slotId });
+    await this.notifier.notify("Question répondue", ticket.title);
+    this.pumpQueue();
   }
 
   /** Notification line summarizing how the PR ended (draft / open / auto-merged / merge failed). */

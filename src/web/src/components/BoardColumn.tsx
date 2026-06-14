@@ -26,8 +26,8 @@ interface BoardColumnProps {
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
 
-/** "PR mergée"/"PR reviewed" pile up over time, so they start folded; others start open. */
-const DEFAULT_COLLAPSED: Partial<Record<Column, boolean>> = { merged: true, reviewed: true };
+/** "PR mergée"/"PR reviewed"/"Répondu" pile up over time, so they start folded; others start open. */
+const DEFAULT_COLLAPSED: Partial<Record<Column, boolean>> = { merged: true, reviewed: true, answered: true };
 
 function readCollapsed(column: Column): boolean {
   const stored = localStorage.getItem(`${COLLAPSE_KEY_PREFIX}${column}`);

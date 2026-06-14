@@ -285,6 +285,22 @@ export const createReviewSchema = z.object({
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 
+/** Ask a read-only question about a project; the agent answers (chosen model/effort), no PR. */
+export const createAskSchema = z
+  .object({
+    title: z.string().default(""),
+    description: z.string().default(""),
+    project: projectKeySchema,
+    // Agent model + reasoning effort picked at creation (null = fall back to server config).
+    model: agentModelSchema.nullable().default(null),
+    effort: agentEffortSchema.nullable().default(null),
+  })
+  .refine((data) => data.description.trim().length > 0, {
+    message: "Question requise",
+    path: ["description"],
+  });
+export type CreateAskInput = z.infer<typeof createAskSchema>;
+
 export const createCommentSchema = z.object({
   body: z.string().min(1),
   questionId: z.string().nullable().default(null),
@@ -342,6 +358,7 @@ export const workerToolNameSchema = z.enum([
   "update_stage",
   "ask_user",
   "submit_prd",
+  "submit_answer",
   "done",
   "fail",
   "submit_triage",
@@ -356,6 +373,10 @@ export const askUserArgsSchema = z.object({
 });
 export const submitPrdArgsSchema = z.object({
   markdown: z.string().min(1),
+});
+/** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
+export const submitAnswerArgsSchema = z.object({
+  answer: z.string().min(1),
 });
 export const doneArgsSchema = z.object({
   pr_url: z.string().url(),

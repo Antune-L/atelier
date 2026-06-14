@@ -107,6 +107,12 @@ const TOOLS = [
     schema: z.object({ markdown: z.string().min(1) }),
   },
   {
+    name: "submit_answer",
+    description:
+      "Soumet la réponse finale (markdown) d'un ticket « ask ». Le backend la publie en commentaire et clôt le ticket.",
+    schema: z.object({ answer: z.string().min(1) }),
+  },
+  {
     name: "done",
     description: "Signale la fin du ticket avec l'URL de la PR draft. Le backend vérifie avant de clôturer.",
     schema: z.object({ pr_url: z.string().url() }),

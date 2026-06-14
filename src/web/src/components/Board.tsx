@@ -5,7 +5,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, type Column } from "@shared/constants";
@@ -14,6 +14,7 @@ import { BoardColumn } from "@/components/BoardColumn";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { api } from "@/lib/api";
 import { useBoard } from "@/hooks/useBoard";
+import { boardStore } from "@/lib/store";
 
 interface BoardProps {
   projects: ProjectInfo[];
@@ -44,9 +45,12 @@ function isColumn(value: string): value is Column {
 }
 
 export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAddTicket }: BoardProps) {
-  const { tickets } = useBoard();
+  const { tickets, slots } = useBoard();
   const [pendingAbandon, setPendingAbandon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [movingAll, setMovingAll] = useState(false);
+  // Synchronous guard: two clicks fire before React re-renders the disabled button, so state alone can't block re-entry.
+  const movingAllRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
@@ -63,6 +67,45 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     if (column !== "merged") return inColumn;
     // Newest merge first: rank by terminal-state timestamp, falling back to last update.
     return [...inColumn].sort((a, b) => (b.finishedAt ?? b.updatedAt) - (a.finishedAt ?? a.updatedAt));
+  };
+
+  // A running triage holds the ticket's worker socket, so the server rejects a move to implementing.
+  const eligibleTodo = ticketsByColumn("todo").filter((t) => t.triageStatus !== "running");
+  const freeSlotCount = slots.filter((s) => s.status === "free").length;
+  // Never queue: cap the bulk launch at the number of immediately available slots.
+  const moveAllCount = Math.min(eligibleTodo.length, freeSlotCount);
+
+  const handleMoveAllToImplementing = async (): Promise<void> => {
+    if (movingAllRef.current) return;
+    const toMove = eligibleTodo.slice(0, moveAllCount);
+    if (toMove.length === 0) return;
+    movingAllRef.current = true;
+    setMovingAll(true);
+    let moved = 0;
+    const failures: string[] = [];
+    // Sequential so each launch claims its slot before the next reads availability;
+    // one rejection (e.g. a ticket whose triage just started) must not abort the rest.
+    for (const ticket of toMove) {
+      try {
+        await api.moveTicket(ticket.id, "implementing");
+        moved += 1;
+      } catch (e) {
+        failures.push(e instanceof Error ? e.message : "Lancement refusé");
+      }
+    }
+    movingAllRef.current = false;
+    setMovingAll(false);
+    if (moved > 0) {
+      const remaining = eligibleTodo.length - moved;
+      const body =
+        remaining > 0
+          ? `${moved} ticket(s) lancé(s) — ${remaining} en attente (slots pleins).`
+          : `${moved} ticket(s) lancé(s).`;
+      boardStore.notify("À implémenter", body);
+    }
+    if (failures.length > 0) {
+      setError(`${failures.length} ticket(s) non lancé(s) : ${failures[0]}`);
+    }
   };
 
   const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
@@ -98,6 +141,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             projects={projects}
             onOpenTicket={onOpenTicket}
             onAddTicket={onAddTicket}
+            onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
+            moveAllCount={moveAllCount}
+            moveAllBusy={movingAll}
           />
         ))}
       </div>

@@ -285,6 +285,7 @@ export const importTicketsSchema = z.object({
   autoMerge: z.boolean().default(false),
   addScreenshots: z.boolean().default(false),
   verifyFeature: z.boolean().default(false),
+  researchPlan: z.boolean().default(false),
   baseBranch: baseBranchSchema.nullable().default(null),
   model: agentModelSchema.nullable().default(null),
   effort: agentEffortSchema.nullable().default(null),

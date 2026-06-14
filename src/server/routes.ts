@@ -268,6 +268,7 @@ export function createApiRoutes(deps: RouteDeps) {
           autoMerge: input.autoMerge,
           addScreenshots: input.addScreenshots,
           verifyFeature: input.verifyFeature,
+          researchPlan: input.researchPlan,
           baseBranch: input.baseBranch,
           model: input.model,
           effort: input.effort,

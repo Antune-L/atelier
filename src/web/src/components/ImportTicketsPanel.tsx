@@ -120,6 +120,8 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
         autoMerge,
         addScreenshots,
         verifyFeature,
+        // No paris-research control in the import panel: keep it off for imported tickets.
+        researchPlan: false,
         // No base-branch control in the import panel: always fall back to the project default.
         baseBranch: null,
         model,

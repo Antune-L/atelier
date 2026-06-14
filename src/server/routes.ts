@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { z } from "zod";
 
-import { ACTIVE_STAGES, TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../shared/constants.ts";
+import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import {
   createCommentSchema,
@@ -20,19 +20,16 @@ import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
-import { buildTriagePrompt, parseTriageResult } from "./agents/triage.ts";
+import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
-import type { LiveLog } from "./liveLog.ts";
 import { createLogger } from "./logger.ts";
-import type { TriageOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
 
 const log = createLogger("triage");
 
-interface TriageRunner {
+interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
-  runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
   listBranches(repoPath: string): Promise<string[]>;
   // Desktop self-update guards + build runner (dev desktop only).
@@ -47,8 +44,8 @@ interface RouteDeps {
   hub: ClientHub;
   slots: SlotManager;
   coordinator: AgentCoordinator;
-  system: TriageRunner;
-  triageLog: LiveLog;
+  system: PaneReader;
+  triage: TriageManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
@@ -99,46 +96,6 @@ function isProcessing(stage: Stage | null): boolean {
   if (stage === null) return false;
   if (stage === "awaiting_answers") return true;
   return ACTIVE_STAGES.includes(stage);
-}
-
-/** Read-only triage: run the agent against the project repo, then persist + push the verdict. */
-async function runTriageFlow(deps: RouteDeps, ticketId: string): Promise<void> {
-  const { store, hub, system, triageLog } = deps;
-  const ticket = store.getTicket(ticketId);
-  if (!ticket || !isProjectKey(ticket.project)) return;
-  const project = getProject(ticket.project);
-
-  store.logEvent(ticketId, "triage_started", {});
-  log.info("analyse démarrée", { ticketId, project: ticket.project });
-  const prompt = buildTriagePrompt(ticket, project);
-  const outcome = await system.runTriage({
-    repoPath: project.repoPath,
-    prompt,
-    timeoutMs: TRIAGE_TIMEOUT_MS,
-    onLine: (line) => triageLog.append(ticketId, line),
-  });
-
-  const parsed = outcome.ok ? parseTriageResult(outcome.output) : null;
-  if (parsed) {
-    const updated = store.updateTicket(ticketId, {
-      triageStatus: "done",
-      triageVerdict: parsed.verdict,
-      triageReport: JSON.stringify(parsed),
-    });
-    hub.pushTicket(updated);
-    store.logEvent(ticketId, "triage_done", { verdict: parsed.verdict });
-    log.info("analyse terminée", { ticketId, verdict: parsed.verdict });
-    return;
-  }
-
-  const updated = store.updateTicket(ticketId, {
-    triageStatus: "failed",
-    triageVerdict: null,
-    triageReport: outcome.output.slice(0, TRIAGE_RAW_REPORT_MAX),
-  });
-  hub.pushTicket(updated);
-  store.logEvent(ticketId, "triage_failed", { ok: outcome.ok });
-  log.warn("analyse échouée", { ticketId, ok: outcome.ok });
 }
 
 export function createApiRoutes(deps: RouteDeps) {
@@ -321,6 +278,11 @@ export function createApiRoutes(deps: RouteDeps) {
         return store.getTicket(params.id);
       }
       if (target === "implementing") {
+        // A running triage holds a worker socket keyed by this ticketId; launching now would
+        // collide the two sessions on that key. Wait for the verdict first.
+        if (ticket.triageStatus === "running") {
+          return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
+        }
         hub.pushTicket(store.updateTicket(params.id, { column: "implementing" }));
         // retry() relaunches a failed/stalled/interrupted ticket in its held slot;
         // for a fresh ticket (no slot) it falls through to a normal startTicket.
@@ -386,20 +348,20 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
       if (ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse déjà en cours");
-      deps.triageLog.clear(params.id);
       const running = store.updateTicket(params.id, {
         triageStatus: "running",
         triageVerdict: null,
         triageReport: null,
       });
       hub.pushTicket(running);
-      void runTriageFlow(deps, params.id);
+      // Spawn the triage session in the background; persistence happens in TriageManager.complete.
+      void deps.triage.start(params.id).catch((e) => {
+        log.error("démarrage du triage échoué", {
+          ticketId: params.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
       return { started: true };
-    })
-    .get("/tickets/:id/triage-output", ({ params, set }) => {
-      const ticket = store.getTicket(params.id);
-      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      return { output: deps.triageLog.get(params.id) };
     })
     .delete("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
@@ -414,12 +376,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/tickets/:id/terminal", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      if (ticket.slotId === null) return jsonError(set, HTTP_CONFLICT, "aucun slot actif");
+      // A triage runs in no slot: fall back to its detached session.
+      const sessionName =
+        ticket.slotId !== null
+          ? store.getSlot(ticket.slotId)?.tmuxSession ?? null
+          : deps.triage.resolveSession(params.id);
+      if (ticket.slotId === null && !sessionName) return jsonError(set, HTTP_CONFLICT, "aucun slot actif");
       const phase = slots.getSetupPhase(params.id);
-      const slot = store.getSlot(ticket.slotId);
       // Before the tmux session exists (worktree/install/spawn), surface the setup phase.
-      if (!slot?.tmuxSession) return { output: "", phase };
-      const output = await deps.system.capturePane(slot.tmuxSession);
+      if (!sessionName) return { output: "", phase };
+      const output = await deps.system.capturePane(sessionName);
       return { output, phase };
     })
     .post("/uploads", async ({ body, set }) => {

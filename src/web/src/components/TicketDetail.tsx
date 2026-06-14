@@ -38,7 +38,6 @@ import { Switch } from "@/components/ui/switch";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { LiveTerminal } from "@/components/LiveTerminal";
-import { TerminalView } from "@/components/TerminalView";
 import {
   finishedKindLabel,
   formatDateTime,
@@ -889,7 +888,7 @@ function TriageSection({ ticket, onTriage, onApplySuggestion }: TriageSectionPro
 
       {running && (
         <div className="mt-2">
-          <TerminalView ticketId={ticket.id} variant="triage" />
+          <LiveTerminal ticketId={ticket.id} />
         </div>
       )}
 

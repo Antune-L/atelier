@@ -6,7 +6,6 @@ import { z } from "zod";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
-import { MODELS } from "../config.ts";
 
 import type {
   DoneGateResult,
@@ -15,13 +14,18 @@ import type {
   PrepareSlotFiles,
   ReviewDoneOptions,
   SpawnTmuxOptions,
+  SpawnTriageOptions,
   SystemAdapter,
-  TriageOptions,
 } from "./types.ts";
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
 const PROD_ENV_MARKER = "prod";
-const TRIAGE_ALLOWED_TOOLS = "Read,Glob,Grep";
+/**
+ * Read-only built-in tool allowlist for a triage session: bounding `--tools` to these makes
+ * Edit/Write/Bash structurally unloadable regardless of permission-mode. MCP tools survive `--tools`,
+ * so `mcp__worker__submit_triage` stays callable.
+ */
+const TRIAGE_READONLY_TOOLS = "Read,Glob,Grep";
 /** How long a crashed pane stays readable before the session closes itself (1 h). */
 const DEAD_PANE_KEEP_ALIVE_S = 3600;
 // The dev-channels warning dialog has no bypass (by design): the backend watches
@@ -41,6 +45,8 @@ const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 const PR_LIST_FIELDS = "number,title,url,headRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
+/** Minimal settings injected inline so a triage session skips the "enable MCP servers?" dialog. */
+const TRIAGE_SETTINGS_JSON = JSON.stringify({ enableAllProjectMcpServers: true });
 
 /** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
 const ghReviewSchema = z.object({
@@ -72,26 +78,6 @@ const PR_STATE_MERGED = "MERGED";
 const PR_MERGE_CONFIRM_ATTEMPTS = 3;
 const PR_MERGE_CONFIRM_DELAY_MS = 1000;
 
-// `claude -p --output-format stream-json` emits one JSON event per line. We only
-// care about assistant turns (text + tool_use, for the live view) and the final
-// result event (the verdict text to parse). Everything else (hooks, rate limits)
-// is ignored.
-const textBlockSchema = z.object({ type: z.literal("text"), text: z.string() });
-const toolUseBlockSchema = z.object({
-  type: z.literal("tool_use"),
-  name: z.string(),
-  input: z.record(z.string(), z.unknown()).optional(),
-});
-const assistantEventSchema = z.object({
-  type: z.literal("assistant"),
-  message: z.object({ content: z.unknown() }),
-});
-const resultEventSchema = z.object({
-  type: z.literal("result"),
-  result: z.string().default(""),
-  is_error: z.boolean().default(false),
-});
-
 /**
  * Real adapter: performs actual git/tmux/gh/osascript/filesystem side effects.
  * Only selected when KANBAN_DRY_RUN is off AND the env explicitly opts in.
@@ -100,17 +86,17 @@ const resultEventSchema = z.object({
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
 
-  async seedTrustForSlots(slotPaths: string[]): Promise<void> {
+  async seedWorkspaceTrust(paths: string[]): Promise<void> {
     const file = Bun.file(CLAUDE_JSON_PATH);
     const exists = await file.exists();
     const config: Record<string, unknown> = exists ? await file.json() : {};
     const projectsRaw = config.projects;
     const projects: Record<string, unknown> =
       projectsRaw && typeof projectsRaw === "object" ? { ...projectsRaw } : {};
-    for (const slotPath of slotPaths) {
-      const existing = projects[slotPath];
+    for (const path of paths) {
+      const existing = projects[path];
       const base = existing && typeof existing === "object" ? existing : {};
-      projects[slotPath] = { ...base, hasTrustDialogAccepted: true };
+      projects[path] = { ...base, hasTrustDialogAccepted: true };
     }
     config.projects = projects;
     await Bun.write(CLAUDE_JSON_PATH, JSON.stringify(config, null, 2));
@@ -195,6 +181,25 @@ export class RealSystemAdapter implements SystemAdapter {
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     // -x/-y fix the detached pane size; without it an unattached session is 80×24
     // and the live terminal can't reflow to the viewer's xterm width.
+    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
+    void this.acceptDevChannelsDialog(opts.sessionName);
+  }
+
+  async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
+    const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+    // Read-only is structural via `--tools` (Edit/Write/Bash unloadable); bypassPermissions only
+    // auto-authorizes the loaded tools + the surviving MCP tool, never injecting a write tool.
+    // The JSON args carry no single quotes (JSON.stringify emits double quotes), so single-quoting
+    // them for the inner shell is safe.
+    const claudeCmd =
+      `claude --model ${opts.model}` +
+      ` --mcp-config '${opts.mcpConfig}'` +
+      ` --strict-mcp-config` +
+      ` --dangerously-load-development-channels server:worker` +
+      ` --settings '${TRIAGE_SETTINGS_JSON}'` +
+      ` --tools ${TRIAGE_READONLY_TOOLS}` +
+      ` --permission-mode bypassPermissions`;
+    const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
     void this.acceptDevChannelsDialog(opts.sessionName);
   }
@@ -381,63 +386,6 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: res.exitCode === 0, output: res.stdout.toString() + res.stderr.toString() };
   }
 
-  async runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }> {
-    // Read-only allowlist: the session physically cannot write, safe on the real repo.
-    // stream-json surfaces the analysis live (opts.onLine) while the final result
-    // event carries the verdict text we parse.
-    const proc = Bun.spawn(
-      [
-        "claude",
-        "-p",
-        opts.prompt,
-        "--model",
-        MODELS.triage,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--allowedTools",
-        TRIAGE_ALLOWED_TOOLS,
-      ],
-      { cwd: opts.repoPath, stdout: "pipe", stderr: "pipe" },
-    );
-    const killTimer = setTimeout(() => proc.kill(), opts.timeoutMs);
-    let result = "";
-    let resultIsError = false;
-    try {
-      const reader = proc.stdout.getReader();
-      const decoder = new TextDecoder();
-      let pending = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split("\n");
-        pending = lines.pop() ?? "";
-        for (const line of lines) {
-          const event = parseTriageStreamLine(line);
-          if (!event) continue;
-          if (event.kind === "result") {
-            result = event.text;
-            resultIsError = event.isError;
-          } else if (event.text) {
-            opts.onLine?.(event.text);
-          }
-        }
-      }
-      const exitCode = await proc.exited;
-      clearTimeout(killTimer);
-      if (resultIsError) return { ok: false, output: result };
-      if (!result) {
-        const stderr = await new Response(proc.stderr).text();
-        return { ok: false, output: stderr || `claude triage: code ${exitCode}` };
-      }
-      return { ok: true, output: result };
-    } catch (error) {
-      clearTimeout(killTimer);
-      return { ok: false, output: error instanceof Error ? error.message : String(error) };
-    }
-  }
-
   async gitCurrentBranch(repoPath: string): Promise<string> {
     const res = await $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.nothrow().quiet();
     return res.exitCode === 0 ? res.stdout.toString().trim() : "";
@@ -539,61 +487,6 @@ class RealPaneStream implements PaneStream {
     this.proc.kill();
     await $`rm -f ${this.fifoPath}`.nothrow().quiet();
   }
-}
-
-type TriageStreamEvent =
-  | { kind: "progress"; text: string }
-  | { kind: "result"; text: string; isError: boolean };
-
-/** Map one stream-json line to a progress line or the final result; null for ignored events. */
-function parseTriageStreamLine(line: string): TriageStreamEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  let event: unknown;
-  try {
-    event = JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-  const result = resultEventSchema.safeParse(event);
-  if (result.success) {
-    return { kind: "result", text: result.data.result, isError: result.data.is_error };
-  }
-  const assistant = assistantEventSchema.safeParse(event);
-  if (assistant.success) {
-    const text = renderAssistantContent(assistant.data.message.content);
-    return text ? { kind: "progress", text } : null;
-  }
-  return null;
-}
-
-/** Render an assistant message's content blocks as readable terminal lines. */
-function renderAssistantContent(content: unknown): string {
-  if (!Array.isArray(content)) return "";
-  const lines: string[] = [];
-  for (const block of content) {
-    const text = textBlockSchema.safeParse(block);
-    if (text.success) {
-      const trimmed = text.data.text.trim();
-      if (trimmed) lines.push(trimmed);
-      continue;
-    }
-    const tool = toolUseBlockSchema.safeParse(block);
-    if (tool.success) {
-      lines.push(`● ${tool.data.name}(${summarizeToolInput(tool.data.input)})`);
-    }
-  }
-  return lines.join("\n");
-}
-
-/** Pick the most telling argument of a read-only tool call for the live line. */
-function summarizeToolInput(input: Record<string, unknown> | undefined): string {
-  if (!input) return "";
-  for (const key of ["file_path", "pattern", "path", "query"]) {
-    const value = input[key];
-    if (typeof value === "string") return value;
-  }
-  return "";
 }
 
 /** Lockfile → install command. Installing with the wrong manager would diverge from the lockfile. */

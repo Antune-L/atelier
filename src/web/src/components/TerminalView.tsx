@@ -4,12 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type TerminalVariant = "agent" | "triage";
-
 interface TerminalViewProps {
   ticketId: string;
-  /** "agent" = live tmux pane (with setup phase); "triage" = read-only analysis stream. */
-  variant?: TerminalVariant;
   /** Stretch to fill the parent's height instead of capping at 60vh. */
   fill?: boolean;
   /** Chrome-less, non-interactive thumbnail (no header, no fullscreen) for embedding in a card. */
@@ -28,26 +24,11 @@ const COMPACT_POLL_INTERVAL_MS = 4000;
 /** Distance (px) from the bottom within which the view is still considered "pinned". */
 const BOTTOM_THRESHOLD_PX = 24;
 
-const TITLES: Record<TerminalVariant, string> = {
-  agent: "Terminal",
-  triage: "Analyse en direct",
-};
+const TITLE = "Terminal";
+const EMPTY_HINT = "La session démarre, en attente de la première sortie de l'agent…";
 
-const EMPTY_HINTS: Record<TerminalVariant, string> = {
-  agent: "La session démarre, en attente de la première sortie de l'agent…",
-  triage: "Démarrage de l'analyse…",
-};
-
-async function fetchTerminal(variant: TerminalVariant, ticketId: string): Promise<TerminalData> {
-  if (variant === "triage") {
-    const data = await api.triageOutput(ticketId);
-    return { output: data.output, phase: null };
-  }
-  return api.terminal(ticketId);
-}
-
-/** Read-only live view of an agent tmux pane or a triage analysis stream. */
-export function TerminalView({ ticketId, variant = "agent", fill = false, compact = false }: TerminalViewProps) {
+/** Read-only polled view of an agent tmux pane (with setup phase). */
+export function TerminalView({ ticketId, fill = false, compact = false }: TerminalViewProps) {
   const [data, setData] = useState<TerminalData>({ output: "", phase: null });
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -61,7 +42,7 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
   };
 
-  // Poll the relevant endpoint while mounted; skip while the tab is hidden so a backgrounded
+  // Poll the terminal endpoint while mounted; skip while the tab is hidden so a backgrounded
   // Agents view (many previews) issues no requests, and refetch immediately on return.
   useEffect(() => {
     // A fresh stream starts pinned so its first output scrolls into view.
@@ -70,7 +51,7 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
     const poll = async (): Promise<void> => {
       if (document.hidden) return;
       try {
-        const next = await fetchTerminal(variant, ticketId);
+        const next = await api.terminal(ticketId);
         if (!active) return;
         setError(null);
         setData(next);
@@ -89,7 +70,7 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [ticketId, variant, compact]);
+  }, [ticketId, compact]);
 
   // Follow new output only when the user is still pinned to the bottom.
   useEffect(() => {
@@ -111,13 +92,13 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
   }, [fullscreen]);
 
   // While a setup phase shows, the phase line already explains the empty pane.
-  const placeholder = data.phase ? "" : EMPTY_HINTS[variant];
+  const placeholder = data.phase ? "" : EMPTY_HINT;
 
   if (compact) {
     return (
       <pre
         ref={preRef}
-        aria-label={`${TITLES[variant]} (aperçu)`}
+        aria-label={`${TITLE} (aperçu)`}
         className="pointer-events-none h-full min-h-0 w-full flex-1 overflow-hidden rounded-md bg-[#001219] p-2 font-mono text-[10px] leading-snug text-[#94d2bd]"
       >
         {error ?? (data.output || placeholder)}
@@ -134,7 +115,7 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
       )}
     >
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">{TITLES[variant]}</h3>
+        <h3 className="text-sm font-semibold">{TITLE}</h3>
         <div className="flex items-center gap-2">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
             lecture seule
@@ -165,7 +146,7 @@ export function TerminalView({ ticketId, variant = "agent", fill = false, compac
             onScroll={handleScroll}
             tabIndex={0}
             role="log"
-            aria-label={`${TITLES[variant]} (sortie, lecture seule)`}
+            aria-label={`${TITLE} (sortie, lecture seule)`}
             className={cn(
               "overflow-auto rounded-md bg-[#001219] p-3 font-mono text-xs leading-relaxed text-[#94d2bd]",
               fullscreen || fill ? "min-h-0 flex-1" : "max-h-[60vh] min-h-[12rem]",

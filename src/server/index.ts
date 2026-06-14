@@ -14,13 +14,13 @@ import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SlotManager } from "./agents/slotManager.ts";
+import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
 import { runFirstBootSetup } from "./boot.ts";
 import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
 import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
-import { LiveLog } from "./liveLog.ts";
 import { createLogger } from "./logger.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
@@ -159,8 +159,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const clientHub = new ClientHub(store);
   const workerHub = new WorkerHub();
   const notifier = new Notifier(clientHub, opts.onNotify);
-  const triageLog = new LiveLog();
-  const terminalManager = new TerminalSessionManager(store, system);
+  const triageManager = new TriageManager(store, system, workerHub, clientHub, {
+    backendWs,
+    projectRoot: resourcesRoot,
+    bunPath,
+  });
+  const terminalManager = new TerminalSessionManager(store, system, triageManager);
 
   const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
     backendHttp,
@@ -168,11 +172,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
     bunPath,
   });
-  const coordinator = new AgentCoordinator(store, clientHub, workerHub, notifier, slotManager);
+  const coordinator = new AgentCoordinator(store, clientHub, workerHub, notifier, slotManager, triageManager);
   const watchdog = new Watchdog(store, clientHub, notifier);
 
   await runFirstBootSetup(store, system);
   await slotManager.recover();
+  await triageManager.recoverStale();
   watchdog.start();
 
   const composerAvailable = await system.checkComposerAvailable();
@@ -184,7 +189,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     slots: slotManager,
     coordinator,
     system,
-    triageLog,
+    triage: triageManager,
     projectRoot: dataRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
@@ -277,6 +282,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     port: server.port ?? port,
     async teardownSessions() {
       await slotManager.teardownSessions();
+      await triageManager.teardownAll();
     },
     stop() {
       watchdog.stop();

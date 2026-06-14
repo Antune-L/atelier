@@ -16,7 +16,7 @@ import {
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { OpenPr, Ticket, UpdateMode } from "../shared/schemas.ts";
+import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
@@ -179,6 +179,21 @@ export function createApiRoutes(deps: RouteDeps) {
       return { ok: true };
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
+    .get("/stats", () =>
+      store.listTickets(true).map((t): StatRecord => ({
+        id: t.id,
+        project: t.project,
+        kind: t.kind,
+        column: t.column,
+        stage: t.stage,
+        model: t.model,
+        effort: t.effort,
+        implementer: t.implementer,
+        createdAt: t.createdAt,
+        implementingStartedAt: t.implementingStartedAt,
+        finishedAt: t.finishedAt,
+      })),
+    )
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

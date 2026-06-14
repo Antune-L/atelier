@@ -165,6 +165,11 @@ export const ACTIVE_STAGES: Stage[] = [
   "opening_pr",
 ];
 
+/** Columns whose tickets are counted as a successful outcome in the stats dashboard. */
+export const SUCCESS_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered"];
+/** Columns whose tickets are counted as a failed outcome in the stats dashboard. */
+export const FAILURE_COLUMNS: Column[] = ["failed"];
+
 export const COMMENT_AUTHORS = ["user", "agent", "system"] as const;
 export type CommentAuthor = (typeof COMMENT_AUTHORS)[number];
 

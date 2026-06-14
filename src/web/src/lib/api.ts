@@ -10,6 +10,7 @@ import type {
   OpenPr,
   Profile,
   ProjectInfo,
+  StatRecord,
   TerminalOutput,
   Ticket,
   UpdateAppSettingsInput,
@@ -47,6 +48,7 @@ export const api = {
   deleteProfile: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/profiles/${id}`, { method: "DELETE" }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
+  stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),
   createTicket: (input: CreateTicketInput): Promise<Ticket> =>

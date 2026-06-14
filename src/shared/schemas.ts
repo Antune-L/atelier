@@ -128,6 +128,22 @@ export const ticketSchema = z.object({
 });
 export type Ticket = z.infer<typeof ticketSchema>;
 
+/** Lightweight per-ticket record powering the stats dashboard (no prdMarkdown/error/etc.). */
+export const statRecordSchema = z.object({
+  id: z.string(),
+  project: projectKeySchema,
+  kind: kindSchema,
+  column: columnSchema,
+  stage: stageSchema.nullable(),
+  model: agentModelSchema.nullable(),
+  effort: agentEffortSchema.nullable(),
+  implementer: implementerSchema,
+  createdAt: z.number().int(),
+  implementingStartedAt: z.number().int().nullable(),
+  finishedAt: z.number().int().nullable(),
+});
+export type StatRecord = z.infer<typeof statRecordSchema>;
+
 export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),

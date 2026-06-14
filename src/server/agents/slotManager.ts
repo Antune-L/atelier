@@ -364,6 +364,7 @@ export class SlotManager {
         this.store.logEvent(ticketId, "auto_merged", { prUrl });
       } else {
         mergeError = merge.reason;
+        column = "failed";
         this.store.logEvent(ticketId, "auto_merge_failed", { reason: merge.reason });
         log.warn("auto-merge échoué", { ticketId, reason: merge.reason });
       }
@@ -373,14 +374,14 @@ export class SlotManager {
     this.touch(
       this.store.updateTicket(ticketId, {
         column,
-        stage: "done",
+        stage: mergeError ? "failed" : "done",
         prUrl,
         slotId: null,
         error: mergeError,
         finishedAt: Date.now(),
       }),
     );
-    this.store.logEvent(ticketId, "done", { prUrl });
+    if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
     this.pumpQueue();
     return { ok: true, reason: "" };

@@ -299,54 +299,57 @@ export function NewTicketDialog({
                     onApplyProfile={applyProfile}
                   />
                 </div>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>PRD à implémenter (planification avant code)</span>
-                  <Switch
-                    checked={prdEnabled}
-                    onCheckedChange={setPrdEnabled}
-                    aria-label="PRD à implémenter"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>
-                    Ouvrir la PR en draft
-                    {autoMerge && (
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        (forcé non-draft pour le merge auto)
-                      </span>
-                    )}
-                  </span>
-                  <Switch
-                    checked={prDraft && !autoMerge}
-                    disabled={autoMerge}
-                    onCheckedChange={setPrDraft}
-                    aria-label="Ouvrir la PR en draft"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Merger automatiquement la PR après ouverture</span>
-                  <Switch
-                    checked={autoMerge}
-                    onCheckedChange={setAutoMergeChoice}
-                    aria-label="Merge automatique de la PR"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
-                  <Switch
-                    checked={verifyFeature}
-                    onCheckedChange={setVerifyFeature}
-                    aria-label="Tester la feature avant la PR"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Réfléchir sur la solution en amont (recherche parallèle paris-research)</span>
-                  <Switch
-                    checked={researchPlan}
-                    onCheckedChange={setResearchPlan}
-                    aria-label="Réflexion paris-research en amont"
-                  />
-                </label>
+                <div className="space-y-3 rounded-md border p-3">
+                  <h3 className="text-sm font-semibold">Options</h3>
+                  <label className="flex items-center justify-between gap-2 text-sm">
+                    <span>PRD à implémenter (planification avant code)</span>
+                    <Switch
+                      checked={prdEnabled}
+                      onCheckedChange={setPrdEnabled}
+                      aria-label="PRD à implémenter"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-sm">
+                    <span>
+                      Ouvrir la PR en draft
+                      {autoMerge && (
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          (forcé non-draft pour le merge auto)
+                        </span>
+                      )}
+                    </span>
+                    <Switch
+                      checked={prDraft && !autoMerge}
+                      disabled={autoMerge}
+                      onCheckedChange={setPrDraft}
+                      aria-label="Ouvrir la PR en draft"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-sm">
+                    <span>Merger automatiquement la PR après ouverture</span>
+                    <Switch
+                      checked={autoMerge}
+                      onCheckedChange={setAutoMergeChoice}
+                      aria-label="Merge automatique de la PR"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-sm">
+                    <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
+                    <Switch
+                      checked={verifyFeature}
+                      onCheckedChange={setVerifyFeature}
+                      aria-label="Tester la feature avant la PR"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-sm">
+                    <span>Réfléchir sur la solution en amont (recherche parallèle paris-research)</span>
+                    <Switch
+                      checked={researchPlan}
+                      onCheckedChange={setResearchPlan}
+                      aria-label="Réflexion paris-research en amont"
+                    />
+                  </label>
+                </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
             </div>

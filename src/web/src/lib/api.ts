@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   Capabilities,
   Comment,
   CreateCommentInput,
@@ -11,6 +12,7 @@ import type {
   TerminalOutput,
   Ticket,
   TriageOutput,
+  UpdateAppSettingsInput,
   UpdateProfileInput,
   UpdateTicketInput,
   UploadResult,
@@ -33,6 +35,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
   capabilities: (): Promise<Capabilities> => request("/api/capabilities"),
+  settings: (): Promise<AppSettings> => request("/api/settings"),
+  updateSettings: (input: UpdateAppSettingsInput): Promise<AppSettings> =>
+    request("/api/settings", { method: "PATCH", body: JSON.stringify(input) }),
   profiles: (): Promise<Profile[]> => request("/api/profiles"),
   createProfile: (input: CreateProfileInput): Promise<Profile> =>
     request("/api/profiles", { method: "POST", body: JSON.stringify(input) }),

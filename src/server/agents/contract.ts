@@ -1,6 +1,17 @@
+import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { getProject, isProjectKey } from "../config.ts";
+
+/** Uppercase French label of the language the agent must write commits/PR/review text in. */
+function commitLanguageLabel(language: CommitLanguage): string {
+  return language === "fr" ? "FRANÇAIS" : "ANGLAIS";
+}
+
+/** Instruction line forcing the language of commit messages and PR title/description. */
+function commitLanguageDirective(language: CommitLanguage): string {
+  return `- Rédige les messages de commit et le titre/description de la PR en ${commitLanguageLabel(language)}.`;
+}
 
 /**
  * Builds the `implementing` step(s) of the contract. Three modes:
@@ -48,7 +59,10 @@ function buildImplementingSteps(
  * Builds the `ticket` channel payload: the full pipeline contract injected into
  * the session at startup. Describes the steps, the tools to call, and the bans.
  */
-export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: string }): string {
+export function buildTicketContract(
+  ticket: Ticket,
+  opts: { composerScriptPath: string; commitLanguage: CommitLanguage },
+): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
@@ -81,6 +95,7 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
       : "- (Option PRD désactivée : implémente directement.)",
     `- \`done(pr_url)\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    commitLanguageDirective(opts.commitLanguage),
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours (ce n'est PAS une réponse à une question `ask_user`).",
@@ -119,7 +134,7 @@ export function buildTicketContract(ticket: Ticket, opts: { composerScriptPath: 
  * Builds the `ticket` channel payload for a review ticket: drive the argus skill
  * over an open PR, optionally posting findings inline via gh, then done().
  */
-export function buildReviewContract(ticket: Ticket): string {
+export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
@@ -145,6 +160,7 @@ export function buildReviewContract(ticket: Ticket): string {
     "- `ask_user(question)` si une décision te dépasse (ex. PR introuvable ou ambiguë).",
     "- `done(pr_url)` UNIQUEMENT une fois la revue terminée (et postée si demandé).",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    `- Rédige les commentaires de revue postés sur la PR en ${commitLanguageLabel(opts.commitLanguage)}.`,
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans la revue en cours.",

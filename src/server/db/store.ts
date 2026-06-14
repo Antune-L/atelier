@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
-import { AUTO_RECLAIM_EVENT } from "../../shared/constants.ts";
+import { AUTO_RECLAIM_EVENT, COMMIT_LANGUAGE_META_KEY, DEFAULT_COMMIT_LANGUAGE } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
-import type { Comment, Profile, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
+import { commitLanguageSchema } from "../../shared/schemas.ts";
+import type { AppSettings, Comment, Profile, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
 import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow } from "./rows.ts";
@@ -382,6 +383,19 @@ export class Store {
       .get(ticketId, ...types);
     if (row && typeof row === "object" && "type" in row && typeof row.type === "string") return row.type;
     return null;
+  }
+
+  // ---- App settings (global, stored in the `meta` table) ----
+
+  getAppSettings(): AppSettings {
+    const stored = this.getMeta(COMMIT_LANGUAGE_META_KEY);
+    const parsed = commitLanguageSchema.safeParse(stored);
+    return { commitLanguage: parsed.success ? parsed.data : DEFAULT_COMMIT_LANGUAGE };
+  }
+
+  updateAppSettings(patch: UpdateAppSettingsInput): AppSettings {
+    if (patch.commitLanguage !== undefined) this.setMeta(COMMIT_LANGUAGE_META_KEY, patch.commitLanguage);
+    return this.getAppSettings();
   }
 
   // ---- Meta (first-boot flag) ----

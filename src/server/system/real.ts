@@ -40,7 +40,9 @@ const FEASIBILITY_READONLY_TOOLS = "Read,Glob,Grep,Task";
  * Inline subagent the orchestrator fans out per ticket. `--tools` bounds ONLY the top-level session;
  * subagents default to `general-purpose` (all tools incl. Bash + Task) and recurse without limit. A
  * read-only scout with no Task/Edit/Write/Bash structurally breaks that recursion. Defined inline via
- * `--agents` so nothing is written into the real repo's `.claude/agents/`.
+ * `--agents` so nothing is written into the real repo's `.claude/agents/`. The scout alone is not
+ * enough — nothing forces the orchestrator to pick it; `permissions.deny` (FEASIBILITY_SETTINGS_JSON)
+ * is what removes the recursing built-in fallback.
  */
 const FEASIBILITY_SCOUT_AGENTS_JSON = JSON.stringify({
   [FEASIBILITY_SCOUT_AGENT_NAME]: {
@@ -74,6 +76,23 @@ const PR_LIST_FIELDS = "number,title,url,headRefName,isDraft,reviewDecision,upda
 const PR_LIST_LIMIT = "50";
 /** Minimal settings injected inline so a triage session skips the "enable MCP servers?" dialog. */
 const TRIAGE_SETTINGS_JSON = JSON.stringify({ enableAllProjectMcpServers: true });
+/**
+ * Built-in spawnable agent types the feasibility orchestrator must never fan out: each carries the
+ * full toolset (incl. Task), so a single fallback to one of them re-opens unbounded recursion. The
+ * default when `subagent_type` is omitted is `general-purpose`, which is the observed runaway path.
+ */
+const FEASIBILITY_DENIED_AGENTS = ["general-purpose", "Explore", "Plan"];
+/**
+ * Feasibility settings: triage's MCP-dialog skip PLUS a deny of every built-in spawnable agent, so the
+ * inline `--agents` scout is the ONLY type the orchestrator can spawn. `permissions.deny` is deny-first
+ * and enforced by Claude Code itself (not the model), so it structurally closes the recursion the
+ * contract wording alone could not. Injected inline (no settings file) to avoid writing into the real
+ * repo's `.claude/`.
+ */
+const FEASIBILITY_SETTINGS_JSON = JSON.stringify({
+  enableAllProjectMcpServers: true,
+  permissions: { deny: FEASIBILITY_DENIED_AGENTS.map((name) => `Agent(${name})`) },
+});
 
 /** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
 const ghReviewSchema = z.object({
@@ -225,20 +244,27 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
-    await this.spawnReadonlySession(opts, TRIAGE_READONLY_TOOLS);
+    await this.spawnReadonlySession(opts, {
+      tools: TRIAGE_READONLY_TOOLS,
+      settingsJson: TRIAGE_SETTINGS_JSON,
+    });
   }
 
   async spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void> {
-    // Fan-out subagents inherit neither `--tools` nor the contract's read-only wording, so an inline
-    // `--agents` definition is the only thing that actually keeps them read-only and non-recursive.
-    await this.spawnReadonlySession(opts, FEASIBILITY_READONLY_TOOLS, FEASIBILITY_SCOUT_AGENTS_JSON);
+    // Fan-out subagents inherit neither `--tools` nor the contract's read-only wording. The inline
+    // `--agents` scout keeps the fan-out itself non-recursive; FEASIBILITY_SETTINGS_JSON's
+    // `permissions.deny` is what forbids the orchestrator from spawning a recursing built-in instead.
+    await this.spawnReadonlySession(opts, {
+      tools: FEASIBILITY_READONLY_TOOLS,
+      settingsJson: FEASIBILITY_SETTINGS_JSON,
+      agentsJson: FEASIBILITY_SCOUT_AGENTS_JSON,
+    });
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */
   private async spawnReadonlySession(
     opts: SpawnTriageOptions,
-    tools: string,
-    agentsJson?: string,
+    config: { tools: string; settingsJson: string; agentsJson?: string },
   ): Promise<void> {
     const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
@@ -246,14 +272,14 @@ export class RealSystemAdapter implements SystemAdapter {
     // surface via `--tools` (Edit/Write/Bash unloadable) guarantees no write tool can exist anyway.
     // The JSON args carry no single quotes (JSON.stringify emits double quotes), so single-quoting
     // them for the inner shell is safe.
-    const agentsFlag = agentsJson ? ` --agents '${agentsJson}'` : "";
+    const agentsFlag = config.agentsJson ? ` --agents '${config.agentsJson}'` : "";
     const claudeCmd =
       `claude --model ${opts.model}${effortFlag}` +
       ` --mcp-config '${opts.mcpConfig}'` +
       ` --strict-mcp-config` +
       ` --dangerously-load-development-channels server:worker` +
-      ` --settings '${TRIAGE_SETTINGS_JSON}'` +
-      ` --tools ${tools}` +
+      ` --settings '${config.settingsJson}'` +
+      ` --tools ${config.tools}` +
       agentsFlag +
       ` --permission-mode auto`;
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;

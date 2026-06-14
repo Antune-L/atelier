@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -171,16 +172,11 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
       </div>
 
       <div className="space-y-1">
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={fixComments}
-            onChange={(e) => setFixComments(e.target.checked)}
-            className="h-4 w-4 rounded border-muted-foreground/40"
-          />
-          Corriger les retours directement sur la PR
-        </label>
-        <p className="pl-6 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <Switch checked={fixComments} onCheckedChange={setFixComments} aria-labelledby="fix-comments-label" />
+          <span id="fix-comments-label" className="text-sm">Corriger les retours directement sur la PR</span>
+        </div>
+        <p className="pl-11 text-xs text-muted-foreground">
           Un sous-agent applique les corrections puis pousse sur la branche de la PR.
         </p>
       </div>

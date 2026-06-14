@@ -154,7 +154,8 @@ export function buildTicketContract(
           ...figmaUrls.map((url) => `     - ${url}`),
         ]
       : []),
-    "4. fixing : corrige les findings, puis re-review. Max 2 boucles, sinon fail().",
+    "3b. anti-régression : lance un AUTRE subagent à contexte frais (outil Agent) avec le skill `regression-check` sur ton diff, en modèle sonnet et effort low. Il cartographie les consommateurs des symboles modifiés et signale les régressions potentielles. C'est un subagent distinct de la review argus.",
+    "4. fixing : corrige les findings (argus + anti-régression), puis relance les DEUX subagents (review argus ET anti-régression) pour confirmer. Max 2 boucles, sinon fail().",
     "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
     wantsVerify
       ? "5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (via Playwright/navigateur pour un changement frontend, ou en exerçant le code/CLI/endpoint concerné sinon). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie."

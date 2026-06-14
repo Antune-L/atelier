@@ -135,8 +135,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, post_comments, pr_url, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, post_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -148,6 +148,7 @@ export class Store {
         input.prHeadBranch,
         input.postComments ? 1 : 0,
         input.prUrl,
+        now,
         now,
         now,
         now,
@@ -173,7 +174,14 @@ export class Store {
     if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
-    if (patch.column !== undefined) set(COLUMN_TO_DB, patch.column);
+    if (patch.column !== undefined) {
+      set(COLUMN_TO_DB, patch.column);
+      // Stamp the entry into "À implémenter" (re-stamped on each re-entry) so the card's
+      // elapsed timer counts from when work started, not from ticket creation.
+      if (patch.column === "implementing" && this.getTicket(id)?.column !== "implementing") {
+        set("implementing_started_at", Date.now());
+      }
+    }
     if (patch.stage !== undefined) set("stage", patch.stage);
     if (patch.model !== undefined) set("model", patch.model);
     if (patch.effort !== undefined) set("effort", patch.effort);

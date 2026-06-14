@@ -95,6 +95,8 @@ export const ticketSchema = z.object({
   triageReport: z.string().nullable(),
   /** Epoch ms when the ticket reached a terminal state (done/failed/stalled/interrupted/abandoned); null otherwise. */
   finishedAt: z.number().int().nullable(),
+  /** Epoch ms when the ticket last entered the "À implémenter" column; null until it first does. */
+  implementingStartedAt: z.number().int().nullable(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

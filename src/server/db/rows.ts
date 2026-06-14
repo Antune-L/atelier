@@ -53,6 +53,7 @@ const ticketRowSchema = z.object({
   triage_verdict: z.string().nullable(),
   triage_report: z.string().nullable(),
   finished_at: z.number().nullable(),
+  implementing_started_at: z.number().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -118,6 +119,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     triageVerdict: row.triage_verdict === null ? null : triageVerdictSchema.parse(row.triage_verdict),
     triageReport: row.triage_report,
     finishedAt: row.finished_at,
+    implementingStartedAt: row.implementing_started_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

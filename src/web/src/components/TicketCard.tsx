@@ -7,7 +7,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { Badge } from "@/components/ui/badge";
-import { formatRelativeDuration, isStageAnimated, triageVerdictDot } from "@/lib/display";
+import { formatRelativeDuration, isStageAnimated, ticketElapsedStart, triageVerdictDot } from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
 
@@ -95,7 +95,7 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
 
       <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
         <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
-        <span>{formatRelativeDuration(ticket.createdAt, now)}</span>
+        <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
       </div>
     </div>
   );

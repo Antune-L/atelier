@@ -9,7 +9,7 @@ import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { useBoard } from "@/hooks/useBoard";
 import { useTickTimer } from "@/hooks/useTickTimer";
-import { formatRelativeDuration, isStageAnimated } from "@/lib/display";
+import { formatRelativeDuration, isStageAnimated, ticketElapsedStart } from "@/lib/display";
 
 interface AgentsViewProps {
   projects: ProjectInfo[];
@@ -125,7 +125,7 @@ function AgentCard({ ticket, projectLabel, onOpen }: AgentCardProps) {
 
       <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
         <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
-        <span>{formatRelativeDuration(ticket.createdAt, now)}</span>
+        <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
       </div>
 
       <div className="mt-2 h-40 overflow-hidden rounded-md">

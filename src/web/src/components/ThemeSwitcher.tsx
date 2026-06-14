@@ -1,4 +1,4 @@
-import { Palette } from "lucide-react";
+import { ChevronsUpDown, Palette } from "lucide-react";
 
 import { Select } from "@/components/ui/select";
 import { useTheme } from "@/hooks/useTheme";
@@ -19,7 +19,7 @@ export function ThemeSwitcher() {
         onChange={(e) => {
           if (isTheme(e.target.value)) setTheme(e.target.value);
         }}
-        className="bg-card pl-8"
+        className="appearance-none bg-card pl-8 pr-8"
         aria-label="Choisir le thème"
       >
         {THEMES.map((t) => (
@@ -28,6 +28,7 @@ export function ThemeSwitcher() {
           </option>
         ))}
       </Select>
+      <ChevronsUpDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
     </div>
   );
 }

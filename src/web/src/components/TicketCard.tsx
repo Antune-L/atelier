@@ -43,7 +43,7 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="text-sm font-medium leading-snug">{ticket.title}</h3>
+        <h3 className="min-w-0 break-words text-sm font-medium leading-snug">{ticket.title}</h3>
         <div className="flex shrink-0 items-center gap-1">
           {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
           <Badge variant="outline" className="text-[10px]">

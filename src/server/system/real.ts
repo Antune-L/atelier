@@ -4,7 +4,11 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
+import {
+  FEASIBILITY_SCOUT_AGENT_NAME,
+  TERMINAL_DEFAULT_COLS,
+  TERMINAL_DEFAULT_ROWS,
+} from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 
 import type {
@@ -32,6 +36,23 @@ const TRIAGE_READONLY_TOOLS = "Read,Glob,Grep";
  * per ticket. Edit/Write/Bash stay unloadable; MCP `submit_feasibility` survives `--tools`.
  */
 const FEASIBILITY_READONLY_TOOLS = "Read,Glob,Grep,Task";
+/**
+ * Inline subagent the orchestrator fans out per ticket. `--tools` bounds ONLY the top-level session;
+ * subagents default to `general-purpose` (all tools incl. Bash + Task) and recurse without limit. A
+ * read-only scout with no Task/Edit/Write/Bash structurally breaks that recursion. Defined inline via
+ * `--agents` so nothing is written into the real repo's `.claude/agents/`.
+ */
+const FEASIBILITY_SCOUT_AGENTS_JSON = JSON.stringify({
+  [FEASIBILITY_SCOUT_AGENT_NAME]: {
+    description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
+    prompt:
+      "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
+      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
+      "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.",
+    tools: ["Read", "Glob", "Grep"],
+    disallowedTools: ["Task", "Agent", "Bash", "Edit", "Write"],
+  },
+});
 /** How long a crashed pane stays readable before the session closes itself (1 h). */
 const DEAD_PANE_KEEP_ALIVE_S = 3600;
 // The dev-channels warning dialog has no bypass (by design): the backend watches
@@ -208,17 +229,24 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void> {
-    await this.spawnReadonlySession(opts, FEASIBILITY_READONLY_TOOLS);
+    // Fan-out subagents inherit neither `--tools` nor the contract's read-only wording, so an inline
+    // `--agents` definition is the only thing that actually keeps them read-only and non-recursive.
+    await this.spawnReadonlySession(opts, FEASIBILITY_READONLY_TOOLS, FEASIBILITY_SCOUT_AGENTS_JSON);
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */
-  private async spawnReadonlySession(opts: SpawnTriageOptions, tools: string): Promise<void> {
+  private async spawnReadonlySession(
+    opts: SpawnTriageOptions,
+    tools: string,
+    agentsJson?: string,
+  ): Promise<void> {
     const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
     // `auto` never prompts interactively (it auto-approves or silently blocks); the read-only tool
     // surface via `--tools` (Edit/Write/Bash unloadable) guarantees no write tool can exist anyway.
     // The JSON args carry no single quotes (JSON.stringify emits double quotes), so single-quoting
     // them for the inner shell is safe.
+    const agentsFlag = agentsJson ? ` --agents '${agentsJson}'` : "";
     const claudeCmd =
       `claude --model ${opts.model}${effortFlag}` +
       ` --mcp-config '${opts.mcpConfig}'` +
@@ -226,6 +254,7 @@ export class RealSystemAdapter implements SystemAdapter {
       ` --dangerously-load-development-channels server:worker` +
       ` --settings '${TRIAGE_SETTINGS_JSON}'` +
       ` --tools ${tools}` +
+      agentsFlag +
       ` --permission-mode auto`;
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();

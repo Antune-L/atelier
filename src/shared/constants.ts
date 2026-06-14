@@ -215,6 +215,12 @@ export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
 export const FEASIBILITY_SLOT_ID = -2;
 /** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
 export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
+/**
+ * Subagent type the orchestrator MUST fan out per ticket: a read-only scout WITHOUT the Task tool, so
+ * it cannot recurse into further subagents. Defined inline via `--agents` (no write to the real repo);
+ * `--tools` only bounds the top-level session, never the subagents it spawns.
+ */
+export const FEASIBILITY_SCOUT_AGENT_NAME = "feasibility-scout";
 /** Max automatic batch relaunches before the imported tickets are finally marked failed. */
 export const FEASIBILITY_AUTO_RELAUNCH_MAX = 1;
 /** Audit event logged each time a stuck feasibility batch is automatically relaunched. */

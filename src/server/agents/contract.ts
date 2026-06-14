@@ -1,3 +1,4 @@
+import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
@@ -266,9 +267,11 @@ export function buildFeasibilityBatchContract(tickets: Ticket[], project: Projec
     "Les descriptions peuvent référencer des chemins d'images locaux absolus (Read possible) et des liens externes.",
     "",
     "## Ta mission",
-    "Pour CHACUN des tickets ci-dessus, lance un sous-agent à contexte frais (outil Agent / Task) en LECTURE SEULE",
-    "(Read/Glob/Grep uniquement, aucune modification) qui décide si le ticket est implémentable EXACTEMENT tel",
-    "qu'il est écrit contre CE dépôt, sans le reformuler. Lance les sous-agents EN PARALLÈLE (fan-out, un par ticket).",
+    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent à contexte frais via l'outil Task avec`,
+    `\`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (sous-agent en lecture seule, sans Task ni Bash : il ne`,
+    "peut pas relancer d'autre sous-agent). Chaque sous-agent décide si SON ticket est implémentable EXACTEMENT",
+    "tel qu'il est écrit contre CE dépôt, sans le reformuler. Lance-les EN PARALLÈLE (fan-out, un seul par ticket).",
+    "N'imbrique JAMAIS les sous-agents : un sous-agent ne doit jamais en lancer un autre.",
     "",
     "Chaque sous-agent renvoie pour son ticket :",
     "- `verdict` : `implementable` | `needs_info` | `needs_rework`",

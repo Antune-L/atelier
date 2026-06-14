@@ -192,8 +192,8 @@ export const AUTO_RECLAIM_MAX = 2;
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */
 export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 
-/** Implementability triage ("Analyser"): read-only, fast, user-initiated. */
-export const TRIAGE_TIMEOUT_MS = 5 * 60 * 1000;
+/** Implementability triage ("Analyser"): read-only, user-initiated. Generous so large repos can be explored — the timer also covers claude boot + MCP connect (~2 min poll). */
+export const TRIAGE_TIMEOUT_MS = 15 * 60 * 1000;
 /**
  * SLOT_ID a triage worker identifies with: a triage runs in NO slot. The coordinator uses it to
  * recognize a triage session and bar it from the slot-pipeline tools (it may only submit_triage).

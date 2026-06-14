@@ -10,6 +10,7 @@ import {
   createTicketSchema,
   deriveTitleFromDescription,
   moveTicketSchema,
+  updateAppSettingsSchema,
   updateProfileSchema,
   updateTicketSchema,
   validatePrdSchema,
@@ -160,6 +161,12 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
     }))
+    .get("/settings", () => store.getAppSettings())
+    .patch("/settings", ({ body, set }) => {
+      const parsed = updateAppSettingsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      return store.updateAppSettings(parsed.data);
+    })
     .get("/profiles", () => store.listProfiles())
     .post("/profiles", ({ body, set }) => {
       const parsed = createProfileSchema.safeParse(body);

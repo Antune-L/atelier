@@ -6,7 +6,7 @@ import type { Ticket } from "@shared/schemas";
 import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
-import { ProfilesSettingsModal } from "@/components/ProfilesSettingsModal";
+import { SettingsModal } from "@/components/SettingsModal";
 import { SlotsBar } from "@/components/SlotsBar";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { TicketDetail } from "@/components/TicketDetail";
@@ -126,7 +126,7 @@ export function App() {
         projects={projects}
         onClose={() => setCreating(false)}
       />
-      <ProfilesSettingsModal
+      <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />

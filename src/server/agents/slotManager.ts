@@ -253,10 +253,12 @@ export class SlotManager {
   }
 
   private buildContractPayload(ticket: Ticket): string {
+    const { commitLanguage } = this.store.getAppSettings();
     return ticket.kind === "review"
-      ? buildReviewContract(ticket)
+      ? buildReviewContract(ticket, { commitLanguage })
       : buildTicketContract(ticket, {
           composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+          commitLanguage,
         });
   }
 

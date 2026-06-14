@@ -1,15 +1,19 @@
 import { Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   AGENT_EFFORTS,
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  COMMIT_LANGUAGES,
+  COMMIT_LANGUAGE_LABELS,
+  DEFAULT_COMMIT_LANGUAGE,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CommitLanguage,
   type Implementer,
 } from "@shared/constants";
 import type { Profile } from "@shared/schemas";
@@ -24,14 +28,98 @@ import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
 const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
 const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({ value: i, label: IMPLEMENTER_LABELS[i] }));
+const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) => ({
+  value: l,
+  label: COMMIT_LANGUAGE_LABELS[l],
+}));
 
-interface ProfilesSettingsModalProps {
+type SettingsTab = "general" | "agents";
+
+const TAB_OPTIONS: TabOption<SettingsTab>[] = [
+  { value: "general", label: "Options générales" },
+  { value: "agents", label: "Agents d'implémentation" },
+];
+
+interface SettingsModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-/** Settings modal: create/edit/delete the implementation-agent profiles stored in the DB. */
-export function ProfilesSettingsModal({ open, onClose }: ProfilesSettingsModalProps) {
+/** Settings modal split into tabs: global options and the implementation-agent profiles. */
+export function SettingsModal({ open, onClose }: SettingsModalProps) {
+  const [tab, setTab] = useState<SettingsTab>("general");
+
+  return (
+    <Modal open={open} onClose={onClose} className="max-w-2xl">
+      <ModalHeader>
+        <ModalTitle>Réglages</ModalTitle>
+      </ModalHeader>
+      <ModalBody>
+        <div className="mb-4">
+          <Tabs options={TAB_OPTIONS} value={tab} onChange={setTab} aria-label="Sections des réglages" />
+        </div>
+        {tab === "general" ? <GeneralSettings /> : <ProfilesSettings />}
+      </ModalBody>
+      <ModalFooter>
+        <Button onClick={onClose}>Fermer</Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+/** General options tab: the global commit/PR language (more options land here later). */
+function GeneralSettings() {
+  const [language, setLanguage] = useState<CommitLanguage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    api
+      .settings()
+      .then((settings) => {
+        // Adopt the persisted value only if the user hasn't already picked one
+        // (a click during the in-flight fetch must not be clobbered).
+        if (active) setLanguage((current) => current ?? settings.commitLanguage);
+      })
+      .catch((e) => {
+        if (active) {
+          setLanguage((current) => current ?? DEFAULT_COMMIT_LANGUAGE);
+          setError(e instanceof Error ? e.message : "Erreur");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const changeLanguage = async (next: CommitLanguage): Promise<void> => {
+    const previous = language;
+    setLanguage(next);
+    setError(null);
+    try {
+      await api.updateSettings({ commitLanguage: next });
+    } catch (e) {
+      setLanguage(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <div className="flex flex-col items-start gap-1.5">
+        <Label>Langue des PRs et des commits</Label>
+        <p className="text-sm text-muted-foreground">
+          Langue par défaut des messages de commit et du titre/description des PRs générés par les agents.
+        </p>
+        <Tabs options={LANGUAGE_OPTIONS} value={language} onChange={(v) => void changeLanguage(v)} aria-label="Langue des PRs et des commits" />
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/** Implementation-agent profiles tab: create/edit/delete the presets stored in the DB. */
+function ProfilesSettings() {
   const profiles = useProfiles();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,26 +138,18 @@ export function ProfilesSettingsModal({ open, onClose }: ProfilesSettingsModalPr
   };
 
   return (
-    <Modal open={open} onClose={onClose} className="max-w-2xl">
-      <ModalHeader>
-        <ModalTitle>Profils d'implémentation</ModalTitle>
-      </ModalHeader>
-      <ModalBody>
-        {profiles.length === 0 && <p className="text-sm text-muted-foreground">Aucun profil.</p>}
-        {profiles.map((profile) => (
-          // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
-          <ProfileRow key={`${profile.id}:${profile.updatedAt}`} profile={profile} onError={setError} />
-        ))}
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </ModalBody>
-      <ModalFooter>
-        <Button variant="outline" onClick={() => void addProfile()} disabled={busy}>
-          <Plus className="h-4 w-4" />
-          Ajouter un profil
-        </Button>
-        <Button onClick={onClose}>Fermer</Button>
-      </ModalFooter>
-    </Modal>
+    <div className="space-y-3">
+      {profiles.length === 0 && <p className="text-sm text-muted-foreground">Aucun profil.</p>}
+      {profiles.map((profile) => (
+        // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
+        <ProfileRow key={`${profile.id}:${profile.updatedAt}`} profile={profile} onError={setError} />
+      ))}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      <Button variant="outline" onClick={() => void addProfile()} disabled={busy}>
+        <Plus className="h-4 w-4" />
+        Ajouter un profil
+      </Button>
+    </div>
   );
 }
 

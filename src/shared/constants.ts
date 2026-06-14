@@ -62,6 +62,21 @@ export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   composer: "Composer 2.5",
 };
 
+/** Language the agent writes commit messages and PR title/description in. */
+export const COMMIT_LANGUAGES = ["en", "fr"] as const;
+export type CommitLanguage = (typeof COMMIT_LANGUAGES)[number];
+
+export const COMMIT_LANGUAGE_LABELS: Record<CommitLanguage, string> = {
+  en: "Anglais",
+  fr: "Français",
+};
+
+/** Default when the user has never picked one (stored in the `meta` table). */
+export const DEFAULT_COMMIT_LANGUAGE: CommitLanguage = "en";
+
+/** `meta` table key holding the persisted commit/PR language. */
+export const COMMIT_LANGUAGE_META_KEY = "commit_language";
+
 /** A reusable implementation-agent preset (model + effort + implementer). */
 export interface ProfileConfig {
   name: string;

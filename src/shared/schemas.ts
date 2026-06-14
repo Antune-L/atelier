@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, IMPLEMENTERS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -19,6 +19,21 @@ export const agentEffortSchema = z.enum(AGENT_EFFORTS);
 export const implementerSchema = z.enum(IMPLEMENTERS);
 export const kindSchema = z.enum(KINDS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
+export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
+
+// ---- App settings (global, persisted in the `meta` table) ----
+
+/** Global, non-project settings editable from the settings modal's "general" tab. */
+export const appSettingsSchema = z.object({
+  /** Language the agent writes commit messages and PR title/description in. */
+  commitLanguage: commitLanguageSchema,
+});
+export type AppSettings = z.infer<typeof appSettingsSchema>;
+
+export const updateAppSettingsSchema = z.object({
+  commitLanguage: commitLanguageSchema.optional(),
+});
+export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 
 // ---- Implementability triage ("Analyser") ----
 

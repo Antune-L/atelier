@@ -109,6 +109,17 @@ export function formatRelativeDuration(startMs: number, nowMs: number): string {
   return `${Math.floor(delta / DAY_MS)}j`;
 }
 
+/**
+ * Epoch ms the card's elapsed timer should count from. In "À implémenter" it's when the
+ * ticket entered that column (when work started); elsewhere it falls back to creation.
+ */
+export function ticketElapsedStart(ticket: Pick<Ticket, "column" | "implementingStartedAt" | "createdAt">): number {
+  if (ticket.column === "implementing" && ticket.implementingStartedAt !== null) {
+    return ticket.implementingStartedAt;
+  }
+  return ticket.createdAt;
+}
+
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";

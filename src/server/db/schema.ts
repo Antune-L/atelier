@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   triage_verdict TEXT,
   triage_report TEXT,
   finished_at INTEGER,
+  implementing_started_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -84,6 +85,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "triage_verdict", ddl: "ALTER TABLE tickets ADD COLUMN triage_verdict TEXT" },
   { column: "triage_report", ddl: "ALTER TABLE tickets ADD COLUMN triage_report TEXT" },
   { column: "finished_at", ddl: "ALTER TABLE tickets ADD COLUMN finished_at INTEGER" },
+  { column: "implementing_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementing_started_at INTEGER" },
   { column: "model", ddl: "ALTER TABLE tickets ADD COLUMN model TEXT" },
   { column: "effort", ddl: "ALTER TABLE tickets ADD COLUMN effort TEXT" },
   { column: "implementer", ddl: "ALTER TABLE tickets ADD COLUMN implementer TEXT NOT NULL DEFAULT 'claude'" },

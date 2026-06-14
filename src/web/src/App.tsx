@@ -8,7 +8,6 @@ import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { SettingsModal } from "@/components/SettingsModal";
 import { SlotsBar } from "@/components/SlotsBar";
-import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { TicketDetail } from "@/components/TicketDetail";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
@@ -123,7 +122,6 @@ export function App() {
               </option>
             ))}
           </Select>
-          <ThemeSwitcher />
           <Button onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" />
           </Button>

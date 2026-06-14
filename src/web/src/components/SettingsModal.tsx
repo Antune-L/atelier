@@ -23,7 +23,9 @@ import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
+import { useTheme } from "@/hooks/useTheme";
 
 const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
 const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
@@ -32,6 +34,7 @@ const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) =
   value: l,
   label: COMMIT_LANGUAGE_LABELS[l],
 }));
+const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
 
 type SettingsTab = "general" | "agents";
 
@@ -67,8 +70,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   );
 }
 
-/** General options tab: the global commit/PR language (more options land here later). */
+/** General options tab: the UI theme and the global commit/PR language. */
 function GeneralSettings() {
+  const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useState<CommitLanguage | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,15 +109,24 @@ function GeneralSettings() {
   };
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <div className="flex flex-col items-start gap-1.5">
-        <Label>Langue des PRs et des commits</Label>
-        <p className="text-sm text-muted-foreground">
-          Langue par défaut des messages de commit et du titre/description des PRs générés par les agents.
-        </p>
-        <Tabs options={LANGUAGE_OPTIONS} value={language} onChange={(v) => void changeLanguage(v)} aria-label="Langue des PRs et des commits" />
+    <div className="space-y-3">
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Thème</Label>
+          <p className="text-sm text-muted-foreground">Apparence de l'interface (préférence locale à ce navigateur).</p>
+          <Tabs options={THEME_OPTIONS} value={theme} onChange={setTheme} aria-label="Thème" />
+        </div>
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Langue des PRs et des commits</Label>
+          <p className="text-sm text-muted-foreground">
+            Langue par défaut des messages de commit et du titre/description des PRs générés par les agents.
+          </p>
+          <Tabs options={LANGUAGE_OPTIONS} value={language} onChange={(v) => void changeLanguage(v)} aria-label="Langue des PRs et des commits" />
+        </div>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
     </div>
   );
 }

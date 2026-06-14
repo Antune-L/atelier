@@ -51,6 +51,8 @@ interface TriageSession {
  */
 export class TriageManager {
   private readonly sessions = new Map<string, TriageSession>();
+  /** Tickets whose spawn is mid-flight: guards the relaunch path (no 409) against unserialized double-spawn. */
+  private readonly launching = new Set<string>();
   /** Repos whose `~/.claude.json` trust has been seeded this process (idempotent, outside KANBAN_SETUP). */
   private readonly seededRepos = new Set<string>();
 
@@ -79,7 +81,17 @@ export class TriageManager {
       return;
     }
 
+    // The relaunch path drops the running-status 409, so two near-simultaneous calls (double-click,
+    // relaunch mid-spawn) could otherwise both spawn against the same tmux name. Serialize per ticket:
+    // bail while a spawn is already in flight (distinct from the in-flight tmux SESSION, which is a
+    // legitimate relaunch target torn down by cleanup below).
+    if (this.launching.has(ticketId)) return;
+    this.launching.add(ticketId);
     try {
+      // A relaunch (terminal stuck) may find a previous session still live: tear it down first so the
+      // stale tmux pane, worker socket, and timeout can't collide with or clobber the fresh run.
+      await this.cleanup(ticketId);
+
       // The interactive (TTY) session would block on the trust dialog with no human to confirm it;
       // seed the real repo's trust idempotently (outside KANBAN_SETUP, which only covers slots).
       if (!this.seededRepos.has(project.repoPath)) {
@@ -101,6 +113,8 @@ export class TriageManager {
       void this.deliverWhenReady(ticketId, prompt, session);
     } catch (error) {
       await this.failTriage(ticketId, error instanceof Error ? error.message : String(error));
+    } finally {
+      this.launching.delete(ticketId);
     }
   }
 

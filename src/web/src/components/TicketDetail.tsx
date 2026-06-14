@@ -971,11 +971,12 @@ function TriageSection({ ticket, onTriage, onApplySuggestion }: TriageSectionPro
         size="sm"
         variant="secondary"
         className="mt-2"
-        disabled={running}
+        title={running ? "Tuer la session de faisabilité bloquée et la relancer" : undefined}
         onClick={() => void onTriage()}
       >
+        {running && <RotateCw className="h-4 w-4" />}
         {running
-          ? "Analyse en cours…"
+          ? "Relancer l'analyse"
           : ticket.triageStatus === "none"
             ? "Analyser"
             : "Re-analyser"}

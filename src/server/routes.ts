@@ -488,7 +488,8 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
-      if (ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse déjà en cours");
+      // No running-guard: a stuck "running" analysis can be force-relaunched; start() tears the
+      // previous session down first (mirrors the ticket-side "Relancer la session" force relaunch).
       const running = store.updateTicket(params.id, {
         triageStatus: "running",
         triageVerdict: null,

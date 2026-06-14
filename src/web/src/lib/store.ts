@@ -1,4 +1,4 @@
-import type { Slot, Ticket, WsClientEvent } from "@shared/schemas";
+import type { Comment, Slot, Ticket, WsClientEvent } from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
 
 import { ensureNotificationPermission, showDesktopNotification } from "./notifications";
@@ -21,16 +21,27 @@ export interface BoardState {
 }
 
 type Listener = () => void;
+type CommentListener = (comment: Comment) => void;
 
 class BoardStore {
   private state: BoardState = { tickets: [], slots: [], connected: false, toasts: [] };
   private readonly listeners = new Set<Listener>();
+  private readonly commentListeners = new Set<CommentListener>();
   private toastSeq = 0;
   private ws: WebSocket | null = null;
 
   subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  };
+
+  /**
+   * Comments live outside the board snapshot (fetched on demand by the detail view), so they get
+   * their own stream: the open ticket subscribes to surface agent/user messages without a refresh.
+   */
+  subscribeComments = (listener: CommentListener): (() => void) => {
+    this.commentListeners.add(listener);
+    return () => this.commentListeners.delete(listener);
   };
 
   getSnapshot = (): BoardState => this.state;
@@ -77,7 +88,8 @@ class BoardStore {
         this.set({ slots: event.slots });
         break;
       case "comment":
-        // Comments are fetched on demand in the detail view; nothing to store here.
+        // Not part of the board snapshot; fan out to whichever ticket detail is open.
+        for (const listener of this.commentListeners) listener(event.comment);
         break;
       case "notification":
         this.pushToast(event.title, event.body);

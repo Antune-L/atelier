@@ -1,5 +1,5 @@
 import { Cpu, Eye, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type {
   Comment,
@@ -14,6 +14,7 @@ import {
   AGENT_MODEL_LABELS,
   COLUMN_LABELS,
   COLUMN_ORDER,
+  TERMINAL_STAGES,
   type AgentEffort,
   type AgentModel,
   type Column,
@@ -47,6 +48,7 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { api } from "@/lib/api";
+import { boardStore } from "@/lib/store";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 import { resolveProjectLabel } from "@/components/TicketCard";
@@ -61,6 +63,17 @@ function parseTriageReport(report: string | null): TriageResult | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Union comments by id (incoming wins) and keep them chronological. Shared by the initial fetch
+ * and the live WS stream so a comment pushed during the fetch window is neither clobbered by the
+ * full-list response nor shown out of order.
+ */
+function mergeComments(existing: Comment[], incoming: Comment[]): Comment[] {
+  const byId = new Map(existing.map((c) => [c.id, c]));
+  for (const c of incoming) byId.set(c.id, c);
+  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
 }
 
 interface TicketDetailProps {
@@ -97,13 +110,28 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
   const load = useCallback(async (id: string) => {
     const data = await api.ticketDetail(id);
-    setComments(data.comments);
+    // Merge (not replace): a comment pushed over WS during this fetch would otherwise be dropped.
+    setComments((prev) => mergeComments(prev, data.comments));
   }, []);
+
+  // Live comments: the initial list is loaded once per ticket, but the agent (and any other
+  // client) keeps posting over the board WS while the drawer stays open. Merge pushed comments
+  // so the user sees them without a refresh — deduped by id and kept in chronological order.
+  const openTicketId = ticket?.id ?? null;
+  useEffect(() => {
+    if (openTicketId === null) return;
+    return boardStore.subscribeComments((incoming) => {
+      if (incoming.ticketId !== openTicketId) return;
+      setComments((prev) => mergeComments(prev, [incoming]));
+    });
+  }, [openTicketId]);
 
   if (ticket && ticket.id !== loadedId) {
     setLoadedId(ticket.id);
     setEditing(false);
     setEditError(null);
+    // Drop the previous ticket's comments before the merge-based load so they don't bleed across.
+    setComments([]);
     void load(ticket.id);
   }
   if (!ticket && loadedId !== null) {
@@ -129,6 +157,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.stage !== null &&
     current.stage !== "done";
   const terminalPaneVisible = showTerminal && terminalVisible;
+  // The pane WebSocket can land before tmux is spawned (queued/setup window); while the session is
+  // expected to be live the terminal retries rather than freezing on the first "session terminée".
+  const sessionLive = current.stage !== null && !TERMINAL_STAGES.includes(current.stage);
   // A "todo" card carries config sections (agent, PR options, feasibility) and
   // never has a terminal: lay it out on two columns so it breathes.
   const isTodoSplit = current.column === "todo";
@@ -664,7 +695,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
-            <LiveTerminal ticketId={current.id} fill />
+            <LiveTerminal ticketId={current.id} live={sessionLive} fill />
           </div>
         )}
       </div>

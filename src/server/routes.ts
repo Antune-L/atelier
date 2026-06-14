@@ -79,6 +79,10 @@ const stopHookSchema = z.object({
   sessionId: z.string().nullable().default(null),
 });
 
+const agentActiveSchema = z.object({
+  ticketId: z.string(),
+});
+
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
@@ -416,6 +420,12 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = stopHookSchema.safeParse(body);
       if (!parsed.success) return { ok: false };
       coordinator.handleStopHook(parsed.data.ticketId, parsed.data.sessionId);
+      return { ok: true };
+    })
+    .post("/internal/active", ({ body }) => {
+      const parsed = agentActiveSchema.safeParse(body);
+      if (!parsed.success) return { ok: false };
+      coordinator.handleAgentActive(parsed.data.ticketId);
       return { ok: true };
     })
     .post("/internal/update", async ({ set }) => {

@@ -134,7 +134,6 @@ export function buildSettingsJson(ctx: SlotTemplateContext): string {
     hooks: {
       PreToolUse: [
         {
-          matcher: "Bash",
           hooks: [{ type: "command", command: `${ctx.bunPath} ${ctx.preToolUseHookPath}` }],
         },
       ],

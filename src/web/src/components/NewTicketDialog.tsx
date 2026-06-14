@@ -65,6 +65,7 @@ export function NewTicketDialog({
   const addScreenshots =
     !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
+  const [researchPlan, setResearchPlan] = useState(false);
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -119,6 +120,7 @@ export function NewTicketDialog({
     setAutoMergeChoice(null);
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
+    setResearchPlan(false);
     setModel(null);
     setEffort(null);
     setImplementerModel(null);
@@ -163,6 +165,7 @@ export function NewTicketDialog({
         autoMerge,
         addScreenshots,
         verifyFeature,
+        researchPlan,
         baseBranch: baseBranchOverride,
         model,
         effort,
@@ -340,6 +343,14 @@ export function NewTicketDialog({
                     checked={verifyFeature}
                     onCheckedChange={setVerifyFeature}
                     aria-label="Tester la feature avant la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Réfléchir sur la solution en amont (recherche parallèle paris-research)</span>
+                  <Switch
+                    checked={researchPlan}
+                    onCheckedChange={setResearchPlan}
+                    aria-label="Réflexion paris-research en amont"
                   />
                 </label>
                 {error && <p className="text-sm text-destructive">{error}</p>}

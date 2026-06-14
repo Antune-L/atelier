@@ -280,6 +280,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { verifyFeature: checked }).catch(() => undefined);
   };
 
+  const setResearchPlan = (checked: boolean): void => {
+    void api.updateTicket(current.id, { researchPlan: checked }).catch(() => undefined);
+  };
+
   const startEdit = (): void => {
     setEditTitle(current.title);
     setEditDescription(current.description);
@@ -754,6 +758,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     checked={current.verifyFeature}
                     onCheckedChange={setVerifyFeature}
                     aria-label="Tester la feature avant la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Réfléchir sur la solution en amont (recherche parallèle paris-research)</span>
+                  <Switch
+                    checked={current.researchPlan}
+                    onCheckedChange={setResearchPlan}
+                    aria-label="Réflexion paris-research en amont"
                   />
                 </label>
               </div>

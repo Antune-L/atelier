@@ -16,6 +16,7 @@ import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjects } from "@/hooks/useProjects";
+import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ const VIEW_OPTIONS: { value: View; label: string; Icon: typeof LayoutGrid }[] = 
 ];
 
 export function App() {
+  useSuppressEscapeBeep();
   const projects = useProjects();
   const { slots } = useBoard();
   const [view, setView] = useState<View>("kanban");

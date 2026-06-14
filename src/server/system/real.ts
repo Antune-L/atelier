@@ -270,15 +270,16 @@ export class RealSystemAdapter implements SystemAdapter {
     const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
     // `auto` never prompts interactively (it auto-approves or silently blocks); the read-only tool
     // surface via `--tools` (Edit/Write/Bash unloadable) guarantees no write tool can exist anyway.
-    // The JSON args carry no single quotes (JSON.stringify emits double quotes), so single-quoting
-    // them for the inner shell is safe.
-    const agentsFlag = config.agentsJson ? ` --agents '${config.agentsJson}'` : "";
+    // Every inline JSON arg goes through `shQuote`: tmux re-parses this command via `sh`, and JSON
+    // string contents can hold literal apostrophes (e.g. French in `--agents`) that would otherwise
+    // break naive single-quoting and corrupt the flag.
+    const agentsFlag = config.agentsJson ? ` --agents ${shQuote(config.agentsJson)}` : "";
     const claudeCmd =
       `claude --model ${opts.model}${effortFlag}` +
-      ` --mcp-config '${opts.mcpConfig}'` +
+      ` --mcp-config ${shQuote(opts.mcpConfig)}` +
       ` --strict-mcp-config` +
       ` --dangerously-load-development-channels server:worker` +
-      ` --settings '${config.settingsJson}'` +
+      ` --settings ${shQuote(config.settingsJson)}` +
       ` --tools ${config.tools}` +
       agentsFlag +
       ` --permission-mode auto`;
@@ -612,6 +613,17 @@ async function detectInstallCommand(slotPath: string): Promise<string> {
     if (await Bun.file(join(slotPath, lockfile)).exists()) return command;
   }
   return "bun install";
+}
+
+/**
+ * Wrap a value as a single POSIX-shell single-quoted argument, escaping any embedded apostrophe via
+ * the `'\''` idiom (close-quote, literal quote, reopen). Required because the readonly `claude` command
+ * is assembled as a string and re-parsed by `sh` when tmux runs it: an unescaped `'` inside an inline
+ * JSON arg (e.g. French text in `--agents`) terminates the quote and corrupts the flag. `JSON.stringify`
+ * escapes double quotes but leaves apostrophes literal, so it is NOT enough on its own.
+ */
+function shQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */

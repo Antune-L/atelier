@@ -232,17 +232,20 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
-      <div className="flex flex-col gap-2">
-        <Field label="Modèle">
-          <Tabs options={MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
-        </Field>
-        <Field label="Effort">
-          <Tabs options={EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
-        </Field>
-        <Field label="Implémenté par">
-          <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
-        </Field>
-      </div>
+      <details className="rounded-md border bg-muted/30 px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration</summary>
+        <div className="mt-3 flex flex-col gap-2">
+          <Field label="Modèle">
+            <Tabs options={MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
+          </Field>
+          <Field label="Effort">
+            <Tabs options={EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
+          </Field>
+          <Field label="Implémenté par">
+            <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
+          </Field>
+        </div>
+      </details>
       <div className="flex justify-end">
         <Button size="sm" onClick={() => void save()} disabled={busy || !dirty || name.trim() === ""}>
           Enregistrer

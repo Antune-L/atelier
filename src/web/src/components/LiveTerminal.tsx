@@ -13,11 +13,21 @@ interface LiveTerminalProps {
   ticketId: string;
   /** Stretch to fill the parent's height instead of capping at 60vh. */
   fill?: boolean;
+  /**
+   * Whether the agent session is expected to be running. The pane WebSocket can connect before
+   * tmux is spawned (queued → setup window): the server then reports the pane gone. While the
+   * session should be live, the view retries instead of freezing on "session terminée".
+   */
+  live?: boolean;
 }
 
 const TITLE = "Terminal";
 const TERMINAL_FONT_SIZE = 12;
 const TERMINAL_SCROLLBACK = 5000;
+/** Retry cadence while reconnecting to a pane that has not produced a live stream yet. */
+const RECONNECT_DELAY_MS = 1000;
+/** Bounded retries so a genuinely dead-but-active pane eventually settles on "session terminée". */
+const MAX_CONNECT_ATTEMPTS = 300;
 /** Shared background so the xterm theme and the wrapper never desync. */
 const TERMINAL_BG = "#001219";
 
@@ -62,15 +72,19 @@ function fromBase64(chunk: string): Uint8Array {
  * into xterm.js and relays keystrokes/resize back. Input is off by default (co-control,
  * so toggling it sends no signal to the agent); the pane keeps running either way.
  */
-export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
+export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const inputEnabledRef = useRef(false);
+  const liveRef = useRef(live);
 
   const [inputEnabled, setInputEnabled] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [exited, setExited] = useState(false);
+
+  // Read the latest liveness inside the socket callbacks without remounting the terminal on change.
+  liveRef.current = live;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -94,18 +108,53 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
     let socket: WebSocket | null = null;
     let dataSub: IDisposable | null = null;
     let resizeSub: IDisposable | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    let disposed = false;
 
     // Connect only once the pane has a real box. A full-screen TUI is captured by absolute
     // coordinates, so fitting/seeding while the container is still unsized (detail panel not
     // laid out yet) makes xterm render the seed and the live stream at the wrong geometry —
     // garbled and seemingly frozen until a manual resize/remount. Deferring to the first real
     // size makes the very first frame correct.
-    const connect = (): void => {
-      fit.fit();
+    function connect(): void {
+      if (disposed) return;
+      try {
+        fit.fit();
+      } catch {
+        // Not measurable this frame; keep the last good geometry.
+      }
       // term.cols/rows now hold the real viewport; carry it so the server reflows the pane to
       // this geometry before its first capture (no resize message fires when fit is a no-op).
       const ws = new WebSocket(wsUrl(ticketId, term.cols, term.rows));
       socket = ws;
+      let settled = false;
+
+      // A dropped socket — or an `exit` received while the pane is still spawning (the queued →
+      // setup window before tmux exists) — must not freeze the view. Retry while the session is
+      // expected to be live; settle on the last frame once it is genuinely gone or the retry budget
+      // is spent. Funnel close + exit through one idempotent path so a close after an exit can't
+      // double-fire.
+      const onGone = (): void => {
+        if (settled) return;
+        settled = true;
+        dataSub?.dispose();
+        resizeSub?.dispose();
+        dataSub = null;
+        resizeSub = null;
+        try {
+          ws.close();
+        } catch {
+          // Already closing.
+        }
+        if (disposed) return;
+        if (!liveRef.current || attempts >= MAX_CONNECT_ATTEMPTS) {
+          setExited(true);
+          return;
+        }
+        attempts += 1;
+        retryTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+      };
 
       ws.addEventListener("message", (event) => {
         if (typeof event.data !== "string") return;
@@ -117,11 +166,14 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
         }
         const parsed = terminalServerMessageSchema.safeParse(payload);
         if (!parsed.success) return;
-        if (parsed.data.type === "data") term.write(fromBase64(parsed.data.chunk));
-        else setExited(true);
+        if (parsed.data.type === "data") {
+          // A live frame resets the budget so it bounds *consecutive* failures, not the lifetime:
+          // a long session that briefly flaps must not eventually freeze while still running.
+          attempts = 0;
+          term.write(fromBase64(parsed.data.chunk));
+        } else onGone();
       });
-      // A dropped socket must disable input and reflect the lost connection, not freeze silently.
-      ws.addEventListener("close", () => setExited(true));
+      ws.addEventListener("close", onGone);
 
       dataSub = term.onData((data) => {
         if (!inputEnabledRef.current || ws.readyState !== WebSocket.OPEN) return;
@@ -130,7 +182,7 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
       resizeSub = term.onResize(({ cols, rows }) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
       });
-    };
+    }
 
     const observer = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
@@ -147,6 +199,8 @@ export function LiveTerminal({ ticketId, fill = false }: LiveTerminalProps) {
     observer.observe(container);
 
     return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       observer.disconnect();
       dataSub?.dispose();
       resizeSub?.dispose();

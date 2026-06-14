@@ -34,7 +34,7 @@ import {
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
+import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { LiveTerminal } from "@/components/LiveTerminal";
 import { TerminalView } from "@/components/TerminalView";
@@ -170,6 +170,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   const setImplementer = (implementer: Implementer): void => {
     void api.updateTicket(current.id, { implementer }).catch(() => undefined);
+  };
+
+  // Apply a whole profile in a single PATCH so the three knobs never land in an intermediate state.
+  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+    void api.updateTicket(current.id, config).catch(() => undefined);
   };
 
   const moveTo = async (target: Column): Promise<void> => {
@@ -587,13 +592,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           <div className="min-w-0 space-y-4">
             <section className="rounded-md border p-3">
               <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
-              <ImplementationAgentFields
+              <AgentProfileConfig
                 model={current.model}
                 effort={current.effort}
                 implementer={current.implementer}
                 onModelChange={setAgentModel}
                 onEffortChange={setAgentEffort}
                 onImplementerChange={setImplementer}
+                onApplyProfile={applyProfile}
               />
               <div className="mt-3">
                 <Button

@@ -2,13 +2,16 @@ import type {
   Capabilities,
   Comment,
   CreateCommentInput,
+  CreateProfileInput,
   CreateReviewInput,
   CreateTicketInput,
   OpenPr,
+  Profile,
   ProjectInfo,
   TerminalOutput,
   Ticket,
   TriageOutput,
+  UpdateProfileInput,
   UpdateTicketInput,
   UploadResult,
 } from "@shared/schemas";
@@ -30,6 +33,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
   capabilities: (): Promise<Capabilities> => request("/api/capabilities"),
+  profiles: (): Promise<Profile[]> => request("/api/profiles"),
+  createProfile: (input: CreateProfileInput): Promise<Profile> =>
+    request("/api/profiles", { method: "POST", body: JSON.stringify(input) }),
+  updateProfile: (id: string, input: UpdateProfileInput): Promise<Profile> =>
+    request(`/api/profiles/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  deleteProfile: (id: string): Promise<{ ok: boolean }> =>
+    request(`/api/profiles/${id}`, { method: "DELETE" }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),

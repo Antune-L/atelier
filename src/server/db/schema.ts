@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
+import { nanoid } from "nanoid";
 
-import { SLOT_COUNT } from "../../shared/constants.ts";
+import { DEFAULT_PROFILES, SLOT_COUNT } from "../../shared/constants.ts";
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tickets (
@@ -73,6 +74,17 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  model TEXT NOT NULL,
+  effort TEXT NOT NULL,
+  implementer TEXT NOT NULL DEFAULT 'claude',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
 `;
@@ -106,6 +118,7 @@ export function createDatabase(path: string): Database {
   db.exec(SCHEMA_SQL);
   migrate(db);
   seedSlots(db);
+  seedProfiles(db);
   return db;
 }
 
@@ -127,4 +140,18 @@ function seedSlots(db: Database): void {
   for (let id = 1; id <= SLOT_COUNT; id += 1) {
     insert.run(id);
   }
+}
+
+/** Seed the built-in implementation profiles once (no-op when the table already holds any). */
+function seedProfiles(db: Database): void {
+  const row = db.query("SELECT COUNT(*) AS n FROM profiles").get();
+  const count = row && typeof row === "object" && "n" in row && typeof row.n === "number" ? row.n : 0;
+  if (count > 0) return;
+  const now = Date.now();
+  const insert = db.prepare(
+    "INSERT INTO profiles (id, name, model, effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  DEFAULT_PROFILES.forEach((profile, index) => {
+    insert.run(nanoid(10), profile.name, profile.model, profile.effort, profile.implementer, index, now, now);
+  });
 }

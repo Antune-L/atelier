@@ -1,0 +1,98 @@
+import { useId } from "react";
+
+import {
+  CUSTOM_PROFILE_ID,
+  CUSTOM_PROFILE_LABEL,
+  type AgentEffort,
+  type AgentModel,
+  type Implementer,
+} from "@shared/constants";
+import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
+
+import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
+import { Label } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { useCapabilities } from "@/hooks/useCapabilities";
+import { useProfiles } from "@/hooks/useProfiles";
+
+interface AgentProfileConfigProps {
+  model: AgentModel | null;
+  effort: AgentEffort | null;
+  implementer: Implementer;
+  onModelChange: (model: AgentModel | null) => void;
+  onEffortChange: (effort: AgentEffort | null) => void;
+  onImplementerChange: (implementer: Implementer) => void;
+  /** Apply a whole profile at once (lets a single call site batch the three knobs). */
+  onApplyProfile: (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }) => void;
+}
+
+/**
+ * Profile picker over the implementation-agent knobs: a stored preset selects model/effort/implementer
+ * in one click, while the "Configuration avancée" collapse exposes the raw knobs. Editing any knob so it
+ * no longer matches a profile surfaces the "Personnalisé" entry (derived, never persisted).
+ */
+export function AgentProfileConfig({
+  model,
+  effort,
+  implementer,
+  onModelChange,
+  onEffortChange,
+  onImplementerChange,
+  onApplyProfile,
+}: AgentProfileConfigProps) {
+  const profiles = useProfiles();
+  const { defaultModel, defaultEffort } = useCapabilities();
+  const id = useId();
+  const profileLabelId = `${id}-profile`;
+
+  // A null knob follows the orchestrator default; resolve it before matching a stored profile.
+  const parsedDefaultModel = agentModelSchema.safeParse(defaultModel);
+  const parsedDefaultEffort = agentEffortSchema.safeParse(defaultEffort);
+  const effectiveModel = model ?? (parsedDefaultModel.success ? parsedDefaultModel.data : null);
+  const effectiveEffort = effort ?? (parsedDefaultEffort.success ? parsedDefaultEffort.data : null);
+
+  const selectedProfile = profiles.find(
+    (p) => p.model === effectiveModel && p.effort === effectiveEffort && p.implementer === implementer,
+  );
+  const selectedId = selectedProfile?.id ?? CUSTOM_PROFILE_ID;
+
+  const onSelectProfile = (value: string): void => {
+    const profile = profiles.find((p) => p.id === value);
+    if (!profile) return;
+    onApplyProfile({ model: profile.model, effort: profile.effort, implementer: profile.implementer });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col items-start gap-1.5">
+        <Label id={profileLabelId}>Profil</Label>
+        <Select
+          aria-labelledby={profileLabelId}
+          className="w-full"
+          value={selectedId}
+          onChange={(e) => onSelectProfile(e.target.value)}
+        >
+          {selectedId === CUSTOM_PROFILE_ID && <option value={CUSTOM_PROFILE_ID}>{CUSTOM_PROFILE_LABEL}</option>}
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <details className="rounded-md border bg-muted/30 px-3 py-2">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration avancée</summary>
+        <div className="mt-3">
+          <ImplementationAgentFields
+            model={model}
+            effort={effort}
+            implementer={implementer}
+            onModelChange={onModelChange}
+            onEffortChange={onEffortChange}
+            onImplementerChange={onImplementerChange}
+          />
+        </div>
+      </details>
+    </div>
+  );
+}

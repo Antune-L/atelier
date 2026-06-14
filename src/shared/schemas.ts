@@ -102,6 +102,36 @@ export const ticketSchema = z.object({
 });
 export type Ticket = z.infer<typeof ticketSchema>;
 
+export const profileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  model: agentModelSchema,
+  effort: agentEffortSchema,
+  implementer: implementerSchema,
+  /** Display order in the picker (ascending). */
+  sortOrder: z.number().int(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+});
+export type Profile = z.infer<typeof profileSchema>;
+
+export const createProfileSchema = z.object({
+  name: z.string().min(1),
+  model: agentModelSchema,
+  effort: agentEffortSchema,
+  implementer: implementerSchema.default("claude"),
+});
+export type CreateProfileInput = z.infer<typeof createProfileSchema>;
+
+export const updateProfileSchema = z.object({
+  name: z.string().min(1).optional(),
+  model: agentModelSchema.optional(),
+  effort: agentEffortSchema.optional(),
+  implementer: implementerSchema.optional(),
+  sortOrder: z.number().int().optional(),
+});
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
+
 export const commentSchema = z.object({
   id: z.string(),
   ticketId: z.string(),

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import {
+  createAskSchema,
   createCommentSchema,
   createProfileSchema,
   createReviewSchema,
@@ -239,6 +240,29 @@ export function createApiRoutes(deps: RouteDeps) {
         created.push(ticket);
       }
       return created;
+    })
+    .post("/asks", ({ body, set }) => {
+      const parsed = createAskSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      // Title is optional: fall back to a slice of the question when left blank.
+      const title = parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
+      const ticket = store.createAsk({
+        title,
+        description: parsed.data.description,
+        project: parsed.data.project,
+        model: parsed.data.model,
+        effort: parsed.data.effort,
+      });
+      hub.pushTicket(ticket);
+      // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
+      void slots.startTicket(ticket.id).catch((e) => {
+        log.error("démarrage de l'ask échoué", {
+          ticketId: ticket.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
+      return ticket;
     })
     .patch("/tickets/:id", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);

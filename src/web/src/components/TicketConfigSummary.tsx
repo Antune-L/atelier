@@ -55,7 +55,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
       <dl className="mt-3 space-y-2">
         <Row label="Modèle (orchestrateur)" value={modelValue} />
         <Row label="Effort (orchestrateur)" value={effortValue} />
-        {ticket.kind === "review" ? (
+        {ticket.kind === "review" && (
           <>
             {ticket.reviewDepth && (
               <Row label="Profondeur de revue" value={REVIEW_DEPTH_LABELS[ticket.reviewDepth]} />
@@ -63,7 +63,9 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             {ticket.prNumber !== null && <Row label="PR analysée" value={`#${ticket.prNumber}`} />}
             <Row label="Commentaires postés sur GitHub" value={ticket.postComments ? YES : NO} />
           </>
-        ) : (
+        )}
+        {/* An ask ticket is read-only: only the model/effort rows above apply (no implementer/PR knobs). */}
+        {ticket.kind === "feature" && (
           <>
             <Row label="Implémenté par" value={IMPLEMENTER_LABELS[ticket.implementer]} />
             <Row label="PRD à implémenter" value={ticket.prdEnabled ? YES : NO} />

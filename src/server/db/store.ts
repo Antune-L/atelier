@@ -50,6 +50,14 @@ export interface NewReview {
   postComments: boolean;
 }
 
+export interface NewAsk {
+  title: string;
+  description: string;
+  project: ProjectKey;
+  model: AgentModel | null;
+  effort: AgentEffort | null;
+}
+
 export interface TicketPatch {
   title?: string;
   description?: string;
@@ -172,6 +180,22 @@ export class Store {
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error("createReview: ticket vanished after insert");
     this.logEvent(id, "created", { title: input.title, kind: "review", prNumber: input.prNumber });
+    return ticket;
+  }
+
+  /** Create an ask ticket: straight into "À implémenter", carrying the chosen model/effort. */
+  createAsk(input: NewAsk): Ticket {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'ask', ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+      )
+      .run(id, input.title, input.description, input.project, input.model, input.effort, now, now, now, now);
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error("createAsk: ticket vanished after insert");
+    this.logEvent(id, "created", { title: input.title, kind: "ask" });
     return ticket;
   }
 

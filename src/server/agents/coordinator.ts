@@ -5,6 +5,7 @@ import {
   askUserArgsSchema,
   doneArgsSchema,
   failArgsSchema,
+  submitAnswerArgsSchema,
   submitPrdArgsSchema,
   submitTriageArgsSchema,
   updateStageArgsSchema,
@@ -75,6 +76,8 @@ export class AgentCoordinator {
         return this.handleAskUser(ctx);
       case "submit_prd":
         return this.handleSubmitPrd(ctx);
+      case "submit_answer":
+        return this.handleSubmitAnswer(ctx);
       case "done":
         return this.handleDone(ctx);
       case "fail":
@@ -126,6 +129,24 @@ export class AgentCoordinator {
     this.store.logEvent(ctx.ticketId, "submit_prd", {});
     void this.notifier.notify("PRD prêt", `${ticket.title}: PRD à valider`);
     return { ok: true, result: "PRD enregistré. Attends l'événement prd_validated avant d'implémenter." };
+  }
+
+  private async handleSubmitAnswer(ctx: ToolCallContext): Promise<ToolResult> {
+    const parsed = submitAnswerArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.kind !== "ask") {
+      return { ok: false, result: "submit_answer réservé aux tickets de type « ask »." };
+    }
+    // Already closed (slot released): ignore a stale/duplicate call instead of posting a second answer.
+    if (ticket.slotId === null) {
+      return { ok: false, result: "Ticket déjà clôturé." };
+    }
+    const comment = this.store.addComment(ctx.ticketId, "agent", parsed.data.answer, null);
+    this.hub.pushComment(comment);
+    // completeAsk releases the slot and logs the "answered" outcome (mirrors handleDone → finishTicket).
+    await this.slots.completeAsk(ctx.ticketId, ctx.slotId);
+    return { ok: true, result: "Réponse enregistrée, ticket clôturé, slot libéré." };
   }
 
   private async handleDone(ctx: ToolCallContext): Promise<ToolResult> {

@@ -80,20 +80,24 @@ export const DEFAULT_COMMIT_LANGUAGE: CommitLanguage = "en";
 /** `meta` table key holding the persisted commit/PR language. */
 export const COMMIT_LANGUAGE_META_KEY = "commit_language";
 
-/** A reusable implementation-agent preset (model + effort + implementer). */
+/** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {
   name: string;
   model: AgentModel;
   effort: AgentEffort;
+  /** Implementer sub-agent model (claude mode only). */
+  implementerModel: AgentModel;
+  /** Implementer sub-agent reasoning effort (claude mode only). */
+  implementerEffort: AgentEffort;
   implementer: Implementer;
 }
 
 /** Seeded into the DB on first boot; editable afterwards via the settings modal. */
 export const DEFAULT_PROFILES: ProfileConfig[] = [
-  { name: "Basique", model: "opus", effort: "medium", implementer: "claude" },
-  { name: "Debug -", model: "opus", effort: "low", implementer: "claude" },
-  { name: "Debug +", model: "opus", effort: "max", implementer: "claude" },
-  { name: "Délégation", model: "opus", effort: "medium", implementer: "composer" },
+  { name: "Basique", model: "opus", effort: "medium", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
+  { name: "Debug -", model: "opus", effort: "low", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
+  { name: "Debug +", model: "opus", effort: "max", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
+  { name: "Délégation", model: "opus", effort: "medium", implementerModel: "opus", implementerEffort: "low", implementer: "composer" },
 ];
 
 /** Sentinel "profile" shown when a ticket's knobs match no stored profile. */

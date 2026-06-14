@@ -87,20 +87,27 @@ export const ticketSchema = z.object({
   prDraft: z.boolean(),
   /** Auto-merge the PR into the base branch once the done() gate passes. */
   autoMerge: z.boolean(),
+  /** Attach Playwright screenshots of the feature to the PR (frontend changes). Unavailable when autoMerge is on. */
+  addScreenshots: z.boolean(),
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
-  /** Implementation agent overrides (null = fall back to the server config defaults). */
+  /** Orchestrator agent overrides (null = fall back to the server config defaults). */
   model: agentModelSchema.nullable(),
   effort: agentEffortSchema.nullable(),
+  /** Implementer sub-agent overrides (null = fall back to the server config defaults). */
+  implementerModel: agentModelSchema.nullable(),
+  implementerEffort: agentEffortSchema.nullable(),
   implementer: implementerSchema,
   reviewRounds: z.number().int(),
   sessionId: z.string().nullable(),
   slotId: z.number().int().nullable(),
   branch: z.string().nullable(),
   prUrl: z.string().nullable(),
+  /** An opus-low session is resolving merge conflicts on the existing PR branch (auto-merge retry). */
+  resolvingConflicts: z.boolean(),
   error: z.string().nullable(),
   archived: z.boolean(),
   watchdogFlagged: z.boolean(),
@@ -122,6 +129,8 @@ export const profileSchema = z.object({
   name: z.string(),
   model: agentModelSchema,
   effort: agentEffortSchema,
+  implementerModel: agentModelSchema,
+  implementerEffort: agentEffortSchema,
   implementer: implementerSchema,
   /** Display order in the picker (ascending). */
   sortOrder: z.number().int(),
@@ -134,6 +143,8 @@ export const createProfileSchema = z.object({
   name: z.string().min(1),
   model: agentModelSchema,
   effort: agentEffortSchema,
+  implementerModel: agentModelSchema.default("opus"),
+  implementerEffort: agentEffortSchema.default("low"),
   implementer: implementerSchema.default("claude"),
 });
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
@@ -142,6 +153,8 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
   model: agentModelSchema.optional(),
   effort: agentEffortSchema.optional(),
+  implementerModel: agentModelSchema.optional(),
+  implementerEffort: agentEffortSchema.optional(),
   implementer: implementerSchema.optional(),
   sortOrder: z.number().int().optional(),
 });
@@ -173,6 +186,8 @@ export const projectInfoSchema = z.object({
   baseBranch: z.string(),
   /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
   defaultAutoMerge: z.boolean(),
+  /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
+  defaultAddScreenshots: z.boolean(),
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
@@ -204,11 +219,14 @@ export const createTicketSchema = z
     prdEnabled: z.boolean().default(false),
     prDraft: z.boolean().default(true),
     autoMerge: z.boolean().default(false),
+    addScreenshots: z.boolean().default(false),
     // Branch the worktree forks from and the PR targets (null = project default).
     baseBranch: baseBranchSchema.nullable().default(null),
     // Implementation agent knobs picked at creation (null = fall back to server config).
     model: agentModelSchema.nullable().default(null),
     effort: agentEffortSchema.nullable().default(null),
+    implementerModel: agentModelSchema.nullable().default(null),
+    implementerEffort: agentEffortSchema.nullable().default(null),
     implementer: implementerSchema.default("claude"),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
@@ -227,9 +245,12 @@ export const updateTicketSchema = z.object({
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  addScreenshots: z.boolean().optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),
+  implementerModel: agentModelSchema.nullable().optional(),
+  implementerEffort: agentEffortSchema.nullable().optional(),
   implementer: implementerSchema.optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
@@ -310,6 +331,10 @@ export const capabilitiesSchema = z.object({
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultEffort: z.string(),
+  /** Implementer sub-agent model used when a ticket leaves it unset (e.g. "opus"). */
+  defaultImplementerModel: z.string(),
+  /** Implementer sub-agent reasoning effort used when a ticket leaves it unset (e.g. "low"). */
+  defaultImplementerEffort: z.string(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
 });

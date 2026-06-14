@@ -24,6 +24,8 @@ const projectConfigSchema = z.object({
   baseBranch: z.string().min(1),
   /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
   defaultAutoMerge: z.boolean().default(false),
+  /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
+  defaultAddScreenshots: z.boolean().default(false),
   commitTimeoutMs: z.number().int().positive(),
   /** Optional overrides for test/lint/typecheck commands (default: read project package.json scripts). */
   scripts: z
@@ -39,7 +41,14 @@ const projectConfigSchema = z.object({
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
-const DEFAULT_MODELS = { implement: "opus", triage: "sonnet", implementEffort: "medium", triageEffort: "low" } as const;
+const DEFAULT_MODELS = {
+  implement: "opus",
+  triage: "sonnet",
+  implementEffort: "medium",
+  triageEffort: "low",
+  implementerModel: "opus",
+  implementerEffort: "low",
+} as const;
 
 const configSchema = z.object({
   projects: z.record(z.string(), projectConfigSchema),
@@ -53,6 +62,10 @@ const configSchema = z.object({
       implementEffort: z.enum(AGENT_EFFORTS).default("medium"),
       /** Reasoning effort of the read-only feasibility triage session. */
       triageEffort: z.enum(AGENT_EFFORTS).default("low"),
+      /** Model of the implementer sub-agent that writes code (claude mode; per-ticket override wins). */
+      implementerModel: z.string().default("opus"),
+      /** Reasoning effort of the implementer sub-agent (claude mode; per-ticket override wins). */
+      implementerEffort: z.enum(AGENT_EFFORTS).default("low"),
     })
     .default(DEFAULT_MODELS),
   /** Root holding the fixed per-slot worktrees (default: <repo>/slots). */

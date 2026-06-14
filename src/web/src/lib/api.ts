@@ -70,6 +70,8 @@ export const api = {
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
+  resolveConflicts: (id: string): Promise<Ticket> =>
+    request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
   triage: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage`, { method: "POST" }),

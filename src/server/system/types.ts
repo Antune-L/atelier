@@ -63,6 +63,8 @@ export interface PrepareSlotFiles {
   slotPath: string;
   mcpJson: string;
   settingsJson: string;
+  /** `.claude/agents/implementer.md` content (the configurable code-writing sub-agent). */
+  implementerAgentMd: string;
 }
 
 export interface ReviewDoneOptions {
@@ -84,6 +86,8 @@ export interface SystemAdapter {
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string): Promise<void>;
   worktreeAdd(opts: GitWorktreeAddOptions): Promise<void>;
+  /** Check out an EXISTING remote branch into a worktree (auto-merge conflict resolution), resetting the local ref to origin/<branch>. */
+  worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void>;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
 
   // ---- slot preparation ----

@@ -7,7 +7,14 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { Badge } from "@/components/ui/badge";
-import { formatRelativeDuration, isStageAnimated, ticketElapsedStart, triageVerdictDot } from "@/lib/display";
+import {
+  formatDuration,
+  formatRelativeDuration,
+  isStageAnimated,
+  ticketElapsedStart,
+  ticketImplementationDuration,
+  triageVerdictDot,
+} from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +26,7 @@ interface TicketCardProps {
 
 export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
   const now = useTickTimer();
+  const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
   });
@@ -100,7 +108,11 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
 
       <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
         <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
-        <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
+        {implementationDuration !== null ? (
+          <span>Implémentée en {formatDuration(implementationDuration)}</span>
+        ) : (
+          <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
+        )}
       </div>
     </div>
   );

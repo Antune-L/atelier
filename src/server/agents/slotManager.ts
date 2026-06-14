@@ -12,8 +12,14 @@ import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
-import { buildAskContract, buildReviewContract, buildTicketContract } from "./contract.ts";
 import {
+  buildAskContract,
+  buildConflictResolutionContract,
+  buildReviewContract,
+  buildTicketContract,
+} from "./contract.ts";
+import {
+  buildImplementerAgentMd,
   buildMcpJson,
   buildSettingsJson,
   resolveTemplatePaths,
@@ -133,6 +139,40 @@ export class SlotManager {
     if (next) void this.startTicket(next);
   }
 
+  /**
+   * Auto-merge failed (conflicts / branch behind base): spawn an opus-low session on the EXISTING
+   * PR branch to rebase onto the base, resolve conflicts, force-push, then re-trigger the auto-merge
+   * via done(). Unlike startTicket it never queues — with no free slot it surfaces a hint and bails,
+   * leaving the card in its failed state so the user can retry once a slot frees up.
+   */
+  async resolveMergeConflicts(ticketId: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.branch === null || ticket.prUrl === null) return;
+    const free = this.store.findFreeSlot();
+    if (!free) {
+      this.touch(
+        this.store.updateTicket(ticketId, {
+          error: "Aucun slot libre pour résoudre les conflits — réessaie une fois un slot libéré.",
+        }),
+      );
+      return;
+    }
+    this.store.logEvent(ticketId, "resolve_conflicts_started", { prUrl: ticket.prUrl });
+    // opus low per the feature spec; the flag routes the conflict-resolution contract at delivery.
+    this.touch(
+      this.store.updateTicket(ticketId, {
+        resolvingConflicts: true,
+        model: "opus",
+        effort: "low",
+        column: "implementing",
+        stage: "queued",
+        error: null,
+        finishedAt: null,
+      }),
+    );
+    await this.launchInSlot(free.id, ticketId);
+  }
+
   private async launchInSlot(slotId: number, ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
@@ -144,7 +184,11 @@ export class SlotManager {
     const baseBranch = ticket.baseBranch ?? project.baseBranch;
     const path = slotPath(slotId);
     const slug = slugify(ticket.title);
-    const branch = `feat/${ticket.id}-${slug}`;
+    // Resolving merge conflicts reuses the EXISTING PR branch (its commits); a fresh feature run
+    // forks a new branch off the base.
+    const resolving = ticket.resolvingConflicts && ticket.branch !== null;
+    // The second `ticket.branch !== null` is required: TS does not carry the narrowing across `resolving`.
+    const branch = resolving && ticket.branch !== null ? ticket.branch : `feat/${ticket.id}-${slug}`;
     const sessionName = `ticket-${ticket.id}`;
 
     this.store.updateSlot(slotId, {
@@ -175,15 +219,22 @@ export class SlotManager {
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
         await this.system.fetch(project.repoPath, baseBranch);
-        await this.system.worktreeAdd({
-          repoPath: project.repoPath,
-          slotPath: path,
-          branch,
-          baseBranch,
-        });
+        if (resolving) {
+          // The PR branch lives only on origin after the slot was released; fetch it, then check it
+          // out so the session has the PR's commits to rebase onto the (also fetched) base.
+          await this.system.fetch(project.repoPath, branch);
+          await this.system.worktreeAddExisting(project.repoPath, path, branch);
+        } else {
+          await this.system.worktreeAdd({
+            repoPath: project.repoPath,
+            slotPath: path,
+            branch,
+            baseBranch,
+          });
+        }
       });
 
-      await this.depositSlotFiles(path, ticket.id, slotId);
+      await this.depositSlotFiles(path, ticket, slotId);
       await this.system.copyEnvFiles(project.repoPath, path);
       // An ask ticket is read-only (explore + answer); installing deps is pure overhead, so skip it
       // to start answering faster. Feature/review tickets need a built tree for typecheck/lint/argus.
@@ -219,20 +270,23 @@ export class SlotManager {
     }
   }
 
-  private async depositSlotFiles(path: string, ticketId: string, slotId: number): Promise<void> {
+  private async depositSlotFiles(path: string, ticket: Ticket, slotId: number): Promise<void> {
     const templates = resolveTemplatePaths(this.config.projectRoot);
     const ctx: SlotTemplateContext = {
       ...templates,
       backendHttp: this.config.backendHttp,
       backendWs: this.config.backendWs,
-      ticketId,
+      ticketId: ticket.id,
       slotId,
       bunPath: this.config.bunPath,
+      implementerModel: ticket.implementerModel ?? MODELS.implementerModel,
+      implementerEffort: ticket.implementerEffort ?? MODELS.implementerEffort,
     };
     await this.system.prepareSlotFiles({
       slotPath: path,
       mcpJson: buildMcpJson(ctx),
       settingsJson: buildSettingsJson(ctx),
+      implementerAgentMd: buildImplementerAgentMd(ctx),
     });
   }
 
@@ -258,6 +312,7 @@ export class SlotManager {
 
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
+    if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
     if (ticket.kind === "ask") return buildAskContract(ticket);
     return buildTicketContract(ticket, {
@@ -381,6 +436,8 @@ export class SlotManager {
         stage: mergeError ? "failed" : "done",
         prUrl,
         slotId: null,
+        // The run reached done(): any conflict-resolution session is over (cleared on both outcomes).
+        resolvingConflicts: false,
         error: mergeError,
         finishedAt: Date.now(),
       }),
@@ -452,7 +509,13 @@ export class SlotManager {
       await this.releaseSlot(ticket.slotId, ticket);
     }
     this.touch(
-      this.store.updateTicket(ticketId, { column: "abandoned", stage: null, slotId: null, finishedAt: Date.now() }),
+      this.store.updateTicket(ticketId, {
+        column: "abandoned",
+        stage: null,
+        slotId: null,
+        resolvingConflicts: false,
+        finishedAt: Date.now(),
+      }),
     );
     this.store.logEvent(ticketId, "abandoned", {});
     log.info("ticket abandonné", { ticketId });
@@ -462,7 +525,13 @@ export class SlotManager {
   private markFailed(ticketId: string, slotId: number, reason: string): void {
     this.clearPhase(ticketId);
     this.touch(
-      this.store.updateTicket(ticketId, { column: "failed", stage: "failed", error: reason, finishedAt: Date.now() }),
+      this.store.updateTicket(ticketId, {
+        column: "failed",
+        stage: "failed",
+        error: reason,
+        resolvingConflicts: false,
+        finishedAt: Date.now(),
+      }),
     );
     this.store.updateSlot(slotId, { status: "failed" });
     this.hub.pushSlots(this.store.listSlots());
@@ -600,7 +669,7 @@ export class SlotManager {
     // and evict its worker socket now so the contract re-delivers to the fresh one.
     await this.system.killSession(sessionName);
     this.workerHub.disconnect(ticketId);
-    await this.depositSlotFiles(path, ticketId, slotId);
+    await this.depositSlotFiles(path, ticket, slotId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     await this.system.spawnSession({
       sessionName,

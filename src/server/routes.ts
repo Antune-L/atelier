@@ -121,6 +121,7 @@ export function createApiRoutes(deps: RouteDeps) {
           label: project.label,
           baseBranch: project.baseBranch,
           defaultAutoMerge: project.defaultAutoMerge,
+          defaultAddScreenshots: project.defaultAddScreenshots,
         };
       }),
     )
@@ -146,6 +147,8 @@ export function createApiRoutes(deps: RouteDeps) {
       composerAvailable: deps.composerAvailable,
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
+      defaultImplementerModel: MODELS.implementerModel,
+      defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
     }))
     .get("/settings", () => store.getAppSettings())
@@ -191,9 +194,12 @@ export function createApiRoutes(deps: RouteDeps) {
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
+        addScreenshots: parsed.data.addScreenshots,
         baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,
+        implementerModel: parsed.data.implementerModel,
+        implementerEffort: parsed.data.implementerEffort,
         implementer: parsed.data.implementer,
       });
       if (!parsed.data.start) {
@@ -356,7 +362,8 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merged", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      const merged = store.updateTicket(params.id, { column: "merged" });
+      // Stamp the merge time so the board can order "PR mergée" newest-first.
+      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
       hub.pushTicket(merged);
       store.logEvent(params.id, "merged", {});
       return merged;
@@ -365,6 +372,30 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       await slots.retry(params.id);
+      return store.getTicket(params.id);
+    })
+    .post("/tickets/:id/resolve-conflicts", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      // Only meaningful for an auto-merge that failed after opening the PR: the PR exists, the slot
+      // is released, and a fresh session can rebase the branch and re-trigger the merge.
+      const eligible =
+        ticket.column === "failed" &&
+        ticket.autoMerge &&
+        ticket.kind !== "review" &&
+        ticket.slotId === null &&
+        ticket.prUrl !== null &&
+        ticket.branch !== null;
+      if (!eligible) {
+        return jsonError(set, HTTP_CONFLICT, "résolution de conflits réservée aux PR dont le merge auto a échoué");
+      }
+      // Slow git worktree setup runs in the background; the board updates live over WS.
+      void slots.resolveMergeConflicts(params.id).catch((e) => {
+        log.error("résolution de conflits échouée", {
+          ticketId: params.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {

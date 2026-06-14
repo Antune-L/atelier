@@ -60,13 +60,27 @@ export function NewTicketDialog({
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
   const autoMerge =
     autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
+  const [addScreenshotsChoice, setAddScreenshotsChoice] = useState<boolean | null>(null);
+  // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
+  const addScreenshots =
+    !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
+  const [implementerEffort, setImplementerEffort] = useState<AgentEffort | null>(null);
   const [implementer, setImplementer] = useState<Implementer>("claude");
-  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+  const applyProfile = (config: {
+    model: AgentModel;
+    effort: AgentEffort;
+    implementerModel: AgentModel;
+    implementerEffort: AgentEffort;
+    implementer: Implementer;
+  }): void => {
     setModel(config.model);
     setEffort(config.effort);
+    setImplementerModel(config.implementerModel);
+    setImplementerEffort(config.implementerEffort);
     setImplementer(config.implementer);
   };
   const [error, setError] = useState<string | null>(null);
@@ -102,8 +116,11 @@ export function NewTicketDialog({
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
+    setAddScreenshotsChoice(null);
     setModel(null);
     setEffort(null);
+    setImplementerModel(null);
+    setImplementerEffort(null);
     setImplementer("claude");
     setError(null);
   };
@@ -142,9 +159,12 @@ export function NewTicketDialog({
         prdEnabled,
         prDraft,
         autoMerge,
+        addScreenshots,
         baseBranch: baseBranchOverride,
         model,
         effort,
+        implementerModel,
+        implementerEffort,
         implementer,
         start,
       });
@@ -252,9 +272,13 @@ export function NewTicketDialog({
                   <AgentProfileConfig
                     model={model}
                     effort={effort}
+                    implementerModel={implementerModel}
+                    implementerEffort={implementerEffort}
                     implementer={implementer}
                     onModelChange={setModel}
                     onEffortChange={setEffort}
+                    onImplementerModelChange={setImplementerModel}
+                    onImplementerEffortChange={setImplementerEffort}
                     onImplementerChange={setImplementer}
                     onApplyProfile={applyProfile}
                   />
@@ -289,6 +313,22 @@ export function NewTicketDialog({
                     checked={autoMerge}
                     onCheckedChange={setAutoMergeChoice}
                     aria-label="Merge automatique de la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ajouter des captures d'écran à la PR (frontend)
+                    {autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        (indisponible avec le merge auto)
+                      </span>
+                    )}
+                  </span>
+                  <Switch
+                    checked={addScreenshots}
+                    disabled={autoMerge}
+                    onCheckedChange={setAddScreenshotsChoice}
+                    aria-label="Ajouter des captures d'écran à la PR"
                   />
                 </label>
                 {error && <p className="text-sm text-destructive">{error}</p>}

@@ -41,11 +41,23 @@ function Row({ label, value }: { label: string; value: string }) {
  * once the ticket has left it.
  */
 export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
-  const { defaultModel, defaultEffort } = useCapabilities();
+  const { defaultModel, defaultEffort, defaultImplementerModel, defaultImplementerEffort } = useCapabilities();
 
-  // A null per-ticket knob falls back to the orchestrator default: show it explicitly.
+  // A null per-ticket knob falls back to the configured default: show it explicitly.
   const modelValue = labelWithDefault(ticket.model, defaultModel, agentModelSchema, AGENT_MODEL_LABELS);
   const effortValue = labelWithDefault(ticket.effort, defaultEffort, agentEffortSchema, AGENT_EFFORT_LABELS);
+  const implementerModelValue = labelWithDefault(
+    ticket.implementerModel,
+    defaultImplementerModel,
+    agentModelSchema,
+    AGENT_MODEL_LABELS,
+  );
+  const implementerEffortValue = labelWithDefault(
+    ticket.implementerEffort,
+    defaultImplementerEffort,
+    agentEffortSchema,
+    AGENT_EFFORT_LABELS,
+  );
 
   return (
     <details className="rounded-md border bg-muted/30 p-3">
@@ -68,9 +80,16 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
         {ticket.kind === "feature" && (
           <>
             <Row label="Implémenté par" value={IMPLEMENTER_LABELS[ticket.implementer]} />
+            {ticket.implementer === "claude" && (
+              <>
+                <Row label="Modèle (implémenteur)" value={implementerModelValue} />
+                <Row label="Effort (implémenteur)" value={implementerEffortValue} />
+              </>
+            )}
             <Row label="PRD à implémenter" value={ticket.prdEnabled ? YES : NO} />
             <Row label="PR en draft" value={ticket.prDraft && !ticket.autoMerge ? YES : NO} />
             <Row label="Merge automatique" value={ticket.autoMerge ? YES : NO} />
+            <Row label="Captures d'écran dans la PR" value={ticket.addScreenshots && !ticket.autoMerge ? YES : NO} />
             <Row
               label="Branche de base"
               value={ticket.baseBranch ?? "Défaut du projet"}

@@ -97,12 +97,21 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void> {
+    this.log("worktreeAddExisting", { repoPath, slotPath, branch });
+    await delay(FAKE_SETTLE_MS);
+  }
+
   async deleteLocalBranch(repoPath: string, branch: string): Promise<void> {
     this.log("deleteLocalBranch", { repoPath, branch });
   }
 
   async prepareSlotFiles(files: PrepareSlotFiles): Promise<void> {
-    this.log("prepareSlotFiles", { slotPath: files.slotPath, mcpBytes: files.mcpJson.length });
+    this.log("prepareSlotFiles", {
+      slotPath: files.slotPath,
+      mcpBytes: files.mcpJson.length,
+      implementerAgentBytes: files.implementerAgentMd.length,
+    });
   }
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {

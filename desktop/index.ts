@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import Electrobun, { ApplicationMenu, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
+import { z } from "zod";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
 import { spawnRelauncher } from "./relaunch.ts";
@@ -23,8 +24,28 @@ import { repairPath } from "./repairPath.ts";
 const WINDOW_TITLE = "Atelier";
 const WINDOW_WIDTH = 1440;
 const WINDOW_HEIGHT = 900;
+const NEW_WINDOW_OPEN_EVENT = "new-window-open";
 const HEALTH_POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_TIMEOUT_MS = 30_000;
+
+/**
+ * `new-window-open` payload (the front's `target="_blank"` / window.open). WKWebView's `detail` is a
+ * JSON object for this event, but Electrobun keeps a string fallback when parsing fails — accept both.
+ */
+const newWindowEventSchema = z.object({
+  data: z.object({
+    detail: z.union([z.string(), z.object({ url: z.string() })]),
+  }),
+});
+
+/** Returns the http(s) target of a `new-window-open` event, or null for anything we shouldn't route out. */
+function externalUrlFromNewWindowEvent(event: unknown): string | null {
+  const parsed = newWindowEventSchema.safeParse(event);
+  if (!parsed.success) return null;
+  const { detail } = parsed.data.data;
+  const url = typeof detail === "string" ? detail : detail.url;
+  return /^https?:\/\//i.test(url) ? url : null;
+}
 
 /**
  * Absolute path to the bundled bun. MUST be execPath, not argv0: the Electrobun launcher spawns the
@@ -179,6 +200,13 @@ async function boot(): Promise<void> {
       title: WINDOW_TITLE,
       url: `http://localhost:${server.port}`,
       frame: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, x: 0, y: 0 },
+    });
+
+    // `target="_blank"` / window.open links (e.g. the "Voir la PR" link) have no default handler in
+    // WKWebView — the click silently does nothing. Route them to the system browser instead.
+    Electrobun.events.on(NEW_WINDOW_OPEN_EVENT, (event) => {
+      const url = externalUrlFromNewWindowEvent(event);
+      if (url != null) Utils.openExternal(url);
     });
   } catch (error) {
     await teardown().catch(() => undefined);

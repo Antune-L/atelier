@@ -1,4 +1,4 @@
-import { Cpu, Eye, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -171,6 +171,15 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.slotId !== null &&
     current.stage !== null &&
     ACTIVE_STAGES.includes(current.stage);
+  // Auto-merge failed after the PR was opened: offer a one-click opus-low session that rebases the
+  // branch, resolves the conflicts, force-pushes, and re-triggers the auto-merge.
+  const canResolveConflicts =
+    current.column === "failed" &&
+    current.autoMerge &&
+    current.kind !== "review" &&
+    current.slotId === null &&
+    current.prUrl !== null &&
+    current.branch !== null;
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -199,12 +208,26 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { effort }).catch(() => undefined);
   };
 
+  const setImplementerModel = (implementerModel: AgentModel | null): void => {
+    void api.updateTicket(current.id, { implementerModel }).catch(() => undefined);
+  };
+
+  const setImplementerEffort = (implementerEffort: AgentEffort | null): void => {
+    void api.updateTicket(current.id, { implementerEffort }).catch(() => undefined);
+  };
+
   const setImplementer = (implementer: Implementer): void => {
     void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
-  // Apply a whole profile in a single PATCH so the three knobs never land in an intermediate state.
-  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+  // Apply a whole profile in a single PATCH so the knobs never land in an intermediate state.
+  const applyProfile = (config: {
+    model: AgentModel;
+    effort: AgentEffort;
+    implementerModel: AgentModel;
+    implementerEffort: AgentEffort;
+    implementer: Implementer;
+  }): void => {
     void api.updateTicket(current.id, config).catch(() => undefined);
   };
 
@@ -245,7 +268,12 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   };
 
   const setAutoMerge = (checked: boolean): void => {
+    // Screenshots stay stored but masked by `!autoMerge` everywhere, so the choice survives toggling.
     void api.updateTicket(current.id, { autoMerge: checked }).catch(() => undefined);
+  };
+
+  const setAddScreenshots = (checked: boolean): void => {
+    void api.updateTicket(current.id, { addScreenshots: checked }).catch(() => undefined);
   };
 
   const startEdit = (): void => {
@@ -569,6 +597,20 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </section>
 
         <section className="flex flex-wrap gap-2 border-t pt-4">
+          {canResolveConflicts && (
+            <Button
+              variant="default"
+              size="sm"
+              title="Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto"
+              onClick={async () => {
+                await api.resolveConflicts(ticket.id);
+                refresh();
+              }}
+            >
+              <GitMerge className="h-4 w-4" />
+              Résoudre les conflits
+            </Button>
+          )}
           {(current.stage === "failed" ||
             current.stage === "interrupted" ||
             current.stage === "stalled") &&
@@ -635,9 +677,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               <AgentProfileConfig
                 model={current.model}
                 effort={current.effort}
+                implementerModel={current.implementerModel}
+                implementerEffort={current.implementerEffort}
                 implementer={current.implementer}
                 onModelChange={setAgentModel}
                 onEffortChange={setAgentEffort}
+                onImplementerModelChange={setImplementerModel}
+                onImplementerEffortChange={setImplementerEffort}
                 onImplementerChange={setImplementer}
                 onApplyProfile={applyProfile}
               />
@@ -683,6 +729,20 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 <label className="flex items-center justify-between gap-2 text-sm">
                   <span>Merger automatiquement la PR après ouverture</span>
                   <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ajouter des captures d'écran à la PR (frontend)
+                    {current.autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">(indisponible avec le merge auto)</span>
+                    )}
+                  </span>
+                  <Switch
+                    checked={current.addScreenshots && !current.autoMerge}
+                    disabled={current.autoMerge}
+                    onCheckedChange={setAddScreenshots}
+                    aria-label="Ajouter des captures d'écran à la PR"
+                  />
                 </label>
               </div>
             </section>

@@ -24,6 +24,10 @@ export interface SlotTemplateContext {
   slotId: number;
   /** Bun runtime binary (so the worker.ts/hooks run under bun). */
   bunPath: string;
+  /** Resolved model of the implementer sub-agent (frontmatter `model:`). */
+  implementerModel: string;
+  /** Resolved reasoning effort of the implementer sub-agent (frontmatter `effort:`). */
+  implementerEffort: string;
 }
 
 /** Bash commands the agent may run without escalation. Everything else is denied. */
@@ -39,6 +43,8 @@ const BASH_ALLOWLIST = [
   "Bash(git branch:*)",
   "Bash(git rev-parse:*)",
   "Bash(git restore:*)",
+  // Auto-merge conflict resolution: rebase the PR branch onto the base and continue through conflicts.
+  "Bash(git rebase:*)",
   "Bash(bun:*)",
   "Bash(bunx:*)",
   "Bash(npm run:*)",
@@ -70,6 +76,31 @@ const BASH_ALLOWLIST = [
   "Bash(mktemp:*)",
   "Bash(echo:*)",
 ];
+
+/**
+ * Builds the `.claude/agents/implementer.md` sub-agent file. Its frontmatter `model:`/`effort:`
+ * are generated from the resolved per-ticket (or config-default) implementer knobs so the
+ * code-writing sub-agent can run on a different model/effort than the orchestrator session.
+ * No `disallowedTools`: the sub-agent inherits the session's tools.
+ */
+export function buildImplementerAgentMd(ctx: SlotTemplateContext): string {
+  return `---
+name: implementer
+description: Implémente intégralement la fonctionnalité demandée dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.
+model: ${ctx.implementerModel}
+effort: ${ctx.implementerEffort}
+---
+
+Tu es le sous-agent implémenteur. Ton unique rôle est d'écrire le code de la fonctionnalité décrite, intégralement, dans le worktree courant.
+
+Consignes :
+- Implémente de bout en bout la fonctionnalité demandée. Si un chemin de PRD t'est fourni dans le prompt, lis-le et traite-le comme le contrat à respecter.
+- Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
+- Respecte les conventions de code du projet.
+- Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
+- Quand tu as terminé, rends la main en résumant ce que tu as implémenté et les fichiers touchés.
+`;
+}
 
 export function buildMcpJson(ctx: SlotTemplateContext): string {
   const config = {

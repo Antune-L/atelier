@@ -170,6 +170,9 @@ export class AgentCoordinator {
       column: "failed",
       stage: "failed",
       error: parsed.data.reason,
+      // A conflict-resolution session that fails ends the run; clear the flag so a later launch
+      // uses the normal contract.
+      resolvingConflicts: false,
       finishedAt: Date.now(),
     });
     if (ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "failed" });

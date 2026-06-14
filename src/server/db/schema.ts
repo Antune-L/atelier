@@ -17,12 +17,15 @@ CREATE TABLE IF NOT EXISTS tickets (
   prd_enabled INTEGER NOT NULL DEFAULT 0,
   pr_draft INTEGER NOT NULL DEFAULT 1,
   auto_merge INTEGER NOT NULL DEFAULT 0,
+  add_screenshots INTEGER NOT NULL DEFAULT 0,
   base_branch TEXT,
   prd_markdown TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
   model TEXT,
   effort TEXT,
+  implementer_model TEXT,
+  implementer_effort TEXT,
   implementer TEXT NOT NULL DEFAULT 'claude',
   review_rounds INTEGER NOT NULL DEFAULT 0,
   nudge_count INTEGER NOT NULL DEFAULT 0,
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   slot_id INTEGER,
   branch TEXT,
   pr_url TEXT,
+  resolving_conflicts INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   archived INTEGER NOT NULL DEFAULT 0,
   watchdog_flagged INTEGER NOT NULL DEFAULT 0,
@@ -79,6 +83,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   name TEXT NOT NULL,
   model TEXT NOT NULL,
   effort TEXT NOT NULL,
+  implementer_model TEXT NOT NULL DEFAULT 'opus',
+  implementer_effort TEXT NOT NULL DEFAULT 'low',
   implementer TEXT NOT NULL DEFAULT 'claude',
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
@@ -100,15 +106,28 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "implementing_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementing_started_at INTEGER" },
   { column: "model", ddl: "ALTER TABLE tickets ADD COLUMN model TEXT" },
   { column: "effort", ddl: "ALTER TABLE tickets ADD COLUMN effort TEXT" },
+  { column: "implementer_model", ddl: "ALTER TABLE tickets ADD COLUMN implementer_model TEXT" },
+  { column: "implementer_effort", ddl: "ALTER TABLE tickets ADD COLUMN implementer_effort TEXT" },
   { column: "implementer", ddl: "ALTER TABLE tickets ADD COLUMN implementer TEXT NOT NULL DEFAULT 'claude'" },
   { column: "pr_draft", ddl: "ALTER TABLE tickets ADD COLUMN pr_draft INTEGER NOT NULL DEFAULT 1" },
   { column: "auto_merge", ddl: "ALTER TABLE tickets ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0" },
+  { column: "add_screenshots", ddl: "ALTER TABLE tickets ADD COLUMN add_screenshots INTEGER NOT NULL DEFAULT 0" },
   { column: "kind", ddl: "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'feature'" },
   { column: "review_depth", ddl: "ALTER TABLE tickets ADD COLUMN review_depth TEXT" },
   { column: "pr_number", ddl: "ALTER TABLE tickets ADD COLUMN pr_number INTEGER" },
   { column: "pr_head_branch", ddl: "ALTER TABLE tickets ADD COLUMN pr_head_branch TEXT" },
   { column: "post_comments", ddl: "ALTER TABLE tickets ADD COLUMN post_comments INTEGER NOT NULL DEFAULT 1" },
   { column: "base_branch", ddl: "ALTER TABLE tickets ADD COLUMN base_branch TEXT" },
+  { column: "resolving_conflicts", ddl: "ALTER TABLE tickets ADD COLUMN resolving_conflicts INTEGER NOT NULL DEFAULT 0" },
+];
+
+/**
+ * Columns added to the profiles table after its original schema. A NOT NULL column added to a
+ * non-empty table requires a DEFAULT (SQLite refuses it otherwise), so both carry one.
+ */
+const PROFILE_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "implementer_model", ddl: "ALTER TABLE profiles ADD COLUMN implementer_model TEXT NOT NULL DEFAULT 'opus'" },
+  { column: "implementer_effort", ddl: "ALTER TABLE profiles ADD COLUMN implementer_effort TEXT NOT NULL DEFAULT 'low'" },
 ];
 
 export function createDatabase(path: string): Database {
@@ -116,21 +135,22 @@ export function createDatabase(path: string): Database {
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(SCHEMA_SQL);
-  migrate(db);
+  migrate(db, "tickets", TICKET_MIGRATIONS);
+  migrate(db, "profiles", PROFILE_MIGRATIONS);
   seedSlots(db);
   seedProfiles(db);
   return db;
 }
 
-/** Adds new columns to a pre-existing tickets table (no-op on fresh DBs). */
-function migrate(db: Database): void {
+/** Adds new columns to a pre-existing table (no-op on fresh DBs). */
+function migrate(db: Database, table: string, migrations: { column: string; ddl: string }[]): void {
   const existing = new Set(
     db
-      .query("PRAGMA table_info(tickets)")
+      .query(`PRAGMA table_info(${table})`)
       .all()
       .map((row) => (row && typeof row === "object" && "name" in row ? String(row.name) : "")),
   );
-  for (const { column, ddl } of TICKET_MIGRATIONS) {
+  for (const { column, ddl } of migrations) {
     if (!existing.has(column)) db.exec(ddl);
   }
 }
@@ -149,9 +169,20 @@ function seedProfiles(db: Database): void {
   if (count > 0) return;
   const now = Date.now();
   const insert = db.prepare(
-    "INSERT INTO profiles (id, name, model, effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   DEFAULT_PROFILES.forEach((profile, index) => {
-    insert.run(nanoid(10), profile.name, profile.model, profile.effort, profile.implementer, index, now, now);
+    insert.run(
+      nanoid(10),
+      profile.name,
+      profile.model,
+      profile.effort,
+      profile.implementerModel,
+      profile.implementerEffort,
+      profile.implementer,
+      index,
+      now,
+      now,
+    );
   });
 }

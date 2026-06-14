@@ -1,6 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Plus, Rocket } from "lucide-react";
 import { useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -16,6 +16,12 @@ interface BoardColumnProps {
   onOpenTicket: (ticket: Ticket) => void;
   /** When set on the TODO column, renders a "+" beside the count to create a ticket. */
   onAddTicket?: () => void;
+  /** When set on the TODO column, renders a button to send the first eligible tickets to "À implémenter". */
+  onMoveAllToImplementing?: () => void;
+  /** How many tickets the bulk action would actually start (capped by free slots); disables the button at 0. */
+  moveAllCount?: number;
+  /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
+  moveAllBusy?: boolean;
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
@@ -33,7 +39,22 @@ function writeCollapsed(column: Column, collapsed: boolean): void {
   localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${column}`, collapsed ? "1" : "0");
 }
 
-export function BoardColumn({ column, tickets, projects, onOpenTicket, onAddTicket }: BoardColumnProps) {
+function resolveMoveAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Lancement en cours…";
+  if (count === 0) return "Aucun slot libre";
+  return `Lancer ${count} ticket(s) dans « À implémenter »`;
+}
+
+export function BoardColumn({
+  column,
+  tickets,
+  projects,
+  onOpenTicket,
+  onAddTicket,
+  onMoveAllToImplementing,
+  moveAllCount = 0,
+  moveAllBusy = false,
+}: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
   const label = COLUMN_LABELS[column];
@@ -51,22 +72,39 @@ export function BoardColumn({ column, tickets, projects, onOpenTicket, onAddTick
   );
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
-  const headerTrailing = canAdd ? (
-    <div className="flex items-center gap-1">
-      {countBadge}
-      <button
-        type="button"
-        onClick={onAddTicket}
-        className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-        title="Nouveau ticket"
-        aria-label="Nouveau ticket"
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  ) : (
-    countBadge
-  );
+  const canMoveAll = column === "todo" && onMoveAllToImplementing !== undefined && tickets.length > 0;
+  const moveAllButtonTitle = resolveMoveAllTitle(moveAllCount, moveAllBusy);
+  const headerTrailing =
+    canAdd || canMoveAll ? (
+      <div className="flex items-center gap-1">
+        {countBadge}
+        {canMoveAll && (
+          <button
+            type="button"
+            onClick={onMoveAllToImplementing}
+            disabled={moveAllCount === 0 || moveAllBusy}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+            title={moveAllButtonTitle}
+            aria-label="Tout lancer dans À implémenter"
+          >
+            <Rocket className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {canAdd && (
+          <button
+            type="button"
+            onClick={onAddTicket}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+            title="Nouveau ticket"
+            aria-label="Nouveau ticket"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    ) : (
+      countBadge
+    );
 
   if (collapsed) {
     return (

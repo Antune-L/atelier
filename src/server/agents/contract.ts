@@ -45,14 +45,18 @@ function buildImplementingSteps(
   }
   if (ticket.prdEnabled) {
     return [
-      "2. implementing (délégué à un sous-agent à contexte frais) :",
+      "2. implementing (délégué au sous-agent `implementer`) :",
       `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
-      "   b. Lance un sous-agent à CONTEXTE FRAIS (outil Agent) dédié à l'implémentation, distinct de cette session de planification : toi (session principale) tu gardes la main sur git, review, tests et PR ; le sous-agent écrit le code dans le worktree courant et ne commit JAMAIS.",
+      "   b. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR.",
       `      Dans son prompt, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et la consigne d'implémenter intégralement la fonctionnalité décrite.`,
       "   c. Quand le sous-agent rend la main, relis son diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
     ];
   }
-  return ["2. implementing : implémente la fonctionnalité dans le worktree courant."];
+  return [
+    "2. implementing (délégué au sous-agent `implementer`) :",
+    "   a. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Dans son prompt, transmets-lui le worktree courant comme répertoire de travail et la consigne d'implémenter intégralement la fonctionnalité décrite dans la description du ticket.",
+    "   b. Quand le sous-agent rend la main, relis son diff (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+  ];
 }
 
 /**
@@ -72,6 +76,8 @@ export function buildTicketContract(
   const isUi = figmaUrls.length > 0;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
+  // Screenshots only make sense on a PR a human will read; auto-merge skips that.
+  const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge;
   const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
@@ -116,6 +122,9 @@ export function buildTicketContract(
     "4. fixing : corrige les findings, puis re-review. Max 2 boucles, sinon fail().",
     "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
     `6. opening_pr : commit (conventions du projet), push, \`${prCreateCmd}\` vers ${baseBranch}.`,
+    wantsScreenshots
+      ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
+      : "",
     "7. done(pr_url).",
     ticket.autoMerge
       ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
@@ -123,6 +132,60 @@ export function buildTicketContract(
     "",
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
+ * Builds the `ticket` channel payload for an auto-merge conflict-resolution session: the worktree is
+ * already checked out on the EXISTING PR branch (its commits), and the goal is to make the PR merge
+ * cleanly again, then re-trigger the auto-merge via done(). No new PR is created.
+ */
+export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+
+  const lines: string[] = [
+    `# Résolution de conflits de merge — Ticket ${ticket.id} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base et cible : ${baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${ticket.branch}`,
+    "",
+    "## Contexte",
+    `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
+    "Motif rapporté par le système :",
+    ticket.error ? `> ${ticket.error}` : "> (non précisé)",
+    "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
+    "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    "- `fail(reason, findings)` si les conflits ne sont pas résolvables sans arbitrage.",
+    commitLanguageDirective(opts.commitLanguage),
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
+    "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
+    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
+    `4. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
+    `5. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
+    "",
+    "## Interdits",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne ferme pas, ne recrée pas et ne mets pas la PR en draft.",
     "- Ne touche à aucun fichier hors du worktree.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];

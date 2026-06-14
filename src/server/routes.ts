@@ -332,7 +332,8 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merged", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      const merged = store.updateTicket(params.id, { column: "merged" });
+      // Stamp the merge time so the board can order "PR mergée" newest-first.
+      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
       hub.pushTicket(merged);
       store.logEvent(params.id, "merged", {});
       return merged;

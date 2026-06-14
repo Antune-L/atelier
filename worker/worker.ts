@@ -19,6 +19,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const WORKER_VERSION = "0.0.0";
 const RECONNECT_DELAY_MS = 1500;
@@ -247,10 +248,13 @@ const bridge = new BackendBridge(async (event) => {
 });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  // Advertise the real JSON Schema per tool: without declared `properties` the client
+  // can't tell that e.g. `submit_feasibility.results` is an array, so it serializes nested
+  // payloads as a JSON *string* and zod then rejects them ("Arguments invalides").
   tools: TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
-    inputSchema: { type: "object" },
+    inputSchema: zodToJsonSchema(t.schema, { target: "openApi3", $refStrategy: "none" }),
   })),
 }));
 

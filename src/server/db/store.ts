@@ -57,6 +57,14 @@ export interface NewReview {
   postComments: boolean;
 }
 
+export interface NewAsk {
+  title: string;
+  description: string;
+  project: ProjectKey;
+  model: AgentModel | null;
+  effort: AgentEffort | null;
+}
+
 export interface TicketPatch {
   title?: string;
   description?: string;
@@ -79,6 +87,7 @@ export interface TicketPatch {
   slotId?: number | null;
   branch?: string | null;
   prUrl?: string | null;
+  resolvingConflicts?: boolean;
   error?: string | null;
   archived?: boolean;
   watchdogFlagged?: boolean;
@@ -188,6 +197,22 @@ export class Store {
     return ticket;
   }
 
+  /** Create an ask ticket: straight into "À implémenter", carrying the chosen model/effort. */
+  createAsk(input: NewAsk): Ticket {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'ask', ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+      )
+      .run(id, input.title, input.description, input.project, input.model, input.effort, now, now, now, now);
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error("createAsk: ticket vanished after insert");
+    this.logEvent(id, "created", { title: input.title, kind: "ask" });
+    return ticket;
+  }
+
   updateTicket(id: string, patch: TicketPatch): Ticket {
     const fields: string[] = [];
     const values: (string | number | null)[] = [];
@@ -224,6 +249,7 @@ export class Store {
     if (patch.slotId !== undefined) set("slot_id", patch.slotId);
     if (patch.branch !== undefined) set("branch", patch.branch);
     if (patch.prUrl !== undefined) set("pr_url", patch.prUrl);
+    if (patch.resolvingConflicts !== undefined) set("resolving_conflicts", patch.resolvingConflicts ? 1 : 0);
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.archived !== undefined) set("archived", patch.archived ? 1 : 0);
     if (patch.watchdogFlagged !== undefined) set("watchdog_flagged", patch.watchdogFlagged ? 1 : 0);

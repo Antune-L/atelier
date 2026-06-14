@@ -140,6 +140,60 @@ export function buildTicketContract(
 }
 
 /**
+ * Builds the `ticket` channel payload for an auto-merge conflict-resolution session: the worktree is
+ * already checked out on the EXISTING PR branch (its commits), and the goal is to make the PR merge
+ * cleanly again, then re-trigger the auto-merge via done(). No new PR is created.
+ */
+export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+
+  const lines: string[] = [
+    `# Résolution de conflits de merge — Ticket ${ticket.id} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base et cible : ${baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${ticket.branch}`,
+    "",
+    "## Contexte",
+    `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
+    "Motif rapporté par le système :",
+    ticket.error ? `> ${ticket.error}` : "> (non précisé)",
+    "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
+    "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    "- `fail(reason, findings)` si les conflits ne sont pas résolvables sans arbitrage.",
+    commitLanguageDirective(opts.commitLanguage),
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
+    "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
+    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
+    `4. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
+    `5. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
+    "",
+    "## Interdits",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne ferme pas, ne recrée pas et ne mets pas la PR en draft.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
  * Builds the `ticket` channel payload for a review ticket: drive the argus skill
  * over an open PR, optionally posting findings inline via gh, then done().
  */
@@ -187,6 +241,50 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "- Ne modifie AUCUN fichier : argus est en lecture seule, cette session ne produit pas de diff.",
     "- N'approuve JAMAIS, ne demande pas de changements via l'API, ne merge pas la PR (`event: COMMENT` uniquement).",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
+ * Builds the `ticket` channel payload for an ask ticket: a read-only session that explores the
+ * project to answer a question, then surfaces the answer via submit_answer. No diff, commit or PR.
+ */
+export function buildAskContract(ticket: Ticket): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+
+  const lines: string[] = [
+    `# Question ${ticket.id} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (worktree en LECTURE SEULE sur ${ticket.baseBranch ?? project.baseBranch})`,
+    "",
+    "## Question",
+    ticket.description || "(vide)",
+    "La question peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à RÉPONDRE à une question (lecture seule, aucune modification). Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    '- `update_stage("implementing")` dès le début (accuse réception du contrat et signale l\'activité).',
+    "- `ask_user(question)` UNIQUEMENT si la question est ambiguë au point de t'empêcher de répondre (ne devine pas une intention critique).",
+    "- `submit_answer(answer)` avec ta réponse complète en markdown une fois ton analyse terminée. Ceci clôt le ticket.",
+    "- `fail(reason, findings)` si tu ne peux pas répondre après avoir épuisé tes options.",
+    "- Réponds dans la même langue que la question.",
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une précision ou réorientation de l'utilisateur à prendre en compte dans ta réponse en cours.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    "2. Explore le projet en lecture seule (Read, Grep, Glob, et `git log`/`git diff` si utile) pour répondre précisément, en citant les fichiers/chemins pertinents.",
+    "3. `submit_answer(<réponse markdown>)`. Ne termine pas ton tour avant d'avoir appelé `submit_answer`, `ask_user` ou `fail` (sinon le pipeline te relancera).",
+    "",
+    "## Interdits",
+    "- Ne modifie, ne crée ni ne supprime AUCUN fichier ; ne commit pas, ne push pas, n'ouvre pas de PR.",
     "- Ne touche à aucun fichier hors du worktree.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];

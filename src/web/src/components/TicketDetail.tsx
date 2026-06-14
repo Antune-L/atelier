@@ -1,4 +1,4 @@
-import { Cpu, Eye, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -145,10 +145,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   if (!ticket) return null;
   const current = ticket;
   const locked = isLocked(current);
-  // "merged" is reserved for feature PRs, "reviewed" for review tickets (kind gate).
+  // Per-kind terminal lanes: "merged" for feature PRs, "reviewed" for reviews, "answered" for asks.
   const statusOptions = COLUMN_ORDER.filter((col) => {
-    if (col === "merged") return current.kind !== "review";
+    if (col === "merged") return current.kind === "feature";
     if (col === "reviewed") return current.kind === "review";
+    if (col === "answered") return current.kind === "ask";
     return true;
   });
   const showTerminal =
@@ -170,6 +171,15 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.slotId !== null &&
     current.stage !== null &&
     ACTIVE_STAGES.includes(current.stage);
+  // Auto-merge failed after the PR was opened: offer a one-click opus-low session that rebases the
+  // branch, resolves the conflicts, force-pushes, and re-triggers the auto-merge.
+  const canResolveConflicts =
+    current.column === "failed" &&
+    current.autoMerge &&
+    current.kind !== "review" &&
+    current.slotId === null &&
+    current.prUrl !== null &&
+    current.branch !== null;
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -345,6 +355,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               {current.kind === "review" && (
                 <Badge variant="secondary" className="gap-1">
                   <Eye className="h-3 w-3" /> Review
+                </Badge>
+              )}
+              {current.kind === "ask" && (
+                <Badge variant="secondary" className="gap-1">
+                  <HelpCircle className="h-3 w-3" /> Ask
                 </Badge>
               )}
               {current.stage && (
@@ -582,6 +597,20 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </section>
 
         <section className="flex flex-wrap gap-2 border-t pt-4">
+          {canResolveConflicts && (
+            <Button
+              variant="default"
+              size="sm"
+              title="Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto"
+              onClick={async () => {
+                await api.resolveConflicts(ticket.id);
+                refresh();
+              }}
+            >
+              <GitMerge className="h-4 w-4" />
+              Résoudre les conflits
+            </Button>
+          )}
           {(current.stage === "failed" ||
             current.stage === "interrupted" ||
             current.stage === "stalled") &&
@@ -611,7 +640,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               Relancer la session
             </Button>
           )}
-          {current.column === "done" && current.kind !== "review" && (
+          {current.column === "done" && current.kind === "feature" && (
             <Button
               variant="default"
               size="sm"

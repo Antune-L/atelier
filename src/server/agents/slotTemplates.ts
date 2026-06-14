@@ -43,6 +43,8 @@ const BASH_ALLOWLIST = [
   "Bash(git branch:*)",
   "Bash(git rev-parse:*)",
   "Bash(git restore:*)",
+  // Auto-merge conflict resolution: rebase the PR branch onto the base and continue through conflicts.
+  "Bash(git rebase:*)",
   "Bash(bun:*)",
   "Bash(bunx:*)",
   "Bash(npm run:*)",

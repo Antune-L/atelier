@@ -1,7 +1,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { PanelLeftClose, PanelLeftOpen, Plus, Rocket } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { COLUMN_LABELS, type Column } from "@shared/constants";
@@ -25,6 +25,69 @@ interface BoardColumnProps {
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
+
+/** Only the "merged" column piles up, so it windows its card list to stay responsive. */
+const WINDOWED_COLUMN: Column = "merged";
+/** Cards rendered before any scroll. */
+const WINDOW_INITIAL_SIZE = 20;
+/** Cards added each time the bottom sentinel comes into view. */
+const WINDOW_INCREMENT = 20;
+
+/** Grow the next batch slightly before the sentinel is fully in view, for seamless scrolling. */
+const WINDOW_PREFETCH_MARGIN = "200px";
+
+/**
+ * Progressive client-side windowing for a fully in-memory list. Renders an initial slice and
+ * grows it whenever the bottom sentinel scrolls into view of the column's own scroll container,
+ * clamping to the total length when the underlying list shrinks.
+ */
+function useWindowedTickets(
+  tickets: Ticket[],
+  enabled: boolean,
+): {
+  visibleTickets: Ticket[];
+  sentinelRef: React.RefObject<HTMLDivElement>;
+  scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  hasMore: boolean;
+} {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [visibleCount, setVisibleCount] = useState(WINDOW_INITIAL_SIZE);
+  // Restart from the first page when a filter/search collapses the list to within the initial page,
+  // so clearing the filter later doesn't restore a stale expanded window. (render-phase reset, not an effect)
+  const [trackedLength, setTrackedLength] = useState(tickets.length);
+  if (tickets.length !== trackedLength) {
+    setTrackedLength(tickets.length);
+    if (tickets.length <= WINDOW_INITIAL_SIZE) setVisibleCount(WINDOW_INITIAL_SIZE);
+  }
+
+  const clampedCount = enabled ? Math.min(visibleCount, tickets.length) : tickets.length;
+  const hasMore = enabled && clampedCount < tickets.length;
+
+  useEffect(() => {
+    if (!hasMore) return;
+    const sentinel = sentinelRef.current;
+    const root = scrollRef.current;
+    if (sentinel === null || root === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleCount((current) => current + WINDOW_INCREMENT);
+        }
+      },
+      { root, rootMargin: WINDOW_PREFETCH_MARGIN },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore]);
+
+  const visibleTickets = useMemo(
+    () => (enabled ? tickets.slice(0, clampedCount) : tickets),
+    [enabled, tickets, clampedCount],
+  );
+
+  return { visibleTickets, sentinelRef, scrollRef, hasMore };
+}
 
 /** "PR mergée"/"PR reviewed"/"Répondu" pile up over time, so they start folded; others start open. */
 const DEFAULT_COLLAPSED: Partial<Record<Column, boolean>> = { merged: true, reviewed: true, answered: true };
@@ -58,6 +121,15 @@ export function BoardColumn({
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
   const label = COLUMN_LABELS[column];
+
+  const isWindowed = column === WINDOWED_COLUMN;
+  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(tickets, isWindowed);
+
+  // The card container is both the dnd droppable and the windowing scroll root, so compose both refs.
+  const setCardContainerRef = (node: HTMLDivElement | null): void => {
+    setNodeRef(node);
+    scrollRef.current = node;
+  };
 
   const toggle = (): void => {
     const next = !collapsed;
@@ -148,14 +220,15 @@ export function BoardColumn({
         {headerTrailing}
       </div>
       <div
-        ref={setNodeRef}
+        ref={setCardContainerRef}
         className={cn(
           "flex min-h-[60vh] flex-col gap-2 rounded-b-xl p-2 transition-colors",
+          isWindowed && "max-h-[70vh] overflow-y-auto",
           isOver && "bg-accent/70",
         )}
       >
-        <SortableContext items={tickets.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          {tickets.map((ticket) => (
+        <SortableContext items={visibleTickets.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          {visibleTickets.map((ticket) => (
             <TicketCard
               key={ticket.id}
               ticket={ticket}
@@ -164,6 +237,7 @@ export function BoardColumn({
             />
           ))}
         </SortableContext>
+        {hasMore && <div ref={sentinelRef} className="h-px shrink-0" aria-hidden />}
       </div>
     </div>
   );

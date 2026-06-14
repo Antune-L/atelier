@@ -136,6 +136,60 @@ export function buildTicketContract(
 }
 
 /**
+ * Builds the `ticket` channel payload for an auto-merge conflict-resolution session: the worktree is
+ * already checked out on the EXISTING PR branch (its commits), and the goal is to make the PR merge
+ * cleanly again, then re-trigger the auto-merge via done(). No new PR is created.
+ */
+export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+
+  const lines: string[] = [
+    `# Résolution de conflits de merge — Ticket ${ticket.id} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base et cible : ${baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${ticket.branch}`,
+    "",
+    "## Contexte",
+    `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
+    "Motif rapporté par le système :",
+    ticket.error ? `> ${ticket.error}` : "> (non précisé)",
+    "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
+    "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    "- `fail(reason, findings)` si les conflits ne sont pas résolvables sans arbitrage.",
+    commitLanguageDirective(opts.commitLanguage),
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
+    "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
+    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
+    `4. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
+    `5. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
+    "",
+    "## Interdits",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne ferme pas, ne recrée pas et ne mets pas la PR en draft.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
  * Builds the `ticket` channel payload for a review ticket: drive the argus skill
  * over an open PR, optionally posting findings inline via gh, then done().
  */

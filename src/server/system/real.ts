@@ -143,6 +143,16 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void> {
+    // `-B` (re)creates the local branch at origin/<branch>, so the worktree carries the PR's commits
+    // rather than a fresh branch off base. Caller fetches origin/<branch> first.
+    const res = await $`git -C ${repoPath} worktree add ${slotPath} -B ${branch} origin/${branch}`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`git worktree add (branche existante) a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+  }
+
   async deleteLocalBranch(repoPath: string, branch: string): Promise<void> {
     await $`git -C ${repoPath} branch -D ${branch}`.nothrow().quiet();
   }

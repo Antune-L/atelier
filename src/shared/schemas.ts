@@ -103,6 +103,8 @@ export const ticketSchema = z.object({
   slotId: z.number().int().nullable(),
   branch: z.string().nullable(),
   prUrl: z.string().nullable(),
+  /** An opus-low session is resolving merge conflicts on the existing PR branch (auto-merge retry). */
+  resolvingConflicts: z.boolean(),
   error: z.string().nullable(),
   archived: z.boolean(),
   watchdogFlagged: z.boolean(),

@@ -71,6 +71,7 @@ export interface TicketPatch {
   slotId?: number | null;
   branch?: string | null;
   prUrl?: string | null;
+  resolvingConflicts?: boolean;
   error?: string | null;
   archived?: boolean;
   watchdogFlagged?: boolean;
@@ -212,6 +213,7 @@ export class Store {
     if (patch.slotId !== undefined) set("slot_id", patch.slotId);
     if (patch.branch !== undefined) set("branch", patch.branch);
     if (patch.prUrl !== undefined) set("pr_url", patch.prUrl);
+    if (patch.resolvingConflicts !== undefined) set("resolving_conflicts", patch.resolvingConflicts ? 1 : 0);
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.archived !== undefined) set("archived", patch.archived ? 1 : 0);
     if (patch.watchdogFlagged !== undefined) set("watchdog_flagged", patch.watchdogFlagged ? 1 : 0);

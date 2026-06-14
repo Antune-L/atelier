@@ -13,6 +13,7 @@ import {
   isStageAnimated,
   ticketElapsedStart,
   ticketImplementationDuration,
+  ticketPrNumber,
   triageVerdictDot,
 } from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
@@ -27,6 +28,7 @@ interface TicketCardProps {
 export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
   const now = useTickTimer();
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
+  const prNumber = ticketPrNumber(ticket);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
   });
@@ -99,7 +101,8 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
             onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
           >
-            <ExternalLink className="h-3 w-3" /> PR
+            <ExternalLink className="h-3 w-3" />
+            {prNumber !== null ? `PR #${prNumber}` : "PR"}
           </a>
         )}
       </div>

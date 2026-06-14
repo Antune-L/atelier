@@ -147,6 +147,21 @@ export function ticketImplementationDuration(
   return duration > 0 ? duration : null;
 }
 
+const PR_URL_NUMBER_REGEX = /\/pull\/(\d+)/;
+
+/** Extracts the PR number from a GitHub PR URL (e.g. ".../pull/123" → 123), or null. */
+export function prNumberFromUrl(prUrl: string | null): number | null {
+  if (prUrl === null) return null;
+  const match = PR_URL_NUMBER_REGEX.exec(prUrl);
+  if (match === null || match[1] === undefined) return null;
+  return Number.parseInt(match[1], 10);
+}
+
+/** PR number to display on a card: stored `prNumber`, else parsed from `prUrl`. */
+export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): number | null {
+  return ticket.prNumber ?? prNumberFromUrl(ticket.prUrl);
+}
+
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";

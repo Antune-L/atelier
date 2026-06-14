@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 
-import type { StatRecord } from "@shared/schemas";
+import type { ProjectInfo, StatRecord } from "@shared/schemas";
 
 import {
   ChartContainer,
@@ -26,6 +26,7 @@ import {
   meanDurationByEffort,
   meanDurationByModel,
   outcomeCounts,
+  projectCounts,
   recordOutcome,
   weeklyThroughput,
   type Outcome,
@@ -61,6 +62,13 @@ const AXIS_PROPS = {
   fontSize: 11,
 } as const;
 
+/** Soft theme-aware hover cursor behind a hovered bar (avoids a harsh white box). */
+const BAR_CURSOR = { fill: "hsl(var(--muted))", fillOpacity: 0.4 } as const;
+/** Soft theme-aware hover cursor for the area chart. */
+const AREA_CURSOR = { stroke: "hsl(var(--muted-foreground))", strokeOpacity: 0.4 } as const;
+/** Hovered-bar emphasis (keeps the per-Cell fill). */
+const ACTIVE_BAR = { fillOpacity: 0.8 } as const;
+
 // --- Card 1: tickets handled by outcome ---
 
 export function OutcomeChart({ records }: { records: StatRecord[] }): ReactNode {
@@ -76,8 +84,8 @@ export function OutcomeChart({ records }: { records: StatRecord[] }): ReactNode 
           <CartesianGrid vertical={false} />
           <XAxis dataKey="label" {...AXIS_PROPS} />
           <YAxis allowDecimals={false} {...AXIS_PROPS} />
-          <ChartTooltip content={<ChartTooltipContent />} />
-          <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+          <ChartTooltip cursor={BAR_CURSOR} content={<ChartTooltipContent />} />
+          <Bar dataKey="count" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
             {data.map((d) => (
               <Cell key={d.outcome} fill={OUTCOME_COLORS[d.outcome]} />
             ))}
@@ -106,6 +114,7 @@ function DurationBars({ data }: { data: DurationDatum[] }): ReactNode {
         <XAxis dataKey="label" {...AXIS_PROPS} />
         <YAxis tickFormatter={(v: number) => formatDuration(v)} width={48} {...AXIS_PROPS} />
         <ChartTooltip
+          cursor={BAR_CURSOR}
           content={
             <ChartTooltipContent
               valueFormatter={(value) => formatDuration(typeof value === "number" ? value : 0)}
@@ -117,7 +126,7 @@ function DurationBars({ data }: { data: DurationDatum[] }): ReactNode {
             />
           }
         />
-        <Bar dataKey="meanMs" radius={[4, 4, 0, 0]} fill="hsl(var(--chart-1))" />
+        <Bar dataKey="meanMs" radius={[4, 4, 0, 0]} fill="hsl(var(--chart-1))" activeBar={ACTIVE_BAR} />
       </BarChart>
     </ChartContainer>
   );
@@ -153,7 +162,7 @@ export function ThroughputChart({ records }: { records: StatRecord[] }): ReactNo
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" {...AXIS_PROPS} />
         <YAxis allowDecimals={false} {...AXIS_PROPS} />
-        <ChartTooltip content={<ChartTooltipContent />} />
+        <ChartTooltip cursor={AREA_CURSOR} content={<ChartTooltipContent />} />
         <Area
           dataKey="count"
           type="monotone"
@@ -161,6 +170,7 @@ export function ThroughputChart({ records }: { records: StatRecord[] }): ReactNo
           fill="hsl(var(--chart-1))"
           fillOpacity={0.2}
           strokeWidth={2}
+          activeDot={{ r: 5, strokeWidth: 2 }}
         />
       </AreaChart>
     </ChartContainer>
@@ -215,10 +225,39 @@ export function KindChart({ records }: { records: StatRecord[] }): ReactNode {
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" {...AXIS_PROPS} />
         <YAxis allowDecimals={false} {...AXIS_PROPS} />
-        <ChartTooltip content={<ChartTooltipContent />} />
-        <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+        <ChartTooltip cursor={BAR_CURSOR} content={<ChartTooltipContent />} />
+        <Bar dataKey="count" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
           {data.map((d, index) => (
             <Cell key={d.kind} fill={colorAt(index)} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ChartContainer>
+  );
+}
+
+// --- Card 6: tickets handled by project ---
+
+export function ProjectChart({
+  records,
+  projects,
+}: {
+  records: StatRecord[];
+  projects: ProjectInfo[];
+}): ReactNode {
+  const data = useMemo(() => projectCounts(records, projects), [records, projects]);
+  if (data.length === 0) return <StatEmpty />;
+  const config: ChartConfig = { count: { label: "Tickets" } };
+  return (
+    <ChartContainer config={config}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis dataKey="label" {...AXIS_PROPS} />
+        <YAxis allowDecimals={false} {...AXIS_PROPS} />
+        <ChartTooltip cursor={BAR_CURSOR} content={<ChartTooltipContent />} />
+        <Bar dataKey="count" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
+          {data.map((d, index) => (
+            <Cell key={d.key} fill={colorAt(index)} />
           ))}
         </Bar>
       </BarChart>

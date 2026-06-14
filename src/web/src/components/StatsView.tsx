@@ -8,6 +8,7 @@ import {
   DurationChart,
   KindChart,
   OutcomeChart,
+  ProjectChart,
   SuccessRateChart,
   ThroughputChart,
 } from "@/components/stats/StatCharts";
@@ -84,6 +85,15 @@ export function StatsView({ projects }: StatsViewProps): ReactNode {
           records={records}
         >
           {(filtered) => <KindChart records={filtered} />}
+        </StatCard>
+
+        <StatCard
+          title="Tickets traités par projet"
+          description="Nombre de tickets par projet"
+          projects={projects}
+          records={records}
+        >
+          {(filtered) => <ProjectChart records={filtered} projects={projects} />}
         </StatCard>
       </div>
     </div>

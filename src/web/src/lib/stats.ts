@@ -10,7 +10,7 @@ import {
   type AgentModel,
   type Kind,
 } from "@shared/constants";
-import type { StatRecord } from "@shared/schemas";
+import type { ProjectInfo, StatRecord } from "@shared/schemas";
 
 export type Outcome = "success" | "failure" | "abandoned";
 
@@ -142,6 +142,25 @@ export function kindCounts(records: StatRecord[]): KindCount[] {
   return KINDS.map((kind) => ({ kind, label: KIND_LABELS[kind], count: counts.get(kind) ?? 0 })).filter(
     (c) => c.count > 0,
   );
+}
+
+export interface ProjectCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/** Handled (terminal-outcome) ticket count per project, sorted descending by count. */
+export function projectCounts(records: StatRecord[], projects: ProjectInfo[]): ProjectCount[] {
+  const labelByKey = new Map(projects.map((p) => [p.key, p.label]));
+  const counts = new Map<string, number>();
+  for (const record of records) {
+    if (recordOutcome(record) === null) continue;
+    counts.set(record.project, (counts.get(record.project) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, count]) => ({ key, label: labelByKey.get(key) ?? key, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;

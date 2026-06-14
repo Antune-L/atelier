@@ -217,6 +217,13 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   const branch = ticket.prHeadBranch ?? "";
   const argusCmd = `argus ${branch} --base ${project.baseBranch}${fullFlag}${postFlag}`;
 
+  // Guard on prHeadBranch too: slotManager only checks out the PR head branch (worktreeAddExisting)
+  // and the done gate only requires a push when prHeadBranch is non-null. Branching the contract on
+  // the same condition keeps contract/worktree/gate from diverging if prHeadBranch is ever absent.
+  if (ticket.fixComments && ticket.prHeadBranch !== null) {
+    return buildReviewFixLines(ticket, opts, { project, depth, branch, argusCmd });
+  }
+
   const lines: string[] = [
     `# Revue de PR #${ticket.prNumber} — ${ticket.title}`,
     "",
@@ -250,6 +257,59 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "- Ne modifie AUCUN fichier : argus est en lecture seule, cette session ne produit pas de diff.",
     "- N'approuve JAMAIS, ne demande pas de changements via l'API, ne merge pas la PR (`event: COMMENT` uniquement).",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
+ * fix-mode review contract: the worktree is ALREADY checked out on the PR's head branch. The session
+ * runs argus (posting its findings), delegates the corrections to the `pr-fixer` sub-agent, then
+ * tests, commits and pushes the fixes onto the SAME branch — no new PR.
+ */
+function buildReviewFixLines(
+  ticket: Ticket,
+  opts: { commitLanguage: CommitLanguage },
+  ctx: { project: ReturnType<typeof getProject>; depth: string; branch: string; argusCmd: string },
+): string {
+  const { project, depth, branch, argusCmd } = ctx;
+
+  const lines: string[] = [
+    `# Revue + correction de PR #${ticket.prNumber} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${branch}`,
+    `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
+    "",
+    "## Contexte",
+    `Le worktree courant est DÉJÀ positionné sur la branche head de la PR (\`${branch}\`). Tu vas reviewer la PR, corriger les retours, puis commiter et pousser sur CETTE MÊME branche (aucune nouvelle PR).`,
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée à la REVUE puis la CORRECTION d'une PR. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision te dépasse (ex. retour ambigu, arbitrage de périmètre).",
+    "- `done(pr_url)` UNIQUEMENT après qu'argus a posté la revue, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    `- Rédige les messages de commit et les commentaires de revue en ${commitLanguageLabel(opts.commitLanguage)}.`,
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours.",
+    "",
+    "## Étapes",
+    '1. `update_stage("reviewing")`.',
+    `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
+    "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais, puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`).",
+    `3. \`update_stage("fixing")\` : délègue les corrections au sous-agent \`pr-fixer\` (outil Agent, \`subagent_type: pr-fixer\`). Dans son prompt, transmets-lui : le worktree courant comme répertoire de travail, le numéro de la PR (#${ticket.prNumber}), les findings d'argus issus de ton contexte, et la consigne de lire au besoin les commentaires de review postés via \`gh\` et de n'appliquer que les corrections PERTINENTES. Il ne commit JAMAIS. Quand il rend la main, relis son diff (\`git diff\`) et complète toi-même ce qui est partiel.`,
+    '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
+    '5. `update_stage("opening_pr")` : commit (conventions du projet), puis `git push` la branche head de la PR (jamais `--no-verify`, aucune nouvelle PR).',
+    `6. \`done(${ticket.prUrl})\`.`,
+    "",
+    "## Interdits",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne ferme pas, ne recrée pas, ne mets pas la PR en draft, et ne crée PAS de nouvelle PR.",
     "- Ne touche à aucun fichier hors du worktree.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];

@@ -37,6 +37,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [depth, setDepth] = useState<ReviewDepth>("full");
+  const [fixComments, setFixComments] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (key: string): Promise<void> => {
@@ -86,6 +87,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         project,
         depth,
         postComments: true,
+        fixComments,
         prs: chosen,
       });
       onClose();
@@ -166,6 +168,21 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
             </option>
           ))}
         </Select>
+      </div>
+
+      <div className="space-y-1">
+        <label className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={fixComments}
+            onChange={(e) => setFixComments(e.target.checked)}
+            className="h-4 w-4 rounded border-muted-foreground/40"
+          />
+          Corriger les retours directement sur la PR
+        </label>
+        <p className="pl-6 text-xs text-muted-foreground">
+          Un sous-agent applique les corrections puis pousse sur la branche de la PR.
+        </p>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}

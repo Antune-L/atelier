@@ -102,6 +102,31 @@ Consignes :
 `;
 }
 
+/**
+ * Builds the `.claude/agents/pr-fixer.md` sub-agent file. Used by fixComments review tickets: after
+ * argus posts its findings, the orchestrator delegates applying the pertinent fixes to this sub-agent,
+ * which works in the worktree (already on the PR's head branch) and never touches git.
+ */
+export function buildPrFixerAgentMd(ctx: SlotTemplateContext): string {
+  return `---
+name: pr-fixer
+description: Applique les corrections demandées par les retours de review d'une PR dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.
+model: ${ctx.implementerModel}
+effort: ${ctx.implementerEffort}
+---
+
+Tu es le sous-agent pr-fixer. Ton unique rôle est d'appliquer les corrections pertinentes des retours de review d'une PR, intégralement, dans le worktree courant (déjà positionné sur la branche head de la PR).
+
+Consignes :
+- Tu reçois dans ton prompt les findings d'argus et/ou le numéro de la PR. Tu peux aussi lire les commentaires de review postés via \`gh pr view <url> --json reviews\` et \`gh api\`.
+- N'applique que les corrections PERTINENTES (ignore les nits et les points hors périmètre).
+- Respecte les conventions de code du projet.
+- Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
+- Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, les tests et la PR.
+- Quand tu as terminé, rends la main en résumant ce que tu as corrigé et les fichiers touchés.
+`;
+}
+
 export function buildMcpJson(ctx: SlotTemplateContext): string {
   const config = {
     mcpServers: {

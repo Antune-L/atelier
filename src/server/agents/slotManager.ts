@@ -20,6 +20,7 @@ import {
 } from "./contract.ts";
 import {
   buildImplementerAgentMd,
+  buildPrFixerAgentMd,
   buildMcpJson,
   buildSettingsJson,
   resolveTemplatePaths,
@@ -194,8 +195,13 @@ export class SlotManager {
     // Resolving merge conflicts reuses the EXISTING PR branch (its commits); a fresh feature run
     // forks a new branch off the base.
     const resolving = ticket.resolvingConflicts && ticket.branch !== null;
-    // The second `ticket.branch !== null` is required: TS does not carry the narrowing across `resolving`.
-    const branch = resolving && ticket.branch !== null ? ticket.branch : `feat/${ticket.id}-${slug}`;
+    // A fixComments review reuses the EXISTING PR head branch (its commits) so fixes can be committed
+    // and pushed straight to the PR — no new PR.
+    const reviewFix = ticket.kind === "review" && ticket.fixComments && ticket.prHeadBranch !== null;
+    // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`.
+    let branch = `feat/${ticket.id}-${slug}`;
+    if (resolving && ticket.branch !== null) branch = ticket.branch;
+    else if (reviewFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
     const sessionName = `ticket-${ticket.id}`;
 
     this.store.updateSlot(slotId, {
@@ -226,9 +232,10 @@ export class SlotManager {
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
         await this.system.fetch(project.repoPath, baseBranch);
-        if (resolving) {
+        if (resolving || reviewFix) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
-          // out so the session has the PR's commits to rebase onto the (also fetched) base.
+          // out so the session has the PR's commits. Conflict resolution rebases onto the (also
+          // fetched) base; a review-fix applies and pushes fixes onto this same PR head branch.
           await this.system.fetch(project.repoPath, branch);
           await this.system.worktreeAddExisting(project.repoPath, path, branch);
         } else {
@@ -294,6 +301,7 @@ export class SlotManager {
       mcpJson: buildMcpJson(ctx),
       settingsJson: buildSettingsJson(ctx),
       implementerAgentMd: buildImplementerAgentMd(ctx),
+      prFixerAgentMd: buildPrFixerAgentMd(ctx),
     });
   }
 
@@ -410,6 +418,7 @@ export class SlotManager {
       ticket.kind === "review"
         ? await this.system.verifyReviewDone(path, prUrl, {
             requirePostedSince: ticket.postComments ? ticket.createdAt : null,
+            requirePushedBranch: ticket.fixComments ? ticket.prHeadBranch : null,
           })
         : await this.system.verifyDone(path, ticket.branch, prUrl);
     if (!gate.ok) {

@@ -161,6 +161,7 @@ export class RealSystemAdapter implements SystemAdapter {
     await Bun.write(join(files.slotPath, ".mcp.json"), files.mcpJson);
     await Bun.write(join(files.slotPath, ".claude", "settings.json"), files.settingsJson);
     await Bun.write(join(files.slotPath, ".claude", "agents", "implementer.md"), files.implementerAgentMd);
+    await Bun.write(join(files.slotPath, ".claude", "agents", "pr-fixer.md"), files.prFixerAgentMd);
   }
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
@@ -281,8 +282,35 @@ export class RealSystemAdapter implements SystemAdapter {
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
     const pr = await $`gh pr view ${prUrl} --json url`.cwd(slotPath).nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
+
+    // fixComments review: the fixes must be committed and pushed onto the PR's head branch.
+    if (opts.requirePushedBranch !== null) {
+      const pushed = await this.verifyBranchPushed(slotPath, opts.requirePushedBranch);
+      if (!pushed.ok) return pushed;
+    }
+
     if (opts.requirePostedSince === null) return { ok: true, reason: "" };
     return this.verifyReviewPosted(slotPath, prUrl, opts.requirePostedSince);
+  }
+
+  /** Clean working tree and the branch has no commits ahead of origin/<branch> (mirrors verifyDone). */
+  private async verifyBranchPushed(slotPath: string, branch: string): Promise<DoneGateResult> {
+    const status = await $`git -C ${slotPath} status --porcelain`.nothrow().quiet();
+    if (status.exitCode !== 0) return { ok: false, reason: "git status a échoué" };
+    if (status.stdout.toString().trim().length > 0) {
+      return { ok: false, reason: "arbre de travail non propre (corrections non commitées)" };
+    }
+    // A non-zero exit means origin/<branch> couldn't be resolved (branch never pushed): fail the gate
+    // rather than fall through to ok. origin/<branch> exists here (the worktree was checked out from it),
+    // so a failure is a real signal, not the absent-ref case verifyDone tolerates for fresh branches.
+    const ahead = await $`git -C ${slotPath} rev-list --count origin/${branch}..${branch}`.nothrow().quiet();
+    if (ahead.exitCode !== 0) {
+      return { ok: false, reason: "impossible de vérifier l'avance de la branche de la PR (ref origin absente ?)" };
+    }
+    if (ahead.stdout.toString().trim() !== "0") {
+      return { ok: false, reason: "la branche de la PR n'est pas poussée (commits en avance)" };
+    }
+    return { ok: true, reason: "" };
   }
 
   /** Confirm the current gh user posted a review on the PR at or after `since` (epoch ms). */

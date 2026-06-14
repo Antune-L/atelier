@@ -56,6 +56,7 @@ export interface NewReview {
   prUrl: string;
   reviewDepth: ReviewDepth;
   postComments: boolean;
+  fixComments: boolean;
 }
 
 export interface NewAsk {
@@ -176,8 +177,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, post_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, post_comments, fix_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -188,6 +189,7 @@ export class Store {
         input.prNumber,
         input.prHeadBranch,
         input.postComments ? 1 : 0,
+        input.fixComments ? 1 : 0,
         input.prUrl,
         now,
         now,

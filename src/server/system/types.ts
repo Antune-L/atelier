@@ -65,6 +65,8 @@ export interface PrepareSlotFiles {
   settingsJson: string;
   /** `.claude/agents/implementer.md` content (the configurable code-writing sub-agent). */
   implementerAgentMd: string;
+  /** `.claude/agents/pr-fixer.md` content (review-fix sub-agent that applies reviewer findings). */
+  prFixerAgentMd: string;
 }
 
 export interface ReviewDoneOptions {
@@ -73,6 +75,8 @@ export interface ReviewDoneOptions {
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
+  /** When set (fixComments review), also require a clean tree with the PR branch fully pushed (no commits ahead of origin/<branch>). */
+  requirePushedBranch: string | null;
 }
 
 export interface SystemAdapter {

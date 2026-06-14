@@ -74,6 +74,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             )}
             {ticket.prNumber !== null && <Row label="PR analysée" value={`#${ticket.prNumber}`} />}
             <Row label="Commentaires postés sur GitHub" value={ticket.postComments ? YES : NO} />
+            <Row label="Correction des retours" value={ticket.fixComments ? YES : NO} />
           </>
         )}
         {/* An ask ticket is read-only: only the model/effort rows above apply (no implementer/PR knobs). */}

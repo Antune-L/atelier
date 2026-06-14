@@ -238,6 +238,7 @@ export function createApiRoutes(deps: RouteDeps) {
           prUrl: pr.url,
           reviewDepth: parsed.data.depth,
           postComments: parsed.data.postComments,
+          fixComments: parsed.data.fixComments,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it

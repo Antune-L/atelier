@@ -111,6 +111,7 @@ export class FakeSystemAdapter implements SystemAdapter {
       slotPath: files.slotPath,
       mcpBytes: files.mcpJson.length,
       implementerAgentBytes: files.implementerAgentMd.length,
+      prFixerAgentBytes: files.prFixerAgentMd.length,
     });
   }
 
@@ -194,7 +195,12 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
-    this.log("verifyReviewDone", { slotPath, prUrl, requirePostedSince: opts.requirePostedSince });
+    this.log("verifyReviewDone", {
+      slotPath,
+      prUrl,
+      requirePostedSince: opts.requirePostedSince,
+      requirePushedBranch: opts.requirePushedBranch,
+    });
     return { ok: true, reason: "" };
   }
 

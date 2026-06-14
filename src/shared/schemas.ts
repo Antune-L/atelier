@@ -82,6 +82,8 @@ export const ticketSchema = z.object({
   prHeadBranch: z.string().nullable(),
   /** Whether the review posts its findings inline on GitHub (argus --post). */
   postComments: z.boolean(),
+  /** Review tickets only: after posting, delegate fixing the findings to the pr-fixer sub-agent, then push fixes to the PR branch. */
+  fixComments: z.boolean(),
   prdEnabled: z.boolean(),
   /** Open the PR as a draft (default true). Forced off when autoMerge is on. */
   prDraft: z.boolean(),
@@ -285,6 +287,7 @@ export const createReviewSchema = z.object({
   project: projectKeySchema,
   depth: reviewDepthSchema.default("full"),
   postComments: z.boolean().default(true),
+  fixComments: z.boolean().default(false),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;

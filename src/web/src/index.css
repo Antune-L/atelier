@@ -41,6 +41,76 @@
     --danger: 358 64% 37%; /* failed / interrupted */
     --danger-foreground: 45 50% 97%;
   }
+
+  /* Deep Ocean — dark teal-to-purple palette (coolors #006466 … #4d194d). */
+  .theme-deep-ocean {
+    --background: 199 47% 11%;
+    --foreground: 180 28% 90%;
+    --card: 200 42% 15%;
+    --card-foreground: 180 28% 90%;
+    --popover: 200 42% 15%;
+    --popover-foreground: 180 28% 90%;
+
+    --primary: 181 80% 30%; /* teal #006466, brightened for dark surfaces */
+    --primary-foreground: 180 30% 95%;
+    --secondary: 242 25% 24%; /* indigo #272640 */
+    --secondary-foreground: 180 28% 90%;
+    --muted: 205 30% 20%;
+    --muted-foreground: 195 18% 66%;
+    --accent: 262 33% 28%; /* violet #312244 */
+    --accent-foreground: 180 28% 90%;
+
+    --destructive: 358 64% 48%;
+    --destructive-foreground: 180 30% 95%;
+
+    --border: 200 28% 24%;
+    --input: 200 28% 24%;
+    --ring: 181 70% 45%;
+
+    --success: 160 50% 45%;
+    --success-foreground: 199 47% 11%;
+    --info: 181 72% 46%;
+    --info-foreground: 199 47% 11%;
+    --warning: 36 90% 56%;
+    --warning-foreground: 199 47% 11%;
+    --danger: 350 65% 55%;
+    --danger-foreground: 180 30% 95%;
+  }
+
+  /* Dark — neutral dark built on the brand teal (#001219). */
+  .dark {
+    --background: 197 55% 6%;
+    --foreground: 45 35% 91%;
+    --card: 197 42% 9%;
+    --card-foreground: 45 35% 91%;
+    --popover: 197 42% 9%;
+    --popover-foreground: 45 35% 91%;
+
+    --primary: 181 72% 42%;
+    --primary-foreground: 197 100% 6%;
+    --secondary: 197 28% 17%;
+    --secondary-foreground: 45 35% 91%;
+    --muted: 197 24% 15%;
+    --muted-foreground: 197 14% 63%;
+    --accent: 190 38% 21%;
+    --accent-foreground: 45 35% 91%;
+
+    --destructive: 5 70% 46%;
+    --destructive-foreground: 45 40% 95%;
+
+    --border: 197 24% 18%;
+    --input: 197 24% 18%;
+    --ring: 181 78% 42%;
+
+    --success: 160 50% 44%;
+    --success-foreground: 197 55% 6%;
+    --info: 181 74% 46%;
+    --info-foreground: 197 55% 6%;
+    --warning: 36 92% 55%;
+    --warning-foreground: 197 55% 6%;
+    --danger: 358 64% 52%;
+    --danger-foreground: 45 40% 95%;
+  }
 }
 
 @layer base {

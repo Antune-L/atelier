@@ -4,7 +4,12 @@ import type { Capabilities } from "@shared/schemas";
 
 import { api } from "@/lib/api";
 
-const UNKNOWN_CAPABILITIES: Capabilities = { composerAvailable: false, defaultModel: "", defaultEffort: "" };
+const UNKNOWN_CAPABILITIES: Capabilities = {
+  composerAvailable: false,
+  defaultModel: "",
+  defaultEffort: "",
+  canUpdate: false,
+};
 
 let cache: Capabilities | null = null;
 const subscribers = new Set<(caps: Capabilities) => void>();

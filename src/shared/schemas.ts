@@ -298,6 +298,8 @@ export const capabilitiesSchema = z.object({
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultEffort: z.string(),
+  /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
+  canUpdate: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

@@ -87,6 +87,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             <Row label="PRD à implémenter" value={ticket.prdEnabled ? YES : NO} />
             <Row label="PR en draft" value={ticket.prDraft && !ticket.autoMerge ? YES : NO} />
             <Row label="Merge automatique" value={ticket.autoMerge ? YES : NO} />
+            <Row label="Captures d'écran dans la PR" value={ticket.addScreenshots && !ticket.autoMerge ? YES : NO} />
             <Row
               label="Branche de base"
               value={ticket.baseBranch ?? "Défaut du projet"}

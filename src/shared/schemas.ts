@@ -87,6 +87,8 @@ export const ticketSchema = z.object({
   prDraft: z.boolean(),
   /** Auto-merge the PR into the base branch once the done() gate passes. */
   autoMerge: z.boolean(),
+  /** Attach Playwright screenshots of the feature to the PR (frontend changes). Unavailable when autoMerge is on. */
+  addScreenshots: z.boolean(),
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
@@ -182,6 +184,8 @@ export const projectInfoSchema = z.object({
   baseBranch: z.string(),
   /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
   defaultAutoMerge: z.boolean(),
+  /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
+  defaultAddScreenshots: z.boolean(),
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
@@ -213,6 +217,7 @@ export const createTicketSchema = z
     prdEnabled: z.boolean().default(false),
     prDraft: z.boolean().default(true),
     autoMerge: z.boolean().default(false),
+    addScreenshots: z.boolean().default(false),
     // Branch the worktree forks from and the PR targets (null = project default).
     baseBranch: baseBranchSchema.nullable().default(null),
     // Implementation agent knobs picked at creation (null = fall back to server config).
@@ -238,6 +243,7 @@ export const updateTicketSchema = z.object({
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  addScreenshots: z.boolean().optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),

@@ -120,6 +120,7 @@ export function createApiRoutes(deps: RouteDeps) {
           label: project.label,
           baseBranch: project.baseBranch,
           defaultAutoMerge: project.defaultAutoMerge,
+          defaultAddScreenshots: project.defaultAddScreenshots,
         };
       }),
     )
@@ -192,6 +193,7 @@ export function createApiRoutes(deps: RouteDeps) {
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
+        addScreenshots: parsed.data.addScreenshots,
         baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,
@@ -336,7 +338,8 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merged", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      const merged = store.updateTicket(params.id, { column: "merged" });
+      // Stamp the merge time so the board can order "PR mergée" newest-first.
+      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
       hub.pushTicket(merged);
       store.logEvent(params.id, "merged", {});
       return merged;

@@ -1,5 +1,5 @@
 import { Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   Comment,
@@ -104,6 +104,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
   const [prdDialogOpen, setPrdDialogOpen] = useState(false);
+  // Base-branch picker state (TODO column only). null = remote list not loaded yet.
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [branchesKey, setBranchesKey] = useState<string | null>(null);
+  // Tracks the latest requested project so an out-of-order branch fetch is dropped.
+  const latestBranchKey = useRef<string | null>(null);
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -163,6 +168,42 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // A "todo" card carries config sections (agent, PR options, feasibility) and
   // never has a terminal: lay it out on two columns so it breathes.
   const isTodoSplit = current.column === "todo";
+  const ticketProject = projects.find((p) => p.key === current.project);
+  const projectDefaultBranch = ticketProject?.baseBranch ?? "";
+  // Editing the base branch is only meaningful before launch (TODO) and while unlocked.
+  const canEditBaseBranch = isTodoSplit && !locked;
+
+  // Load the project's branches for the base-branch picker once per ticket project,
+  // mirroring NewTicketDialog's no-useEffect load-on-render pattern.
+  if (canEditBaseBranch && current.project !== branchesKey) {
+    const key = current.project;
+    latestBranchKey.current = key;
+    setBranchesKey(key);
+    setBranches(null);
+    void api
+      .projectBranches(key)
+      // Ignore a stale response if the open ticket's project changed before it resolved.
+      .then((list) => latestBranchKey.current === key && setBranches(list))
+      .catch(() => latestBranchKey.current === key && setBranches([]));
+  }
+
+  // Current selection resolves null (no override) to the project default for display.
+  const selectedBaseBranch = current.baseBranch ?? projectDefaultBranch;
+  // The project default and the saved selection are always selectable, even while the
+  // remote list loads/fails or when the stored override no longer exists upstream.
+  const baseBranchOptions = (() => {
+    const list = branches ?? [];
+    const pinned = [projectDefaultBranch, selectedBaseBranch].filter(
+      (b) => b && !list.includes(b),
+    );
+    return [...new Set([...pinned, ...list])];
+  })();
+
+  // Send null when the choice matches the project default → keep "no override" semantics.
+  const changeBaseBranch = (value: string): void => {
+    const override = value && value !== projectDefaultBranch ? value : null;
+    void api.updateTicket(current.id, { baseBranch: override }).catch(() => undefined);
+  };
   // Escape hatch for a stuck "À implémenter" card: the session spawned but its
   // contract/instruction never landed. Only while actively running — terminal
   // (failed/interrupted/stalled) states already have the "Relancer" button below.
@@ -675,6 +716,29 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
         {isTodoSplit && (
           <div className="min-w-0 space-y-4">
+            {canEditBaseBranch && (
+              <section className="rounded-md border p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ticket-base-branch">
+                    Branche de base du worktree
+                  </Label>
+                  <Select
+                    id="ticket-base-branch"
+                    value={selectedBaseBranch}
+                    onChange={(e) => changeBaseBranch(e.target.value)}
+                    disabled={branches === null}
+                    className="w-full"
+                  >
+                    {baseBranchOptions.map((b) => (
+                      <option key={b} value={b}>
+                        {b === projectDefaultBranch ? `${b} (défaut)` : b}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </section>
+            )}
+
             <section className="rounded-md border p-3">
               <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
               <AgentProfileConfig

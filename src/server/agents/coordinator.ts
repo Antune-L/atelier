@@ -17,7 +17,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
 
-import { CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
+import { AGENT_ACTIVE_EVENT, CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 
 const log = createLogger("coordinator");
@@ -187,6 +187,15 @@ export class AgentCoordinator {
   /** Public entry for the Stop hook HTTP endpoint (mirrors the WS stop frame). */
   handleStopHook(ticketId: string, sessionId: string | null): void {
     void this.onStop(ticketId, sessionId);
+  }
+
+  /**
+   * Public entry for the agent-active HTTP endpoint. Idempotent: logs the event only once.
+   * Called by the preToolUse hook on the first tool call, before any protocol tool fires.
+   */
+  handleAgentActive(ticketId: string): void {
+    if (this.store.lastEventType(ticketId, [AGENT_ACTIVE_EVENT]) !== null) return;
+    this.store.logEvent(ticketId, AGENT_ACTIVE_EVENT, {});
   }
 
   /** Stop hook: turn ended. If no protocol tool resolved the turn → auto-nudge ×1 → stalled. */

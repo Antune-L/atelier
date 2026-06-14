@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { AUTO_RECLAIM_EVENT, AUTO_RECLAIM_MAX, type Column } from "../../shared/constants.ts";
+import { AUTO_RECLAIM_EVENT, AUTO_RECLAIM_MAX, TERMINAL_STAGES, type Column } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
@@ -44,6 +44,13 @@ const CONTRACT_REPUSH_MAX_ATTEMPTS = 3;
 
 /** Audit event logged on the agent's first protocol tool call; gates the contract re-push. */
 export const CONTRACT_ACKED_EVENT = "contract_acked";
+/**
+ * Audit event logged when the preToolUse hook fires for the first time: the agent is alive and
+ * receiving tool calls, even before its first protocol call. Used as an early-life discriminator
+ * in the contract re-push guard so feature tickets dropped before their first protocol call are
+ * recovered just like review tickets.
+ */
+export const AGENT_ACTIVE_EVENT = "agent_active";
 
 /**
  * Outcome of an auto-reclaim attempt:
@@ -370,16 +377,20 @@ export class SlotManager {
    * The ack lands well before the first check in the nominal case, so this fires only on a real drop;
    * the re-push then arrives once the session is ready. Bounded by CONTRACT_REPUSH_MAX_ATTEMPTS.
    *
-   * Scoped to review + ask tickets: their contract mandates update_stage(...) as step 1, so a missing
-   * ack within the window is a genuine drop. Feature tickets have no early-mandated protocol call
-   * (a late first ack is normal work), so re-pushing them would re-inject the contract spuriously.
+   * The early-life discriminator is agent_active (emitted by the preToolUse hook on the first tool
+   * call). A healthy agent emits it before the check window expires → no re-push. An agent that
+   * dropped the contract never calls any tool → no agent_active → re-push.
+   * contract_acked (first protocol tool) and auto_nudge also count as "agent alive".
    */
   private repushContractIfUnacked(ticketId: string, attempt: number): void {
-    if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
+    if (
+      this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT, AGENT_ACTIVE_EVENT, "auto_nudge"]) !== null
+    ) return;
     if (!this.workerHub.isConnected(ticketId)) return;
     if (attempt >= CONTRACT_REPUSH_MAX_ATTEMPTS) return;
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket || ticket.kind === "feature") return;
+    if (!ticket) return;
+    if (ticket.stage !== null && TERMINAL_STAGES.includes(ticket.stage)) return;
     const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
     if (sent) {
       this.store.logEvent(ticketId, "contract_repushed", { attempt: attempt + 1 });

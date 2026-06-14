@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import Electrobun, { ApplicationMenu, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
+import { spawnRelauncher } from "./relaunch.ts";
 import { repairPath } from "./repairPath.ts";
 
 /**
@@ -120,6 +122,15 @@ async function boot(): Promise<void> {
   // 2. Repair the GUI PATH so tmux/claude/gh/git/cursor-agent resolve (macOS Finder launch).
   process.env.PATH = await repairPath();
 
+  // The in-app self-update is dev-desktop-only: it needs the real checkout (KANBAN_REPO_ROOT,
+  // exported by the dev:desktop script + the relauncher) to be a git working copy. A packaged
+  // .app never sets it, so canUpdate stays false there and the button is hidden.
+  const repoRoot = process.env.KANBAN_REPO_ROOT;
+  const canSelfUpdate = repoRoot != null && existsSync(join(repoRoot, ".git"));
+
+  // Late-bound so onRequestUpdate can reference `server`/`teardown` defined just below.
+  let requestUpdate: (() => void) | undefined;
+
   // 3. Dynamic import only now that config + env are in place.
   const { startServer } = await import("../src/server/index.ts");
   const server = await startServer({
@@ -128,6 +139,8 @@ async function boot(): Promise<void> {
     // WKWebView has no web Notification API, so the front's desktop notifications are inert here.
     // Fire a native notification attributed to the app instead (clicking focuses the app window).
     onNotify: (title, body) => Utils.showNotification({ title, body }),
+    repoRoot: canSelfUpdate ? repoRoot : undefined,
+    onRequestUpdate: canSelfUpdate ? () => requestUpdate?.() : undefined,
   });
 
   let tornDown = false;
@@ -138,6 +151,20 @@ async function boot(): Promise<void> {
     await server.teardownSessions();
     server.stop();
   };
+
+  // Update path: distinct from teardown — it must NEVER kill the tmux sessions (the running jobs
+  // must survive the relaunch). Mark tornDown so the window-close handler's teardown no-ops, hand
+  // off to the detached relauncher, stop the server (frees port 52817), then exit so the relauncher
+  // — which waits on this PID — can rebind. repoRoot is non-null whenever canSelfUpdate gated this in.
+  if (canSelfUpdate && repoRoot != null) {
+    requestUpdate = (): void => {
+      if (tornDown) return;
+      tornDown = true;
+      spawnRelauncher(repoRoot);
+      server.stop();
+      process.exit(0);
+    };
+  }
 
   // The server is already listening: a health timeout (or a window-open failure) must tear it down,
   // otherwise the listener, watchdog timer, and db handle leak on a dirty exit (acceptance crit. 5).

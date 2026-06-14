@@ -228,6 +228,19 @@ export class FakeSystemAdapter implements SystemAdapter {
     // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
     return true;
   }
+
+  async gitCurrentBranch(): Promise<string> {
+    return "main";
+  }
+
+  async gitStatusClean(): Promise<boolean> {
+    return true;
+  }
+
+  async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
+    this.log("gitPullFastForward", { repoPath, baseBranch });
+    return { ok: true, reason: "" };
+  }
 }
 
 /** Decode a hex byte string ("41 → 0x41…") to bytes; ignores any trailing odd nibble. */

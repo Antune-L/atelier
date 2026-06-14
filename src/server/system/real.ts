@@ -438,6 +438,25 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async gitCurrentBranch(repoPath: string): Promise<string> {
+    const res = await $`git -C ${repoPath} rev-parse --abbrev-ref HEAD`.nothrow().quiet();
+    return res.exitCode === 0 ? res.stdout.toString().trim() : "";
+  }
+
+  async gitStatusClean(repoPath: string): Promise<boolean> {
+    const res = await $`git -C ${repoPath} status --porcelain`.nothrow().quiet();
+    return res.exitCode === 0 && res.stdout.toString().trim().length === 0;
+  }
+
+  async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
+    const res = await $`git -C ${repoPath} pull --ff-only origin ${baseBranch}`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      return { ok: false, reason: `git pull --ff-only origin ${baseBranch} a échoué : ${detail}` };
+    }
+    return { ok: true, reason: "" };
+  }
+
   async checkComposerAvailable(): Promise<boolean> {
     for (const bin of COMPOSER_BINARIES) {
       if (!Bun.which(bin)) continue;

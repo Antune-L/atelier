@@ -34,6 +34,11 @@ interface TriageRunner {
   runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
   listBranches(repoPath: string): Promise<string[]>;
+  // Desktop self-update guards + build runner (dev desktop only).
+  gitCurrentBranch(repoPath: string): Promise<string>;
+  gitStatusClean(repoPath: string): Promise<boolean>;
+  gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
+  runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
 }
 
 interface RouteDeps {
@@ -46,7 +51,20 @@ interface RouteDeps {
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
+  /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
+  repoRoot?: string;
+  /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
+  onRequestUpdate?: () => void;
 }
+
+/** Branch the self-update tracks; mismatch blocks the update (no auto-switch). */
+const UPDATE_BASE_BRANCH = "main";
+/** Generous bound for the pre-relaunch web + agents rebuild. */
+const UPDATE_BUILD_TIMEOUT_MS = 300_000;
+/** Let the {ok:true} response flush before tearing the server down + relaunching. */
+const UPDATE_RELAUNCH_DELAY_MS = 200;
+/** Keep only the tail of a failed build's output in the surfaced error. */
+const BUILD_ERROR_TAIL = 600;
 
 const stopHookSchema = z.object({
   ticketId: z.string(),
@@ -159,6 +177,7 @@ export function createApiRoutes(deps: RouteDeps) {
       composerAvailable: deps.composerAvailable,
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
+      canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
     }))
     .get("/profiles", () => store.listProfiles())
     .post("/profiles", ({ body, set }) => {
@@ -407,6 +426,38 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = stopHookSchema.safeParse(body);
       if (!parsed.success) return { ok: false };
       coordinator.handleStopHook(parsed.data.ticketId, parsed.data.sessionId);
+      return { ok: true };
+    })
+    .post("/internal/update", async ({ set }) => {
+      const { onRequestUpdate, repoRoot, system } = deps;
+      if (!onRequestUpdate || !repoRoot) return jsonError(set, HTTP_CONFLICT, "mise à jour indisponible");
+
+      // Guards: never touch a job. Wrong branch / dirty tree / non-ff pull all abort cleanly.
+      const branch = await system.gitCurrentBranch(repoRoot);
+      if (branch !== UPDATE_BASE_BRANCH) {
+        return jsonError(set, HTTP_BAD_REQUEST, `branche courante « ${branch || "?"} » ≠ ${UPDATE_BASE_BRANCH} : bascule dessus avant de mettre à jour`);
+      }
+      if (!(await system.gitStatusClean(repoRoot))) {
+        return jsonError(set, HTTP_BAD_REQUEST, "arbre de travail sale : commite ou stashe tes changements avant de mettre à jour");
+      }
+      const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH);
+      if (!pull.ok) return jsonError(set, HTTP_BAD_REQUEST, pull.reason);
+
+      // Rebuild before cutting the window: the relauncher only re-runs `electrobun dev`, which copies
+      // these fresh artifacts into the new bundle (it does not run Vite itself). A build timeout
+      // rejects (withTimeout), so wrap it: the curated 502 beats a generic 500, and no relaunch fires.
+      try {
+        const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_BUILD_TIMEOUT_MS);
+        if (!web.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+        const agents = await system.runProjectScript(repoRoot, "bun run build:agents", UPDATE_BUILD_TIMEOUT_MS);
+        if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      log.info("mise à jour validée, relance imminente", { repoRoot, branch });
+      // Defer so this {ok:true} flushes before the server stops and the process exits.
+      setTimeout(() => onRequestUpdate(), UPDATE_RELAUNCH_DELAY_MS);
       return { ok: true };
     });
 }

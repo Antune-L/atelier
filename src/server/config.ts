@@ -95,8 +95,13 @@ export const MODELS = config.models;
 export const SLOTS_ROOT = resolveSlotsRoot(config.slotsRoot);
 
 function resolveSlotsRoot(configured: string | undefined): string {
-  if (!configured) return join(PROJECT_ROOT, "slots");
-  return isAbsolute(configured) ? configured : join(PROJECT_ROOT, configured);
+  if (configured) return isAbsolute(configured) ? configured : join(PROJECT_ROOT, configured);
+  // Desktop dev: PROJECT_ROOT resolves inside the bundled launcher (under build/), which
+  // `electrobun dev` wipes on every relaunch — a relaunch would delete the slot worktrees out
+  // from under live agents. KANBAN_REPO_ROOT (the real checkout, exported by the dev:desktop
+  // script and the relauncher) anchors slots at <repoRoot>/slots, outside build/, like `bun run dev`.
+  const repoRoot = process.env.KANBAN_REPO_ROOT;
+  return join(repoRoot ?? PROJECT_ROOT, "slots");
 }
 
 /** Project keys are runtime-defined, so this is a plain string narrowing guard. */

@@ -117,6 +117,14 @@ export interface SystemAdapter {
   // ---- capability probe ----
   /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
   checkComposerAvailable(): Promise<boolean>;
+
+  // ---- desktop self-update guards (dev desktop only) ----
+  /** Current checked-out branch (`git rev-parse --abbrev-ref HEAD`); "" when it can't be read. */
+  gitCurrentBranch(repoPath: string): Promise<string>;
+  /** True when the working tree has no uncommitted changes (`git status --porcelain` empty). */
+  gitStatusClean(repoPath: string): Promise<boolean>;
+  /** Fast-forward-only pull of origin/<baseBranch> (never merges; blocks on divergence). */
+  gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult>;
 }
 
 export interface TriageOptions {

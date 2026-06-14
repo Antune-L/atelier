@@ -54,6 +54,10 @@ export interface StartServerOptions {
   dataRoot?: string;
   /** Native OS notification sink (desktop app only; WKWebView has no web Notification API). */
   onNotify?: (title: string, body: string) => void;
+  /** Real checkout root for the in-app self-update git guards + rebuild (desktop dev only). */
+  repoRoot?: string;
+  /** Tear down the server (preserving tmux jobs) and relaunch the app (desktop dev only). */
+  onRequestUpdate?: () => void;
 }
 
 export interface RunningServer {
@@ -183,6 +187,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     triageLog,
     projectRoot: dataRoot,
     composerAvailable,
+    repoRoot: opts.repoRoot,
+    onRequestUpdate: opts.onRequestUpdate,
   });
 
   const app = new Elysia()

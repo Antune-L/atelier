@@ -1,11 +1,12 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import {
   askUserArgsSchema,
   doneArgsSchema,
   failArgsSchema,
   submitAnswerArgsSchema,
+  submitFeasibilityArgsSchema,
   submitPrdArgsSchema,
   submitTriageArgsSchema,
   updateStageArgsSchema,
@@ -17,6 +18,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
 
+import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import { AGENT_ACTIVE_EVENT, CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 
@@ -42,6 +44,7 @@ export class AgentCoordinator {
     private readonly notifier: Notifier,
     private readonly slots: SlotManager,
     private readonly triage: TriageManager,
+    private readonly feasibility: FeasibilityBatchManager,
   ) {
     this.workerHub.setHandlers({
       onHello: (ticketId, slotId) => this.onHello(ticketId, slotId),
@@ -65,6 +68,16 @@ export class AgentCoordinator {
       log.info("tool call (triage)", { ticketId: ctx.ticketId, tool: ctx.name });
       if (ctx.name === "submit_triage") return this.handleSubmitTriage(ctx);
       return { ok: false, result: "Session de triage en lecture seule : seul submit_triage est autorisé." };
+    }
+    // A batch feasibility orchestrator identifies with FEASIBILITY_SLOT_ID on a synthetic batch id
+    // (no real ticket). It may ONLY submit its aggregated verdicts; every pipeline tool is barred.
+    if (ctx.slotId === FEASIBILITY_SLOT_ID) {
+      log.info("tool call (faisabilité)", { batchId: ctx.ticketId, tool: ctx.name });
+      if (ctx.name === "submit_feasibility") return this.handleSubmitFeasibility(ctx);
+      return {
+        ok: false,
+        result: "Session de faisabilité en lecture seule : seul submit_feasibility est autorisé.",
+      };
     }
     this.markProgress(ctx.ticketId);
     this.ackContract(ctx.ticketId);
@@ -92,6 +105,14 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     await this.triage.complete(ctx.ticketId, parsed.data);
     return { ok: true, result: "Verdict de faisabilité enregistré." };
+  }
+
+  private async handleSubmitFeasibility(ctx: ToolCallContext): Promise<ToolResult> {
+    const parsed = submitFeasibilityArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    // ctx.ticketId is the synthetic batch id, not a real ticket.
+    await this.feasibility.complete(ctx.ticketId, parsed.data.results);
+    return { ok: true, result: "Verdicts de faisabilité enregistrés." };
   }
 
   private handleUpdateStage(ctx: ToolCallContext): ToolResult {
@@ -200,9 +221,12 @@ export class AgentCoordinator {
 
   /** Stop hook: turn ended. If no protocol tool resolved the turn → auto-nudge ×1 → stalled. */
   private async onStop(ticketId: string, sessionId: string | null): Promise<void> {
+    // Guard first: updateTicket throws on an unknown id, and a read-only (triage/feasibility)
+    // session identifies with an id that is not a real pipeline ticket.
+    if (!this.store.getTicket(ticketId)) return;
     if (sessionId) {
-      const ticket = this.store.updateTicket(ticketId, { sessionId });
-      this.hub.pushTicket(ticket);
+      const updated = this.store.updateTicket(ticketId, { sessionId });
+      this.hub.pushTicket(updated);
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;

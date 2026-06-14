@@ -13,6 +13,7 @@ import type {
   PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
+  SpawnFeasibilityOptions,
   SpawnTmuxOptions,
   SpawnTriageOptions,
   SystemAdapter,
@@ -26,6 +27,11 @@ const PROD_ENV_MARKER = "prod";
  * so `mcp__worker__submit_triage` stays callable.
  */
 const TRIAGE_READONLY_TOOLS = "Read,Glob,Grep";
+/**
+ * Feasibility batch tool surface: read-only plus `Task` so the orchestrator can fan out one sub-agent
+ * per ticket. Edit/Write/Bash stay unloadable; MCP `submit_feasibility` survives `--tools`.
+ */
+const FEASIBILITY_READONLY_TOOLS = "Read,Glob,Grep,Task";
 /** How long a crashed pane stays readable before the session closes itself (1 h). */
 const DEAD_PANE_KEEP_ALIVE_S = 3600;
 // The dev-channels warning dialog has no bypass (by design): the backend watches
@@ -197,6 +203,15 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
+    await this.spawnReadonlySession(opts, TRIAGE_READONLY_TOOLS);
+  }
+
+  async spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void> {
+    await this.spawnReadonlySession(opts, FEASIBILITY_READONLY_TOOLS);
+  }
+
+  /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */
+  private async spawnReadonlySession(opts: SpawnTriageOptions, tools: string): Promise<void> {
     const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
     // `auto` never prompts interactively (it auto-approves or silently blocks); the read-only tool
@@ -209,7 +224,7 @@ export class RealSystemAdapter implements SystemAdapter {
       ` --strict-mcp-config` +
       ` --dangerously-load-development-channels server:worker` +
       ` --settings '${TRIAGE_SETTINGS_JSON}'` +
-      ` --tools ${TRIAGE_READONLY_TOOLS}` +
+      ` --tools ${tools}` +
       ` --permission-mode auto`;
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();

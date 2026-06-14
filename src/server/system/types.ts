@@ -41,6 +41,13 @@ export interface SpawnTriageOptions {
 }
 
 /**
+ * A read-only batch feasibility session: a detached `claude` on the real repo with the worker
+ * channel attached but no worktree/slot, allowed to fan out sub-agents (`--tools Read,Glob,Grep,Task`).
+ * Same options as a triage session; the wider tool surface is the only difference.
+ */
+export type SpawnFeasibilityOptions = SpawnTriageOptions;
+
+/**
  * A live byte stream of a tmux pane's output. Backed by `pipe-pane` → FIFO → `cat`
  * in the real adapter, or a synthetic echo queue in the fake. The boundary keeps all
  * tmux/FIFO plumbing inside the adapter so the terminal manager runs in dry-run too.
@@ -99,6 +106,8 @@ export interface SystemAdapter {
   spawnSession(opts: SpawnTmuxOptions): Promise<void>;
   /** Spawn a detached read-only triage session (worker channel attached, no worktree/slot). */
   spawnTriageSession(opts: SpawnTriageOptions): Promise<void>;
+  /** Spawn a detached read-only batch feasibility session (fans out sub-agents; no worktree/slot). */
+  spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;
   hasSession(sessionName: string): Promise<boolean>;
   /** Last ~200 lines of the session's pane (read-only). Empty string if missing. */

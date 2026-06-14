@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -60,6 +60,10 @@ export const triageResultSchema = z.object({
   suggestedEffort: agentEffortSchema.nullable().default(null).catch(null),
 });
 export type TriageResult = z.infer<typeof triageResultSchema>;
+
+/** One ticket's feasibility verdict in a batch analysis: a triage report keyed by its ticket id. */
+export const feasibilityResultSchema = triageResultSchema.extend({ ticketId: z.string().min(1) });
+export type FeasibilityResult = z.infer<typeof feasibilityResultSchema>;
 
 export const TRIAGE_VERDICT_LABELS: Record<TriageVerdict, string> = {
   implementable: "Implémentable",
@@ -240,6 +244,36 @@ export const createTicketSchema = z
   );
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;
 
+/** One imported CSV row: a ticket title (required, validated server-side) and its description. */
+export const importTicketRowSchema = z.object({
+  title: z.string(),
+  description: z.string().default(""),
+});
+export type ImportTicketRow = z.infer<typeof importTicketRowSchema>;
+
+/**
+ * Bulk-create tickets from a parsed CSV. The batch options mirror createTicketSchema (minus
+ * title/description/start, picked once for the whole batch); runFeasibility kicks off the batch
+ * feasibility analysis after creation.
+ */
+export const importTicketsSchema = z.object({
+  project: projectKeySchema,
+  rows: z.array(importTicketRowSchema).min(1).max(IMPORT_MAX_ROWS),
+  prdEnabled: z.boolean().default(false),
+  prDraft: z.boolean().default(true),
+  autoMerge: z.boolean().default(false),
+  addScreenshots: z.boolean().default(false),
+  verifyFeature: z.boolean().default(false),
+  baseBranch: baseBranchSchema.nullable().default(null),
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
+  implementerModel: agentModelSchema.nullable().default(null),
+  implementerEffort: agentEffortSchema.nullable().default(null),
+  implementer: implementerSchema.default("claude"),
+  runFeasibility: z.boolean().default(false),
+});
+export type ImportTicketsInput = z.infer<typeof importTicketsSchema>;
+
 export const updateTicketSchema = z.object({
   // Optional and may be blank: a blank title is derived from the description
   // server-side, mirroring creation (see deriveTitleFromDescription).
@@ -366,6 +400,7 @@ export const workerToolNameSchema = z.enum([
   "done",
   "fail",
   "submit_triage",
+  "submit_feasibility",
 ]);
 export type WorkerToolName = z.infer<typeof workerToolNameSchema>;
 
@@ -391,6 +426,8 @@ export const failArgsSchema = z.object({
 });
 /** Feasibility verdict the triage session submits via the worker channel (same shape as the report). */
 export const submitTriageArgsSchema = triageResultSchema;
+/** Batch feasibility verdicts the orchestrator session submits once (one entry per imported ticket). */
+export const submitFeasibilityArgsSchema = z.object({ results: z.array(feasibilityResultSchema) });
 
 // ---- Worker channel: WS frames worker.ts ↔ backend ----
 

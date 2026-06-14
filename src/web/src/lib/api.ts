@@ -7,6 +7,7 @@ import type {
   CreateProfileInput,
   CreateReviewInput,
   CreateTicketInput,
+  ImportTicketsInput,
   OpenPr,
   Profile,
   ProjectInfo,
@@ -51,6 +52,8 @@ export const api = {
     request(`/api/tickets/${id}`),
   createTicket: (input: CreateTicketInput): Promise<Ticket> =>
     request("/api/tickets", { method: "POST", body: JSON.stringify(input) }),
+  importTickets: (input: ImportTicketsInput): Promise<{ created: Ticket[]; feasibilityStarted: boolean }> =>
+    request("/api/tickets/import", { method: "POST", body: JSON.stringify(input) }),
   projectPrs: (key: string): Promise<OpenPr[]> => request(`/api/projects/${key}/prs`),
   projectBranches: (key: string): Promise<string[]> => request(`/api/projects/${key}/branches`),
   createReviews: (input: CreateReviewInput): Promise<Ticket[]> =>

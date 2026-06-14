@@ -197,6 +197,22 @@ export const TRIAGE_SLOT_ID = -1;
 /** Max chars of raw CLI output stored as the report when triage fails to parse. */
 export const TRIAGE_RAW_REPORT_MAX = 4000;
 
+/**
+ * Batch feasibility analysis ("Import CSV"): ONE orchestrator session fans out X read-only
+ * sub-agents (one per imported ticket), each returning a verdict reusing the triage fields.
+ */
+export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
+/**
+ * SLOT_ID a feasibility-batch worker identifies with (distinct from TRIAGE_SLOT_ID). The orchestrator
+ * runs in NO slot on a synthetic batch id; the coordinator uses it to bar every pipeline tool but
+ * submit_feasibility.
+ */
+export const FEASIBILITY_SLOT_ID = -2;
+/** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
+export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
+/** Max rows a single CSV import may create (bounds a batch; average ~20). */
+export const IMPORT_MAX_ROWS = 200;
+
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 export const WS_PATH_WORKER = "/workers";

@@ -10,6 +10,7 @@ import {
   createReviewSchema,
   createTicketSchema,
   deriveTitleFromDescription,
+  importTicketsSchema,
   moveTicketSchema,
   updateAppSettingsSchema,
   updateProfileSchema,
@@ -21,6 +22,7 @@ import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
+import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
@@ -47,6 +49,7 @@ interface RouteDeps {
   coordinator: AgentCoordinator;
   system: PaneReader;
   triage: TriageManager;
+  feasibility: FeasibilityBatchManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
@@ -222,6 +225,56 @@ export function createApiRoutes(deps: RouteDeps) {
         });
       });
       return started;
+    })
+    .post("/tickets/import", ({ body, set }) => {
+      const parsed = importTicketsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const input = parsed.data;
+      if (!isProjectKey(input.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      // Server-side re-validation (never trust the client): every row needs a non-empty title.
+      // All-or-nothing — reject the whole batch listing the offending rows before creating anything.
+      const blankTitleRows = input.rows
+        .map((row, index) => ({ row, line: index + 1 }))
+        .filter(({ row }) => row.title.trim().length === 0)
+        .map(({ line }) => line);
+      if (blankTitleRows.length > 0) {
+        return jsonError(set, HTTP_BAD_REQUEST, `titre manquant aux lignes : ${blankTitleRows.join(", ")}`);
+      }
+
+      const created: Ticket[] = [];
+      for (const row of input.rows) {
+        const ticket = store.createTicket({
+          title: row.title.trim(),
+          description: row.description,
+          project: input.project,
+          prdEnabled: input.prdEnabled,
+          prDraft: input.prDraft,
+          autoMerge: input.autoMerge,
+          addScreenshots: input.addScreenshots,
+          verifyFeature: input.verifyFeature,
+          baseBranch: input.baseBranch,
+          model: input.model,
+          effort: input.effort,
+          implementerModel: input.implementerModel,
+          implementerEffort: input.implementerEffort,
+          implementer: input.implementer,
+        });
+        hub.pushTicket(ticket);
+        created.push(ticket);
+      }
+
+      if (!input.runFeasibility) return { created, feasibilityStarted: false };
+      // Kick off the batch feasibility analysis in the background; it marks tickets running then
+      // persists verdicts via the worker channel (mirrors the triage path).
+      void deps.feasibility
+        .start(created.map((ticket) => ticket.id), input.project)
+        .catch((e) => {
+          log.error("démarrage de la faisabilité échoué", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+      // The batch id is generated inside the manager; the client only needs to know the run started.
+      return { created, feasibilityStarted: true };
     })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);

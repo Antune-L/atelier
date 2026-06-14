@@ -1,6 +1,7 @@
 import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
+import { hasMockups } from "../../shared/mockups.ts";
 import { getProject, isProjectKey } from "../config.ts";
 
 /** Uppercase French label of the language the agent must write commits/PR/review text in. */
@@ -78,6 +79,8 @@ export function buildTicketContract(
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
   // Screenshots only make sense on a PR a human will read; auto-merge skips that.
   const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge;
+  const wantsVerify = ticket.verifyFeature;
+  const verifyWithMockups = wantsVerify && hasMockups(ticket.description);
   const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
@@ -121,6 +124,12 @@ export function buildTicketContract(
       : []),
     "4. fixing : corrige les findings, puis re-review. Max 2 boucles, sinon fail().",
     "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
+    wantsVerify
+      ? "5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (via Playwright/navigateur pour un changement frontend, ou en exerçant le code/CLI/endpoint concerné sinon). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie."
+      : "",
+    verifyWithMockups
+      ? "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus."
+      : "",
     `6. opening_pr : commit (conventions du projet), push, \`${prCreateCmd}\` vers ${baseBranch}.`,
     wantsScreenshots
       ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."

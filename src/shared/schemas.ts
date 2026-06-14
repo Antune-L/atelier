@@ -89,6 +89,8 @@ export const ticketSchema = z.object({
   autoMerge: z.boolean(),
   /** Attach Playwright screenshots of the feature to the PR (frontend changes). Unavailable when autoMerge is on. */
   addScreenshots: z.boolean(),
+  /** Before opening the PR, mandatorily run the app to verify the feature works, and visually compare to any provided mockups (in addition to argus). */
+  verifyFeature: z.boolean(),
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
@@ -220,6 +222,7 @@ export const createTicketSchema = z
     prDraft: z.boolean().default(true),
     autoMerge: z.boolean().default(false),
     addScreenshots: z.boolean().default(false),
+    verifyFeature: z.boolean().default(false),
     // Branch the worktree forks from and the PR targets (null = project default).
     baseBranch: baseBranchSchema.nullable().default(null),
     // Implementation agent knobs picked at creation (null = fall back to server config).
@@ -246,6 +249,7 @@ export const updateTicketSchema = z.object({
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   addScreenshots: z.boolean().optional(),
+  verifyFeature: z.boolean().optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),

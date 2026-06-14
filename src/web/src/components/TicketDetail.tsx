@@ -276,6 +276,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { addScreenshots: checked }).catch(() => undefined);
   };
 
+  const setVerifyFeature = (checked: boolean): void => {
+    void api.updateTicket(current.id, { verifyFeature: checked }).catch(() => undefined);
+  };
+
   const startEdit = (): void => {
     setEditTitle(current.title);
     setEditDescription(current.description);
@@ -742,6 +746,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     disabled={current.autoMerge}
                     onCheckedChange={setAddScreenshots}
                     aria-label="Ajouter des captures d'écran à la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
+                  <Switch
+                    checked={current.verifyFeature}
+                    onCheckedChange={setVerifyFeature}
+                    aria-label="Tester la feature avant la PR"
                   />
                 </label>
               </div>

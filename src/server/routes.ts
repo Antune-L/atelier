@@ -15,7 +15,7 @@ import {
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { OpenPr, Ticket } from "../shared/schemas.ts";
+import type { OpenPr, Ticket, UpdateMode } from "../shared/schemas.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
@@ -63,6 +63,16 @@ const UPDATE_BUILD_TIMEOUT_MS = 300_000;
 const UPDATE_RELAUNCH_DELAY_MS = 200;
 /** Keep only the tail of a failed build's output in the surfaced error. */
 const BUILD_ERROR_TAIL = 600;
+/** Timeout for lightweight git introspection commands (rev-parse, diff --name-only). */
+const GIT_QUERY_TIMEOUT_MS = 5_000;
+/**
+ * Strict allowlist: only paths under src/web/ are considered frontend-only.
+ * src/shared/** is excluded — it is consumed by the server at runtime, so a change there requires
+ * a full relaunch. Any unrecognised path defaults conservatively to a full relaunch.
+ */
+function isWebOnlyPath(filePath: string): boolean {
+  return filePath.startsWith("src/web/");
+}
 
 const stopHookSchema = z.object({
   ticketId: z.string(),
@@ -405,7 +415,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const { onRequestUpdate, repoRoot, system } = deps;
       if (!onRequestUpdate || !repoRoot) return jsonError(set, HTTP_CONFLICT, "mise à jour indisponible");
 
-      // Guards: never touch a job. Wrong branch / dirty tree / non-ff pull all abort cleanly.
+      // Guards: never touch a dirty or diverged tree.
       const branch = await system.gitCurrentBranch(repoRoot);
       if (branch !== UPDATE_BASE_BRANCH) {
         return jsonError(set, HTTP_BAD_REQUEST, `branche courante « ${branch || "?"} » ≠ ${UPDATE_BASE_BRANCH} : bascule dessus avant de mettre à jour`);
@@ -413,24 +423,47 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!(await system.gitStatusClean(repoRoot))) {
         return jsonError(set, HTTP_BAD_REQUEST, "arbre de travail sale : commite ou stashe tes changements avant de mettre à jour");
       }
+
+      // Capture HEAD before the pull so we can diff what actually changed.
+      const headResult = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
+      if (!headResult.ok) log.warn("git rev-parse HEAD a échoué, fallback relaunch", { repoRoot });
+      const beforeHash = headResult.ok ? headResult.output.trim() : null;
+
       const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH);
       if (!pull.ok) return jsonError(set, HTTP_BAD_REQUEST, pull.reason);
 
-      // Rebuild before cutting the window: the relauncher only re-runs `electrobun dev`, which copies
-      // these fresh artifacts into the new bundle (it does not run Vite itself). A build timeout
-      // rejects (withTimeout), so wrap it: the curated 502 beats a generic 500, and no relaunch fires.
+      // Classify the pull: frontend-only (src/web/** exclusively) → soft reload; anything else → relaunch.
+      let frontendOnly = false;
+      if (beforeHash) {
+        const diffResult = await system.runProjectScript(
+          repoRoot,
+          `git diff --name-only ${beforeHash} HEAD`,
+          GIT_QUERY_TIMEOUT_MS,
+        );
+        if (!diffResult.ok) log.warn("git diff --name-only a échoué, fallback relaunch", { repoRoot, beforeHash });
+        const changed = diffResult.ok ? diffResult.output.trim().split("\n").filter(Boolean) : [];
+        frontendOnly = changed.length > 0 && changed.every(isWebOnlyPath);
+      }
+
       try {
         const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_BUILD_TIMEOUT_MS);
         if (!web.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-        const agents = await system.runProjectScript(repoRoot, "bun run build:agents", UPDATE_BUILD_TIMEOUT_MS);
-        if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+        if (!frontendOnly) {
+          const agents = await system.runProjectScript(repoRoot, "bun run build:agents", UPDATE_BUILD_TIMEOUT_MS);
+          if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+        }
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${error instanceof Error ? error.message : String(error)}`);
       }
 
+      const mode: UpdateMode = frontendOnly ? "reload" : "relaunch";
+      if (frontendOnly) {
+        log.info("mise à jour frontend-only validée, soft-reload", { repoRoot, branch });
+        return { ok: true, mode };
+      }
       log.info("mise à jour validée, relance imminente", { repoRoot, branch });
       // Defer so this {ok:true} flushes before the server stops and the process exits.
-      setTimeout(() => onRequestUpdate(), UPDATE_RELAUNCH_DELAY_MS);
-      return { ok: true };
+      setTimeout(onRequestUpdate, UPDATE_RELAUNCH_DELAY_MS);
+      return { ok: true, mode };
     });
 }

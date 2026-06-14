@@ -24,6 +24,8 @@ type View = "kanban" | "agents";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
+/** If location.reload() is suppressed (e.g. Electrobun quirk), release the spinner. */
+const RELOAD_WATCHDOG_MS = 5_000;
 
 const VIEW_OPTIONS: { value: View; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
@@ -47,14 +49,21 @@ export function App() {
     ? (tickets.find((t) => t.id === openTicketId) ?? null)
     : null;
 
-  // Dev desktop self-update: git pull + rebuild + relaunch. On success the app recreates the
-  // window, so the overlay stays up until then; a guard failure (dirty tree, wrong branch) just toasts.
+  // Dev desktop self-update: git pull + rebuild, then either soft-reload (frontend-only diff) or
+  // full relaunch (backend/shared/worker changes). Guard failures (dirty tree, wrong branch) toast.
   const handleUpdate = async (): Promise<void> => {
     setUpdating(true);
     try {
-      await api.appUpdate();
-      // The relaunch recreates the window (full reload), clearing this overlay. If it silently fails
-      // (relauncher couldn't start — see .update.log), release the spinner instead of hanging forever.
+      const result = await api.appUpdate();
+      if (result.mode === "reload") {
+        // Assets are already rebuilt server-side before the response; a plain reload picks them up.
+        // Fallback: if the reload is suppressed (Electrobun quirk), release the spinner.
+        window.setTimeout(() => setUpdating(false), RELOAD_WATCHDOG_MS);
+        window.location.reload();
+        return;
+      }
+      // Hard relaunch: the app recreates the window, which clears this overlay. If the relauncher
+      // silently fails (see .update.log), release the spinner after the watchdog timeout.
       window.setTimeout(() => {
         boardStore.notify("Relance non détectée", "Vérifie .update.log à la racine du dépôt.");
         setUpdating(false);

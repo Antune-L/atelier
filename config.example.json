@@ -5,6 +5,7 @@
       "repoPath": "/Users/moi/mon-projet",
       "baseBranch": "main",
       "defaultAutoMerge": false,
+      "defaultAddScreenshots": false,
       "commitTimeoutMs": 120000,
       "scripts": {
         "typecheck": "npm run typecheck",

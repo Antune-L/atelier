@@ -72,6 +72,8 @@ export function buildTicketContract(
   const isUi = figmaUrls.length > 0;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
+  // Screenshots only make sense on a PR a human will read; auto-merge skips that.
+  const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge;
   const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
@@ -116,6 +118,9 @@ export function buildTicketContract(
     "4. fixing : corrige les findings, puis re-review. Max 2 boucles, sinon fail().",
     "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
     `6. opening_pr : commit (conventions du projet), push, \`${prCreateCmd}\` vers ${baseBranch}.`,
+    wantsScreenshots
+      ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
+      : "",
     "7. done(pr_url).",
     ticket.autoMerge
       ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`

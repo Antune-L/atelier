@@ -53,6 +53,10 @@ export function NewTicketDialog({
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
   const autoMerge =
     autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
+  const [addScreenshotsChoice, setAddScreenshotsChoice] = useState<boolean | null>(null);
+  // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
+  const addScreenshots =
+    !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -95,6 +99,7 @@ export function NewTicketDialog({
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
+    setAddScreenshotsChoice(null);
     setModel(null);
     setEffort(null);
     setImplementer("claude");
@@ -135,6 +140,7 @@ export function NewTicketDialog({
         prdEnabled,
         prDraft,
         autoMerge,
+        addScreenshots,
         baseBranch: baseBranchOverride,
         model,
         effort,
@@ -275,6 +281,22 @@ export function NewTicketDialog({
                     checked={autoMerge}
                     onCheckedChange={setAutoMergeChoice}
                     aria-label="Merge automatique de la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ajouter des captures d'écran à la PR (frontend)
+                    {autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        (indisponible avec le merge auto)
+                      </span>
+                    )}
+                  </span>
+                  <Switch
+                    checked={addScreenshots}
+                    disabled={autoMerge}
+                    onCheckedChange={setAddScreenshotsChoice}
+                    aria-label="Ajouter des captures d'écran à la PR"
                   />
                 </label>
                 {error && <p className="text-sm text-destructive">{error}</p>}

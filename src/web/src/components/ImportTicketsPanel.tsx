@@ -36,7 +36,6 @@ const COPY_FEEDBACK_MS = 1500;
 export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProps) {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = projectChoice ?? projects[0]?.key ?? "";
-  const selectedProject = projects.find((p) => p.key === project);
 
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
@@ -48,11 +47,6 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
 
   // Batch options (applied to every imported ticket); null = fall back to project/server defaults.
   const [prdEnabled, setPrdEnabled] = useState(false);
-  const [prDraft, setPrDraft] = useState(true);
-  const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
-  const addScreenshots = !autoMerge && (selectedProject?.defaultAddScreenshots ?? false);
-  const [verifyFeature, setVerifyFeature] = useState(false);
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
   const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
@@ -116,10 +110,11 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
         project,
         rows: parsed.rows.map((row) => ({ title: row.title, description: row.description })),
         prdEnabled,
-        prDraft,
-        autoMerge,
-        addScreenshots,
-        verifyFeature,
+        // These exec settings are not exposed in the import panel: fall back to safe defaults for imported tickets.
+        prDraft: true,
+        autoMerge: false,
+        addScreenshots: false,
+        verifyFeature: false,
         // No paris-research control in the import panel: keep it off for imported tickets.
         researchPlan: false,
         // No base-branch control in the import panel: always fall back to the project default.
@@ -270,28 +265,6 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
       <label className="flex items-center justify-between gap-2 text-sm">
         <span>PRD à implémenter (planification avant code)</span>
         <Switch checked={prdEnabled} onCheckedChange={setPrdEnabled} aria-label="PRD à implémenter" />
-      </label>
-      <label className="flex items-center justify-between gap-2 text-sm">
-        <span>
-          Ouvrir la PR en draft
-          {autoMerge && (
-            <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>
-          )}
-        </span>
-        <Switch
-          checked={prDraft && !autoMerge}
-          disabled={autoMerge}
-          onCheckedChange={setPrDraft}
-          aria-label="Ouvrir la PR en draft"
-        />
-      </label>
-      <label className="flex items-center justify-between gap-2 text-sm">
-        <span>Merger automatiquement la PR après ouverture</span>
-        <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-label="Merge automatique de la PR" />
-      </label>
-      <label className="flex items-center justify-between gap-2 text-sm">
-        <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
-        <Switch checked={verifyFeature} onCheckedChange={setVerifyFeature} aria-label="Tester la feature avant la PR" />
       </label>
       <label className="flex items-center justify-between gap-2 text-sm">
         <span>

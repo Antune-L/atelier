@@ -199,6 +199,7 @@ export function createApiRoutes(deps: RouteDeps) {
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
         addScreenshots: parsed.data.addScreenshots,
+        verifyFeature: parsed.data.verifyFeature,
         baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,

@@ -64,6 +64,7 @@ export function NewTicketDialog({
   // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
   const addScreenshots =
     !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
+  const [verifyFeature, setVerifyFeature] = useState(false);
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -117,6 +118,7 @@ export function NewTicketDialog({
     setPrDraft(true);
     setAutoMergeChoice(null);
     setAddScreenshotsChoice(null);
+    setVerifyFeature(false);
     setModel(null);
     setEffort(null);
     setImplementerModel(null);
@@ -160,6 +162,7 @@ export function NewTicketDialog({
         prDraft,
         autoMerge,
         addScreenshots,
+        verifyFeature,
         baseBranch: baseBranchOverride,
         model,
         effort,
@@ -329,6 +332,14 @@ export function NewTicketDialog({
                     disabled={autoMerge}
                     onCheckedChange={setAddScreenshotsChoice}
                     aria-label="Ajouter des captures d'écran à la PR"
+                  />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
+                  <Switch
+                    checked={verifyFeature}
+                    onCheckedChange={setVerifyFeature}
+                    aria-label="Tester la feature avant la PR"
                   />
                 </label>
                 {error && <p className="text-sm text-destructive">{error}</p>}

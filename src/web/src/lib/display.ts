@@ -94,6 +94,7 @@ export function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DATETIME_FORMAT);
 }
 
+const SECOND_MS = 1_000;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -118,6 +119,32 @@ export function ticketElapsedStart(ticket: Pick<Ticket, "column" | "implementing
     return ticket.implementingStartedAt;
   }
   return ticket.createdAt;
+}
+
+/** Compact two-unit duration for a finished span (e.g. "45s", "12m", "2h 15m", "3j 4h"). */
+export function formatDuration(ms: number): string {
+  if (ms < MINUTE_MS) return `${Math.floor(ms / SECOND_MS)}s`;
+  if (ms < HOUR_MS) return `${Math.floor(ms / MINUTE_MS)}m`;
+  if (ms < DAY_MS) {
+    const hours = Math.floor(ms / HOUR_MS);
+    const minutes = Math.floor((ms % HOUR_MS) / MINUTE_MS);
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  const days = Math.floor(ms / DAY_MS);
+  const hours = Math.floor((ms % DAY_MS) / HOUR_MS);
+  return hours > 0 ? `${days}j ${hours}h` : `${days}j`;
+}
+
+/**
+ * Wall-clock time the ticket took from when work started (entering "À implémenter") to when
+ * it finished. Null when either bound is missing, so callers can omit the badge entirely.
+ */
+export function ticketImplementationDuration(
+  ticket: Pick<Ticket, "implementingStartedAt" | "finishedAt">,
+): number | null {
+  if (ticket.implementingStartedAt === null || ticket.finishedAt === null) return null;
+  const duration = ticket.finishedAt - ticket.implementingStartedAt;
+  return duration > 0 ? duration : null;
 }
 
 /** Verb describing how a ticket ended, for the finished-at line. */

@@ -1,5 +1,5 @@
-import { LayoutGrid, MonitorPlay, Plus, RefreshCw, Settings } from "lucide-react";
-import { useState } from "react";
+import { BarChart3, LayoutGrid, MonitorPlay, Plus, RefreshCw, Settings } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
 
@@ -8,6 +8,7 @@ import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { SettingsModal } from "@/components/SettingsModal";
 import { SlotsBar } from "@/components/SlotsBar";
+import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type View = "kanban" | "agents";
+type View = "kanban" | "agents" | "stats";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
@@ -31,6 +32,7 @@ const RELOAD_WATCHDOG_MS = 5_000;
 const VIEW_OPTIONS: { value: View; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
+  { value: "stats", label: "Stats", Icon: BarChart3 },
 ];
 
 export function App() {
@@ -74,6 +76,31 @@ export function App() {
       boardStore.notify("Mise à jour impossible", error instanceof Error ? error.message : "échec");
       setUpdating(false);
     }
+  };
+
+  const renderView = (): ReactNode => {
+    if (view === "kanban") {
+      return (
+        <Board
+          projects={projects}
+          projectFilter={filter}
+          searchQuery={search}
+          onOpenTicket={(t) => setOpenTicketId(t.id)}
+          onAddTicket={() => setCreating(true)}
+        />
+      );
+    }
+    if (view === "agents") {
+      return (
+        <AgentsView
+          projects={projects}
+          projectFilter={filter}
+          searchQuery={search}
+          onOpenTicket={(t) => setOpenTicketId(t.id)}
+        />
+      );
+    }
+    return <StatsView projects={projects} />;
   };
 
   return (
@@ -151,22 +178,7 @@ export function App() {
         <SlotsBar slots={slots} />
       </div>
 
-      {view === "kanban" ? (
-        <Board
-          projects={projects}
-          projectFilter={filter}
-          searchQuery={search}
-          onOpenTicket={(t) => setOpenTicketId(t.id)}
-          onAddTicket={() => setCreating(true)}
-        />
-      ) : (
-        <AgentsView
-          projects={projects}
-          projectFilter={filter}
-          searchQuery={search}
-          onOpenTicket={(t) => setOpenTicketId(t.id)}
-        />
-      )}
+      {renderView()}
 
       <NewTicketDialog
         open={creating}

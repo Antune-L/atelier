@@ -40,6 +40,13 @@
     --warning-foreground: 45 50% 97%;
     --danger: 358 64% 37%; /* failed / interrupted */
     --danger-foreground: 45 50% 97%;
+
+    /* Chart palette (teal/brand range) for the stats dashboard. */
+    --chart-1: 190 100% 23%;
+    --chart-2: 160 50% 36%;
+    --chart-3: 30 98% 40%;
+    --chart-4: 262 45% 45%;
+    --chart-5: 5 81% 38%;
   }
 
   /* Deep Ocean — dark teal-to-purple palette (coolors #006466 … #4d194d). */
@@ -75,6 +82,12 @@
     --warning-foreground: 199 47% 11%;
     --danger: 350 65% 55%;
     --danger-foreground: 180 30% 95%;
+
+    --chart-1: 181 72% 46%;
+    --chart-2: 160 50% 45%;
+    --chart-3: 36 90% 56%;
+    --chart-4: 262 50% 62%;
+    --chart-5: 350 65% 55%;
   }
 
   /* Dark — neutral dark built on the brand teal (#001219). */
@@ -110,6 +123,12 @@
     --warning-foreground: 197 55% 6%;
     --danger: 358 64% 52%;
     --danger-foreground: 45 40% 95%;
+
+    --chart-1: 181 74% 46%;
+    --chart-2: 160 50% 44%;
+    --chart-3: 36 92% 55%;
+    --chart-4: 262 50% 60%;
+    --chart-5: 358 64% 52%;
   }
 }
 

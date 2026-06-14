@@ -565,7 +565,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         <section className="flex flex-wrap gap-2 border-t pt-4">
           {(current.stage === "failed" ||
             current.stage === "interrupted" ||
-            current.stage === "stalled") && (
+            current.stage === "stalled") &&
+            // Auto-merge failed: the PR is already pushed/open and the slot is released.
+            // A retry would re-spawn a fresh session for an existing PR — hide it; the
+            // user resolves the conflict via the linked PR instead.
+            !(current.slotId === null && current.prUrl !== null) && (
             <Button
               variant="secondary"
               size="sm"

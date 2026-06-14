@@ -296,12 +296,13 @@ export function ImportTicketsPanel({
           aria-label="PRD à implémenter"
         />
       </label>
-      {/* FIXME: the feature is buggy, infinite subagents are spawned */}
-      {/* <label className="flex items-center justify-between gap-2 text-sm">
+      <label className="flex items-center justify-between gap-2 text-sm">
         <span>
           Analyser la faisabilité de chaque ticket
           {feasibilityDisabled && (
-            <span className="ml-1 text-xs text-muted-foreground">(importe un CSV sans erreur d'abord)</span>
+            <span className="ml-1 text-xs text-muted-foreground">
+              (importe un CSV sans erreur d'abord)
+            </span>
           )}
         </span>
         <Switch
@@ -310,7 +311,7 @@ export function ImportTicketsPanel({
           onCheckedChange={setRunFeasibility}
           aria-label="Analyser la faisabilité"
         />
-      </label> */}
+      </label>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

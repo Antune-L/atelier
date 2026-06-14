@@ -192,8 +192,12 @@ export class TerminalSessionManager {
     const ticket = this.store.getTicket(ticketId);
     // A feasibility batch runs on a synthetic id (no real ticket): fall back to its detached session.
     if (!ticket) return this.feasibility.resolveSession(ticketId);
-    // A triage runs in no slot: fall back to its detached session so the viewer can attach.
-    if (ticket.slotId === null) return this.triage.resolveSession(ticketId);
+    // A triage runs in no slot: fall back to its detached session, then to the feasibility
+    // batch session evaluating this ticket (batch analysis runs on a synthetic id, not the ticket).
+    if (ticket.slotId === null) {
+      return this.triage.resolveSession(ticketId)
+        ?? this.feasibility.resolveSessionForTicket(ticketId);
+    }
     const slot = this.store.getSlot(ticket.slotId);
     return slot?.tmuxSession ?? null;
   }

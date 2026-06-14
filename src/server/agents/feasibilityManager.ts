@@ -77,6 +77,8 @@ interface FeasibilitySession {
  */
 export class FeasibilityBatchManager {
   private readonly sessions = new Map<string, FeasibilitySession>();
+  /** ticketId → batchId of the live batch evaluating it, for the terminal viewer. */
+  private readonly ticketToBatch = new Map<string, string>();
   /** Repos whose `~/.claude.json` trust has been seeded this process (idempotent, outside KANBAN_SETUP). */
   private readonly seededRepos = new Set<string>();
 
@@ -169,6 +171,7 @@ export class FeasibilityBatchManager {
         timer,
       };
       this.sessions.set(batchId, session);
+      for (const ticket of tickets) this.ticketToBatch.set(ticket.id, batchId);
       void this.deliverWhenReady(batchId, prompt, session);
     } catch (error) {
       await this.cleanup(batchId);
@@ -205,10 +208,17 @@ export class FeasibilityBatchManager {
     return this.sessions.get(batchId)?.sessionName ?? null;
   }
 
+  /** tmux session backing the batch that is evaluating `ticketId`, for the terminal viewer. */
+  resolveSessionForTicket(ticketId: string): string | null {
+    const batchId = this.ticketToBatch.get(ticketId);
+    return batchId ? this.resolveSession(batchId) : null;
+  }
+
   /** Boot recovery: a `running` triage status with no live session (registry empty on boot) is dead. */
   async recoverStale(): Promise<void> {
     const names = [...this.sessions.values()].map((entry) => entry.sessionName);
     this.sessions.clear();
+    this.ticketToBatch.clear();
     for (const name of names) await this.system.killSession(name);
     // The TriageManager's recoverStale already flips every `running` triage status to `failed`;
     // tickets evaluated by a batch share those fields, so they are covered there too. Killing the
@@ -222,6 +232,7 @@ export class FeasibilityBatchManager {
       return entry.sessionName;
     });
     this.sessions.clear();
+    this.ticketToBatch.clear();
     for (const name of names) await this.system.killSession(name);
   }
 
@@ -290,6 +301,9 @@ export class FeasibilityBatchManager {
     const entry = this.sessions.get(batchId);
     if (entry) clearTimeout(entry.timer);
     this.sessions.delete(batchId);
+    for (const [ticketId, id] of this.ticketToBatch) {
+      if (id === batchId) this.ticketToBatch.delete(ticketId);
+    }
     this.workerHub.disconnect(batchId);
     await this.system.killSession(feasibilitySessionName(batchId));
   }

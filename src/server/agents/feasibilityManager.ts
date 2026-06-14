@@ -1,11 +1,14 @@
 import { nanoid } from "nanoid";
 
 import {
+  FEASIBILITY_AUTO_RELAUNCH_EVENT,
+  FEASIBILITY_AUTO_RELAUNCH_MAX,
   FEASIBILITY_BATCH_PREFIX,
   FEASIBILITY_SLOT_ID,
   FEASIBILITY_TIMEOUT_MS,
 } from "../../shared/constants.ts";
 import type { FeasibilityResult, TriageResult } from "../../shared/schemas.ts";
+import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -60,6 +63,9 @@ export interface FeasibilityManagerConfig {
 interface FeasibilitySession {
   sessionName: string;
   ticketIds: string[];
+  project: ProjectConfig;
+  /** Number of prior automatic relaunches; 0 for the initial spawn. */
+  attempt: number;
   timer: ReturnType<typeof setTimeout>;
 }
 
@@ -90,7 +96,6 @@ export class FeasibilityBatchManager {
       return;
     }
     const project = getProject(projectKey);
-    const batchId = `${FEASIBILITY_BATCH_PREFIX}${nanoid(8)}`;
 
     const tickets = ticketIds
       .map((id) => this.store.getTicket(id))
@@ -105,8 +110,6 @@ export class FeasibilityBatchManager {
       });
       this.hub.pushTicket(updated);
     }
-    this.store.logEvent(null, "feasibility_started", { batchId, count: tickets.length });
-    log.info("faisabilité en lot démarrée", { batchId, count: tickets.length, project: projectKey });
 
     const evaluatedIds = tickets.map((ticket) => ticket.id);
 
@@ -115,6 +118,28 @@ export class FeasibilityBatchManager {
       for (const id of evaluatedIds) this.persistVerdict(id, DRY_RUN_VERDICT);
       return;
     }
+
+    await this.spawnBatch(evaluatedIds, project, 0);
+  }
+
+  /**
+   * Spawn ONE feasibility session for `ticketIds` under a fresh batch id and deliver its contract
+   * once the worker connects. `attempt` tracks automatic relaunches (0 = initial). A failure to
+   * spawn routes to `retryOrFail` WITH the known ids so a throw before registration can't lose them.
+   */
+  private async spawnBatch(
+    ticketIds: string[],
+    project: ProjectConfig,
+    attempt: number,
+  ): Promise<void> {
+    const batchId = `${FEASIBILITY_BATCH_PREFIX}${nanoid(8)}`;
+    const tickets = ticketIds
+      .map((id) => this.store.getTicket(id))
+      .filter((ticket): ticket is NonNullable<typeof ticket> => ticket !== null);
+    if (tickets.length === 0) return;
+
+    this.store.logEvent(null, "feasibility_started", { batchId, count: tickets.length, attempt });
+    log.info("faisabilité en lot démarrée", { batchId, count: tickets.length, attempt });
 
     try {
       // The interactive (TTY) session would block on the trust dialog with no human to confirm it;
@@ -133,18 +158,27 @@ export class FeasibilityBatchManager {
         env: { DISABLE_AUTOUPDATER: "1" },
       });
       const timer = setTimeout(
-        () => void this.failBatch(batchId, "délai de faisabilité dépassé"),
+        () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
         FEASIBILITY_TIMEOUT_MS,
       );
       const session: FeasibilitySession = {
         sessionName: feasibilitySessionName(batchId),
-        ticketIds: evaluatedIds,
+        ticketIds: tickets.map((ticket) => ticket.id),
+        project,
+        attempt,
         timer,
       };
       this.sessions.set(batchId, session);
       void this.deliverWhenReady(batchId, prompt, session);
     } catch (error) {
-      await this.failBatch(batchId, error instanceof Error ? error.message : String(error));
+      await this.cleanup(batchId);
+      await this.retryOrFail(
+        tickets.map((ticket) => ticket.id),
+        project,
+        attempt,
+        batchId,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -213,11 +247,39 @@ export class FeasibilityBatchManager {
     this.store.logEvent(ticketId, "feasibility_failed", { reason });
   }
 
-  /** Mark the whole batch failed (timeout / never connected / spawn error), then tear it down. */
-  private async failBatch(batchId: string, reason: string): Promise<void> {
+  /**
+   * A live batch failed for a retriable reason (timeout / never connected): tear it down and route
+   * to `retryOrFail` with the session's context. No-op when the session was already torn down.
+   */
+  private async handleBatchFailure(batchId: string, reason: string): Promise<void> {
     const session = this.sessions.get(batchId);
-    const ticketIds = session?.ticketIds ?? [];
+    if (!session) return;
+    const { ticketIds, project, attempt } = session;
     await this.cleanup(batchId);
+    await this.retryOrFail(ticketIds, project, attempt, batchId, reason);
+  }
+
+  /**
+   * Bounded automatic relaunch (calqued on the slot auto-reclaim convention): under the cap, spawn a
+   * fresh batch for the same tickets; once exhausted, mark every ticket failed for good.
+   */
+  private async retryOrFail(
+    ticketIds: string[],
+    project: ProjectConfig,
+    attempt: number,
+    batchId: string,
+    reason: string,
+  ): Promise<void> {
+    if (attempt < FEASIBILITY_AUTO_RELAUNCH_MAX) {
+      log.warn("faisabilité en lot relancée automatiquement", { batchId, reason, attempt: attempt + 1 });
+      this.store.logEvent(null, FEASIBILITY_AUTO_RELAUNCH_EVENT, {
+        batchId,
+        reason,
+        attempt: attempt + 1,
+      });
+      await this.spawnBatch(ticketIds, project, attempt + 1);
+      return;
+    }
     for (const ticketId of ticketIds) this.failTicket(ticketId, reason);
     this.store.logEvent(null, "feasibility_batch_failed", { batchId, reason });
     log.warn("faisabilité en lot échouée", { batchId, reason });
@@ -251,7 +313,7 @@ export class FeasibilityBatchManager {
       return;
     }
     if (attempt >= FEASIBILITY_DELIVER_MAX_ATTEMPTS) {
-      await this.failBatch(batchId, "worker de faisabilité jamais connecté");
+      await this.handleBatchFailure(batchId, "worker de faisabilité jamais connecté");
       return;
     }
     setTimeout(

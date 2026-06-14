@@ -89,6 +89,12 @@ const submitTriageSchema = z.object({
   suggestedEffort: z.string().nullable().default(null),
 });
 
+// Mirror of the shared submitFeasibilityArgsSchema; tolerant on purpose (the backend re-validates
+// strictly before persisting). One entry per imported ticket, keyed by ticketId.
+const submitFeasibilitySchema = z.object({
+  results: z.array(submitTriageSchema.extend({ ticketId: z.string().min(1) })),
+});
+
 const TOOLS = [
   {
     name: "update_stage",
@@ -127,6 +133,12 @@ const TOOLS = [
     description:
       "Soumet le verdict de faisabilité (triage en lecture seule). Le backend le persiste puis détruit la session.",
     schema: submitTriageSchema,
+  },
+  {
+    name: "submit_feasibility",
+    description:
+      "Soumet en UN SEUL appel les verdicts de faisabilité d'un lot (un par ticket importé, keyé par ticketId). Le backend les persiste puis détruit la session.",
+    schema: submitFeasibilitySchema,
   },
 ] as const;
 

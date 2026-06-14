@@ -136,6 +136,18 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.liveSessions.add(opts.sessionName);
   }
 
+  async spawnFeasibilitySession(opts: SpawnTriageOptions): Promise<void> {
+    // Never reached in practice: the dry-run FeasibilityBatchManager short-circuits to stub verdicts
+    // instead of spawning. Tracked anyway so the terminal viewer stays consistent if it ever is.
+    this.log("spawnFeasibilitySession", {
+      sessionName: opts.sessionName,
+      cwd: opts.cwd,
+      model: opts.model,
+      effort: opts.effort,
+    });
+    this.liveSessions.add(opts.sessionName);
+  }
+
   async killSession(sessionName: string): Promise<void> {
     this.log("killSession", { sessionName });
     this.liveSessions.delete(sessionName);

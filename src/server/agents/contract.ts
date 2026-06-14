@@ -2,7 +2,11 @@ import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
+import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
+
+/** Max chars of each ticket's description injected into the feasibility list (keeps the prompt bounded). */
+const FEASIBILITY_DESC_MAX = 1200;
 
 /** Uppercase French label of the language the agent must write commits/PR/review text in. */
 function commitLanguageLabel(language: CommitLanguage): string {
@@ -222,6 +226,69 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     "- Ne ferme pas, ne recrée pas et ne mets pas la PR en draft.",
     "- Ne touche à aucun fichier hors du worktree.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+function truncateDescription(description: string): string {
+  const flat = description.replace(/\s+/g, " ").trim();
+  if (flat.length <= FEASIBILITY_DESC_MAX) return flat || "(vide)";
+  return `${flat.slice(0, FEASIBILITY_DESC_MAX - 1)}…`;
+}
+
+/**
+ * Builds the `ticket` channel payload for a batch feasibility session: ONE read-only orchestrator on
+ * the real repo fans out one fresh-context sub-agent per imported ticket (Read/Glob/Grep only),
+ * aggregates the verdicts, and submits them all at once via the `submit_feasibility` worker tool.
+ * Non-readable attachments (e.g. Trello links) are flagged in `questions` with an explicit prefix.
+ */
+export function buildFeasibilityBatchContract(tickets: Ticket[], project: ProjectConfig): string {
+  const ticketList = tickets.map(
+    (ticket) => `- [${ticket.id}] ${ticket.title} :: ${truncateDescription(ticket.description)}`,
+  );
+
+  const lines: string[] = [
+    `# Analyse de faisabilité en lot — ${tickets.length} ticket(s)`,
+    "",
+    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    "",
+    "Tu es une session orchestratrice de faisabilité en LECTURE SEULE sur le dépôt réel (pas de worktree).",
+    "Seuls Read, Glob, Grep et Task (sous-agents) sont disponibles ; Edit/Write/Bash sont inappelables.",
+    "Ne modifie JAMAIS le dépôt.",
+    "",
+    "## Tickets à évaluer",
+    ...ticketList,
+    "Les descriptions peuvent référencer des chemins d'images locaux absolus (Read possible) et des liens externes.",
+    "",
+    "## Ta mission",
+    "Pour CHACUN des tickets ci-dessus, lance un sous-agent à contexte frais (outil Agent / Task) en LECTURE SEULE",
+    "(Read/Glob/Grep uniquement, aucune modification) qui décide si le ticket est implémentable EXACTEMENT tel",
+    "qu'il est écrit contre CE dépôt, sans le reformuler. Lance les sous-agents EN PARALLÈLE (fan-out, un par ticket).",
+    "",
+    "Chaque sous-agent renvoie pour son ticket :",
+    "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
+    "- `summary` : 2-3 phrases",
+    "- `reasons` : raisons (obligatoire si `needs_rework`)",
+    "- `questions` : questions (obligatoire si `needs_info`)",
+    "- `files` : chemins réellement lus qui fondent l'analyse",
+    "- `suggestedModel` / `suggestedEffort` : UNIQUEMENT si `implementable`, sinon `null`",
+    "",
+    "## Liens / pièces jointes non consultables",
+    "Si une description référence une pièce jointe ou un lien que tu ne peux pas consulter (ex. lien Trello,",
+    "image absente), ajoute-le dans `questions` du ticket concerné avec le préfixe exact `Lien non consultable: <url>`.",
+    "",
+    "## Règles strictes (reprises du triage)",
+    "- N'invente rien.",
+    "- Ne suppose rien : si une information manque, c'est une question, pas une hypothèse.",
+    "- Ne propose pas de réécrire le ticket.",
+    "- Fonde chaque affirmation sur du code réellement lu (cite les chemins de fichiers).",
+    "",
+    "## Format de réponse",
+    "Une fois TOUS les sous-agents terminés, agrège leurs verdicts et appelle UNE SEULE FOIS le tool",
+    "`submit_feasibility` (serveur MCP `worker`) avec `{ results: [{ ticketId, verdict, summary, reasons, questions, files, suggestedModel, suggestedEffort }] }`,",
+    "un objet par ticket (reprends le `ticketId` exact entre crochets ci-dessus). Ne termine pas ton tour avant",
+    "d'avoir appelé `submit_feasibility` ou `fail`. N'écris pas les verdicts en texte : seul l'appel au tool compte.",
   ];
 
   return lines.filter((line) => line !== "").join("\n");

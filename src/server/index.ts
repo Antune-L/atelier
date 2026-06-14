@@ -14,6 +14,7 @@ import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SlotManager } from "./agents/slotManager.ts";
+import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
 import { runFirstBootSetup } from "./boot.ts";
@@ -174,7 +175,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
     bunPath,
   });
-  const terminalManager = new TerminalSessionManager(store, system, triageManager);
+  const feasibilityManager = new FeasibilityBatchManager(store, system, workerHub, clientHub, {
+    backendWs,
+    projectRoot: resourcesRoot,
+    bunPath,
+  });
+  const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
     backendHttp,
@@ -182,12 +188,21 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
     bunPath,
   });
-  const coordinator = new AgentCoordinator(store, clientHub, workerHub, notifier, slotManager, triageManager);
+  const coordinator = new AgentCoordinator(
+    store,
+    clientHub,
+    workerHub,
+    notifier,
+    slotManager,
+    triageManager,
+    feasibilityManager,
+  );
   const watchdog = new Watchdog(store, clientHub, notifier);
 
   await runFirstBootSetup(store, system);
   await slotManager.recover();
   await triageManager.recoverStale();
+  await feasibilityManager.recoverStale();
   watchdog.start();
 
   const composerAvailable = await system.checkComposerAvailable();
@@ -200,6 +215,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     coordinator,
     system,
     triage: triageManager,
+    feasibility: feasibilityManager,
     projectRoot: dataRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
@@ -293,6 +309,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     async teardownSessions() {
       await slotManager.teardownSessions();
       await triageManager.teardownAll();
+      await feasibilityManager.teardownAll();
     },
     stop() {
       watchdog.stop();

@@ -5,6 +5,7 @@ import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { AskPanel } from "@/components/AskPanel";
+import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -21,10 +22,11 @@ import { api } from "@/lib/api";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
-type Tab = "ticket" | "review" | "ask";
+type Tab = "ticket" | "import" | "review" | "ask";
 
 const TAB_TITLES: Record<Tab, string> = {
   ticket: "Nouveau ticket",
+  import: "Import CSV",
   review: "Review une PR",
   ask: "Poser une question",
 };
@@ -191,6 +193,9 @@ export function NewTicketDialog({
           <TabButton active={tab === "ticket"} onClick={() => setTab("ticket")}>
             Nouveau ticket
           </TabButton>
+          <TabButton active={tab === "import"} onClick={() => setTab("import")}>
+            Import CSV
+          </TabButton>
           <TabButton active={tab === "review"} onClick={() => setTab("review")}>
             PR Review
           </TabButton>
@@ -199,6 +204,11 @@ export function NewTicketDialog({
           </TabButton>
         </div>
       </ModalHeader>
+      {tab === "import" && (
+        <ModalBody>
+          <ImportTicketsPanel projects={projects} onClose={onClose} />
+        </ModalBody>
+      )}
       {tab === "review" && (
         <ModalBody>
           <ReviewPrPanel projects={projects} onClose={onClose} />

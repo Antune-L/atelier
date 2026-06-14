@@ -3,6 +3,7 @@ import type { ServerWebSocket } from "bun";
 import type { TerminalServerMessage } from "../shared/schemas.ts";
 import { terminalClientMessageSchema } from "../shared/schemas.ts";
 
+import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
@@ -136,6 +137,7 @@ export class TerminalSessionManager {
     private readonly store: Store,
     private readonly system: SystemAdapter,
     private readonly triage: TriageManager,
+    private readonly feasibility: FeasibilityBatchManager,
   ) {}
 
   async handleOpen(ws: TerminalSocket): Promise<void> {
@@ -188,7 +190,8 @@ export class TerminalSessionManager {
   /** ticketId → tmux session name via its active slot, or its triage session; null when none lives. */
   private resolveSession(ticketId: string): string | null {
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return null;
+    // A feasibility batch runs on a synthetic id (no real ticket): fall back to its detached session.
+    if (!ticket) return this.feasibility.resolveSession(ticketId);
     // A triage runs in no slot: fall back to its detached session so the viewer can attach.
     if (ticket.slotId === null) return this.triage.resolveSession(ticketId);
     const slot = this.store.getSlot(ticket.slotId);

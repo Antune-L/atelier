@@ -518,11 +518,12 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/tickets/:id/terminal", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      // A triage runs in no slot: fall back to its detached session.
+      // A triage runs in no slot: fall back to its detached session, then to the
+      // feasibility batch session this ticket belongs to (mirrors the WS terminal path).
       const sessionName =
         ticket.slotId !== null
           ? store.getSlot(ticket.slotId)?.tmuxSession ?? null
-          : deps.triage.resolveSession(params.id);
+          : deps.triage.resolveSession(params.id) ?? deps.feasibility.resolveSessionForTicket(params.id);
       if (ticket.slotId === null && !sessionName) return jsonError(set, HTTP_CONFLICT, "aucun slot actif");
       const phase = slots.getSetupPhase(params.id);
       // Before the tmux session exists (worktree/install/spawn), surface the setup phase.

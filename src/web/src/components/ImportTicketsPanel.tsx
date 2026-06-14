@@ -51,8 +51,7 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
   const [prDraft, setPrDraft] = useState(true);
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
   const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
-  const [addScreenshotsChoice, setAddScreenshotsChoice] = useState<boolean | null>(null);
-  const addScreenshots = !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
+  const addScreenshots = !autoMerge && (selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -287,18 +286,6 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
       <label className="flex items-center justify-between gap-2 text-sm">
         <span>Merger automatiquement la PR après ouverture</span>
         <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-label="Merge automatique de la PR" />
-      </label>
-      <label className="flex items-center justify-between gap-2 text-sm">
-        <span>
-          Ajouter des captures d'écran à la PR (frontend)
-          {autoMerge && <span className="ml-1 text-xs text-muted-foreground">(indisponible avec le merge auto)</span>}
-        </span>
-        <Switch
-          checked={addScreenshots}
-          disabled={autoMerge}
-          onCheckedChange={setAddScreenshotsChoice}
-          aria-label="Ajouter des captures d'écran à la PR"
-        />
       </label>
       <label className="flex items-center justify-between gap-2 text-sm">
         <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>

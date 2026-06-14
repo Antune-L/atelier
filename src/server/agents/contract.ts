@@ -105,6 +105,9 @@ export function buildTicketContract(
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
   // Screenshots only make sense on a PR a human will read; auto-merge skips that.
+  // NOTE(ali): `gh` can't upload images to GitHub's user-attachments CDN (that endpoint is
+  // internal to the web editor's drag-and-drop, not in the REST API). The agent must host the
+  // image elsewhere (commit it, release asset) before referencing it in the PR markdown.
   const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge;
   const wantsVerify = ticket.verifyFeature;
   const verifyWithMockups = wantsVerify && hasMockups(ticket.description);

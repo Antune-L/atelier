@@ -332,22 +332,6 @@ export function NewTicketDialog({
                   />
                 </label>
                 <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>
-                    Ajouter des captures d'écran à la PR (frontend)
-                    {autoMerge && (
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        (indisponible avec le merge auto)
-                      </span>
-                    )}
-                  </span>
-                  <Switch
-                    checked={addScreenshots}
-                    disabled={autoMerge}
-                    onCheckedChange={setAddScreenshotsChoice}
-                    aria-label="Ajouter des captures d'écran à la PR"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
                   <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
                   <Switch
                     checked={verifyFeature}

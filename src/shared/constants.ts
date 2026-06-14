@@ -179,6 +179,11 @@ export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 
 /** Implementability triage ("Analyser"): read-only, fast, user-initiated. */
 export const TRIAGE_TIMEOUT_MS = 5 * 60 * 1000;
+/**
+ * SLOT_ID a triage worker identifies with: a triage runs in NO slot. The coordinator uses it to
+ * recognize a triage session and bar it from the slot-pipeline tools (it may only submit_triage).
+ */
+export const TRIAGE_SLOT_ID = -1;
 /** Max chars of raw CLI output stored as the report when triage fails to parse. */
 export const TRIAGE_RAW_REPORT_MAX = 4000;
 

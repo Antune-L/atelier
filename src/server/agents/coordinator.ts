@@ -1,11 +1,12 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, AUTO_NUDGE_MAX, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import {
   askUserArgsSchema,
   doneArgsSchema,
   failArgsSchema,
   submitPrdArgsSchema,
+  submitTriageArgsSchema,
   updateStageArgsSchema,
 } from "../../shared/schemas.ts";
 
@@ -16,6 +17,7 @@ import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
 
 import { CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
+import type { TriageManager } from "./triageManager.ts";
 
 const log = createLogger("coordinator");
 
@@ -38,6 +40,7 @@ export class AgentCoordinator {
     private readonly workerHub: WorkerHub,
     private readonly notifier: Notifier,
     private readonly slots: SlotManager,
+    private readonly triage: TriageManager,
   ) {
     this.workerHub.setHandlers({
       onHello: (ticketId, slotId) => this.onHello(ticketId, slotId),
@@ -53,6 +56,15 @@ export class AgentCoordinator {
   }
 
   private async onToolCall(ctx: ToolCallContext): Promise<ToolResult> {
+    // A triage worker identifies with TRIAGE_SLOT_ID: it runs on a stage-null "todo" card outside
+    // the slot pipeline and may ONLY submit its verdict. The 5 pipeline tools would corrupt that
+    // card (set column=failed, stamp a stage, run the done gate with slotId=-1…), and `--tools`
+    // can't bar MCP tools — so the gate lives here, before markProgress/ackContract.
+    if (ctx.slotId === TRIAGE_SLOT_ID) {
+      log.info("tool call (triage)", { ticketId: ctx.ticketId, tool: ctx.name });
+      if (ctx.name === "submit_triage") return this.handleSubmitTriage(ctx);
+      return { ok: false, result: "Session de triage en lecture seule : seul submit_triage est autorisé." };
+    }
     this.markProgress(ctx.ticketId);
     this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
@@ -70,6 +82,13 @@ export class AgentCoordinator {
       default:
         return { ok: false, result: `tool inconnu: ${ctx.name}` };
     }
+  }
+
+  private async handleSubmitTriage(ctx: ToolCallContext): Promise<ToolResult> {
+    const parsed = submitTriageArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    await this.triage.complete(ctx.ticketId, parsed.data);
+    return { ok: true, result: "Verdict de faisabilité enregistré." };
   }
 
   private handleUpdateStage(ctx: ToolCallContext): ToolResult {

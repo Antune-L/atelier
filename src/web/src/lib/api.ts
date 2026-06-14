@@ -11,7 +11,6 @@ import type {
   ProjectInfo,
   TerminalOutput,
   Ticket,
-  TriageOutput,
   UpdateAppSettingsInput,
   UpdateProfileInput,
   UpdateTicketInput,
@@ -72,7 +71,6 @@ export const api = {
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
   terminal: (id: string): Promise<TerminalOutput> => request(`/api/tickets/${id}/terminal`),
-  triageOutput: (id: string): Promise<TriageOutput> => request(`/api/tickets/${id}/triage-output`),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);

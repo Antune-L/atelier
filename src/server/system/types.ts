@@ -24,6 +24,21 @@ export interface SpawnTmuxOptions {
 }
 
 /**
+ * A read-only feasibility triage session: a detached `claude` spawned on the real repo with the
+ * worker channel attached but no worktree/slot. Read-only is structural (`--tools Read,Glob,Grep`).
+ */
+export interface SpawnTriageOptions {
+  sessionName: string;
+  cwd: string;
+  /** Model alias for the triage session (claude --model). */
+  model: string;
+  /** Inline worker MCP config (JSON), passed via `--mcp-config` + `--strict-mcp-config`. */
+  mcpConfig: string;
+  /** Extra tmux env (e.g. DISABLE_AUTOUPDATER); the worker's TICKET_ID/SLOT_ID live in mcpConfig. */
+  env: Record<string, string>;
+}
+
+/**
  * A live byte stream of a tmux pane's output. Backed by `pipe-pane` → FIFO → `cat`
  * in the real adapter, or a synthetic echo queue in the fake. The boundary keeps all
  * tmux/FIFO plumbing inside the adapter so the terminal manager runs in dry-run too.
@@ -59,8 +74,8 @@ export interface ReviewDoneOptions {
 export interface SystemAdapter {
   readonly dryRun: boolean;
 
-  // ---- First-boot setup (gated behind KANBAN_SETUP=1) ----
-  seedTrustForSlots(slotPaths: string[]): Promise<void>;
+  // ---- Workspace trust seeding (slots at first-boot; the real repo before a triage session) ----
+  seedWorkspaceTrust(paths: string[]): Promise<void>;
   excludeAgentFilesInRepo(repoPath: string): Promise<void>;
 
   // ---- git worktree lifecycle ----
@@ -76,6 +91,8 @@ export interface SystemAdapter {
 
   // ---- tmux session ----
   spawnSession(opts: SpawnTmuxOptions): Promise<void>;
+  /** Spawn a detached read-only triage session (worker channel attached, no worktree/slot). */
+  spawnTriageSession(opts: SpawnTriageOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;
   hasSession(sessionName: string): Promise<boolean>;
   /** Last ~200 lines of the session's pane (read-only). Empty string if missing. */
@@ -111,9 +128,6 @@ export interface SystemAdapter {
   // ---- project test commands ----
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
 
-  // ---- implementability triage (read-only, against the real repo) ----
-  runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }>;
-
   // ---- capability probe ----
   /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
   checkComposerAvailable(): Promise<boolean>;
@@ -125,12 +139,4 @@ export interface SystemAdapter {
   gitStatusClean(repoPath: string): Promise<boolean>;
   /** Fast-forward-only pull of origin/<baseBranch> (never merges; blocks on divergence). */
   gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult>;
-}
-
-export interface TriageOptions {
-  repoPath: string;
-  prompt: string;
-  timeoutMs: number;
-  /** Called with each human-readable progress line as the analysis streams. */
-  onLine?: (line: string) => void;
 }

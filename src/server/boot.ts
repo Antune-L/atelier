@@ -28,7 +28,7 @@ export async function runFirstBootSetup(store: Store, system: SystemAdapter): Pr
   }
 
   const slotPaths = Array.from({ length: SLOT_COUNT }, (_, i) => slotPath(i + 1));
-  await system.seedTrustForSlots(slotPaths);
+  await system.seedWorkspaceTrust(slotPaths);
   for (const key of PROJECT_KEYS) {
     await system.excludeAgentFilesInRepo(getProject(key).repoPath);
   }

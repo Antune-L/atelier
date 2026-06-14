@@ -1,22 +1,23 @@
-import type { Ticket, TriageResult } from "../../shared/schemas.ts";
-import { triageResultSchema } from "../../shared/schemas.ts";
+import type { Ticket } from "../../shared/schemas.ts";
 import { AGENT_EFFORTS, AGENT_MODELS } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
 
-const FENCE_PATTERN = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/;
-
 /**
- * Builds the read-only triage prompt: decide whether the ticket is implementable
- * EXACTLY as written against THIS repository, without inventing or reworking.
+ * Builds the read-only triage prompt injected into a worker-channel session: decide whether the
+ * ticket is implementable EXACTLY as written against THIS repository, then return the verdict by
+ * calling the `submit_triage` worker tool (not by printing JSON).
  */
-export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): string {
+export function buildTriageChannelPrompt(ticket: Ticket, project: ProjectConfig): string {
   const figmaUrls = extractFigmaUrls(ticket.description);
 
   const lines: string[] = [
     `# Triage de faisabilité — Ticket ${ticket.id}`,
     "",
     `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    "",
+    "Tu es une session de triage en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;",
+    "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
     "",
     "## Ticket",
     `Titre : ${ticket.title}`,
@@ -29,7 +30,7 @@ export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): strin
     ...(figmaUrls.length > 0 ? ["Liens Figma référencés :", ...figmaUrls.map((url) => `- ${url}`)] : []),
     "",
     "## Ta mission",
-    "Explore CE dépôt (en lecture seule : Read, Glob, Grep) et décide si le ticket est implémentable",
+    "Explore CE dépôt (en lecture seule) et décide si le ticket est implémentable",
     "EXACTEMENT tel qu'il est écrit, sans le reformuler.",
     "",
     "## Règles strictes",
@@ -39,20 +40,14 @@ export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): strin
     "- Fonde chaque affirmation sur du code que tu as réellement lu (cite les chemins de fichiers).",
     "",
     "## Format de réponse",
-    "Réponds avec UNIQUEMENT un objet JSON (aucun texte autour, aucune clôture markdown) :",
-    JSON.stringify(
-      {
-        verdict: "implementable | needs_info | needs_rework",
-        summary: "<2-3 phrases>",
-        reasons: ["…"],
-        questions: ["…"],
-        files: ["chemins réellement lus qui fondent l'analyse"],
-        suggestedModel: null,
-        suggestedEffort: null,
-      },
-      null,
-      2,
-    ),
+    "Quand ton analyse est terminée, appelle le tool `submit_triage` (serveur MCP `worker`) avec :",
+    "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
+    "- `summary` : 2-3 phrases",
+    "- `reasons` : liste de raisons (obligatoire pour `needs_rework`)",
+    "- `questions` : liste de questions (obligatoire pour `needs_info`)",
+    "- `files` : chemins réellement lus qui fondent l'analyse",
+    "- `suggestedModel` / `suggestedEffort` : voir ci-dessous, sinon `null`",
+    "N'écris pas le verdict en texte : seul l'appel à `submit_triage` est pris en compte.",
     "",
     "Contraintes du contrat :",
     "- `verdict` = `implementable` si le ticket peut être implémenté tel quel.",
@@ -68,18 +63,4 @@ export function buildTriagePrompt(ticket: Ticket, project: ProjectConfig): strin
   ];
 
   return lines.filter((line) => line !== "").join("\n");
-}
-
-/** Strips an optional ```json fence, then zod-validates the triage shape. null on failure. */
-export function parseTriageResult(raw: string): TriageResult | null {
-  const trimmed = raw.trim();
-  const unfenced = FENCE_PATTERN.exec(trimmed)?.[1] ?? trimmed;
-  let value: unknown;
-  try {
-    value = JSON.parse(unfenced);
-  } catch {
-    return null;
-  }
-  const parsed = triageResultSchema.safeParse(value);
-  return parsed.success ? parsed.data : null;
 }

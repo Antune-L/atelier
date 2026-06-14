@@ -76,6 +76,19 @@ const stageEnum = z.enum([
   "failed",
 ]);
 
+// Mirror of the shared triageResultSchema; kept tolerant on purpose (the backend re-validates
+// strictly with submitTriageArgsSchema before persisting). suggested* stay loose strings here.
+const triageVerdictEnum = z.enum(["implementable", "needs_info", "needs_rework"]);
+const submitTriageSchema = z.object({
+  verdict: triageVerdictEnum,
+  summary: z.string(),
+  reasons: z.array(z.string()).default([]),
+  questions: z.array(z.string()).default([]),
+  files: z.array(z.string()).default([]),
+  suggestedModel: z.string().nullable().default(null),
+  suggestedEffort: z.string().nullable().default(null),
+});
+
 const TOOLS = [
   {
     name: "update_stage",
@@ -102,6 +115,12 @@ const TOOLS = [
     name: "fail",
     description: "Signale un échec avec une raison et des findings.",
     schema: z.object({ reason: z.string().min(1), findings: z.string().default("") }),
+  },
+  {
+    name: "submit_triage",
+    description:
+      "Soumet le verdict de faisabilité (triage en lecture seule). Le backend le persiste puis détruit la session.",
+    schema: submitTriageSchema,
   },
 ] as const;
 

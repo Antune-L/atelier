@@ -8,15 +8,13 @@ import type {
   PrepareSlotFiles,
   ReviewDoneOptions,
   SpawnTmuxOptions,
+  SpawnTriageOptions,
   SystemAdapter,
-  TriageOptions,
 } from "./types.ts";
 
 const dryRunLog = createLogger("dry-run");
 
 const FAKE_SETTLE_MS = 50;
-const FAKE_TRIAGE_STEP_MS = 400;
-const TRIAGE_VERDICT_CYCLE = 3;
 
 /** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
 const FAKE_OPEN_PRS: OpenPr[] = [
@@ -58,15 +56,6 @@ const FAKE_OPEN_PRS: OpenPr[] = [
   },
 ];
 
-/** Simulated read-only analysis steps streamed to the live triage view in dry-run. */
-const FAKE_TRIAGE_STEPS = [
-  "Lecture de la structure du dépôt…",
-  "● Glob(**/*.ts)",
-  "● Read(src/server/routes.ts)",
-  '● Grep("createTicket")',
-  "Analyse de cohérence avec le ticket…",
-];
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -81,14 +70,13 @@ export class FakeSystemAdapter implements SystemAdapter {
   private readonly liveSessions = new Set<string>();
   private readonly captureCounters = new Map<string, number>();
   private readonly paneStreams = new Map<string, FakePaneStream>();
-  private triageCounter = 0;
 
   private log(action: string, detail: Record<string, unknown> = {}): void {
     dryRunLog.debug(action, detail);
   }
 
-  async seedTrustForSlots(slotPaths: string[]): Promise<void> {
-    this.log("seedTrustForSlots", { slotPaths });
+  async seedWorkspaceTrust(paths: string[]): Promise<void> {
+    this.log("seedWorkspaceTrust", { paths });
   }
 
   async excludeAgentFilesInRepo(repoPath: string): Promise<void> {
@@ -128,6 +116,13 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async spawnSession(opts: SpawnTmuxOptions): Promise<void> {
     this.log("spawnSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model, effort: opts.effort });
+    this.liveSessions.add(opts.sessionName);
+  }
+
+  async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
+    // Never reached in practice: the dry-run TriageManager short-circuits to a stub verdict
+    // instead of spawning. Tracked anyway so the terminal viewer stays consistent if it ever is.
+    this.log("spawnTriageSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model });
     this.liveSessions.add(opts.sessionName);
   }
 
@@ -214,16 +209,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, output: "[dry-run] skipped" };
   }
 
-  async runTriage(opts: TriageOptions): Promise<{ ok: boolean; output: string }> {
-    this.log("runTriage", { repoPath: opts.repoPath, promptBytes: opts.prompt.length });
-    for (const step of FAKE_TRIAGE_STEPS) {
-      await delay(FAKE_TRIAGE_STEP_MS);
-      opts.onLine?.(step);
-    }
-    this.triageCounter += 1;
-    return { ok: true, output: fakeTriageVerdict(this.triageCounter % TRIAGE_VERDICT_CYCLE) };
-  }
-
   async checkComposerAvailable(): Promise<boolean> {
     // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
     return true;
@@ -301,39 +286,4 @@ class FakePaneStream implements PaneStream {
       resolve({ value: undefined, done: true });
     }
   }
-}
-
-/** Deterministic-ish triage payload cycling through the three verdicts for demo. */
-function fakeTriageVerdict(bucket: number): string {
-  if (bucket === 0) {
-    return JSON.stringify({
-      verdict: "implementable",
-      summary: "Le ticket est clair et cohérent avec le code existant. Aucun blocage identifié.",
-      reasons: [],
-      questions: [],
-      files: ["src/server/routes.ts", "src/shared/schemas.ts"],
-    });
-  }
-  if (bucket === 1) {
-    return JSON.stringify({
-      verdict: "needs_info",
-      summary: "Le périmètre est plausible mais deux décisions manquent pour démarrer sans deviner.",
-      reasons: [],
-      questions: [
-        "Quel libellé exact afficher pour le badge de faisabilité ?",
-        "Faut-il notifier l'utilisateur à la fin du triage ?",
-      ],
-      files: ["src/web/src/components/TicketDetail.tsx"],
-    });
-  }
-  return JSON.stringify({
-    verdict: "needs_rework",
-    summary: "Le ticket contredit le modèle de données actuel et ne peut être implémenté tel quel.",
-    reasons: [
-      "La colonne demandée n'existe pas dans le schéma (src/server/db/schema.ts).",
-      "Le flux décrit suppose un endpoint absent de src/server/routes.ts.",
-    ],
-    questions: [],
-    files: ["src/server/db/schema.ts", "src/server/routes.ts"],
-  });
 }

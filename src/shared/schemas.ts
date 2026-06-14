@@ -283,10 +283,6 @@ export const terminalOutputSchema = z.object({
 });
 export type TerminalOutput = z.infer<typeof terminalOutputSchema>;
 
-/** Live triage transcript (read-only feasibility analysis stream). */
-export const triageOutputSchema = z.object({ output: z.string() });
-export type TriageOutput = z.infer<typeof triageOutputSchema>;
-
 export const uploadResultSchema = z.object({ path: z.string(), url: z.string() });
 export type UploadResult = z.infer<typeof uploadResultSchema>;
 
@@ -323,6 +319,7 @@ export const workerToolNameSchema = z.enum([
   "submit_prd",
   "done",
   "fail",
+  "submit_triage",
 ]);
 export type WorkerToolName = z.infer<typeof workerToolNameSchema>;
 
@@ -342,6 +339,8 @@ export const failArgsSchema = z.object({
   reason: z.string().min(1),
   findings: z.string().default(""),
 });
+/** Feasibility verdict the triage session submits via the worker channel (same shape as the report). */
+export const submitTriageArgsSchema = triageResultSchema;
 
 // ---- Worker channel: WS frames worker.ts ↔ backend ----
 

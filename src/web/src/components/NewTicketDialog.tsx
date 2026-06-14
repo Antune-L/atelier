@@ -56,10 +56,20 @@ export function NewTicketDialog({
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
+  const [implementerEffort, setImplementerEffort] = useState<AgentEffort | null>(null);
   const [implementer, setImplementer] = useState<Implementer>("claude");
-  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+  const applyProfile = (config: {
+    model: AgentModel;
+    effort: AgentEffort;
+    implementerModel: AgentModel;
+    implementerEffort: AgentEffort;
+    implementer: Implementer;
+  }): void => {
     setModel(config.model);
     setEffort(config.effort);
+    setImplementerModel(config.implementerModel);
+    setImplementerEffort(config.implementerEffort);
     setImplementer(config.implementer);
   };
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +107,8 @@ export function NewTicketDialog({
     setAutoMergeChoice(null);
     setModel(null);
     setEffort(null);
+    setImplementerModel(null);
+    setImplementerEffort(null);
     setImplementer("claude");
     setError(null);
   };
@@ -138,6 +150,8 @@ export function NewTicketDialog({
         baseBranch: baseBranchOverride,
         model,
         effort,
+        implementerModel,
+        implementerEffort,
         implementer,
         start,
       });
@@ -238,9 +252,13 @@ export function NewTicketDialog({
                   <AgentProfileConfig
                     model={model}
                     effort={effort}
+                    implementerModel={implementerModel}
+                    implementerEffort={implementerEffort}
                     implementer={implementer}
                     onModelChange={setModel}
                     onEffortChange={setEffort}
+                    onImplementerModelChange={setImplementerModel}
+                    onImplementerEffortChange={setImplementerEffort}
                     onImplementerChange={setImplementer}
                     onApplyProfile={applyProfile}
                   />

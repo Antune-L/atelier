@@ -14,6 +14,7 @@ import type { WorkerHub } from "../workerHub.ts";
 
 import { buildReviewContract, buildTicketContract } from "./contract.ts";
 import {
+  buildImplementerAgentMd,
   buildMcpJson,
   buildSettingsJson,
   resolveTemplatePaths,
@@ -183,7 +184,7 @@ export class SlotManager {
         });
       });
 
-      await this.depositSlotFiles(path, ticket.id, slotId);
+      await this.depositSlotFiles(path, ticket, slotId);
       await this.system.copyEnvFiles(project.repoPath, path);
       this.setPhase(ticketId, SETUP_PHASES.deps);
       await this.system.installDeps(path, project.commitTimeoutMs);
@@ -215,20 +216,23 @@ export class SlotManager {
     }
   }
 
-  private async depositSlotFiles(path: string, ticketId: string, slotId: number): Promise<void> {
+  private async depositSlotFiles(path: string, ticket: Ticket, slotId: number): Promise<void> {
     const templates = resolveTemplatePaths(this.config.projectRoot);
     const ctx: SlotTemplateContext = {
       ...templates,
       backendHttp: this.config.backendHttp,
       backendWs: this.config.backendWs,
-      ticketId,
+      ticketId: ticket.id,
       slotId,
       bunPath: this.config.bunPath,
+      implementerModel: ticket.implementerModel ?? MODELS.implementerModel,
+      implementerEffort: ticket.implementerEffort ?? MODELS.implementerEffort,
     };
     await this.system.prepareSlotFiles({
       slotPath: path,
       mcpJson: buildMcpJson(ctx),
       settingsJson: buildSettingsJson(ctx),
+      implementerAgentMd: buildImplementerAgentMd(ctx),
     });
   }
 
@@ -567,7 +571,7 @@ export class SlotManager {
     // and evict its worker socket now so the contract re-delivers to the fresh one.
     await this.system.killSession(sessionName);
     this.workerHub.disconnect(ticketId);
-    await this.depositSlotFiles(path, ticketId, slotId);
+    await this.depositSlotFiles(path, ticket, slotId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     await this.system.spawnSession({
       sessionName,

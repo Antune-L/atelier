@@ -198,12 +198,26 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { effort }).catch(() => undefined);
   };
 
+  const setImplementerModel = (implementerModel: AgentModel | null): void => {
+    void api.updateTicket(current.id, { implementerModel }).catch(() => undefined);
+  };
+
+  const setImplementerEffort = (implementerEffort: AgentEffort | null): void => {
+    void api.updateTicket(current.id, { implementerEffort }).catch(() => undefined);
+  };
+
   const setImplementer = (implementer: Implementer): void => {
     void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
-  // Apply a whole profile in a single PATCH so the three knobs never land in an intermediate state.
-  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+  // Apply a whole profile in a single PATCH so the knobs never land in an intermediate state.
+  const applyProfile = (config: {
+    model: AgentModel;
+    effort: AgentEffort;
+    implementerModel: AgentModel;
+    implementerEffort: AgentEffort;
+    implementer: Implementer;
+  }): void => {
     void api.updateTicket(current.id, config).catch(() => undefined);
   };
 
@@ -629,9 +643,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               <AgentProfileConfig
                 model={current.model}
                 effort={current.effort}
+                implementerModel={current.implementerModel}
+                implementerEffort={current.implementerEffort}
                 implementer={current.implementer}
                 onModelChange={setAgentModel}
                 onEffortChange={setAgentEffort}
+                onImplementerModelChange={setImplementerModel}
+                onImplementerEffortChange={setImplementerEffort}
                 onImplementerChange={setImplementer}
                 onApplyProfile={applyProfile}
               />

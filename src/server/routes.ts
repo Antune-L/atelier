@@ -145,6 +145,8 @@ export function createApiRoutes(deps: RouteDeps) {
       composerAvailable: deps.composerAvailable,
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
+      defaultImplementerModel: MODELS.implementerModel,
+      defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
     }))
     .get("/settings", () => store.getAppSettings())
@@ -193,6 +195,8 @@ export function createApiRoutes(deps: RouteDeps) {
         baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,
+        implementerModel: parsed.data.implementerModel,
+        implementerEffort: parsed.data.implementerEffort,
         implementer: parsed.data.implementer,
       });
       if (!parsed.data.start) {

@@ -92,9 +92,12 @@ export const ticketSchema = z.object({
   prdMarkdown: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
-  /** Implementation agent overrides (null = fall back to the server config defaults). */
+  /** Orchestrator agent overrides (null = fall back to the server config defaults). */
   model: agentModelSchema.nullable(),
   effort: agentEffortSchema.nullable(),
+  /** Implementer sub-agent overrides (null = fall back to the server config defaults). */
+  implementerModel: agentModelSchema.nullable(),
+  implementerEffort: agentEffortSchema.nullable(),
   implementer: implementerSchema,
   reviewRounds: z.number().int(),
   sessionId: z.string().nullable(),
@@ -122,6 +125,8 @@ export const profileSchema = z.object({
   name: z.string(),
   model: agentModelSchema,
   effort: agentEffortSchema,
+  implementerModel: agentModelSchema,
+  implementerEffort: agentEffortSchema,
   implementer: implementerSchema,
   /** Display order in the picker (ascending). */
   sortOrder: z.number().int(),
@@ -134,6 +139,8 @@ export const createProfileSchema = z.object({
   name: z.string().min(1),
   model: agentModelSchema,
   effort: agentEffortSchema,
+  implementerModel: agentModelSchema.default("opus"),
+  implementerEffort: agentEffortSchema.default("low"),
   implementer: implementerSchema.default("claude"),
 });
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
@@ -142,6 +149,8 @@ export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
   model: agentModelSchema.optional(),
   effort: agentEffortSchema.optional(),
+  implementerModel: agentModelSchema.optional(),
+  implementerEffort: agentEffortSchema.optional(),
   implementer: implementerSchema.optional(),
   sortOrder: z.number().int().optional(),
 });
@@ -209,6 +218,8 @@ export const createTicketSchema = z
     // Implementation agent knobs picked at creation (null = fall back to server config).
     model: agentModelSchema.nullable().default(null),
     effort: agentEffortSchema.nullable().default(null),
+    implementerModel: agentModelSchema.nullable().default(null),
+    implementerEffort: agentEffortSchema.nullable().default(null),
     implementer: implementerSchema.default("claude"),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
@@ -230,6 +241,8 @@ export const updateTicketSchema = z.object({
   baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),
+  implementerModel: agentModelSchema.nullable().optional(),
+  implementerEffort: agentEffortSchema.nullable().optional(),
   implementer: implementerSchema.optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
@@ -294,6 +307,10 @@ export const capabilitiesSchema = z.object({
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultEffort: z.string(),
+  /** Implementer sub-agent model used when a ticket leaves it unset (e.g. "opus"). */
+  defaultImplementerModel: z.string(),
+  /** Implementer sub-agent reasoning effort used when a ticket leaves it unset (e.g. "low"). */
+  defaultImplementerEffort: z.string(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
 });

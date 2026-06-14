@@ -45,14 +45,18 @@ function buildImplementingSteps(
   }
   if (ticket.prdEnabled) {
     return [
-      "2. implementing (délégué à un sous-agent à contexte frais) :",
+      "2. implementing (délégué au sous-agent `implementer`) :",
       `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
-      "   b. Lance un sous-agent à CONTEXTE FRAIS (outil Agent) dédié à l'implémentation, distinct de cette session de planification : toi (session principale) tu gardes la main sur git, review, tests et PR ; le sous-agent écrit le code dans le worktree courant et ne commit JAMAIS.",
+      "   b. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR.",
       `      Dans son prompt, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et la consigne d'implémenter intégralement la fonctionnalité décrite.`,
       "   c. Quand le sous-agent rend la main, relis son diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
     ];
   }
-  return ["2. implementing : implémente la fonctionnalité dans le worktree courant."];
+  return [
+    "2. implementing (délégué au sous-agent `implementer`) :",
+    "   a. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Dans son prompt, transmets-lui le worktree courant comme répertoire de travail et la consigne d'implémenter intégralement la fonctionnalité décrite dans la description du ticket.",
+    "   b. Quand le sous-agent rend la main, relis son diff (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+  ];
 }
 
 /**

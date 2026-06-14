@@ -122,7 +122,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
     // Never reached in practice: the dry-run TriageManager short-circuits to a stub verdict
     // instead of spawning. Tracked anyway so the terminal viewer stays consistent if it ever is.
-    this.log("spawnTriageSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model });
+    this.log("spawnTriageSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model, effort: opts.effort });
     this.liveSessions.add(opts.sessionName);
   }
 

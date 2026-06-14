@@ -187,18 +187,19 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
     const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-    // Read-only is structural via `--tools` (Edit/Write/Bash unloadable); bypassPermissions only
-    // auto-authorizes the loaded tools + the surviving MCP tool, never injecting a write tool.
+    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
+    // `auto` never prompts interactively (it auto-approves or silently blocks); the read-only tool
+    // surface via `--tools` (Edit/Write/Bash unloadable) guarantees no write tool can exist anyway.
     // The JSON args carry no single quotes (JSON.stringify emits double quotes), so single-quoting
     // them for the inner shell is safe.
     const claudeCmd =
-      `claude --model ${opts.model}` +
+      `claude --model ${opts.model}${effortFlag}` +
       ` --mcp-config '${opts.mcpConfig}'` +
       ` --strict-mcp-config` +
       ` --dangerously-load-development-channels server:worker` +
       ` --settings '${TRIAGE_SETTINGS_JSON}'` +
       ` --tools ${TRIAGE_READONLY_TOOLS}` +
-      ` --permission-mode bypassPermissions`;
+      ` --permission-mode auto`;
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
     void this.acceptDevChannelsDialog(opts.sessionName);

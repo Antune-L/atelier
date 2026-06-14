@@ -91,6 +91,7 @@ export class TriageManager {
         sessionName: triageSessionName(ticketId),
         cwd: project.repoPath,
         model: MODELS.triage,
+        effort: MODELS.triageEffort,
         mcpConfig: this.buildMcpConfig(ticketId),
         env: { DISABLE_AUTOUPDATER: "1" },
       });

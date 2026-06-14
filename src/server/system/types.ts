@@ -32,6 +32,8 @@ export interface SpawnTriageOptions {
   cwd: string;
   /** Model alias for the triage session (claude --model). */
   model: string;
+  /** Reasoning effort (claude --effort), or null to use the model default. */
+  effort: string | null;
   /** Inline worker MCP config (JSON), passed via `--mcp-config` + `--strict-mcp-config`. */
   mcpConfig: string;
   /** Extra tmux env (e.g. DISABLE_AUTOUPDATER); the worker's TICKET_ID/SLOT_ID live in mcpConfig. */

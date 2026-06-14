@@ -24,6 +24,8 @@ const projectConfigSchema = z.object({
   baseBranch: z.string().min(1),
   /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
   defaultAutoMerge: z.boolean().default(false),
+  /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
+  defaultAddScreenshots: z.boolean().default(false),
   commitTimeoutMs: z.number().int().positive(),
   /** Optional overrides for test/lint/typecheck commands (default: read project package.json scripts). */
   scripts: z

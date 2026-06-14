@@ -244,7 +244,12 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   };
 
   const setAutoMerge = (checked: boolean): void => {
+    // Screenshots stay stored but masked by `!autoMerge` everywhere, so the choice survives toggling.
     void api.updateTicket(current.id, { autoMerge: checked }).catch(() => undefined);
+  };
+
+  const setAddScreenshots = (checked: boolean): void => {
+    void api.updateTicket(current.id, { addScreenshots: checked }).catch(() => undefined);
   };
 
   const startEdit = (): void => {
@@ -677,6 +682,20 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 <label className="flex items-center justify-between gap-2 text-sm">
                   <span>Merger automatiquement la PR après ouverture</span>
                   <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
+                </label>
+                <label className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    Ajouter des captures d'écran à la PR (frontend)
+                    {current.autoMerge && (
+                      <span className="ml-1 text-xs text-muted-foreground">(indisponible avec le merge auto)</span>
+                    )}
+                  </span>
+                  <Switch
+                    checked={current.addScreenshots && !current.autoMerge}
+                    disabled={current.autoMerge}
+                    onCheckedChange={setAddScreenshots}
+                    aria-label="Ajouter des captures d'écran à la PR"
+                  />
                 </label>
               </div>
             </section>

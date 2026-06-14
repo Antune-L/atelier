@@ -120,6 +120,7 @@ export function createApiRoutes(deps: RouteDeps) {
           label: project.label,
           baseBranch: project.baseBranch,
           defaultAutoMerge: project.defaultAutoMerge,
+          defaultAddScreenshots: project.defaultAddScreenshots,
         };
       }),
     )
@@ -190,6 +191,7 @@ export function createApiRoutes(deps: RouteDeps) {
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
         autoMerge: parsed.data.autoMerge,
+        addScreenshots: parsed.data.addScreenshots,
         baseBranch: parsed.data.baseBranch,
         model: parsed.data.model,
         effort: parsed.data.effort,

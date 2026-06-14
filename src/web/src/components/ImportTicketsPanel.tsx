@@ -33,7 +33,10 @@ const PREVIEW_DESC_MAX = 80;
 /** How long the "Copié" confirmation stays visible after copying the prompt. */
 const COPY_FEEDBACK_MS = 1500;
 
-export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProps) {
+export function ImportTicketsPanel({
+  projects,
+  onClose,
+}: ImportTicketsPanelProps) {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = projectChoice ?? projects[0]?.key ?? "";
 
@@ -49,8 +52,11 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
-  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
-  const [implementerEffort, setImplementerEffort] = useState<AgentEffort | null>(null);
+  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(
+    null,
+  );
+  const [implementerEffort, setImplementerEffort] =
+    useState<AgentEffort | null>(null);
   const [implementer, setImplementer] = useState<Implementer>("claude");
   const [runFeasibility, setRunFeasibility] = useState(false);
 
@@ -81,7 +87,10 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
     void navigator.clipboard.writeText(FORMATTING_PROMPT).then(() => {
       setPromptCopied(true);
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => setPromptCopied(false), COPY_FEEDBACK_MS);
+      copyTimerRef.current = setTimeout(
+        () => setPromptCopied(false),
+        COPY_FEEDBACK_MS,
+      );
     });
   };
 
@@ -96,7 +105,8 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
         const result = parseTicketsCsv(text);
         setParsed(result);
         // Cleared CSV can no longer support feasibility: keep the toggle honest.
-        if (result.errors.length > 0 || result.rows.length === 0) setRunFeasibility(false);
+        if (result.errors.length > 0 || result.rows.length === 0)
+          setRunFeasibility(false);
       })
       .catch(() => setError("Lecture du fichier impossible."));
   };
@@ -108,7 +118,10 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
     try {
       await api.importTickets({
         project,
-        rows: parsed.rows.map((row) => ({ title: row.title, description: row.description })),
+        rows: parsed.rows.map((row) => ({
+          title: row.title,
+          description: row.description,
+        })),
         prdEnabled,
         // These exec settings are not exposed in the import panel: fall back to safe defaults for imported tickets.
         prDraft: true,
@@ -159,7 +172,11 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
             onClick={() => setPromptOpen((open) => !open)}
             className="flex flex-1 items-center gap-1.5"
           >
-            {promptOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {promptOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
             Prompt de mise en forme CSV
           </button>
           <button
@@ -188,7 +205,11 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
           onChange={onFileChange}
           className="hidden"
         />
-        <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full justify-start">
+        <Button
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          className="w-full justify-start"
+        >
           <FileUp className="h-4 w-4" />
           {fileName ?? "Choisir un fichier .csv"}
         </Button>
@@ -199,7 +220,8 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
           {hasErrors ? (
             <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
               <p className="font-semibold text-destructive">
-                {parsed.errors.length} erreur(s) — corrige le CSV à la source avant d'importer.
+                {parsed.errors.length} erreur(s) — corrige le CSV à la source
+                avant d'importer.
               </p>
               <ul className="mt-1 list-disc pl-5 text-destructive">
                 {parsed.errors.map((err, i) => (
@@ -230,7 +252,9 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
                 <tbody>
                   {validRows.map((row) => (
                     <tr key={row.line} className="border-t">
-                      <td className="px-2 py-1 text-muted-foreground">{row.line}</td>
+                      <td className="px-2 py-1 text-muted-foreground">
+                        {row.line}
+                      </td>
                       <td className="px-2 py-1">{row.title}</td>
                       <td className="px-2 py-1 text-muted-foreground">
                         {row.description.slice(0, PREVIEW_DESC_MAX)}
@@ -246,7 +270,9 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
       )}
 
       <div className="space-y-2 rounded-md border p-3">
-        <h3 className="text-sm font-semibold">Agent d'implémentation (tout le lot)</h3>
+        <h3 className="text-sm font-semibold">
+          Agent d'implémentation (tout le lot)
+        </h3>
         <AgentProfileConfig
           model={model}
           effort={effort}
@@ -264,9 +290,14 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
 
       <label className="flex items-center justify-between gap-2 text-sm">
         <span>PRD à implémenter (planification avant code)</span>
-        <Switch checked={prdEnabled} onCheckedChange={setPrdEnabled} aria-label="PRD à implémenter" />
+        <Switch
+          checked={prdEnabled}
+          onCheckedChange={setPrdEnabled}
+          aria-label="PRD à implémenter"
+        />
       </label>
-      <label className="flex items-center justify-between gap-2 text-sm">
+      {/* FIXME: the feature is buggy, infinite subagents are spawned */}
+      {/* <label className="flex items-center justify-between gap-2 text-sm">
         <span>
           Analyser la faisabilité de chaque ticket
           {feasibilityDisabled && (
@@ -279,7 +310,7 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
           onCheckedChange={setRunFeasibility}
           aria-label="Analyser la faisabilité"
         />
-      </label>
+      </label> */}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -287,7 +318,11 @@ export function ImportTicketsPanel({ projects, onClose }: ImportTicketsPanelProp
         <Button variant="outline" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={() => void submit()} disabled={!canImport} className={cn(!canImport && "opacity-60")}>
+        <Button
+          onClick={() => void submit()}
+          disabled={!canImport}
+          className={cn(!canImport && "opacity-60")}
+        >
           <Upload className="h-4 w-4" />
           {runFeasibility && !feasibilityDisabled
             ? `Importer et analyser (${validRows.length})`

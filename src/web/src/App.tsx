@@ -7,6 +7,7 @@ import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { SlotsBar } from "@/components/SlotsBar";
+import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { TicketDetail } from "@/components/TicketDetail";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
@@ -67,13 +68,13 @@ export function App() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Rechercher…"
-            className="w-48 bg-white"
+            className="w-48 bg-card"
             aria-label="Rechercher un ticket"
           />
           <Select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="bg-white"
+            className="bg-card"
           >
             <option value="all">Tous les projets</option>
             {projects.map((p) => (
@@ -82,6 +83,7 @@ export function App() {
               </option>
             ))}
           </Select>
+          <ThemeSwitcher />
           <Button onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" />
           </Button>

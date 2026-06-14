@@ -141,7 +141,14 @@ function ProfilesSettings() {
     setError(null);
     setBusy(true);
     try {
-      await api.createProfile({ name: "Nouveau profil", model: "opus", effort: "medium", implementer: "claude" });
+      await api.createProfile({
+        name: "Nouveau profil",
+        model: "opus",
+        effort: "medium",
+        implementerModel: "opus",
+        implementerEffort: "low",
+        implementer: "claude",
+      });
       await refreshProfiles();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur");
@@ -175,6 +182,8 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
   const [name, setName] = useState(profile.name);
   const [model, setModel] = useState<AgentModel>(profile.model);
   const [effort, setEffort] = useState<AgentEffort>(profile.effort);
+  const [implementerModel, setImplementerModel] = useState<AgentModel>(profile.implementerModel);
+  const [implementerEffort, setImplementerEffort] = useState<AgentEffort>(profile.implementerEffort);
   const [implementer, setImplementer] = useState<Implementer>(profile.implementer);
   const [busy, setBusy] = useState(false);
 
@@ -182,13 +191,22 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
     name !== profile.name ||
     model !== profile.model ||
     effort !== profile.effort ||
+    implementerModel !== profile.implementerModel ||
+    implementerEffort !== profile.implementerEffort ||
     implementer !== profile.implementer;
 
   const save = async (): Promise<void> => {
     onError(null);
     setBusy(true);
     try {
-      await api.updateProfile(profile.id, { name: name.trim(), model, effort, implementer });
+      await api.updateProfile(profile.id, {
+        name: name.trim(),
+        model,
+        effort,
+        implementerModel,
+        implementerEffort,
+        implementer,
+      });
       await refreshProfiles();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Erreur");
@@ -244,6 +262,17 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
           <Field label="Implémenté par">
             <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
           </Field>
+          {implementer === "claude" && (
+            <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
+              <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
+              <Field label="Modèle">
+                <Tabs options={MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
+              </Field>
+              <Field label="Effort">
+                <Tabs options={EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
+              </Field>
+            </div>
+          )}
         </div>
       </details>
       <div className="flex justify-end">

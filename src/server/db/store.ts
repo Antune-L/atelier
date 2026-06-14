@@ -22,6 +22,8 @@ export interface NewTicket {
   baseBranch: string | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
+  implementerModel: AgentModel | null;
+  implementerEffort: AgentEffort | null;
   implementer: Implementer;
 }
 
@@ -29,6 +31,8 @@ export interface NewProfile {
   name: string;
   model: AgentModel;
   effort: AgentEffort;
+  implementerModel: AgentModel;
+  implementerEffort: AgentEffort;
   implementer: Implementer;
 }
 
@@ -36,6 +40,8 @@ export interface ProfilePatch {
   name?: string;
   model?: AgentModel;
   effort?: AgentEffort;
+  implementerModel?: AgentModel;
+  implementerEffort?: AgentEffort;
   implementer?: Implementer;
   sortOrder?: number;
 }
@@ -64,6 +70,8 @@ export interface TicketPatch {
   stage?: Stage | null;
   model?: AgentModel | null;
   effort?: AgentEffort | null;
+  implementerModel?: AgentModel | null;
+  implementerEffort?: AgentEffort | null;
   implementer?: Implementer;
   reviewRounds?: number;
   nudgeCount?: number;
@@ -122,8 +130,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, base_branch, model, effort, implementer, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, base_branch, model, effort, implementer_model, implementer_effort, implementer, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -137,6 +145,8 @@ export class Store {
         input.baseBranch,
         input.model,
         input.effort,
+        input.implementerModel,
+        input.implementerEffort,
         input.implementer,
         now,
         now,
@@ -205,6 +215,8 @@ export class Store {
     if (patch.stage !== undefined) set("stage", patch.stage);
     if (patch.model !== undefined) set("model", patch.model);
     if (patch.effort !== undefined) set("effort", patch.effort);
+    if (patch.implementerModel !== undefined) set("implementer_model", patch.implementerModel);
+    if (patch.implementerEffort !== undefined) set("implementer_effort", patch.implementerEffort);
     if (patch.implementer !== undefined) set("implementer", patch.implementer);
     if (patch.reviewRounds !== undefined) set("review_rounds", patch.reviewRounds);
     if (patch.nudgeCount !== undefined) set("nudge_count", patch.nudgeCount);
@@ -295,9 +307,20 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM profiles");
     this.db
       .query(
-        "INSERT INTO profiles (id, name, model, effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(id, input.name, input.model, input.effort, input.implementer, nextOrder, now, now);
+      .run(
+        id,
+        input.name,
+        input.model,
+        input.effort,
+        input.implementerModel,
+        input.implementerEffort,
+        input.implementer,
+        nextOrder,
+        now,
+        now,
+      );
     const profile = this.getProfile(id);
     if (!profile) throw new Error("createProfile: profil introuvable après insertion");
     return profile;
@@ -313,6 +336,8 @@ export class Store {
     if (patch.name !== undefined) set("name", patch.name);
     if (patch.model !== undefined) set("model", patch.model);
     if (patch.effort !== undefined) set("effort", patch.effort);
+    if (patch.implementerModel !== undefined) set("implementer_model", patch.implementerModel);
+    if (patch.implementerEffort !== undefined) set("implementer_effort", patch.implementerEffort);
     if (patch.implementer !== undefined) set("implementer", patch.implementer);
     if (patch.sortOrder !== undefined) set("sort_order", patch.sortOrder);
     set("updated_at", Date.now());

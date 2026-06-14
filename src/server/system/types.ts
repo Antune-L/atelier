@@ -63,6 +63,8 @@ export interface PrepareSlotFiles {
   slotPath: string;
   mcpJson: string;
   settingsJson: string;
+  /** `.claude/agents/implementer.md` content (the configurable code-writing sub-agent). */
+  implementerAgentMd: string;
 }
 
 export interface ReviewDoneOptions {

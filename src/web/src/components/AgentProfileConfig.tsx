@@ -18,12 +18,22 @@ import { useProfiles } from "@/hooks/useProfiles";
 interface AgentProfileConfigProps {
   model: AgentModel | null;
   effort: AgentEffort | null;
+  implementerModel: AgentModel | null;
+  implementerEffort: AgentEffort | null;
   implementer: Implementer;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
+  onImplementerModelChange: (model: AgentModel | null) => void;
+  onImplementerEffortChange: (effort: AgentEffort | null) => void;
   onImplementerChange: (implementer: Implementer) => void;
-  /** Apply a whole profile at once (lets a single call site batch the three knobs). */
-  onApplyProfile: (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }) => void;
+  /** Apply a whole profile at once (lets a single call site batch all knobs). */
+  onApplyProfile: (config: {
+    model: AgentModel;
+    effort: AgentEffort;
+    implementerModel: AgentModel;
+    implementerEffort: AgentEffort;
+    implementer: Implementer;
+  }) => void;
 }
 
 /**
@@ -34,32 +44,54 @@ interface AgentProfileConfigProps {
 export function AgentProfileConfig({
   model,
   effort,
+  implementerModel,
+  implementerEffort,
   implementer,
   onModelChange,
   onEffortChange,
+  onImplementerModelChange,
+  onImplementerEffortChange,
   onImplementerChange,
   onApplyProfile,
 }: AgentProfileConfigProps) {
   const profiles = useProfiles();
-  const { defaultModel, defaultEffort } = useCapabilities();
+  const { defaultModel, defaultEffort, defaultImplementerModel, defaultImplementerEffort } = useCapabilities();
   const id = useId();
   const profileLabelId = `${id}-profile`;
 
-  // A null knob follows the orchestrator default; resolve it before matching a stored profile.
+  // A null knob follows the configured default; resolve it before matching a stored profile.
   const parsedDefaultModel = agentModelSchema.safeParse(defaultModel);
   const parsedDefaultEffort = agentEffortSchema.safeParse(defaultEffort);
+  const parsedDefaultImplementerModel = agentModelSchema.safeParse(defaultImplementerModel);
+  const parsedDefaultImplementerEffort = agentEffortSchema.safeParse(defaultImplementerEffort);
   const effectiveModel = model ?? (parsedDefaultModel.success ? parsedDefaultModel.data : null);
   const effectiveEffort = effort ?? (parsedDefaultEffort.success ? parsedDefaultEffort.data : null);
+  const effectiveImplementerModel =
+    implementerModel ?? (parsedDefaultImplementerModel.success ? parsedDefaultImplementerModel.data : null);
+  const effectiveImplementerEffort =
+    implementerEffort ?? (parsedDefaultImplementerEffort.success ? parsedDefaultImplementerEffort.data : null);
 
   const selectedProfile = profiles.find(
-    (p) => p.model === effectiveModel && p.effort === effectiveEffort && p.implementer === implementer,
+    (p) =>
+      p.model === effectiveModel &&
+      p.effort === effectiveEffort &&
+      p.implementer === implementer &&
+      // Implementer knobs only differentiate profiles in claude mode (ignored under composer).
+      (implementer !== "claude" ||
+        (p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort)),
   );
   const selectedId = selectedProfile?.id ?? CUSTOM_PROFILE_ID;
 
   const onSelectProfile = (value: string): void => {
     const profile = profiles.find((p) => p.id === value);
     if (!profile) return;
-    onApplyProfile({ model: profile.model, effort: profile.effort, implementer: profile.implementer });
+    onApplyProfile({
+      model: profile.model,
+      effort: profile.effort,
+      implementerModel: profile.implementerModel,
+      implementerEffort: profile.implementerEffort,
+      implementer: profile.implementer,
+    });
   };
 
   return (
@@ -86,9 +118,13 @@ export function AgentProfileConfig({
           <ImplementationAgentFields
             model={model}
             effort={effort}
+            implementerModel={implementerModel}
+            implementerEffort={implementerEffort}
             implementer={implementer}
             onModelChange={onModelChange}
             onEffortChange={onEffortChange}
+            onImplementerModelChange={onImplementerModelChange}
+            onImplementerEffortChange={onImplementerEffortChange}
             onImplementerChange={onImplementerChange}
           />
         </div>

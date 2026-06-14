@@ -102,7 +102,11 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async prepareSlotFiles(files: PrepareSlotFiles): Promise<void> {
-    this.log("prepareSlotFiles", { slotPath: files.slotPath, mcpBytes: files.mcpJson.length });
+    this.log("prepareSlotFiles", {
+      slotPath: files.slotPath,
+      mcpBytes: files.mcpJson.length,
+      implementerAgentBytes: files.implementerAgentMd.length,
+    });
   }
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {

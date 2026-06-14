@@ -150,6 +150,7 @@ export class RealSystemAdapter implements SystemAdapter {
   async prepareSlotFiles(files: PrepareSlotFiles): Promise<void> {
     await Bun.write(join(files.slotPath, ".mcp.json"), files.mcpJson);
     await Bun.write(join(files.slotPath, ".claude", "settings.json"), files.settingsJson);
+    await Bun.write(join(files.slotPath, ".claude", "agents", "implementer.md"), files.implementerAgentMd);
   }
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {

@@ -8,6 +8,8 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   composerAvailable: false,
   defaultModel: "",
   defaultEffort: "",
+  defaultImplementerModel: "",
+  defaultImplementerEffort: "",
   canUpdate: false,
 };
 

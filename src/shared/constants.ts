@@ -215,6 +215,10 @@ export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
 export const FEASIBILITY_SLOT_ID = -2;
 /** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
 export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
+/** Max automatic batch relaunches before the imported tickets are finally marked failed. */
+export const FEASIBILITY_AUTO_RELAUNCH_MAX = 1;
+/** Audit event logged each time a stuck feasibility batch is automatically relaunched. */
+export const FEASIBILITY_AUTO_RELAUNCH_EVENT = "feasibility_auto_relaunch";
 /** Max rows a single CSV import may create (bounds a batch; average ~20). */
 export const IMPORT_MAX_ROWS = 200;
 

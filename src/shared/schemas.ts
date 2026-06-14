@@ -422,3 +422,7 @@ export const workerOutboundSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tool_result"), id: z.string(), ok: z.boolean(), result: z.string() }),
 ]);
 export type WorkerOutbound = z.infer<typeof workerOutboundSchema>;
+
+/** In-app self-update outcome: reload the webview in place (frontend-only diff) or relaunch the process. */
+export const updateModeSchema = z.enum(["reload", "relaunch"]);
+export type UpdateMode = z.infer<typeof updateModeSchema>;

@@ -114,8 +114,13 @@ const STATIC_CONTENT_TYPES: Record<string, string> = {
 const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
 function staticResponse(file: ReturnType<typeof Bun.file>, name: string): Response {
-  const type = STATIC_CONTENT_TYPES[extname(name).toLowerCase()] ?? DEFAULT_CONTENT_TYPE;
-  return new Response(file, { headers: { "content-type": type } });
+  const ext = extname(name).toLowerCase();
+  const type = STATIC_CONTENT_TYPES[ext] ?? DEFAULT_CONTENT_TYPE;
+  const headers: Record<string, string> = { "content-type": type };
+  // index.html must not be cached: Vite assets are content-hashed, but the entry point isn't.
+  // A stale index.html after a soft-reload would serve the old JS bundles despite a rebuilt dist.
+  if (ext === ".html") headers["cache-control"] = "no-cache, no-store, must-revalidate";
+  return new Response(file, { headers });
 }
 
 /**
@@ -143,7 +148,12 @@ async function serveStaticAsset(webDist: string, pathname: string): Promise<Resp
 export async function startServer(opts: StartServerOptions = {}): Promise<RunningServer> {
   const resourcesRoot = opts.resourcesRoot ?? PROJECT_ROOT;
   const dataRoot = opts.dataRoot ?? PROJECT_ROOT;
-  const webDist = join(resourcesRoot, WEB_DIST_SUBPATH);
+  // dev-desktop self-update: serve from the live repo so a soft-reload (location.reload()) picks up
+  // freshly rebuilt assets without killing the window. The packaged .app never sets repoRoot.
+  const webDist =
+    opts.repoRoot != null
+      ? join(opts.repoRoot, WEB_DIST_SUBPATH)
+      : join(resourcesRoot, WEB_DIST_SUBPATH);
 
   const port = Number(process.env.PORT ?? DEFAULT_PORT);
   const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");

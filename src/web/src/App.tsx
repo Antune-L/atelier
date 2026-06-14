@@ -1,4 +1,4 @@
-import { LayoutGrid, MonitorPlay, Plus } from "lucide-react";
+import { LayoutGrid, MonitorPlay, Plus, Settings } from "lucide-react";
 import { useState } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -6,6 +6,7 @@ import type { Ticket } from "@shared/schemas";
 import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
+import { ProfilesSettingsModal } from "@/components/ProfilesSettingsModal";
 import { SlotsBar } from "@/components/SlotsBar";
 import { TicketDetail } from "@/components/TicketDetail";
 import { Toaster } from "@/components/Toaster";
@@ -30,6 +31,7 @@ export function App() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
   const { tickets } = useBoard();
@@ -85,6 +87,14 @@ export function App() {
           <Button onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" />
           </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Paramètres"
+          >
+            <Settings className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
@@ -113,6 +123,10 @@ export function App() {
         open={creating}
         projects={projects}
         onClose={() => setCreating(false)}
+      />
+      <ProfilesSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
       <TicketDetail
         ticket={openTicket}

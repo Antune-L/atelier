@@ -5,10 +5,12 @@ import { ACTIVE_STAGES, TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../shar
 import type { Stage } from "../shared/constants.ts";
 import {
   createCommentSchema,
+  createProfileSchema,
   createReviewSchema,
   createTicketSchema,
   deriveTitleFromDescription,
   moveTicketSchema,
+  updateProfileSchema,
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
@@ -158,6 +160,23 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
     }))
+    .get("/profiles", () => store.listProfiles())
+    .post("/profiles", ({ body, set }) => {
+      const parsed = createProfileSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      return store.createProfile(parsed.data);
+    })
+    .patch("/profiles/:id", ({ params, body, set }) => {
+      if (!store.getProfile(params.id)) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
+      const parsed = updateProfileSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      return store.updateProfile(params.id, parsed.data);
+    })
+    .delete("/profiles/:id", ({ params, set }) => {
+      if (!store.getProfile(params.id)) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
+      store.deleteProfile(params.id);
+      return { ok: true };
+    })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);

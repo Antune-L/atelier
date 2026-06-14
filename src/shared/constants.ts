@@ -62,6 +62,26 @@ export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   composer: "Composer 2.5",
 };
 
+/** A reusable implementation-agent preset (model + effort + implementer). */
+export interface ProfileConfig {
+  name: string;
+  model: AgentModel;
+  effort: AgentEffort;
+  implementer: Implementer;
+}
+
+/** Seeded into the DB on first boot; editable afterwards via the settings modal. */
+export const DEFAULT_PROFILES: ProfileConfig[] = [
+  { name: "Basique", model: "opus", effort: "medium", implementer: "claude" },
+  { name: "Debug -", model: "opus", effort: "low", implementer: "claude" },
+  { name: "Debug +", model: "opus", effort: "max", implementer: "claude" },
+  { name: "Délégation", model: "opus", effort: "medium", implementer: "composer" },
+];
+
+/** Sentinel "profile" shown when a ticket's knobs match no stored profile. */
+export const CUSTOM_PROFILE_ID = "custom";
+export const CUSTOM_PROFILE_LABEL = "Personnalisé";
+
 /** What a ticket delivers: a feature implementation (default) or an autonomous PR review. */
 export const KINDS = ["feature", "review"] as const;
 export type Kind = (typeof KINDS)[number];

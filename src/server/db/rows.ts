@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { Comment, Slot, Ticket } from "../../shared/schemas.ts";
+import type { Comment, Profile, Slot, Ticket } from "../../shared/schemas.ts";
 import {
   agentEffortSchema,
   agentModelSchema,
@@ -69,6 +69,18 @@ const commentRowSchema = z.object({
 });
 export type CommentRow = z.infer<typeof commentRowSchema>;
 
+const profileRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  model: z.string(),
+  effort: z.string(),
+  implementer: z.string(),
+  sort_order: z.number(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type ProfileRow = z.infer<typeof profileRowSchema>;
+
 const slotRowSchema = z.object({
   id: z.number(),
   ticket_id: z.string().nullable(),
@@ -134,6 +146,20 @@ export function mapCommentRow(raw: unknown): Comment {
     questionId: row.question_id,
     answered: row.answered === 1,
     createdAt: row.created_at,
+  };
+}
+
+export function mapProfileRow(raw: unknown): Profile {
+  const row = profileRowSchema.parse(raw);
+  return {
+    id: row.id,
+    name: row.name,
+    model: agentModelSchema.parse(row.model),
+    effort: agentEffortSchema.parse(row.effort),
+    implementer: implementerSchema.parse(row.implementer),
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

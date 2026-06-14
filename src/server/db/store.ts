@@ -3,10 +3,10 @@ import { nanoid } from "nanoid";
 
 import { AUTO_RECLAIM_EVENT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
-import type { Comment, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
+import type { Comment, Profile, Slot, Ticket, TriageStatus, TriageVerdict } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
-import { mapCommentRow, mapSlotRow, mapTicketRow } from "./rows.ts";
+import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -21,6 +21,21 @@ export interface NewTicket {
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementer: Implementer;
+}
+
+export interface NewProfile {
+  name: string;
+  model: AgentModel;
+  effort: AgentEffort;
+  implementer: Implementer;
+}
+
+export interface ProfilePatch {
+  name?: string;
+  model?: AgentModel;
+  effort?: AgentEffort;
+  implementer?: Implementer;
+  sortOrder?: number;
 }
 
 export interface NewReview {
@@ -247,6 +262,55 @@ export class Store {
       this.db.query("DELETE FROM tickets WHERE id = ?").run(ticketId);
     });
     tx();
+  }
+
+  // ---- Profiles (implementation-agent presets) ----
+
+  listProfiles(): Profile[] {
+    const rows = this.db.query("SELECT * FROM profiles ORDER BY sort_order ASC, created_at ASC").all();
+    return rows.map(mapProfileRow);
+  }
+
+  getProfile(id: string): Profile | null {
+    const raw = this.db.query("SELECT * FROM profiles WHERE id = ?").get(id);
+    return raw ? mapProfileRow(raw) : null;
+  }
+
+  createProfile(input: NewProfile): Profile {
+    const id = nanoid(10);
+    const now = Date.now();
+    const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM profiles");
+    this.db
+      .query(
+        "INSERT INTO profiles (id, name, model, effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(id, input.name, input.model, input.effort, input.implementer, nextOrder, now, now);
+    const profile = this.getProfile(id);
+    if (!profile) throw new Error("createProfile: profil introuvable après insertion");
+    return profile;
+  }
+
+  updateProfile(id: string, patch: ProfilePatch): Profile {
+    const fields: string[] = [];
+    const values: (string | number)[] = [];
+    const set = (col: string, value: string | number): void => {
+      fields.push(`${col} = ?`);
+      values.push(value);
+    };
+    if (patch.name !== undefined) set("name", patch.name);
+    if (patch.model !== undefined) set("model", patch.model);
+    if (patch.effort !== undefined) set("effort", patch.effort);
+    if (patch.implementer !== undefined) set("implementer", patch.implementer);
+    if (patch.sortOrder !== undefined) set("sort_order", patch.sortOrder);
+    set("updated_at", Date.now());
+    this.db.query(`UPDATE profiles SET ${fields.join(", ")} WHERE id = ?`).run(...values, id);
+    const profile = this.getProfile(id);
+    if (!profile) throw new Error(`updateProfile: profil ${id} introuvable`);
+    return profile;
+  }
+
+  deleteProfile(id: string): void {
+    this.db.query("DELETE FROM profiles WHERE id = ?").run(id);
   }
 
   // ---- Slots ----

@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import type { ProjectInfo } from "@shared/schemas";
 import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
-import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
+import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -55,8 +55,13 @@ export function NewTicketDialog({
     autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const [model, setModel] = useState<AgentModel | null>(null);
-  const [effort, setEffort] = useState<AgentEffort | null>("medium");
+  const [effort, setEffort] = useState<AgentEffort | null>(null);
   const [implementer, setImplementer] = useState<Implementer>("claude");
+  const applyProfile = (config: { model: AgentModel; effort: AgentEffort; implementer: Implementer }): void => {
+    setModel(config.model);
+    setEffort(config.effort);
+    setImplementer(config.implementer);
+  };
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -230,13 +235,14 @@ export function NewTicketDialog({
                   <h3 className="text-sm font-semibold">
                     Agent d'implémentation
                   </h3>
-                  <ImplementationAgentFields
+                  <AgentProfileConfig
                     model={model}
                     effort={effort}
                     implementer={implementer}
                     onModelChange={setModel}
                     onEffortChange={setEffort}
                     onImplementerChange={setImplementer}
+                    onApplyProfile={applyProfile}
                   />
                 </div>
                 <label className="flex items-center justify-between gap-2 text-sm">

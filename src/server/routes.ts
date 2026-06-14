@@ -350,6 +350,30 @@ export function createApiRoutes(deps: RouteDeps) {
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })
+    .post("/tickets/:id/resolve-conflicts", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      // Only meaningful for an auto-merge that failed after opening the PR: the PR exists, the slot
+      // is released, and a fresh session can rebase the branch and re-trigger the merge.
+      const eligible =
+        ticket.column === "failed" &&
+        ticket.autoMerge &&
+        ticket.kind !== "review" &&
+        ticket.slotId === null &&
+        ticket.prUrl !== null &&
+        ticket.branch !== null;
+      if (!eligible) {
+        return jsonError(set, HTTP_CONFLICT, "résolution de conflits réservée aux PR dont le merge auto a échoué");
+      }
+      // Slow git worktree setup runs in the background; the board updates live over WS.
+      void slots.resolveMergeConflicts(params.id).catch((e) => {
+        log.error("résolution de conflits échouée", {
+          ticketId: params.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
+      return store.getTicket(params.id);
+    })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

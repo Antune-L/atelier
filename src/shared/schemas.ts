@@ -309,6 +309,7 @@ export const updateTicketSchema = z.object({
   addScreenshots: z.boolean().optional(),
   verifyFeature: z.boolean().optional(),
   researchPlan: z.boolean().optional(),
+  project: projectKeySchema.optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),

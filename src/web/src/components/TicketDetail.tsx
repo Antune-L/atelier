@@ -204,6 +204,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     const override = value && value !== projectDefaultBranch ? value : null;
     void api.updateTicket(current.id, { baseBranch: override }).catch(() => undefined);
   };
+  const changeProject = (value: string): void => {
+    if (value === current.project) return;
+    void api.updateTicket(current.id, { project: value }).catch(() => undefined);
+  };
   // Escape hatch for a stuck "À implémenter" card: the session spawned but its
   // contract/instruction never landed. Only while actively running — terminal
   // (failed/interrupted/stalled) states already have the "Relancer" button below.
@@ -725,6 +729,26 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
         {isTodoSplit && (
           <div className="min-w-0 space-y-4">
+            {canEditBaseBranch && (
+              <section className="rounded-md border p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ticket-project">Projet</Label>
+                  <Select
+                    id="ticket-project"
+                    value={current.project}
+                    onChange={(e) => changeProject(e.target.value)}
+                    className="w-full"
+                  >
+                    {projects.map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </section>
+            )}
+
             {canEditBaseBranch && (
               <section className="rounded-md border p-3">
                 <div className="space-y-1.5">

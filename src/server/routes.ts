@@ -397,7 +397,26 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       const parsed = updateTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (parsed.data.project !== undefined && parsed.data.project !== ticket.project) {
+        // Key validity is independent of the card's column: reject an unknown
+        // project (400) before the TODO-only transition rule (409).
+        if (!isProjectKey(parsed.data.project)) {
+          return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+        }
+        if (ticket.column !== "todo") {
+          return jsonError(set, HTTP_CONFLICT, "le projet ne peut être changé que dans TODO");
+        }
+      }
       const patch: TicketPatch = { ...parsed.data };
+      // A project change invalidates the saved base-branch override (it is
+      // project-specific). Reset it unless the same request supplies a new one.
+      if (
+        parsed.data.project !== undefined &&
+        parsed.data.project !== ticket.project &&
+        parsed.data.baseBranch === undefined
+      ) {
+        patch.baseBranch = null;
+      }
       // A blank title is not rejected: derive one from the (new or existing)
       // description so the title stays genuinely optional, as on creation.
       if (parsed.data.title !== undefined && parsed.data.title.trim() === "") {

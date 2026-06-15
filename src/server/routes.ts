@@ -5,6 +5,7 @@ import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import {
   createAskSchema,
+  createCleanSchema,
   createCommentSchema,
   createProfileSchema,
   createReviewSchema,
@@ -101,6 +102,21 @@ function reviewDescription(pr: OpenPr): string {
     `- **Branche** : \`${pr.headBranch}\``,
     `- **Auteur** : ${pr.author}`,
     `- **Diff** : +${pr.additions} / -${pr.deletions}`,
+  ].join("\n");
+}
+
+/** Markdown body shown on a clean card, summarizing the target PR and the user-provided context. */
+function cleanDescription(pr: OpenPr, context: string): string {
+  return [
+    `Nettoyage des retours de [PR #${pr.number}](${pr.url})`,
+    "",
+    `- **Titre** : ${pr.title}`,
+    `- **Branche** : \`${pr.headBranch}\``,
+    `- **Auteur** : ${pr.author}`,
+    `- **Diff** : +${pr.additions} / -${pr.deletions}`,
+    "",
+    "## Contexte fourni",
+    context.trim() || "(aucun)",
   ].join("\n");
 }
 
@@ -315,6 +331,32 @@ export function createApiRoutes(deps: RouteDeps) {
         // (it kept the dialog open). Kick it off in the background and let the board update live.
         void slots.startTicket(ticket.id).catch((e) => {
           log.error("démarrage de la review échoué", {
+            ticketId: ticket.id,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+        created.push(ticket);
+      }
+      return created;
+    })
+    .post("/cleaners", ({ body, set }) => {
+      const parsed = createCleanSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const created: Ticket[] = [];
+      for (const pr of parsed.data.prs) {
+        const ticket = store.createClean({
+          title: `Clean PR #${pr.number} — ${pr.title}`,
+          description: cleanDescription(pr, parsed.data.context),
+          project: parsed.data.project,
+          prNumber: pr.number,
+          prHeadBranch: pr.headBranch,
+          prUrl: pr.url,
+        });
+        hub.pushTicket(ticket);
+        // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
+        void slots.startTicket(ticket.id).catch((e) => {
+          log.error("démarrage du nettoyage échoué", {
             ticketId: ticket.id,
             error: e instanceof Error ? e.message : String(e),
           });

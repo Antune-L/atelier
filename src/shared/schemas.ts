@@ -350,6 +350,15 @@ export const createReviewSchema = z.object({
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 
+/** Process a PR's reviewer feedback, applying only the pertinent fixes (minos-pr-feedback). */
+export const createCleanSchema = z.object({
+  project: projectKeySchema,
+  /** Optional free-text context of the PR; the cleaner only applies feedback that respects it. */
+  context: z.string().default(""),
+  prs: z.array(openPrSchema).min(1),
+});
+export type CreateCleanInput = z.infer<typeof createCleanSchema>;
+
 /** Ask a read-only question about a project; the agent answers (chosen model/effort), no PR. */
 export const createAskSchema = z
   .object({

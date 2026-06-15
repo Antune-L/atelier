@@ -92,7 +92,7 @@ export interface ReviewDoneOptions {
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
-  /** When set (fixComments review), also require a clean tree with the PR branch fully pushed (no commits ahead of origin/<branch>). */
+  /** When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully pushed (no commits ahead of origin/<branch>). */
   requirePushedBranch: string | null;
 }
 

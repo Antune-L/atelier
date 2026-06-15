@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Clock, ExternalLink, Eye, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { AlertTriangle, Brush, Clock, ExternalLink, Eye, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -71,6 +71,11 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
         {ticket.kind === "review" && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Eye className="h-3 w-3" /> Review
+          </Badge>
+        )}
+        {ticket.kind === "clean" && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Brush className="h-3 w-3" /> Clean
           </Badge>
         )}
         {ticket.kind === "ask" && (

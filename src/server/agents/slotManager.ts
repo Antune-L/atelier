@@ -17,10 +17,12 @@ import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
+import type { DoneGateResult } from "../system/types.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
 import {
   buildAskContract,
+  buildCleanContract,
   buildConflictResolutionContract,
   buildReviewContract,
   buildTicketContract,
@@ -206,10 +208,14 @@ export class SlotManager {
     // A fixComments review reuses the EXISTING PR head branch (its commits) so fixes can be committed
     // and pushed straight to the PR — no new PR.
     const reviewFix = ticket.kind === "review" && ticket.fixComments && ticket.prHeadBranch !== null;
-    // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`.
+    // A clean ticket reuses the EXISTING PR head branch (its commits) so fixes can be committed and
+    // pushed straight to the PR — no new PR (same as a fixComments review).
+    const cleanFix = ticket.kind === "clean" && ticket.prHeadBranch !== null;
+    // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
     let branch = `feat/${ticket.id}-${slug}`;
     if (resolving && ticket.branch !== null) branch = ticket.branch;
     else if (reviewFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
+    else if (cleanFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
     const sessionName = `ticket-${ticket.id}`;
 
     this.store.updateSlot(slotId, {
@@ -240,10 +246,10 @@ export class SlotManager {
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
         await this.system.fetch(project.repoPath, baseBranch);
-        if (resolving || reviewFix) {
+        if (resolving || reviewFix || cleanFix) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
-          // fetched) base; a review-fix applies and pushes fixes onto this same PR head branch.
+          // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
           await this.system.fetch(project.repoPath, branch);
           await this.system.worktreeAddExisting(project.repoPath, path, branch);
         } else {
@@ -348,6 +354,7 @@ export class SlotManager {
     const { commitLanguage } = this.store.getAppSettings();
     if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
+    if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
     if (ticket.kind === "ask") return buildAskContract(ticket);
     return buildTicketContract(ticket, {
       composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
@@ -426,6 +433,29 @@ export class SlotManager {
     this.scheduleContractAckCheck(ticketId, attempt + 1);
   }
 
+  /**
+   * Select the done gate by ticket kind. Review gates on optional posted/pushed proof; a clean gates
+   * on a clean tree and a fully-pushed PR head branch — `requirePushedBranch` asserts both no
+   * uncommitted changes AND zero commits ahead of origin, which also passes the legitimate "nothing
+   * pertinent to apply" case (0 commits ahead) while preventing applied-but-unpushed fixes from being
+   * lost when the slot is released; everything else gates on the standard feature done.
+   */
+  private doneGate(ticket: Ticket, path: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+    if (ticket.kind === "review") {
+      return this.system.verifyReviewDone(path, prUrl, {
+        requirePostedSince: ticket.postComments ? ticket.createdAt : null,
+        requirePushedBranch: ticket.fixComments ? ticket.prHeadBranch : null,
+      });
+    }
+    if (ticket.kind === "clean") {
+      return this.system.verifyReviewDone(path, prUrl, {
+        requirePostedSince: null,
+        requirePushedBranch: ticket.prHeadBranch,
+      });
+    }
+    return this.system.verifyDone(path, branch, prUrl);
+  }
+
   /** Verify and release a slot on done(pr_url). */
   async finishTicket(ticketId: string, slotId: number, prUrl: string): Promise<{ ok: boolean; reason: string }> {
     const ticket = this.store.getTicket(ticketId);
@@ -433,13 +463,7 @@ export class SlotManager {
     const path = slotPath(slotId);
 
     log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
-    const gate =
-      ticket.kind === "review"
-        ? await this.system.verifyReviewDone(path, prUrl, {
-            requirePostedSince: ticket.postComments ? ticket.createdAt : null,
-            requirePushedBranch: ticket.fixComments ? ticket.prHeadBranch : null,
-          })
-        : await this.system.verifyDone(path, ticket.branch, prUrl);
+    const gate = await this.doneGate(ticket, path, ticket.branch, prUrl);
     if (!gate.ok) {
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
       const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
@@ -466,10 +490,11 @@ export class SlotManager {
     log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
-    // Review tickets land in their own "PR reviewed" column instead of the generic "done".
-    let column: Column = ticket.kind === "review" ? "reviewed" : "done";
+    // Review and clean tickets land in their own "PR reviewed" column instead of the generic "done".
+    let column: Column = "done";
+    if (ticket.kind === "review" || ticket.kind === "clean") column = "reviewed";
     let mergeError: string | null = null;
-    if (ticket.autoMerge && ticket.kind !== "review") {
+    if (ticket.autoMerge && ticket.kind === "feature") {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl);
       if (merge.ok) {
@@ -531,8 +556,11 @@ export class SlotManager {
     this.pumpQueue();
   }
 
-  /** Notification line summarizing how the PR ended (draft / open / auto-merged / merge failed). */
+  /** Notification line summarizing how the PR ended (reviewed / cleaned / draft / open / merged / merge failed). */
   private doneNotifyBody(ticket: Ticket, mergeError: string | null): string {
+    // Review and clean tickets never open a new PR — they act on an existing one.
+    if (ticket.kind === "review") return `${ticket.title} → revue terminée`;
+    if (ticket.kind === "clean") return `${ticket.title} → retours traités`;
     if (ticket.autoMerge) {
       return mergeError
         ? `${ticket.title} → PR ouverte mais auto-merge échoué`

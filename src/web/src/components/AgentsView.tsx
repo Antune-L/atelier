@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock, Cpu, Eye, HelpCircle, MessageCircleQuestion } from "lucide-react";
+import { AlertTriangle, Brush, Clock, Cpu, Eye, HelpCircle, MessageCircleQuestion } from "lucide-react";
 
 import { TERMINAL_STAGES } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -107,6 +107,11 @@ function AgentCard({ ticket, projectLabel, onOpen }: AgentCardProps) {
         {ticket.kind === "review" && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Eye className="h-3 w-3" /> Review
+          </Badge>
+        )}
+        {ticket.kind === "clean" && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Brush className="h-3 w-3" /> Clean
           </Badge>
         )}
         {ticket.kind === "ask" && (

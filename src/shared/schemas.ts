@@ -125,6 +125,8 @@ export const ticketSchema = z.object({
   triageStatus: triageStatusSchema,
   triageVerdict: triageVerdictSchema.nullable(),
   triageReport: z.string().nullable(),
+  /** Inject the feasibility-triage findings as a dedicated section of the implementation contract. */
+  feasibilityContext: z.boolean(),
   /** Epoch ms when the ticket reached a terminal state (done/failed/stalled/interrupted/abandoned); null otherwise. */
   finishedAt: z.number().int().nullable(),
   /** Epoch ms when the ticket last entered the "À implémenter" column; null until it first does. */
@@ -313,6 +315,7 @@ export const updateTicketSchema = z.object({
   implementerModel: agentModelSchema.nullable().optional(),
   implementerEffort: agentEffortSchema.nullable().optional(),
   implementer: implementerSchema.optional(),
+  feasibilityContext: z.boolean().optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
 

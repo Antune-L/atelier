@@ -320,6 +320,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { researchPlan: checked }).catch(() => undefined);
   };
 
+  const setFeasibilityContext = (checked: boolean): void => {
+    void api.updateTicket(current.id, { feasibilityContext: checked }).catch(() => undefined);
+  };
+
   const startEdit = (): void => {
     setEditTitle(current.title);
     setEditDescription(current.description);
@@ -825,6 +829,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 onApplySuggestion={(model, effort) => {
                   void api.updateTicket(current.id, { model, effort }).catch(() => undefined);
                 }}
+                onToggleContext={setFeasibilityContext}
               />
             )}
           </div>
@@ -929,9 +934,10 @@ interface TriageSectionProps {
   ticket: Ticket;
   onTriage: () => Promise<void>;
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
+  onToggleContext: (checked: boolean) => void;
 }
 
-function TriageSection({ ticket, onTriage, onApplySuggestion }: TriageSectionProps) {
+function TriageSection({ ticket, onTriage, onApplySuggestion, onToggleContext }: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
   const suggestion =
@@ -1008,6 +1014,19 @@ function TriageSection({ ticket, onTriage, onApplySuggestion }: TriageSectionPro
           </div>
         </div>
       )}
+
+      {ticket.column === "todo" &&
+        ticket.triageStatus === "done" &&
+        ticket.triageVerdict === "implementable" && (
+          <label className="mt-2 flex items-center justify-between gap-2 text-sm">
+            <span>Injecter le contexte de faisabilité dans le contrat</span>
+            <Switch
+              checked={ticket.feasibilityContext}
+              onCheckedChange={onToggleContext}
+              aria-label="Injecter le contexte de faisabilité dans le contrat"
+            />
+          </label>
+        )}
 
       {ticket.triageStatus === "failed" && (
         <div className="space-y-2 text-sm">

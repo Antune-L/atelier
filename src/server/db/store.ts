@@ -100,6 +100,7 @@ export interface TicketPatch {
   triageStatus?: TriageStatus;
   triageVerdict?: TriageVerdict | null;
   triageReport?: string | null;
+  feasibilityContext?: boolean;
   finishedAt?: number | null;
 }
 
@@ -267,6 +268,7 @@ export class Store {
     if (patch.triageStatus !== undefined) set("triage_status", patch.triageStatus);
     if (patch.triageVerdict !== undefined) set("triage_verdict", patch.triageVerdict);
     if (patch.triageReport !== undefined) set("triage_report", patch.triageReport);
+    if (patch.feasibilityContext !== undefined) set("feasibility_context", patch.feasibilityContext ? 1 : 0);
     if (patch.finishedAt !== undefined) set("finished_at", patch.finishedAt);
 
     set("updated_at", Date.now());

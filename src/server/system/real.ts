@@ -21,6 +21,7 @@ import type {
   SpawnTmuxOptions,
   SpawnTriageOptions,
   SystemAdapter,
+  WorktreeSetupOptions,
 } from "./types.ts";
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
@@ -64,6 +65,8 @@ const DIALOG_POLL_INTERVAL_MS = 500;
 const DIALOG_POLL_ATTEMPTS = 120;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
+/** Conventional worktree setup script paths (relative to the repo), tried in order when no explicit command is configured. */
+const WORKTREE_SETUP_CANDIDATES = ["scripts/setup-worktree.sh", "setup-worktree.sh", ".kanban/setup-worktree.sh"] as const;
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
 /** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
@@ -218,6 +221,29 @@ export class RealSystemAdapter implements SystemAdapter {
       if (rel.toLowerCase().includes(PROD_ENV_MARKER)) continue;
       const content = await Bun.file(join(repoPath, rel)).text();
       await Bun.write(join(slotPath, rel), content);
+    }
+  }
+
+  async runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void> {
+    // An explicit config command is trusted input run verbatim through `sh -c` (Bun's `$` quotes the
+    // whole `${command}` as one argument); the auto-detected path is pre-quoted by detectWorktreeSetupCommand.
+    const command = opts.script ?? (await detectWorktreeSetupCommand(opts.repoPath));
+    if (command === null) return;
+    const env = {
+      ...process.env,
+      WORKTREE_PATH: opts.slotPath,
+      REPO_PATH: opts.repoPath,
+      BRANCH: opts.branch,
+      BASE_BRANCH: opts.baseBranch,
+    };
+    const res = await withTimeout(
+      $`sh -c ${command}`.cwd(opts.slotPath).env(env).nothrow().quiet(),
+      opts.timeoutMs,
+      command,
+    );
+    if (res.exitCode !== 0) {
+      const detail = (res.stderr.toString() + res.stdout.toString()).trim().slice(-INSTALL_ERROR_TAIL);
+      throw new Error(`le script de configuration du worktree a échoué (code ${res.exitCode}) : ${detail}`);
     }
   }
 
@@ -607,6 +633,19 @@ const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
   { lockfile: "package-lock.json", command: "npm install" },
   { lockfile: "bun.lock", command: "bun install" },
 ];
+
+/**
+ * First conventional setup script that exists in the repo, returned as a `sh <absolutePath>` command
+ * (so it runs without a +x bit). Null when none is present (no-op). Runs from the slot's cwd, so the
+ * script path is anchored to the source repo, not the worktree.
+ */
+async function detectWorktreeSetupCommand(repoPath: string): Promise<string | null> {
+  for (const rel of WORKTREE_SETUP_CANDIDATES) {
+    const absolute = join(repoPath, rel);
+    if (await Bun.file(absolute).exists()) return `sh ${shQuote(absolute)}`;
+  }
+  return null;
+}
 
 async function detectInstallCommand(slotPath: string): Promise<string> {
   for (const { lockfile, command } of INSTALL_COMMANDS) {

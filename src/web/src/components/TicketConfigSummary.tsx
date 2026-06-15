@@ -77,6 +77,13 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             <Row label="Correction des retours" value={ticket.fixComments ? YES : NO} />
           </>
         )}
+        {/* A clean ticket carries only the target PR (no depth/post/fix knobs). */}
+        {ticket.kind === "clean" && ticket.prNumber !== null && (
+          <>
+            <Row label="PR nettoyée" value={`#${ticket.prNumber}`} />
+            {ticket.prHeadBranch !== null && <Row label="Branche de la PR" value={ticket.prHeadBranch} />}
+          </>
+        )}
         {/* An ask ticket is read-only: only the model/effort rows above apply (no implementer/PR knobs). */}
         {ticket.kind === "feature" && (
           <>

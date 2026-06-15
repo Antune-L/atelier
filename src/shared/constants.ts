@@ -105,10 +105,11 @@ export const CUSTOM_PROFILE_ID = "custom";
 export const CUSTOM_PROFILE_LABEL = "Personnalisé";
 
 /**
- * What a ticket delivers: a feature implementation (default), an autonomous PR review, or a
- * read-only answer to a question about a project (ask — no branch, no PR, surfaces a comment).
+ * What a ticket delivers: a feature implementation (default), an autonomous PR review, a
+ * read-only answer to a question about a project (ask — no branch, no PR, surfaces a comment), or
+ * a PR cleaner (clean — triage a PR's reviewer feedback and apply only the pertinent fixes).
  */
-export const KINDS = ["feature", "review", "ask"] as const;
+export const KINDS = ["feature", "review", "ask", "clean"] as const;
 export type Kind = (typeof KINDS)[number];
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */

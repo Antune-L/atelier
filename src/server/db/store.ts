@@ -60,6 +60,15 @@ export interface NewReview {
   fixComments: boolean;
 }
 
+export interface NewClean {
+  title: string;
+  description: string;
+  project: ProjectKey;
+  prNumber: number;
+  prHeadBranch: string;
+  prUrl: string;
+}
+
 export interface NewAsk {
   title: string;
   description: string;
@@ -202,6 +211,34 @@ export class Store {
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error("createReview: ticket vanished after insert");
     this.logEvent(id, "created", { title: input.title, kind: "review", prNumber: input.prNumber });
+    return ticket;
+  }
+
+  /** Create a clean ticket: straight into "À implémenter", carrying the target PR (no argus knobs). */
+  createClean(input: NewClean): Ticket {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO tickets (id, title, description, project, kind, pr_number, pr_head_branch, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'clean', ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.title,
+        input.description,
+        input.project,
+        input.prNumber,
+        input.prHeadBranch,
+        input.prUrl,
+        now,
+        now,
+        now,
+        now,
+      );
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error("createClean: ticket vanished after insert");
+    this.logEvent(id, "created", { title: input.title, kind: "clean", prNumber: input.prNumber });
     return ticket;
   }
 

@@ -417,6 +417,60 @@ function buildReviewFixLines(
 }
 
 /**
+ * Builds the `ticket` channel payload for a clean ticket: the worktree is ALREADY checked out on the
+ * PR's head branch. The session triages the PR's reviewer feedback via the minos-pr-feedback skill,
+ * applies ONLY the pertinent fixes respecting the PR context, then commits and pushes onto the SAME
+ * branch — no new PR, no posted comments.
+ */
+export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const branch = ticket.prHeadBranch ?? "";
+
+  const lines: string[] = [
+    `# Nettoyage des retours de PR #${ticket.prNumber} — ${ticket.title}`,
+    "",
+    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `PR : ${ticket.prUrl}`,
+    `Branche de la PR : ${branch}`,
+    "",
+    "## Contexte de la PR",
+    ticket.description || "(vide)",
+    "",
+    "Tu ne dois appliquer QUE les retours qui respectent ce contexte : un retour hors-périmètre, qui élargit ou détourne l'intention de la PR ci-dessus, doit être ignoré.",
+    "",
+    "## Contrat de pipeline",
+    "Tu es une session Claude Code autonome dédiée au TRI puis à l'APPLICATION des retours de review d'une PR. Le worktree courant est DÉJÀ positionné sur la branche head de la PR (`" + branch + "`). Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "- `update_stage(stage)` à chaque transition d'étape.",
+    "- `ask_user(question)` si une décision est ambiguë (ex. retour au périmètre incertain).",
+    "- `done(pr_url)` UNIQUEMENT après avoir appliqué les corrections pertinentes (ou déterminé qu'aucune ne l'est), commité et poussé sur la MÊME branche head de la PR (passe la MÊME URL de PR, ne crée JAMAIS de nouvelle PR).",
+    "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    commitLanguageDirective(opts.commitLanguage),
+    "",
+    "## Événements de channel",
+    "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours.",
+    "",
+    "## Étapes",
+    '1. `update_stage("implementing")`.',
+    `2. \`update_stage("fixing")\` puis : lance le skill **minos-pr-feedback** sur la PR #${ticket.prNumber} (branche \`${branch}\`). Il récupère tous les fils de commentaires (inline, résumés de review, conversation), les trie par pertinence, et n'applique QUE les corrections pertinentes qui respectent le contexte de la PR ci-dessus ; il écarte les nits et ignore les fils résolus/obsolètes. Si rien n'est pertinent, n'applique rien.`,
+    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
+    '4. `update_stage("opening_pr")` : commit (conventions du projet), puis `git push` la branche head de la PR (jamais `--no-verify`, aucune nouvelle PR). Si aucune correction n\'a été appliquée, saute le commit/push.',
+    `5. \`done(${ticket.prUrl})\`.`,
+    "",
+    "## Interdits",
+    "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
+    "- Ne ferme pas, ne recrée pas, ne mets pas la PR en draft, et ne crée PAS de nouvelle PR.",
+    "- Ne poste AUCUN commentaire/réponse sur la PR (c'est argus --post, hors périmètre).",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/**
  * Builds the `ticket` channel payload for an ask ticket: a read-only session that explores the
  * project to answer a question, then surfaces the answer via submit_answer. No diff, commit or PR.
  */

@@ -3,6 +3,7 @@ import type {
   Capabilities,
   Comment,
   CreateAskInput,
+  CreateCleanInput,
   CreateCommentInput,
   CreateProfileInput,
   CreateReviewInput,
@@ -60,6 +61,8 @@ export const api = {
   projectBranches: (key: string): Promise<string[]> => request(`/api/projects/${key}/branches`),
   createReviews: (input: CreateReviewInput): Promise<Ticket[]> =>
     request("/api/reviews", { method: "POST", body: JSON.stringify(input) }),
+  createCleaners: (input: CreateCleanInput): Promise<Ticket[]> =>
+    request("/api/cleaners", { method: "POST", body: JSON.stringify(input) }),
   createAsk: (input: CreateAskInput): Promise<Ticket> =>
     request("/api/asks", { method: "POST", body: JSON.stringify(input) }),
   updateTicket: (id: string, input: UpdateTicketInput): Promise<Ticket> =>

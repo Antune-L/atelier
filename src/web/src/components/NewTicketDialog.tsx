@@ -6,6 +6,7 @@ import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { AskPanel } from "@/components/AskPanel";
 import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
+import { CleanPrPanel } from "@/components/CleanPrPanel";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -22,12 +23,13 @@ import { api } from "@/lib/api";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
-type Tab = "ticket" | "import" | "review" | "ask";
+type Tab = "ticket" | "import" | "review" | "clean" | "ask";
 
 const TAB_TITLES: Record<Tab, string> = {
   ticket: "Nouveau ticket",
   import: "Import CSV",
   review: "Review une PR",
+  clean: "PR Cleaner",
   ask: "Poser une question",
 };
 
@@ -199,6 +201,9 @@ export function NewTicketDialog({
           <TabButton active={tab === "review"} onClick={() => setTab("review")}>
             PR Review
           </TabButton>
+          <TabButton active={tab === "clean"} onClick={() => setTab("clean")}>
+            PR Cleaner
+          </TabButton>
           <TabButton active={tab === "ask"} onClick={() => setTab("ask")}>
             Ask
           </TabButton>
@@ -212,6 +217,11 @@ export function NewTicketDialog({
       {tab === "review" && (
         <ModalBody>
           <ReviewPrPanel projects={projects} onClose={onClose} />
+        </ModalBody>
+      )}
+      {tab === "clean" && (
+        <ModalBody>
+          <CleanPrPanel projects={projects} onClose={onClose} />
         </ModalBody>
       )}
       {tab === "ask" && (

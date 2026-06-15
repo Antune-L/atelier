@@ -52,6 +52,7 @@ export const KIND_LABELS: Record<Kind, string> = {
   feature: "Feature",
   review: "Review",
   ask: "Question",
+  clean: "Clean",
 };
 
 interface DurationGroup {

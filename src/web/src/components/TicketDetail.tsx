@@ -1,4 +1,4 @@
-import { Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Brush, Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -153,7 +153,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // Per-kind terminal lanes: "merged" for feature PRs, "reviewed" for reviews, "answered" for asks.
   const statusOptions = COLUMN_ORDER.filter((col) => {
     if (col === "merged") return current.kind === "feature";
-    if (col === "reviewed") return current.kind === "review";
+    if (col === "reviewed") return current.kind === "review" || current.kind === "clean";
     if (col === "answered") return current.kind === "ask";
     return true;
   });
@@ -399,6 +399,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               {current.kind === "review" && (
                 <Badge variant="secondary" className="gap-1">
                   <Eye className="h-3 w-3" /> Review
+                </Badge>
+              )}
+              {current.kind === "clean" && (
+                <Badge variant="secondary" className="gap-1">
+                  <Brush className="h-3 w-3" /> Clean
                 </Badge>
               )}
               {current.kind === "ask" && (

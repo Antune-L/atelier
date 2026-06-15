@@ -192,10 +192,11 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
-  async worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void> {
-    // `-B` (re)creates the local branch at origin/<branch>, so the worktree carries the PR's commits
-    // rather than a fresh branch off base. Caller fetches origin/<branch> first.
-    const res = await $`git -C ${repoPath} worktree add ${slotPath} -B ${branch} origin/${branch}`.nothrow().quiet();
+  async worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch = localBranch): Promise<void> {
+    // `-B` (re)creates the local branch at origin/<startBranch>, so the worktree carries the PR's commits
+    // rather than a fresh branch off base. `localBranch` may differ from `startBranch` (clean ticket).
+    // Caller fetches origin/<startBranch> first.
+    const res = await $`git -C ${repoPath} worktree add ${slotPath} -B ${localBranch} origin/${startBranch}`.nothrow().quiet();
     if (res.exitCode !== 0) {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       throw new Error(`git worktree add (branche existante) a échoué (code ${res.exitCode}) : ${detail}`);
@@ -400,7 +401,9 @@ export class RealSystemAdapter implements SystemAdapter {
     // A non-zero exit means origin/<branch> couldn't be resolved (branch never pushed): fail the gate
     // rather than fall through to ok. origin/<branch> exists here (the worktree was checked out from it),
     // so a failure is a real signal, not the absent-ref case verifyDone tolerates for fresh branches.
-    const ahead = await $`git -C ${slotPath} rev-list --count origin/${branch}..${branch}`.nothrow().quiet();
+    // Compare against HEAD (the worktree's checked-out tip), not the local branch name: a clean
+    // ticket's local branch is suffixed (-cleaner) and differs from the PR head origin ref `branch`.
+    const ahead = await $`git -C ${slotPath} rev-list --count origin/${branch}..HEAD`.nothrow().quiet();
     if (ahead.exitCode !== 0) {
       return { ok: false, reason: "impossible de vérifier l'avance de la branche de la PR (ref origin absente ?)" };
     }

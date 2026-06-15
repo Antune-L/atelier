@@ -1,6 +1,7 @@
 import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
+import { triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -92,6 +93,36 @@ function buildResearchStep(ticket: Ticket): string {
  * Builds the `ticket` channel payload: the full pipeline contract injected into
  * the session at startup. Describes the steps, the tools to call, and the bans.
  */
+function buildFeasibilityContextSection(ticket: Ticket): string {
+  if (
+    !ticket.feasibilityContext ||
+    ticket.triageStatus !== "done" ||
+    ticket.triageVerdict !== "implementable" ||
+    ticket.triageReport === null
+  ) {
+    return "";
+  }
+  let parsedReport: unknown;
+  try {
+    parsedReport = JSON.parse(ticket.triageReport);
+  } catch {
+    return "";
+  }
+  const result = triageResultSchema.safeParse(parsedReport);
+  if (!result.success) return "";
+  const { summary, files, reasons, questions } = result.data;
+  const lines = [
+    "## Contexte de faisabilité",
+    "Une analyse de faisabilité a jugé ce ticket implémentable. Utilise ses constats pour cadrer ta solution et traiter le problème au mieux (ce n'est PAS une réécriture du ticket).",
+    `- Synthèse : ${summary}`,
+    files.length > 0 ? `- Fichiers identifiés comme pertinents : ${files.join(", ")}` : "",
+    reasons.length > 0 ? `- Raisons : ${reasons.join(" ; ")}` : "",
+    questions.length > 0 ? `- Questions : ${questions.join(" ; ")}` : "",
+    "",
+  ];
+  return lines.filter((line) => line !== "").join("\n");
+}
+
 export function buildTicketContract(
   ticket: Ticket,
   opts: { composerScriptPath: string; commitLanguage: CommitLanguage },
@@ -127,6 +158,7 @@ export function buildTicketContract(
     ticket.description || "(vide)",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
     "",
+    buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
     "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
     "- `update_stage(stage)` à chaque transition d'étape.",

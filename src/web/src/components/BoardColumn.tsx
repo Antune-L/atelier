@@ -26,8 +26,6 @@ interface BoardColumnProps {
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
 
-/** Only the "merged" column piles up, so it windows its card list to stay responsive. */
-const WINDOWED_COLUMN: Column = "merged";
 /** Cards rendered before any scroll. */
 const WINDOW_INITIAL_SIZE = 20;
 /** Cards added each time the bottom sentinel comes into view. */
@@ -41,10 +39,7 @@ const WINDOW_PREFETCH_MARGIN = "200px";
  * grows it whenever the bottom sentinel scrolls into view of the column's own scroll container,
  * clamping to the total length when the underlying list shrinks.
  */
-function useWindowedTickets(
-  tickets: Ticket[],
-  enabled: boolean,
-): {
+function useWindowedTickets(tickets: Ticket[]): {
   visibleTickets: Ticket[];
   sentinelRef: React.RefObject<HTMLDivElement>;
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -61,8 +56,8 @@ function useWindowedTickets(
     if (tickets.length <= WINDOW_INITIAL_SIZE) setVisibleCount(WINDOW_INITIAL_SIZE);
   }
 
-  const clampedCount = enabled ? Math.min(visibleCount, tickets.length) : tickets.length;
-  const hasMore = enabled && clampedCount < tickets.length;
+  const clampedCount = Math.min(visibleCount, tickets.length);
+  const hasMore = clampedCount < tickets.length;
 
   useEffect(() => {
     if (!hasMore) return;
@@ -82,8 +77,8 @@ function useWindowedTickets(
   }, [hasMore]);
 
   const visibleTickets = useMemo(
-    () => (enabled ? tickets.slice(0, clampedCount) : tickets),
-    [enabled, tickets, clampedCount],
+    () => tickets.slice(0, clampedCount),
+    [tickets, clampedCount],
   );
 
   return { visibleTickets, sentinelRef, scrollRef, hasMore };
@@ -122,8 +117,8 @@ export function BoardColumn({
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
   const label = COLUMN_LABELS[column];
 
-  const isWindowed = column === WINDOWED_COLUMN;
-  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(tickets, isWindowed);
+  // Every column windows its card list so long piles stay responsive.
+  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(tickets);
 
   // The card container is both the dnd droppable and the windowing scroll root, so compose both refs.
   const setCardContainerRef = (node: HTMLDivElement | null): void => {
@@ -222,8 +217,7 @@ export function BoardColumn({
       <div
         ref={setCardContainerRef}
         className={cn(
-          "flex min-h-[60vh] flex-col gap-2 rounded-b-xl p-2 transition-colors",
-          isWindowed && "max-h-[70vh] overflow-y-auto",
+          "flex max-h-[70vh] min-h-[60vh] flex-col gap-2 overflow-y-auto rounded-b-xl p-2 transition-colors",
           isOver && "bg-accent/70",
         )}
       >

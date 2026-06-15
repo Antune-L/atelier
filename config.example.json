@@ -12,6 +12,7 @@
         "lint": "npm run lint",
         "test": "npm test"
       },
+      "worktreeScript": "npm run setup:worktree",
       "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent"
     }
   },

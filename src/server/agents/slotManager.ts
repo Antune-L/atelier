@@ -66,6 +66,7 @@ const log = createLogger("slot");
 /** Human-readable setup phases surfaced to the terminal view before the agent produces output. */
 const SETUP_PHASES = {
   worktree: "Préparation du worktree…",
+  setup: "Configuration du worktree (script projet)…",
   deps: "Installation des dépendances…",
   spawning: "Démarrage de la session Claude…",
   waiting: "En attente de la première sortie de l'agent…",
@@ -250,9 +251,20 @@ export class SlotManager {
 
       await this.depositSlotFiles(path, ticket, slotId);
       await this.system.copyEnvFiles(project.repoPath, path);
-      // An ask ticket is read-only (explore + answer); installing deps is pure overhead, so skip it
-      // to start answering faster. Feature/review tickets need a built tree for typecheck/lint/argus.
+      // An ask ticket is read-only (explore + answer); the project setup script and dep install are
+      // pure overhead, so skip both to start answering faster. Feature/review tickets need a built
+      // tree (typecheck/lint/argus) and the project's own setup (e.g. generated .env). The setup
+      // script runs before install since it may produce the .env the install step relies on.
       if (ticket.kind !== "ask") {
+        this.setPhase(ticketId, SETUP_PHASES.setup);
+        await this.system.runWorktreeSetupScript({
+          repoPath: project.repoPath,
+          slotPath: path,
+          branch,
+          baseBranch,
+          script: project.worktreeScript ?? null,
+          timeoutMs: project.commitTimeoutMs,
+        });
         this.setPhase(ticketId, SETUP_PHASES.deps);
         await this.system.installDeps(path, project.commitTimeoutMs);
       }
@@ -621,7 +633,12 @@ export class SlotManager {
   /** True while a (re)launch is mid-setup, when a concurrent spawn would race the in-flight one. */
   private isLaunching(ticketId: string): boolean {
     const phase = this.setupPhase.get(ticketId);
-    return phase === SETUP_PHASES.worktree || phase === SETUP_PHASES.deps || phase === SETUP_PHASES.spawning;
+    return (
+      phase === SETUP_PHASES.worktree ||
+      phase === SETUP_PHASES.setup ||
+      phase === SETUP_PHASES.deps ||
+      phase === SETUP_PHASES.spawning
+    );
   }
 
   /**

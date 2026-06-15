@@ -76,6 +76,16 @@ export interface PrepareSlotFiles {
   prFixerAgentMd: string;
 }
 
+export interface WorktreeSetupOptions {
+  repoPath: string;
+  slotPath: string;
+  branch: string;
+  baseBranch: string;
+  /** Explicit command from project config, or null to auto-detect a conventional script file. */
+  script: string | null;
+  timeoutMs: number;
+}
+
 export interface ReviewDoneOptions {
   /**
    * When set, the gate also requires a review posted by the current gh user at or after this
@@ -104,6 +114,8 @@ export interface SystemAdapter {
   // ---- slot preparation ----
   prepareSlotFiles(files: PrepareSlotFiles): Promise<void>;
   copyEnvFiles(repoPath: string, slotPath: string): Promise<void>;
+  /** Run the project's worktree setup script (explicit config command, else auto-detected) in the freshly-created slot worktree. No-op when neither exists. Throws on non-zero exit. */
+  runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void>;
   installDeps(slotPath: string, timeoutMs: number): Promise<void>;
 
   // ---- tmux session ----

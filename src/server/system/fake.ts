@@ -10,6 +10,7 @@ import type {
   SpawnTmuxOptions,
   SpawnTriageOptions,
   SystemAdapter,
+  WorktreeSetupOptions,
 } from "./types.ts";
 
 const dryRunLog = createLogger("dry-run");
@@ -117,6 +118,11 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
     this.log("copyEnvFiles", { repoPath, slotPath });
+  }
+
+  async runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void> {
+    this.log("runWorktreeSetupScript", { repoPath: opts.repoPath, slotPath: opts.slotPath, script: opts.script });
+    await delay(FAKE_SETTLE_MS);
   }
 
   async installDeps(slotPath: string, timeoutMs: number): Promise<void> {

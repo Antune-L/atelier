@@ -35,6 +35,13 @@ const projectConfigSchema = z.object({
       test: z.string().optional(),
     })
     .optional(),
+  /**
+   * Optional command run in the freshly-created slot worktree to configure it (e.g. produce .env).
+   * Runs with cwd=worktree and env WORKTREE_PATH/REPO_PATH/BRANCH/BASE_BRANCH. If absent, a
+   * conventional script file in the repo is auto-detected (scripts/setup-worktree.sh, …). The script
+   * must write only gitignored paths — any tracked change it leaves would fail the done() clean-tree gate.
+   */
+  worktreeScript: z.string().optional(),
   /** Project-specific agent instructions injected into the ticket contract. */
   instructions: z.string().optional(),
 });

@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Brush, Clock, ExternalLink, Eye, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { AlertTriangle, Brush, Clock, ExternalLink, Eye, FlaskConical, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -96,6 +96,11 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
         {extractFigmaUrls(ticket.description).length > 0 && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Palette className="h-3 w-3" /> UI
+          </Badge>
+        )}
+        {ticket.testing && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <FlaskConical className="h-3 w-3" /> Test en cours
           </Badge>
         )}
         {ticket.implementer === "composer" && (

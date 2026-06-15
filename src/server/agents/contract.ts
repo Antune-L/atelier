@@ -555,3 +555,39 @@ export function buildAskContract(ticket: Ticket): string {
 
   return lines.filter((line) => line !== "").join("\n");
 }
+
+/**
+ * Interactive test session contract: the feature already lives on `ticket.branch`, checked out in a
+ * ready-to-run worktree. No pipeline, no gate, no PR — the user drives the session via the terminal
+ * to explore/run/test the feature. Mentions NO MCP pipeline tool (see the coordinator guard).
+ */
+export function buildTestContract(ticket: Ticket): string {
+  if (!isProjectKey(ticket.project)) {
+    throw new Error(`Projet inconnu: ${ticket.project}`);
+  }
+  const project = getProject(ticket.project);
+  const branch = ticket.branch ?? "(inconnue)";
+
+  const lines: string[] = [
+    `# Session de test — ${ticket.id} — ${ticket.title}`,
+    "",
+    `Session de test interactive. La feature « ${ticket.title} » est implémentée sur la branche \`${branch}\`, déjà checkout dans ce worktree (projet ${project.label}, dépendances installées).`,
+    "",
+    "## Description de la feature",
+    ticket.description || "(vide)",
+    "",
+    "## Ta mission",
+    "Aider l'utilisateur à lancer, tester et explorer cette feature : build, run, navigation, scénarios de test, etc. Réponds à ses questions et exécute les commandes nécessaires pour observer le comportement de la feature.",
+    "",
+    "## Interdits",
+    "- Ne commit pas, ne push pas, n'ouvre aucune PR.",
+    "- Cette session n'a pas de gate `done` et aucun tool de pipeline ; elle se termine quand l'utilisateur clique « Arrêter le test ».",
+    "- Ne touche à aucun fichier hors du worktree.",
+    project.instructions ? `- Consigne projet : ${project.instructions}` : "",
+    "",
+    "## Pour démarrer",
+    "Propose d'emblée comment lancer et observer la feature (commande de build/run, URL ou étape à suivre), puis attends les instructions de l'utilisateur.",
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}

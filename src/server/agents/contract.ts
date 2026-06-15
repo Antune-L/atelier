@@ -463,7 +463,7 @@ function buildReviewFixLines(
  * local branch (PR head + `-cleaner` suffix) carrying the PR's commits. The session triages the PR's
  * reviewer feedback via the minos-pr-feedback skill, applies ONLY the pertinent fixes respecting the PR
  * context, then commits and pushes to the SAME PR head branch (HEAD:<prHeadBranch>) — no new PR, no
- * posted comments.
+ * posted comments. It collapses (minimizes) the reviewer comments it actually addressed.
  */
 export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
   if (!isProjectKey(ticket.project)) {
@@ -501,12 +501,13 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     `2. \`update_stage("fixing")\` puis : lance le skill **minos-pr-feedback** sur la PR #${ticket.prNumber} (branche \`${branch}\`). Il récupère tous les fils de commentaires (inline, résumés de review, conversation), les trie par pertinence, et n'applique QUE les corrections pertinentes qui respectent le contexte de la PR ci-dessus ; il écarte les nits et ignore les fils résolus/obsolètes. Si rien n'est pertinent, n'applique rien.`,
     '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
     `4. \`update_stage("opening_pr")\` : commit (conventions du projet), puis pousse vers la head de la PR avec \`git push origin HEAD:${branch}\` (jamais \`--no-verify\`, aucune nouvelle PR ; le nom de branche locale diffère volontairement de la head de la PR). Si aucune correction n'a été appliquée, saute le commit/push.`,
-    `5. \`done(${ticket.prUrl})\`.`,
+    `5. Replie (minimise) chaque commentaire de reviewer RÉELLEMENT traité (l'ensemble \`apply\` : retours pertinents que tu as adressés), PAS les nits écartés ni les retours hors-périmètre. Cela vaut que du code ait été poussé ou non — un retour peut être adressé par une correction appliquée. Récupère le \`node_id\` de chaque commentaire traité : les commentaires inline via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/comments\` (champ \`node_id\`), les commentaires de conversation top-level via \`gh api /repos/{owner}/{repo}/issues/${ticket.prNumber}/comments\` (champ \`node_id\`). Pour chacun, replie-le avec la mutation GraphQL \`minimizeComment\` (\`classifier: RESOLVED\`, \`subjectId\` = le \`node_id\`), ex. : \`gh api graphql -f query='mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:RESOLVED}){minimizedComment{isMinimized}}}' -f id=<node_id>\`. Si aucun commentaire n'a été traité, ne replie rien.`,
+    `6. \`done(${ticket.prUrl})\`.`,
     "",
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne ferme pas, ne recrée pas, ne mets pas la PR en draft, et ne crée PAS de nouvelle PR.",
-    "- Ne poste AUCUN commentaire/réponse sur la PR (c'est argus --post, hors périmètre).",
+    "- Ne poste AUCUN nouveau commentaire/réponse sur la PR (c'est argus --post, hors périmètre). Seul le repli (minimisation) des commentaires que tu as traités est autorisé : c'est la SEULE mutation de commentaire de PR permise.",
     "- Ne touche à aucun fichier hors du worktree.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];

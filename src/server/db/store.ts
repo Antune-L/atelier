@@ -440,6 +440,24 @@ export class Store {
       .run(ticketId, type, JSON.stringify(payload ?? null), Date.now());
   }
 
+  /**
+   * Count of trailing `type` events for this ticket — i.e. how many of the most recent events are
+   * `type`, stopping at the first event of any other type. A tight retry loop (failure after failure
+   * with no progress event between) accumulates; an agent making real progress between attempts
+   * resets the run, so this isolates a genuinely stuck session from a transient retry.
+   */
+  countTrailingEvents(ticketId: string, type: string, limit: number): number {
+    const rows = this.db
+      .query("SELECT type FROM events WHERE ticket_id = ? ORDER BY id DESC LIMIT ?")
+      .all(ticketId, limit);
+    let n = 0;
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !("type" in row) || row.type !== type) break;
+      n += 1;
+    }
+    return n;
+  }
+
   /** Most recent event type among `types` for this ticket (null if none). */
   lastEventType(ticketId: string, types: string[]): string | null {
     const placeholders = types.map(() => "?").join(", ");

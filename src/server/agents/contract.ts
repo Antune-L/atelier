@@ -1,5 +1,5 @@
 import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
-import type { CommitLanguage } from "../../shared/constants.ts";
+import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
@@ -301,6 +301,14 @@ export function buildFeasibilityBatchContract(tickets: Ticket[], project: Projec
   return lines.filter((line) => line !== "").join("\n");
 }
 
+/** Explicit, non-droppable depth directive injected next to the argus invocation so the
+ * autonomous agent never silently falls back to argus' documented light default. */
+function reviewDepthDirective(depth: ReviewDepth): string {
+  return depth === "full"
+    ? "   Profondeur EXIGÉE : **full** — le flag `--full` ci-dessus est OBLIGATOIRE, ne le retire jamais. Argus DOIT dispatcher les 6 reviewers (quality, architecture, regression, security, conventions, logic). Le défaut light (4 reviewers) est INTERDIT pour cette revue."
+    : "   Profondeur EXIGÉE : **light** — 4 reviewers (quality, conventions, regression, logic). N'ajoute PAS `--full`.";
+}
+
 /**
  * Builds the `ticket` channel payload for a review ticket: drive the argus skill
  * over an open PR, optionally posting findings inline via gh, then done().
@@ -346,6 +354,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "## Étapes",
     '1. `update_stage("reviewing")`.',
     `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
+    reviewDepthDirective(depth),
     "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais,",
     ticket.postComments
       ? "   puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`)."
@@ -371,7 +380,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
 function buildReviewFixLines(
   ticket: Ticket,
   opts: { commitLanguage: CommitLanguage },
-  ctx: { project: ReturnType<typeof getProject>; depth: string; branch: string; argusCmd: string },
+  ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; argusCmd: string },
 ): string {
   const { project, depth, branch, argusCmd } = ctx;
 
@@ -400,6 +409,7 @@ function buildReviewFixLines(
     "## Étapes",
     '1. `update_stage("reviewing")`.',
     `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
+    reviewDepthDirective(depth),
     "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais, puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`).",
     `3. \`update_stage("fixing")\` : délègue les corrections au sous-agent \`pr-fixer\` (outil Agent, \`subagent_type: pr-fixer\`). Dans son prompt, transmets-lui : le worktree courant comme répertoire de travail, le numéro de la PR (#${ticket.prNumber}), les findings d'argus issus de ton contexte, et la consigne de lire au besoin les commentaires de review postés via \`gh\` et de n'appliquer que les corrections PERTINENTES. Il ne commit JAMAIS. Quand il rend la main, relis son diff (\`git diff\`) et complète toi-même ce qui est partiel.`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',

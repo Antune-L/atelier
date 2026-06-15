@@ -86,6 +86,7 @@ export interface TicketPatch {
   addScreenshots?: boolean;
   verifyFeature?: boolean;
   researchPlan?: boolean;
+  project?: string;
   baseBranch?: string | null;
   prdMarkdown?: string | null;
   column?: Column;
@@ -275,6 +276,7 @@ export class Store {
     if (patch.addScreenshots !== undefined) set("add_screenshots", patch.addScreenshots ? 1 : 0);
     if (patch.verifyFeature !== undefined) set("verify_feature", patch.verifyFeature ? 1 : 0);
     if (patch.researchPlan !== undefined) set("research_plan", patch.researchPlan ? 1 : 0);
+    if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
     if (patch.column !== undefined) {

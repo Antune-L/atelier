@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   triage_status TEXT NOT NULL DEFAULT 'none',
   triage_verdict TEXT,
   triage_report TEXT,
-  feasibility_context INTEGER NOT NULL DEFAULT 0,
+  feasibility_context INTEGER NOT NULL DEFAULT 1,
   finished_at INTEGER,
   implementing_started_at INTEGER,
   created_at INTEGER NOT NULL,
@@ -126,7 +126,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "fix_comments", ddl: "ALTER TABLE tickets ADD COLUMN fix_comments INTEGER NOT NULL DEFAULT 0" },
   { column: "base_branch", ddl: "ALTER TABLE tickets ADD COLUMN base_branch TEXT" },
   { column: "resolving_conflicts", ddl: "ALTER TABLE tickets ADD COLUMN resolving_conflicts INTEGER NOT NULL DEFAULT 0" },
-  { column: "feasibility_context", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_context INTEGER NOT NULL DEFAULT 0" },
+  { column: "feasibility_context", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_context INTEGER NOT NULL DEFAULT 1" },
 ];
 
 /**

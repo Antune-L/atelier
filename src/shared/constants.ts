@@ -191,6 +191,16 @@ export const AUTO_NUDGE_MAX = 1;
 export const AUTO_RECLAIM_MAX = 2;
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */
 export const AUTO_RECLAIM_EVENT = "auto_reclaim";
+/** Audit event logged on each failed done() gate; backs the consecutive-failure loop guard. */
+export const DONE_GATE_FAILED_EVENT = "done_gate_failed";
+/**
+ * Consecutive failed done() gates (no intervening protocol event — a tight within-turn loop)
+ * tolerated before the card is treated as a real stall. Below this, a failure is a false positive:
+ * done() returns the actionable reason and the still-alive agent corrects + retries, so the card
+ * stays "opening_pr", not "Bloqué". Cross-turn retries are escalated by the Stop-hook/watchdog
+ * instead (their auto_nudge event resets this trailing counter), so this only catches a runaway loop.
+ */
+export const DONE_GATE_MAX_FAILURES = 5;
 
 /** Implementability triage ("Analyser"): read-only, user-initiated. Generous so large repos can be explored — the timer also covers claude boot + MCP connect (~2 min poll). */
 export const TRIAGE_TIMEOUT_MS = 15 * 60 * 1000;

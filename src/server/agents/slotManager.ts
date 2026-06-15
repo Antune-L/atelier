@@ -1,6 +1,13 @@
 import { join } from "node:path";
 
-import { AUTO_RECLAIM_EVENT, AUTO_RECLAIM_MAX, TERMINAL_STAGES, type Column } from "../../shared/constants.ts";
+import {
+  AUTO_RECLAIM_EVENT,
+  AUTO_RECLAIM_MAX,
+  DONE_GATE_FAILED_EVENT,
+  DONE_GATE_MAX_FAILURES,
+  TERMINAL_STAGES,
+  type Column,
+} from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
@@ -434,10 +441,25 @@ export class SlotManager {
           })
         : await this.system.verifyDone(path, ticket.branch, prUrl);
     if (!gate.ok) {
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
+      const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
+      // A failed gate is not, by itself, a stall: done() hands the actionable reason back to the
+      // still-alive agent, which corrects and retries (e.g. commits a file it left uncommitted).
+      // Marking the card "stalled" on the first failure produced false "Bloqué" badges while the
+      // session kept working. Escalate to a real stall only once the agent is gone, or it loops on
+      // the gate without ever passing it (no progress between attempts → consecutive failures).
+      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      if (retriable) {
+        // Keep the card active (animated "opening_pr"), clear of any stale error box. The watchdog
+        // and Stop-hook still guard a session that genuinely dies in this stage.
+        this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
+        log.info("gate done échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
+        return { ok: false, reason: gate.reason };
+      }
       this.touch(this.store.updateTicket(ticketId, { stage: "stalled", error: gate.reason, finishedAt: Date.now() }));
       this.store.updateSlot(slotId, { status: "stalled" });
       this.hub.pushSlots(this.store.listSlots());
-      log.warn("gate done échouée", { ticketId, reason: gate.reason });
+      log.warn("gate done échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
       await this.notifier.notify("Gate done échouée", `${ticket.title}: ${gate.reason}`);
       return { ok: false, reason: gate.reason };
     }

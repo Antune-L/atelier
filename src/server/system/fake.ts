@@ -98,8 +98,8 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
-  async worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void> {
-    this.log("worktreeAddExisting", { repoPath, slotPath, branch });
+  async worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void> {
+    this.log("worktreeAddExisting", { repoPath, slotPath, localBranch, startBranch: startBranch ?? localBranch });
     await delay(FAKE_SETTLE_MS);
   }
 

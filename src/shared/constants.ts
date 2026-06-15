@@ -112,6 +112,9 @@ export const CUSTOM_PROFILE_LABEL = "Personnalisé";
 export const KINDS = ["feature", "review", "ask", "clean"] as const;
 export type Kind = (typeof KINDS)[number];
 
+/** Local branch suffix for a clean (PR cleaner) worktree: keeps it distinct from the PR head branch (which may already be checked out in another worktree) while still pushing back to the PR head. */
+export const CLEANER_BRANCH_SUFFIX = "-cleaner";
+
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;
 export type ReviewDepth = (typeof REVIEW_DEPTHS)[number];

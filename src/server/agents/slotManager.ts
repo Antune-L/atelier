@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   AUTO_RECLAIM_EVENT,
   AUTO_RECLAIM_MAX,
+  CLEANER_BRANCH_SUFFIX,
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
   TERMINAL_STAGES,
@@ -213,9 +214,20 @@ export class SlotManager {
     const cleanFix = ticket.kind === "clean" && ticket.prHeadBranch !== null;
     // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
     let branch = `feat/${ticket.id}-${slug}`;
-    if (resolving && ticket.branch !== null) branch = ticket.branch;
-    else if (reviewFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
-    else if (cleanFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
+    // For an existing-branch checkout (resolving/reviewFix/cleanFix), the origin ref to start from.
+    // A clean ticket's local branch is suffixed to avoid colliding with the PR head branch when it is
+    // already checked out in another worktree; it still starts from and pushes back to the PR head.
+    let startBranch: string | null = null;
+    if (resolving && ticket.branch !== null) {
+      branch = ticket.branch;
+      startBranch = ticket.branch;
+    } else if (reviewFix && ticket.prHeadBranch !== null) {
+      branch = ticket.prHeadBranch;
+      startBranch = ticket.prHeadBranch;
+    } else if (cleanFix && ticket.prHeadBranch !== null) {
+      branch = `${ticket.prHeadBranch}${CLEANER_BRANCH_SUFFIX}`;
+      startBranch = ticket.prHeadBranch;
+    }
     const sessionName = `ticket-${ticket.id}`;
 
     this.store.updateSlot(slotId, {
@@ -250,8 +262,9 @@ export class SlotManager {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
-          await this.system.fetch(project.repoPath, branch);
-          await this.system.worktreeAddExisting(project.repoPath, path, branch);
+          const start = startBranch ?? branch;
+          await this.system.fetch(project.repoPath, start);
+          await this.system.worktreeAddExisting(project.repoPath, path, branch, start);
         } else {
           await this.system.worktreeAdd({
             repoPath: project.repoPath,

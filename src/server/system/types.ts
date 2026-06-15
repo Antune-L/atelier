@@ -92,7 +92,11 @@ export interface ReviewDoneOptions {
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
-  /** When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully pushed (no commits ahead of origin/<branch>). */
+  /**
+   * When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully
+   * pushed. The gate compares `origin/<branch>..HEAD` (the worktree's checked-out tip), so a clean
+   * ticket's suffixed local branch is still verified against the PR head.
+   */
   requirePushedBranch: string | null;
 }
 
@@ -107,8 +111,12 @@ export interface SystemAdapter {
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string): Promise<void>;
   worktreeAdd(opts: GitWorktreeAddOptions): Promise<void>;
-  /** Check out an EXISTING remote branch into a worktree (auto-merge conflict resolution), resetting the local ref to origin/<branch>. */
-  worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void>;
+  /**
+   * Check out an EXISTING remote branch into a worktree, resetting the local ref to origin/<startBranch>.
+   * `localBranch` is the worktree's branch name; `startBranch` (default = localBranch) is the origin ref
+   * to start from — they differ for a clean ticket whose local branch is suffixed to avoid collisions.
+   */
+  worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
 
   // ---- slot preparation ----

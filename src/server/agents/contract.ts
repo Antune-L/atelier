@@ -1,4 +1,4 @@
-import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
@@ -459,10 +459,11 @@ function buildReviewFixLines(
 }
 
 /**
- * Builds the `ticket` channel payload for a clean ticket: the worktree is ALREADY checked out on the
- * PR's head branch. The session triages the PR's reviewer feedback via the minos-pr-feedback skill,
- * applies ONLY the pertinent fixes respecting the PR context, then commits and pushes onto the SAME
- * branch — no new PR, no posted comments.
+ * Builds the `ticket` channel payload for a clean ticket: the worktree is checked out on a dedicated
+ * local branch (PR head + `-cleaner` suffix) carrying the PR's commits. The session triages the PR's
+ * reviewer feedback via the minos-pr-feedback skill, applies ONLY the pertinent fixes respecting the PR
+ * context, then commits and pushes to the SAME PR head branch (HEAD:<prHeadBranch>) — no new PR, no
+ * posted comments.
  */
 export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
   if (!isProjectKey(ticket.project)) {
@@ -470,6 +471,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
   }
   const project = getProject(ticket.project);
   const branch = ticket.prHeadBranch ?? "";
+  const localBranch = branch ? `${branch}${CLEANER_BRANCH_SUFFIX}` : "";
 
   const lines: string[] = [
     `# Nettoyage des retours de PR #${ticket.prNumber} — ${ticket.title}`,
@@ -484,10 +486,10 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     "Tu ne dois appliquer QUE les retours qui respectent ce contexte : un retour hors-périmètre, qui élargit ou détourne l'intention de la PR ci-dessus, doit être ignoré.",
     "",
     "## Contrat de pipeline",
-    "Tu es une session Claude Code autonome dédiée au TRI puis à l'APPLICATION des retours de review d'une PR. Le worktree courant est DÉJÀ positionné sur la branche head de la PR (`" + branch + "`). Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    "Tu es une session Claude Code autonome dédiée au TRI puis à l'APPLICATION des retours de review d'une PR. Le worktree courant est sur une branche locale dédiée `" + localBranch + "` qui porte les commits de la PR (partie de la head de la PR `" + branch + "`). Tu commites tes corrections sur cette branche locale et les pousses vers la head de la PR `" + branch + "` pour mettre à jour la MÊME PR — ce nom local volontairement différent de la head de la PR est attendu. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision est ambiguë (ex. retour au périmètre incertain).",
-    "- `done(pr_url)` UNIQUEMENT après avoir appliqué les corrections pertinentes (ou déterminé qu'aucune ne l'est), commité et poussé sur la MÊME branche head de la PR (passe la MÊME URL de PR, ne crée JAMAIS de nouvelle PR).",
+    "- `done(pr_url)` UNIQUEMENT après avoir appliqué les corrections pertinentes (ou déterminé qu'aucune ne l'est), commité et poussé via `git push origin HEAD:" + branch + "` (passe la MÊME URL de PR, ne crée JAMAIS de nouvelle PR).",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     commitLanguageDirective(opts.commitLanguage),
     "",
@@ -498,7 +500,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     '1. `update_stage("implementing")`.',
     `2. \`update_stage("fixing")\` puis : lance le skill **minos-pr-feedback** sur la PR #${ticket.prNumber} (branche \`${branch}\`). Il récupère tous les fils de commentaires (inline, résumés de review, conversation), les trie par pertinence, et n'applique QUE les corrections pertinentes qui respectent le contexte de la PR ci-dessus ; il écarte les nits et ignore les fils résolus/obsolètes. Si rien n'est pertinent, n'applique rien.`,
     '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
-    '4. `update_stage("opening_pr")` : commit (conventions du projet), puis `git push` la branche head de la PR (jamais `--no-verify`, aucune nouvelle PR). Si aucune correction n\'a été appliquée, saute le commit/push.',
+    `4. \`update_stage("opening_pr")\` : commit (conventions du projet), puis pousse vers la head de la PR avec \`git push origin HEAD:${branch}\` (jamais \`--no-verify\`, aucune nouvelle PR ; le nom de branche locale diffère volontairement de la head de la PR). Si aucune correction n'a été appliquée, saute le commit/push.`,
     `5. \`done(${ticket.prUrl})\`.`,
     "",
     "## Interdits",

@@ -164,6 +164,69 @@ export function projectCounts(records: StatRecord[], projects: ProjectInfo[]): P
     .sort((a, b) => b.count - a.count);
 }
 
+// ---- Cost / token aggregation ----
+
+export interface CostGroup {
+  key: string;
+  label: string;
+  /** Total cost in USD over the records contributing to this group. */
+  costUsd: number;
+  /** Number of records (with usage) contributing. */
+  count: number;
+}
+
+/** Records carrying recorded usage (costUsd non-null). */
+function withCost(records: StatRecord[]): StatRecord[] {
+  return records.filter((r) => r.costUsd !== null);
+}
+
+/** Cost per model family, including the "Défaut" bucket for records with no model override. */
+export function costByModel(records: StatRecord[]): CostGroup[] {
+  const totals = new Map<string, { cost: number; count: number; label: string }>();
+  for (const record of withCost(records)) {
+    const key = record.model ?? NULL_KEY;
+    const entry = totals.get(key) ?? { cost: 0, count: 0, label: modelLabel(record.model) };
+    entry.cost += record.costUsd ?? 0;
+    entry.count += 1;
+    totals.set(key, entry);
+  }
+  const groups: CostGroup[] = [];
+  for (const model of [...AGENT_MODELS, null]) {
+    const key = model ?? NULL_KEY;
+    const entry = totals.get(key);
+    if (!entry) continue;
+    groups.push({ key, label: entry.label, costUsd: entry.cost, count: entry.count });
+  }
+  return groups;
+}
+
+/** Cost per project, sorted descending by spend. */
+export function costByProject(records: StatRecord[], projects: ProjectInfo[]): CostGroup[] {
+  const labelByKey = new Map(projects.map((p) => [p.key, p.label]));
+  const totals = new Map<string, { cost: number; count: number }>();
+  for (const record of withCost(records)) {
+    const entry = totals.get(record.project) ?? { cost: 0, count: 0 };
+    entry.cost += record.costUsd ?? 0;
+    entry.count += 1;
+    totals.set(record.project, entry);
+  }
+  return [...totals.entries()]
+    .map(([key, { cost, count }]) => ({ key, label: labelByKey.get(key) ?? key, costUsd: cost, count }))
+    .sort((a, b) => b.costUsd - a.costUsd);
+}
+
+/** Total spend in USD across all records with recorded usage. */
+export function totalSpendUsd(records: StatRecord[]): number {
+  return withCost(records).reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+}
+
+/** Mean cost in USD per issue (over records with recorded usage); 0 when none. */
+export function meanCostPerIssueUsd(records: StatRecord[]): number {
+  const priced = withCost(records);
+  if (priced.length === 0) return 0;
+  return totalSpendUsd(priced) / priced.length;
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAYS_PER_WEEK = 7;
 const WEEK_MS = DAYS_PER_WEEK * MS_PER_DAY;

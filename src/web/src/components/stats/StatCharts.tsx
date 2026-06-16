@@ -22,12 +22,16 @@ import {
 } from "@/components/ui/chart";
 import { formatDuration } from "@/lib/display";
 import {
+  costByModel,
+  costByProject,
   kindCounts,
+  meanCostPerIssueUsd,
   meanDurationByEffort,
   meanDurationByModel,
   outcomeCounts,
   projectCounts,
   recordOutcome,
+  totalSpendUsd,
   weeklyThroughput,
   type Outcome,
 } from "@/lib/stats";
@@ -233,6 +237,107 @@ export function KindChart({ records }: { records: StatRecord[] }): ReactNode {
         </Bar>
       </BarChart>
     </ChartContainer>
+  );
+}
+
+// --- Card 7: cost ---
+
+const USD_FORMATTER = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function formatUsd(value: number): string {
+  return USD_FORMATTER.format(value);
+}
+
+export function CostChart({
+  records,
+  projects,
+}: {
+  records: StatRecord[];
+  projects: ProjectInfo[];
+}): ReactNode {
+  const byModel = useMemo(() => costByModel(records), [records]);
+  const byProject = useMemo(() => costByProject(records, projects), [records, projects]);
+  const total = useMemo(() => totalSpendUsd(records), [records]);
+  const meanPerIssue = useMemo(() => meanCostPerIssueUsd(records), [records]);
+  if (byModel.length === 0 && byProject.length === 0) return <StatEmpty />;
+  const config: ChartConfig = { costUsd: { label: "Coût" } };
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-baseline gap-4">
+        <div>
+          <div className="text-2xl font-bold tabular-nums">{formatUsd(total)}</div>
+          <div className="text-xs text-muted-foreground">dépense totale</div>
+        </div>
+        <div>
+          <div className="text-lg font-semibold tabular-nums">{formatUsd(meanPerIssue)}</div>
+          <div className="text-xs text-muted-foreground">moyenne par issue</div>
+        </div>
+      </div>
+      <div>
+        <h3 className="mb-1 text-xs font-medium text-muted-foreground">Par modèle</h3>
+        {byModel.length > 0 ? (
+          <ChartContainer config={config} className="h-48">
+            <BarChart data={byModel} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="label" {...AXIS_PROPS} />
+              <YAxis tickFormatter={(v: number) => formatUsd(v)} width={56} {...AXIS_PROPS} />
+              <ChartTooltip
+                cursor={BAR_CURSOR}
+                content={
+                  <ChartTooltipContent
+                    valueFormatter={(value) => formatUsd(typeof value === "number" ? value : 0)}
+                    extraFormatter={(item) => {
+                      const datum = item.payload;
+                      const count = datum && typeof datum.count === "number" ? datum.count : 0;
+                      return `n = ${count}`;
+                    }}
+                  />
+                }
+              />
+              <Bar dataKey="costUsd" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
+                {byModel.map((d, index) => (
+                  <Cell key={d.key} fill={colorAt(index)} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ChartContainer>
+        ) : (
+          <StatEmpty />
+        )}
+      </div>
+      <div>
+        <h3 className="mb-1 text-xs font-medium text-muted-foreground">Par projet</h3>
+        {byProject.length > 0 ? (
+          <ChartContainer config={config} className="h-48">
+            <BarChart data={byProject} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="label" {...AXIS_PROPS} />
+              <YAxis tickFormatter={(v: number) => formatUsd(v)} width={56} {...AXIS_PROPS} />
+              <ChartTooltip
+                cursor={BAR_CURSOR}
+                content={
+                  <ChartTooltipContent
+                    valueFormatter={(value) => formatUsd(typeof value === "number" ? value : 0)}
+                  />
+                }
+              />
+              <Bar dataKey="costUsd" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
+                {byProject.map((d, index) => (
+                  <Cell key={d.key} fill={colorAt(index)} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ChartContainer>
+        ) : (
+          <StatEmpty />
+        )}
+      </div>
+    </div>
   );
 }
 

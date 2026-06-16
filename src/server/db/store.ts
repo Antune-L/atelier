@@ -12,7 +12,7 @@ import {
 } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import { commitLanguageSchema } from "../../shared/schemas.ts";
-import type { AppSettings, Comment, Profile, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput } from "../../shared/schemas.ts";
+import type { AppSettings, Comment, Profile, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
 import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow } from "./rows.ts";
@@ -121,6 +121,7 @@ export interface TicketPatch {
   triageVerdict?: TriageVerdict | null;
   triageReport?: string | null;
   feasibilityContext?: boolean;
+  sessionUsage?: SessionUsage;
   finishedAt?: number | null;
 }
 
@@ -348,6 +349,7 @@ export class Store {
     if (patch.triageVerdict !== undefined) set("triage_verdict", patch.triageVerdict);
     if (patch.triageReport !== undefined) set("triage_report", patch.triageReport);
     if (patch.feasibilityContext !== undefined) set("feasibility_context", patch.feasibilityContext ? 1 : 0);
+    if (patch.sessionUsage !== undefined) set("session_usage", JSON.stringify(patch.sessionUsage));
     if (patch.finishedAt !== undefined) set("finished_at", patch.finishedAt);
 
     set("updated_at", Date.now());

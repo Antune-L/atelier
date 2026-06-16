@@ -212,6 +212,7 @@ export function createApiRoutes(deps: RouteDeps) {
         implementer: t.implementer,
         createdAt: t.createdAt,
         implementingStartedAt: t.implementingStartedAt,
+        implementationStartedAt: t.implementationStartedAt,
         finishedAt: t.finishedAt,
       })),
     )

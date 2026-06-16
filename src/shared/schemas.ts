@@ -133,6 +133,8 @@ export const ticketSchema = z.object({
   finishedAt: z.number().int().nullable(),
   /** Epoch ms when the ticket last entered the "À implémenter" column; null until it first does. */
   implementingStartedAt: z.number().int().nullable(),
+  /** Epoch ms when the agent first entered the `implementing` stage (real work start, excludes queue wait); null until then. */
+  implementationStartedAt: z.number().int().nullable(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
@@ -150,6 +152,7 @@ export const statRecordSchema = z.object({
   implementer: implementerSchema,
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
+  implementationStartedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),
 });
 export type StatRecord = z.infer<typeof statRecordSchema>;

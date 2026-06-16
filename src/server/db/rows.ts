@@ -63,6 +63,7 @@ const ticketRowSchema = z.object({
   feasibility_context: z.number(),
   finished_at: z.number().nullable(),
   implementing_started_at: z.number().nullable(),
+  implementation_started_at: z.number().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -152,6 +153,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     feasibilityContext: row.feasibility_context === 1,
     finishedAt: row.finished_at,
     implementingStartedAt: row.implementing_started_at,
+    implementationStartedAt: row.implementation_started_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -297,7 +297,15 @@ export class Store {
         set("implementing_started_at", Date.now());
       }
     }
-    if (patch.stage !== undefined) set("stage", patch.stage);
+    if (patch.stage !== undefined) {
+      set("stage", patch.stage);
+      // Stamp the real work-start once: the first time the agent enters the `implementing`
+      // stage (not the column entry, which happens at queue time). Drives the accurate
+      // "implémenté en" badge. Never re-stamped, so re-entries keep the original start.
+      if (patch.stage === "implementing" && this.getTicket(id)?.implementationStartedAt == null) {
+        set("implementation_started_at", Date.now());
+      }
+    }
     if (patch.model !== undefined) set("model", patch.model);
     if (patch.effort !== undefined) set("effort", patch.effort);
     if (patch.implementerModel !== undefined) set("implementer_model", patch.implementerModel);

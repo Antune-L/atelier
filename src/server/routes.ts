@@ -36,6 +36,7 @@ interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
   listBranches(repoPath: string): Promise<string[]>;
+  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -504,6 +505,28 @@ export function createApiRoutes(deps: RouteDeps) {
       hub.pushTicket(merged);
       store.logEvent(params.id, "merged", {});
       return merged;
+    })
+    .post("/tickets/:id/check-merged", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (ticket.column !== "done" || ticket.kind !== "feature") {
+        return jsonError(set, HTTP_CONFLICT, "vérification réservée aux features en colonne Fini");
+      }
+      if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
+      if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(ticket.project);
+      let result: { merged: boolean; state: string };
+      try {
+        result = await deps.system.checkPrMerged(project.repoPath, ticket.prUrl);
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec gh pr view");
+      }
+      if (!result.merged) return { merged: false, state: result.state };
+      // Mirror /merged: stamp finishedAt so the board orders newest-first.
+      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
+      hub.pushTicket(merged);
+      store.logEvent(params.id, "merged", {});
+      return { merged: true, state: result.state, ticket: merged };
     })
     .post("/tickets/:id/retry", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);

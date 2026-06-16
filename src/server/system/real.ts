@@ -494,6 +494,13 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }> {
+    // Single read (no polling): a manual user-triggered check has no synchronous-merge
+    // read lag to absorb as in confirmMerged's auto-merge path.
+    const state = await this.prState(repoPath, prUrl);
+    return { merged: state === PR_STATE_MERGED, state };
+  }
+
   /**
    * Resolve the PR's true merge state, polling briefly to absorb GitHub read lag so a
    * synchronous merge isn't misread as unmerged. Returns the last seen state ("MERGED"

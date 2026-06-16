@@ -1,6 +1,7 @@
-import { Maximize2, Minimize2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
+import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +25,6 @@ const COMPACT_POLL_INTERVAL_MS = 4000;
 /** Distance (px) from the bottom within which the view is still considered "pinned". */
 const BOTTOM_THRESHOLD_PX = 24;
 
-const TITLE = "Terminal";
 const EMPTY_HINT = "La session démarre, en attente de la première sortie de l'agent…";
 
 /** Read-only polled view of an agent tmux pane (with setup phase). */
@@ -78,18 +78,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [data.output]);
 
-  // Escape exits fullscreen without bubbling to the drawer's own Escape handler.
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setFullscreen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [fullscreen]);
+  useFullscreenEscape(fullscreen, () => setFullscreen(false));
 
   // While a setup phase shows, the phase line already explains the empty pane.
   const placeholder = data.phase ? "" : EMPTY_HINT;
@@ -98,7 +87,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
     return (
       <pre
         ref={preRef}
-        aria-label={`${TITLE} (aperçu)`}
+        aria-label={`${TERMINAL_TITLE} (aperçu)`}
         className="pointer-events-none h-full min-h-0 w-full flex-1 overflow-hidden rounded-md bg-[#001219] p-2 font-mono text-[10px] leading-snug text-[#94d2bd]"
       >
         {error ?? (data.output || placeholder)}
@@ -115,20 +104,12 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
       )}
     >
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">{TITLE}</h3>
+        <h3 className="text-sm font-semibold">{TERMINAL_TITLE}</h3>
         <div className="flex items-center gap-2">
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
             lecture seule
           </span>
-          <button
-            type="button"
-            onClick={() => setFullscreen((v) => !v)}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-            aria-label={fullscreen ? "Réduire le terminal" : "Agrandir le terminal"}
-            title={fullscreen ? "Réduire" : "Plein écran"}
-          >
-            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </button>
+          <FullscreenToggle fullscreen={fullscreen} onToggle={() => setFullscreen((v) => !v)} />
         </div>
       </div>
       {error ? (
@@ -146,7 +127,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
             onScroll={handleScroll}
             tabIndex={0}
             role="log"
-            aria-label={`${TITLE} (sortie, lecture seule)`}
+            aria-label={`${TERMINAL_TITLE} (sortie, lecture seule)`}
             className={cn(
               "overflow-auto rounded-md bg-[#001219] p-3 font-mono text-xs leading-relaxed text-[#94d2bd]",
               fullscreen || fill ? "min-h-0 flex-1" : "max-h-[60vh] min-h-[12rem]",

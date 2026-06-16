@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { AGENT_EFFORTS } from "../shared/constants.ts";
+import { getErrorMessage } from "../shared/errors.ts";
 
 /**
  * Single source of machine-specific configuration. Everything that used to be
@@ -96,7 +97,7 @@ function loadConfig(): AppConfig {
   try {
     json = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`[config] JSON invalide (${CONFIG_PATH}): ${error instanceof Error ? error.message : error}`);
+    throw new Error(`[config] JSON invalide (${CONFIG_PATH}): ${getErrorMessage(error)}`);
   }
   const parsed = configSchema.safeParse(json);
   if (!parsed.success) {

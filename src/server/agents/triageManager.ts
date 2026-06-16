@@ -1,4 +1,5 @@
 import { TRIAGE_RAW_REPORT_MAX, TRIAGE_SLOT_ID, TRIAGE_TIMEOUT_MS } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
@@ -112,7 +113,7 @@ export class TriageManager {
       this.sessions.set(ticketId, session);
       void this.deliverWhenReady(ticketId, prompt, session);
     } catch (error) {
-      await this.failTriage(ticketId, error instanceof Error ? error.message : String(error));
+      await this.failTriage(ticketId, getErrorMessage(error));
     } finally {
       this.launching.delete(ticketId);
     }

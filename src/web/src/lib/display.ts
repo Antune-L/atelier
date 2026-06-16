@@ -1,7 +1,30 @@
-import { STAGE_LABELS, type Stage } from "@shared/constants";
+import {
+  AGENT_EFFORTS,
+  AGENT_EFFORT_LABELS,
+  AGENT_MODELS,
+  AGENT_MODEL_LABELS,
+  STAGE_LABELS,
+  type AgentEffort,
+  type AgentModel,
+  type Stage,
+} from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
 
+import type { TabOption } from "@/components/ui/tabs";
+
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "warning" | "success" | "info";
+
+/** Ready-made segmented-control options for the agent model picker. */
+export const AGENT_MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({
+  value: m,
+  label: AGENT_MODEL_LABELS[m],
+}));
+
+/** Ready-made segmented-control options for the agent reasoning-effort picker. */
+export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
+  value: e,
+  label: AGENT_EFFORT_LABELS[e],
+}));
 
 const TRIAGE_VERDICT_VARIANTS: Record<TriageVerdict, BadgeVariant> = {
   implementable: "success",

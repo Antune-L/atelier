@@ -38,6 +38,7 @@ const ticketRowSchema = z.object({
   research_plan: z.number(),
   base_branch: z.string().nullable(),
   prd_markdown: z.string().nullable(),
+  agent_summary: z.string().nullable(),
   column_name: z.string(),
   stage: z.string().nullable(),
   model: z.string().nullable(),
@@ -63,6 +64,7 @@ const ticketRowSchema = z.object({
   feasibility_context: z.number(),
   finished_at: z.number().nullable(),
   implementing_started_at: z.number().nullable(),
+  implementation_started_at: z.number().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -128,6 +130,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     researchPlan: row.research_plan === 1,
     baseBranch: row.base_branch,
     prdMarkdown: row.prd_markdown,
+    agentSummary: row.agent_summary,
     column: ticketColumnSchema.parse(row.column_name),
     stage: ticketStageSchema.parse(row.stage),
     model: row.model === null ? null : agentModelSchema.parse(row.model),
@@ -152,6 +155,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     feasibilityContext: row.feasibility_context === 1,
     finishedAt: row.finished_at,
     implementingStartedAt: row.implementing_started_at,
+    implementationStartedAt: row.implementation_started_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

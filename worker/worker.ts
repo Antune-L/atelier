@@ -21,6 +21,9 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
+import type { ChannelEvent, WorkerToolName } from "../src/shared/protocol.ts";
+import { WORKER_TOOLS, isWorkerToolName, workerOutboundSchema } from "../src/shared/protocol.ts";
+
 const WORKER_VERSION = "0.0.0";
 const RECONNECT_DELAY_MS = 1500;
 // Claude Code's channel handler only accepts this exact method, with
@@ -40,114 +43,9 @@ const env = envSchema.parse({
   BACKEND_WS: process.env.BACKEND_WS,
 });
 
-// ---- backend WS frames ----
-
-const toolResultSchema = z.object({
-  type: z.literal("tool_result"),
-  id: z.string(),
-  ok: z.boolean(),
-  result: z.string(),
-});
-
-const eventSchema = z.object({
-  type: z.literal("event"),
-  event: z.discriminatedUnion("type", [
-    z.object({ type: z.literal("ticket"), payload: z.string() }),
-    z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
-    z.object({ type: z.literal("prd_validated"), note: z.string() }),
-    z.object({ type: z.literal("nudge"), message: z.string() }),
-    z.object({ type: z.literal("user_comment"), body: z.string() }),
-  ]),
-});
-
-const outboundSchema = z.discriminatedUnion("type", [toolResultSchema, eventSchema]);
-
-// ---- tool arg schemas ----
-
-const stageEnum = z.enum([
-  "queued",
-  "planning",
-  "awaiting_answers",
-  "implementing",
-  "reviewing",
-  "fixing",
-  "testing",
-  "opening_pr",
-  "done",
-  "failed",
-]);
-
-// Mirror of the shared triageResultSchema; kept tolerant on purpose (the backend re-validates
-// strictly with submitTriageArgsSchema before persisting). suggested* stay loose strings here.
-const triageVerdictEnum = z.enum(["implementable", "needs_info", "needs_rework"]);
-const submitTriageSchema = z.object({
-  verdict: triageVerdictEnum,
-  summary: z.string(),
-  reasons: z.array(z.string()).default([]),
-  questions: z.array(z.string()).default([]),
-  files: z.array(z.string()).default([]),
-  suggestedModel: z.string().nullable().default(null),
-  suggestedEffort: z.string().nullable().default(null),
-});
-
-// Mirror of the shared submitFeasibilityArgsSchema; tolerant on purpose (the backend re-validates
-// strictly before persisting). One entry per imported ticket, keyed by ticketId.
-const submitFeasibilitySchema = z.object({
-  results: z.array(submitTriageSchema.extend({ ticketId: z.string().min(1) })),
-});
-
-const TOOLS = [
-  {
-    name: "update_stage",
-    description: "Met à jour le badge d'étape de la carte du ticket.",
-    schema: z.object({ stage: stageEnum }),
-  },
-  {
-    name: "ask_user",
-    description:
-      "Pose une question à l'utilisateur. La session reste en vie ; la réponse arrive via un événement de channel.",
-    schema: z.object({ question: z.string().min(1) }),
-  },
-  {
-    name: "submit_prd",
-    description: "Soumet le PRD (markdown). Déplace la carte en colonne PRD à implémenter.",
-    schema: z.object({ markdown: z.string().min(1) }),
-  },
-  {
-    name: "submit_answer",
-    description:
-      "Soumet la réponse finale (markdown) d'un ticket « ask ». Le backend la publie en commentaire et clôt le ticket.",
-    schema: z.object({ answer: z.string().min(1) }),
-  },
-  {
-    name: "done",
-    description: "Signale la fin du ticket avec l'URL de la PR draft. Le backend vérifie avant de clôturer.",
-    schema: z.object({ pr_url: z.string().url() }),
-  },
-  {
-    name: "fail",
-    description: "Signale un échec avec une raison et des findings.",
-    schema: z.object({ reason: z.string().min(1), findings: z.string().default("") }),
-  },
-  {
-    name: "submit_triage",
-    description:
-      "Soumet le verdict de faisabilité (triage en lecture seule). Le backend le persiste puis détruit la session.",
-    schema: submitTriageSchema,
-  },
-  {
-    name: "submit_feasibility",
-    description:
-      "Soumet en UN SEUL appel les verdicts de faisabilité d'un lot (un par ticket importé, keyé par ticketId). Le backend les persiste puis détruit la session.",
-    schema: submitFeasibilitySchema,
-  },
-] as const;
-
-type ToolName = (typeof TOOLS)[number]["name"];
-
-function isToolName(value: string): value is ToolName {
-  return TOOLS.some((t) => t.name === value);
-}
+// The wire protocol (WS frames, tool registry, channel events) is the single source of truth
+// in src/shared/protocol.ts. This worker is bundled standalone, so it imports that module by
+// relative path; everything below derives from it (no hand-kept copies).
 
 // ---- backend bridge ----
 
@@ -156,7 +54,7 @@ class BackendBridge {
   private readonly pending = new Map<string, (result: { ok: boolean; result: string }) => void>();
   private callSeq = 0;
 
-  constructor(private readonly onEvent: (event: z.infer<typeof eventSchema>["event"]) => Promise<void>) {}
+  constructor(private readonly onEvent: (event: ChannelEvent) => Promise<void>) {}
 
   connect(): void {
     const socket = new WebSocket(env.BACKEND_WS);
@@ -168,7 +66,7 @@ class BackendBridge {
 
     socket.addEventListener("message", (msg) => {
       const text = typeof msg.data === "string" ? msg.data : "";
-      const parsed = outboundSchema.safeParse(JSON.parse(text));
+      const parsed = workerOutboundSchema.safeParse(JSON.parse(text));
       if (!parsed.success) return;
       const data = parsed.data;
       if (data.type === "tool_result") {
@@ -190,7 +88,7 @@ class BackendBridge {
     socket.addEventListener("error", () => socket.close());
   }
 
-  callTool(name: ToolName, args: unknown): Promise<{ ok: boolean; result: string }> {
+  callTool(name: WorkerToolName, args: unknown): Promise<{ ok: boolean; result: string }> {
     return new Promise((resolve) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         resolve({ ok: false, result: "backend injoignable" });
@@ -221,8 +119,6 @@ const server = new Server(
   },
 );
 
-type ChannelEvent = z.infer<typeof eventSchema>["event"];
-
 /** Render a backend event as the prompt text injected into the session. */
 function renderEventContent(event: ChannelEvent): string {
   switch (event.type) {
@@ -251,23 +147,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   // Advertise the real JSON Schema per tool: without declared `properties` the client
   // can't tell that e.g. `submit_feasibility.results` is an array, so it serializes nested
   // payloads as a JSON *string* and zod then rejects them ("Arguments invalides").
-  tools: TOOLS.map((t) => ({
+  tools: WORKER_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
-    inputSchema: zodToJsonSchema(t.schema, { target: "openApi3", $refStrategy: "none" }),
+    inputSchema: zodToJsonSchema(t.argsSchema, { target: "openApi3", $refStrategy: "none" }),
   })),
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  if (!isToolName(name)) {
+  if (!isWorkerToolName(name)) {
     return { isError: true, content: [{ type: "text", text: `Tool inconnu: ${name}` }] };
   }
-  const def = TOOLS.find((t) => t.name === name);
+  const def = WORKER_TOOLS.find((t) => t.name === name);
   if (!def) {
     return { isError: true, content: [{ type: "text", text: `Tool inconnu: ${name}` }] };
   }
-  const parsed = def.schema.safeParse(args ?? {});
+  const parsed = def.argsSchema.safeParse(args ?? {});
   if (!parsed.success) {
     return { isError: true, content: [{ type: "text", text: `Arguments invalides: ${parsed.error.message}` }] };
   }

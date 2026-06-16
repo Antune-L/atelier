@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
 
-import type { ChannelEvent, WorkerOutbound } from "../shared/schemas.ts";
+import type { ChannelEvent, WorkerOutbound, WorkerToolName } from "../shared/schemas.ts";
 import { workerInboundSchema } from "../shared/schemas.ts";
 
 export interface WorkerSocketData {
@@ -15,7 +15,8 @@ export interface ToolCallContext {
   ticketId: string;
   slotId: number;
   callId: string;
-  name: string;
+  /** Validated worker tool name (from workerToolCallSchema) — drives the coordinator's typed dispatch. */
+  name: WorkerToolName;
   args: unknown;
 }
 

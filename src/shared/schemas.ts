@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -41,7 +41,7 @@ export const TRIAGE_STATUSES = ["none", "running", "done", "failed"] as const;
 export const triageStatusSchema = z.enum(TRIAGE_STATUSES);
 export type TriageStatus = z.infer<typeof triageStatusSchema>;
 
-export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+export { TRIAGE_VERDICTS };
 export const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 export type TriageVerdict = z.infer<typeof triageVerdictSchema>;
 
@@ -102,6 +102,8 @@ export const ticketSchema = z.object({
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
+  /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
+  agentSummary: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
   /** Orchestrator agent overrides (null = fall back to the server config defaults). */
@@ -133,6 +135,8 @@ export const ticketSchema = z.object({
   finishedAt: z.number().int().nullable(),
   /** Epoch ms when the ticket last entered the "À implémenter" column; null until it first does. */
   implementingStartedAt: z.number().int().nullable(),
+  /** Epoch ms when the agent first entered the `implementing` stage (real work start, excludes queue wait); null until then. */
+  implementationStartedAt: z.number().int().nullable(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
@@ -150,6 +154,7 @@ export const statRecordSchema = z.object({
   implementer: implementerSchema,
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
+  implementationStartedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),
 });
 export type StatRecord = z.infer<typeof statRecordSchema>;
@@ -241,25 +246,32 @@ export function deriveTitleFromDescription(description: string): string {
   return `${firstLine.slice(0, DERIVED_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
-export const createTicketSchema = z
-  .object({
+/**
+ * Per-ticket options shared by single creation and CSV import: the target project plus the
+ * pipeline toggles and agent knobs picked at creation (null = fall back to server config).
+ */
+const ticketBatchOptionsSchema = z.object({
+  project: projectKeySchema,
+  prdEnabled: z.boolean().default(false),
+  prDraft: z.boolean().default(true),
+  autoMerge: z.boolean().default(false),
+  addScreenshots: z.boolean().default(false),
+  verifyFeature: z.boolean().default(false),
+  researchPlan: z.boolean().default(false),
+  // Branch the worktree forks from and the PR targets (null = project default).
+  baseBranch: baseBranchSchema.nullable().default(null),
+  // Implementation agent knobs picked at creation (null = fall back to server config).
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
+  implementerModel: agentModelSchema.nullable().default(null),
+  implementerEffort: agentEffortSchema.nullable().default(null),
+  implementer: implementerSchema.default("claude"),
+});
+
+export const createTicketSchema = ticketBatchOptionsSchema
+  .extend({
     title: z.string().default(""),
     description: z.string().default(""),
-    project: projectKeySchema,
-    prdEnabled: z.boolean().default(false),
-    prDraft: z.boolean().default(true),
-    autoMerge: z.boolean().default(false),
-    addScreenshots: z.boolean().default(false),
-    verifyFeature: z.boolean().default(false),
-    researchPlan: z.boolean().default(false),
-    // Branch the worktree forks from and the PR targets (null = project default).
-    baseBranch: baseBranchSchema.nullable().default(null),
-    // Implementation agent knobs picked at creation (null = fall back to server config).
-    model: agentModelSchema.nullable().default(null),
-    effort: agentEffortSchema.nullable().default(null),
-    implementerModel: agentModelSchema.nullable().default(null),
-    implementerEffort: agentEffortSchema.nullable().default(null),
-    implementer: implementerSchema.default("claude"),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
   })
@@ -281,21 +293,8 @@ export type ImportTicketRow = z.infer<typeof importTicketRowSchema>;
  * title/description/start, picked once for the whole batch); runFeasibility kicks off the batch
  * feasibility analysis after creation.
  */
-export const importTicketsSchema = z.object({
-  project: projectKeySchema,
+export const importTicketsSchema = ticketBatchOptionsSchema.extend({
   rows: z.array(importTicketRowSchema).min(1).max(IMPORT_MAX_ROWS),
-  prdEnabled: z.boolean().default(false),
-  prDraft: z.boolean().default(true),
-  autoMerge: z.boolean().default(false),
-  addScreenshots: z.boolean().default(false),
-  verifyFeature: z.boolean().default(false),
-  researchPlan: z.boolean().default(false),
-  baseBranch: baseBranchSchema.nullable().default(null),
-  model: agentModelSchema.nullable().default(null),
-  effort: agentEffortSchema.nullable().default(null),
-  implementerModel: agentModelSchema.nullable().default(null),
-  implementerEffort: agentEffortSchema.nullable().default(null),
-  implementer: implementerSchema.default("claude"),
   runFeasibility: z.boolean().default(false),
 });
 export type ImportTicketsInput = z.infer<typeof importTicketsSchema>;
@@ -327,6 +326,12 @@ export const moveTicketSchema = z.object({
   confirmed: z.boolean().default(false),
 });
 export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
+
+/** Start the batch feasibility analysis on a set of already-existing tickets (e.g. all of TODO). */
+export const analyzeTicketsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1),
+});
+export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
 
 /** One open GitHub PR surfaced by `gh pr list` (and the unit the user picks to review). */
 export const openPrSchema = z.object({
@@ -429,81 +434,40 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
 ]);
 export type WsClientEvent = z.infer<typeof wsClientEventSchema>;
 
-// ---- Worker channel: agent → backend (tool calls over WS) ----
+// ---- Worker channel ----
+// The wire protocol's single source of truth lives in ./protocol.ts (kept dependency-light so
+// the standalone worker bundle can import it). Re-exported here so existing importers are
+// unaffected. The two STRICT coordinator-facing arg schemas below stay in this module because
+// they reference the full stageSchema / triageResultSchema (which carry server-shared semantics).
 
-export const workerToolNameSchema = z.enum([
-  "update_stage",
-  "ask_user",
-  "submit_prd",
-  "submit_answer",
-  "done",
-  "fail",
-  "submit_triage",
-  "submit_feasibility",
-]);
-export type WorkerToolName = z.infer<typeof workerToolNameSchema>;
+export {
+  workerToolNameSchema,
+  askUserArgsSchema,
+  submitPrdArgsSchema,
+  submitAnswerArgsSchema,
+  doneArgsSchema,
+  failArgsSchema,
+  workerHelloSchema,
+  workerToolCallSchema,
+  workerStopSchema,
+  workerInboundSchema,
+  channelEventSchema,
+  workerOutboundSchema,
+} from "./protocol.ts";
+export type { WorkerToolName, WorkerInbound, ChannelEvent, WorkerOutbound } from "./protocol.ts";
 
+/**
+ * Strict coordinator-facing `update_stage` args: accepts the FULL stage set (the worker only
+ * advertises the agent-settable subset via protocol.ts, but the coordinator never tightens
+ * this — see protocol.ts AGENT_SETTABLE_STAGES).
+ */
 export const updateStageArgsSchema = z.object({
   stage: stageSchema,
-});
-export const askUserArgsSchema = z.object({
-  question: z.string().min(1),
-});
-export const submitPrdArgsSchema = z.object({
-  markdown: z.string().min(1),
-});
-/** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
-export const submitAnswerArgsSchema = z.object({
-  answer: z.string().min(1),
-});
-export const doneArgsSchema = z.object({
-  pr_url: z.string().url(),
-});
-export const failArgsSchema = z.object({
-  reason: z.string().min(1),
-  findings: z.string().default(""),
 });
 /** Feasibility verdict the triage session submits via the worker channel (same shape as the report). */
 export const submitTriageArgsSchema = triageResultSchema;
 /** Batch feasibility verdicts the orchestrator session submits once (one entry per imported ticket). */
 export const submitFeasibilityArgsSchema = z.object({ results: z.array(feasibilityResultSchema) });
-
-// ---- Worker channel: WS frames worker.ts ↔ backend ----
-
-export const workerHelloSchema = z.object({
-  type: z.literal("hello"),
-  ticketId: z.string(),
-  slotId: z.number().int(),
-});
-
-export const workerToolCallSchema = z.object({
-  type: z.literal("tool_call"),
-  id: z.string(),
-  name: workerToolNameSchema,
-  args: z.unknown(),
-});
-
-export const workerStopSchema = z.object({
-  type: z.literal("stop"),
-  sessionId: z.string().nullable().default(null),
-});
-
-export const workerInboundSchema = z.discriminatedUnion("type", [
-  workerHelloSchema,
-  workerToolCallSchema,
-  workerStopSchema,
-]);
-export type WorkerInbound = z.infer<typeof workerInboundSchema>;
-
-/** backend → worker.ts → injected as channel notification into the Claude session. */
-export const channelEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("ticket"), payload: z.string() }),
-  z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
-  z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
-  z.object({ type: z.literal("nudge"), message: z.string() }),
-  z.object({ type: z.literal("user_comment"), body: z.string() }),
-]);
-export type ChannelEvent = z.infer<typeof channelEventSchema>;
 
 // ---- Interactive terminal channel: browser ↔ backend (xterm.js ↔ tmux pane) ----
 
@@ -541,13 +505,6 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("exit") }),
 ]);
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
-
-/** backend → worker.ts: either a channel event, or a tool result for a pending tool_call. */
-export const workerOutboundSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("event"), event: channelEventSchema }),
-  z.object({ type: z.literal("tool_result"), id: z.string(), ok: z.boolean(), result: z.string() }),
-]);
-export type WorkerOutbound = z.infer<typeof workerOutboundSchema>;
 
 /** In-app self-update outcome: reload the webview in place (frontend-only diff) or relaunch the process. */
 export const updateModeSchema = z.enum(["reload", "relaunch"]);

@@ -35,6 +35,15 @@ export const COLUMN_ORDER: Column[] = [
   "abandoned",
 ];
 
+/** Field a sortable column ranks its tickets by; absent columns aren't sortable. */
+export const COLUMN_SORT_FIELD: Partial<Record<Column, "createdAt" | "finishedAt">> = {
+  todo: "createdAt",
+  implementing: "createdAt",
+  prd: "createdAt",
+  done: "finishedAt",
+  merged: "finishedAt",
+};
+
 /** Implementation agent knobs the user can pick per ticket (CLI: --model / --effort). */
 export const AGENT_MODELS = ["opus", "sonnet", "haiku"] as const;
 export type AgentModel = (typeof AGENT_MODELS)[number];
@@ -112,6 +121,13 @@ export const CUSTOM_PROFILE_LABEL = "Personnalisé";
 export const KINDS = ["feature", "review", "ask", "clean"] as const;
 export type Kind = (typeof KINDS)[number];
 
+/** Local branch suffix for a clean (PR cleaner) worktree: keeps it distinct from the PR head branch (which may already be checked out in another worktree) while still pushing back to the PR head. */
+export const CLEANER_BRANCH_SUFFIX = "-cleaner";
+
+/** The PR cleaner runs Opus at low effort: triaging reviewer feedback is light work that doesn't warrant a heavier reasoning budget. */
+export const CLEANER_MODEL: AgentModel = "opus";
+export const CLEANER_EFFORT: AgentEffort = "low";
+
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;
 export type ReviewDepth = (typeof REVIEW_DEPTHS)[number];
@@ -166,6 +182,9 @@ export const ACTIVE_STAGES: Stage[] = [
   "opening_pr",
 ];
 
+/** Triage feasibility verdicts an agent can return. */
+export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+
 /** Columns whose tickets are counted as a successful outcome in the stats dashboard. */
 export const SUCCESS_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered"];
 /** Columns whose tickets are counted as a failed outcome in the stats dashboard. */
@@ -190,10 +209,20 @@ export const WATCHDOG_TIMEOUT_MS = 45 * 60 * 1000;
 export const AUTO_NUDGE_MAX = 1;
 /** Max in-place relaunches of a dead/stalled session before giving up (preserves the worktree). */
 export const AUTO_RECLAIM_MAX = 2;
+/** Audit event logged when any ticket (feature/review/clean/ask) is first inserted. */
+export const CREATED_EVENT = "created";
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */
 export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 /** Audit event logged on each failed done() gate; backs the consecutive-failure loop guard. */
 export const DONE_GATE_FAILED_EVENT = "done_gate_failed";
+/**
+ * Max automatic rebase/conflict-resolution sessions spawned when an auto-merge fails (branch behind
+ * base / conflicts). Bounds the loop: the resolution session can itself reach a failing merge, which
+ * would otherwise re-trigger resolution forever. Past this the card lands in "failed" for manual review.
+ */
+export const AUTO_MERGE_RESOLVE_MAX = 1;
+/** Audit event logged on each auto-triggered merge-conflict resolution; backs the resolve counter. */
+export const AUTO_MERGE_RESOLVE_EVENT = "auto_merge_resolve";
 /**
  * Consecutive failed done() gates (no intervening protocol event — a tight within-turn loop)
  * tolerated before the card is treated as a real stall. Below this, a failure is a false positive:

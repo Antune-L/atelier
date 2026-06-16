@@ -1,21 +1,18 @@
 import { useId } from "react";
 
 import {
-  AGENT_EFFORTS,
-  AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
-  AGENT_MODEL_LABELS,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
   type AgentEffort,
   type AgentModel,
   type Implementer,
 } from "@shared/constants";
-import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
 
 import { Label } from "@/components/ui/input";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { resolveAgentDefaults } from "@/lib/agentDefaults";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 
 function Field({ labelId, label, children }: { labelId: string; label: string; children: React.ReactNode }) {
   return (
@@ -52,8 +49,8 @@ export function ImplementationAgentFields({
   onImplementerEffortChange,
   onImplementerChange,
 }: ImplementationAgentFieldsProps) {
-  const { composerAvailable, defaultModel, defaultEffort, defaultImplementerModel, defaultImplementerEffort } =
-    useCapabilities();
+  const capabilities = useCapabilities();
+  const { composerAvailable } = capabilities;
   const id = useId();
   const modelLabelId = `${id}-model`;
   const effortLabelId = `${id}-effort`;
@@ -62,19 +59,13 @@ export function ImplementationAgentFields({
   const implementerLabelId = `${id}-implementer`;
 
   // A null per-ticket knob follows the configured default, so highlight that tab directly.
-  const parsedDefaultModel = agentModelSchema.safeParse(defaultModel);
-  const resolvedDefaultModel = parsedDefaultModel.success ? parsedDefaultModel.data : null;
-  const parsedDefaultEffort = agentEffortSchema.safeParse(defaultEffort);
-  const resolvedDefaultEffort = parsedDefaultEffort.success ? parsedDefaultEffort.data : null;
-  const parsedDefaultImplementerModel = agentModelSchema.safeParse(defaultImplementerModel);
-  const resolvedDefaultImplementerModel = parsedDefaultImplementerModel.success ? parsedDefaultImplementerModel.data : null;
-  const parsedDefaultImplementerEffort = agentEffortSchema.safeParse(defaultImplementerEffort);
-  const resolvedDefaultImplementerEffort = parsedDefaultImplementerEffort.success
-    ? parsedDefaultImplementerEffort.data
-    : null;
+  const {
+    model: resolvedDefaultModel,
+    effort: resolvedDefaultEffort,
+    implementerModel: resolvedDefaultImplementerModel,
+    implementerEffort: resolvedDefaultImplementerEffort,
+  } = resolveAgentDefaults(capabilities);
 
-  const modelOptions: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
-  const effortOptions: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
   const implementerOptions: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
     value: i,
     label: i === "composer" && !composerAvailable ? `${IMPLEMENTER_LABELS[i]} — Cursor non détecté` : IMPLEMENTER_LABELS[i],
@@ -85,7 +76,7 @@ export function ImplementationAgentFields({
     <div className="flex flex-col gap-3">
       <Field labelId={modelLabelId} label="Modèle (orchestrateur)">
         <Tabs
-          options={modelOptions}
+          options={AGENT_MODEL_OPTIONS}
           value={model ?? resolvedDefaultModel}
           onChange={(value) => onModelChange(value === resolvedDefaultModel ? null : value)}
           aria-labelledby={modelLabelId}
@@ -93,7 +84,7 @@ export function ImplementationAgentFields({
       </Field>
       <Field labelId={effortLabelId} label="Effort (orchestrateur)">
         <Tabs
-          options={effortOptions}
+          options={AGENT_EFFORT_OPTIONS}
           value={effort ?? resolvedDefaultEffort}
           onChange={(value) => onEffortChange(value === resolvedDefaultEffort ? null : value)}
           aria-labelledby={effortLabelId}
@@ -112,7 +103,7 @@ export function ImplementationAgentFields({
           <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
           <Field labelId={implementerModelLabelId} label="Modèle">
             <Tabs
-              options={modelOptions}
+              options={AGENT_MODEL_OPTIONS}
               value={implementerModel ?? resolvedDefaultImplementerModel}
               onChange={(value) => onImplementerModelChange(value === resolvedDefaultImplementerModel ? null : value)}
               aria-labelledby={implementerModelLabelId}
@@ -120,7 +111,7 @@ export function ImplementationAgentFields({
           </Field>
           <Field labelId={implementerEffortLabelId} label="Effort">
             <Tabs
-              options={effortOptions}
+              options={AGENT_EFFORT_OPTIONS}
               value={implementerEffort ?? resolvedDefaultImplementerEffort}
               onChange={(value) => onImplementerEffortChange(value === resolvedDefaultImplementerEffort ? null : value)}
               aria-labelledby={implementerEffortLabelId}

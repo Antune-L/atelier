@@ -10,6 +10,7 @@ import {
   WS_PATH_TERMINAL,
   WS_PATH_WORKER,
 } from "../shared/constants.ts";
+import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -22,6 +23,7 @@ import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
 import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
+import { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
@@ -170,6 +172,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const clientHub = new ClientHub(store);
   const workerHub = new WorkerHub();
   const notifier = new Notifier(clientHub, opts.onNotify);
+  const lifecycle = new TicketLifecycle(store, clientHub, notifier);
   const triageManager = new TriageManager(store, system, workerHub, clientHub, {
     backendWs,
     projectRoot: resourcesRoot,
@@ -182,7 +185,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   });
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
-  const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, {
+  const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, lifecycle, {
     backendHttp,
     backendWs,
     projectRoot: resourcesRoot,
@@ -193,6 +196,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     clientHub,
     workerHub,
     notifier,
+    lifecycle,
     slotManager,
     triageManager,
     feasibilityManager,
@@ -211,6 +215,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const api = createApiRoutes({
     store,
     hub: clientHub,
+    lifecycle,
     slots: slotManager,
     coordinator,
     system,
@@ -237,7 +242,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return { error: "NOT_FOUND" };
       }
       set.status = 500;
-      return { error: error instanceof Error ? error.message : String(error) };
+      return { error: getErrorMessage(error) };
     });
 
   // CORS for the Vite dev server.

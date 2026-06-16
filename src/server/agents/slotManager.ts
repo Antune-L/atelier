@@ -1,18 +1,23 @@
 import { join } from "node:path";
 
 import {
+  AUTO_MERGE_RESOLVE_EVENT,
+  AUTO_MERGE_RESOLVE_MAX,
   AUTO_RECLAIM_EVENT,
   AUTO_RECLAIM_MAX,
+  CLEANER_BRANCH_SUFFIX,
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
   TERMINAL_STAGES,
   type Column,
 } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
+import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
@@ -136,6 +141,7 @@ export class SlotManager {
     private readonly hub: ClientHub,
     private readonly workerHub: WorkerHub,
     private readonly notifier: Notifier,
+    private readonly lifecycle: TicketLifecycle,
     private readonly config: SlotManagerConfig,
   ) {}
 
@@ -164,9 +170,9 @@ export class SlotManager {
    * via done(). Unlike startTicket it never queues — with no free slot it surfaces a hint and bails,
    * leaving the card in its failed state so the user can retry once a slot frees up.
    */
-  async resolveMergeConflicts(ticketId: string): Promise<void> {
+  async resolveMergeConflicts(ticketId: string): Promise<boolean> {
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket || ticket.branch === null || ticket.prUrl === null) return;
+    if (!ticket || ticket.branch === null || ticket.prUrl === null) return false;
     const free = this.store.findFreeSlot();
     if (!free) {
       this.touch(
@@ -174,7 +180,7 @@ export class SlotManager {
           error: "Aucun slot libre pour résoudre les conflits — réessaie une fois un slot libéré.",
         }),
       );
-      return;
+      return false;
     }
     this.store.logEvent(ticketId, "resolve_conflicts_started", { prUrl: ticket.prUrl });
     // opus low per the feature spec; the flag routes the conflict-resolution contract at delivery.
@@ -190,6 +196,7 @@ export class SlotManager {
       }),
     );
     await this.launchInSlot(free.id, ticketId);
+    return true;
   }
 
   /**
@@ -331,9 +338,20 @@ export class SlotManager {
     const cleanFix = ticket.kind === "clean" && ticket.prHeadBranch !== null;
     // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
     let branch = `feat/${ticket.id}-${slug}`;
-    if (resolving && ticket.branch !== null) branch = ticket.branch;
-    else if (reviewFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
-    else if (cleanFix && ticket.prHeadBranch !== null) branch = ticket.prHeadBranch;
+    // For an existing-branch checkout (resolving/reviewFix/cleanFix), the origin ref to start from.
+    // A clean ticket's local branch is suffixed to avoid colliding with the PR head branch when it is
+    // already checked out in another worktree; it still starts from and pushes back to the PR head.
+    let startBranch: string | null = null;
+    if (resolving && ticket.branch !== null) {
+      branch = ticket.branch;
+      startBranch = ticket.branch;
+    } else if (reviewFix && ticket.prHeadBranch !== null) {
+      branch = ticket.prHeadBranch;
+      startBranch = ticket.prHeadBranch;
+    } else if (cleanFix && ticket.prHeadBranch !== null) {
+      branch = `${ticket.prHeadBranch}${CLEANER_BRANCH_SUFFIX}`;
+      startBranch = ticket.prHeadBranch;
+    }
     const sessionName = `ticket-${ticket.id}`;
 
     this.store.updateSlot(slotId, {
@@ -368,8 +386,9 @@ export class SlotManager {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
-          await this.system.fetch(project.repoPath, branch);
-          await this.system.worktreeAddExisting(project.repoPath, path, branch);
+          const start = startBranch ?? branch;
+          await this.system.fetch(project.repoPath, start);
+          await this.system.worktreeAddExisting(project.repoPath, path, branch, start);
         } else {
           await this.system.worktreeAdd({
             repoPath: project.repoPath,
@@ -423,7 +442,7 @@ export class SlotManager {
       void this.deliverContractWhenReady(ticket.id);
     } catch (error) {
       this.clearPhase(ticketId);
-      this.markFailed(ticketId, slotId, error instanceof Error ? error.message : String(error));
+      this.markFailed(ticketId, slotId, getErrorMessage(error));
     }
   }
 
@@ -606,11 +625,12 @@ export class SlotManager {
         log.info("gate done échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
         return { ok: false, reason: gate.reason };
       }
-      this.touch(this.store.updateTicket(ticketId, { stage: "stalled", error: gate.reason, finishedAt: Date.now() }));
-      this.store.updateSlot(slotId, { status: "stalled" });
-      this.hub.pushSlots(this.store.listSlots());
       log.warn("gate done échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
-      await this.notifier.notify("Gate done échouée", `${ticket.title}: ${gate.reason}`);
+      await this.lifecycle.stall(
+        ticketId,
+        { title: "Gate done échouée", body: `${ticket.title}: ${gate.reason}` },
+        { error: gate.reason },
+      );
       return { ok: false, reason: gate.reason };
     }
     log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
@@ -631,8 +651,20 @@ export class SlotManager {
         column = "failed";
         this.store.logEvent(ticketId, "auto_merge_failed", { reason: merge.reason });
         log.warn("auto-merge échoué", { ticketId, reason: merge.reason });
+        // Auto-merge failures (branch behind base / conflicts) are the top terminal-failure cause.
+        // Instead of parking the card in "failed" for a manual resolve, spawn a rebase/resolution
+        // session automatically (bounded by AUTO_MERGE_RESOLVE_MAX to break the resolve→fail loop).
+        if (await this.tryAutoResolveMerge(ticket, slotId, prUrl, merge.reason)) {
+          return { ok: true, reason: "" };
+        }
       }
     }
+
+    // Capture the agent's own work summary from the PR description (feature tickets that actually
+    // landed in done/merged; a review/clean ticket's PR body is not the agent's work, and a
+    // merge-failed ticket never surfaces it). Read before releasing the slot, while the worktree is
+    // still present for gh's cwd.
+    const agentSummary = ticket.kind === "feature" && !mergeError ? await this.system.fetchPrSummary(path, prUrl) : null;
 
     await this.releaseSlot(slotId, ticket);
     this.touch(
@@ -644,6 +676,7 @@ export class SlotManager {
         // The run reached done(): any conflict-resolution session is over (cleared on both outcomes).
         resolvingConflicts: false,
         error: mergeError,
+        agentSummary,
         finishedAt: Date.now(),
       }),
     );
@@ -651,6 +684,39 @@ export class SlotManager {
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
     this.pumpQueue();
     return { ok: true, reason: "" };
+  }
+
+  /**
+   * On an auto-merge failure, automatically spawn a rebase/conflict-resolution session instead of
+   * leaving the card in "failed" for a manual trigger. Bounded by AUTO_MERGE_RESOLVE_MAX (counted
+   * from AUTO_MERGE_RESOLVE_EVENT) so a resolution session that itself reaches a failing merge can't
+   * loop forever — past the budget the caller falls through to the normal failed landing.
+   *
+   * Returns true once it has taken over the card (slot released, resolution session launched); the
+   * caller must then stop and NOT mark the ticket failed. Returns false to defer to the failed path —
+   * either the budget is spent, or no slot could be claimed for the resolution session.
+   */
+  private async tryAutoResolveMerge(ticket: Ticket, slotId: number, prUrl: string, reason: string): Promise<boolean> {
+    if (this.store.getAutoMergeResolveCount(ticket.id) >= AUTO_MERGE_RESOLVE_MAX) return false;
+    // resolveMergeConflicts reads branch + prUrl from the store and grabs a free slot, so persist the
+    // PR URL and free the current slot first (the just-freed slot is the one it reuses, when nothing
+    // else stole it during releaseSlot's async cleanup).
+    this.store.updateTicket(ticket.id, { prUrl });
+    await this.releaseSlot(slotId, ticket);
+    const launched = await this.resolveMergeConflicts(ticket.id);
+    if (!launched) {
+      // No slot was available for the resolution session: defer to the caller's failed landing. The
+      // budget event is NOT logged, so a later retry (manual or once a slot frees) still has its turn.
+      // pumpQueue is the caller's responsibility on the failed path.
+      return false;
+    }
+    this.store.logEvent(ticket.id, AUTO_MERGE_RESOLVE_EVENT, { reason });
+    log.info("auto-merge échoué — résolution de conflits automatique lancée", { ticketId: ticket.id, reason });
+    await this.notifier.notify("Auto-merge en conflit", `${ticket.title} → rebase automatique en cours`);
+    // The resolution session already holds its slot (claimed synchronously inside resolveMergeConflicts);
+    // the caller skips its own pumpQueue on this early-return path, so wake any other queued ticket here.
+    this.pumpQueue();
+    return true;
   }
 
   /**
@@ -732,20 +798,8 @@ export class SlotManager {
 
   private markFailed(ticketId: string, slotId: number, reason: string): void {
     this.clearPhase(ticketId);
-    this.touch(
-      this.store.updateTicket(ticketId, {
-        column: "failed",
-        stage: "failed",
-        error: reason,
-        resolvingConflicts: false,
-        finishedAt: Date.now(),
-      }),
-    );
-    this.store.updateSlot(slotId, { status: "failed" });
-    this.hub.pushSlots(this.store.listSlots());
-    this.store.logEvent(ticketId, "failed", { reason });
+    this.lifecycle.markLaunchFailed(ticketId, slotId, reason);
     log.error("ticket en échec", { ticketId, slotId, reason });
-    void this.notifier.notify("Ticket en échec", `${reason}`);
   }
 
   private touch(ticket: Ticket): void {
@@ -877,7 +931,7 @@ export class SlotManager {
       await this.relaunchInPlace(ticket.slotId, ticketId);
     } catch (error) {
       this.clearPhase(ticketId);
-      log.error("auto-reclaim échoué", { ticketId, error: error instanceof Error ? error.message : String(error) });
+      log.error("auto-reclaim échoué", { ticketId, error: getErrorMessage(error) });
       return "escalate";
     }
     return "reclaimed";

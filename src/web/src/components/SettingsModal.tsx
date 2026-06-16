@@ -1,11 +1,18 @@
-import { Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import {
-  AGENT_EFFORTS,
-  AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
-  AGENT_MODEL_LABELS,
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
   DEFAULT_COMMIT_LANGUAGE,
@@ -23,12 +30,13 @@ import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 import { useTheme } from "@/hooks/useTheme";
 
-const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
-const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
+const DRAG_ACTIVATION_DISTANCE = 6;
+
 const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({ value: i, label: IMPLEMENTER_LABELS[i] }));
 const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) => ({
   value: l,
@@ -131,11 +139,25 @@ function GeneralSettings() {
   );
 }
 
-/** Implementation-agent profiles tab: create/edit/delete the presets stored in the DB. */
+/** Implementation-agent profiles tab: create/edit/delete/reorder the presets stored in the DB. */
 function ProfilesSettings() {
-  const profiles = useProfiles();
+  const remoteProfiles = useProfiles();
+  const [localProfiles, setLocalProfiles] = useState<Profile[]>(remoteProfiles);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeIdRef = useRef<string | null>(null);
+  const dragGenRef = useRef(0);
+
+  // Sync local order from remote after create/delete/refresh, but not mid-drag.
+  useEffect(() => {
+    if (activeIdRef.current !== null) return;
+    setLocalProfiles(remoteProfiles);
+  }, [remoteProfiles]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+  );
 
   const addProfile = async (): Promise<void> => {
     setError(null);
@@ -157,28 +179,104 @@ function ProfilesSettings() {
     }
   };
 
+  const handleDragStart = ({ active }: DragStartEvent): void => {
+    const id = String(active.id);
+    setActiveId(id);
+    activeIdRef.current = id;
+  };
+
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    setActiveId(null);
+    activeIdRef.current = null;
+    setError(null);
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = localProfiles.findIndex((p) => p.id === active.id);
+    const newIndex = localProfiles.findIndex((p) => p.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const previousProfiles = localProfiles;
+    const reordered = arrayMove(localProfiles, oldIndex, newIndex);
+    setLocalProfiles(reordered);
+
+    const gen = ++dragGenRef.current;
+    void Promise.all(
+      reordered.map((profile, index) => api.updateProfile(profile.id, { sortOrder: index })),
+    )
+      .then(() => {
+        if (gen !== dragGenRef.current) return;
+        void refreshProfiles();
+      })
+      .catch((e) => {
+        if (gen !== dragGenRef.current) return;
+        setLocalProfiles(previousProfiles);
+        setError(e instanceof Error ? e.message : "Erreur lors de la réorganisation");
+      });
+  };
+
+  const activeProfile = activeId !== null ? localProfiles.find((p) => p.id === activeId) : null;
+
   return (
-    <div className="space-y-3">
-      {profiles.length === 0 && <p className="text-sm text-muted-foreground">Aucun profil.</p>}
-      {profiles.map((profile) => (
-        // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
-        <ProfileRow key={`${profile.id}:${profile.updatedAt}`} profile={profile} onError={setError} />
-      ))}
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button variant="outline" onClick={() => void addProfile()} disabled={busy}>
-        <Plus className="h-4 w-4" />
-        Ajouter un profil
-      </Button>
-    </div>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <SortableContext items={localProfiles.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+        <div className="space-y-3">
+          {localProfiles.length === 0 && <p className="text-sm text-muted-foreground">Aucun profil.</p>}
+          {localProfiles.map((profile) => (
+            // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
+            <SortableProfileRow key={`${profile.id}:${profile.updatedAt}`} profile={profile} onError={setError} />
+          ))}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button variant="outline" onClick={() => void addProfile()} disabled={busy}>
+            <Plus className="h-4 w-4" />
+            Ajouter un profil
+          </Button>
+        </div>
+      </SortableContext>
+      <DragOverlay>
+        {activeProfile != null && (
+          <ProfileRow profile={activeProfile} onError={setError} isDragOverlay />
+        )}
+      </DragOverlay>
+    </DndContext>
   );
 }
+
+type DragHandleListeners = ReturnType<typeof useSortable>["listeners"];
+type DragHandleAttributes = ReturnType<typeof useSortable>["attributes"];
 
 interface ProfileRowProps {
   profile: Profile;
   onError: (message: string | null) => void;
+  isDragOverlay?: boolean;
+  dragHandleListeners?: DragHandleListeners;
+  dragHandleAttributes?: DragHandleAttributes;
+  setActivatorNodeRef?: (element: HTMLElement | null) => void;
 }
 
-function ProfileRow({ profile, onError }: ProfileRowProps) {
+function SortableProfileRow({ profile, onError }: Pick<ProfileRowProps, "profile" | "onError">) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: profile.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <ProfileRow
+        profile={profile}
+        onError={onError}
+        dragHandleListeners={listeners}
+        dragHandleAttributes={attributes}
+        setActivatorNodeRef={setActivatorNodeRef}
+      />
+    </div>
+  );
+}
+
+function ProfileRow({ profile, onError, isDragOverlay = false, dragHandleListeners, dragHandleAttributes, setActivatorNodeRef }: ProfileRowProps) {
   const [name, setName] = useState(profile.name);
   const [model, setModel] = useState<AgentModel>(profile.model);
   const [effort, setEffort] = useState<AgentEffort>(profile.effort);
@@ -231,6 +329,18 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
   return (
     <div className="space-y-3 rounded-md border p-3">
       <div className="flex items-end gap-2">
+        {!isDragOverlay && (
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            className="cursor-grab self-end pb-2 text-muted-foreground active:cursor-grabbing"
+            aria-label={`Réorganiser ${profile.name}`}
+            {...dragHandleAttributes}
+            {...dragHandleListeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        )}
         <div className="flex-1 space-y-1.5">
           <Label htmlFor={`profile-name-${profile.id}`}>Nom</Label>
           <Input
@@ -254,10 +364,10 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
         <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration</summary>
         <div className="mt-3 flex flex-col gap-2">
           <Field label="Modèle">
-            <Tabs options={MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
+            <Tabs options={AGENT_MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
           </Field>
           <Field label="Effort">
-            <Tabs options={EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
+            <Tabs options={AGENT_EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
           </Field>
           <Field label="Implémenté par">
             <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
@@ -266,10 +376,10 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
             <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
               <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
               <Field label="Modèle">
-                <Tabs options={MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
+                <Tabs options={AGENT_MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
               </Field>
               <Field label="Effort">
-                <Tabs options={EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
+                <Tabs options={AGENT_EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
               </Field>
             </div>
           )}

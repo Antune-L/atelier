@@ -1,11 +1,13 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Brush, Clock, ExternalLink, Eye, FlaskConical, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { Clock, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
+import { TicketBadges } from "@/components/TicketBadges";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
@@ -23,10 +25,13 @@ interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
   onOpen: (ticket: Ticket) => void;
+  /** When set on the "Fini" column, renders a small button to re-check the PR merge status. */
+  onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
-export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
+export function TicketCard({ ticket, projectLabel, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
+  const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -68,31 +73,7 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
             <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
           </Badge>
         )}
-        {ticket.kind === "review" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Eye className="h-3 w-3" /> Review
-          </Badge>
-        )}
-        {ticket.kind === "clean" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Brush className="h-3 w-3" /> Clean
-          </Badge>
-        )}
-        {ticket.kind === "ask" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <HelpCircle className="h-3 w-3" /> Ask
-          </Badge>
-        )}
-        {ticket.watchdogFlagged && (
-          <Badge variant="warning" className="gap-1">
-            <AlertTriangle className="h-3 w-3" /> Inactif
-          </Badge>
-        )}
-        {ticket.pendingQuestions > 0 && (
-          <Badge variant="warning" className="gap-1">
-            <MessageCircleQuestion className="h-3 w-3" /> {ticket.pendingQuestions}
-          </Badge>
-        )}
+        <TicketBadges ticket={ticket} />
         {extractFigmaUrls(ticket.description).length > 0 && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Palette className="h-3 w-3" /> UI
@@ -119,6 +100,21 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
             <ExternalLink className="h-3 w-3" />
             {prNumber !== null ? `PR #${prNumber}` : "PR"}
           </a>
+        )}
+        {ticket.column === "done" && ticket.kind === "feature" && onCheckMerge && (
+          <button
+            type="button"
+            disabled={checkingMerge}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCheckingMerge(true);
+              void onCheckMerge(ticket).finally(() => setCheckingMerge(false));
+            }}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+          >
+            {checkingMerge ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+            Vérifier le merge
+          </button>
         )}
       </div>
 

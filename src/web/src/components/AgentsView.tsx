@@ -1,10 +1,11 @@
-import { AlertTriangle, Brush, Clock, Cpu, Eye, HelpCircle, MessageCircleQuestion } from "lucide-react";
+import { Clock, Cpu } from "lucide-react";
 
 import { TERMINAL_STAGES } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { TerminalView } from "@/components/TerminalView";
+import { TicketBadges } from "@/components/TicketBadges";
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { useBoard } from "@/hooks/useBoard";
@@ -104,31 +105,7 @@ function AgentCard({ ticket, projectLabel, onOpen }: AgentCardProps) {
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {ticket.kind === "review" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Eye className="h-3 w-3" /> Review
-          </Badge>
-        )}
-        {ticket.kind === "clean" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Brush className="h-3 w-3" /> Clean
-          </Badge>
-        )}
-        {ticket.kind === "ask" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <HelpCircle className="h-3 w-3" /> Ask
-          </Badge>
-        )}
-        {ticket.watchdogFlagged && (
-          <Badge variant="warning" className="gap-1">
-            <AlertTriangle className="h-3 w-3" /> Inactif
-          </Badge>
-        )}
-        {ticket.pendingQuestions > 0 && (
-          <Badge variant="warning" className="gap-1">
-            <MessageCircleQuestion className="h-3 w-3" /> {ticket.pendingQuestions}
-          </Badge>
-        )}
+        <TicketBadges ticket={ticket} />
       </div>
 
       {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}

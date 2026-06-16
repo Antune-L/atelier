@@ -1,7 +1,30 @@
-import { STAGE_LABELS, type Stage } from "@shared/constants";
+import {
+  AGENT_EFFORTS,
+  AGENT_EFFORT_LABELS,
+  AGENT_MODELS,
+  AGENT_MODEL_LABELS,
+  STAGE_LABELS,
+  type AgentEffort,
+  type AgentModel,
+  type Stage,
+} from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
 
+import type { TabOption } from "@/components/ui/tabs";
+
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "warning" | "success" | "info";
+
+/** Ready-made segmented-control options for the agent model picker. */
+export const AGENT_MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({
+  value: m,
+  label: AGENT_MODEL_LABELS[m],
+}));
+
+/** Ready-made segmented-control options for the agent reasoning-effort picker. */
+export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
+  value: e,
+  label: AGENT_EFFORT_LABELS[e],
+}));
 
 const TRIAGE_VERDICT_VARIANTS: Record<TriageVerdict, BadgeVariant> = {
   implementable: "success",
@@ -136,15 +159,28 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Wall-clock time the ticket took from when work started (entering "À implémenter") to when
- * it finished. Null when either bound is missing, so callers can omit the badge entirely.
+ * Wall-clock work duration in ms: from when the agent actually started (entering the
+ * `implementing` stage, `implementationStartedAt`) to `finishedAt`. Falls back to
+ * `implementingStartedAt` (column entry, queue-inclusive) for tickets created before the precise
+ * stamp existed. Null when either bound is missing or the span is non-positive. Shared by the card
+ * badge and the stats charts so both stay in sync.
  */
-export function ticketImplementationDuration(
-  ticket: Pick<Ticket, "implementingStartedAt" | "finishedAt">,
-): number | null {
-  if (ticket.implementingStartedAt === null || ticket.finishedAt === null) return null;
-  const duration = ticket.finishedAt - ticket.implementingStartedAt;
+export function effectiveWorkDurationMs(span: {
+  implementationStartedAt: number | null;
+  implementingStartedAt: number | null;
+  finishedAt: number | null;
+}): number | null {
+  const start = span.implementationStartedAt ?? span.implementingStartedAt;
+  if (start === null || span.finishedAt === null) return null;
+  const duration = span.finishedAt - start;
   return duration > 0 ? duration : null;
+}
+
+/** Card-badge duration: the agent's effective work time on a ticket. */
+export function ticketImplementationDuration(
+  ticket: Pick<Ticket, "implementationStartedAt" | "implementingStartedAt" | "finishedAt">,
+): number | null {
+  return effectiveWorkDurationMs(ticket);
 }
 
 const PR_URL_NUMBER_REGEX = /\/pull\/(\d+)/;

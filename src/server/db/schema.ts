@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   research_plan INTEGER NOT NULL DEFAULT 0,
   base_branch TEXT,
   prd_markdown TEXT,
+  agent_summary TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
   model TEXT,
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   feasibility_context INTEGER NOT NULL DEFAULT 1,
   finished_at INTEGER,
   implementing_started_at INTEGER,
+  implementation_started_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -109,6 +111,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "triage_report", ddl: "ALTER TABLE tickets ADD COLUMN triage_report TEXT" },
   { column: "finished_at", ddl: "ALTER TABLE tickets ADD COLUMN finished_at INTEGER" },
   { column: "implementing_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementing_started_at INTEGER" },
+  { column: "implementation_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementation_started_at INTEGER" },
   { column: "model", ddl: "ALTER TABLE tickets ADD COLUMN model TEXT" },
   { column: "effort", ddl: "ALTER TABLE tickets ADD COLUMN effort TEXT" },
   { column: "implementer_model", ddl: "ALTER TABLE tickets ADD COLUMN implementer_model TEXT" },
@@ -129,6 +132,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "resolving_conflicts", ddl: "ALTER TABLE tickets ADD COLUMN resolving_conflicts INTEGER NOT NULL DEFAULT 0" },
   { column: "feasibility_context", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_context INTEGER NOT NULL DEFAULT 1" },
   { column: "testing", ddl: "ALTER TABLE tickets ADD COLUMN testing INTEGER NOT NULL DEFAULT 0" },
+  { column: "agent_summary", ddl: "ALTER TABLE tickets ADD COLUMN agent_summary TEXT" },
 ];
 
 /**

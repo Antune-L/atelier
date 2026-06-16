@@ -3,7 +3,9 @@ import { z } from "zod";
 
 import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
+import { getErrorMessage } from "../shared/errors.ts";
 import {
+  analyzeTicketsSchema,
   createAskSchema,
   createCleanSchema,
   createCommentSchema,
@@ -27,6 +29,7 @@ import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
+import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { saveUpload } from "./uploads.ts";
 
@@ -36,6 +39,7 @@ interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
   listBranches(repoPath: string): Promise<string[]>;
+  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -46,6 +50,7 @@ interface PaneReader {
 interface RouteDeps {
   store: Store;
   hub: ClientHub;
+  lifecycle: TicketLifecycle;
   slots: SlotManager;
   coordinator: AgentCoordinator;
   system: PaneReader;
@@ -133,7 +138,7 @@ function isProcessing(stage: Stage | null): boolean {
 }
 
 export function createApiRoutes(deps: RouteDeps) {
-  const { store, hub, slots, coordinator } = deps;
+  const { store, hub, lifecycle, slots, coordinator } = deps;
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () =>
@@ -154,7 +159,7 @@ export function createApiRoutes(deps: RouteDeps) {
       try {
         return await deps.system.listOpenPrs(project.repoPath);
       } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec gh pr list");
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec gh pr list"));
       }
     })
     .get("/projects/:key/branches", async ({ params, set }) => {
@@ -163,7 +168,7 @@ export function createApiRoutes(deps: RouteDeps) {
       try {
         return await deps.system.listBranches(project.repoPath);
       } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, error instanceof Error ? error.message : "échec listing branches");
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec listing branches"));
       }
     })
     .get("/capabilities", () => ({
@@ -210,6 +215,7 @@ export function createApiRoutes(deps: RouteDeps) {
         implementer: t.implementer,
         createdAt: t.createdAt,
         implementingStartedAt: t.implementingStartedAt,
+        implementationStartedAt: t.implementationStartedAt,
         finishedAt: t.finishedAt,
       })),
     )
@@ -246,14 +252,13 @@ export function createApiRoutes(deps: RouteDeps) {
         hub.pushTicket(ticket);
         return ticket;
       }
-      const started = store.updateTicket(ticket.id, { column: "implementing", stage: "queued" });
-      hub.pushTicket(started);
+      const started = lifecycle.enqueue(ticket.id);
       // Slot launch does slow git worktree setup; don't block the HTTP response on it.
       // Kick it off in the background and let the board update live (mirrors the review path).
       void slots.startTicket(ticket.id).catch((e) => {
         log.error("démarrage du ticket échoué", {
           ticketId: ticket.id,
-          error: e instanceof Error ? e.message : String(e),
+          error: getErrorMessage(e),
         });
       });
       return started;
@@ -303,11 +308,38 @@ export function createApiRoutes(deps: RouteDeps) {
         .start(created.map((ticket) => ticket.id), input.project)
         .catch((e) => {
           log.error("démarrage de la faisabilité échoué", {
-            error: e instanceof Error ? e.message : String(e),
+            error: getErrorMessage(e),
           });
         });
       // The batch id is generated inside the manager; the client only needs to know the run started.
       return { created, feasibilityStarted: true };
+    })
+    .post("/tickets/analyze", ({ body, set }) => {
+      const parsed = analyzeTicketsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      // Re-run is allowed on any TODO ticket whose analysis isn't already live and which isn't processing.
+      const eligible = parsed.data.ids
+        .map((id) => store.getTicket(id))
+        .filter((ticket): ticket is Ticket => ticket !== null)
+        .filter((ticket) => ticket.triageStatus !== "running" && !isProcessing(ticket.stage));
+
+      const idsByProject = new Map<string, string[]>();
+      for (const ticket of eligible) {
+        const group = idsByProject.get(ticket.project) ?? [];
+        group.push(ticket.id);
+        idsByProject.set(ticket.project, group);
+      }
+
+      // The manager marks each ticket running then persists/pushes verdicts via the worker channel.
+      for (const [project, ids] of idsByProject) {
+        void deps.feasibility.start(ids, project).catch((e) => {
+          log.error("démarrage de l'analyse en lot échoué", {
+            error: getErrorMessage(e),
+          });
+        });
+      }
+
+      return { started: eligible.length };
     })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);
@@ -332,7 +364,7 @@ export function createApiRoutes(deps: RouteDeps) {
         void slots.startTicket(ticket.id).catch((e) => {
           log.error("démarrage de la review échoué", {
             ticketId: ticket.id,
-            error: e instanceof Error ? e.message : String(e),
+            error: getErrorMessage(e),
           });
         });
         created.push(ticket);
@@ -358,7 +390,7 @@ export function createApiRoutes(deps: RouteDeps) {
         void slots.startTicket(ticket.id).catch((e) => {
           log.error("démarrage du nettoyage échoué", {
             ticketId: ticket.id,
-            error: e instanceof Error ? e.message : String(e),
+            error: getErrorMessage(e),
           });
         });
         created.push(ticket);
@@ -383,7 +415,7 @@ export function createApiRoutes(deps: RouteDeps) {
       void slots.startTicket(ticket.id).catch((e) => {
         log.error("démarrage de l'ask échoué", {
           ticketId: ticket.id,
-          error: e instanceof Error ? e.message : String(e),
+          error: getErrorMessage(e),
         });
       });
       return ticket;
@@ -460,15 +492,13 @@ export function createApiRoutes(deps: RouteDeps) {
         if (ticket.triageStatus === "running") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
-        hub.pushTicket(store.updateTicket(params.id, { column: "implementing" }));
+        lifecycle.moveColumn(params.id, "implementing");
         // retry() relaunches a failed/stalled/interrupted ticket in its held slot;
         // for a fresh ticket (no slot) it falls through to a normal startTicket.
         await slots.retry(params.id);
         return store.getTicket(params.id);
       }
-      const moved = store.updateTicket(params.id, { column: target });
-      hub.pushTicket(moved);
-      return moved;
+      return lifecycle.moveColumn(params.id, target);
     })
     .post("/tickets/:id/comments", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
@@ -500,10 +530,28 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       // Stamp the merge time so the board can order "PR mergée" newest-first.
-      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
-      hub.pushTicket(merged);
-      store.logEvent(params.id, "merged", {});
+      const merged = lifecycle.markMerged(params.id);
       return merged;
+    })
+    .post("/tickets/:id/check-merged", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (ticket.column !== "done" || ticket.kind !== "feature") {
+        return jsonError(set, HTTP_CONFLICT, "vérification réservée aux features en colonne Fini");
+      }
+      if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
+      if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(ticket.project);
+      let result: { merged: boolean; state: string };
+      try {
+        result = await deps.system.checkPrMerged(project.repoPath, ticket.prUrl);
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec gh pr view"));
+      }
+      if (!result.merged) return { merged: false, state: result.state };
+      // Mirror /merged: stamp finishedAt so the board orders newest-first.
+      const merged = lifecycle.markMerged(params.id);
+      return { merged: true, state: result.state, ticket: merged };
     })
     .post("/tickets/:id/retry", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
@@ -530,7 +578,7 @@ export function createApiRoutes(deps: RouteDeps) {
       void slots.resolveMergeConflicts(params.id).catch((e) => {
         log.error("résolution de conflits échouée", {
           ticketId: params.id,
-          error: e instanceof Error ? e.message : String(e),
+          error: getErrorMessage(e),
         });
       });
       return store.getTicket(params.id);
@@ -589,7 +637,7 @@ export function createApiRoutes(deps: RouteDeps) {
       void deps.triage.start(params.id).catch((e) => {
         log.error("démarrage du triage échoué", {
           ticketId: params.id,
-          error: e instanceof Error ? e.message : String(e),
+          error: getErrorMessage(e),
         });
       });
       return { started: true };
@@ -681,7 +729,7 @@ export function createApiRoutes(deps: RouteDeps) {
           if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
         }
       } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${error instanceof Error ? error.message : String(error)}`);
+        return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${getErrorMessage(error)}`);
       }
 
       const mode: UpdateMode = frontendOnly ? "reload" : "relaunch";

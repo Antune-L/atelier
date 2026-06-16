@@ -1,11 +1,21 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { PanelLeftClose, PanelLeftOpen, Plus, Rocket } from "lucide-react";
+import {
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
+  GitMerge,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Rocket,
+  ScanSearch,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { COLUMN_LABELS, type Column } from "@shared/constants";
+import { COLUMN_LABELS, COLUMN_SORT_FIELD, type Column } from "@shared/constants";
 
+import { ColumnActionsMenu } from "@/components/ColumnActionsMenu";
 import { TicketCard, resolveProjectLabel } from "@/components/TicketCard";
 import { cn } from "@/lib/utils";
 
@@ -22,12 +32,30 @@ interface BoardColumnProps {
   moveAllCount?: number;
   /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
   moveAllBusy?: boolean;
+  /** When set on the TODO column, runs the batch feasibility analysis on eligible tickets. */
+  onAnalyzeAll?: () => void;
+  /** How many TODO tickets the bulk analysis targets; disables the item at 0. */
+  analyzeAllCount?: number;
+  /** True while a bulk analysis launch is in flight. */
+  analyzeAllBusy?: boolean;
+  /** When set on the "Fini" column, lets each card re-check its PR merge status. */
+  onCheckMerge?: (ticket: Ticket) => Promise<void>;
+  /** When set on the "Fini" column, re-checks the merge status of every eligible card at once. */
+  onCheckAllMerges?: () => void;
+  /** How many "Fini" cards the bulk check targets; disables the button at 0. */
+  checkAllCount?: number;
+  /** True while a bulk merge check is in flight — disables the button to prevent re-entry. */
+  checkAllBusy?: boolean;
 }
 
-const COLLAPSE_KEY_PREFIX = "column-collapsed:";
+/** Stable placeholder so a menu item with an undefined handler still has a callable onSelect. */
+const NOOP = (): void => {};
 
-/** Only the "merged" column piles up, so it windows its card list to stay responsive. */
-const WINDOWED_COLUMN: Column = "merged";
+const COLLAPSE_KEY_PREFIX = "column-collapsed:";
+const SORT_DIR_KEY_PREFIX = "column-sort-dir:";
+
+type SortDir = "asc" | "desc";
+
 /** Cards rendered before any scroll. */
 const WINDOW_INITIAL_SIZE = 20;
 /** Cards added each time the bottom sentinel comes into view. */
@@ -41,10 +69,7 @@ const WINDOW_PREFETCH_MARGIN = "200px";
  * grows it whenever the bottom sentinel scrolls into view of the column's own scroll container,
  * clamping to the total length when the underlying list shrinks.
  */
-function useWindowedTickets(
-  tickets: Ticket[],
-  enabled: boolean,
-): {
+function useWindowedTickets(tickets: Ticket[]): {
   visibleTickets: Ticket[];
   sentinelRef: React.RefObject<HTMLDivElement>;
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -61,8 +86,8 @@ function useWindowedTickets(
     if (tickets.length <= WINDOW_INITIAL_SIZE) setVisibleCount(WINDOW_INITIAL_SIZE);
   }
 
-  const clampedCount = enabled ? Math.min(visibleCount, tickets.length) : tickets.length;
-  const hasMore = enabled && clampedCount < tickets.length;
+  const clampedCount = Math.min(visibleCount, tickets.length);
+  const hasMore = clampedCount < tickets.length;
 
   useEffect(() => {
     if (!hasMore) return;
@@ -82,8 +107,8 @@ function useWindowedTickets(
   }, [hasMore]);
 
   const visibleTickets = useMemo(
-    () => (enabled ? tickets.slice(0, clampedCount) : tickets),
-    [enabled, tickets, clampedCount],
+    () => tickets.slice(0, clampedCount),
+    [tickets, clampedCount],
   );
 
   return { visibleTickets, sentinelRef, scrollRef, hasMore };
@@ -102,10 +127,31 @@ function writeCollapsed(column: Column, collapsed: boolean): void {
   localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${column}`, collapsed ? "1" : "0");
 }
 
+function readSortDir(column: Column): SortDir {
+  const stored = localStorage.getItem(`${SORT_DIR_KEY_PREFIX}${column}`);
+  return stored === "asc" ? "asc" : "desc";
+}
+
+function writeSortDir(column: Column, dir: SortDir): void {
+  localStorage.setItem(`${SORT_DIR_KEY_PREFIX}${column}`, dir);
+}
+
 function resolveMoveAllTitle(count: number, busy: boolean): string {
   if (busy) return "Lancement en cours…";
   if (count === 0) return "Aucun slot libre";
   return `Lancer ${count} ticket(s) dans « À implémenter »`;
+}
+
+function resolveAnalyzeAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Analyse en cours…";
+  if (count === 0) return "Aucun ticket à analyser";
+  return `Analyser ${count} ticket(s)`;
+}
+
+function resolveCheckAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Vérification en cours…";
+  if (count === 0) return "Aucune carte à vérifier";
+  return `Vérifier le merge de ${count} carte(s)`;
 }
 
 export function BoardColumn({
@@ -117,13 +163,28 @@ export function BoardColumn({
   onMoveAllToImplementing,
   moveAllCount = 0,
   moveAllBusy = false,
+  onAnalyzeAll,
+  analyzeAllCount = 0,
+  analyzeAllBusy = false,
+  onCheckMerge,
+  onCheckAllMerges,
+  checkAllCount = 0,
+  checkAllBusy = false,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
+  const [sortDir, setSortDir] = useState(() => readSortDir(column));
   const label = COLUMN_LABELS[column];
 
-  const isWindowed = column === WINDOWED_COLUMN;
-  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(tickets, isWindowed);
+  const sortField = COLUMN_SORT_FIELD[column];
+  const sortedTickets = useMemo(() => {
+    if (sortField === undefined) return tickets;
+    const value = (t: Ticket): number => (sortField === "finishedAt" ? (t.finishedAt ?? t.updatedAt) : t.createdAt);
+    return [...tickets].sort((a, b) => (sortDir === "desc" ? value(b) - value(a) : value(a) - value(b)));
+  }, [tickets, sortField, sortDir]);
+
+  // Every column windows its card list so long piles stay responsive.
+  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(sortedTickets);
 
   // The card container is both the dnd droppable and the windowing scroll root, so compose both refs.
   const setCardContainerRef = (node: HTMLDivElement | null): void => {
@@ -137,6 +198,12 @@ export function BoardColumn({
     writeCollapsed(column, next);
   };
 
+  const toggleSort = (): void => {
+    const next: SortDir = sortDir === "desc" ? "asc" : "desc";
+    setSortDir(next);
+    writeSortDir(column, next);
+  };
+
   const countBadge = (
     <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
       {tickets.length}
@@ -144,22 +211,53 @@ export function BoardColumn({
   );
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
-  const canMoveAll = column === "todo" && onMoveAllToImplementing !== undefined && tickets.length > 0;
+  const canCheckAll = column === "done" && onCheckAllMerges !== undefined;
+  const canColumnMenu = column === "todo" && (onMoveAllToImplementing !== undefined || onAnalyzeAll !== undefined);
   const moveAllButtonTitle = resolveMoveAllTitle(moveAllCount, moveAllBusy);
+  const analyzeAllButtonTitle = resolveAnalyzeAllTitle(analyzeAllCount, analyzeAllBusy);
+  const checkAllButtonTitle = resolveCheckAllTitle(checkAllCount, checkAllBusy);
+  const columnMenuItems = useMemo(
+    () => [
+      {
+        label: "Lancer tous les tickets",
+        icon: Rocket,
+        onSelect: onMoveAllToImplementing ?? NOOP,
+        disabled: onMoveAllToImplementing === undefined || moveAllCount === 0 || moveAllBusy,
+        title: moveAllButtonTitle,
+      },
+      {
+        label: "Lancer l'analyse de tous les tickets",
+        icon: ScanSearch,
+        onSelect: onAnalyzeAll ?? NOOP,
+        disabled: onAnalyzeAll === undefined || analyzeAllCount === 0 || analyzeAllBusy,
+        title: analyzeAllButtonTitle,
+      },
+    ],
+    [
+      onMoveAllToImplementing,
+      moveAllCount,
+      moveAllBusy,
+      moveAllButtonTitle,
+      onAnalyzeAll,
+      analyzeAllCount,
+      analyzeAllBusy,
+      analyzeAllButtonTitle,
+    ],
+  );
   const headerTrailing =
-    canAdd || canMoveAll ? (
+    canAdd || canColumnMenu || canCheckAll ? (
       <div className="flex items-center gap-1">
         {countBadge}
-        {canMoveAll && (
+        {canCheckAll && (
           <button
             type="button"
-            onClick={onMoveAllToImplementing}
-            disabled={moveAllCount === 0 || moveAllBusy}
+            onClick={onCheckAllMerges}
+            disabled={checkAllCount === 0 || checkAllBusy}
             className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-            title={moveAllButtonTitle}
-            aria-label="Tout lancer dans À implémenter"
+            title={checkAllButtonTitle}
+            aria-label="Vérifier le merge de toutes les cartes"
           >
-            <Rocket className="h-3.5 w-3.5" />
+            <GitMerge className="h-3.5 w-3.5" />
           </button>
         )}
         {canAdd && (
@@ -173,6 +271,7 @@ export function BoardColumn({
             <Plus className="h-3.5 w-3.5" />
           </button>
         )}
+        {canColumnMenu && <ColumnActionsMenu items={columnMenuItems} ariaLabel="Actions de la colonne" />}
       </div>
     ) : (
       countBadge
@@ -183,7 +282,7 @@ export function BoardColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "flex w-12 shrink-0 flex-col items-center rounded-xl border border-border bg-secondary/70 shadow-sm transition-colors",
+          "flex h-full w-12 shrink-0 flex-col items-center rounded-xl border border-border bg-secondary/70 shadow-sm transition-colors",
           isOver && "bg-accent/70",
         )}
       >
@@ -203,7 +302,7 @@ export function BoardColumn({
   }
 
   return (
-    <div className="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-secondary/70 shadow-sm">
+    <div className="flex h-full w-72 shrink-0 flex-col rounded-xl border border-border bg-secondary/70 shadow-sm">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
         <div className="flex items-center gap-2">
           <button
@@ -216,14 +315,28 @@ export function BoardColumn({
             <PanelLeftClose className="h-4 w-4" />
           </button>
           <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+          {sortField !== undefined && (
+            <button
+              type="button"
+              onClick={toggleSort}
+              className="text-muted-foreground hover:text-foreground"
+              title={sortDir === "desc" ? "Tri : plus récents d'abord" : "Tri : plus anciens d'abord"}
+              aria-label={sortDir === "desc" ? "Tri : plus récents d'abord, cliquer pour inverser" : "Tri : plus anciens d'abord, cliquer pour inverser"}
+            >
+              {sortDir === "desc" ? (
+                <ArrowDownWideNarrow className="h-4 w-4" />
+              ) : (
+                <ArrowUpNarrowWide className="h-4 w-4" />
+              )}
+            </button>
+          )}
         </div>
         {headerTrailing}
       </div>
       <div
         ref={setCardContainerRef}
         className={cn(
-          "flex min-h-[60vh] flex-col gap-2 rounded-b-xl p-2 transition-colors",
-          isWindowed && "max-h-[70vh] overflow-y-auto",
+          "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-b-xl p-2 transition-colors",
           isOver && "bg-accent/70",
         )}
       >
@@ -234,6 +347,7 @@ export function BoardColumn({
               ticket={ticket}
               projectLabel={resolveProjectLabel(projects, ticket.project)}
               onOpen={onOpenTicket}
+              onCheckMerge={onCheckMerge}
             />
           ))}
         </SortableContext>

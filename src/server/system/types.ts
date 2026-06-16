@@ -92,7 +92,11 @@ export interface ReviewDoneOptions {
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
-  /** When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully pushed (no commits ahead of origin/<branch>). */
+  /**
+   * When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully
+   * pushed. The gate compares `origin/<branch>..HEAD` (the worktree's checked-out tip), so a clean
+   * ticket's suffixed local branch is still verified against the PR head.
+   */
   requirePushedBranch: string | null;
 }
 
@@ -107,8 +111,12 @@ export interface SystemAdapter {
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string): Promise<void>;
   worktreeAdd(opts: GitWorktreeAddOptions): Promise<void>;
-  /** Check out an EXISTING remote branch into a worktree (auto-merge conflict resolution), resetting the local ref to origin/<branch>. */
-  worktreeAddExisting(repoPath: string, slotPath: string, branch: string): Promise<void>;
+  /**
+   * Check out an EXISTING remote branch into a worktree, resetting the local ref to origin/<startBranch>.
+   * `localBranch` is the worktree's branch name; `startBranch` (default = localBranch) is the origin ref
+   * to start from — they differ for a clean ticket whose local branch is suffixed to avoid collisions.
+   */
+  worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
 
   // ---- slot preparation ----
@@ -143,6 +151,8 @@ export interface SystemAdapter {
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
   /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult>;
+  /** PR description body (`gh pr view --json body`), used as the agent-work summary. null when unreadable. */
+  fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null>;
 
   // ---- PR listing (review entry point) ----
   /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */
@@ -155,6 +165,8 @@ export interface SystemAdapter {
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
   mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
+  /** Read the PR's GitHub merge state. `merged` is true only when state === "MERGED". `state` is "OPEN"|"MERGED"|"CLOSED"|"" (empty when unreadable). */
+  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
 
   // ---- project test commands ----
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;

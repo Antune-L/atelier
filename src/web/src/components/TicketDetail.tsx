@@ -1,4 +1,4 @@
-import { Brush, Cpu, Eye, FlaskConical, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, Square, X } from "lucide-react";
+import { Brush, Check, Cpu, Eye, FlaskConical, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -106,6 +106,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [checkingMerge, setCheckingMerge] = useState(false);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
   const [prdDialogOpen, setPrdDialogOpen] = useState(false);
   // Base-branch picker state (TODO column only). null = remote list not loaded yet.
@@ -313,6 +314,23 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
       return;
     }
     void moveTo(target);
+  };
+
+  // Ask GitHub whether the PR is actually merged; archive the card if so, otherwise surface its state.
+  const checkMerge = async (): Promise<void> => {
+    setCheckingMerge(true);
+    try {
+      const result = await api.checkMerged(ticket.id);
+      if (result.merged) {
+        onClose();
+        return;
+      }
+      setMoveError(`PR non mergée (état : ${result.state || "inconnu"})`);
+    } catch (e) {
+      setMoveError(e instanceof Error ? e.message : "Vérification du merge échouée");
+    } finally {
+      setCheckingMerge(false);
+    }
   };
 
   const setPrdEnabled = (checked: boolean): void => {
@@ -582,6 +600,19 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           )}
         </section>
 
+        {current.agentSummary && (current.column === "done" || current.column === "merged") && (
+          <section className="rounded-md border bg-muted/30 p-3">
+            <details>
+              <summary className="cursor-pointer text-sm font-semibold">
+                Résumé de l'agent
+              </summary>
+              <div className="mt-2 max-h-64 overflow-y-auto">
+                <Markdown content={current.agentSummary} />
+              </div>
+            </details>
+          </section>
+        )}
+
         {current.prdMarkdown && (
           <section className="rounded-md border bg-muted/30 p-3">
             {current.column === "prd" ? (
@@ -710,10 +741,22 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           )}
           {current.column === "done" && current.kind === "feature" && (
             <Button
+              variant="outline"
+              size="sm"
+              disabled={checkingMerge}
+              onClick={() => void checkMerge()}
+            >
+              <GitMerge className="h-4 w-4" />
+              Vérifier le merge
+            </Button>
+          )}
+          {current.column === "done" && current.kind === "feature" && (
+            <Button
               variant="default"
               size="sm"
               onClick={() => setConfirmMerged(true)}
             >
+              <Check className="h-4 w-4" />
               PR mergée
             </Button>
           )}

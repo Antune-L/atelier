@@ -2,6 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Clock, CornerDownRight, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
 import { useState } from "react";
+import type { CSSProperties } from "react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -24,6 +25,8 @@ import { cn } from "@/lib/utils";
 interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
+  /** Optional CSS color value applied as the background of the project badge. */
+  projectColor?: string;
   /** The dependency parent (resolved by the caller, which holds the full board), or null/undefined. */
   parent?: Ticket | null;
   onOpen: (ticket: Ticket) => void;
@@ -31,7 +34,7 @@ interface TicketCardProps {
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
-export function TicketCard({ ticket, projectLabel, parent, onOpen, onCheckMerge }: TicketCardProps) {
+export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
   const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null : false;
   const [checkingMerge, setCheckingMerge] = useState(false);
@@ -64,7 +67,11 @@ export function TicketCard({ ticket, projectLabel, parent, onOpen, onCheckMerge 
         <h3 className="min-w-0 break-words text-sm font-medium leading-snug">{ticket.title}</h3>
         <div className="flex shrink-0 items-center gap-1">
           {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
-          <Badge variant="outline" className="text-[10px]">
+          <Badge
+            variant="outline"
+            className="text-[10px]"
+            style={projectBadgeStyle(projectColor)}
+          >
             {projectLabel}
           </Badge>
         </div>
@@ -153,4 +160,13 @@ function TriageDot({ verdict }: { verdict: NonNullable<Ticket["triageVerdict"]> 
 
 export function resolveProjectLabel(projects: ProjectInfo[], key: string): string {
   return projects.find((p) => p.key === key)?.label ?? key;
+}
+
+export function resolveProjectColor(projects: ProjectInfo[], key: string): string | undefined {
+  return projects.find((p) => p.key === key)?.color;
+}
+
+export function projectBadgeStyle(color: string | undefined): CSSProperties | undefined {
+  if (!color) return undefined;
+  return { backgroundColor: color, borderColor: color, color: "#fff" };
 }

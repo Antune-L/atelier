@@ -53,7 +53,7 @@ import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
-import { resolveProjectLabel } from "@/components/TicketCard";
+import { projectBadgeStyle, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
 
 const TERMINAL_VISIBLE_KEY = "ticket-terminal-visible";
 
@@ -483,7 +483,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge variant="outline">{resolveProjectLabel(projects, current.project)}</Badge>
+            <Badge variant="outline" style={projectBadgeStyle(resolveProjectColor(projects, current.project))}>{resolveProjectLabel(projects, current.project)}</Badge>
             {showTerminal && (
               <Button variant="ghost" size="sm" onClick={toggleTerminal}>
                 {terminalVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}

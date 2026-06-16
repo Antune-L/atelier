@@ -16,7 +16,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { COLUMN_LABELS, COLUMN_SORT_FIELD, type Column } from "@shared/constants";
 
 import { ColumnActionsMenu } from "@/components/ColumnActionsMenu";
-import { TicketCard, resolveProjectLabel } from "@/components/TicketCard";
+import { TicketCard, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
 import { cn } from "@/lib/utils";
 
 interface BoardColumnProps {
@@ -349,6 +349,7 @@ export function BoardColumn({
               key={ticket.id}
               ticket={ticket}
               projectLabel={resolveProjectLabel(projects, ticket.project)}
+              projectColor={resolveProjectColor(projects, ticket.project)}
               parent={ticket.dependsOn ? ticketsById.get(ticket.dependsOn) ?? null : null}
               onOpen={onOpenTicket}
               onCheckMerge={onCheckMerge}

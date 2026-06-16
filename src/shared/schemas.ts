@@ -21,6 +21,29 @@ export const kindSchema = z.enum(KINDS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
 export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
 
+// ---- Token usage (cost tracking) ----
+
+/**
+ * One model's token usage within a session: the four billable buckets Claude Code records in the
+ * transcript's `message.usage`. Coerced defensively (.catch(0)) so a malformed bucket counts as 0
+ * rather than rejecting the whole entry.
+ */
+export const modelUsageSchema = z.object({
+  input_tokens: z.number().nonnegative().catch(0),
+  output_tokens: z.number().nonnegative().catch(0),
+  cache_creation_input_tokens: z.number().nonnegative().catch(0),
+  cache_read_input_tokens: z.number().nonnegative().catch(0),
+});
+export type ModelUsage = z.infer<typeof modelUsageSchema>;
+
+/** A session's usage keyed by full model id (e.g. "claude-opus-4-7-20250930"). */
+export const usageByModelSchema = z.record(z.string(), modelUsageSchema);
+export type UsageByModel = z.infer<typeof usageByModelSchema>;
+
+/** A ticket's usage keyed by sessionId (a ticket may span several sessions via auto-reclaim). */
+export const sessionUsageSchema = z.record(z.string(), usageByModelSchema);
+export type SessionUsage = z.infer<typeof sessionUsageSchema>;
+
 // ---- App settings (global, persisted in the `meta` table) ----
 
 /** Global, non-project settings editable from the settings modal's "general" tab. */
@@ -137,6 +160,8 @@ export const ticketSchema = z.object({
   implementingStartedAt: z.number().int().nullable(),
   /** Epoch ms when the agent first entered the `implementing` stage (real work start, excludes queue wait); null until then. */
   implementationStartedAt: z.number().int().nullable(),
+  /** Token usage per session (sessionId → usage by model); empty until a Stop hook reports it. */
+  sessionUsage: sessionUsageSchema,
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
@@ -156,6 +181,10 @@ export const statRecordSchema = z.object({
   implementingStartedAt: z.number().int().nullable(),
   implementationStartedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),
+  /** Derived total cost in USD across all sessions; null when no usage recorded. */
+  costUsd: z.number().nullable(),
+  /** Derived total token count across all sessions; null when no usage recorded. */
+  totalTokens: z.number().nullable(),
 });
 export type StatRecord = z.infer<typeof statRecordSchema>;
 

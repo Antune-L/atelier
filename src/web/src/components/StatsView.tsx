@@ -5,6 +5,7 @@ import type { ProjectInfo } from "@shared/schemas";
 
 import { StatCard } from "@/components/stats/StatCard";
 import {
+  CostChart,
   DurationChart,
   KindChart,
   OutcomeChart,
@@ -94,6 +95,15 @@ export function StatsView({ projects }: StatsViewProps): ReactNode {
           records={records}
         >
           {(filtered) => <ProjectChart records={filtered} projects={projects} />}
+        </StatCard>
+
+        <StatCard
+          title="Coût"
+          description="Dépense des sessions Claude (Cursor non inclus)"
+          projects={projects}
+          records={records}
+        >
+          {(filtered) => <CostChart records={filtered} projects={projects} />}
         </StatCard>
       </div>
     </div>

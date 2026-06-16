@@ -18,9 +18,11 @@ import {
   updateAppSettingsSchema,
   updateProfileSchema,
   updateTicketSchema,
+  usageByModelSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
+import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
@@ -87,6 +89,8 @@ function isWebOnlyPath(filePath: string): boolean {
 const stopHookSchema = z.object({
   ticketId: z.string(),
   sessionId: z.string().nullable().default(null),
+  /** Token usage aggregated from this session's transcript (additive; omitted in dry-run). */
+  usageByModel: usageByModelSchema.optional(),
 });
 
 const agentActiveSchema = z.object({
@@ -204,20 +208,25 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/stats", () =>
-      store.listTickets(true).map((t): StatRecord => ({
-        id: t.id,
-        project: t.project,
-        kind: t.kind,
-        column: t.column,
-        stage: t.stage,
-        model: t.model,
-        effort: t.effort,
-        implementer: t.implementer,
-        createdAt: t.createdAt,
-        implementingStartedAt: t.implementingStartedAt,
-        implementationStartedAt: t.implementationStartedAt,
-        finishedAt: t.finishedAt,
-      })),
+      store.listTickets(true).map((t): StatRecord => {
+        const hasUsage = Object.keys(t.sessionUsage).length > 0;
+        return {
+          id: t.id,
+          project: t.project,
+          kind: t.kind,
+          column: t.column,
+          stage: t.stage,
+          model: t.model,
+          effort: t.effort,
+          implementer: t.implementer,
+          createdAt: t.createdAt,
+          implementingStartedAt: t.implementingStartedAt,
+          implementationStartedAt: t.implementationStartedAt,
+          finishedAt: t.finishedAt,
+          costUsd: hasUsage ? costOfSessions(t.sessionUsage) : null,
+          totalTokens: hasUsage ? totalTokensOfSessions(t.sessionUsage) : null,
+        };
+      }),
     )
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
@@ -678,7 +687,18 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/internal/stop", ({ body }) => {
       const parsed = stopHookSchema.safeParse(body);
       if (!parsed.success) return { ok: false };
-      coordinator.handleStopHook(parsed.data.ticketId, parsed.data.sessionId);
+      const { ticketId, sessionId, usageByModel } = parsed.data;
+      // Persist this session's cumulative usage (idempotent: each Stop overwrites its own
+      // sessionId entry; total = sum across sessions, correct across auto-reclaim relaunches).
+      if (usageByModel && sessionId) {
+        const ticket = store.getTicket(ticketId);
+        if (ticket) {
+          store.updateTicket(ticketId, {
+            sessionUsage: { ...ticket.sessionUsage, [sessionId]: usageByModel },
+          });
+        }
+      }
+      coordinator.handleStopHook(ticketId, sessionId);
       return { ok: true };
     })
     .post("/internal/active", ({ body }) => {

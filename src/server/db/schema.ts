@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   triage_verdict TEXT,
   triage_report TEXT,
   feasibility_context INTEGER NOT NULL DEFAULT 1,
+  session_usage TEXT,
   finished_at INTEGER,
   implementing_started_at INTEGER,
   implementation_started_at INTEGER,
@@ -133,6 +134,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "feasibility_context", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_context INTEGER NOT NULL DEFAULT 1" },
   { column: "testing", ddl: "ALTER TABLE tickets ADD COLUMN testing INTEGER NOT NULL DEFAULT 0" },
   { column: "agent_summary", ddl: "ALTER TABLE tickets ADD COLUMN agent_summary TEXT" },
+  { column: "session_usage", ddl: "ALTER TABLE tickets ADD COLUMN session_usage TEXT" },
 ];
 
 /**

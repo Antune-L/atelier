@@ -8,6 +8,7 @@ import {
   implementerSchema,
   kindSchema,
   reviewDepthSchema,
+  sessionUsageSchema,
   stageSchema,
   triageStatusSchema,
   triageVerdictSchema,
@@ -62,6 +63,7 @@ const ticketRowSchema = z.object({
   triage_verdict: z.string().nullable(),
   triage_report: z.string().nullable(),
   feasibility_context: z.number(),
+  session_usage: z.string().nullable(),
   finished_at: z.number().nullable(),
   implementing_started_at: z.number().nullable(),
   implementation_started_at: z.number().nullable(),
@@ -109,6 +111,19 @@ const ticketStageSchema = stageSchema.nullable();
 const projectSchema = z.string().refine(isProjectKey, { message: "projet inconnu" });
 const slotStatusSchema = z.enum(["free", "busy", "stalled", "interrupted", "failed"]);
 
+/** Parse the JSON session_usage column; malformed or absent → empty (no usage recorded yet). */
+function parseSessionUsage(raw: string | null): Ticket["sessionUsage"] {
+  if (raw === null) return {};
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  const parsed = sessionUsageSchema.safeParse(json);
+  return parsed.success ? parsed.data : {};
+}
+
 export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
   const row = ticketRowSchema.parse(raw);
   return {
@@ -153,6 +168,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     triageVerdict: row.triage_verdict === null ? null : triageVerdictSchema.parse(row.triage_verdict),
     triageReport: row.triage_report,
     feasibilityContext: row.feasibility_context === 1,
+    sessionUsage: parseSessionUsage(row.session_usage),
     finishedAt: row.finished_at,
     implementingStartedAt: row.implementing_started_at,
     implementationStartedAt: row.implementation_started_at,

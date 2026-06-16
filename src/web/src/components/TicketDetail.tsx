@@ -37,6 +37,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
+import { TicketCost } from "@/components/TicketCost";
 import { LiveTerminal } from "@/components/LiveTerminal";
 import {
   finishedKindLabel,
@@ -524,6 +525,8 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             {finishedKindLabel(current)} le {formatDateTime(current.finishedAt)}
           </p>
         )}
+
+        <TicketCost ticket={current} />
 
         <section className="flex flex-wrap items-center gap-2">
           <Label htmlFor="ticket-status" className="text-sm font-semibold">

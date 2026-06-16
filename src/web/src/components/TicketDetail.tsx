@@ -1,4 +1,4 @@
-import { Brush, Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Brush, Check, Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -745,6 +745,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               size="sm"
               onClick={() => setConfirmMerged(true)}
             >
+              <Check className="h-4 w-4" />
               PR mergée
             </Button>
           )}

@@ -377,6 +377,15 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null> {
+    const res = await $`gh pr view ${prUrl} --json body`.cwd(slotPath).nothrow().quiet();
+    if (res.exitCode !== 0) return null;
+    const parsed = z.object({ body: z.string() }).safeParse(safeJsonParse(res.stdout.toString()));
+    if (!parsed.success) return null;
+    const body = parsed.data.body.trim();
+    return body.length > 0 ? body : null;
+  }
+
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
     const pr = await $`gh pr view ${prUrl} --json url`.cwd(slotPath).nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };

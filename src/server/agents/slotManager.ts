@@ -521,6 +521,12 @@ export class SlotManager {
       }
     }
 
+    // Capture the agent's own work summary from the PR description (feature tickets that actually
+    // landed in done/merged; a review/clean ticket's PR body is not the agent's work, and a
+    // merge-failed ticket never surfaces it). Read before releasing the slot, while the worktree is
+    // still present for gh's cwd.
+    const agentSummary = ticket.kind === "feature" && !mergeError ? await this.system.fetchPrSummary(path, prUrl) : null;
+
     await this.releaseSlot(slotId, ticket);
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -531,6 +537,7 @@ export class SlotManager {
         // The run reached done(): any conflict-resolution session is over (cleared on both outcomes).
         resolvingConflicts: false,
         error: mergeError,
+        agentSummary,
         finishedAt: Date.now(),
       }),
     );

@@ -95,6 +95,7 @@ export interface TicketPatch {
   project?: string;
   baseBranch?: string | null;
   prdMarkdown?: string | null;
+  agentSummary?: string | null;
   column?: Column;
   stage?: Stage | null;
   model?: AgentModel | null;
@@ -287,6 +288,7 @@ export class Store {
     if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
+    if (patch.agentSummary !== undefined) set("agent_summary", patch.agentSummary);
     if (patch.column !== undefined) {
       set(COLUMN_TO_DB, patch.column);
       // Stamp the entry into "À implémenter" (re-stamped on each re-entry) so the card's

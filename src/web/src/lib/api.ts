@@ -1,4 +1,5 @@
 import type {
+  AnalyzeTicketsInput,
   AppSettings,
   Capabilities,
   Comment,
@@ -57,6 +58,8 @@ export const api = {
     request("/api/tickets", { method: "POST", body: JSON.stringify(input) }),
   importTickets: (input: ImportTicketsInput): Promise<{ created: Ticket[]; feasibilityStarted: boolean }> =>
     request("/api/tickets/import", { method: "POST", body: JSON.stringify(input) }),
+  analyzeTickets: (input: AnalyzeTicketsInput): Promise<{ started: number }> =>
+    request("/api/tickets/analyze", { method: "POST", body: JSON.stringify(input) }),
   projectPrs: (key: string): Promise<OpenPr[]> => request(`/api/projects/${key}/prs`),
   projectBranches: (key: string): Promise<string[]> => request(`/api/projects/${key}/branches`),
   createReviews: (input: CreateReviewInput): Promise<Ticket[]> =>

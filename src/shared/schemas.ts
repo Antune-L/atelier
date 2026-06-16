@@ -328,6 +328,12 @@ export const moveTicketSchema = z.object({
 });
 export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
 
+/** Start the batch feasibility analysis on a set of already-existing tickets (e.g. all of TODO). */
+export const analyzeTicketsSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1),
+});
+export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
+
 /** One open GitHub PR surfaced by `gh pr list` (and the unit the user picks to review). */
 export const openPrSchema = z.object({
   number: z.number().int(),

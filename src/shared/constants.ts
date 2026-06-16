@@ -35,6 +35,15 @@ export const COLUMN_ORDER: Column[] = [
   "abandoned",
 ];
 
+/** Field a sortable column ranks its tickets by; absent columns aren't sortable. */
+export const COLUMN_SORT_FIELD: Partial<Record<Column, "createdAt" | "finishedAt">> = {
+  todo: "createdAt",
+  implementing: "createdAt",
+  prd: "createdAt",
+  done: "finishedAt",
+  merged: "finishedAt",
+};
+
 /** Implementation agent knobs the user can pick per ticket (CLI: --model / --effort). */
 export const AGENT_MODELS = ["opus", "sonnet", "haiku"] as const;
 export type AgentModel = (typeof AGENT_MODELS)[number];

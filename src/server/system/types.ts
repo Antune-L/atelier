@@ -151,6 +151,8 @@ export interface SystemAdapter {
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
   /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult>;
+  /** PR description body (`gh pr view --json body`), used as the agent-work summary. null when unreadable. */
+  fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null>;
 
   // ---- PR listing (review entry point) ----
   /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */

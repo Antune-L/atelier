@@ -212,6 +212,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null> {
+    this.log("fetchPrSummary", { slotPath, prUrl });
+    return "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
+  }
+
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
     this.log("verifyReviewDone", {
       slotPath,

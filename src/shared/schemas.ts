@@ -102,6 +102,8 @@ export const ticketSchema = z.object({
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
+  /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
+  agentSummary: z.string().nullable(),
   column: columnSchema,
   stage: stageSchema.nullable(),
   /** Orchestrator agent overrides (null = fall back to the server config defaults). */

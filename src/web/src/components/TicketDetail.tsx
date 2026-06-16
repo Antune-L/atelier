@@ -589,6 +589,19 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
           )}
         </section>
 
+        {current.agentSummary && (current.column === "done" || current.column === "merged") && (
+          <section className="rounded-md border bg-muted/30 p-3">
+            <details>
+              <summary className="cursor-pointer text-sm font-semibold">
+                Résumé de l'agent
+              </summary>
+              <div className="mt-2 max-h-64 overflow-y-auto">
+                <Markdown content={current.agentSummary} />
+              </div>
+            </details>
+          </section>
+        )}
+
         {current.prdMarkdown && (
           <section className="rounded-md border bg-muted/30 p-3">
             {current.column === "prd" ? (

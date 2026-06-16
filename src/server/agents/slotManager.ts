@@ -9,6 +9,7 @@ import {
   TERMINAL_STAGES,
   type Column,
 } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
@@ -320,7 +321,7 @@ export class SlotManager {
       void this.deliverContractWhenReady(ticket.id);
     } catch (error) {
       this.clearPhase(ticketId);
-      this.markFailed(ticketId, slotId, error instanceof Error ? error.message : String(error));
+      this.markFailed(ticketId, slotId, getErrorMessage(error));
     }
   }
 
@@ -750,7 +751,7 @@ export class SlotManager {
       await this.relaunchInPlace(ticket.slotId, ticketId);
     } catch (error) {
       this.clearPhase(ticketId);
-      log.error("auto-reclaim échoué", { ticketId, error: error instanceof Error ? error.message : String(error) });
+      log.error("auto-reclaim échoué", { ticketId, error: getErrorMessage(error) });
       return "escalate";
     }
     return "reclaimed";

@@ -10,6 +10,7 @@ import {
   WS_PATH_TERMINAL,
   WS_PATH_WORKER,
 } from "../shared/constants.ts";
+import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -241,7 +242,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return { error: "NOT_FOUND" };
       }
       set.status = 500;
-      return { error: error instanceof Error ? error.message : String(error) };
+      return { error: getErrorMessage(error) };
     });
 
   // CORS for the Vite dev server.

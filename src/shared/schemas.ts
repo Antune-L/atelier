@@ -244,25 +244,32 @@ export function deriveTitleFromDescription(description: string): string {
   return `${firstLine.slice(0, DERIVED_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
-export const createTicketSchema = z
-  .object({
+/**
+ * Per-ticket options shared by single creation and CSV import: the target project plus the
+ * pipeline toggles and agent knobs picked at creation (null = fall back to server config).
+ */
+const ticketBatchOptionsSchema = z.object({
+  project: projectKeySchema,
+  prdEnabled: z.boolean().default(false),
+  prDraft: z.boolean().default(true),
+  autoMerge: z.boolean().default(false),
+  addScreenshots: z.boolean().default(false),
+  verifyFeature: z.boolean().default(false),
+  researchPlan: z.boolean().default(false),
+  // Branch the worktree forks from and the PR targets (null = project default).
+  baseBranch: baseBranchSchema.nullable().default(null),
+  // Implementation agent knobs picked at creation (null = fall back to server config).
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
+  implementerModel: agentModelSchema.nullable().default(null),
+  implementerEffort: agentEffortSchema.nullable().default(null),
+  implementer: implementerSchema.default("claude"),
+});
+
+export const createTicketSchema = ticketBatchOptionsSchema
+  .extend({
     title: z.string().default(""),
     description: z.string().default(""),
-    project: projectKeySchema,
-    prdEnabled: z.boolean().default(false),
-    prDraft: z.boolean().default(true),
-    autoMerge: z.boolean().default(false),
-    addScreenshots: z.boolean().default(false),
-    verifyFeature: z.boolean().default(false),
-    researchPlan: z.boolean().default(false),
-    // Branch the worktree forks from and the PR targets (null = project default).
-    baseBranch: baseBranchSchema.nullable().default(null),
-    // Implementation agent knobs picked at creation (null = fall back to server config).
-    model: agentModelSchema.nullable().default(null),
-    effort: agentEffortSchema.nullable().default(null),
-    implementerModel: agentModelSchema.nullable().default(null),
-    implementerEffort: agentEffortSchema.nullable().default(null),
-    implementer: implementerSchema.default("claude"),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
   })
@@ -284,21 +291,8 @@ export type ImportTicketRow = z.infer<typeof importTicketRowSchema>;
  * title/description/start, picked once for the whole batch); runFeasibility kicks off the batch
  * feasibility analysis after creation.
  */
-export const importTicketsSchema = z.object({
-  project: projectKeySchema,
+export const importTicketsSchema = ticketBatchOptionsSchema.extend({
   rows: z.array(importTicketRowSchema).min(1).max(IMPORT_MAX_ROWS),
-  prdEnabled: z.boolean().default(false),
-  prDraft: z.boolean().default(true),
-  autoMerge: z.boolean().default(false),
-  addScreenshots: z.boolean().default(false),
-  verifyFeature: z.boolean().default(false),
-  researchPlan: z.boolean().default(false),
-  baseBranch: baseBranchSchema.nullable().default(null),
-  model: agentModelSchema.nullable().default(null),
-  effort: agentEffortSchema.nullable().default(null),
-  implementerModel: agentModelSchema.nullable().default(null),
-  implementerEffort: agentEffortSchema.nullable().default(null),
-  implementer: implementerSchema.default("claude"),
   runFeasibility: z.boolean().default(false),
 });
 export type ImportTicketsInput = z.infer<typeof importTicketsSchema>;

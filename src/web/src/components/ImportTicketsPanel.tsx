@@ -2,13 +2,13 @@ import { ChevronDown, ChevronRight, Copy, FileUp, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
-import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
+import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { api } from "@/lib/api";
 import { parseTicketsCsv, type ParsedTicketsCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
@@ -50,32 +50,11 @@ export function ImportTicketsPanel({
 
   // Batch options (applied to every imported ticket); null = fall back to project/server defaults.
   const [prdEnabled, setPrdEnabled] = useState(false);
-  const [model, setModel] = useState<AgentModel | null>(null);
-  const [effort, setEffort] = useState<AgentEffort | null>(null);
-  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(
-    null,
-  );
-  const [implementerEffort, setImplementerEffort] =
-    useState<AgentEffort | null>(null);
-  const [implementer, setImplementer] = useState<Implementer>("claude");
+  const agent = useAgentKnobs();
   const [runFeasibility, setRunFeasibility] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const applyProfile = (config: {
-    model: AgentModel;
-    effort: AgentEffort;
-    implementerModel: AgentModel;
-    implementerEffort: AgentEffort;
-    implementer: Implementer;
-  }): void => {
-    setModel(config.model);
-    setEffort(config.effort);
-    setImplementerModel(config.implementerModel);
-    setImplementerEffort(config.implementerEffort);
-    setImplementer(config.implementer);
-  };
 
   const hasErrors = (parsed?.errors.length ?? 0) > 0;
   const validRows = parsed?.rows ?? [];
@@ -132,11 +111,11 @@ export function ImportTicketsPanel({
         researchPlan: false,
         // No base-branch control in the import panel: always fall back to the project default.
         baseBranch: null,
-        model,
-        effort,
-        implementerModel,
-        implementerEffort,
-        implementer,
+        model: agent.model,
+        effort: agent.effort,
+        implementerModel: agent.implementerModel,
+        implementerEffort: agent.implementerEffort,
+        implementer: agent.implementer,
         runFeasibility: runFeasibility && !feasibilityDisabled,
       });
       onClose();
@@ -149,21 +128,7 @@ export function ImportTicketsPanel({
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1.5">
-        <Label htmlFor="import-project">Projet</Label>
-        <Select
-          id="import-project"
-          value={project}
-          onChange={(e) => setProjectChoice(e.target.value)}
-          className="w-full"
-        >
-          {projects.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
-            </option>
-          ))}
-        </Select>
-      </div>
+      <ProjectSelect id="import-project" projects={projects} value={project} onChange={setProjectChoice} />
 
       <div className="rounded-md border">
         <div className="flex items-center justify-between px-3 py-2 text-sm font-medium">
@@ -274,17 +239,17 @@ export function ImportTicketsPanel({
           Agent d'implémentation (tout le lot)
         </h3>
         <AgentProfileConfig
-          model={model}
-          effort={effort}
-          implementerModel={implementerModel}
-          implementerEffort={implementerEffort}
-          implementer={implementer}
-          onModelChange={setModel}
-          onEffortChange={setEffort}
-          onImplementerModelChange={setImplementerModel}
-          onImplementerEffortChange={setImplementerEffort}
-          onImplementerChange={setImplementer}
-          onApplyProfile={applyProfile}
+          model={agent.model}
+          effort={agent.effort}
+          implementerModel={agent.implementerModel}
+          implementerEffort={agent.implementerEffort}
+          implementer={agent.implementer}
+          onModelChange={agent.setModel}
+          onEffortChange={agent.setEffort}
+          onImplementerModelChange={agent.setImplementerModel}
+          onImplementerEffortChange={agent.setImplementerEffort}
+          onImplementerChange={agent.setImplementer}
+          onApplyProfile={agent.applyProfile}
         />
       </div>
 

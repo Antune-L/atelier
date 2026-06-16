@@ -6,6 +6,7 @@ import {
   CLEANER_EFFORT,
   CLEANER_MODEL,
   COMMIT_LANGUAGE_META_KEY,
+  CREATED_EVENT,
   DEFAULT_COMMIT_LANGUAGE,
 } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
@@ -123,6 +124,28 @@ export interface TicketPatch {
 
 const COLUMN_TO_DB = "column_name";
 
+/** Values SQLite accepts as positional bindings in our UPDATE statements. */
+type SqlBindValue = string | number | null;
+
+/**
+ * Accumulates `column = ?` assignments for a dynamic UPDATE so each builder method only declares
+ * which columns changed. Emits `UPDATE <table> SET ... WHERE id = ?` with the patched values
+ * followed by the row id. Kept type-safe (no casts): every binding is a SqlBindValue.
+ */
+class SqlUpdateBuilder {
+  private readonly fields: string[] = [];
+  private readonly values: SqlBindValue[] = [];
+
+  set(column: string, value: SqlBindValue): void {
+    this.fields.push(`${column} = ?`);
+    this.values.push(value);
+  }
+
+  run(db: Database, table: string, id: SqlBindValue): void {
+    db.query(`UPDATE ${table} SET ${this.fields.join(", ")} WHERE id = ?`).run(...this.values, id);
+  }
+}
+
 export class Store {
   constructor(private readonly db: Database) {}
 
@@ -157,6 +180,18 @@ export class Store {
     });
   }
 
+  /**
+   * Shared tail of every create* method: fetch the just-inserted row, fail loudly if it
+   * vanished, log the "created" event, and return the validated ticket. `method` names the
+   * caller so the thrown message stays specific.
+   */
+  private finalizeCreate(id: string, method: string, eventPayload: unknown): Ticket {
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error(`${method}: ticket vanished after insert`);
+    this.logEvent(id, CREATED_EVENT, eventPayload);
+    return ticket;
+  }
+
   createTicket(input: NewTicket): Ticket {
     const id = nanoid(10);
     const now = Date.now();
@@ -186,10 +221,7 @@ export class Store {
         now,
         now,
       );
-    const ticket = this.getTicket(id);
-    if (!ticket) throw new Error("createTicket: ticket vanished after insert");
-    this.logEvent(id, "created", { title: input.title });
-    return ticket;
+    return this.finalizeCreate(id, "createTicket", { title: input.title });
   }
 
   /** Create a review ticket: straight into "À implémenter", carrying the target PR + argus knobs. */
@@ -217,10 +249,7 @@ export class Store {
         now,
         now,
       );
-    const ticket = this.getTicket(id);
-    if (!ticket) throw new Error("createReview: ticket vanished after insert");
-    this.logEvent(id, "created", { title: input.title, kind: "review", prNumber: input.prNumber });
-    return ticket;
+    return this.finalizeCreate(id, "createReview", { title: input.title, kind: "review", prNumber: input.prNumber });
   }
 
   /** Create a clean ticket: straight into "À implémenter", carrying the target PR and pinned to Opus/low. */
@@ -247,10 +276,7 @@ export class Store {
         now,
         now,
       );
-    const ticket = this.getTicket(id);
-    if (!ticket) throw new Error("createClean: ticket vanished after insert");
-    this.logEvent(id, "created", { title: input.title, kind: "clean", prNumber: input.prNumber });
-    return ticket;
+    return this.finalizeCreate(id, "createClean", { title: input.title, kind: "clean", prNumber: input.prNumber });
   }
 
   /** Create an ask ticket: straight into "À implémenter", carrying the chosen model/effort. */
@@ -263,19 +289,12 @@ export class Store {
          VALUES (?, ?, ?, ?, 'ask', ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(id, input.title, input.description, input.project, input.model, input.effort, now, now, now, now);
-    const ticket = this.getTicket(id);
-    if (!ticket) throw new Error("createAsk: ticket vanished after insert");
-    this.logEvent(id, "created", { title: input.title, kind: "ask" });
-    return ticket;
+    return this.finalizeCreate(id, "createAsk", { title: input.title, kind: "ask" });
   }
 
   updateTicket(id: string, patch: TicketPatch): Ticket {
-    const fields: string[] = [];
-    const values: (string | number | null)[] = [];
-    const set = (col: string, value: string | number | null): void => {
-      fields.push(`${col} = ?`);
-      values.push(value);
-    };
+    const builder = new SqlUpdateBuilder();
+    const set = builder.set.bind(builder);
 
     if (patch.title !== undefined) set("title", patch.title);
     if (patch.description !== undefined) set("description", patch.description);
@@ -329,7 +348,7 @@ export class Store {
     if (patch.finishedAt !== undefined) set("finished_at", patch.finishedAt);
 
     set("updated_at", Date.now());
-    this.db.query(`UPDATE tickets SET ${fields.join(", ")} WHERE id = ?`).run(...values, id);
+    builder.run(this.db, "tickets", id);
 
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error(`updateTicket: ticket ${id} not found`);
@@ -422,21 +441,16 @@ export class Store {
   }
 
   updateProfile(id: string, patch: ProfilePatch): Profile {
-    const fields: string[] = [];
-    const values: (string | number)[] = [];
-    const set = (col: string, value: string | number): void => {
-      fields.push(`${col} = ?`);
-      values.push(value);
-    };
-    if (patch.name !== undefined) set("name", patch.name);
-    if (patch.model !== undefined) set("model", patch.model);
-    if (patch.effort !== undefined) set("effort", patch.effort);
-    if (patch.implementerModel !== undefined) set("implementer_model", patch.implementerModel);
-    if (patch.implementerEffort !== undefined) set("implementer_effort", patch.implementerEffort);
-    if (patch.implementer !== undefined) set("implementer", patch.implementer);
-    if (patch.sortOrder !== undefined) set("sort_order", patch.sortOrder);
-    set("updated_at", Date.now());
-    this.db.query(`UPDATE profiles SET ${fields.join(", ")} WHERE id = ?`).run(...values, id);
+    const builder = new SqlUpdateBuilder();
+    if (patch.name !== undefined) builder.set("name", patch.name);
+    if (patch.model !== undefined) builder.set("model", patch.model);
+    if (patch.effort !== undefined) builder.set("effort", patch.effort);
+    if (patch.implementerModel !== undefined) builder.set("implementer_model", patch.implementerModel);
+    if (patch.implementerEffort !== undefined) builder.set("implementer_effort", patch.implementerEffort);
+    if (patch.implementer !== undefined) builder.set("implementer", patch.implementer);
+    if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
+    builder.set("updated_at", Date.now());
+    builder.run(this.db, "profiles", id);
     const profile = this.getProfile(id);
     if (!profile) throw new Error(`updateProfile: profil ${id} introuvable`);
     return profile;
@@ -467,25 +481,12 @@ export class Store {
     id: number,
     patch: { ticketId?: string | null; repoPath?: string | null; tmuxSession?: string | null; status?: SlotStatus },
   ): Slot {
-    const fields: string[] = [];
-    const values: (string | number | null)[] = [];
-    if (patch.ticketId !== undefined) {
-      fields.push("ticket_id = ?");
-      values.push(patch.ticketId);
-    }
-    if (patch.repoPath !== undefined) {
-      fields.push("repo_path = ?");
-      values.push(patch.repoPath);
-    }
-    if (patch.tmuxSession !== undefined) {
-      fields.push("tmux_session = ?");
-      values.push(patch.tmuxSession);
-    }
-    if (patch.status !== undefined) {
-      fields.push("status = ?");
-      values.push(patch.status);
-    }
-    this.db.query(`UPDATE slots SET ${fields.join(", ")} WHERE id = ?`).run(...values, id);
+    const builder = new SqlUpdateBuilder();
+    if (patch.ticketId !== undefined) builder.set("ticket_id", patch.ticketId);
+    if (patch.repoPath !== undefined) builder.set("repo_path", patch.repoPath);
+    if (patch.tmuxSession !== undefined) builder.set("tmux_session", patch.tmuxSession);
+    if (patch.status !== undefined) builder.set("status", patch.status);
+    builder.run(this.db, "slots", id);
     const slot = this.getSlot(id);
     if (!slot) throw new Error(`updateSlot: slot ${id} not found`);
     return slot;

@@ -1,12 +1,13 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Brush, Clock, ExternalLink, Eye, GitMerge, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { Clock, ExternalLink, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
+import { TicketBadges } from "@/components/TicketBadges";
 import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
@@ -72,31 +73,7 @@ export function TicketCard({ ticket, projectLabel, onOpen, onCheckMerge }: Ticke
             <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
           </Badge>
         )}
-        {ticket.kind === "review" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Eye className="h-3 w-3" /> Review
-          </Badge>
-        )}
-        {ticket.kind === "clean" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Brush className="h-3 w-3" /> Clean
-          </Badge>
-        )}
-        {ticket.kind === "ask" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <HelpCircle className="h-3 w-3" /> Ask
-          </Badge>
-        )}
-        {ticket.watchdogFlagged && (
-          <Badge variant="warning" className="gap-1">
-            <AlertTriangle className="h-3 w-3" /> Inactif
-          </Badge>
-        )}
-        {ticket.pendingQuestions > 0 && (
-          <Badge variant="warning" className="gap-1">
-            <MessageCircleQuestion className="h-3 w-3" /> {ticket.pendingQuestions}
-          </Badge>
-        )}
+        <TicketBadges ticket={ticket} />
         {extractFigmaUrls(ticket.description).length > 0 && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Palette className="h-3 w-3" /> UI

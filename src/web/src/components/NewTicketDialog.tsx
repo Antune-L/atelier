@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
-import type { AgentEffort, AgentModel, Implementer } from "@shared/constants";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { AskPanel } from "@/components/AskPanel";
 import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
 import { CleanPrPanel } from "@/components/CleanPrPanel";
+import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { api } from "@/lib/api";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
@@ -71,24 +72,7 @@ export function NewTicketDialog({
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [researchPlan, setResearchPlan] = useState(false);
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
-  const [model, setModel] = useState<AgentModel | null>(null);
-  const [effort, setEffort] = useState<AgentEffort | null>(null);
-  const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
-  const [implementerEffort, setImplementerEffort] = useState<AgentEffort | null>(null);
-  const [implementer, setImplementer] = useState<Implementer>("claude");
-  const applyProfile = (config: {
-    model: AgentModel;
-    effort: AgentEffort;
-    implementerModel: AgentModel;
-    implementerEffort: AgentEffort;
-    implementer: Implementer;
-  }): void => {
-    setModel(config.model);
-    setEffort(config.effort);
-    setImplementerModel(config.implementerModel);
-    setImplementerEffort(config.implementerEffort);
-    setImplementer(config.implementer);
-  };
+  const agent = useAgentKnobs();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -125,11 +109,7 @@ export function NewTicketDialog({
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
     setResearchPlan(false);
-    setModel(null);
-    setEffort(null);
-    setImplementerModel(null);
-    setImplementerEffort(null);
-    setImplementer("claude");
+    agent.reset();
     setError(null);
   };
 
@@ -171,11 +151,11 @@ export function NewTicketDialog({
         verifyFeature,
         researchPlan,
         baseBranch: baseBranchOverride,
-        model,
-        effort,
-        implementerModel,
-        implementerEffort,
-        implementer,
+        model: agent.model,
+        effort: agent.effort,
+        implementerModel: agent.implementerModel,
+        implementerEffort: agent.implementerEffort,
+        implementer: agent.implementer,
         start,
       });
       reset();
@@ -256,21 +236,7 @@ export function NewTicketDialog({
                 </div>
               </div>
               <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="project">Projet</Label>
-                  <Select
-                    id="project"
-                    value={project}
-                    onChange={(e) => setProjectChoice(e.target.value)}
-                    className="w-full"
-                  >
-                    {projects.map((p) => (
-                      <option key={p.key} value={p.key}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+                <ProjectSelect id="project" projects={projects} value={project} onChange={setProjectChoice} />
                 <div className="space-y-1.5">
                   <Label htmlFor="base-branch">
                     Branche de base du worktree
@@ -296,17 +262,17 @@ export function NewTicketDialog({
                     Agent d'implémentation
                   </h3>
                   <AgentProfileConfig
-                    model={model}
-                    effort={effort}
-                    implementerModel={implementerModel}
-                    implementerEffort={implementerEffort}
-                    implementer={implementer}
-                    onModelChange={setModel}
-                    onEffortChange={setEffort}
-                    onImplementerModelChange={setImplementerModel}
-                    onImplementerEffortChange={setImplementerEffort}
-                    onImplementerChange={setImplementer}
-                    onApplyProfile={applyProfile}
+                    model={agent.model}
+                    effort={agent.effort}
+                    implementerModel={agent.implementerModel}
+                    implementerEffort={agent.implementerEffort}
+                    implementer={agent.implementer}
+                    onModelChange={agent.setModel}
+                    onEffortChange={agent.setEffort}
+                    onImplementerModelChange={agent.setImplementerModel}
+                    onImplementerEffortChange={agent.setImplementerEffort}
+                    onImplementerChange={agent.setImplementer}
+                    onApplyProfile={agent.applyProfile}
                   />
                 </div>
                 <div className="space-y-3 rounded-md border p-3">

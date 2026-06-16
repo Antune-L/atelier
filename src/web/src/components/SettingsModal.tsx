@@ -2,10 +2,6 @@ import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
-  AGENT_EFFORTS,
-  AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
-  AGENT_MODEL_LABELS,
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
   DEFAULT_COMMIT_LANGUAGE,
@@ -23,12 +19,11 @@ import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 import { useTheme } from "@/hooks/useTheme";
 
-const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }));
-const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({ value: e, label: AGENT_EFFORT_LABELS[e] }));
 const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({ value: i, label: IMPLEMENTER_LABELS[i] }));
 const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) => ({
   value: l,
@@ -254,10 +249,10 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
         <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration</summary>
         <div className="mt-3 flex flex-col gap-2">
           <Field label="Modèle">
-            <Tabs options={MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
+            <Tabs options={AGENT_MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
           </Field>
           <Field label="Effort">
-            <Tabs options={EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
+            <Tabs options={AGENT_EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
           </Field>
           <Field label="Implémenté par">
             <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
@@ -266,10 +261,10 @@ function ProfileRow({ profile, onError }: ProfileRowProps) {
             <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
               <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
               <Field label="Modèle">
-                <Tabs options={MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
+                <Tabs options={AGENT_MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
               </Field>
               <Field label="Effort">
-                <Tabs options={EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
+                <Tabs options={AGENT_EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
               </Field>
             </div>
           )}

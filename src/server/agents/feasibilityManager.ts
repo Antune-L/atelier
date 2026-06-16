@@ -7,6 +7,7 @@ import {
   FEASIBILITY_SLOT_ID,
   FEASIBILITY_TIMEOUT_MS,
 } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { FeasibilityResult, TriageResult } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
@@ -180,7 +181,7 @@ export class FeasibilityBatchManager {
         project,
         attempt,
         batchId,
-        error instanceof Error ? error.message : String(error),
+        getErrorMessage(error),
       );
     }
   }

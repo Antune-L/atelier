@@ -209,6 +209,8 @@ export const WATCHDOG_TIMEOUT_MS = 45 * 60 * 1000;
 export const AUTO_NUDGE_MAX = 1;
 /** Max in-place relaunches of a dead/stalled session before giving up (preserves the worktree). */
 export const AUTO_RECLAIM_MAX = 2;
+/** Audit event logged when any ticket (feature/review/clean/ask) is first inserted. */
+export const CREATED_EVENT = "created";
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */
 export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 /** Audit event logged on each failed done() gate; backs the consecutive-failure loop guard. */

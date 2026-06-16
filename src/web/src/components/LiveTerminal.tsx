@@ -1,12 +1,14 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type IDisposable } from "@xterm/xterm";
-import { Keyboard, Maximize2, Minimize2 } from "lucide-react";
+import { Keyboard } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import "@xterm/xterm/css/xterm.css";
 
 import { terminalServerMessageSchema } from "@shared/schemas";
 
+import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
+import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
 import { cn } from "@/lib/utils";
 
 interface LiveTerminalProps {
@@ -21,7 +23,6 @@ interface LiveTerminalProps {
   live?: boolean;
 }
 
-const TITLE = "Terminal";
 const TERMINAL_FONT_SIZE = 12;
 const TERMINAL_SCROLLBACK = 5000;
 /** Retry cadence while reconnecting to a pane that has not produced a live stream yet. */
@@ -229,18 +230,7 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
     if (inputEnabled && !exited) termRef.current?.focus();
   }, [inputEnabled, exited]);
 
-  // Escape exits fullscreen without bubbling to the drawer's own Escape handler.
-  useEffect(() => {
-    if (!fullscreen) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setFullscreen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [fullscreen]);
+  useFullscreenEscape(fullscreen, () => setFullscreen(false));
 
   const inputActive = inputEnabled && !exited;
   const badgeLabel = badgeLabelFor(exited, inputActive);
@@ -253,7 +243,7 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
       )}
     >
       <div className="mb-1 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">{TITLE}</h3>
+        <h3 className="text-sm font-semibold">{TERMINAL_TITLE}</h3>
         <div className="flex items-center gap-2">
           <span
             className={cn(
@@ -277,21 +267,13 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
           >
             <Keyboard className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => setFullscreen((v) => !v)}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-            aria-label={fullscreen ? "Réduire le terminal" : "Agrandir le terminal"}
-            title={fullscreen ? "Réduire" : "Plein écran"}
-          >
-            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </button>
+          <FullscreenToggle fullscreen={fullscreen} onToggle={() => setFullscreen((v) => !v)} />
         </div>
       </div>
       <div
         ref={containerRef}
         role="group"
-        aria-label={`${TITLE} interactif`}
+        aria-label={`${TERMINAL_TITLE} interactif`}
         style={{ backgroundColor: TERMINAL_BG }}
         className={cn(
           "overflow-hidden rounded-md p-2",

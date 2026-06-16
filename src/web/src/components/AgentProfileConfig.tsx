@@ -7,13 +7,13 @@ import {
   type AgentModel,
   type Implementer,
 } from "@shared/constants";
-import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
 
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProfiles } from "@/hooks/useProfiles";
+import { resolveAgentDefaults } from "@/lib/agentDefaults";
 
 interface AgentProfileConfigProps {
   model: AgentModel | null;
@@ -55,21 +55,16 @@ export function AgentProfileConfig({
   onApplyProfile,
 }: AgentProfileConfigProps) {
   const profiles = useProfiles();
-  const { defaultModel, defaultEffort, defaultImplementerModel, defaultImplementerEffort } = useCapabilities();
+  const capabilities = useCapabilities();
   const id = useId();
   const profileLabelId = `${id}-profile`;
 
   // A null knob follows the configured default; resolve it before matching a stored profile.
-  const parsedDefaultModel = agentModelSchema.safeParse(defaultModel);
-  const parsedDefaultEffort = agentEffortSchema.safeParse(defaultEffort);
-  const parsedDefaultImplementerModel = agentModelSchema.safeParse(defaultImplementerModel);
-  const parsedDefaultImplementerEffort = agentEffortSchema.safeParse(defaultImplementerEffort);
-  const effectiveModel = model ?? (parsedDefaultModel.success ? parsedDefaultModel.data : null);
-  const effectiveEffort = effort ?? (parsedDefaultEffort.success ? parsedDefaultEffort.data : null);
-  const effectiveImplementerModel =
-    implementerModel ?? (parsedDefaultImplementerModel.success ? parsedDefaultImplementerModel.data : null);
-  const effectiveImplementerEffort =
-    implementerEffort ?? (parsedDefaultImplementerEffort.success ? parsedDefaultImplementerEffort.data : null);
+  const defaults = resolveAgentDefaults(capabilities);
+  const effectiveModel = model ?? defaults.model;
+  const effectiveEffort = effort ?? defaults.effort;
+  const effectiveImplementerModel = implementerModel ?? defaults.implementerModel;
+  const effectiveImplementerEffort = implementerEffort ?? defaults.implementerEffort;
 
   const selectedProfile = profiles.find(
     (p) =>

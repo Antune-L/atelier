@@ -104,8 +104,8 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-screen flex-col bg-background p-6">
+      <header className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           {canUpdate && (
             <Button
@@ -174,11 +174,11 @@ export function App() {
         </div>
       </header>
 
-      <div className="mb-4">
+      <div className="mb-4 shrink-0">
         <SlotsBar slots={slots} />
       </div>
 
-      {renderView()}
+      <main className="min-h-0 flex-1 overflow-auto">{renderView()}</main>
 
       <NewTicketDialog
         open={creating}

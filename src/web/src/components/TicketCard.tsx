@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Clock, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
+import { Clock, CornerDownRight, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
 import { useState } from "react";
 
 import { extractFigmaUrls } from "@shared/figma";
@@ -24,13 +24,16 @@ import { cn } from "@/lib/utils";
 interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
+  /** The dependency parent (resolved by the caller, which holds the full board), or null/undefined. */
+  parent?: Ticket | null;
   onOpen: (ticket: Ticket) => void;
   /** When set on the "Fini" column, renders a small button to re-check the PR merge status. */
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
-export function TicketCard({ ticket, projectLabel, onOpen, onCheckMerge }: TicketCardProps) {
+export function TicketCard({ ticket, projectLabel, parent, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
+  const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null : false;
   const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
@@ -74,6 +77,13 @@ export function TicketCard({ ticket, projectLabel, onOpen, onCheckMerge }: Ticke
           </Badge>
         )}
         <TicketBadges ticket={ticket} />
+        {ticket.dependsOn && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <CornerDownRight className="h-3 w-3" />
+            {parentBlocked ? "en attente de " : "basé sur "}
+            <span className="max-w-[120px] truncate">{parent?.title ?? "?"}</span>
+          </Badge>
+        )}
         {extractFigmaUrls(ticket.description).length > 0 && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Palette className="h-3 w-3" /> UI

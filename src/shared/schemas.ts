@@ -124,6 +124,8 @@ export const ticketSchema = z.object({
   researchPlan: z.boolean(),
   /** Branch the worktree forks from and the PR targets (null = project default). */
   baseBranch: z.string().nullable(),
+  /** Parent ticket this one stacks on: its worktree forks from the parent's branch and its PR targets it (null = none). */
+  dependsOn: z.string().nullable(),
   prdMarkdown: z.string().nullable(),
   /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
   agentSummary: z.string().nullable(),
@@ -301,6 +303,8 @@ export const createTicketSchema = ticketBatchOptionsSchema
   .extend({
     title: z.string().default(""),
     description: z.string().default(""),
+    /** Parent ticket this one stacks on (null = none). The PR forks from and targets the parent's branch. */
+    dependsOn: z.string().nullable().default(null),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
   })
@@ -341,6 +345,7 @@ export const updateTicketSchema = z.object({
   researchPlan: z.boolean().optional(),
   project: projectKeySchema.optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
+  dependsOn: z.string().nullable().optional(),
   model: agentModelSchema.nullable().optional(),
   effort: agentEffortSchema.nullable().optional(),
   implementerModel: agentModelSchema.nullable().optional(),

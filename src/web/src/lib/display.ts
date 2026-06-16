@@ -198,6 +198,19 @@ export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): numb
   return ticket.prNumber ?? prNumberFromUrl(ticket.prUrl);
 }
 
+/** Columns a ticket can't serve as a dependency from (it can never reach an open PR). */
+const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["abandoned", "failed"];
+
+/**
+ * Tickets eligible to be picked as a dependency (PR-stack parent): same project, not the ticket
+ * itself, and able to reach a PR. Shared by the creation dialog and the ticket detail editor.
+ */
+export function dependencyCandidates(tickets: Ticket[], project: string, selfId: string | null): Ticket[] {
+  return tickets.filter(
+    (t) => t.project === project && t.id !== selfId && !NON_DEPENDABLE_COLUMNS.includes(t.column),
+  );
+}
+
 /** Verb describing how a ticket ended, for the finished-at line. */
 export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): string {
   if (ticket.column === "merged") return "PR mergée";

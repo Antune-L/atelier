@@ -20,7 +20,9 @@ import {
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
+import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
+import { dependencyCandidates } from "@/lib/display";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +73,11 @@ export function NewTicketDialog({
     !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [researchPlan, setResearchPlan] = useState(false);
+  const { tickets } = useBoard();
+  const [dependsOn, setDependsOn] = useState<string | null>(null);
+  const dependsCandidates = dependencyCandidates(tickets, project, null);
+  // A project change may invalidate the chosen parent; treat an out-of-range choice as none.
+  const dependsOnValid = dependsOn && dependsCandidates.some((t) => t.id === dependsOn) ? dependsOn : null;
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const agent = useAgentKnobs();
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +116,7 @@ export function NewTicketDialog({
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
     setResearchPlan(false);
+    setDependsOn(null);
     agent.reset();
     setError(null);
   };
@@ -151,6 +159,7 @@ export function NewTicketDialog({
         verifyFeature,
         researchPlan,
         baseBranch: baseBranchOverride,
+        dependsOn: dependsOnValid,
         model: agent.model,
         effort: agent.effort,
         implementerModel: agent.implementerModel,
@@ -253,6 +262,22 @@ export function NewTicketDialog({
                         {b === selectedProject?.baseBranch
                           ? `${b} (défaut)`
                           : b}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="depends-on">Dépend du ticket (stack PR)</Label>
+                  <Select
+                    id="depends-on"
+                    value={dependsOnValid ?? ""}
+                    onChange={(e) => setDependsOn(e.target.value || null)}
+                    className="w-full"
+                  >
+                    <option value="">Aucune</option>
+                    {dependsCandidates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
                       </option>
                     ))}
                   </Select>

@@ -125,13 +125,13 @@ function buildFeasibilityContextSection(ticket: Ticket): string {
 
 export function buildTicketContract(
   ticket: Ticket,
-  opts: { composerScriptPath: string; commitLanguage: CommitLanguage },
+  opts: { composerScriptPath: string; commitLanguage: CommitLanguage; baseBranch: string },
 ): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
   const project = getProject(ticket.project);
-  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+  const baseBranch = opts.baseBranch;
   const figmaUrls = extractFigmaUrls(ticket.description);
   const isUi = figmaUrls.length > 0;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.

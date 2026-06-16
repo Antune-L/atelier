@@ -25,6 +25,7 @@ import type { SystemAdapter } from "../system/index.ts";
 import type { DoneGateResult } from "../system/types.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
+import { resolveBaseBranch } from "./baseBranch.ts";
 import {
   buildAskContract,
   buildCleanContract,
@@ -162,6 +163,18 @@ export class SlotManager {
   private pumpQueue(): void {
     const next = this.queue.shift();
     if (next) void this.startTicket(next);
+  }
+
+  /**
+   * Parent reached done() (PR open, branch pushed): auto-start any todo child that depends on it.
+   * Recursive by nature (each child's own done releases its children).
+   */
+  private async startDependents(parentId: string): Promise<void> {
+    for (const child of this.store.listDependents(parentId)) {
+      if (child.column !== "todo") continue;
+      this.lifecycle.enqueue(child.id);
+      await this.startTicket(child.id);
+    }
   }
 
   /**
@@ -324,7 +337,7 @@ export class SlotManager {
       return;
     }
     const project = getProject(ticket.project);
-    const baseBranch = ticket.baseBranch ?? project.baseBranch;
+    const baseBranch = resolveBaseBranch(ticket, project, this.store);
     const path = slotPath(slotId);
     const slug = slugify(ticket.title);
     // Resolving merge conflicts reuses the EXISTING PR branch (its commits); a fresh feature run
@@ -494,9 +507,15 @@ export class SlotManager {
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
     if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
     if (ticket.kind === "ask") return buildAskContract(ticket);
+    // A child ticket stacks on its parent's branch: the PR target must match the worktree fork point
+    // resolved in launchInSlot, so resolve it once here and pass it through.
+    const baseBranch = isProjectKey(ticket.project)
+      ? resolveBaseBranch(ticket, getProject(ticket.project), this.store)
+      : ticket.baseBranch ?? "";
     return buildTicketContract(ticket, {
       composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
       commitLanguage,
+      baseBranch,
     });
   }
 
@@ -682,6 +701,8 @@ export class SlotManager {
     );
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
+    // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
+    if (!mergeError) void this.startDependents(ticketId);
     this.pumpQueue();
     return { ok: true, reason: "" };
   }

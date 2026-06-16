@@ -691,7 +691,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               />
             ))}
           </div>
-          {current.column !== "todo" && (
+          {!["todo", "done", "merged"].includes(current.column) && (
             <div className="mt-3 space-y-1.5">
               <Label htmlFor="new-comment">Ajouter un commentaire</Label>
               <Input

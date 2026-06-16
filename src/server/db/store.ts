@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
 import {
+  AUTO_MERGE_RESOLVE_EVENT,
   AUTO_RECLAIM_EVENT,
   CLEANER_EFFORT,
   CLEANER_MODEL,
@@ -347,6 +348,15 @@ export class Store {
    */
   getReclaimCount(id: string): number {
     return this.scalar("SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND type = ?", id, AUTO_RECLAIM_EVENT);
+  }
+
+  /**
+   * Count of auto-triggered merge-conflict resolution sessions for this ticket. Event-based like
+   * getReclaimCount: only the auto-resolve path logs AUTO_MERGE_RESOLVE_EVENT, so a user's manual
+   * resolve-conflicts trigger never inflates it and never consumes the auto-resolution budget.
+   */
+  getAutoMergeResolveCount(id: string): number {
+    return this.scalar("SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND type = ?", id, AUTO_MERGE_RESOLVE_EVENT);
   }
 
   getLastProgressAt(id: string): number {

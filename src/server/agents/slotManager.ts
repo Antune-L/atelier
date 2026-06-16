@@ -1,6 +1,8 @@
 import { join } from "node:path";
 
 import {
+  AUTO_MERGE_RESOLVE_EVENT,
+  AUTO_MERGE_RESOLVE_MAX,
   AUTO_RECLAIM_EVENT,
   AUTO_RECLAIM_MAX,
   CLEANER_BRANCH_SUFFIX,
@@ -166,9 +168,9 @@ export class SlotManager {
    * via done(). Unlike startTicket it never queues — with no free slot it surfaces a hint and bails,
    * leaving the card in its failed state so the user can retry once a slot frees up.
    */
-  async resolveMergeConflicts(ticketId: string): Promise<void> {
+  async resolveMergeConflicts(ticketId: string): Promise<boolean> {
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket || ticket.branch === null || ticket.prUrl === null) return;
+    if (!ticket || ticket.branch === null || ticket.prUrl === null) return false;
     const free = this.store.findFreeSlot();
     if (!free) {
       this.touch(
@@ -176,7 +178,7 @@ export class SlotManager {
           error: "Aucun slot libre pour résoudre les conflits — réessaie une fois un slot libéré.",
         }),
       );
-      return;
+      return false;
     }
     this.store.logEvent(ticketId, "resolve_conflicts_started", { prUrl: ticket.prUrl });
     // opus low per the feature spec; the flag routes the conflict-resolution contract at delivery.
@@ -192,6 +194,7 @@ export class SlotManager {
       }),
     );
     await this.launchInSlot(free.id, ticketId);
+    return true;
   }
 
   private async launchInSlot(slotId: number, ticketId: string): Promise<void> {
@@ -521,6 +524,12 @@ export class SlotManager {
         column = "failed";
         this.store.logEvent(ticketId, "auto_merge_failed", { reason: merge.reason });
         log.warn("auto-merge échoué", { ticketId, reason: merge.reason });
+        // Auto-merge failures (branch behind base / conflicts) are the top terminal-failure cause.
+        // Instead of parking the card in "failed" for a manual resolve, spawn a rebase/resolution
+        // session automatically (bounded by AUTO_MERGE_RESOLVE_MAX to break the resolve→fail loop).
+        if (await this.tryAutoResolveMerge(ticket, slotId, prUrl, merge.reason)) {
+          return { ok: true, reason: "" };
+        }
       }
     }
 
@@ -548,6 +557,39 @@ export class SlotManager {
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
     this.pumpQueue();
     return { ok: true, reason: "" };
+  }
+
+  /**
+   * On an auto-merge failure, automatically spawn a rebase/conflict-resolution session instead of
+   * leaving the card in "failed" for a manual trigger. Bounded by AUTO_MERGE_RESOLVE_MAX (counted
+   * from AUTO_MERGE_RESOLVE_EVENT) so a resolution session that itself reaches a failing merge can't
+   * loop forever — past the budget the caller falls through to the normal failed landing.
+   *
+   * Returns true once it has taken over the card (slot released, resolution session launched); the
+   * caller must then stop and NOT mark the ticket failed. Returns false to defer to the failed path —
+   * either the budget is spent, or no slot could be claimed for the resolution session.
+   */
+  private async tryAutoResolveMerge(ticket: Ticket, slotId: number, prUrl: string, reason: string): Promise<boolean> {
+    if (this.store.getAutoMergeResolveCount(ticket.id) >= AUTO_MERGE_RESOLVE_MAX) return false;
+    // resolveMergeConflicts reads branch + prUrl from the store and grabs a free slot, so persist the
+    // PR URL and free the current slot first (the just-freed slot is the one it reuses, when nothing
+    // else stole it during releaseSlot's async cleanup).
+    this.store.updateTicket(ticket.id, { prUrl });
+    await this.releaseSlot(slotId, ticket);
+    const launched = await this.resolveMergeConflicts(ticket.id);
+    if (!launched) {
+      // No slot was available for the resolution session: defer to the caller's failed landing. The
+      // budget event is NOT logged, so a later retry (manual or once a slot frees) still has its turn.
+      // pumpQueue is the caller's responsibility on the failed path.
+      return false;
+    }
+    this.store.logEvent(ticket.id, AUTO_MERGE_RESOLVE_EVENT, { reason });
+    log.info("auto-merge échoué — résolution de conflits automatique lancée", { ticketId: ticket.id, reason });
+    await this.notifier.notify("Auto-merge en conflit", `${ticket.title} → rebase automatique en cours`);
+    // The resolution session already holds its slot (claimed synchronously inside resolveMergeConflicts);
+    // the caller skips its own pumpQueue on this early-return path, so wake any other queued ticket here.
+    this.pumpQueue();
+    return true;
   }
 
   /**

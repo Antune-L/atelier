@@ -214,6 +214,14 @@ export const AUTO_RECLAIM_EVENT = "auto_reclaim";
 /** Audit event logged on each failed done() gate; backs the consecutive-failure loop guard. */
 export const DONE_GATE_FAILED_EVENT = "done_gate_failed";
 /**
+ * Max automatic rebase/conflict-resolution sessions spawned when an auto-merge fails (branch behind
+ * base / conflicts). Bounds the loop: the resolution session can itself reach a failing merge, which
+ * would otherwise re-trigger resolution forever. Past this the card lands in "failed" for manual review.
+ */
+export const AUTO_MERGE_RESOLVE_MAX = 1;
+/** Audit event logged on each auto-triggered merge-conflict resolution; backs the resolve counter. */
+export const AUTO_MERGE_RESOLVE_EVENT = "auto_merge_resolve";
+/**
  * Consecutive failed done() gates (no intervening protocol event — a tight within-turn loop)
  * tolerated before the card is treated as a real stall. Below this, a failure is a false positive:
  * done() returns the actionable reason and the still-alive agent corrects + retries, so the card

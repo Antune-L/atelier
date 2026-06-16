@@ -182,6 +182,9 @@ export const ACTIVE_STAGES: Stage[] = [
   "opening_pr",
 ];
 
+/** Triage feasibility verdicts an agent can return. */
+export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+
 /** Columns whose tickets are counted as a successful outcome in the stats dashboard. */
 export const SUCCESS_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered"];
 /** Columns whose tickets are counted as a failed outcome in the stats dashboard. */

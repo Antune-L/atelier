@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   doneArgsSchema,
@@ -31,6 +32,8 @@ interface ToolResult {
   ok: boolean;
   result: string;
 }
+
+type ToolHandler = (ctx: ToolCallContext) => ToolResult | Promise<ToolResult>;
 
 /**
  * Routes worker tool calls and Stop-hook events to state mutations.
@@ -82,23 +85,23 @@ export class AgentCoordinator {
     this.markProgress(ctx.ticketId);
     this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
-    switch (ctx.name) {
-      case "update_stage":
-        return this.handleUpdateStage(ctx);
-      case "ask_user":
-        return this.handleAskUser(ctx);
-      case "submit_prd":
-        return this.handleSubmitPrd(ctx);
-      case "submit_answer":
-        return this.handleSubmitAnswer(ctx);
-      case "done":
-        return this.handleDone(ctx);
-      case "fail":
-        return this.handleFail(ctx);
-      default:
-        return { ok: false, result: `tool inconnu: ${ctx.name}` };
-    }
+    // Registry-derived dispatch: a tool name without an entry is a COMPILE error (Record over the
+    // full WorkerToolName union), not a runtime fallthrough. submit_triage/submit_feasibility are
+    // handled by their slot-gated early returns above; reaching them on a pipeline slot is illegal,
+    // mirroring the previous switch's `default` ("tool inconnu").
+    return this.pipelineHandlers[ctx.name](ctx);
   }
+
+  private readonly pipelineHandlers: Record<WorkerToolName, ToolHandler> = {
+    update_stage: (ctx) => this.handleUpdateStage(ctx),
+    ask_user: (ctx) => this.handleAskUser(ctx),
+    submit_prd: (ctx) => this.handleSubmitPrd(ctx),
+    submit_answer: (ctx) => this.handleSubmitAnswer(ctx),
+    done: (ctx) => this.handleDone(ctx),
+    fail: (ctx) => this.handleFail(ctx),
+    submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
+    submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
+  };
 
   private async handleSubmitTriage(ctx: ToolCallContext): Promise<ToolResult> {
     const parsed = submitTriageArgsSchema.safeParse(ctx.args);

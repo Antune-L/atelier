@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -41,7 +41,7 @@ export const TRIAGE_STATUSES = ["none", "running", "done", "failed"] as const;
 export const triageStatusSchema = z.enum(TRIAGE_STATUSES);
 export type TriageStatus = z.infer<typeof triageStatusSchema>;
 
-export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+export { TRIAGE_VERDICTS };
 export const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 export type TriageVerdict = z.infer<typeof triageVerdictSchema>;
 
@@ -429,81 +429,40 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
 ]);
 export type WsClientEvent = z.infer<typeof wsClientEventSchema>;
 
-// ---- Worker channel: agent → backend (tool calls over WS) ----
+// ---- Worker channel ----
+// The wire protocol's single source of truth lives in ./protocol.ts (kept dependency-light so
+// the standalone worker bundle can import it). Re-exported here so existing importers are
+// unaffected. The two STRICT coordinator-facing arg schemas below stay in this module because
+// they reference the full stageSchema / triageResultSchema (which carry server-shared semantics).
 
-export const workerToolNameSchema = z.enum([
-  "update_stage",
-  "ask_user",
-  "submit_prd",
-  "submit_answer",
-  "done",
-  "fail",
-  "submit_triage",
-  "submit_feasibility",
-]);
-export type WorkerToolName = z.infer<typeof workerToolNameSchema>;
+export {
+  workerToolNameSchema,
+  askUserArgsSchema,
+  submitPrdArgsSchema,
+  submitAnswerArgsSchema,
+  doneArgsSchema,
+  failArgsSchema,
+  workerHelloSchema,
+  workerToolCallSchema,
+  workerStopSchema,
+  workerInboundSchema,
+  channelEventSchema,
+  workerOutboundSchema,
+} from "./protocol.ts";
+export type { WorkerToolName, WorkerInbound, ChannelEvent, WorkerOutbound } from "./protocol.ts";
 
+/**
+ * Strict coordinator-facing `update_stage` args: accepts the FULL stage set (the worker only
+ * advertises the agent-settable subset via protocol.ts, but the coordinator never tightens
+ * this — see protocol.ts AGENT_SETTABLE_STAGES).
+ */
 export const updateStageArgsSchema = z.object({
   stage: stageSchema,
-});
-export const askUserArgsSchema = z.object({
-  question: z.string().min(1),
-});
-export const submitPrdArgsSchema = z.object({
-  markdown: z.string().min(1),
-});
-/** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
-export const submitAnswerArgsSchema = z.object({
-  answer: z.string().min(1),
-});
-export const doneArgsSchema = z.object({
-  pr_url: z.string().url(),
-});
-export const failArgsSchema = z.object({
-  reason: z.string().min(1),
-  findings: z.string().default(""),
 });
 /** Feasibility verdict the triage session submits via the worker channel (same shape as the report). */
 export const submitTriageArgsSchema = triageResultSchema;
 /** Batch feasibility verdicts the orchestrator session submits once (one entry per imported ticket). */
 export const submitFeasibilityArgsSchema = z.object({ results: z.array(feasibilityResultSchema) });
-
-// ---- Worker channel: WS frames worker.ts ↔ backend ----
-
-export const workerHelloSchema = z.object({
-  type: z.literal("hello"),
-  ticketId: z.string(),
-  slotId: z.number().int(),
-});
-
-export const workerToolCallSchema = z.object({
-  type: z.literal("tool_call"),
-  id: z.string(),
-  name: workerToolNameSchema,
-  args: z.unknown(),
-});
-
-export const workerStopSchema = z.object({
-  type: z.literal("stop"),
-  sessionId: z.string().nullable().default(null),
-});
-
-export const workerInboundSchema = z.discriminatedUnion("type", [
-  workerHelloSchema,
-  workerToolCallSchema,
-  workerStopSchema,
-]);
-export type WorkerInbound = z.infer<typeof workerInboundSchema>;
-
-/** backend → worker.ts → injected as channel notification into the Claude session. */
-export const channelEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("ticket"), payload: z.string() }),
-  z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
-  z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
-  z.object({ type: z.literal("nudge"), message: z.string() }),
-  z.object({ type: z.literal("user_comment"), body: z.string() }),
-]);
-export type ChannelEvent = z.infer<typeof channelEventSchema>;
 
 // ---- Interactive terminal channel: browser ↔ backend (xterm.js ↔ tmux pane) ----
 
@@ -541,13 +500,6 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("exit") }),
 ]);
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
-
-/** backend → worker.ts: either a channel event, or a tool result for a pending tool_call. */
-export const workerOutboundSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("event"), event: channelEventSchema }),
-  z.object({ type: z.literal("tool_result"), id: z.string(), ok: z.boolean(), result: z.string() }),
-]);
-export type WorkerOutbound = z.infer<typeof workerOutboundSchema>;
 
 /** In-app self-update outcome: reload the webview in place (frontend-only diff) or relaunch the process. */
 export const updateModeSchema = z.enum(["reload", "relaunch"]);

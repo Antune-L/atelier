@@ -1,4 +1,4 @@
-import { Brush, Check, Cpu, Eye, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, X } from "lucide-react";
+import { Brush, Check, Cpu, Eye, FlaskConical, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -82,6 +82,9 @@ interface TicketDetailProps {
 }
 
 function isLocked(ticket: Ticket): boolean {
+  // An interactive test session occupies a slot (stage stays "done"); treat it as locked so the
+  // card can't be edited or moved while the test runs.
+  if (ticket.testing) return true;
   if (ticket.stage === null) return false;
   if (ticket.stage === "awaiting_answers") return true;
   return ACTIVE_STAGES.includes(ticket.stage);
@@ -96,6 +99,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [confirmImplement, setConfirmImplement] = useState(false);
   const [confirmRelaunch, setConfirmRelaunch] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -160,12 +164,12 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   });
   const showTerminal =
     current.slotId !== null &&
-    current.stage !== null &&
-    current.stage !== "done";
+    ((current.stage !== null && current.stage !== "done") || current.testing);
   const terminalPaneVisible = showTerminal && terminalVisible;
   // The pane WebSocket can land before tmux is spawned (queued/setup window); while the session is
   // expected to be live the terminal retries rather than freezing on the first "session terminée".
-  const sessionLive = current.stage !== null && !TERMINAL_STAGES.includes(current.stage);
+  // A test session sits on a "done" (terminal) stage, so OR in `testing` to keep it live.
+  const sessionLive = (current.stage !== null && !TERMINAL_STAGES.includes(current.stage)) || current.testing;
   // A "todo" card carries config sections (agent, PR options, feasibility) and
   // never has a terminal: lay it out on two columns so it breathes.
   const isTodoSplit = current.column === "todo";
@@ -226,6 +230,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.slotId === null &&
     current.prUrl !== null &&
     current.branch !== null;
+  // A finished feature can spawn an interactive test session on its existing branch.
+  const canStartTest =
+    current.column === "done" &&
+    current.kind === "feature" &&
+    current.branch !== null &&
+    current.slotId === null &&
+    !current.testing;
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -747,6 +758,46 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             >
               <Check className="h-4 w-4" />
               PR mergée
+            </Button>
+          )}
+          {canStartTest && (
+            <Button
+              variant="default"
+              size="sm"
+              disabled={testBusy}
+              title="Recréer un worktree sur la branche de la feature et lancer une session Claude interactive pour la tester (sans PR ni gate)"
+              onClick={async () => {
+                setTestBusy(true);
+                try {
+                  await api.startTest(ticket.id);
+                  refresh();
+                } finally {
+                  setTestBusy(false);
+                }
+              }}
+            >
+              <FlaskConical className="h-4 w-4" />
+              Tester la feature
+            </Button>
+          )}
+          {current.testing && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={testBusy}
+              title="Arrêter la session de test : tue la session, retire le worktree et libère le slot"
+              onClick={async () => {
+                setTestBusy(true);
+                try {
+                  await api.stopTest(ticket.id);
+                  refresh();
+                } finally {
+                  setTestBusy(false);
+                }
+              }}
+            >
+              <Square className="h-4 w-4" />
+              Arrêter le test
             </Button>
           )}
           {current.column !== "abandoned" && (

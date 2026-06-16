@@ -112,6 +112,7 @@ export interface TicketPatch {
   branch?: string | null;
   prUrl?: string | null;
   resolvingConflicts?: boolean;
+  testing?: boolean;
   error?: string | null;
   archived?: boolean;
   watchdogFlagged?: boolean;
@@ -338,6 +339,7 @@ export class Store {
     if (patch.branch !== undefined) set("branch", patch.branch);
     if (patch.prUrl !== undefined) set("pr_url", patch.prUrl);
     if (patch.resolvingConflicts !== undefined) set("resolving_conflicts", patch.resolvingConflicts ? 1 : 0);
+    if (patch.testing !== undefined) set("testing", patch.testing ? 1 : 0);
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.archived !== undefined) set("archived", patch.archived ? 1 : 0);
     if (patch.watchdogFlagged !== undefined) set("watchdog_flagged", patch.watchdogFlagged ? 1 : 0);

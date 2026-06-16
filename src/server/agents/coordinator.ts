@@ -84,6 +84,12 @@ export class AgentCoordinator {
         result: "Session de faisabilité en lecture seule : seul submit_feasibility est autorisé.",
       };
     }
+    // An interactive test session runs on a "done" card; it has no pipeline. `--tools` can't bar MCP
+    // tools, so bar every pipeline tool here (same rationale as the triage/feasibility guards above).
+    const testingTicket = this.store.getTicket(ctx.ticketId);
+    if (testingTicket?.testing) {
+      return { ok: false, result: "Session de test interactive : aucun tool de pipeline n'est disponible." };
+    }
     this.markProgress(ctx.ticketId);
     this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
@@ -209,6 +215,8 @@ export class AgentCoordinator {
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;
+    // Interactive test sessions run on a "done" card (stage stays "done", not active nor
+    // awaiting_answers), so they exit just below at `needsResolution` and are never escalated/nudged.
 
     // A turn that legitimately parks on the user is not stalled: either an unanswered
     // question, or a submitted PRD awaiting validation/feedback (column "prd"). The

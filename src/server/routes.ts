@@ -583,6 +583,34 @@ export function createApiRoutes(deps: RouteDeps) {
       });
       return store.getTicket(params.id);
     })
+    .post("/tickets/:id/test", ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      const eligible =
+        ticket.kind === "feature" &&
+        ticket.column === "done" &&
+        ticket.slotId === null &&
+        ticket.branch !== null &&
+        !ticket.testing;
+      if (!eligible) {
+        return jsonError(set, HTTP_CONFLICT, "test réservé aux features terminées (colonne Fini) sans slot occupé");
+      }
+      // Slow git worktree setup + install runs in the background; the board updates live over WS.
+      void slots.startTestSession(params.id).catch((e) => {
+        log.error("démarrage session de test échoué", {
+          ticketId: params.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
+      return store.getTicket(params.id);
+    })
+    .post("/tickets/:id/stop-test", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (!ticket.testing) return jsonError(set, HTTP_CONFLICT, "aucune session de test active");
+      await slots.stopTestSession(params.id);
+      return store.getTicket(params.id);
+    })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

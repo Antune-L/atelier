@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   branch TEXT,
   pr_url TEXT,
   resolving_conflicts INTEGER NOT NULL DEFAULT 0,
+  testing INTEGER NOT NULL DEFAULT 0,
   error TEXT,
   archived INTEGER NOT NULL DEFAULT 0,
   watchdog_flagged INTEGER NOT NULL DEFAULT 0,
@@ -130,6 +131,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "base_branch", ddl: "ALTER TABLE tickets ADD COLUMN base_branch TEXT" },
   { column: "resolving_conflicts", ddl: "ALTER TABLE tickets ADD COLUMN resolving_conflicts INTEGER NOT NULL DEFAULT 0" },
   { column: "feasibility_context", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_context INTEGER NOT NULL DEFAULT 1" },
+  { column: "testing", ddl: "ALTER TABLE tickets ADD COLUMN testing INTEGER NOT NULL DEFAULT 0" },
   { column: "agent_summary", ddl: "ALTER TABLE tickets ADD COLUMN agent_summary TEXT" },
 ];
 

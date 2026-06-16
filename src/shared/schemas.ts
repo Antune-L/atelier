@@ -120,6 +120,8 @@ export const ticketSchema = z.object({
   prUrl: z.string().nullable(),
   /** An opus-low session is resolving merge conflicts on the existing PR branch (auto-merge retry). */
   resolvingConflicts: z.boolean(),
+  /** An interactive test session occupies a slot on this card's existing feature branch (no pipeline/gate/PR). */
+  testing: z.boolean(),
   error: z.string().nullable(),
   archived: z.boolean(),
   watchdogFlagged: z.boolean(),

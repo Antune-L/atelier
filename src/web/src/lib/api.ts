@@ -86,6 +86,8 @@ export const api = {
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
+  startTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/test`, { method: "POST" }),
+  stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
   triage: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage`, { method: "POST" }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>

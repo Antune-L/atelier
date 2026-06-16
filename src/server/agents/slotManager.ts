@@ -30,6 +30,7 @@ import {
   buildCleanContract,
   buildConflictResolutionContract,
   buildReviewContract,
+  buildTestContract,
   buildTicketContract,
 } from "./contract.ts";
 import {
@@ -196,6 +197,123 @@ export class SlotManager {
     );
     await this.launchInSlot(free.id, ticketId);
     return true;
+  }
+
+  /**
+   * Spawn an interactive test session for a finished feature: reserve a free slot, recreate a
+   * worktree on the card's EXISTING feature branch (fetched from origin after the slot was
+   * released), install deps + run the project setup, then spawn a Claude session the user drives via
+   * the terminal. No pipeline, no gate, no PR, no queue. The card stays in "Fini" (column/stage
+   * untouched) — the `testing` flag is the only marker. Eligibility is re-checked here (the route
+   * also validates) so a double click can't double-spawn.
+   */
+  async startTestSession(ticketId: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (
+      !ticket ||
+      ticket.kind !== "feature" ||
+      ticket.column !== "done" ||
+      ticket.branch === null ||
+      ticket.slotId !== null ||
+      ticket.testing ||
+      !isProjectKey(ticket.project)
+    ) {
+      return;
+    }
+    const free = this.store.findFreeSlot();
+    if (!free) {
+      this.touch(
+        this.store.updateTicket(ticketId, {
+          error: "Aucun slot libre pour tester — réessaie une fois un slot libéré.",
+        }),
+      );
+      return;
+    }
+    this.store.logEvent(ticketId, "test_session_started", {});
+
+    const project = getProject(ticket.project);
+    const baseBranch = ticket.baseBranch ?? project.baseBranch;
+    const branch = ticket.branch;
+    const path = slotPath(free.id);
+    const sessionName = `ticket-${ticketId}`;
+
+    this.store.updateSlot(free.id, {
+      ticketId,
+      repoPath: project.repoPath,
+      tmuxSession: sessionName,
+      status: "busy",
+    });
+    this.touch(this.store.updateTicket(ticketId, { testing: true, slotId: free.id, error: null }));
+    this.hub.pushSlots(this.store.listSlots());
+    log.info("démarrage session de test", { ticketId, slotId: free.id, branch });
+
+    try {
+      this.setPhase(ticketId, SETUP_PHASES.worktree);
+      await this.repoMutex.run(project.repoPath, async () => {
+        const previous = this.store.getSlot(free.id);
+        await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
+        await this.system.deleteLocalBranch(project.repoPath, branch);
+        await this.system.fetch(project.repoPath, baseBranch);
+        // The feature branch lives only on origin after the original slot was released.
+        await this.system.fetch(project.repoPath, branch);
+        await this.system.worktreeAddExisting(project.repoPath, path, branch);
+      });
+
+      await this.depositSlotFiles(path, ticket, free.id);
+      await this.system.copyEnvFiles(project.repoPath, path);
+
+      // Testing demands a runnable worktree — never skip setup/install (unlike an ask ticket).
+      this.setPhase(ticketId, SETUP_PHASES.setup);
+      await this.system.runWorktreeSetupScript({
+        repoPath: project.repoPath,
+        slotPath: path,
+        branch,
+        baseBranch,
+        script: project.worktreeScript ?? null,
+        timeoutMs: project.commitTimeoutMs,
+      });
+      this.setPhase(ticketId, SETUP_PHASES.deps);
+      await this.system.installDeps(path, project.commitTimeoutMs);
+
+      this.setPhase(ticketId, SETUP_PHASES.spawning);
+      await this.system.spawnSession({
+        sessionName,
+        cwd: path,
+        model: ticket.model ?? MODELS.implement,
+        effort: ticket.effort ?? MODELS.implementEffort,
+        env: {
+          TICKET_ID: ticketId,
+          SLOT_ID: String(free.id),
+          BACKEND_WS: this.config.backendWs,
+          DISABLE_AUTOUPDATER: "1",
+        },
+      });
+      this.setPhase(ticketId, SETUP_PHASES.waiting);
+      this.store.logEvent(ticketId, "session_spawned", { slotId: free.id, sessionName });
+      log.info("session de test spawnée", { ticketId, slotId: free.id, sessionName });
+
+      // Delivers the test contract once the worker connects (stage stays "done" → no escalation).
+      void this.deliverContractWhenReady(ticketId);
+    } catch (error) {
+      this.clearPhase(ticketId);
+      // Not markFailed: a test setup failure must not flip the card to "failed". Free the slot and
+      // surface the error; the user can retry once a slot frees up.
+      const message = error instanceof Error ? error.message : String(error);
+      await this.releaseSlot(free.id, ticket);
+      this.touch(this.store.updateTicket(ticketId, { testing: false, slotId: null, error: message }));
+      log.error("échec setup session de test", { ticketId, slotId: free.id, error: message });
+    }
+  }
+
+  /** Stop an interactive test session: kill it, drop the worktree + local branch, free the slot. */
+  async stopTestSession(ticketId: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || !ticket.testing || ticket.slotId === null) return;
+    await this.releaseSlot(ticket.slotId, ticket);
+    this.touch(this.store.updateTicket(ticketId, { testing: false, slotId: null, error: null }));
+    this.store.logEvent(ticketId, "test_session_stopped", {});
+    log.info("session de test arrêtée", { ticketId });
+    this.pumpQueue();
   }
 
   private async launchInSlot(slotId: number, ticketId: string): Promise<void> {
@@ -371,6 +489,7 @@ export class SlotManager {
 
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
+    if (ticket.testing) return buildTestContract(ticket);
     if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
     if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
@@ -409,6 +528,13 @@ export class SlotManager {
   private async handleWorkerConnectTimeout(ticketId: string): Promise<void> {
     if (this.workerHub.isConnected(ticketId)) return;
     log.warn("worker jamais connecté dans la fenêtre de spawn", { ticketId });
+    // A test session is never auto-reclaimed (tryAutoReclaim returns "ignore"), which would leave the
+    // slot busy + the card stuck on "Test en cours" forever. Tear it down cleanly instead, as if the
+    // user had clicked "Arrêter le test" (the card stays in "Fini").
+    if (this.store.getTicket(ticketId)?.testing) {
+      await this.stopTestSession(ticketId);
+      return;
+    }
     const outcome = await this.tryAutoReclaim(ticketId, "worker jamais connecté au spawn");
     if (outcome !== "escalate") return;
     const ticket = this.store.getTicket(ticketId);
@@ -699,6 +825,16 @@ export class SlotManager {
       if (alive) continue;
       const ticketId = slot.ticketId;
 
+      // A test session is ephemeral: a backend restart ends it cleanly rather than resurrecting it.
+      const recovered = this.store.getTicket(ticketId);
+      if (recovered?.testing) {
+        await this.releaseSlot(slot.id, recovered);
+        this.touch(this.store.updateTicket(ticketId, { testing: false, slotId: null }));
+        this.store.logEvent(ticketId, "test_session_stopped", { reason: "backend restart" });
+        log.info("session de test terminée à la reprise", { ticketId, slotId: slot.id });
+        continue;
+      }
+
       // Under the cap, relaunch in place (keeps the worktree); otherwise leave interrupted + notify.
       if ((await this.tryAutoReclaim(ticketId, "session tmux disparue")) !== "escalate") continue;
 
@@ -779,6 +915,8 @@ export class SlotManager {
   async tryAutoReclaim(ticketId: string, reason: string): Promise<ReclaimOutcome> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.slotId === null) return "ignore";
+    // A test session is ephemeral and lives on a "done" card: never resurrect it as a pipeline run.
+    if (ticket.testing) return "ignore";
     if (this.isLaunching(ticketId)) {
       log.warn("auto-reclaim ignoré : lancement déjà en cours", { ticketId });
       return "ignore";
@@ -802,6 +940,8 @@ export class SlotManager {
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) return;
+    // A test session must never be relaunched with a pipeline contract; the user stops it manually.
+    if (ticket.testing) return;
     const sessionName = `ticket-${ticketId}`;
     const path = slotPath(slotId);
     log.info("relance en place", { ticketId, slotId });

@@ -175,7 +175,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      <div className="flex h-full gap-3 overflow-x-auto pb-4">
         {COLUMN_ORDER.map((column) => (
           <BoardColumn
             key={column}

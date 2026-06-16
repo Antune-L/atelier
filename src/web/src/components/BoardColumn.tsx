@@ -244,7 +244,7 @@ export function BoardColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "flex w-12 shrink-0 flex-col items-center rounded-xl border border-border bg-secondary/70 shadow-sm transition-colors",
+          "flex h-full w-12 shrink-0 flex-col items-center rounded-xl border border-border bg-secondary/70 shadow-sm transition-colors",
           isOver && "bg-accent/70",
         )}
       >
@@ -264,7 +264,7 @@ export function BoardColumn({
   }
 
   return (
-    <div className="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-secondary/70 shadow-sm">
+    <div className="flex h-full w-72 shrink-0 flex-col rounded-xl border border-border bg-secondary/70 shadow-sm">
       <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
         <div className="flex items-center gap-2">
           <button
@@ -298,7 +298,7 @@ export function BoardColumn({
       <div
         ref={setCardContainerRef}
         className={cn(
-          "flex max-h-[70vh] min-h-[60vh] flex-col gap-2 overflow-y-auto rounded-b-xl p-2 transition-colors",
+          "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-b-xl p-2 transition-colors",
           isOver && "bg-accent/70",
         )}
       >

@@ -3,6 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  GitMerge,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -31,6 +32,12 @@ interface BoardColumnProps {
   moveAllBusy?: boolean;
   /** When set on the "Fini" column, lets each card re-check its PR merge status. */
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
+  /** When set on the "Fini" column, re-checks the merge status of every eligible card at once. */
+  onCheckAllMerges?: () => void;
+  /** How many "Fini" cards the bulk check targets; disables the button at 0. */
+  checkAllCount?: number;
+  /** True while a bulk merge check is in flight — disables the button to prevent re-entry. */
+  checkAllBusy?: boolean;
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
@@ -124,6 +131,12 @@ function resolveMoveAllTitle(count: number, busy: boolean): string {
   return `Lancer ${count} ticket(s) dans « À implémenter »`;
 }
 
+function resolveCheckAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Vérification en cours…";
+  if (count === 0) return "Aucune carte à vérifier";
+  return `Vérifier le merge de ${count} carte(s)`;
+}
+
 export function BoardColumn({
   column,
   tickets,
@@ -134,6 +147,9 @@ export function BoardColumn({
   moveAllCount = 0,
   moveAllBusy = false,
   onCheckMerge,
+  onCheckAllMerges,
+  checkAllCount = 0,
+  checkAllBusy = false,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
@@ -176,11 +192,25 @@ export function BoardColumn({
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
   const canMoveAll = column === "todo" && onMoveAllToImplementing !== undefined && tickets.length > 0;
+  const canCheckAll = column === "done" && onCheckAllMerges !== undefined;
   const moveAllButtonTitle = resolveMoveAllTitle(moveAllCount, moveAllBusy);
+  const checkAllButtonTitle = resolveCheckAllTitle(checkAllCount, checkAllBusy);
   const headerTrailing =
-    canAdd || canMoveAll ? (
+    canAdd || canMoveAll || canCheckAll ? (
       <div className="flex items-center gap-1">
         {countBadge}
+        {canCheckAll && (
+          <button
+            type="button"
+            onClick={onCheckAllMerges}
+            disabled={checkAllCount === 0 || checkAllBusy}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+            title={checkAllButtonTitle}
+            aria-label="Vérifier le merge de toutes les cartes"
+          >
+            <GitMerge className="h-3.5 w-3.5" />
+          </button>
+        )}
         {canMoveAll && (
           <button
             type="button"

@@ -51,6 +51,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const [movingAll, setMovingAll] = useState(false);
   // Synchronous guard: two clicks fire before React re-renders the disabled button, so state alone can't block re-entry.
   const movingAllRef = useRef(false);
+  const [checkingAll, setCheckingAll] = useState(false);
+  const checkingAllRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
@@ -107,12 +109,46 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const handleCheckMerge = async (ticket: Ticket): Promise<void> => {
     try {
       const result = await api.checkMerged(ticket.id);
-      if (!result.merged) {
-        setError(`PR non mergée (état : ${result.state || "inconnu"})`);
-      }
+      const body = result.merged
+        ? "PR déjà mergée."
+        : `PR non mergée (état : ${result.state || "inconnu"}).`;
+      boardStore.notify("Merge vérifié", body);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Vérification du merge échouée");
+      boardStore.notify("Vérification échouée", e instanceof Error ? e.message : "Vérification du merge échouée");
     }
+  };
+
+  const doneFeatureTickets = ticketsByColumn("done").filter((t) => t.kind === "feature");
+  const checkAllCount = doneFeatureTickets.length;
+
+  const handleCheckAllMerges = async (): Promise<void> => {
+    if (checkingAllRef.current) return;
+    const toCheck = doneFeatureTickets;
+    if (toCheck.length === 0) return;
+    checkingAllRef.current = true;
+    setCheckingAll(true);
+    let merged = 0;
+    let pending = 0;
+    let failures = 0;
+    try {
+      // Sequential to avoid a burst of `gh` calls; each card's WS update moves it out of "done" on merge.
+      for (const ticket of toCheck) {
+        try {
+          const result = await api.checkMerged(ticket.id);
+          if (result.merged) merged += 1;
+          else pending += 1;
+        } catch {
+          failures += 1;
+        }
+      }
+    } finally {
+      checkingAllRef.current = false;
+      setCheckingAll(false);
+    }
+    const parts = [`${merged} mergée(s)`];
+    if (pending > 0) parts.push(`${pending} en attente`);
+    if (failures > 0) parts.push(`${failures} échec(s)`);
+    boardStore.notify("Merge vérifié", `${parts.join(", ")}.`);
   };
 
   const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
@@ -152,6 +188,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             moveAllCount={moveAllCount}
             moveAllBusy={movingAll}
             onCheckMerge={column === "done" ? handleCheckMerge : undefined}
+            onCheckAllMerges={column === "done" ? handleCheckAllMerges : undefined}
+            checkAllCount={checkAllCount}
+            checkAllBusy={checkingAll}
           />
         ))}
       </div>

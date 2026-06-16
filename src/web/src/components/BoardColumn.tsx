@@ -1,10 +1,17 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { PanelLeftClose, PanelLeftOpen, Plus, Rocket } from "lucide-react";
+import {
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  Rocket,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { COLUMN_LABELS, type Column } from "@shared/constants";
+import { COLUMN_LABELS, COLUMN_SORT_FIELD, type Column } from "@shared/constants";
 
 import { TicketCard, resolveProjectLabel } from "@/components/TicketCard";
 import { cn } from "@/lib/utils";
@@ -25,6 +32,9 @@ interface BoardColumnProps {
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
+const SORT_DIR_KEY_PREFIX = "column-sort-dir:";
+
+type SortDir = "asc" | "desc";
 
 /** Cards rendered before any scroll. */
 const WINDOW_INITIAL_SIZE = 20;
@@ -97,6 +107,15 @@ function writeCollapsed(column: Column, collapsed: boolean): void {
   localStorage.setItem(`${COLLAPSE_KEY_PREFIX}${column}`, collapsed ? "1" : "0");
 }
 
+function readSortDir(column: Column): SortDir {
+  const stored = localStorage.getItem(`${SORT_DIR_KEY_PREFIX}${column}`);
+  return stored === "asc" ? "asc" : "desc";
+}
+
+function writeSortDir(column: Column, dir: SortDir): void {
+  localStorage.setItem(`${SORT_DIR_KEY_PREFIX}${column}`, dir);
+}
+
 function resolveMoveAllTitle(count: number, busy: boolean): string {
   if (busy) return "Lancement en cours…";
   if (count === 0) return "Aucun slot libre";
@@ -115,10 +134,18 @@ export function BoardColumn({
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
+  const [sortDir, setSortDir] = useState(() => readSortDir(column));
   const label = COLUMN_LABELS[column];
 
+  const sortField = COLUMN_SORT_FIELD[column];
+  const sortedTickets = useMemo(() => {
+    if (sortField === undefined) return tickets;
+    const value = (t: Ticket): number => (sortField === "finishedAt" ? (t.finishedAt ?? t.updatedAt) : t.createdAt);
+    return [...tickets].sort((a, b) => (sortDir === "desc" ? value(b) - value(a) : value(a) - value(b)));
+  }, [tickets, sortField, sortDir]);
+
   // Every column windows its card list so long piles stay responsive.
-  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(tickets);
+  const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(sortedTickets);
 
   // The card container is both the dnd droppable and the windowing scroll root, so compose both refs.
   const setCardContainerRef = (node: HTMLDivElement | null): void => {
@@ -130,6 +157,12 @@ export function BoardColumn({
     const next = !collapsed;
     setCollapsed(next);
     writeCollapsed(column, next);
+  };
+
+  const toggleSort = (): void => {
+    const next: SortDir = sortDir === "desc" ? "asc" : "desc";
+    setSortDir(next);
+    writeSortDir(column, next);
   };
 
   const countBadge = (
@@ -211,6 +244,21 @@ export function BoardColumn({
             <PanelLeftClose className="h-4 w-4" />
           </button>
           <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+          {sortField !== undefined && (
+            <button
+              type="button"
+              onClick={toggleSort}
+              className="text-muted-foreground hover:text-foreground"
+              title={sortDir === "desc" ? "Tri : plus récents d'abord" : "Tri : plus anciens d'abord"}
+              aria-label={sortDir === "desc" ? "Tri : plus récents d'abord, cliquer pour inverser" : "Tri : plus anciens d'abord, cliquer pour inverser"}
+            >
+              {sortDir === "desc" ? (
+                <ArrowDownWideNarrow className="h-4 w-4" />
+              ) : (
+                <ArrowUpNarrowWide className="h-4 w-4" />
+              )}
+            </button>
+          )}
         </div>
         {headerTrailing}
       </div>

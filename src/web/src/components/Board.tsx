@@ -62,12 +62,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     ? byProject.filter((t) => normalize(`${t.title} ${t.description}`).includes(needle))
     : byProject;
 
-  const ticketsByColumn = (column: Column): Ticket[] => {
-    const inColumn = visible.filter((t) => t.column === column);
-    if (column !== "merged") return inColumn;
-    // Newest merge first: rank by terminal-state timestamp, falling back to last update.
-    return [...inColumn].sort((a, b) => (b.finishedAt ?? b.updatedAt) - (a.finishedAt ?? a.updatedAt));
-  };
+  // Sorting (and its per-column asc/desc UI) is owned by BoardColumn.
+  const ticketsByColumn = (column: Column): Ticket[] => visible.filter((t) => t.column === column);
 
   // A running triage holds the ticket's worker socket, so the server rejects a move to implementing.
   const eligibleTodo = ticketsByColumn("todo").filter((t) => t.triageStatus !== "running");

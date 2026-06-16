@@ -29,6 +29,8 @@ interface BoardColumnProps {
   moveAllCount?: number;
   /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
   moveAllBusy?: boolean;
+  /** When set on the "Fini" column, lets each card re-check its PR merge status. */
+  onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
@@ -131,6 +133,7 @@ export function BoardColumn({
   onMoveAllToImplementing,
   moveAllCount = 0,
   moveAllBusy = false,
+  onCheckMerge,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
@@ -276,6 +279,7 @@ export function BoardColumn({
               ticket={ticket}
               projectLabel={resolveProjectLabel(projects, ticket.project)}
               onOpen={onOpenTicket}
+              onCheckMerge={onCheckMerge}
             />
           ))}
         </SortableContext>

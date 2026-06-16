@@ -104,6 +104,17 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     }
   };
 
+  const handleCheckMerge = async (ticket: Ticket): Promise<void> => {
+    try {
+      const result = await api.checkMerged(ticket.id);
+      if (!result.merged) {
+        setError(`PR non mergée (état : ${result.state || "inconnu"})`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Vérification du merge échouée");
+    }
+  };
+
   const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
     const { active, over } = event;
     if (!over) return;
@@ -140,6 +151,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
             moveAllCount={moveAllCount}
             moveAllBusy={movingAll}
+            onCheckMerge={column === "done" ? handleCheckMerge : undefined}
           />
         ))}
       </div>

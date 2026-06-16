@@ -1,6 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, Brush, Clock, ExternalLink, Eye, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { AlertTriangle, Brush, Clock, ExternalLink, Eye, GitMerge, HelpCircle, Loader2, MessageCircleQuestion, Palette, Sparkles } from "lucide-react";
+import { useState } from "react";
 
 import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
@@ -23,10 +24,13 @@ interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
   onOpen: (ticket: Ticket) => void;
+  /** When set on the "Fini" column, renders a small button to re-check the PR merge status. */
+  onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
-export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
+export function TicketCard({ ticket, projectLabel, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
+  const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -114,6 +118,21 @@ export function TicketCard({ ticket, projectLabel, onOpen }: TicketCardProps) {
             <ExternalLink className="h-3 w-3" />
             {prNumber !== null ? `PR #${prNumber}` : "PR"}
           </a>
+        )}
+        {ticket.column === "done" && ticket.kind === "feature" && onCheckMerge && (
+          <button
+            type="button"
+            disabled={checkingMerge}
+            onClick={(e) => {
+              e.stopPropagation();
+              setCheckingMerge(true);
+              void onCheckMerge(ticket).finally(() => setCheckingMerge(false));
+            }}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+          >
+            {checkingMerge ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+            Vérifier le merge
+          </button>
         )}
       </div>
 

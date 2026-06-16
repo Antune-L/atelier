@@ -181,6 +181,7 @@ export function createApiRoutes(deps: RouteDeps) {
           baseBranch: project.baseBranch,
           defaultAutoMerge: project.defaultAutoMerge,
           defaultAddScreenshots: project.defaultAddScreenshots,
+          color: project.color,
         };
       }),
     )

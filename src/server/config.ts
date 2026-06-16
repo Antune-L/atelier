@@ -45,6 +45,8 @@ const projectConfigSchema = z.object({
   worktreeScript: z.string().optional(),
   /** Project-specific agent instructions injected into the ticket contract. */
   instructions: z.string().optional(),
+  /** Optional CSS color value used as the background of the project badge on ticket cards. */
+  color: z.string().optional(),
 });
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;

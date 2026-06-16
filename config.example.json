@@ -13,7 +13,8 @@
         "test": "npm test"
       },
       "worktreeScript": "npm run setup:worktree",
-      "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent"
+      "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent",
+      "color": "#6366f1"
     }
   },
   "models": {

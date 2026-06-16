@@ -254,6 +254,8 @@ export const projectInfoSchema = z.object({
   defaultAutoMerge: z.boolean(),
   /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
   defaultAddScreenshots: z.boolean(),
+  /** Optional CSS color value used as the background of the project badge on ticket cards. */
+  color: z.string().optional(),
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 

@@ -6,7 +6,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { TerminalView } from "@/components/TerminalView";
 import { TicketBadges } from "@/components/TicketBadges";
-import { resolveProjectLabel } from "@/components/TicketCard";
+import { projectBadgeStyle, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { useBoard } from "@/hooks/useBoard";
 import { useTickTimer } from "@/hooks/useTickTimer";
@@ -58,6 +58,7 @@ export function AgentsView({ projects, projectFilter, searchQuery, onOpenTicket 
           key={ticket.id}
           ticket={ticket}
           projectLabel={resolveProjectLabel(projects, ticket.project)}
+          projectColor={resolveProjectColor(projects, ticket.project)}
           onOpen={onOpenTicket}
         />
       ))}
@@ -68,10 +69,11 @@ export function AgentsView({ projects, projectFilter, searchQuery, onOpenTicket 
 interface AgentCardProps {
   ticket: Ticket;
   projectLabel: string;
+  projectColor?: string;
   onOpen: (ticket: Ticket) => void;
 }
 
-function AgentCard({ ticket, projectLabel, onOpen }: AgentCardProps) {
+function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProps) {
   const now = useTickTimer();
 
   // A button may not wrap the block-level <h3> title, so use a focusable role="button" div.
@@ -98,7 +100,11 @@ function AgentCard({ ticket, projectLabel, onOpen }: AgentCardProps) {
               <Cpu className="h-3 w-3" /> slot-{ticket.slotId}
             </Badge>
           )}
-          <Badge variant="outline" className="text-[10px]">
+          <Badge
+            variant="outline"
+            className="text-[10px]"
+            style={projectBadgeStyle(projectColor)}
+          >
             {projectLabel}
           </Badge>
         </div>

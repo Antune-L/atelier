@@ -23,6 +23,8 @@ interface BoardColumnProps {
   column: Column;
   tickets: Ticket[];
   projects: ProjectInfo[];
+  /** Full-board lookup for resolving a card's dependency parent (which may live in another column). */
+  ticketsById: Map<string, Ticket>;
   onOpenTicket: (ticket: Ticket) => void;
   /** When set on the TODO column, renders a "+" beside the count to create a ticket. */
   onAddTicket?: () => void;
@@ -158,6 +160,7 @@ export function BoardColumn({
   column,
   tickets,
   projects,
+  ticketsById,
   onOpenTicket,
   onAddTicket,
   onMoveAllToImplementing,
@@ -346,6 +349,7 @@ export function BoardColumn({
               key={ticket.id}
               ticket={ticket}
               projectLabel={resolveProjectLabel(projects, ticket.project)}
+              parent={ticket.dependsOn ? ticketsById.get(ticket.dependsOn) ?? null : null}
               onOpen={onOpenTicket}
               onCheckMerge={onCheckMerge}
             />

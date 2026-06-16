@@ -30,6 +30,7 @@ export interface NewTicket {
   verifyFeature: boolean;
   researchPlan: boolean;
   baseBranch: string | null;
+  dependsOn: string | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementerModel: AgentModel | null;
@@ -96,6 +97,7 @@ export interface TicketPatch {
   researchPlan?: boolean;
   project?: string;
   baseBranch?: string | null;
+  dependsOn?: string | null;
   prdMarkdown?: string | null;
   agentSummary?: string | null;
   column?: Column;
@@ -183,6 +185,15 @@ export class Store {
     });
   }
 
+  /** Non-archived tickets that declare `parentId` as their dependency (children in the PR stack). */
+  listDependents(parentId: string): Ticket[] {
+    const rows = this.db.query("SELECT * FROM tickets WHERE depends_on = ? AND archived = 0").all(parentId);
+    return rows.map((raw) => {
+      const ticket = mapTicketRow(raw, 0);
+      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id) };
+    });
+  }
+
   /**
    * Shared tail of every create* method: fetch the just-inserted row, fail loudly if it
    * vanished, log the "created" event, and return the validated ticket. `method` names the
@@ -200,8 +211,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, research_plan, base_branch, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -215,6 +226,7 @@ export class Store {
         input.verifyFeature ? 1 : 0,
         input.researchPlan ? 1 : 0,
         input.baseBranch,
+        input.dependsOn,
         input.model,
         input.effort,
         input.implementerModel,
@@ -309,6 +321,7 @@ export class Store {
     if (patch.researchPlan !== undefined) set("research_plan", patch.researchPlan ? 1 : 0);
     if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
+    if (patch.dependsOn !== undefined) set("depends_on", patch.dependsOn);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
     if (patch.agentSummary !== undefined) set("agent_summary", patch.agentSummary);
     if (patch.column !== undefined) {

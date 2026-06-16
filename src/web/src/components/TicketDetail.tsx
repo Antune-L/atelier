@@ -40,6 +40,7 @@ import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { TicketCost } from "@/components/TicketCost";
 import { LiveTerminal } from "@/components/LiveTerminal";
 import {
+  dependencyCandidates,
   finishedKindLabel,
   formatDateTime,
   isStageAnimated,
@@ -47,6 +48,7 @@ import {
   stageVariant,
   triageVerdictVariant,
 } from "@/lib/display";
+import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { handleMediaPaste } from "@/lib/paste";
@@ -92,6 +94,7 @@ function isLocked(ticket: Ticket): boolean {
 }
 
 export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
+  const { tickets: boardTickets } = useBoard();
   const [comments, setComments] = useState<Comment[]>([]);
   const [reply, setReply] = useState<Record<string, string>>({});
   const [newComment, setNewComment] = useState("");
@@ -209,6 +212,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const changeBaseBranch = (value: string): void => {
     const override = value && value !== projectDefaultBranch ? value : null;
     void api.updateTicket(current.id, { baseBranch: override }).catch(() => undefined);
+  };
+  const dependsCandidates = dependencyCandidates(boardTickets, current.project, current.id);
+  const changeDependsOn = (value: string): void => {
+    void api.updateTicket(current.id, { dependsOn: value || null }).catch(() => undefined);
   };
   const changeProject = (value: string): void => {
     if (value === current.project) return;
@@ -862,6 +869,27 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     {baseBranchOptions.map((b) => (
                       <option key={b} value={b}>
                         {b === projectDefaultBranch ? `${b} (défaut)` : b}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </section>
+            )}
+
+            {canEditBaseBranch && (
+              <section className="rounded-md border p-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ticket-depends-on">Dépend du ticket (stack PR)</Label>
+                  <Select
+                    id="ticket-depends-on"
+                    value={current.dependsOn ?? ""}
+                    onChange={(e) => changeDependsOn(e.target.value)}
+                    className="w-full"
+                  >
+                    <option value="">Aucune</option>
+                    {dependsCandidates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
                       </option>
                     ))}
                   </Select>

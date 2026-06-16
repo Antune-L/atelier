@@ -141,6 +141,33 @@ function isProcessing(stage: Stage | null): boolean {
   return ACTIVE_STAGES.includes(stage);
 }
 
+/** A ticket can't start while its dependency hasn't opened its PR yet (no branch/prUrl). */
+function isBlocked(ticket: Ticket, store: Store): boolean {
+  if (!ticket.dependsOn) return false;
+  const parent = store.getTicket(ticket.dependsOn);
+  return !parent || parent.prUrl === null || parent.branch === null;
+}
+
+/**
+ * Validate a proposed dependsOn for `ticketId` (null on create): parent exists, same project, no
+ * cycle. Returns an error message or null.
+ */
+function dependencyError(store: Store, ticketId: string | null, dependsOn: string, project: string): string | null {
+  const parent = store.getTicket(dependsOn);
+  if (!parent) return "ticket dont il dépend introuvable";
+  if (parent.project !== project) return "la dépendance doit être dans le même projet";
+  // Walk the parent chain; reaching ticketId (on edit) is a cycle.
+  const seen = new Set<string>();
+  let cursor: typeof parent | null = parent;
+  while (cursor) {
+    if (cursor.id === ticketId) return "dépendance circulaire interdite";
+    if (seen.has(cursor.id)) break;
+    seen.add(cursor.id);
+    cursor = cursor.dependsOn ? store.getTicket(cursor.dependsOn) : null;
+  }
+  return null;
+}
+
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator } = deps;
 
@@ -237,6 +264,10 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      if (parsed.data.dependsOn !== null) {
+        const depError = dependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
+        if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
+      }
       // Title is optional: fall back to a slice of the description when left blank.
       const title =
         parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
@@ -251,13 +282,15 @@ export function createApiRoutes(deps: RouteDeps) {
         verifyFeature: parsed.data.verifyFeature,
         researchPlan: parsed.data.researchPlan,
         baseBranch: parsed.data.baseBranch,
+        dependsOn: parsed.data.dependsOn,
         model: parsed.data.model,
         effort: parsed.data.effort,
         implementerModel: parsed.data.implementerModel,
         implementerEffort: parsed.data.implementerEffort,
         implementer: parsed.data.implementer,
       });
-      if (!parsed.data.start) {
+      // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
+      if (!parsed.data.start || isBlocked(ticket, store)) {
         hub.pushTicket(ticket);
         return ticket;
       }
@@ -300,6 +333,7 @@ export function createApiRoutes(deps: RouteDeps) {
           verifyFeature: input.verifyFeature,
           researchPlan: input.researchPlan,
           baseBranch: input.baseBranch,
+          dependsOn: null,
           model: input.model,
           effort: input.effort,
           implementerModel: input.implementerModel,
@@ -448,6 +482,10 @@ export function createApiRoutes(deps: RouteDeps) {
           return jsonError(set, HTTP_CONFLICT, "le projet ne peut être changé que dans TODO");
         }
       }
+      if (parsed.data.dependsOn !== undefined && parsed.data.dependsOn !== null) {
+        const depError = dependencyError(store, ticket.id, parsed.data.dependsOn, parsed.data.project ?? ticket.project);
+        if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
+      }
       const patch: TicketPatch = { ...parsed.data };
       // A project change invalidates the saved base-branch override (it is
       // project-specific). Reset it unless the same request supplies a new one.
@@ -500,6 +538,9 @@ export function createApiRoutes(deps: RouteDeps) {
         // collide the two sessions on that key. Wait for the verdict first.
         if (ticket.triageStatus === "running") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
+        }
+        if (isBlocked(ticket, store)) {
+          return jsonError(set, HTTP_CONFLICT, "en attente de la PR du ticket dont il dépend");
         }
         lifecycle.moveColumn(params.id, "implementing");
         // retry() relaunches a failed/stalled/interrupted ticket in its held slot;

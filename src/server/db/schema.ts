@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   verify_feature INTEGER NOT NULL DEFAULT 0,
   research_plan INTEGER NOT NULL DEFAULT 0,
   base_branch TEXT,
+  depends_on TEXT,
   prd_markdown TEXT,
   agent_summary TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
@@ -135,6 +136,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "testing", ddl: "ALTER TABLE tickets ADD COLUMN testing INTEGER NOT NULL DEFAULT 0" },
   { column: "agent_summary", ddl: "ALTER TABLE tickets ADD COLUMN agent_summary TEXT" },
   { column: "session_usage", ddl: "ALTER TABLE tickets ADD COLUMN session_usage TEXT" },
+  { column: "depends_on", ddl: "ALTER TABLE tickets ADD COLUMN depends_on TEXT" },
 ];
 
 /**

@@ -1,4 +1,4 @@
-import { BarChart3, LayoutGrid, MonitorPlay, Plus, RefreshCw, Settings } from "lucide-react";
+import { BarChart3, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw, Settings } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -10,6 +10,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { SlotsBar } from "@/components/SlotsBar";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
+import { WorkflowView } from "@/components/WorkflowView";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +23,7 @@ import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type View = "kanban" | "agents" | "stats";
+type View = "kanban" | "agents" | "workflow" | "stats";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
@@ -32,6 +33,7 @@ const RELOAD_WATCHDOG_MS = 5_000;
 const VIEW_OPTIONS: { value: View; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
+  { value: "workflow", label: "Workflow", Icon: Network },
   { value: "stats", label: "Stats", Icon: BarChart3 },
 ];
 
@@ -96,6 +98,14 @@ export function App() {
           projects={projects}
           projectFilter={filter}
           searchQuery={search}
+          onOpenTicket={(t) => setOpenTicketId(t.id)}
+        />
+      );
+    }
+    if (view === "workflow") {
+      return (
+        <WorkflowView
+          projectFilter={filter}
           onOpenTicket={(t) => setOpenTicketId(t.id)}
         />
       );

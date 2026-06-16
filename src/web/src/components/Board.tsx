@@ -5,7 +5,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, type Column } from "@shared/constants";
@@ -60,6 +60,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
   );
 
+  // Full-board lookup so a card can resolve its dependency parent (possibly in another column).
+  const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
   const byProject = projectFilter === "all" ? tickets : tickets.filter((t) => t.project === projectFilter);
   const needle = normalize(searchQuery.trim());
   const visible = needle
@@ -208,6 +210,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             column={column}
             tickets={ticketsByColumn(column)}
             projects={projects}
+            ticketsById={ticketsById}
             onOpenTicket={onOpenTicket}
             onAddTicket={onAddTicket}
             onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}

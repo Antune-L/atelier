@@ -75,6 +75,8 @@ export const api = {
     request(`/api/tickets/${id}/validate-prd`, { method: "POST", body: JSON.stringify({ note }) }),
   markMerged: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/merged`, { method: "POST" }),
+  checkMerged: (id: string): Promise<{ merged: boolean; state: string; ticket?: Ticket }> =>
+    request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),

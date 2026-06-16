@@ -163,6 +163,8 @@ export interface SystemAdapter {
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
   mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
+  /** Read the PR's GitHub merge state. `merged` is true only when state === "MERGED". `state` is "OPEN"|"MERGED"|"CLOSED"|"" (empty when unreadable). */
+  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
 
   // ---- project test commands ----
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;

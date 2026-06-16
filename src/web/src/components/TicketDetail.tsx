@@ -102,6 +102,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [checkingMerge, setCheckingMerge] = useState(false);
   const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
   const [prdDialogOpen, setPrdDialogOpen] = useState(false);
   // Base-branch picker state (TODO column only). null = remote list not loaded yet.
@@ -302,6 +303,23 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
       return;
     }
     void moveTo(target);
+  };
+
+  // Ask GitHub whether the PR is actually merged; archive the card if so, otherwise surface its state.
+  const checkMerge = async (): Promise<void> => {
+    setCheckingMerge(true);
+    try {
+      const result = await api.checkMerged(ticket.id);
+      if (result.merged) {
+        onClose();
+        return;
+      }
+      setMoveError(`PR non mergée (état : ${result.state || "inconnu"})`);
+    } catch (e) {
+      setMoveError(e instanceof Error ? e.message : "Vérification du merge échouée");
+    } finally {
+      setCheckingMerge(false);
+    }
   };
 
   const setPrdEnabled = (checked: boolean): void => {
@@ -695,6 +713,17 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             >
               <RotateCw className="h-4 w-4" />
               Relancer la session
+            </Button>
+          )}
+          {current.column === "done" && current.kind === "feature" && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={checkingMerge}
+              onClick={() => void checkMerge()}
+            >
+              <GitMerge className="h-4 w-4" />
+              Vérifier le merge
             </Button>
           )}
           {current.column === "done" && current.kind === "feature" && (

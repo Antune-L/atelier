@@ -237,6 +237,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }> {
+    this.log("checkPrMerged", { repoPath, prUrl });
+    return { merged: true, state: "MERGED" };
+  }
+
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
     this.log("runProjectScript", { slotPath, command, timeoutMs });
     return { ok: true, output: "[dry-run] skipped" };

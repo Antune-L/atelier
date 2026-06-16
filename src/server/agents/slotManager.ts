@@ -14,6 +14,7 @@ import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
+import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
@@ -136,6 +137,7 @@ export class SlotManager {
     private readonly hub: ClientHub,
     private readonly workerHub: WorkerHub,
     private readonly notifier: Notifier,
+    private readonly lifecycle: TicketLifecycle,
     private readonly config: SlotManagerConfig,
   ) {}
 
@@ -493,11 +495,12 @@ export class SlotManager {
         log.info("gate done échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
         return { ok: false, reason: gate.reason };
       }
-      this.touch(this.store.updateTicket(ticketId, { stage: "stalled", error: gate.reason, finishedAt: Date.now() }));
-      this.store.updateSlot(slotId, { status: "stalled" });
-      this.hub.pushSlots(this.store.listSlots());
       log.warn("gate done échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
-      await this.notifier.notify("Gate done échouée", `${ticket.title}: ${gate.reason}`);
+      await this.lifecycle.stall(
+        ticketId,
+        { title: "Gate done échouée", body: `${ticket.title}: ${gate.reason}` },
+        { error: gate.reason },
+      );
       return { ok: false, reason: gate.reason };
     }
     log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
@@ -626,20 +629,8 @@ export class SlotManager {
 
   private markFailed(ticketId: string, slotId: number, reason: string): void {
     this.clearPhase(ticketId);
-    this.touch(
-      this.store.updateTicket(ticketId, {
-        column: "failed",
-        stage: "failed",
-        error: reason,
-        resolvingConflicts: false,
-        finishedAt: Date.now(),
-      }),
-    );
-    this.store.updateSlot(slotId, { status: "failed" });
-    this.hub.pushSlots(this.store.listSlots());
-    this.store.logEvent(ticketId, "failed", { reason });
+    this.lifecycle.markLaunchFailed(ticketId, slotId, reason);
     log.error("ticket en échec", { ticketId, slotId, reason });
-    void this.notifier.notify("Ticket en échec", `${reason}`);
   }
 
   private touch(ticket: Ticket): void {

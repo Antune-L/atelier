@@ -55,6 +55,20 @@ exists. The backend does not trust the agent. Failure → `stalled`, slot kept.
 **Coordinator** — routes worker tool calls and Stop-hook events to state mutations;
 owns the auto-nudge → auto-reclaim → stalled escalation.
 
+**Ticket Lifecycle** (`src/server/lifecycle.ts`) — the domain-verb surface for ticket
+state transitions, sitting ABOVE `store` (it calls `store`, never SQL). Each verb
+(`setStage`, `submitPrd`, `beginImplementing`, `resumeImplementing`, `beginOpeningPr`,
+`enqueue`, `moveColumn`, `markMerged`, `fail`, `stall`, `markLaunchFailed`) fuses the
+coupling a transition carries — ticket fields + slot status + `finishedAt` — with the
+broadcast/log/notify ritual, so a caller can't move the stage without syncing the slot or
+forget to push. Replaces hand-assembled `store.updateTicket` patches at the
+coordinator/routes/slotManager call sites. Does NOT depend on the Channel (WorkerHub) —
+channel sends are not lifecycle transitions. Config-knob edits (model, effort, autoMerge…)
+and pure bookkeeping (sessionId, nudgeCount, progress) stay on `store.updateTicket`.
+*Not yet routed through it:* the slot-mechanics-entangled terminal transitions inside
+SlotManager (done-success, completeAsk, abandon, interrupted-on-recover) — a noted
+follow-up. *(Architecture candidate #1 — the deep module above store.)*
+
 ## Seams
 
 **System Adapter** (`src/server/system/`) — the single side-effect seam (git, tmux, gh,
@@ -67,7 +81,8 @@ imported tickets.
 
 ## Proposed (not yet built)
 
-**Ticket Lifecycle** — a proposed deep module that would own the Stage↔Column↔timestamp↔
-slot-status transitions as domain verbs (`startImplementing`, `finishDone`, `fail`,
-`stall`…), replacing the patch-shaped `store.updateTicket` as the public surface.
-*(Architecture candidate #1 — the deeper follow-up after the Protocol seam.)*
+**Lifecycle phase 2** — route the remaining slot-mechanics-entangled terminal transitions
+in SlotManager (done-success, completeAsk, abandon, interrupted-on-recover) through
+[[Ticket Lifecycle]] verbs (`finishDone`, `completeAnswered`, `abandon`, `markInterrupted`)
+so it becomes the *complete* terminal-transition surface, not just the shared `fail`/`stall`
+paths.

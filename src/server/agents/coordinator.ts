@@ -15,6 +15,7 @@ import {
 
 import type { Store, TicketPatch } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
+import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
@@ -45,6 +46,7 @@ export class AgentCoordinator {
     private readonly hub: ClientHub,
     private readonly workerHub: WorkerHub,
     private readonly notifier: Notifier,
+    private readonly lifecycle: TicketLifecycle,
     private readonly slots: SlotManager,
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
@@ -121,9 +123,7 @@ export class AgentCoordinator {
   private handleUpdateStage(ctx: ToolCallContext): ToolResult {
     const parsed = updateStageArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    const ticket = this.store.updateTicket(ctx.ticketId, { stage: parsed.data.stage });
-    this.hub.pushTicket(ticket);
-    this.store.logEvent(ctx.ticketId, "update_stage", { stage: parsed.data.stage });
+    this.lifecycle.setStage(ctx.ticketId, parsed.data.stage);
     return { ok: true, result: `stage=${parsed.data.stage}` };
   }
 
@@ -144,14 +144,7 @@ export class AgentCoordinator {
   private handleSubmitPrd(ctx: ToolCallContext): ToolResult {
     const parsed = submitPrdArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    const ticket = this.store.updateTicket(ctx.ticketId, {
-      column: "prd",
-      stage: "awaiting_answers",
-      prdMarkdown: parsed.data.markdown,
-    });
-    this.hub.pushTicket(ticket);
-    this.store.logEvent(ctx.ticketId, "submit_prd", {});
-    void this.notifier.notify("PRD prêt", `${ticket.title}: PRD à valider`);
+    this.lifecycle.submitPrd(ctx.ticketId, parsed.data.markdown);
     return { ok: true, result: "PRD enregistré. Attends l'événement prd_validated avant d'implémenter." };
   }
 
@@ -176,8 +169,7 @@ export class AgentCoordinator {
   private async handleDone(ctx: ToolCallContext): Promise<ToolResult> {
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    const ticket = this.store.updateTicket(ctx.ticketId, { stage: "opening_pr" });
-    this.hub.pushTicket(ticket);
+    this.lifecycle.beginOpeningPr(ctx.ticketId);
     const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, parsed.data.pr_url);
     if (!outcome.ok) {
       return { ok: false, result: `Gate échouée: ${outcome.reason}. Corrige et rappelle done().` };
@@ -188,23 +180,7 @@ export class AgentCoordinator {
   private async handleFail(ctx: ToolCallContext): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
-    const body = `**Échec**: ${parsed.data.reason}\n\n${parsed.data.findings}`;
-    const comment = this.store.addComment(ctx.ticketId, "agent", body, null);
-    const ticket = this.store.updateTicket(ctx.ticketId, {
-      column: "failed",
-      stage: "failed",
-      error: parsed.data.reason,
-      // A conflict-resolution session that fails ends the run; clear the flag so a later launch
-      // uses the normal contract.
-      resolvingConflicts: false,
-      finishedAt: Date.now(),
-    });
-    if (ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "failed" });
-    this.hub.pushComment(comment);
-    this.hub.pushTicket(ticket);
-    this.hub.pushSlots(this.store.listSlots());
-    await this.notifier.notify("Ticket en échec", `${ticket.title}: ${parsed.data.reason}`);
-    this.store.logEvent(ctx.ticketId, "fail", { reason: parsed.data.reason });
+    await this.lifecycle.fail(ctx.ticketId, parsed.data.reason, parsed.data.findings);
     return { ok: true, result: "Échec enregistré. Slot conservé." };
   }
 
@@ -261,12 +237,11 @@ export class AgentCoordinator {
     // must not clobber the recovering session.
     if ((await this.slots.tryAutoReclaim(ticketId, "tour terminé sans protocole")) !== "escalate") return;
 
-    const stalled = this.store.updateTicket(ticketId, { stage: "stalled", finishedAt: Date.now() });
-    if (stalled.slotId !== null) this.store.updateSlot(stalled.slotId, { status: "stalled" });
-    this.hub.pushTicket(stalled);
-    this.hub.pushSlots(this.store.listSlots());
-    await this.notifier.notify("Ticket bloqué", `${stalled.title}: tour terminé sans protocole`);
-    this.store.logEvent(ticketId, "stalled", {});
+    await this.lifecycle.stall(
+      ticketId,
+      { title: "Ticket bloqué", body: `${ticket.title}: tour terminé sans protocole` },
+      { logEvent: true },
+    );
     log.warn("ticket bloqué (stalled)", { ticketId });
   }
 
@@ -276,8 +251,7 @@ export class AgentCoordinator {
     this.workerHub.sendEvent(ticketId, { type: "answer", questionId, answer });
     const ticket = this.store.getTicket(ticketId);
     if (ticket && ticket.pendingQuestions === 0 && ticket.stage === "awaiting_answers") {
-      const updated = this.store.updateTicket(ticketId, { stage: "implementing" });
-      this.hub.pushTicket(updated);
+      this.lifecycle.resumeImplementing(ticketId);
     }
     this.markProgress(ticketId);
   }
@@ -296,9 +270,7 @@ export class AgentCoordinator {
         ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
         : "");
     this.workerHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
-    const ticket = this.store.updateTicket(ticketId, { column: "implementing", stage: "implementing" });
-    this.hub.pushTicket(ticket);
-    this.store.logEvent(ticketId, "prd_validated", {});
+    this.lifecycle.beginImplementing(ticketId, "prd_validated");
     this.markProgress(ticketId);
   }
 

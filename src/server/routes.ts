@@ -28,6 +28,7 @@ import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
+import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { saveUpload } from "./uploads.ts";
 
@@ -48,6 +49,7 @@ interface PaneReader {
 interface RouteDeps {
   store: Store;
   hub: ClientHub;
+  lifecycle: TicketLifecycle;
   slots: SlotManager;
   coordinator: AgentCoordinator;
   system: PaneReader;
@@ -135,7 +137,7 @@ function isProcessing(stage: Stage | null): boolean {
 }
 
 export function createApiRoutes(deps: RouteDeps) {
-  const { store, hub, slots, coordinator } = deps;
+  const { store, hub, lifecycle, slots, coordinator } = deps;
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () =>
@@ -249,8 +251,7 @@ export function createApiRoutes(deps: RouteDeps) {
         hub.pushTicket(ticket);
         return ticket;
       }
-      const started = store.updateTicket(ticket.id, { column: "implementing", stage: "queued" });
-      hub.pushTicket(started);
+      const started = lifecycle.enqueue(ticket.id);
       // Slot launch does slow git worktree setup; don't block the HTTP response on it.
       // Kick it off in the background and let the board update live (mirrors the review path).
       void slots.startTicket(ticket.id).catch((e) => {
@@ -490,15 +491,13 @@ export function createApiRoutes(deps: RouteDeps) {
         if (ticket.triageStatus === "running") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
-        hub.pushTicket(store.updateTicket(params.id, { column: "implementing" }));
+        lifecycle.moveColumn(params.id, "implementing");
         // retry() relaunches a failed/stalled/interrupted ticket in its held slot;
         // for a fresh ticket (no slot) it falls through to a normal startTicket.
         await slots.retry(params.id);
         return store.getTicket(params.id);
       }
-      const moved = store.updateTicket(params.id, { column: target });
-      hub.pushTicket(moved);
-      return moved;
+      return lifecycle.moveColumn(params.id, target);
     })
     .post("/tickets/:id/comments", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
@@ -530,9 +529,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       // Stamp the merge time so the board can order "PR mergée" newest-first.
-      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
-      hub.pushTicket(merged);
-      store.logEvent(params.id, "merged", {});
+      const merged = lifecycle.markMerged(params.id);
       return merged;
     })
     .post("/tickets/:id/check-merged", async ({ params, set }) => {
@@ -552,9 +549,7 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (!result.merged) return { merged: false, state: result.state };
       // Mirror /merged: stamp finishedAt so the board orders newest-first.
-      const merged = store.updateTicket(params.id, { column: "merged", finishedAt: Date.now() });
-      hub.pushTicket(merged);
-      store.logEvent(params.id, "merged", {});
+      const merged = lifecycle.markMerged(params.id);
       return { merged: true, state: result.state, ticket: merged };
     })
     .post("/tickets/:id/retry", async ({ params, set }) => {

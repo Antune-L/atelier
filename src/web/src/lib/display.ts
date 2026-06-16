@@ -136,15 +136,28 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Wall-clock time the ticket took from when work started (entering "À implémenter") to when
- * it finished. Null when either bound is missing, so callers can omit the badge entirely.
+ * Wall-clock work duration in ms: from when the agent actually started (entering the
+ * `implementing` stage, `implementationStartedAt`) to `finishedAt`. Falls back to
+ * `implementingStartedAt` (column entry, queue-inclusive) for tickets created before the precise
+ * stamp existed. Null when either bound is missing or the span is non-positive. Shared by the card
+ * badge and the stats charts so both stay in sync.
  */
-export function ticketImplementationDuration(
-  ticket: Pick<Ticket, "implementingStartedAt" | "finishedAt">,
-): number | null {
-  if (ticket.implementingStartedAt === null || ticket.finishedAt === null) return null;
-  const duration = ticket.finishedAt - ticket.implementingStartedAt;
+export function effectiveWorkDurationMs(span: {
+  implementationStartedAt: number | null;
+  implementingStartedAt: number | null;
+  finishedAt: number | null;
+}): number | null {
+  const start = span.implementationStartedAt ?? span.implementingStartedAt;
+  if (start === null || span.finishedAt === null) return null;
+  const duration = span.finishedAt - start;
   return duration > 0 ? duration : null;
+}
+
+/** Card-badge duration: the agent's effective work time on a ticket. */
+export function ticketImplementationDuration(
+  ticket: Pick<Ticket, "implementationStartedAt" | "implementingStartedAt" | "finishedAt">,
+): number | null {
+  return effectiveWorkDurationMs(ticket);
 }
 
 const PR_URL_NUMBER_REGEX = /\/pull\/(\d+)/;

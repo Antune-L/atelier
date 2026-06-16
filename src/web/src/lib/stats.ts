@@ -12,6 +12,8 @@ import {
 } from "@shared/constants";
 import type { ProjectInfo, StatRecord } from "@shared/schemas";
 
+import { effectiveWorkDurationMs } from "./display";
+
 export type Outcome = "success" | "failure" | "abandoned";
 
 const ABANDONED_COLUMN = "abandoned";
@@ -27,9 +29,7 @@ export function recordOutcome(record: StatRecord): Outcome | null {
 /** Effective work duration of a successful ticket, in ms; null when not computable. */
 export function successDurationMs(record: StatRecord): number | null {
   if (recordOutcome(record) !== "success") return null;
-  if (record.implementingStartedAt === null || record.finishedAt === null) return null;
-  const duration = record.finishedAt - record.implementingStartedAt;
-  return duration > 0 ? duration : null;
+  return effectiveWorkDurationMs(record);
 }
 
 export const DEFAULT_GROUP_LABEL = "Défaut";

@@ -53,6 +53,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const movingAllRef = useRef(false);
   const [checkingAll, setCheckingAll] = useState(false);
   const checkingAllRef = useRef(false);
+  const [analyzingAll, setAnalyzingAll] = useState(false);
+  const analyzingAllRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
@@ -103,6 +105,30 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     }
     if (failures.length > 0) {
       setError(`${failures.length} ticket(s) non lancé(s) : ${failures[0]}`);
+    }
+  };
+
+  // Batch feasibility ("feature par patch") can re-run on any TODO ticket whose analysis isn't already
+  // live and which isn't processing — mirrors the server's eligibility filter so the count never overstates.
+  const analyzeEligibleTodo = ticketsByColumn("todo").filter((t) => t.triageStatus !== "running" && !isLocked(t));
+  const analyzeAllCount = analyzeEligibleTodo.length;
+
+  const handleAnalyzeAll = async (): Promise<void> => {
+    if (analyzingAllRef.current) return;
+    const ids = analyzeEligibleTodo.map((t) => t.id);
+    if (ids.length === 0) return;
+    analyzingAllRef.current = true;
+    setAnalyzingAll(true);
+    try {
+      const { started } = await api.analyzeTickets({ ids });
+      const body =
+        started === 0 ? "Aucun ticket éligible à analyser." : `Analyse de ${started} ticket(s) démarrée.`;
+      boardStore.notify("Analyse lancée", body);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Analyse refusée");
+    } finally {
+      analyzingAllRef.current = false;
+      setAnalyzingAll(false);
     }
   };
 
@@ -187,6 +213,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
             moveAllCount={moveAllCount}
             moveAllBusy={movingAll}
+            onAnalyzeAll={column === "todo" ? handleAnalyzeAll : undefined}
+            analyzeAllCount={analyzeAllCount}
+            analyzeAllBusy={analyzingAll}
             onCheckMerge={column === "done" ? handleCheckMerge : undefined}
             onCheckAllMerges={column === "done" ? handleCheckAllMerges : undefined}
             checkAllCount={checkAllCount}

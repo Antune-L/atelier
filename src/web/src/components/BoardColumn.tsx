@@ -8,12 +8,14 @@ import {
   PanelLeftOpen,
   Plus,
   Rocket,
+  ScanSearch,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { COLUMN_LABELS, COLUMN_SORT_FIELD, type Column } from "@shared/constants";
 
+import { ColumnActionsMenu } from "@/components/ColumnActionsMenu";
 import { TicketCard, resolveProjectLabel } from "@/components/TicketCard";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +32,12 @@ interface BoardColumnProps {
   moveAllCount?: number;
   /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
   moveAllBusy?: boolean;
+  /** When set on the TODO column, runs the batch feasibility analysis on eligible tickets. */
+  onAnalyzeAll?: () => void;
+  /** How many TODO tickets the bulk analysis targets; disables the item at 0. */
+  analyzeAllCount?: number;
+  /** True while a bulk analysis launch is in flight. */
+  analyzeAllBusy?: boolean;
   /** When set on the "Fini" column, lets each card re-check its PR merge status. */
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
   /** When set on the "Fini" column, re-checks the merge status of every eligible card at once. */
@@ -39,6 +47,9 @@ interface BoardColumnProps {
   /** True while a bulk merge check is in flight — disables the button to prevent re-entry. */
   checkAllBusy?: boolean;
 }
+
+/** Stable placeholder so a menu item with an undefined handler still has a callable onSelect. */
+const NOOP = (): void => {};
 
 const COLLAPSE_KEY_PREFIX = "column-collapsed:";
 const SORT_DIR_KEY_PREFIX = "column-sort-dir:";
@@ -131,6 +142,12 @@ function resolveMoveAllTitle(count: number, busy: boolean): string {
   return `Lancer ${count} ticket(s) dans « À implémenter »`;
 }
 
+function resolveAnalyzeAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Analyse en cours…";
+  if (count === 0) return "Aucun ticket à analyser";
+  return `Analyser ${count} ticket(s)`;
+}
+
 function resolveCheckAllTitle(count: number, busy: boolean): string {
   if (busy) return "Vérification en cours…";
   if (count === 0) return "Aucune carte à vérifier";
@@ -146,6 +163,9 @@ export function BoardColumn({
   onMoveAllToImplementing,
   moveAllCount = 0,
   moveAllBusy = false,
+  onAnalyzeAll,
+  analyzeAllCount = 0,
+  analyzeAllBusy = false,
   onCheckMerge,
   onCheckAllMerges,
   checkAllCount = 0,
@@ -191,12 +211,41 @@ export function BoardColumn({
   );
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
-  const canMoveAll = column === "todo" && onMoveAllToImplementing !== undefined && tickets.length > 0;
   const canCheckAll = column === "done" && onCheckAllMerges !== undefined;
+  const canColumnMenu = column === "todo" && (onMoveAllToImplementing !== undefined || onAnalyzeAll !== undefined);
   const moveAllButtonTitle = resolveMoveAllTitle(moveAllCount, moveAllBusy);
+  const analyzeAllButtonTitle = resolveAnalyzeAllTitle(analyzeAllCount, analyzeAllBusy);
   const checkAllButtonTitle = resolveCheckAllTitle(checkAllCount, checkAllBusy);
+  const columnMenuItems = useMemo(
+    () => [
+      {
+        label: "Lancer tous les tickets",
+        icon: Rocket,
+        onSelect: onMoveAllToImplementing ?? NOOP,
+        disabled: onMoveAllToImplementing === undefined || moveAllCount === 0 || moveAllBusy,
+        title: moveAllButtonTitle,
+      },
+      {
+        label: "Lancer l'analyse de tous les tickets",
+        icon: ScanSearch,
+        onSelect: onAnalyzeAll ?? NOOP,
+        disabled: onAnalyzeAll === undefined || analyzeAllCount === 0 || analyzeAllBusy,
+        title: analyzeAllButtonTitle,
+      },
+    ],
+    [
+      onMoveAllToImplementing,
+      moveAllCount,
+      moveAllBusy,
+      moveAllButtonTitle,
+      onAnalyzeAll,
+      analyzeAllCount,
+      analyzeAllBusy,
+      analyzeAllButtonTitle,
+    ],
+  );
   const headerTrailing =
-    canAdd || canMoveAll || canCheckAll ? (
+    canAdd || canColumnMenu || canCheckAll ? (
       <div className="flex items-center gap-1">
         {countBadge}
         {canCheckAll && (
@@ -211,18 +260,6 @@ export function BoardColumn({
             <GitMerge className="h-3.5 w-3.5" />
           </button>
         )}
-        {canMoveAll && (
-          <button
-            type="button"
-            onClick={onMoveAllToImplementing}
-            disabled={moveAllCount === 0 || moveAllBusy}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-            title={moveAllButtonTitle}
-            aria-label="Tout lancer dans À implémenter"
-          >
-            <Rocket className="h-3.5 w-3.5" />
-          </button>
-        )}
         {canAdd && (
           <button
             type="button"
@@ -234,6 +271,7 @@ export function BoardColumn({
             <Plus className="h-3.5 w-3.5" />
           </button>
         )}
+        {canColumnMenu && <ColumnActionsMenu items={columnMenuItems} ariaLabel="Actions de la colonne" />}
       </div>
     ) : (
       countBadge

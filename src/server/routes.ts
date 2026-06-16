@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import {
+  analyzeTicketsSchema,
   createAskSchema,
   createCleanSchema,
   createCommentSchema,
@@ -309,6 +310,33 @@ export function createApiRoutes(deps: RouteDeps) {
         });
       // The batch id is generated inside the manager; the client only needs to know the run started.
       return { created, feasibilityStarted: true };
+    })
+    .post("/tickets/analyze", ({ body, set }) => {
+      const parsed = analyzeTicketsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      // Re-run is allowed on any TODO ticket whose analysis isn't already live and which isn't processing.
+      const eligible = parsed.data.ids
+        .map((id) => store.getTicket(id))
+        .filter((ticket): ticket is Ticket => ticket !== null)
+        .filter((ticket) => ticket.triageStatus !== "running" && !isProcessing(ticket.stage));
+
+      const idsByProject = new Map<string, string[]>();
+      for (const ticket of eligible) {
+        const group = idsByProject.get(ticket.project) ?? [];
+        group.push(ticket.id);
+        idsByProject.set(ticket.project, group);
+      }
+
+      // The manager marks each ticket running then persists/pushes verdicts via the worker channel.
+      for (const [project, ids] of idsByProject) {
+        void deps.feasibility.start(ids, project).catch((e) => {
+          log.error("démarrage de l'analyse en lot échoué", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
+
+      return { started: eligible.length };
     })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);

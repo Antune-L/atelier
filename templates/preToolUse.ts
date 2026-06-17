@@ -24,8 +24,16 @@ const DENY_PATTERNS = [
 const DENY_MESSAGE =
   "Commande non autorisée. N'utilise jamais --no-verify ni de commande destructive. Si c'est indispensable, utilise le tool ask_user.";
 
+const SETTINGS_JSON_DENY_MESSAGE =
+  "Écriture non autorisée : ne modifie jamais .claude/settings.json dans un projet. Ce fichier est géré par le système Kanban.";
+
+const SETTINGS_JSON_SUFFIX = ".claude/settings.json";
+
+const WRITE_EDIT_TOOLS = new Set(["Write", "Edit"]);
+
 interface HookInput {
-  tool_input?: { command?: string };
+  tool_name?: string;
+  tool_input?: { command?: string; file_path?: string };
 }
 
 function readStdin(): Promise<string> {
@@ -47,12 +55,28 @@ if (BACKEND_HTTP && TICKET_ID && !(await Bun.file(AGENT_ACTIVE_MARKER).exists())
 }
 
 const raw = await readStdin();
+let toolName = "";
 let command = "";
+let filePath = "";
 try {
   const parsed: HookInput = JSON.parse(raw);
+  toolName = parsed.tool_name ?? "";
   command = parsed.tool_input?.command ?? "";
+  filePath = parsed.tool_input?.file_path ?? "";
 } catch {
-  command = "";
+  // Ignore parse errors; all fields remain empty strings.
+}
+
+if (WRITE_EDIT_TOOLS.has(toolName) && filePath.endsWith(SETTINGS_JSON_SUFFIX)) {
+  const output = {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: SETTINGS_JSON_DENY_MESSAGE,
+    },
+  };
+  process.stdout.write(JSON.stringify(output));
+  process.exit(0);
 }
 
 const denied = DENY_PATTERNS.some((pattern) => pattern.test(command));

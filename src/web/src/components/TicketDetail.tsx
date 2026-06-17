@@ -202,6 +202,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // A "todo" card carries config sections (agent, PR options, feasibility) and
   // never has a terminal: lay it out on two columns so it breathes.
   const isTodoSplit = current.column === "todo";
+  // TODO has no live agent and the API rejects new comments; hide the section unless a
+  // previous run left history (e.g. card moved back from failed).
+  const showCommentsSection = comments.length > 0 || current.column !== "todo";
   const ticketProject = projects.find((p) => p.key === current.project);
   const projectDefaultBranch = ticketProject?.baseBranch ?? "";
   // Editing the base branch is only meaningful before launch (TODO) and while unlocked.
@@ -734,40 +737,57 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 </section>
               )}
 
-              <section>
-                <h3 className="mb-2 text-sm font-semibold">Commentaires</h3>
-                <div className="space-y-2">
-                  {comments.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      Aucun commentaire
-                    </p>
-                  )}
-                  {comments.map((c) => (
-                    <CommentRow
-                      key={c.id}
-                      comment={c}
-                      reply={reply[c.questionId ?? ""] ?? ""}
-                      onReplyChange={(v) =>
-                        c.questionId &&
-                        setReply((prev) => ({ ...prev, [c.questionId!]: v }))
-                      }
-                      onAnswer={() => c.questionId && answer(c.questionId)}
-                    />
-                  ))}
-                </div>
-                {!["todo", "done", "merged"].includes(current.column) && (
-                  <div className="mt-3 space-y-1.5">
-                    <Label htmlFor="new-comment">Ajouter un commentaire</Label>
-                    <Input
-                      id="new-comment"
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      placeholder="Votre message…"
-                      onKeyDown={(e) => e.key === "Enter" && comment()}
-                    />
+              {isTodoSplit && !locked && (
+                <TriageSection
+                  ticket={current}
+                  onTriage={async () => {
+                    await api.triage(ticket.id);
+                  }}
+                  onApplySuggestion={(model, effort) => {
+                    void api
+                      .updateTicket(current.id, { model, effort })
+                      .catch(() => undefined);
+                  }}
+                  onToggleContext={setFeasibilityContext}
+                />
+              )}
+
+              {showCommentsSection && (
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold">Commentaires</h3>
+                  <div className="space-y-2">
+                    {comments.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Aucun commentaire
+                      </p>
+                    )}
+                    {comments.map((c) => (
+                      <CommentRow
+                        key={c.id}
+                        comment={c}
+                        reply={reply[c.questionId ?? ""] ?? ""}
+                        onReplyChange={(v) =>
+                          c.questionId &&
+                          setReply((prev) => ({ ...prev, [c.questionId!]: v }))
+                        }
+                        onAnswer={() => c.questionId && answer(c.questionId)}
+                      />
+                    ))}
                   </div>
-                )}
-              </section>
+                  {!["todo", "done", "merged"].includes(current.column) && (
+                    <div className="mt-3 space-y-1.5">
+                      <Label htmlFor="new-comment">Ajouter un commentaire</Label>
+                      <Input
+                        id="new-comment"
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                        placeholder="Votre message…"
+                        onKeyDown={(e) => e.key === "Enter" && comment()}
+                      />
+                    </div>
+                  )}
+                </section>
+              )}
 
               <section className="flex flex-wrap gap-2 border-t pt-4">
                 {canResolveConflicts && (
@@ -1011,21 +1031,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                       .catch(() => undefined);
                   }}
                 />
-
-                {!locked && (
-                  <TriageSection
-                    ticket={current}
-                    onTriage={async () => {
-                      await api.triage(ticket.id);
-                    }}
-                    onApplySuggestion={(model, effort) => {
-                      void api
-                        .updateTicket(current.id, { model, effort })
-                        .catch(() => undefined);
-                    }}
-                    onToggleContext={setFeasibilityContext}
-                  />
-                )}
               </div>
             )}
           </div>

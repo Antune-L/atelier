@@ -147,7 +147,7 @@ function GeneralSettings() {
         <div className="flex flex-col items-start gap-1.5">
           <Label>Thème</Label>
           <p className="text-sm text-muted-foreground">
-            Apparence de l'interface .
+            Apparence de l'interface
           </p>
           <Tabs
             options={THEME_OPTIONS}

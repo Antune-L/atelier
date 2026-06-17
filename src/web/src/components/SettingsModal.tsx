@@ -7,7 +7,12 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -27,7 +32,13 @@ import type { Profile } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
-import { Modal, ModalBody, ModalFooter, ModalHeader, ModalTitle } from "@/components/ui/modal";
+import {
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+} from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
@@ -37,12 +48,20 @@ import { useTheme } from "@/hooks/useTheme";
 
 const DRAG_ACTIVATION_DISTANCE = 6;
 
-const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({ value: i, label: IMPLEMENTER_LABELS[i] }));
-const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) => ({
-  value: l,
-  label: COMMIT_LANGUAGE_LABELS[l],
+const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
+  value: i,
+  label: IMPLEMENTER_LABELS[i],
 }));
-const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
+const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map(
+  (l) => ({
+    value: l,
+    label: COMMIT_LANGUAGE_LABELS[l],
+  }),
+);
+const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({
+  value: t.value,
+  label: t.label,
+}));
 
 type SettingsTab = "general" | "agents";
 
@@ -67,7 +86,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       </ModalHeader>
       <ModalBody>
         <div className="mb-4">
-          <Tabs options={TAB_OPTIONS} value={tab} onChange={setTab} aria-label="Sections des réglages" />
+          <Tabs
+            options={TAB_OPTIONS}
+            value={tab}
+            onChange={setTab}
+            aria-label="Sections des réglages"
+          />
         </div>
         {tab === "general" ? <GeneralSettings /> : <ProfilesSettings />}
       </ModalBody>
@@ -91,7 +115,8 @@ function GeneralSettings() {
       .then((settings) => {
         // Adopt the persisted value only if the user hasn't already picked one
         // (a click during the in-flight fetch must not be clobbered).
-        if (active) setLanguage((current) => current ?? settings.commitLanguage);
+        if (active)
+          setLanguage((current) => current ?? settings.commitLanguage);
       })
       .catch((e) => {
         if (active) {
@@ -121,17 +146,30 @@ function GeneralSettings() {
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex flex-col items-start gap-1.5">
           <Label>Thème</Label>
-          <p className="text-sm text-muted-foreground">Apparence de l'interface (préférence locale à ce navigateur).</p>
-          <Tabs options={THEME_OPTIONS} value={theme} onChange={setTheme} aria-label="Thème" />
+          <p className="text-sm text-muted-foreground">
+            Apparence de l'interface .
+          </p>
+          <Tabs
+            options={THEME_OPTIONS}
+            value={theme}
+            onChange={setTheme}
+            aria-label="Thème"
+          />
         </div>
       </div>
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex flex-col items-start gap-1.5">
           <Label>Langue des PRs et des commits</Label>
           <p className="text-sm text-muted-foreground">
-            Langue par défaut des messages de commit et du titre/description des PRs générés par les agents.
+            Langue par défaut des messages de commit et du titre/description des
+            PRs générés par les agents.
           </p>
-          <Tabs options={LANGUAGE_OPTIONS} value={language} onChange={(v) => void changeLanguage(v)} aria-label="Langue des PRs et des commits" />
+          <Tabs
+            options={LANGUAGE_OPTIONS}
+            value={language}
+            onChange={(v) => void changeLanguage(v)}
+            aria-label="Langue des PRs et des commits"
+          />
         </div>
         {error && <p className="text-sm text-destructive">{error}</p>}
       </div>
@@ -156,7 +194,9 @@ function ProfilesSettings() {
   }, [remoteProfiles]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE },
+    }),
   );
 
   const addProfile = async (): Promise<void> => {
@@ -202,7 +242,9 @@ function ProfilesSettings() {
 
     const gen = ++dragGenRef.current;
     void Promise.all(
-      reordered.map((profile, index) => api.updateProfile(profile.id, { sortOrder: index })),
+      reordered.map((profile, index) =>
+        api.updateProfile(profile.id, { sortOrder: index }),
+      ),
     )
       .then(() => {
         if (gen !== dragGenRef.current) return;
@@ -211,23 +253,43 @@ function ProfilesSettings() {
       .catch((e) => {
         if (gen !== dragGenRef.current) return;
         setLocalProfiles(previousProfiles);
-        setError(e instanceof Error ? e.message : "Erreur lors de la réorganisation");
+        setError(
+          e instanceof Error ? e.message : "Erreur lors de la réorganisation",
+        );
       });
   };
 
-  const activeProfile = activeId !== null ? localProfiles.find((p) => p.id === activeId) : null;
+  const activeProfile =
+    activeId !== null ? localProfiles.find((p) => p.id === activeId) : null;
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <SortableContext items={localProfiles.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext
+        items={localProfiles.map((p) => p.id)}
+        strategy={verticalListSortingStrategy}
+      >
         <div className="space-y-3">
-          {localProfiles.length === 0 && <p className="text-sm text-muted-foreground">Aucun profil.</p>}
+          {localProfiles.length === 0 && (
+            <p className="text-sm text-muted-foreground">Aucun profil.</p>
+          )}
           {localProfiles.map((profile) => (
             // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
-            <SortableProfileRow key={`${profile.id}:${profile.updatedAt}`} profile={profile} onError={setError} />
+            <SortableProfileRow
+              key={`${profile.id}:${profile.updatedAt}`}
+              profile={profile}
+              onError={setError}
+            />
           ))}
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button variant="outline" onClick={() => void addProfile()} disabled={busy}>
+          <Button
+            variant="outline"
+            onClick={() => void addProfile()}
+            disabled={busy}
+          >
             <Plus className="h-4 w-4" />
             Ajouter un profil
           </Button>
@@ -235,7 +297,11 @@ function ProfilesSettings() {
       </SortableContext>
       <DragOverlay>
         {activeProfile != null && (
-          <ProfileRow profile={activeProfile} onError={setError} isDragOverlay />
+          <ProfileRow
+            profile={activeProfile}
+            onError={setError}
+            isDragOverlay
+          />
         )}
       </DragOverlay>
     </DndContext>
@@ -254,8 +320,19 @@ interface ProfileRowProps {
   setActivatorNodeRef?: (element: HTMLElement | null) => void;
 }
 
-function SortableProfileRow({ profile, onError }: Pick<ProfileRowProps, "profile" | "onError">) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: profile.id });
+function SortableProfileRow({
+  profile,
+  onError,
+}: Pick<ProfileRowProps, "profile" | "onError">) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: profile.id });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -276,13 +353,26 @@ function SortableProfileRow({ profile, onError }: Pick<ProfileRowProps, "profile
   );
 }
 
-function ProfileRow({ profile, onError, isDragOverlay = false, dragHandleListeners, dragHandleAttributes, setActivatorNodeRef }: ProfileRowProps) {
+function ProfileRow({
+  profile,
+  onError,
+  isDragOverlay = false,
+  dragHandleListeners,
+  dragHandleAttributes,
+  setActivatorNodeRef,
+}: ProfileRowProps) {
   const [name, setName] = useState(profile.name);
   const [model, setModel] = useState<AgentModel>(profile.model);
   const [effort, setEffort] = useState<AgentEffort>(profile.effort);
-  const [implementerModel, setImplementerModel] = useState<AgentModel>(profile.implementerModel);
-  const [implementerEffort, setImplementerEffort] = useState<AgentEffort>(profile.implementerEffort);
-  const [implementer, setImplementer] = useState<Implementer>(profile.implementer);
+  const [implementerModel, setImplementerModel] = useState<AgentModel>(
+    profile.implementerModel,
+  );
+  const [implementerEffort, setImplementerEffort] = useState<AgentEffort>(
+    profile.implementerEffort,
+  );
+  const [implementer, setImplementer] = useState<Implementer>(
+    profile.implementer,
+  );
   const [busy, setBusy] = useState(false);
 
   const dirty =
@@ -361,32 +451,65 @@ function ProfileRow({ profile, onError, isDragOverlay = false, dragHandleListene
         </Button>
       </div>
       <details className="rounded-md border bg-muted/30 px-3 py-2">
-        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration</summary>
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+          Configuration
+        </summary>
         <div className="mt-3 flex flex-col gap-2">
           <Field label="Modèle">
-            <Tabs options={AGENT_MODEL_OPTIONS} value={model} onChange={setModel} aria-label="Modèle" />
+            <Tabs
+              options={AGENT_MODEL_OPTIONS}
+              value={model}
+              onChange={setModel}
+              aria-label="Modèle"
+            />
           </Field>
           <Field label="Effort">
-            <Tabs options={AGENT_EFFORT_OPTIONS} value={effort} onChange={setEffort} aria-label="Effort" />
+            <Tabs
+              options={AGENT_EFFORT_OPTIONS}
+              value={effort}
+              onChange={setEffort}
+              aria-label="Effort"
+            />
           </Field>
           <Field label="Implémenté par">
-            <Tabs options={IMPLEMENTER_OPTIONS} value={implementer} onChange={setImplementer} aria-label="Implémenté par" />
+            <Tabs
+              options={IMPLEMENTER_OPTIONS}
+              value={implementer}
+              onChange={setImplementer}
+              aria-label="Implémenté par"
+            />
           </Field>
           {implementer === "claude" && (
             <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
-              <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Sous-agent implémenteur
+              </p>
               <Field label="Modèle">
-                <Tabs options={AGENT_MODEL_OPTIONS} value={implementerModel} onChange={setImplementerModel} aria-label="Modèle implémenteur" />
+                <Tabs
+                  options={AGENT_MODEL_OPTIONS}
+                  value={implementerModel}
+                  onChange={setImplementerModel}
+                  aria-label="Modèle implémenteur"
+                />
               </Field>
               <Field label="Effort">
-                <Tabs options={AGENT_EFFORT_OPTIONS} value={implementerEffort} onChange={setImplementerEffort} aria-label="Effort implémenteur" />
+                <Tabs
+                  options={AGENT_EFFORT_OPTIONS}
+                  value={implementerEffort}
+                  onChange={setImplementerEffort}
+                  aria-label="Effort implémenteur"
+                />
               </Field>
             </div>
           )}
         </div>
       </details>
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => void save()} disabled={busy || !dirty || name.trim() === ""}>
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          disabled={busy || !dirty || name.trim() === ""}
+        >
           Enregistrer
         </Button>
       </div>
@@ -394,7 +517,13 @@ function ProfileRow({ profile, onError, isDragOverlay = false, dragHandleListene
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col items-start gap-1.5">
       <Label>{label}</Label>

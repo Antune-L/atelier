@@ -128,7 +128,12 @@ export function ImportTicketsPanel({
 
   return (
     <div className="space-y-4">
-      <ProjectSelect id="import-project" projects={projects} value={project} onChange={setProjectChoice} />
+      <ProjectSelect
+        id="import-project"
+        projects={projects}
+        value={project}
+        onChange={setProjectChoice}
+      />
 
       <div className="rounded-md border">
         <div className="flex items-center justify-between px-3 py-2 text-sm font-medium">
@@ -254,11 +259,11 @@ export function ImportTicketsPanel({
       </div>
 
       <label className="flex items-center justify-between gap-2 text-sm">
-        <span>PRD à implémenter (planification avant code)</span>
+        <span>PRD</span>
         <Switch
           checked={prdEnabled}
           onCheckedChange={setPrdEnabled}
-          aria-label="PRD à implémenter"
+          aria-label="PRD"
         />
       </label>
       <label className="flex items-center justify-between gap-2 text-sm">

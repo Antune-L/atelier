@@ -14,7 +14,7 @@ export type Column = (typeof COLUMNS)[number];
 export const COLUMN_LABELS: Record<Column, string> = {
   todo: "TODO",
   implementing: "À implémenter",
-  prd: "PRD à implémenter",
+  prd: "PRD",
   done: "Fini",
   merged: "PR mergée",
   reviewed: "PR reviewed",
@@ -36,7 +36,9 @@ export const COLUMN_ORDER: Column[] = [
 ];
 
 /** Field a sortable column ranks its tickets by; absent columns aren't sortable. */
-export const COLUMN_SORT_FIELD: Partial<Record<Column, "createdAt" | "finishedAt">> = {
+export const COLUMN_SORT_FIELD: Partial<
+  Record<Column, "createdAt" | "finishedAt">
+> = {
   todo: "createdAt",
   implementing: "createdAt",
   prd: "createdAt",
@@ -107,10 +109,38 @@ export interface ProfileConfig {
 
 /** Seeded into the DB on first boot; editable afterwards via the settings modal. */
 export const DEFAULT_PROFILES: ProfileConfig[] = [
-  { name: "Basique", model: "opus", effort: "medium", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
-  { name: "Debug -", model: "opus", effort: "low", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
-  { name: "Debug +", model: "opus", effort: "max", implementerModel: "opus", implementerEffort: "low", implementer: "claude" },
-  { name: "Délégation", model: "opus", effort: "medium", implementerModel: "opus", implementerEffort: "low", implementer: "composer" },
+  {
+    name: "Basique",
+    model: "opus",
+    effort: "medium",
+    implementerModel: "opus",
+    implementerEffort: "low",
+    implementer: "claude",
+  },
+  {
+    name: "Debug -",
+    model: "opus",
+    effort: "low",
+    implementerModel: "opus",
+    implementerEffort: "low",
+    implementer: "claude",
+  },
+  {
+    name: "Debug +",
+    model: "opus",
+    effort: "max",
+    implementerModel: "opus",
+    implementerEffort: "low",
+    implementer: "claude",
+  },
+  {
+    name: "Délégation",
+    model: "opus",
+    effort: "medium",
+    implementerModel: "opus",
+    implementerEffort: "low",
+    implementer: "composer",
+  },
 ];
 
 /** Sentinel "profile" shown when a ticket's knobs match no stored profile. */
@@ -173,7 +203,12 @@ export const STAGE_LABELS: Record<Stage, string> = {
 };
 
 /** Stages where the pipeline has stopped: the run is over or dead (slot may still be held). */
-export const TERMINAL_STAGES: Stage[] = ["done", "failed", "interrupted", "stalled"];
+export const TERMINAL_STAGES: Stage[] = [
+  "done",
+  "failed",
+  "interrupted",
+  "stalled",
+];
 
 /** Stages where the pipeline is actively running (not terminal, not waiting on user). */
 export const ACTIVE_STAGES: Stage[] = [
@@ -187,10 +222,19 @@ export const ACTIVE_STAGES: Stage[] = [
 ];
 
 /** Triage feasibility verdicts an agent can return. */
-export const TRIAGE_VERDICTS = ["implementable", "needs_info", "needs_rework"] as const;
+export const TRIAGE_VERDICTS = [
+  "implementable",
+  "needs_info",
+  "needs_rework",
+] as const;
 
 /** Columns whose tickets are counted as a successful outcome in the stats dashboard. */
-export const SUCCESS_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered"];
+export const SUCCESS_COLUMNS: Column[] = [
+  "done",
+  "merged",
+  "reviewed",
+  "answered",
+];
 /** Columns whose tickets are counted as a failed outcome in the stats dashboard. */
 export const FAILURE_COLUMNS: Column[] = ["failed"];
 

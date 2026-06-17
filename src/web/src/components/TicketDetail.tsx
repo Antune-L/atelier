@@ -1,4 +1,19 @@
-import { Brush, Check, Cpu, Eye, FlaskConical, GitMerge, HelpCircle, Maximize2, PanelRightClose, PanelRightOpen, Rocket, RotateCw, Square, X } from "lucide-react";
+import {
+  Brush,
+  Check,
+  Cpu,
+  Eye,
+  FlaskConical,
+  GitMerge,
+  HelpCircle,
+  Maximize2,
+  PanelRightClose,
+  PanelRightOpen,
+  Rocket,
+  RotateCw,
+  Square,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
@@ -7,7 +22,11 @@ import type {
   Ticket,
   TriageResult,
 } from "@shared/schemas";
-import { TRIAGE_VERDICT_LABELS, columnSchema, triageResultSchema } from "@shared/schemas";
+import {
+  TRIAGE_VERDICT_LABELS,
+  columnSchema,
+  triageResultSchema,
+} from "@shared/schemas";
 import {
   ACTIVE_STAGES,
   AGENT_EFFORT_LABELS,
@@ -27,11 +46,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/ui/markdown";
-import {
-  Modal,
-  ModalHeader,
-  ModalTitle,
-} from "@/components/ui/modal";
+import { Modal, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -53,7 +68,11 @@ import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
-import { projectBadgeStyle, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
+import {
+  projectBadgeStyle,
+  resolveProjectColor,
+  resolveProjectLabel,
+} from "@/components/TicketCard";
 
 const TERMINAL_VISIBLE_KEY = "ticket-terminal-visible";
 
@@ -111,7 +130,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [checkingMerge, setCheckingMerge] = useState(false);
-  const [terminalVisible, setTerminalVisible] = useState(() => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0");
+  const [terminalVisible, setTerminalVisible] = useState(
+    () => localStorage.getItem(TERMINAL_VISIBLE_KEY) !== "0",
+  );
   const [prdDialogOpen, setPrdDialogOpen] = useState(false);
   // Base-branch picker state (TODO column only). null = remote list not loaded yet.
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -162,7 +183,8 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // Per-kind terminal lanes: "merged" for feature PRs, "reviewed" for reviews, "answered" for asks.
   const statusOptions = COLUMN_ORDER.filter((col) => {
     if (col === "merged") return current.kind === "feature";
-    if (col === "reviewed") return current.kind === "review" || current.kind === "clean";
+    if (col === "reviewed")
+      return current.kind === "review" || current.kind === "clean";
     if (col === "answered") return current.kind === "ask";
     return true;
   });
@@ -173,7 +195,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // The pane WebSocket can land before tmux is spawned (queued/setup window); while the session is
   // expected to be live the terminal retries rather than freezing on the first "session terminée".
   // A test session sits on a "done" (terminal) stage, so OR in `testing` to keep it live.
-  const sessionLive = (current.stage !== null && !TERMINAL_STAGES.includes(current.stage)) || current.testing;
+  const sessionLive =
+    (current.stage !== null && !TERMINAL_STAGES.includes(current.stage)) ||
+    current.testing;
   // A "todo" card carries config sections (agent, PR options, feasibility) and
   // never has a terminal: lay it out on two columns so it breathes.
   const isTodoSplit = current.column === "todo";
@@ -211,15 +235,25 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // Send null when the choice matches the project default → keep "no override" semantics.
   const changeBaseBranch = (value: string): void => {
     const override = value && value !== projectDefaultBranch ? value : null;
-    void api.updateTicket(current.id, { baseBranch: override }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { baseBranch: override })
+      .catch(() => undefined);
   };
-  const dependsCandidates = dependencyCandidates(boardTickets, current.project, current.id);
+  const dependsCandidates = dependencyCandidates(
+    boardTickets,
+    current.project,
+    current.id,
+  );
   const changeDependsOn = (value: string): void => {
-    void api.updateTicket(current.id, { dependsOn: value || null }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { dependsOn: value || null })
+      .catch(() => undefined);
   };
   const changeProject = (value: string): void => {
     if (value === current.project) return;
-    void api.updateTicket(current.id, { project: value }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { project: value })
+      .catch(() => undefined);
   };
   // Escape hatch for a stuck "À implémenter" card: the session spawned but its
   // contract/instruction never landed. Only while actively running — terminal
@@ -274,11 +308,17 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   };
 
   const setImplementerModel = (implementerModel: AgentModel | null): void => {
-    void api.updateTicket(current.id, { implementerModel }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { implementerModel })
+      .catch(() => undefined);
   };
 
-  const setImplementerEffort = (implementerEffort: AgentEffort | null): void => {
-    void api.updateTicket(current.id, { implementerEffort }).catch(() => undefined);
+  const setImplementerEffort = (
+    implementerEffort: AgentEffort | null,
+  ): void => {
+    void api
+      .updateTicket(current.id, { implementerEffort })
+      .catch(() => undefined);
   };
 
   const setImplementer = (implementer: Implementer): void => {
@@ -335,34 +375,48 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
       }
       setMoveError(`PR non mergée (état : ${result.state || "inconnu"})`);
     } catch (e) {
-      setMoveError(e instanceof Error ? e.message : "Vérification du merge échouée");
+      setMoveError(
+        e instanceof Error ? e.message : "Vérification du merge échouée",
+      );
     } finally {
       setCheckingMerge(false);
     }
   };
 
   const setPrdEnabled = (checked: boolean): void => {
-    void api.updateTicket(current.id, { prdEnabled: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { prdEnabled: checked })
+      .catch(() => undefined);
   };
 
   const setPrDraft = (checked: boolean): void => {
-    void api.updateTicket(current.id, { prDraft: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { prDraft: checked })
+      .catch(() => undefined);
   };
 
   const setAutoMerge = (checked: boolean): void => {
-    void api.updateTicket(current.id, { autoMerge: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { autoMerge: checked })
+      .catch(() => undefined);
   };
 
   const setVerifyFeature = (checked: boolean): void => {
-    void api.updateTicket(current.id, { verifyFeature: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { verifyFeature: checked })
+      .catch(() => undefined);
   };
 
   const setResearchPlan = (checked: boolean): void => {
-    void api.updateTicket(current.id, { researchPlan: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { researchPlan: checked })
+      .catch(() => undefined);
   };
 
   const setFeasibilityContext = (checked: boolean): void => {
-    void api.updateTicket(current.id, { feasibilityContext: checked }).catch(() => undefined);
+    void api
+      .updateTicket(current.id, { feasibilityContext: checked })
+      .catch(() => undefined);
   };
 
   const startEdit = (): void => {
@@ -387,11 +441,15 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   const appendToEditDescription = (markdown: string): void => {
     setEditDescription((prev) =>
-      prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`,
+      prev.endsWith("\n") || prev === ""
+        ? `${prev}${markdown}\n`
+        : `${prev}\n${markdown}\n`,
     );
   };
 
-  const onEditPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+  const onEditPaste = (
+    event: React.ClipboardEvent<HTMLTextAreaElement>,
+  ): void => {
     void handleMediaPaste(event, appendToEditDescription).catch((e) =>
       setEditError(e instanceof Error ? e.message : "Échec de l'upload"),
     );
@@ -459,7 +517,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               {current.stage && (
                 <Badge
                   variant={stageVariant(current.stage)}
-                  className={cn(isStageAnimated(current.stage) && "animate-pulse")}
+                  className={cn(
+                    isStageAnimated(current.stage) && "animate-pulse",
+                  )}
                 >
                   {stageLabel(current.stage)}
                 </Badge>
@@ -472,9 +532,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               {extractFigmaUrls(current.description).length > 0 && (
                 <Badge variant="secondary">UI</Badge>
               )}
-              {current.prdEnabled && (
-                <Badge variant="secondary">PRD</Badge>
-              )}
+              {current.prdEnabled && <Badge variant="secondary">PRD</Badge>}
               {locked && (
                 <span className="text-xs text-muted-foreground">
                   verrouillé (en traitement)
@@ -483,11 +541,24 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Badge variant="outline" style={projectBadgeStyle(resolveProjectColor(projects, current.project))}>{resolveProjectLabel(projects, current.project)}</Badge>
+            <Badge
+              variant="outline"
+              style={projectBadgeStyle(
+                resolveProjectColor(projects, current.project),
+              )}
+            >
+              {resolveProjectLabel(projects, current.project)}
+            </Badge>
             {showTerminal && (
               <Button variant="ghost" size="sm" onClick={toggleTerminal}>
-                {terminalVisible ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-                {terminalVisible ? "Masquer le terminal" : "Afficher le terminal"}
+                {terminalVisible ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRightOpen className="h-4 w-4" />
+                )}
+                {terminalVisible
+                  ? "Masquer le terminal"
+                  : "Afficher le terminal"}
               </Button>
             )}
             <button
@@ -509,486 +580,513 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
             !terminalPaneVisible && !isTodoSplit && "mx-auto w-full max-w-4xl",
           )}
         >
-        <div
-          className={cn(
-            isTodoSplit
-              ? "grid grid-cols-1 items-start gap-x-6 gap-y-4 lg:grid-cols-2"
-              : "space-y-4",
-          )}
-        >
-        <div className="min-w-0 space-y-4">
-        {current.error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            {current.error}
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          Créé le {formatDateTime(current.createdAt)}
-        </p>
-
-        {current.finishedAt !== null && (
-          <p className="text-xs text-muted-foreground">
-            {finishedKindLabel(current)} le {formatDateTime(current.finishedAt)}
-          </p>
-        )}
-
-        <TicketCost ticket={current} />
-
-        <section className="flex flex-wrap items-center gap-2">
-          <Label htmlFor="ticket-status" className="text-sm font-semibold">
-            Statut
-          </Label>
-          <Select
-            id="ticket-status"
-            className="w-auto"
-            value={current.column}
-            disabled={locked}
-            title={locked ? "Carte verrouillée (en traitement)" : undefined}
-            onChange={(e) => changeStatus(columnSchema.parse(e.target.value))}
-          >
-            {statusOptions.map((col) => (
-              <option key={col} value={col}>
-                {COLUMN_LABELS[col]}
-              </option>
-            ))}
-          </Select>
-          {locked && (
-            <span className="text-xs text-muted-foreground">
-              verrouillé (en traitement) — utilise « Abandonner » ci-dessous
-            </span>
-          )}
-        </section>
-
-        {!isTodoSplit && <TicketConfigSummary ticket={current} />}
-
-        <section>
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">Description</h3>
-            {!locked && !editing && (
-              <Button variant="ghost" size="sm" onClick={startEdit}>
-                Modifier
-              </Button>
+          <div
+            className={cn(
+              isTodoSplit
+                ? "grid grid-cols-1 items-start gap-x-6 gap-y-4 lg:grid-cols-2"
+                : "space-y-4",
             )}
-          </div>
-          {editing ? (
-            <div className="space-y-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="edit-title">Titre (optionnel)</Label>
-                <Input
-                  id="edit-title"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="Titre du ticket (déduit de la description si vide)"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="edit-description">Description (markdown)</Label>
-                <Textarea
-                  id="edit-description"
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  onPaste={onEditPaste}
-                  className="min-h-[200px]"
-                  placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
-                />
-              </div>
-              {editError && (
-                <p className="text-sm text-destructive">{editError}</p>
+          >
+            <div className="min-w-0 space-y-4">
+              {current.error && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  {current.error}
+                </div>
               )}
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => void saveEdit()}>
-                  Enregistrer
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
-                  Annuler
-                </Button>
-              </div>
-            </div>
-          ) : (
-            descriptionView
-          )}
-        </section>
 
-        {current.agentSummary && (current.column === "done" || current.column === "merged") && (
-          <section className="rounded-md border bg-muted/30 p-3">
-            <details>
-              <summary className="cursor-pointer text-sm font-semibold">
-                Résumé de l'agent
-              </summary>
-              <div className="mt-2 max-h-64 overflow-y-auto">
-                <Markdown content={current.agentSummary} />
-              </div>
-            </details>
-          </section>
-        )}
+              <p className="text-xs text-muted-foreground">
+                Créé le {formatDateTime(current.createdAt)}
+              </p>
 
-        {current.prdMarkdown && (
-          <section className="rounded-md border bg-muted/30 p-3">
-            {current.column === "prd" ? (
-              <>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold">PRD proposé</h3>
-                  <Button variant="ghost" size="sm" onClick={() => setPrdDialogOpen(true)}>
-                    <Maximize2 className="h-4 w-4" />
-                    Agrandir & annoter
-                  </Button>
-                </div>
-                <div className="max-h-64 overflow-y-auto">
-                  <Markdown content={current.prdMarkdown} />
-                </div>
-                <Button
-                  size="sm"
-                  className="mt-2"
-                  onClick={async () => {
-                    await api.validatePrd(ticket.id);
-                    refresh();
-                  }}
+              {current.finishedAt !== null && (
+                <p className="text-xs text-muted-foreground">
+                  {finishedKindLabel(current)} le{" "}
+                  {formatDateTime(current.finishedAt)}
+                </p>
+              )}
+
+              <TicketCost ticket={current} />
+
+              <section className="flex flex-wrap items-center gap-2">
+                <Label
+                  htmlFor="ticket-status"
+                  className="text-sm font-semibold"
                 >
-                  Valider le PRD
-                </Button>
-              </>
-            ) : (
-              <details>
-                <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
-                  PRD validé
+                  Statut
+                </Label>
+                <Select
+                  id="ticket-status"
+                  className="w-auto"
+                  value={current.column}
+                  disabled={locked}
+                  title={
+                    locked ? "Carte verrouillée (en traitement)" : undefined
+                  }
+                  onChange={(e) =>
+                    changeStatus(columnSchema.parse(e.target.value))
+                  }
+                >
+                  {statusOptions.map((col) => (
+                    <option key={col} value={col}>
+                      {COLUMN_LABELS[col]}
+                    </option>
+                  ))}
+                </Select>
+                {locked && (
+                  <span className="text-xs text-muted-foreground">
+                    verrouillé (en traitement) — utilise « Abandonner »
+                    ci-dessous
+                  </span>
+                )}
+              </section>
+
+              {!isTodoSplit && <TicketConfigSummary ticket={current} />}
+
+              <section>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold">Description</h3>
+                  {!locked && !editing && (
+                    <Button variant="ghost" size="sm" onClick={startEdit}>
+                      Modifier
+                    </Button>
+                  )}
+                </div>
+                {editing ? (
+                  <div className="space-y-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-title">Titre (optionnel)</Label>
+                      <Input
+                        id="edit-title"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="Titre du ticket (déduit de la description si vide)"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-description">
+                        Description (markdown)
+                      </Label>
+                      <Textarea
+                        id="edit-description"
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        onPaste={onEditPaste}
+                        className="min-h-[200px]"
+                        placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
+                      />
+                    </div>
+                    {editError && (
+                      <p className="text-sm text-destructive">{editError}</p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => void saveEdit()}>
+                        Enregistrer
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditing(false)}
+                      >
+                        Annuler
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  descriptionView
+                )}
+              </section>
+
+              {current.agentSummary &&
+                (current.column === "done" || current.column === "merged") && (
+                  <section className="rounded-md border bg-muted/30 p-3">
+                    <details>
+                      <summary className="cursor-pointer text-sm font-semibold">
+                        Résumé de l'agent
+                      </summary>
+                      <div className="mt-2 max-h-64 overflow-y-auto">
+                        <Markdown content={current.agentSummary} />
+                      </div>
+                    </details>
+                  </section>
+                )}
+
+              {current.prdMarkdown && (
+                <section className="rounded-md border bg-muted/30 p-3">
+                  {current.column === "prd" ? (
+                    <>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold">PRD proposé</h3>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPrdDialogOpen(true)}
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                          Agrandir & annoter
+                        </Button>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto">
+                        <Markdown content={current.prdMarkdown} />
+                      </div>
+                      <Button
+                        size="sm"
+                        className="mt-2"
+                        onClick={async () => {
+                          await api.validatePrd(ticket.id);
+                          refresh();
+                        }}
+                      >
+                        Valider le PRD
+                      </Button>
+                    </>
+                  ) : (
+                    <details>
+                      <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
+                        PRD validé
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setPrdDialogOpen(true);
+                          }}
+                        >
+                          <Maximize2 className="h-4 w-4" />
+                          Agrandir
+                        </Button>
+                      </summary>
+                      <div className="mt-2 max-h-64 overflow-y-auto">
+                        <Markdown content={current.prdMarkdown} />
+                      </div>
+                    </details>
+                  )}
+                </section>
+              )}
+
+              <section>
+                <h3 className="mb-2 text-sm font-semibold">Commentaires</h3>
+                <div className="space-y-2">
+                  {comments.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Aucun commentaire
+                    </p>
+                  )}
+                  {comments.map((c) => (
+                    <CommentRow
+                      key={c.id}
+                      comment={c}
+                      reply={reply[c.questionId ?? ""] ?? ""}
+                      onReplyChange={(v) =>
+                        c.questionId &&
+                        setReply((prev) => ({ ...prev, [c.questionId!]: v }))
+                      }
+                      onAnswer={() => c.questionId && answer(c.questionId)}
+                    />
+                  ))}
+                </div>
+                {!["todo", "done", "merged"].includes(current.column) && (
+                  <div className="mt-3 space-y-1.5">
+                    <Label htmlFor="new-comment">Ajouter un commentaire</Label>
+                    <Input
+                      id="new-comment"
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      placeholder="Votre message…"
+                      onKeyDown={(e) => e.key === "Enter" && comment()}
+                    />
+                  </div>
+                )}
+              </section>
+
+              <section className="flex flex-wrap gap-2 border-t pt-4">
+                {canResolveConflicts && (
                   <Button
-                    variant="ghost"
+                    variant="default"
                     size="sm"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setPrdDialogOpen(true);
+                    title="Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto"
+                    onClick={async () => {
+                      await api.resolveConflicts(ticket.id);
+                      refresh();
                     }}
                   >
-                    <Maximize2 className="h-4 w-4" />
-                    Agrandir
+                    <GitMerge className="h-4 w-4" />
+                    Résoudre les conflits
                   </Button>
-                </summary>
-                <div className="mt-2 max-h-64 overflow-y-auto">
-                  <Markdown content={current.prdMarkdown} />
-                </div>
-              </details>
-            )}
-          </section>
-        )}
-
-        <section>
-          <h3 className="mb-2 text-sm font-semibold">Commentaires</h3>
-          <div className="space-y-2">
-            {comments.length === 0 && (
-              <p className="text-xs text-muted-foreground">Aucun commentaire</p>
-            )}
-            {comments.map((c) => (
-              <CommentRow
-                key={c.id}
-                comment={c}
-                reply={reply[c.questionId ?? ""] ?? ""}
-                onReplyChange={(v) =>
-                  c.questionId &&
-                  setReply((prev) => ({ ...prev, [c.questionId!]: v }))
-                }
-                onAnswer={() => c.questionId && answer(c.questionId)}
-              />
-            ))}
-          </div>
-          {!["todo", "done", "merged"].includes(current.column) && (
-            <div className="mt-3 space-y-1.5">
-              <Label htmlFor="new-comment">Ajouter un commentaire</Label>
-              <Input
-                id="new-comment"
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Votre message…"
-                onKeyDown={(e) => e.key === "Enter" && comment()}
-              />
+                )}
+                {(current.stage === "failed" ||
+                  current.stage === "interrupted" ||
+                  current.stage === "stalled") &&
+                  // Auto-merge failed: the PR is already pushed/open and the slot is released.
+                  // A retry would re-spawn a fresh session for an existing PR — hide it; the
+                  // user resolves the conflict via the linked PR instead.
+                  !(current.slotId === null && current.prUrl !== null) && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={async () => {
+                        await api.retry(ticket.id);
+                        refresh();
+                      }}
+                    >
+                      Relancer
+                    </Button>
+                  )}
+                {canRelaunch && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    title="Tuer la session et la relancer dans le même slot (réenvoie l'instruction)"
+                    onClick={() => setConfirmRelaunch(true)}
+                  >
+                    <RotateCw className="h-4 w-4" />
+                    Relancer la session
+                  </Button>
+                )}
+                {current.column === "done" && current.kind === "feature" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={checkingMerge}
+                    onClick={() => void checkMerge()}
+                  >
+                    <GitMerge className="h-4 w-4" />
+                    Vérifier le merge
+                  </Button>
+                )}
+                {current.column === "done" && current.kind === "feature" && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => setConfirmMerged(true)}
+                  >
+                    <Check className="h-4 w-4" />
+                    PR mergée
+                  </Button>
+                )}
+                {canStartTest && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={testBusy}
+                    title="Recréer un worktree sur la branche de la feature et lancer une session Claude interactive pour la tester (sans PR ni gate)"
+                    onClick={async () => {
+                      setTestBusy(true);
+                      try {
+                        await api.startTest(ticket.id);
+                        refresh();
+                      } finally {
+                        setTestBusy(false);
+                      }
+                    }}
+                  >
+                    <FlaskConical className="h-4 w-4" />
+                    Tester la feature
+                  </Button>
+                )}
+                {current.testing && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={testBusy}
+                    title="Arrêter la session de test : tue la session, retire le worktree et libère le slot"
+                    onClick={async () => {
+                      setTestBusy(true);
+                      try {
+                        await api.stopTest(ticket.id);
+                        refresh();
+                      } finally {
+                        setTestBusy(false);
+                      }
+                    }}
+                  >
+                    <Square className="h-4 w-4" />
+                    Arrêter le test
+                  </Button>
+                )}
+                {current.column !== "abandoned" && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setConfirmAbandon(true)}
+                  >
+                    Abandonner
+                  </Button>
+                )}
+                {current.slotId === null && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    Supprimer
+                  </Button>
+                )}
+              </section>
             </div>
-          )}
-        </section>
 
-        <section className="flex flex-wrap gap-2 border-t pt-4">
-          {canResolveConflicts && (
-            <Button
-              variant="default"
-              size="sm"
-              title="Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto"
-              onClick={async () => {
-                await api.resolveConflicts(ticket.id);
-                refresh();
-              }}
-            >
-              <GitMerge className="h-4 w-4" />
-              Résoudre les conflits
-            </Button>
-          )}
-          {(current.stage === "failed" ||
-            current.stage === "interrupted" ||
-            current.stage === "stalled") &&
-            // Auto-merge failed: the PR is already pushed/open and the slot is released.
-            // A retry would re-spawn a fresh session for an existing PR — hide it; the
-            // user resolves the conflict via the linked PR instead.
-            !(current.slotId === null && current.prUrl !== null) && (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={async () => {
-                await api.retry(ticket.id);
-                refresh();
-              }}
-            >
-              Relancer
-            </Button>
-          )}
-          {canRelaunch && (
-            <Button
-              variant="secondary"
-              size="sm"
-              title="Tuer la session et la relancer dans le même slot (réenvoie l'instruction)"
-              onClick={() => setConfirmRelaunch(true)}
-            >
-              <RotateCw className="h-4 w-4" />
-              Relancer la session
-            </Button>
-          )}
-          {current.column === "done" && current.kind === "feature" && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={checkingMerge}
-              onClick={() => void checkMerge()}
-            >
-              <GitMerge className="h-4 w-4" />
-              Vérifier le merge
-            </Button>
-          )}
-          {current.column === "done" && current.kind === "feature" && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setConfirmMerged(true)}
-            >
-              <Check className="h-4 w-4" />
-              PR mergée
-            </Button>
-          )}
-          {canStartTest && (
-            <Button
-              variant="default"
-              size="sm"
-              disabled={testBusy}
-              title="Recréer un worktree sur la branche de la feature et lancer une session Claude interactive pour la tester (sans PR ni gate)"
-              onClick={async () => {
-                setTestBusy(true);
-                try {
-                  await api.startTest(ticket.id);
-                  refresh();
-                } finally {
-                  setTestBusy(false);
-                }
-              }}
-            >
-              <FlaskConical className="h-4 w-4" />
-              Tester la feature
-            </Button>
-          )}
-          {current.testing && (
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={testBusy}
-              title="Arrêter la session de test : tue la session, retire le worktree et libère le slot"
-              onClick={async () => {
-                setTestBusy(true);
-                try {
-                  await api.stopTest(ticket.id);
-                  refresh();
-                } finally {
-                  setTestBusy(false);
-                }
-              }}
-            >
-              <Square className="h-4 w-4" />
-              Arrêter le test
-            </Button>
-          )}
-          {current.column !== "abandoned" && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmAbandon(true)}
-            >
-              Abandonner
-            </Button>
-          )}
-          {current.slotId === null && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
-            >
-              Supprimer
-            </Button>
-          )}
-        </section>
-        </div>
+            {isTodoSplit && (
+              <div className="min-w-0 space-y-4">
+                {canEditBaseBranch && (
+                  <section className="rounded-md border p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ticket-project">Projet</Label>
+                      <Select
+                        id="ticket-project"
+                        value={current.project}
+                        onChange={(e) => changeProject(e.target.value)}
+                        className="w-full"
+                      >
+                        {projects.map((p) => (
+                          <option key={p.key} value={p.key}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </section>
+                )}
 
-        {isTodoSplit && (
-          <div className="min-w-0 space-y-4">
-            {canEditBaseBranch && (
-              <section className="rounded-md border p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="ticket-project">Projet</Label>
-                  <Select
-                    id="ticket-project"
-                    value={current.project}
-                    onChange={(e) => changeProject(e.target.value)}
-                    className="w-full"
-                  >
-                    {projects.map((p) => (
-                      <option key={p.key} value={p.key}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </section>
-            )}
+                {canEditBaseBranch && (
+                  <section className="rounded-md border p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ticket-base-branch">
+                        Branche de base du worktree
+                      </Label>
+                      <Select
+                        id="ticket-base-branch"
+                        value={selectedBaseBranch}
+                        onChange={(e) => changeBaseBranch(e.target.value)}
+                        disabled={branches === null}
+                        className="w-full"
+                      >
+                        {baseBranchOptions.map((b) => (
+                          <option key={b} value={b}>
+                            {b === projectDefaultBranch ? `${b} (défaut)` : b}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </section>
+                )}
 
-            {canEditBaseBranch && (
-              <section className="rounded-md border p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="ticket-base-branch">
-                    Branche de base du worktree
-                  </Label>
-                  <Select
-                    id="ticket-base-branch"
-                    value={selectedBaseBranch}
-                    onChange={(e) => changeBaseBranch(e.target.value)}
-                    disabled={branches === null}
-                    className="w-full"
-                  >
-                    {baseBranchOptions.map((b) => (
-                      <option key={b} value={b}>
-                        {b === projectDefaultBranch ? `${b} (défaut)` : b}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </section>
-            )}
+                {canEditBaseBranch && (
+                  <section className="rounded-md border p-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ticket-depends-on">
+                        Dépend du ticket (stack PR)
+                      </Label>
+                      <Select
+                        id="ticket-depends-on"
+                        value={current.dependsOn ?? ""}
+                        onChange={(e) => changeDependsOn(e.target.value)}
+                        className="w-full"
+                      >
+                        <option value="">Aucune</option>
+                        {dependsCandidates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.title}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </section>
+                )}
 
-            {canEditBaseBranch && (
-              <section className="rounded-md border p-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="ticket-depends-on">Dépend du ticket (stack PR)</Label>
-                  <Select
-                    id="ticket-depends-on"
-                    value={current.dependsOn ?? ""}
-                    onChange={(e) => changeDependsOn(e.target.value)}
-                    className="w-full"
-                  >
-                    <option value="">Aucune</option>
-                    {dependsCandidates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.title}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </section>
-            )}
+                <section className="rounded-md border p-3">
+                  <h3 className="mb-2 text-sm font-semibold">
+                    Agent d'implémentation
+                  </h3>
+                  <AgentProfileConfig
+                    model={current.model}
+                    effort={current.effort}
+                    implementerModel={current.implementerModel}
+                    implementerEffort={current.implementerEffort}
+                    implementer={current.implementer}
+                    onModelChange={setAgentModel}
+                    onEffortChange={setAgentEffort}
+                    onImplementerModelChange={setImplementerModel}
+                    onImplementerEffortChange={setImplementerEffort}
+                    onImplementerChange={setImplementer}
+                    onApplyProfile={applyProfile}
+                  />
+                  <div className="mt-3">
+                    <Button
+                      size="sm"
+                      disabled={current.triageStatus === "running"}
+                      onClick={async () => {
+                        await api.moveTicket(current.id, "implementing");
+                      }}
+                    >
+                      <Rocket className="h-4 w-4" />
+                      Lancer l'implémentation
+                    </Button>
+                  </div>
+                </section>
 
-            <section className="rounded-md border p-3">
-              <h3 className="mb-2 text-sm font-semibold">Agent d'implémentation</h3>
-              <AgentProfileConfig
-                model={current.model}
-                effort={current.effort}
-                implementerModel={current.implementerModel}
-                implementerEffort={current.implementerEffort}
-                implementer={current.implementer}
-                onModelChange={setAgentModel}
-                onEffortChange={setAgentEffort}
-                onImplementerModelChange={setImplementerModel}
-                onImplementerEffortChange={setImplementerEffort}
-                onImplementerChange={setImplementer}
-                onApplyProfile={applyProfile}
-              />
-              <div className="mt-3">
-                <Button
-                  size="sm"
-                  disabled={current.triageStatus === "running"}
-                  onClick={async () => {
-                    await api.moveTicket(current.id, "implementing");
-                  }}
-                >
-                  <Rocket className="h-4 w-4" />
-                  Lancer l'implémentation
-                </Button>
+                <section className="rounded-md border p-3">
+                  <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
+                  <div className="space-y-3">
+                    <label className="flex items-center justify-between gap-2 text-sm">
+                      <span>PRD</span>
+                      <Switch
+                        checked={current.prdEnabled}
+                        onCheckedChange={setPrdEnabled}
+                        aria-label="PRD"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-sm">
+                      <span>Ouvrir la PR en draft</span>
+                      <Switch
+                        checked={current.prDraft && !current.autoMerge}
+                        disabled={current.autoMerge}
+                        onCheckedChange={setPrDraft}
+                        aria-label="Ouvrir la PR en draft"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-sm">
+                      <span>Merge automatique de la PR</span>
+                      <Switch
+                        checked={current.autoMerge}
+                        onCheckedChange={setAutoMerge}
+                        aria-label="Merge automatique de la PR"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-sm">
+                      <span>Test approfondi</span>
+                      <Switch
+                        checked={current.verifyFeature}
+                        onCheckedChange={setVerifyFeature}
+                        aria-label="Tester la feature avant la PR"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-2 text-sm">
+                      <span>Réflexion approfondie en parallèle</span>
+                      <Switch
+                        checked={current.researchPlan}
+                        onCheckedChange={setResearchPlan}
+                        aria-label="Réflexion approfondie en parallèle"
+                      />
+                    </label>
+                  </div>
+                </section>
+
+                {!locked && (
+                  <TriageSection
+                    ticket={current}
+                    onTriage={async () => {
+                      await api.triage(ticket.id);
+                    }}
+                    onApplySuggestion={(model, effort) => {
+                      void api
+                        .updateTicket(current.id, { model, effort })
+                        .catch(() => undefined);
+                    }}
+                    onToggleContext={setFeasibilityContext}
+                  />
+                )}
               </div>
-            </section>
-
-            <section className="rounded-md border p-3">
-              <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
-              <div className="space-y-3">
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>PRD à implémenter (planification avant code)</span>
-                  <Switch
-                    checked={current.prdEnabled}
-                    onCheckedChange={setPrdEnabled}
-                    aria-label="PRD à implémenter"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>
-                    Ouvrir la PR en draft
-                    {current.autoMerge && (
-                      <span className="ml-1 text-xs text-muted-foreground">(forcé non-draft pour le merge auto)</span>
-                    )}
-                  </span>
-                  <Switch
-                    checked={current.prDraft && !current.autoMerge}
-                    disabled={current.autoMerge}
-                    onCheckedChange={setPrDraft}
-                    aria-label="Ouvrir la PR en draft"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Merger automatiquement la PR après ouverture</span>
-                  <Switch checked={current.autoMerge} onCheckedChange={setAutoMerge} aria-label="Merge automatique de la PR" />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Tester que la feature marche avant la PR (+ comparaison visuelle aux maquettes)</span>
-                  <Switch
-                    checked={current.verifyFeature}
-                    onCheckedChange={setVerifyFeature}
-                    aria-label="Tester la feature avant la PR"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-sm">
-                  <span>Réfléchir sur la solution en amont (recherche parallèle paris-research)</span>
-                  <Switch
-                    checked={current.researchPlan}
-                    onCheckedChange={setResearchPlan}
-                    aria-label="Réflexion paris-research en amont"
-                  />
-                </label>
-              </div>
-            </section>
-
-            {!locked && (
-              <TriageSection
-                ticket={current}
-                onTriage={async () => {
-                  await api.triage(ticket.id);
-                }}
-                onApplySuggestion={(model, effort) => {
-                  void api.updateTicket(current.id, { model, effort }).catch(() => undefined);
-                }}
-                onToggleContext={setFeasibilityContext}
-              />
             )}
           </div>
-        )}
-        </div>
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
@@ -1091,15 +1189,24 @@ interface TriageSectionProps {
   onToggleContext: (checked: boolean) => void;
 }
 
-function TriageSection({ ticket, onTriage, onApplySuggestion, onToggleContext }: TriageSectionProps) {
+function TriageSection({
+  ticket,
+  onTriage,
+  onApplySuggestion,
+  onToggleContext,
+}: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
   const suggestion =
-    ticket.triageVerdict === "implementable" && result?.suggestedModel && result.suggestedEffort
+    ticket.triageVerdict === "implementable" &&
+    result?.suggestedModel &&
+    result.suggestedEffort
       ? { model: result.suggestedModel, effort: result.suggestedEffort }
       : null;
   const suggestionApplied =
-    suggestion !== null && ticket.model === suggestion.model && ticket.effort === suggestion.effort;
+    suggestion !== null &&
+    ticket.model === suggestion.model &&
+    ticket.effort === suggestion.effort;
 
   return (
     <section className="rounded-md border p-3">
@@ -1151,17 +1258,21 @@ function TriageSection({ ticket, onTriage, onApplySuggestion, onToggleContext }:
 
       {suggestion && (
         <div className="mt-2 rounded border border-dashed p-2 text-sm">
-          <p className="text-xs font-semibold text-muted-foreground">Suggestion agent d'implémentation</p>
+          <p className="text-xs font-semibold text-muted-foreground">
+            Suggestion agent d'implémentation
+          </p>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span>
-              Modèle <strong>{AGENT_MODEL_LABELS[suggestion.model]}</strong> · Effort{" "}
-              <strong>{AGENT_EFFORT_LABELS[suggestion.effort]}</strong>
+              Modèle <strong>{AGENT_MODEL_LABELS[suggestion.model]}</strong> ·
+              Effort <strong>{AGENT_EFFORT_LABELS[suggestion.effort]}</strong>
             </span>
             <Button
               size="sm"
               variant="outline"
               disabled={suggestionApplied}
-              onClick={() => onApplySuggestion(suggestion.model, suggestion.effort)}
+              onClick={() =>
+                onApplySuggestion(suggestion.model, suggestion.effort)
+              }
             >
               {suggestionApplied ? "Appliquée" : "Appliquer"}
             </Button>
@@ -1208,7 +1319,11 @@ function TriageSection({ ticket, onTriage, onApplySuggestion, onToggleContext }:
         size="sm"
         variant="secondary"
         className="mt-2"
-        title={running ? "Tuer la session de faisabilité bloquée et la relancer" : undefined}
+        title={
+          running
+            ? "Tuer la session de faisabilité bloquée et la relancer"
+            : undefined
+        }
         onClick={() => void onTriage()}
       >
         {running && <RotateCw className="h-4 w-4" />}
@@ -1279,7 +1394,9 @@ function CommentRow({
       <div className="mb-1 flex items-center gap-2">
         <AuthorBadge author={comment.author} />
         {isQuestion && <Badge variant="warning">Question</Badge>}
-        <span className="ml-auto text-[10px] text-muted-foreground">{formatDateTime(comment.createdAt)}</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {formatDateTime(comment.createdAt)}
+        </span>
       </div>
       <Markdown content={comment.body} />
       {isQuestion && (

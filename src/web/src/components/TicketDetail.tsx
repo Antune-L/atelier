@@ -51,6 +51,7 @@ import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
+import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { TicketCost } from "@/components/TicketCost";
 import { LiveTerminal } from "@/components/LiveTerminal";
@@ -381,36 +382,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     } finally {
       setCheckingMerge(false);
     }
-  };
-
-  const setPrdEnabled = (checked: boolean): void => {
-    void api
-      .updateTicket(current.id, { prdEnabled: checked })
-      .catch(() => undefined);
-  };
-
-  const setPrDraft = (checked: boolean): void => {
-    void api
-      .updateTicket(current.id, { prDraft: checked })
-      .catch(() => undefined);
-  };
-
-  const setAutoMerge = (checked: boolean): void => {
-    void api
-      .updateTicket(current.id, { autoMerge: checked })
-      .catch(() => undefined);
-  };
-
-  const setVerifyFeature = (checked: boolean): void => {
-    void api
-      .updateTicket(current.id, { verifyFeature: checked })
-      .catch(() => undefined);
-  };
-
-  const setResearchPlan = (checked: boolean): void => {
-    void api
-      .updateTicket(current.id, { researchPlan: checked })
-      .catch(() => undefined);
   };
 
   const setFeasibilityContext = (checked: boolean): void => {
@@ -1023,52 +994,23 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   </div>
                 </section>
 
-                <section className="rounded-md border p-3">
-                  <h3 className="mb-2 text-sm font-semibold">Options de PR</h3>
-                  <div className="space-y-3">
-                    <label className="flex items-center justify-between gap-2 text-sm">
-                      <span>PRD</span>
-                      <Switch
-                        checked={current.prdEnabled}
-                        onCheckedChange={setPrdEnabled}
-                        aria-label="PRD"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2 text-sm">
-                      <span>Ouvrir la PR en draft</span>
-                      <Switch
-                        checked={current.prDraft && !current.autoMerge}
-                        disabled={current.autoMerge}
-                        onCheckedChange={setPrDraft}
-                        aria-label="Ouvrir la PR en draft"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2 text-sm">
-                      <span>Merge automatique de la PR</span>
-                      <Switch
-                        checked={current.autoMerge}
-                        onCheckedChange={setAutoMerge}
-                        aria-label="Merge automatique de la PR"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2 text-sm">
-                      <span>Test approfondi</span>
-                      <Switch
-                        checked={current.verifyFeature}
-                        onCheckedChange={setVerifyFeature}
-                        aria-label="Tester la feature avant la PR"
-                      />
-                    </label>
-                    <label className="flex items-center justify-between gap-2 text-sm">
-                      <span>Réflexion approfondie en parallèle</span>
-                      <Switch
-                        checked={current.researchPlan}
-                        onCheckedChange={setResearchPlan}
-                        aria-label="Réflexion approfondie en parallèle"
-                      />
-                    </label>
-                  </div>
-                </section>
+                <TicketOptionsToggleGroup
+                  key={current.id}
+                  title="Options de PR"
+                  headingId="ticket-detail-options-heading"
+                  values={{
+                    prdEnabled: current.prdEnabled,
+                    prDraft: current.prDraft,
+                    autoMerge: current.autoMerge,
+                    verifyFeature: current.verifyFeature,
+                    researchPlan: current.researchPlan,
+                  }}
+                  onChange={(next) => {
+                    void api
+                      .updateTicket(current.id, next)
+                      .catch(() => undefined);
+                  }}
+                />
 
                 {!locked && (
                   <TriageSection

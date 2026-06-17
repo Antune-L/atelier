@@ -1,12 +1,4 @@
 import { useRef, useState } from "react";
-import {
-  Brain,
-  FileText,
-  FlaskConical,
-  GitMerge,
-  GitPullRequest,
-  type LucideIcon,
-} from "lucide-react";
 
 import type { ProjectInfo } from "@shared/schemas";
 
@@ -16,6 +8,7 @@ import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
 import { CleanPrPanel } from "@/components/CleanPrPanel";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
+import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import {
@@ -26,7 +19,6 @@ import {
   ModalTitle,
 } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
@@ -35,36 +27,6 @@ import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
 type Tab = "ticket" | "import" | "review" | "clean" | "ask";
-
-const TICKET_OPTION = {
-  prd: "prd",
-  draft: "draft",
-  autoMerge: "auto-merge",
-  verify: "verify",
-  research: "research",
-} as const;
-
-const OPTION_ITEM_CLASS =
-  "h-16 w-full min-w-0 flex-row items-center justify-start gap-2 whitespace-normal px-3 text-sm font-normal hover:-translate-y-0.5 hover:shadow-sm active:translate-y-0 disabled:hover:translate-y-0 disabled:hover:shadow-none data-[state=on]:hover:-translate-y-0.5 data-[state=on]:hover:shadow-md";
-
-const OPTION_ICON_CLASS = "h-4 w-4 shrink-0 self-center";
-
-function OptionToggleLabel({
-  icon: Icon,
-  children,
-}: {
-  icon: LucideIcon;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <Icon className={OPTION_ICON_CLASS} aria-hidden />
-      <span className="min-w-0 flex-1 self-center text-left leading-snug">
-        {children}
-      </span>
-    </>
-  );
-}
 
 const TAB_TITLES: Record<Tab, string> = {
   ticket: "Nouveau ticket",
@@ -99,8 +61,7 @@ export function NewTicketDialog({
   const [branchesKey, setBranchesKey] = useState<string | null>(null);
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
-  // Restored when auto-merge is turned off after forcing draft off.
-  const prDraftBeforeAutoMerge = useRef(true);
+  const [optionsKey, setOptionsKey] = useState(0);
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
@@ -124,34 +85,6 @@ export function NewTicketDialog({
     dependsOn && dependsCandidates.some((t) => t.id === dependsOn)
       ? dependsOn
       : null;
-  const selectedOptions = [
-    ...(prdEnabled ? [TICKET_OPTION.prd] : []),
-    ...(prDraft && !autoMerge ? [TICKET_OPTION.draft] : []),
-    ...(autoMerge ? [TICKET_OPTION.autoMerge] : []),
-    ...(verifyFeature ? [TICKET_OPTION.verify] : []),
-    ...(researchPlan ? [TICKET_OPTION.research] : []),
-  ];
-  const onOptionsChange = (values: string[]): void => {
-    const nextAutoMerge = values.includes(TICKET_OPTION.autoMerge);
-    const nextDraft = values.includes(TICKET_OPTION.draft);
-
-    if (nextAutoMerge !== autoMerge) {
-      setAutoMergeChoice(nextAutoMerge);
-      if (nextAutoMerge) {
-        prDraftBeforeAutoMerge.current = prDraft;
-        setPrDraft(false);
-      } else {
-        setPrDraft(prDraftBeforeAutoMerge.current);
-      }
-    } else if (!nextAutoMerge && nextDraft !== prDraft) {
-      setPrDraft(nextDraft);
-      prDraftBeforeAutoMerge.current = nextDraft;
-    }
-
-    setPrdEnabled(values.includes(TICKET_OPTION.prd));
-    setVerifyFeature(values.includes(TICKET_OPTION.verify));
-    setResearchPlan(values.includes(TICKET_OPTION.research));
-  };
   // Implementation agent knobs stored on the ticket (null = fall back to server config).
   const agent = useAgentKnobs();
   const [error, setError] = useState<string | null>(null);
@@ -186,7 +119,6 @@ export function NewTicketDialog({
     setBaseBranchChoice(null);
     setPrdEnabled(false);
     setPrDraft(true);
-    prDraftBeforeAutoMerge.current = true;
     setAutoMergeChoice(null);
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
@@ -194,6 +126,7 @@ export function NewTicketDialog({
     setDependsOn(null);
     agent.reset();
     setError(null);
+    setOptionsKey((k) => k + 1);
   };
 
   const appendToDescription = (markdown: string): void => {
@@ -382,67 +315,26 @@ export function NewTicketDialog({
                     onApplyProfile={agent.applyProfile}
                   />
                 </div>
-                <div className="space-y-3 rounded-md border p-3">
-                  <h3
-                    id="ticket-options-heading"
-                    className="text-sm font-semibold"
-                  >
-                    Options
-                  </h3>
-                  <ToggleGroup
-                    type="multiple"
-                    variant="outline"
-                    value={selectedOptions}
-                    onValueChange={onOptionsChange}
-                    className="grid w-full grid-cols-1 items-stretch gap-2 sm:grid-cols-2"
-                    aria-labelledby="ticket-options-heading"
-                  >
-                    <ToggleGroupItem
-                      value={TICKET_OPTION.prd}
-                      aria-label="PRD"
-                      className={OPTION_ITEM_CLASS}
-                    >
-                      <OptionToggleLabel icon={FileText}>PRD</OptionToggleLabel>
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      value={TICKET_OPTION.draft}
-                      disabled={autoMerge}
-                      aria-label="Ouvrir la PR en draft"
-                      className={OPTION_ITEM_CLASS}
-                    >
-                      <OptionToggleLabel icon={GitPullRequest}>
-                        Ouvrir la PR en draft
-                      </OptionToggleLabel>
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      value={TICKET_OPTION.autoMerge}
-                      aria-label="Merge automatique de la PR"
-                      className={OPTION_ITEM_CLASS}
-                    >
-                      <OptionToggleLabel icon={GitMerge}>
-                        Merge automatique de la PR
-                      </OptionToggleLabel>
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      value={TICKET_OPTION.verify}
-                      aria-label="Test approfondi"
-                      className={OPTION_ITEM_CLASS}
-                    >
-                      <OptionToggleLabel icon={FlaskConical}>
-                        Test approfondi
-                      </OptionToggleLabel>
-                    </ToggleGroupItem>
-                    <ToggleGroupItem
-                      value={TICKET_OPTION.research}
-                      aria-label="Réflexion approfondie en parallèle"
-                      className={cn(OPTION_ITEM_CLASS, "sm:col-span-2")}
-                    >
-                      <OptionToggleLabel icon={Brain}>
-                        Réflexion approfondie en parallèle
-                      </OptionToggleLabel>
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </div>
+                <TicketOptionsToggleGroup
+                  key={optionsKey}
+                  headingId="ticket-options-heading"
+                  values={{
+                    prdEnabled,
+                    prDraft,
+                    autoMerge,
+                    verifyFeature,
+                    researchPlan,
+                  }}
+                  onChange={(next, { autoMergeChanged }) => {
+                    setPrdEnabled(next.prdEnabled);
+                    setPrDraft(next.prDraft);
+                    setVerifyFeature(next.verifyFeature);
+                    setResearchPlan(next.researchPlan);
+                    if (autoMergeChanged) {
+                      setAutoMergeChoice(next.autoMerge);
+                    }
+                  }}
+                />
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
             </div>

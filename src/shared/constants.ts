@@ -42,6 +42,10 @@ export const COLUMN_SORT_FIELD: Partial<Record<Column, "createdAt" | "finishedAt
   prd: "createdAt",
   done: "finishedAt",
   merged: "finishedAt",
+  reviewed: "createdAt",
+  answered: "createdAt",
+  failed: "createdAt",
+  abandoned: "createdAt",
 };
 
 /** Implementation agent knobs the user can pick per ticket (CLI: --model / --effort). */

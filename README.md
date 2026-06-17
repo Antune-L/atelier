@@ -1,8 +1,8 @@
-# Kanban Agents (V0)
+# Atelier
 
-Local single-user kanban app where autonomous Claude Code sessions implement tickets end to end: implementation in an isolated worktree, blocking review, local tests, GitHub PR.
+**Orchestrate coding agents with a kanban board.** Drag tickets across columns; each card spawns a real Claude Code session that implements the work end to end — isolated worktree, blocking review, local tests, GitHub PR.
 
-A **"no SDK"** variant: agents are real interactive Claude Code sessions spawned in tmux, driven through an **MCP channel**. No Agent SDK, no `claude -p`.
+A **"no SDK"** take on agent orchestration: agents are interactive Claude Code sessions in tmux, wired through an **MCP channel**. No Agent SDK, no `claude -p`. The board routes work; the backend verifies gates; the agents do the reasoning.
 
 ## Stack
 
@@ -48,11 +48,11 @@ bun run lint         # eslint
 
 The ports are deliberately unusual to avoid conflicts with other services.
 
-| Var              | Default       | Role                                                       |
-| ---------------- | ------------- | ---------------------------------------------------------- |
-| `PORT`           | `52817`       | backend port                                               |
-| `KANBAN_DB`      | `./kanban.db` | SQLite database path                                       |
-| `KANBAN_DRY_RUN` | `1`           | **dry-run by default**. Set to `0` for real side effects   |
+| Var              | Default       | Role                                                     |
+| ---------------- | ------------- | -------------------------------------------------------- |
+| `PORT`           | `52817`       | backend port                                             |
+| `KANBAN_DB`      | `./kanban.db` | SQLite database path                                     |
+| `KANBAN_DRY_RUN` | `1`           | **dry-run by default**. Set to `0` for real side effects |
 
 ## Real mode
 
@@ -99,4 +99,28 @@ templates/  session hooks (PreToolUse/Stop) + drivers
 3. The agent drives its work through the MCP tools: `update_stage`, `ask_user`, `done`, `fail`.
 4. `done(pr_url)` → the backend verifies on its own (clean tree, branch pushed, PR exists) before closing.
 
-For implementation details, see `CLAUDE.md`.
+### Claude Code skills
+
+Agent sessions rely on **Claude Code skills** installed locally (`~/.claude/skills/`). Most of the skills used here live in [skillzer](https://github.com/Antune-L/skillzer) — install them with `npx skills add`:
+
+```bash
+npx skills add Antune-L/skillzer/skills/<skill-name>
+# … see skillzer/README.md for the full list
+```
+
+The pipeline contract injected into each session (`src/server/agents/contract.ts`) explicitly references:
+
+| Skill                    | When                                                                              | Role                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `paris-research`         | **Feature** ticket with "Research plan" enabled                                   | Two independent research sub-agents on the approach, then an orchestrator verdict — feeds the PRD or implementation framing |
+| `argus` (`argus-review`) | **Feature** ticket (reviewing step); **review** ticket                            | Parallel review of the diff or PR (light or full), with optional inline posting on GitHub                                   |
+| `regression-check`       | **Feature** ticket (anti-regression step)                                         | Maps consumers of changed symbols and flags potential regressions                                                           |
+| `mockup-fidelity-review` | **Feature** ticket with functional verification + mockups (Figma links or images) | Compares the live UI to mockups before opening the PR                                                                       |
+| `minos-pr-feedback`      | **Clean** ticket                                                                  | Fetches PR review threads, triages by relevance, applies only pertinent fixes                                               |
+| `composer-implement`     | **Feature** ticket with **Composer** as implementer                               | Delegates code-writing to Cursor headless via `templates/run_composer.sh` (vendored script — keep in sync with the skill)   |
+
+**Ask**, **test**, and **conflict-resolution** tickets do not invoke a dedicated skill — read-only exploration or manual git per the contract.
+
+In real mode, these skills must be available in the Claude Code environment running in tmux; otherwise the agent cannot run the steps that reference them. Source definitions and install instructions: [Antune-L/skillzer](https://github.com/Antune-L/skillzer).
+
+For implementation details, see `AGENTS.md`.

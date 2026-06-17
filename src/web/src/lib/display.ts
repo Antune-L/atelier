@@ -198,8 +198,8 @@ export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): numb
   return ticket.prNumber ?? prNumberFromUrl(ticket.prUrl);
 }
 
-/** Columns a ticket can't serve as a dependency from (it can never reach an open PR). */
-const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["abandoned", "failed"];
+/** Columns a ticket can't serve as a dependency: only todo/implementing/prd are eligible. */
+const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
 
 /**
  * Tickets eligible to be picked as a dependency (PR-stack parent): same project, not the ticket

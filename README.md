@@ -70,7 +70,7 @@ The backend→agent push (the `ticket`/`answer`/`nudge` events that wake a sessi
 
 Since custom channels are not on Anthropic's allowlist during the preview, the app launches every session with `--dangerously-load-development-channels server:worker` automatically — nothing to pass by hand. The local `claude` must be **v2.1.80+**, otherwise the channel never registers and the spawned agent stays idle (it receives no ticket). On a **Team/Enterprise** Claude Code org, an admin must explicitly enable channels (org policy), or the events are dropped silently ("blocked by org policy").
 
-This only matters in real mode. In dry-run (`bun run dev`, the default) no `claude` is spawned, so the channel is moot. Reference: <https://code.claude.com/docs/en/channels-reference>.
+This only matters in real mode. In dry-run (`bun run dev`, the default) no `claude` is spawned, so the channel is moot. See [Claude Code Channels setup](docs/claude-code-channels.md) for the project-specific setup and troubleshooting notes. Reference: <https://code.claude.com/docs/en/channels-reference>.
 
 ## Desktop app (macOS, optional)
 
@@ -80,6 +80,28 @@ The app can be packaged as a macOS desktop application via [Electrobun](https://
 bun run dev:desktop    # dev window
 bun run build:desktop  # .app → build/dev-macos-arm64/
 ```
+
+### Electrobun dev on a new machine
+
+`bun run dev:desktop` is also a **real-mode** launcher: it starts real `tmux`/`claude` sessions, creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
+
+- it runs `build:web` and `build:agents` before starting the app;
+- agent sessions use the bundled `dist/agents/worker.js` and hook bundles (`KANBAN_AGENT_DIST=1`);
+- the desktop app reads its config and database from `~/Library/Application Support/kanban-agents/` by default, not from the repo root;
+- it repairs the macOS GUI `PATH` before spawning `tmux`, `claude`, `gh`, `git`, or `cursor-agent`.
+
+Bootstrap checklist:
+
+```bash
+bun install
+cp config.example.json config.json
+bun run link:desktop-data   # recommended in dev: share config/db/uploads with bun run real
+bun run dev:desktop
+```
+
+If you do **not** run `bun run link:desktop-data`, edit the desktop config at `~/Library/Application Support/kanban-agents/config.json`. If you do run it, edit the repo-local `config.json`.
+
+For agents to receive tickets in desktop dev, the same real-mode requirements apply: `tmux`, authenticated `gh`, authenticated `claude` CLI **v2.1.80+**, and Claude Code Channels enabled for the account/org. See [Claude Code Channels setup](docs/claude-code-channels.md) for the channel-specific setup.
 
 The desktop app runs in real mode and uses its own database under `~/Library/Application Support/kanban-agents/`. To share data and config with `bun run real`:
 

@@ -43,7 +43,7 @@ export class Watchdog {
         this.hub.pushTicket(flagged);
         this.store.logEvent(ticket.id, "watchdog", { idleMs: now - last });
         log.warn("inactivité détectée", { ticketId: ticket.id, idleMs: now - last });
-        void this.notifier.notify("Watchdog", `${ticket.title}: aucune progression depuis 45 min`);
+        void this.notifier.notify("Watchdog", `${ticket.title}: aucune progression depuis 45 min`, ticket.id);
       }
     }
   }

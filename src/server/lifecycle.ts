@@ -67,7 +67,7 @@ export class TicketLifecycle {
     });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "submit_prd", {});
-    void this.notifier.notify("PRD prêt", `${ticket.title}: PRD à valider`);
+    void this.notifier.notify("PRD prêt", `${ticket.title}: PRD à valider`, ticket.id);
     return ticket;
   }
 
@@ -114,7 +114,7 @@ export class TicketLifecycle {
     this.hub.pushComment(comment);
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
-    await this.notifier.notify("Ticket en échec", `${ticket.title}: ${reason}`);
+    await this.notifier.notify("Ticket en échec", `${ticket.title}: ${reason}`, ticket.id);
     this.store.logEvent(ticketId, "fail", { reason });
     return ticket;
   }
@@ -137,7 +137,7 @@ export class TicketLifecycle {
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
     this.store.logEvent(ticketId, "failed", { reason });
-    void this.notifier.notify("Ticket en échec", `${reason}`);
+    void this.notifier.notify("Ticket en échec", `${reason}`, ticketId);
     return ticket;
   }
 
@@ -163,7 +163,7 @@ export class TicketLifecycle {
     if (ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "stalled" });
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
-    await this.notifier.notify(notify.title, notify.body);
+    await this.notifier.notify(notify.title, notify.body, ticketId);
     if (logEvent) this.store.logEvent(ticketId, "stalled", {});
     return ticket;
   }

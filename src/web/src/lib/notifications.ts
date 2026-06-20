@@ -22,9 +22,10 @@ export function ensureNotificationPermission(): void {
 
 /**
  * Shows a desktop notification when the tab isn't the user's focus — when it is
- * the in-app toast already covers it. Clicking focuses the browser tab.
+ * the in-app toast already covers it. Clicking focuses the browser tab and, when
+ * `onClick` is provided (the notification maps to a ticket), runs it.
  */
-export function showDesktopNotification(title: string, body: string): void {
+export function showDesktopNotification(title: string, body: string, onClick?: () => void): void {
   if (!isSupported() || Notification.permission !== "granted") return;
   if (!document.hidden && document.hasFocus()) return;
 
@@ -32,6 +33,7 @@ export function showDesktopNotification(title: string, body: string): void {
   active.add(notification);
   notification.onclick = () => {
     window.focus();
+    onClick?.();
     notification.close();
   };
   notification.onclose = () => active.delete(notification);

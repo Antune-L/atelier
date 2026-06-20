@@ -149,8 +149,13 @@ export interface SystemAdapter {
   capturePane(sessionName: string): Promise<string>;
 
   // ---- interactive terminal (live PTY stream + co-control) ----
-  /** Like capturePane but keeps ANSI escapes (`-e`), to seed an xterm viewer. */
-  capturePaneAnsi(sessionName: string): Promise<string>;
+  /**
+   * Like capturePane but keeps ANSI escapes (`-e`), to seed an xterm viewer. `historyLines` is how
+   * much scrollback to prepend to the visible frame; pass 0 for the current frame only. A full-screen
+   * TUI (the agent pane) reprints its whole static log on every resize, so its detached scrollback
+   * stacks duplicate frames — capture only the visible frame there.
+   */
+  capturePaneAnsi(sessionName: string, historyLines: number): Promise<string>;
   /** Open a live byte stream of the pane's output (pipe-pane → FIFO in the real adapter). */
   openPaneStream(sessionName: string): Promise<PaneStream>;
   /** Inject raw key bytes (hex pairs) into the pane verbatim (`send-keys -H`). */

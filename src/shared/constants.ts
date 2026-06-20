@@ -338,3 +338,10 @@ export const TERMINAL_DEFAULT_ROWS = 32;
 
 /** Minimum size (percent of its PanelGroup) a terminal split cell may be resized down to. */
 export const TERMINAL_PANEL_MIN_PERCENT = 10;
+
+/**
+ * Scrollback prepended to a user-terminal seed (a plain shell, where past commands are worth
+ * showing on reopen). The agent pane seeds from the visible frame only (0): its TUI reprints the
+ * whole static log on every resize, so its scrollback stacks duplicate frames (see capturePaneAnsi).
+ */
+export const TERMINAL_SEED_HISTORY_LINES = 200;

@@ -391,8 +391,10 @@ export class RealSystemAdapter implements SystemAdapter {
     return res.exitCode === 0 ? res.stdout.toString() : "";
   }
 
-  async capturePaneAnsi(sessionName: string): Promise<string> {
-    const res = await $`tmux capture-pane -e -p -t ${sessionName} -S -200`.nothrow().quiet();
+  async capturePaneAnsi(sessionName: string, historyLines: number): Promise<string> {
+    // historyLines === 0 → no -S, so capture-pane returns only the visible frame (no scrollback).
+    const scrollback = historyLines > 0 ? ["-S", `-${historyLines}`] : [];
+    const res = await $`tmux capture-pane -e -p -t ${sessionName} ${scrollback}`.nothrow().quiet();
     return res.exitCode === 0 ? res.stdout.toString() : "";
   }
 

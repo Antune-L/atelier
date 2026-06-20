@@ -1,5 +1,6 @@
 import type { ServerWebSocket } from "bun";
 
+import { TERMINAL_SEED_HISTORY_LINES } from "../shared/constants.ts";
 import type { TerminalServerMessage } from "../shared/schemas.ts";
 import { terminalClientMessageSchema } from "../shared/schemas.ts";
 
@@ -108,13 +109,15 @@ class TerminalSession {
   constructor(
     private readonly sessionName: string,
     private readonly system: SystemAdapter,
+    /** Scrollback to prepend to the seed; 0 for an agent TUI pane (current frame only). */
+    private readonly seedHistoryLines: number,
     /** Drops this session from the manager's registry so a later viewer re-checks the pane. */
     private readonly onDead: () => void,
   ) {}
 
   /** Seed this viewer with the current pane, then ensure the live stream is running. */
   async attach(ws: TerminalSocket): Promise<void> {
-    const seed = normalizeSeed(await this.system.capturePaneAnsi(this.sessionName));
+    const seed = normalizeSeed(await this.system.capturePaneAnsi(this.sessionName, this.seedHistoryLines));
     if (seed) send(ws, dataMessage(seed));
     if (this.dead || seed.includes(DEAD_PANE_MARKER)) {
       this.dead = true;
@@ -210,13 +213,17 @@ export class TerminalSessionManager {
     // Cache the resolved name so message/close handlers act on the session opened here, even if the
     // ticket's slot is reassigned mid-connection (see TerminalSocketData.resolvedSessionName).
     ws.data.resolvedSessionName = sessionName;
-    const session = this.sessions.get(sessionName) ?? this.createSession(sessionName);
+    // An agent pane is a full-screen TUI whose scrollback stacks duplicate frames on resize, so seed
+    // from the visible frame only; a user terminal is a plain shell where past commands are worth
+    // replaying on reopen. terminalId addresses a user terminal; ticketId an agent.
+    const seedHistoryLines = ws.data.terminalId !== undefined ? TERMINAL_SEED_HISTORY_LINES : 0;
+    const session = this.sessions.get(sessionName) ?? this.createSession(sessionName, seedHistoryLines);
     session.viewers.add(ws);
     await session.attach(ws);
   }
 
-  private createSession(sessionName: string): TerminalSession {
-    const session = new TerminalSession(sessionName, this.system, () => {
+  private createSession(sessionName: string, seedHistoryLines: number): TerminalSession {
+    const session = new TerminalSession(sessionName, this.system, seedHistoryLines, () => {
       // Identity guard: a relaunch may have replaced this entry with a fresh session.
       if (this.sessions.get(sessionName) === session) this.sessions.delete(sessionName);
     });

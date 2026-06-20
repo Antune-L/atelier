@@ -211,7 +211,7 @@ export class FakeSystemAdapter implements SystemAdapter {
     return lines.join("\n");
   }
 
-  async capturePaneAnsi(sessionName: string): Promise<string> {
+  async capturePaneAnsi(sessionName: string, _historyLines: number): Promise<string> {
     return this.capturePane(sessionName);
   }
 

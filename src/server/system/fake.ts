@@ -7,6 +7,7 @@ import type {
   PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
+  SpawnShellOptions,
   SpawnTmuxOptions,
   SpawnTriageOptions,
   SystemAdapter,
@@ -60,6 +61,16 @@ const FAKE_OPEN_PRS: OpenPr[] = [
   },
 ];
 
+/** ASCII carriage return — marks an Enter keystroke in the dry-run shell echo. */
+const CARRIAGE_RETURN = 0x0d;
+
+/** Synthetic zsh-style prompt seeded by the dry-run shell stream (basename of cwd). */
+function fakeShellPrompt(cwd: string): string {
+  const segments = cwd.split("/").filter((s) => s.length > 0);
+  const repo = segments[segments.length - 1] ?? cwd;
+  return `\x1b[36m➜\x1b[0m \x1b[1m${repo}\x1b[0m `;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -74,6 +85,8 @@ export class FakeSystemAdapter implements SystemAdapter {
   private readonly liveSessions = new Set<string>();
   private readonly captureCounters = new Map<string, number>();
   private readonly paneStreams = new Map<string, FakePaneStream>();
+  /** cwd of each synthetic shell session, used to seed a believable zsh banner/prompt in dry-run. */
+  private readonly shellSessions = new Map<string, string>();
 
   private log(action: string, detail: Record<string, unknown> = {}): void {
     dryRunLog.debug(action, detail);
@@ -157,9 +170,18 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.liveSessions.add(opts.sessionName);
   }
 
+  async spawnShellSession(opts: SpawnShellOptions): Promise<void> {
+    this.log("spawnShellSession", { sessionName: opts.sessionName, cwd: opts.cwd });
+    // Overwrite any existing live session of that name (mirrors real.ts reclaiming an orphan): a
+    // name collision after a restart must not throw — the Set/Map writes below replace the zombie.
+    this.liveSessions.add(opts.sessionName);
+    this.shellSessions.set(opts.sessionName, opts.cwd);
+  }
+
   async killSession(sessionName: string): Promise<void> {
     this.log("killSession", { sessionName });
     this.liveSessions.delete(sessionName);
+    this.shellSessions.delete(sessionName);
   }
 
   async hasSession(sessionName: string): Promise<boolean> {
@@ -168,6 +190,8 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async capturePane(sessionName: string): Promise<string> {
     if (!this.liveSessions.has(sessionName)) return "";
+    const shellCwd = this.shellSessions.get(sessionName);
+    if (shellCwd !== undefined) return `[dry-run] zsh — ${shellCwd}\r\n${fakeShellPrompt(shellCwd)}`;
     const tick = (this.captureCounters.get(sessionName) ?? 0) + 1;
     this.captureCounters.set(sessionName, tick);
     const lines = [
@@ -195,15 +219,27 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("openPaneStream", { sessionName });
     const stream = new FakePaneStream(() => this.paneStreams.delete(sessionName));
     this.paneStreams.set(sessionName, stream);
-    stream.push(`\r\n[dry-run] flux terminal interactif pour ${sessionName}\r\n`);
+    const cwd = this.shellSessions.get(sessionName);
+    if (cwd !== undefined) {
+      stream.push(`\r\n[dry-run] zsh — ${cwd}\r\n${fakeShellPrompt(cwd)}`);
+    } else {
+      stream.push(`\r\n[dry-run] flux terminal interactif pour ${sessionName}\r\n`);
+    }
     return stream;
   }
 
   async sendKeysRaw(sessionName: string, hexBytes: string): Promise<void> {
     this.log("sendKeysRaw", { sessionName, hexBytes });
-    // Co-control echo: surface the injected bytes back so the viewer sees its own input.
     const stream = this.paneStreams.get(sessionName);
-    if (stream) stream.push(hexToBytes(hexBytes));
+    if (!stream) return;
+    const bytes = hexToBytes(hexBytes);
+    // Co-control echo: surface the injected bytes back so the viewer sees its own input.
+    stream.push(bytes);
+    // On a carriage return, re-emit a fresh shell prompt so the dry-run shell feels alive.
+    const cwd = this.shellSessions.get(sessionName);
+    if (cwd !== undefined && bytes.includes(CARRIAGE_RETURN)) {
+      stream.push(`\r\n${fakeShellPrompt(cwd)}`);
+    }
   }
 
   async resizePane(sessionName: string, cols: number, rows: number): Promise<void> {

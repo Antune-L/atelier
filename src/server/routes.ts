@@ -11,6 +11,7 @@ import {
   createCommentSchema,
   createProfileSchema,
   createReviewSchema,
+  createTerminalBodySchema,
   createTicketSchema,
   deriveTitleFromDescription,
   importTicketsSchema,
@@ -34,6 +35,7 @@ import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { saveUpload } from "./uploads.ts";
+import type { UserTerminalManager } from "./userTerminalManager.ts";
 
 const log = createLogger("triage");
 
@@ -58,6 +60,7 @@ interface RouteDeps {
   system: PaneReader;
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
+  userTerminals: UserTerminalManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
@@ -97,6 +100,7 @@ const agentActiveSchema = z.object({
   ticketId: z.string(),
 });
 
+const HTTP_CREATED = 201;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
@@ -737,6 +741,23 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!sessionName) return { output: "", phase };
       const output = await deps.system.capturePane(sessionName);
       return { output, phase };
+    })
+    .get("/terminals", async ({ query }) => {
+      const projectKey = typeof query.projectKey === "string" ? query.projectKey : undefined;
+      return deps.userTerminals.list(projectKey);
+    })
+    .post("/terminals", async ({ body, set }) => {
+      const parsed = createTerminalBodySchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(parsed.data.projectKey)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const descriptor = await deps.userTerminals.create(parsed.data.projectKey);
+      set.status = HTTP_CREATED;
+      return descriptor;
+    })
+    .delete("/terminals/:id", async ({ params }) => {
+      // Idempotent: closing an unknown/already-dead terminal is a no-op.
+      await deps.userTerminals.close(params.id);
+      return { ok: true };
     })
     .post("/uploads", async ({ body, set }) => {
       const file = body && typeof body === "object" && "file" in body ? body.file : null;

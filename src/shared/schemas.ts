@@ -547,6 +547,24 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
 ]);
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
 
+/**
+ * A user-owned interactive terminal session (CMUX view): a detached zsh tmux session rooted at the
+ * project's repoPath. `sessionName` and `cwd` are server-only knowledge surfaced for display; the
+ * client only ever addresses the opaque `id` (the WS stream resolves it back to a session name).
+ */
+export const terminalDescriptorSchema = z.object({
+  id: z.string(),
+  projectKey: projectKeySchema,
+  sessionName: z.string(),
+  cwd: z.string(),
+  createdAt: z.number(),
+});
+export type TerminalDescriptor = z.infer<typeof terminalDescriptorSchema>;
+
+/** browser → backend: open a new user terminal in the given project (cwd resolved server-side). */
+export const createTerminalBodySchema = z.object({ projectKey: projectKeySchema });
+export type CreateTerminalBody = z.infer<typeof createTerminalBodySchema>;
+
 /** In-app self-update outcome: reload the webview in place (frontend-only diff) or relaunch the process. */
 export const updateModeSchema = z.enum(["reload", "relaunch"]);
 export type UpdateMode = z.infer<typeof updateModeSchema>;

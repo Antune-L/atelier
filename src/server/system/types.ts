@@ -100,6 +100,12 @@ export interface ReviewDoneOptions {
   requirePushedBranch: string | null;
 }
 
+/** A free interactive login-shell session for the user terminals (CMUX) view. */
+export interface SpawnShellOptions {
+  sessionName: string;
+  cwd: string;
+}
+
 export interface SystemAdapter {
   readonly dryRun: boolean;
 
@@ -132,6 +138,8 @@ export interface SystemAdapter {
   spawnTriageSession(opts: SpawnTriageOptions): Promise<void>;
   /** Spawn a detached read-only batch feasibility session (fans out sub-agents; no worktree/slot). */
   spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void>;
+  /** Spawn a detached interactive login-shell (zsh) session rooted at cwd for a user terminal. */
+  spawnShellSession(opts: SpawnShellOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;
   hasSession(sessionName: string): Promise<boolean>;
   /** Last ~200 lines of the session's pane (read-only). Empty string if missing. */

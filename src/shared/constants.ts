@@ -330,3 +330,6 @@ export const WS_PATH_TERMINAL = "/ws/terminal";
  */
 export const TERMINAL_DEFAULT_COLS = 80;
 export const TERMINAL_DEFAULT_ROWS = 32;
+
+/** Minimum size (percent of its PanelGroup) a terminal split cell may be resized down to. */
+export const TERMINAL_PANEL_MIN_PERCENT = 10;

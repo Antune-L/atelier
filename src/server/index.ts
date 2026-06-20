@@ -30,6 +30,7 @@ import { createApiRoutes } from "./routes.ts";
 import { createSystemAdapter } from "./system/index.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
+import { UserTerminalManager } from "./userTerminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
 import type { WorkerSocket } from "./workerHub.ts";
 import { WorkerHub } from "./workerHub.ts";
@@ -74,7 +75,7 @@ export interface RunningServer {
 type SocketData =
   | { kind: "client" }
   | { kind: "worker"; ticketId: string | null; slotId: number | null }
-  | { kind: "terminal"; ticketId: string; cols: number; rows: number };
+  | { kind: "terminal"; ticketId?: string; terminalId?: string; cols: number; rows: number };
 
 function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
   return ws.data.kind === "worker";
@@ -183,7 +184,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
     bunPath,
   });
-  const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
+  const userTerminals = new UserTerminalManager(system);
+  const terminalManager = new TerminalSessionManager(
+    store,
+    system,
+    triageManager,
+    feasibilityManager,
+    userTerminals,
+  );
 
   const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, lifecycle, {
     backendHttp,
@@ -221,6 +229,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     system,
     triage: triageManager,
     feasibility: feasibilityManager,
+    userTerminals,
     projectRoot: dataRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
@@ -266,8 +275,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return new Response("upgrade failed", { status: 426 });
       }
       if (url.pathname === WS_PATH_TERMINAL) {
-        const ticketId = url.searchParams.get("ticketId");
-        if (!ticketId) return new Response("ticketId requis", { status: 400 });
+        // Exactly one addressing param: an agent ticket pane, or a user terminal.
+        const ticketId = url.searchParams.get("ticketId") ?? undefined;
+        const terminalId = url.searchParams.get("terminalId") ?? undefined;
+        if (!ticketId && !terminalId) return new Response("ticketId ou terminalId requis", { status: 400 });
         // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
         const viewport = terminalViewportSchema.safeParse({
           cols: url.searchParams.get("cols"),
@@ -276,7 +287,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         const { cols, rows } = viewport.success
           ? viewport.data
           : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
-        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, cols, rows } })) return undefined;
+        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, terminalId, cols, rows } })) {
+          return undefined;
+        }
         return new Response("upgrade failed", { status: 426 });
       }
       if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {

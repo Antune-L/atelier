@@ -119,6 +119,7 @@ export class TriageManager {
         effort: deep ? TRIAGE_PLUS_EFFORT : MODELS.triageEffort,
         mcpConfig: this.buildMcpConfig(ticketId),
         env: { DISABLE_AUTOUPDATER: "1" },
+        deep,
       });
       const timer = setTimeout(() => void this.failTriage(ticketId, "délai de triage dépassé"), TRIAGE_TIMEOUT_MS);
       const session: TriageSession = { sessionName: triageSessionName(ticketId), timer };

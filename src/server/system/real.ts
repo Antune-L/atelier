@@ -8,6 +8,7 @@ import {
   FEASIBILITY_SCOUT_AGENT_NAME,
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS,
+  TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 
@@ -33,6 +34,11 @@ const PROD_ENV_MARKER = "prod";
  * so `mcp__worker__submit_triage` stays callable.
  */
 const TRIAGE_READONLY_TOOLS = "Read,Glob,Grep";
+/** "Analyse +" orchestrator tool surface: read-only plus Task for parallel sub-agent fan-out. */
+const TRIAGE_PLUS_READONLY_TOOLS = "Read,Glob,Grep,Task";
+/** Read-only inline subagent tool bounds (no Task — cannot recurse). */
+const READONLY_SCOUT_TOOLS = ["Read", "Glob", "Grep"] as const;
+const READONLY_SCOUT_DISALLOWED = ["Task", "Agent", "Bash", "Edit", "Write"] as const;
 /**
  * Feasibility batch tool surface: read-only plus `Task` so the orchestrator can fan out one sub-agent
  * per ticket. Edit/Write/Bash stay unloadable; MCP `submit_feasibility` survives `--tools`.
@@ -53,8 +59,30 @@ const FEASIBILITY_SCOUT_AGENTS_JSON = JSON.stringify({
       "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
       "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
       "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.",
-    tools: ["Read", "Glob", "Grep"],
-    disallowedTools: ["Task", "Agent", "Bash", "Edit", "Write"],
+    tools: [...READONLY_SCOUT_TOOLS],
+    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
+  },
+});
+/** Inline subagents for "Analyse +": feasibility scout + solutions scout (orchestrator fans out 1+2). */
+const TRIAGE_PLUS_AGENTS_JSON = JSON.stringify({
+  [FEASIBILITY_SCOUT_AGENT_NAME]: {
+    description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
+    prompt:
+      "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
+      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
+      "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.",
+    tools: [...READONLY_SCOUT_TOOLS],
+    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
+  },
+  [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: {
+    description: "Identifie en lecture seule des approches de solution concrètes pour UN ticket.",
+    prompt:
+      "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
+      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Pour le ticket " +
+      "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
+      "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).",
+    tools: [...READONLY_SCOUT_TOOLS],
+    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
   },
 });
 /** How long a crashed pane stays readable before the session closes itself (1 h). */
@@ -97,6 +125,8 @@ const FEASIBILITY_SETTINGS_JSON = JSON.stringify({
   enableAllProjectMcpServers: true,
   permissions: { deny: FEASIBILITY_DENIED_AGENTS.map((name) => `Agent(${name})`) },
 });
+/** Same deny as feasibility batch: only the inline scouts may be spawned (no recursing built-ins). */
+const TRIAGE_PLUS_SETTINGS_JSON = FEASIBILITY_SETTINGS_JSON;
 
 /** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
 const ghReviewSchema = z.object({
@@ -273,6 +303,14 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
+    if (opts.deep) {
+      await this.spawnReadonlySession(opts, {
+        tools: TRIAGE_PLUS_READONLY_TOOLS,
+        settingsJson: TRIAGE_PLUS_SETTINGS_JSON,
+        agentsJson: TRIAGE_PLUS_AGENTS_JSON,
+      });
+      return;
+    }
     await this.spawnReadonlySession(opts, {
       tools: TRIAGE_READONLY_TOOLS,
       settingsJson: TRIAGE_SETTINGS_JSON,

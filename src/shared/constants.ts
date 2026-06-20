@@ -309,6 +309,11 @@ export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
  * `--tools` only bounds the top-level session, never the subagents it spawns.
  */
 export const FEASIBILITY_SCOUT_AGENT_NAME = "feasibility-scout";
+/**
+ * Subagent type the "Analyse +" orchestrator fans out for solution/approach research (read-only,
+ * no Task — cannot recurse). The orchestrator launches two instances with distinct angles.
+ */
+export const TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME = "triage-plus-solutions";
 /** Max automatic batch relaunches before the imported tickets are finally marked failed. */
 export const FEASIBILITY_AUTO_RELAUNCH_MAX = 1;
 /** Audit event logged each time a stuck feasibility batch is automatically relaunched. */

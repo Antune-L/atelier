@@ -25,7 +25,8 @@ export interface SpawnTmuxOptions {
 
 /**
  * A read-only feasibility triage session: a detached `claude` spawned on the real repo with the
- * worker channel attached but no worktree/slot. Read-only is structural (`--tools Read,Glob,Grep`).
+ * worker channel attached but no worktree/slot. Read-only is structural (`--tools Read,Glob,Grep`;
+ * with `deep: true`, Task + inline read-only scouts are added for parallel fan-out).
  */
 export interface SpawnTriageOptions {
   sessionName: string;
@@ -38,6 +39,8 @@ export interface SpawnTriageOptions {
   mcpConfig: string;
   /** Extra tmux env (e.g. DISABLE_AUTOUPDATER); the worker's TICKET_ID/SLOT_ID live in mcpConfig. */
   env: Record<string, string>;
+  /** "Analyse +" variant: orchestrator may fan out read-only sub-agents via Task. */
+  deep?: boolean;
 }
 
 /**

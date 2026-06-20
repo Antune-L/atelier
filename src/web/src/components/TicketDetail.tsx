@@ -780,7 +780,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   </div>
                   {!["todo", "done", "merged"].includes(current.column) && (
                     <div className="mt-3 space-y-1.5">
-                      <Label htmlFor="new-comment">Ajouter un commentaire</Label>
+                      <Label htmlFor="new-comment">
+                        Ajouter un commentaire
+                      </Label>
                       <Input
                         id="new-comment"
                         value={newComment}
@@ -1294,8 +1296,8 @@ function TriageSection({
           {running
             ? "Relancer l'analyse"
             : ticket.triageStatus === "none"
-              ? "Analyser"
-              : "Re-analyser"}
+              ? "Analyse"
+              : "Relancer l'analyse"}
         </Button>
         <Button
           size="sm"

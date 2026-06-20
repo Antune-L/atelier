@@ -21,6 +21,8 @@ const MAX_CONNECT_ATTEMPTS = 300;
  * (see modal.tsx TRANSITION_MS = 200) so the first render happens at the settled, untransformed box.
  */
 const INITIAL_CONNECT_DELAY_MS = 250;
+/** Coalesce rapid panel layout changes (split/resize) before refitting an open terminal. */
+const RESIZE_DEBOUNCE_MS = 50;
 /** Shared background so the xterm theme and the wrapper never desync. */
 export const TERMINAL_BG = "#001219";
 
@@ -127,23 +129,30 @@ export function useXtermSocket({
     let resizeSub: IDisposable | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let initialConnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let resizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
     let disposed = false;
 
-    // Connect only once the pane has a real box AND the open transition has settled. A full-screen
-    // TUI is captured by absolute coordinates, so fitting/seeding while the container is still
-    // unsized (detail panel not laid out yet) makes xterm render the seed and the live stream at
-    // the wrong geometry — garbled and seemingly frozen until a manual resize/remount. The drawer
-    // also opens via a CSS transform, so the box reaches its final size mid-transform; the initial
-    // connect is therefore deferred (see INITIAL_CONNECT_DELAY_MS) so the first frame is rendered at
-    // the settled, untransformed geometry.
-    function connect(): void {
-      if (disposed) return;
+    // Fit to the container and repaint the scrollback. xterm does not always redraw existing buffer
+    // rows after a geometry change — Ctrl+L "fixes" the view because it forces a full redraw.
+    function refit(): void {
       try {
         fit.fit();
+        term.refresh(0, term.rows - 1);
       } catch {
         // Not measurable this frame; keep the last good geometry.
       }
+    }
+
+    // Connect only once the pane has a real box AND the layout has settled. A full-screen TUI is
+    // captured by absolute coordinates, so fitting/seeding while the container is still unsized
+    // (detail panel not laid out yet, or a split panel mid-reflow) makes xterm render the seed and
+    // the live stream at the wrong geometry — blank or garbled until a manual resize/clear. The
+    // drawer also opens via a CSS transform; the initial connect is debounced (see
+    // INITIAL_CONNECT_DELAY_MS) so the first frame uses the settled, untransformed geometry.
+    function connect(): void {
+      if (disposed) return;
+      refit();
       // term.cols/rows now hold the real viewport; carry it so the server reflows the pane to
       // this geometry before its first capture (no resize message fires when fit is a no-op).
       const ws = new WebSocket(buildWsUrlRef.current(term.cols, term.rows));
@@ -207,21 +216,20 @@ export function useXtermSocket({
     const observer = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
       if (!socket) {
-        // Defer the first connect past the drawer's open transition so the first fit/render isn't
-        // baked into a mid-transform (blurry) canvas. Guard against stacking timers across repeated
-        // observations; connect() guards on `disposed`, so a late-firing timer is safe.
-        if (initialConnectTimer) return;
+        // Debounce the first connect: a split remounts the cell while react-resizable-panels
+        // reflows, so the first observation is often stale. Wait for dimensions to stabilize.
+        if (initialConnectTimer) clearTimeout(initialConnectTimer);
         initialConnectTimer = setTimeout(() => {
           initialConnectTimer = null;
           connect();
         }, INITIAL_CONNECT_DELAY_MS);
         return;
       }
-      try {
-        fit.fit();
-      } catch {
-        // Not measurable this frame; the next observation refits.
-      }
+      if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+      resizeDebounceTimer = setTimeout(() => {
+        resizeDebounceTimer = null;
+        refit();
+      }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(container);
 
@@ -229,6 +237,7 @@ export function useXtermSocket({
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
       if (initialConnectTimer) clearTimeout(initialConnectTimer);
+      if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
       observer.disconnect();
       dataSub?.dispose();
       resizeSub?.dispose();

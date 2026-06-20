@@ -54,14 +54,18 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
   // Refit after the layout settles when toggling fullscreen.
   useEffect(() => {
     const timer = setTimeout(() => {
+      const term = termRef.current;
+      const fit = fitRef.current;
+      if (!term || !fit) return;
       try {
-        fitRef.current?.fit();
+        fit.fit();
+        term.refresh(0, term.rows - 1);
       } catch {
         // Not measurable yet; ResizeObserver will catch up.
       }
     }, 0);
     return () => clearTimeout(timer);
-  }, [fullscreen, fitRef]);
+  }, [fullscreen, fitRef, termRef]);
 
   // Keep the onData handler's flag current and focus the pane when input is enabled.
   useEffect(() => {

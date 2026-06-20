@@ -176,12 +176,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const workerHub = new WorkerHub();
   const notifier = new Notifier(clientHub, opts.onNotify);
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
-  const triageManager = new TriageManager(store, system, workerHub, clientHub, {
+  const triageManager = new TriageManager(store, system, workerHub, clientHub, notifier, {
     backendWs,
     projectRoot: resourcesRoot,
     bunPath,
   });
-  const feasibilityManager = new FeasibilityBatchManager(store, system, workerHub, clientHub, {
+  const feasibilityManager = new FeasibilityBatchManager(store, system, workerHub, clientHub, notifier, {
     backendWs,
     projectRoot: resourcesRoot,
     bunPath,

@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
+  RefreshCw,
   Settings,
   SquareTerminal,
 } from "lucide-react";
@@ -16,6 +17,9 @@ interface SidebarProps {
   view: SidebarView;
   onSelect: (view: SidebarView) => void;
   onOpenSettings: () => void;
+  onUpdate?: () => void;
+  updating?: boolean;
+  canUpdate?: boolean;
 }
 
 const STORAGE_KEY = "atelier.sidebar.collapsed";
@@ -41,7 +45,14 @@ function loadCollapsed(): boolean {
 }
 
 /** Primary navigation: Home / Terminals / Stats, with Settings pinned at the bottom. Collapsible. */
-export function Sidebar({ view, onSelect, onOpenSettings }: SidebarProps): ReactNode {
+export function Sidebar({
+  view,
+  onSelect,
+  onOpenSettings,
+  onUpdate,
+  updating = false,
+  canUpdate = false,
+}: SidebarProps): ReactNode {
   const [collapsed, setCollapsed] = useState<boolean>(loadCollapsed);
 
   const toggleCollapsed = (): void => {
@@ -89,17 +100,55 @@ export function Sidebar({ view, onSelect, onOpenSettings }: SidebarProps): React
         collapsed ? "w-14" : "w-44",
       )}
     >
-      <button
-        type="button"
-        onClick={toggleCollapsed}
-        aria-label={collapsed ? "Étendre la barre latérale" : "Réduire la barre latérale"}
-        className={cn(
-          "mb-1 flex items-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-          collapsed ? "justify-center" : "justify-end",
-        )}
-      >
-        {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-      </button>
+      {collapsed ? (
+        <div className="mb-1 flex flex-col items-center gap-1">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Étendre la barre latérale"
+            className="flex items-center justify-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          {canUpdate && onUpdate && (
+            <button
+              type="button"
+              onClick={onUpdate}
+              disabled={updating}
+              aria-label="Mettre à jour l'app"
+              title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
+              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mb-1 flex items-center gap-2">
+          <span className="text-sm font-semibold">Atelier</span>
+          {canUpdate && onUpdate && (
+            <button
+              type="button"
+              onClick={onUpdate}
+              disabled={updating}
+              aria-label="Mettre à jour l'app"
+              title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
+              className="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Réduire la barre latérale"
+            className="flex items-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {NAV_ENTRIES.map((entry) =>
         renderItem(view === entry.value, entry.label, entry.Icon, () => onSelect(entry.value), entry.value),

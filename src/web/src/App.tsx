@@ -121,24 +121,18 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-row bg-background">
-      <Sidebar view={view} onSelect={setView} onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        view={view}
+        onSelect={setView}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onUpdate={handleUpdate}
+        updating={updating}
+        canUpdate={canUpdate}
+      />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col p-6">
         <header className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            {canUpdate && (
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={handleUpdate}
-                disabled={updating}
-                aria-label="Mettre à jour l'app"
-                title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-              >
-                <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
-              </Button>
-            )}
-            <h1 className="text-xl font-bold">Atelier</h1>
             {view === "home" && (
               <div className="inline-flex items-center rounded-md border bg-card p-0.5">
                 {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (

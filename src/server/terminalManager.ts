@@ -52,22 +52,27 @@ function dataMessage(bytes: Uint8Array | string): TerminalServerMessage {
 const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])/g;
 
 /**
- * `tmux capture-pane` returns the whole pane grid, so a shell whose prompt sits near the top comes
- * back padded with the pane's blank bottom rows. Written verbatim to a freshly-mounted xterm those
- * trailing newlines scroll the real content up out of the viewport, leaving a blank screen with the
- * cursor parked at the bottom — the "I have to press Ctrl+L to see the old terminals again" bug that
- * hits every reseed (split, tab switch, reload). Drop the trailing blank rows so the seed ends on the
- * last real line, matching where the live cursor actually is.
+ * Prepare a `tmux capture-pane` dump for replay into a freshly-mounted xterm. Two corrections, both
+ * needed for a reseed (split, tab switch, reload) to reproduce the live view:
+ *
+ * 1. capture-pane returns the whole pane grid, so a shell whose prompt sits near the top comes back
+ *    padded with the pane's blank bottom rows. Written verbatim those trailing newlines scroll the
+ *    real content up out of the viewport, leaving a blank screen with the cursor parked at the bottom
+ *    (the "I press Ctrl+L to see the old terminals again" bug). Drop the trailing blank rows so the
+ *    seed ends on the last real line, where the live cursor actually is.
+ * 2. capture-pane separates rows with bare LF, but the viewer runs with convertEol:false, so LF only
+ *    moves the cursor down — not back to column 0. Replayed rows then cascade diagonally to the right.
+ *    Rejoin with CRLF. The live stream is unaffected: its raw pty bytes already end lines with CRLF.
  */
-function trimTrailingBlankRows(seed: string): string {
-  const lines = seed.split("\n");
+function normalizeSeed(seed: string): string {
+  const lines = seed.split(/\r?\n/);
   let end = lines.length;
   while (end > 0) {
     const line = lines[end - 1];
     if (line === undefined || line.replace(ANSI_ESCAPE, "").trim() !== "") break;
     end -= 1;
   }
-  return lines.slice(0, end).join("\n");
+  return lines.slice(0, end).join("\r\n");
 }
 
 /**
@@ -91,7 +96,7 @@ class TerminalSession {
 
   /** Seed this viewer with the current pane, then ensure the live stream is running. */
   async attach(ws: TerminalSocket): Promise<void> {
-    const seed = trimTrailingBlankRows(await this.system.capturePaneAnsi(this.sessionName));
+    const seed = normalizeSeed(await this.system.capturePaneAnsi(this.sessionName));
     if (seed) send(ws, dataMessage(seed));
     if (this.dead || seed.includes(DEAD_PANE_MARKER)) {
       this.dead = true;

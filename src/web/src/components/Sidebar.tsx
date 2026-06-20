@@ -124,8 +124,7 @@ export function Sidebar({
           )}
         </div>
       ) : (
-        <div className="mb-1 flex items-center gap-2">
-          <span className="text-sm font-semibold">Atelier</span>
+        <div className="relative mb-1 flex items-center">
           {canUpdate && onUpdate && (
             <button
               type="button"
@@ -133,17 +132,19 @@ export function Sidebar({
               disabled={updating}
               aria-label="Mettre à jour l'app"
               title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-              className="flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+              className="relative z-10 flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
               <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
             </button>
           )}
-          <div className="flex-1" />
+          <span className="pointer-events-none absolute inset-x-0 text-center text-sm font-semibold">
+            Atelier
+          </span>
           <button
             type="button"
             onClick={toggleCollapsed}
             aria-label="Réduire la barre latérale"
-            className="flex items-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="relative z-10 ml-auto flex items-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>

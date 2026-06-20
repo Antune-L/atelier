@@ -68,6 +68,8 @@ interface RouteDeps {
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
   onRequestUpdate?: () => void;
+  /** Tear down tmux sessions + server and quit the desktop app. */
+  onRequestQuit?: () => void;
 }
 
 /** Branch the self-update tracks; mismatch blocks the update (no auto-switch). */
@@ -214,6 +216,7 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultImplementerModel: MODELS.implementerModel,
       defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
+      canQuit: deps.onRequestQuit != null,
     }))
     .get("/settings", () => store.getAppSettings())
     .patch("/settings", ({ body, set }) => {
@@ -843,5 +846,11 @@ export function createApiRoutes(deps: RouteDeps) {
       // Defer so this {ok:true} flushes before the server stops and the process exits.
       setTimeout(onRequestUpdate, UPDATE_RELAUNCH_DELAY_MS);
       return { ok: true, mode };
+    })
+    .post("/internal/quit", ({ set }) => {
+      const { onRequestQuit } = deps;
+      if (!onRequestQuit) return jsonError(set, HTTP_CONFLICT, "quitter indisponible");
+      setTimeout(onRequestQuit, UPDATE_RELAUNCH_DELAY_MS);
+      return { ok: true };
     });
 }

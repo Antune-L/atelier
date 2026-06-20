@@ -53,8 +53,8 @@ export interface UseTerminals {
   split: (orientation: SplitOrientation, leafId?: string) => Promise<void>;
   /** Open a new terminal: split the focused leaf, or seed the root when empty. */
   newTerminal: () => Promise<void>;
-  /** Close the focused (or given) leaf and kill its session. */
-  close: (leafId?: string) => Promise<void>;
+  /** Close the focused (or given) leaf and kill its session. Returns false when nothing to close. */
+  close: (leafId?: string) => Promise<boolean>;
   resize: (splitId: string, sizes: number[]) => void;
 }
 
@@ -143,14 +143,15 @@ export function useTerminals(projectKey: string | null): UseTerminals {
   }, [tree, focusedLeafId, addRoot, split]);
 
   const close = useCallback(
-    async (leafId?: string) => {
+    async (leafId?: string): Promise<boolean> => {
       const targetId = leafId ?? focusedLeafId;
-      if (!tree || !targetId) return;
+      if (!tree || !targetId) return false;
       const leaf = findLeaf(tree, targetId);
       const next = removeLeaf(tree, targetId);
       commit(next);
       setFocusedLeafId((current) => (current === targetId ? firstLeafId(next) : current));
       if (leaf) await api.deleteTerminal(leaf.terminalId).catch(() => undefined);
+      return true;
     },
     [tree, focusedLeafId, commit],
   );

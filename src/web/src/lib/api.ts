@@ -83,6 +83,7 @@ export const api = {
     request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),
+  quitApp: (): Promise<{ ok: boolean }> => request("/api/internal/quit", { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),

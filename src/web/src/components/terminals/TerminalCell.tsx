@@ -56,7 +56,7 @@ export function TerminalCell({
       onFocusCapture={onFocus}
       onMouseDown={onFocus}
       className={cn(
-        "flex h-full min-h-0 flex-col overflow-hidden rounded-md border bg-card",
+        "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md border bg-card",
         focused && "ring-1 ring-primary",
       )}
     >

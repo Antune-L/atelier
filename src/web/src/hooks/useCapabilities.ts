@@ -11,6 +11,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultImplementerModel: "",
   defaultImplementerEffort: "",
   canUpdate: false,
+  canQuit: false,
 };
 
 let cache: Capabilities | null = null;

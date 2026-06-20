@@ -27,6 +27,48 @@ const WINDOW_HEIGHT = 900;
 const NEW_WINDOW_OPEN_EVENT = "new-window-open";
 const HEALTH_POLL_INTERVAL_MS = 150;
 const HEALTH_POLL_TIMEOUT_MS = 30_000;
+/** CustomEvent name — must match `ATELIER_SHORTCUT_EVENT` in the web app. */
+const ATELIER_SHORTCUT_EVENT = "atelier-shortcut";
+
+/** Menu `action` ids forwarded to the webview as terminal shortcuts. */
+const MENU_ACTION_SHORTCUT_T = "atelier:shortcut-t";
+const MENU_ACTION_SHORTCUT_W = "atelier:shortcut-w";
+const MENU_ACTION_SHORTCUT_D = "atelier:shortcut-d";
+const MENU_ACTION_SHORTCUT_SHIFT_D = "atelier:shortcut-shift-d";
+
+let mainWindow: BrowserWindow | null = null;
+
+/** Inject a shortcut into the webview (macOS menu accelerators bypass WKWebView key delivery). */
+function forwardAtelierShortcut(key: string, shiftKey = false): void {
+  if (!mainWindow) return;
+  const detail = JSON.stringify({ key, shiftKey });
+  mainWindow.webview.executeJavascript(
+    `window.dispatchEvent(new CustomEvent("${ATELIER_SHORTCUT_EVENT}",{detail:${detail}}))`,
+  );
+}
+
+const menuShortcutActionSchema = z.object({
+  data: z.object({
+    action: z.string(),
+  }),
+});
+
+function shortcutFromMenuAction(action: string): { key: string; shiftKey: boolean } | null {
+  if (action.includes(MENU_ACTION_SHORTCUT_T)) return { key: "t", shiftKey: false };
+  if (action.includes(MENU_ACTION_SHORTCUT_W)) return { key: "w", shiftKey: false };
+  if (action.includes(MENU_ACTION_SHORTCUT_SHIFT_D)) return { key: "d", shiftKey: true };
+  if (action.includes(MENU_ACTION_SHORTCUT_D)) return { key: "d", shiftKey: false };
+  return null;
+}
+
+function installMenuShortcutBridge(): void {
+  Electrobun.events.on("application-menu-clicked", (rawEvent: unknown) => {
+    const parsed = menuShortcutActionSchema.safeParse(rawEvent);
+    if (!parsed.success) return;
+    const shortcut = shortcutFromMenuAction(parsed.data.data.action);
+    if (shortcut) forwardAtelierShortcut(shortcut.key, shortcut.shiftKey);
+  });
+}
 
 /**
  * `new-window-open` payload (the front's `target="_blank"` / window.open). WKWebView's `detail` is a
@@ -69,9 +111,9 @@ function resolveRoots(): DesktopRoots {
 
 /**
  * Standard macOS application menu. Electrobun (WKWebView) drives system shortcuts — fullscreen
- * (Ctrl+Cmd+F), clipboard, undo/redo, window close/quit — off menu items keyed by `role`. Without
- * a menu none of those accelerators fire, so we install the conventional App/Edit/View/Window
- * structure; macOS supplies the canonical accelerators for each role automatically.
+ * (Ctrl+Cmd+F), clipboard, undo/redo — off menu items keyed by `role`. ⌘W is NOT mapped to
+ * `role: close` (that kills the Bun backend); terminal shortcuts are custom actions forwarded to
+ * the webview via `forwardAtelierShortcut`.
  */
 function installApplicationMenu(): void {
   ApplicationMenu.setApplicationMenu([
@@ -106,12 +148,21 @@ function installApplicationMenu(): void {
       submenu: [{ role: "toggleFullScreen", accelerator: "Control+Command+F" }],
     },
     {
+      label: "Terminaux",
+      submenu: [
+        { label: "Nouveau terminal", accelerator: "Command+T", action: MENU_ACTION_SHORTCUT_T },
+        { label: "Fermer le terminal", accelerator: "Command+W", action: MENU_ACTION_SHORTCUT_W },
+        { type: "divider" },
+        { label: "Split vertical", accelerator: "Command+D", action: MENU_ACTION_SHORTCUT_D },
+        { label: "Split horizontal", accelerator: "Shift+Command+D", action: MENU_ACTION_SHORTCUT_SHIFT_D },
+      ],
+    },
+    {
       label: "Window",
       submenu: [
         { role: "minimize", accelerator: "Command+M" },
         { role: "zoom" },
         { type: "divider" },
-        { role: "close", accelerator: "Command+W" },
         { role: "bringAllToFront" },
       ],
     },
@@ -151,6 +202,7 @@ async function boot(): Promise<void> {
 
   // Late-bound so onRequestUpdate can reference `server`/`teardown` defined just below.
   let requestUpdate: (() => void) | undefined;
+  const quitHandler: { run?: () => void } = {};
 
   // 3. Dynamic import only now that config + env are in place.
   const { startServer } = await import("../src/server/index.ts");
@@ -162,6 +214,7 @@ async function boot(): Promise<void> {
     onNotify: (title, body) => Utils.showNotification({ title, body }),
     repoRoot: canSelfUpdate ? repoRoot : undefined,
     onRequestUpdate: canSelfUpdate ? () => requestUpdate?.() : undefined,
+    onRequestQuit: () => quitHandler.run?.(),
   });
 
   let tornDown = false;
@@ -171,6 +224,12 @@ async function boot(): Promise<void> {
     // Kill detached tmux sessions first (they outlive the process otherwise), then stop the server.
     await server.teardownSessions();
     server.stop();
+  };
+
+  quitHandler.run = (): void => {
+    void teardown()
+      .catch(() => undefined)
+      .then(() => app.quit());
   };
 
   // Update path: distinct from teardown — it must NEVER kill the tmux sessions (the running jobs
@@ -192,11 +251,12 @@ async function boot(): Promise<void> {
   try {
     await waitForHealth(server.port);
 
-    // 4. Install the native menu so macOS wires up clipboard/fullscreen/window accelerators.
+    // 4. Install the native menu so macOS wires up clipboard/fullscreen accelerators.
     installApplicationMenu();
+    installMenuShortcutBridge();
 
     // 5. Same-origin window: http://, never views://.
-    new BrowserWindow({
+    mainWindow = new BrowserWindow({
       title: WINDOW_TITLE,
       url: `http://localhost:${server.port}`,
       frame: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, x: 0, y: 0 },

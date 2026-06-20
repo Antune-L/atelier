@@ -62,6 +62,8 @@ export interface StartServerOptions {
   repoRoot?: string;
   /** Tear down the server (preserving tmux jobs) and relaunch the app (desktop dev only). */
   onRequestUpdate?: () => void;
+  /** Tear down tmux sessions + server and quit the desktop app. */
+  onRequestQuit?: () => void;
 }
 
 export interface RunningServer {
@@ -234,6 +236,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     composerAvailable,
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
+    onRequestQuit: opts.onRequestQuit,
   });
 
   const app = new Elysia()

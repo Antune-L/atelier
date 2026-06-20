@@ -460,6 +460,8 @@ export const capabilitiesSchema = z.object({
   defaultImplementerEffort: z.string(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
+  /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
+  canQuit: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

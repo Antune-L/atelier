@@ -90,6 +90,8 @@ export const api = {
   stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
   triage: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage`, { method: "POST" }),
+  triagePlus: (id: string): Promise<{ started: boolean }> =>
+    request(`/api/tickets/${id}/triage-plus`, { method: "POST" }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
   terminal: (id: string): Promise<TerminalOutput> => request(`/api/tickets/${id}/terminal`),

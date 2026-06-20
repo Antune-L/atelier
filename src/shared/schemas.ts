@@ -81,6 +81,8 @@ export const triageResultSchema = z.object({
   suggestedModel: agentModelSchema.nullable().default(null).catch(null),
   /** Suggested implementation-agent effort (verdict=implementable only; null = no suggestion). */
   suggestedEffort: agentEffortSchema.nullable().default(null).catch(null),
+  /** Deployable approaches/solutions identified by a deep "Analyse +" run (empty for normal triage). */
+  solutions: z.array(z.string()).default([]).catch([]),
 });
 export type TriageResult = z.infer<typeof triageResultSchema>;
 
@@ -290,7 +292,6 @@ const ticketBatchOptionsSchema = z.object({
   autoMerge: z.boolean().default(false),
   addScreenshots: z.boolean().default(false),
   verifyFeature: z.boolean().default(false),
-  researchPlan: z.boolean().default(false),
   // Branch the worktree forks from and the PR targets (null = project default).
   baseBranch: baseBranchSchema.nullable().default(null),
   // Implementation agent knobs picked at creation (null = fall back to server config).
@@ -344,7 +345,6 @@ export const updateTicketSchema = z.object({
   autoMerge: z.boolean().optional(),
   addScreenshots: z.boolean().optional(),
   verifyFeature: z.boolean().optional(),
-  researchPlan: z.boolean().optional(),
   project: projectKeySchema.optional(),
   baseBranch: baseBranchSchema.nullable().optional(),
   dependsOn: z.string().nullable().optional(),

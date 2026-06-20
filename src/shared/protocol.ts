@@ -86,6 +86,7 @@ const submitTriageMcpArgsSchema = z.object({
   files: z.array(z.string()).default([]),
   suggestedModel: z.string().nullable().default(null),
   suggestedEffort: z.string().nullable().default(null),
+  solutions: z.array(z.string()).default([]),
 });
 
 /** TOLERANT mirror of the batch feasibility args; one entry per imported ticket, keyed by ticketId. */

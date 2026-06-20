@@ -2,11 +2,13 @@ import { TRIAGE_RAW_REPORT_MAX, TRIAGE_SLOT_ID, TRIAGE_TIMEOUT_MS } from "../../
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { AgentEffort, AgentModel } from "../../shared/constants.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
+import { TRIAGE_VERDICT_LABELS } from "../../shared/schemas.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
+import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
@@ -68,6 +70,7 @@ export class TriageManager {
     private readonly system: SystemAdapter,
     private readonly workerHub: WorkerHub,
     private readonly hub: ClientHub,
+    private readonly notifier: Notifier,
     private readonly config: TriageManagerConfig,
   ) {}
 
@@ -136,6 +139,14 @@ export class TriageManager {
   async complete(ticketId: string, result: TriageResult): Promise<void> {
     await this.cleanup(ticketId);
     this.persistVerdict(ticketId, result);
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket) {
+      void this.notifier.notify(
+        "Analyse terminée",
+        `${ticket.title} → ${TRIAGE_VERDICT_LABELS[result.verdict]}`,
+        ticket.id,
+      );
+    }
     log.info("triage terminé", { ticketId, verdict: result.verdict });
   }
 

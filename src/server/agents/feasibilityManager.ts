@@ -15,6 +15,7 @@ import { MODELS, getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
+import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
@@ -90,6 +91,7 @@ export class FeasibilityBatchManager {
     private readonly system: SystemAdapter,
     private readonly workerHub: WorkerHub,
     private readonly hub: ClientHub,
+    private readonly notifier: Notifier,
     private readonly config: FeasibilityManagerConfig,
   ) {}
 
@@ -121,6 +123,7 @@ export class FeasibilityBatchManager {
     // Dry-run/tests never spawn claude: short-circuit each ticket to a stub verdict.
     if (this.system.dryRun) {
       for (const id of evaluatedIds) this.persistVerdict(id, DRY_RUN_VERDICT);
+      this.notifyBatchDone(evaluatedIds.length);
       return;
     }
 
@@ -203,7 +206,16 @@ export class FeasibilityBatchManager {
         this.failTicket(ticketId, "non évalué par la session de faisabilité");
       }
     }
+    this.notifyBatchDone(expectedIds.length);
     log.info("faisabilité en lot terminée", { batchId, count: expectedIds.length });
+  }
+
+  /** Fire one batch-level notification when a feasibility run finishes (avoids per-ticket spam). */
+  private notifyBatchDone(count: number): void {
+    void this.notifier.notify(
+      "Analyse de faisabilité terminée",
+      `${count} ticket${count > 1 ? "s" : ""} évalué${count > 1 ? "s" : ""}`,
+    );
   }
 
   /** tmux session backing a running feasibility batch, for the terminal viewer; null when none is live. */

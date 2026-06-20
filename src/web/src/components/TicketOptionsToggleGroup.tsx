@@ -3,6 +3,7 @@ import {
   FlaskConical,
   GitMerge,
   GitPullRequest,
+  Repeat2,
   type LucideIcon,
 } from "lucide-react";
 import { useRef } from "react";
@@ -15,6 +16,7 @@ const TICKET_OPTION = {
   draft: "draft",
   autoMerge: "auto-merge",
   verify: "verify",
+  argusMultiLoop: "argus-multi-loop",
 } as const;
 
 const OPTION_ITEM_CLASS =
@@ -27,6 +29,7 @@ export interface TicketOptionValues {
   prDraft: boolean;
   autoMerge: boolean;
   verifyFeature: boolean;
+  argusMultiLoop: boolean;
 }
 
 interface TicketOptionsToggleGroupProps {
@@ -71,6 +74,7 @@ export function TicketOptionsToggleGroup({
     ...(values.prDraft && !values.autoMerge ? [TICKET_OPTION.draft] : []),
     ...(values.autoMerge ? [TICKET_OPTION.autoMerge] : []),
     ...(values.verifyFeature ? [TICKET_OPTION.verify] : []),
+    ...(values.argusMultiLoop ? [TICKET_OPTION.argusMultiLoop] : []),
   ];
 
   const onOptionsChange = (toggleValues: string[]): void => {
@@ -98,6 +102,7 @@ export function TicketOptionsToggleGroup({
         prDraft: nextPrDraft,
         autoMerge: nextAutoMerge,
         verifyFeature: toggleValues.includes(TICKET_OPTION.verify),
+        argusMultiLoop: toggleValues.includes(TICKET_OPTION.argusMultiLoop),
       },
       { autoMergeChanged },
     );
@@ -148,6 +153,13 @@ export function TicketOptionsToggleGroup({
           className={OPTION_ITEM_CLASS}
         >
           <OptionToggleLabel icon={FlaskConical}>Test approfondi</OptionToggleLabel>
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={TICKET_OPTION.argusMultiLoop}
+          aria-label="Argus 2 boucles"
+          className={OPTION_ITEM_CLASS}
+        >
+          <OptionToggleLabel icon={Repeat2}>Argus 2 boucles</OptionToggleLabel>
         </ToggleGroupItem>
       </ToggleGroup>
     </div>

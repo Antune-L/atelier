@@ -1029,6 +1029,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     prDraft: current.prDraft,
                     autoMerge: current.autoMerge,
                     verifyFeature: current.verifyFeature,
+                    argusMultiLoop: current.argusMultiLoop,
                   }}
                   onChange={(next) => {
                     void api

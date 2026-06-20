@@ -76,6 +76,7 @@ export function NewTicketDialog({
     !autoMerge &&
     (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
+  const [argusMultiLoop, setArgusMultiLoop] = useState(false);
   const { tickets } = useBoard();
   const [dependsOn, setDependsOn] = useState<string | null>(null);
   const dependsCandidates = dependencyCandidates(tickets, project, null);
@@ -121,6 +122,7 @@ export function NewTicketDialog({
     setAutoMergeChoice(null);
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
+    setArgusMultiLoop(false);
     setDependsOn(null);
     agent.reset();
     setError(null);
@@ -163,6 +165,7 @@ export function NewTicketDialog({
         autoMerge,
         addScreenshots,
         verifyFeature,
+        argusMultiLoop,
         baseBranch: baseBranchOverride,
         dependsOn: dependsOnValid,
         model: agent.model,
@@ -320,11 +323,13 @@ export function NewTicketDialog({
                     prDraft,
                     autoMerge,
                     verifyFeature,
+                    argusMultiLoop,
                   }}
                   onChange={(next, { autoMergeChanged }) => {
                     setPrdEnabled(next.prdEnabled);
                     setPrDraft(next.prDraft);
                     setVerifyFeature(next.verifyFeature);
+                    setArgusMultiLoop(next.argusMultiLoop);
                     if (autoMergeChanged) {
                       setAutoMergeChoice(next.autoMerge);
                     }

@@ -107,6 +107,7 @@ export function ImportTicketsPanel({
         autoMerge: false,
         addScreenshots: false,
         verifyFeature: false,
+        argusMultiLoop: false,
         // No base-branch control in the import panel: always fall back to the project default.
         baseBranch: null,
         model: agent.model,

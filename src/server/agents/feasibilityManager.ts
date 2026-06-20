@@ -36,6 +36,7 @@ const DRY_RUN_VERDICT: TriageResult = {
   files: [],
   suggestedModel: null,
   suggestedEffort: null,
+  solutions: [],
 };
 
 function feasibilitySessionName(batchId: string): string {
@@ -52,6 +53,7 @@ function toTriageResult(result: FeasibilityResult): TriageResult {
     files: result.files,
     suggestedModel: result.suggestedModel,
     suggestedEffort: result.suggestedEffort,
+    solutions: result.solutions,
   };
 }
 

@@ -66,27 +66,10 @@ function buildImplementingSteps(
   ];
 }
 
-/**
- * Step 1 label of the contract. When `researchPlan` is on (and no PRD), the planning
- * phase is a paris-research deliberation rather than a bare jump to implementing.
- */
+/** Step 1 label of the contract: a PRD planning phase or a direct jump to implementing. */
 function buildPlanningStep(ticket: Ticket): string {
   if (ticket.prdEnabled) return "1. planning → submit_prd → (attente prd_validated)";
-  if (ticket.researchPlan) return "1. réflexion sur la solution (paris-research) → implementing";
   return "1. implementing";
-}
-
-/**
- * Optional "1bis" step injected when `researchPlan` is on: a paris-research-style
- * deliberation (2 independent research sub-agents + a judged verdict) feeding the PRD
- * when one is required, or framing the implementation otherwise. Empty string = no step.
- */
-function buildResearchStep(ticket: Ticket): string {
-  if (!ticket.researchPlan) return "";
-  if (ticket.prdEnabled) {
-    return "1bis. Réflexion sur la solution (OBLIGATOIRE avant le PRD) : déclenche le skill `paris-research` — déploie 2 sous-agents de recherche indépendants (outil Agent) avec des angles délibérément distincts sur la meilleure approche pour ce ticket, puis JUGE toi-même leurs conclusions et tranche sur UNE solution. Intègre ce verdict (approche retenue, alternatives rejetées et pourquoi) dans le PRD avant `submit_prd`.";
-  }
-  return "1bis. Réflexion sur la solution (OBLIGATOIRE avant l'implémentation) : déclenche le skill `paris-research` — déploie 2 sous-agents de recherche indépendants (outil Agent) avec des angles délibérément distincts sur la meilleure approche pour ce ticket, puis JUGE toi-même leurs conclusions et tranche sur UNE solution. Transmets l'approche retenue au sous-agent `implementer` comme cadre d'implémentation.";
 }
 
 /**
@@ -143,7 +126,6 @@ export function buildTicketContract(
   const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge;
   const wantsVerify = ticket.verifyFeature;
   const verifyWithMockups = wantsVerify && hasMockups(ticket.description);
-  const researchStep = buildResearchStep(ticket);
   const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
@@ -178,7 +160,6 @@ export function buildTicketContract(
     "",
     "## Étapes",
     buildPlanningStep(ticket),
-    researchStep,
     ...implementingSteps,
     "3. reviewing : lance un subagent à contexte frais (outil Agent) avec le skill `argus` sur ton diff.",
     ...(isUi

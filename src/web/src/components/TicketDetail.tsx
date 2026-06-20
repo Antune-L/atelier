@@ -11,6 +11,7 @@ import {
   PanelRightOpen,
   Rocket,
   RotateCw,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -743,6 +744,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   onTriage={async () => {
                     await api.triage(ticket.id);
                   }}
+                  onTriagePlus={async () => {
+                    await api.triagePlus(ticket.id);
+                  }}
                   onApplySuggestion={(model, effort) => {
                     void api
                       .updateTicket(current.id, { model, effort })
@@ -1023,7 +1027,6 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     prDraft: current.prDraft,
                     autoMerge: current.autoMerge,
                     verifyFeature: current.verifyFeature,
-                    researchPlan: current.researchPlan,
                   }}
                   onChange={(next) => {
                     void api
@@ -1132,6 +1135,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 interface TriageSectionProps {
   ticket: Ticket;
   onTriage: () => Promise<void>;
+  onTriagePlus: () => Promise<void>;
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
   onToggleContext: (checked: boolean) => void;
 }
@@ -1139,6 +1143,7 @@ interface TriageSectionProps {
 function TriageSection({
   ticket,
   onTriage,
+  onTriagePlus,
   onApplySuggestion,
   onToggleContext,
 }: TriageSectionProps) {
@@ -1199,6 +1204,18 @@ function TriageSection({
                 <li key={file}>{file}</li>
               ))}
             </ul>
+          )}
+          {result.solutions && result.solutions.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground">
+                Solutions envisageables
+              </p>
+              <ul className="list-disc pl-5">
+                {result.solutions.map((solution) => (
+                  <li key={solution}>{solution}</li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       )}
@@ -1262,24 +1279,35 @@ function TriageSection({
         </div>
       )}
 
-      <Button
-        size="sm"
-        variant="secondary"
-        className="mt-2"
-        title={
-          running
-            ? "Tuer la session de faisabilité bloquée et la relancer"
-            : undefined
-        }
-        onClick={() => void onTriage()}
-      >
-        {running && <RotateCw className="h-4 w-4" />}
-        {running
-          ? "Relancer l'analyse"
-          : ticket.triageStatus === "none"
-            ? "Analyser"
-            : "Re-analyser"}
-      </Button>
+      <div className="mt-2 flex gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          title={
+            running
+              ? "Tuer la session de faisabilité bloquée et la relancer"
+              : undefined
+          }
+          onClick={() => void onTriage()}
+        >
+          {running && <RotateCw className="h-4 w-4" />}
+          {running
+            ? "Relancer l'analyse"
+            : ticket.triageStatus === "none"
+              ? "Analyser"
+              : "Re-analyser"}
+        </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          title="Analyse approfondie : faisabilité + solutions via sous-agents parallèles"
+          disabled={running}
+          onClick={() => void onTriagePlus()}
+        >
+          <Sparkles className="h-4 w-4" />
+          Analyse +
+        </Button>
+      </div>
     </section>
   );
 }

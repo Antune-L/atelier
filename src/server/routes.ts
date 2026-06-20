@@ -281,7 +281,6 @@ export function createApiRoutes(deps: RouteDeps) {
         autoMerge: parsed.data.autoMerge,
         addScreenshots: parsed.data.addScreenshots,
         verifyFeature: parsed.data.verifyFeature,
-        researchPlan: parsed.data.researchPlan,
         baseBranch: parsed.data.baseBranch,
         dependsOn: parsed.data.dependsOn,
         model: parsed.data.model,
@@ -332,7 +331,6 @@ export function createApiRoutes(deps: RouteDeps) {
           autoMerge: input.autoMerge,
           addScreenshots: input.addScreenshots,
           verifyFeature: input.verifyFeature,
-          researchPlan: input.researchPlan,
           baseBranch: input.baseBranch,
           dependsOn: null,
           model: input.model,
@@ -689,6 +687,25 @@ export function createApiRoutes(deps: RouteDeps) {
       // Spawn the triage session in the background; persistence happens in TriageManager.complete.
       void deps.triage.start(params.id).catch((e) => {
         log.error("démarrage du triage échoué", {
+          ticketId: params.id,
+          error: getErrorMessage(e),
+        });
+      });
+      return { started: true };
+    })
+    .post("/tickets/:id/triage-plus", ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
+      const running = store.updateTicket(params.id, {
+        triageStatus: "running",
+        triageVerdict: null,
+        triageReport: null,
+      });
+      hub.pushTicket(running);
+      // Deep "Analyse +": fan-out feasibility/solutions analysis (opus/low) in the background.
+      void deps.triage.start(params.id, { deep: true }).catch((e) => {
+        log.error("démarrage de l'analyse + échoué", {
           ticketId: params.id,
           error: getErrorMessage(e),
         });

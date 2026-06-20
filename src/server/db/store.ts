@@ -28,7 +28,8 @@ export interface NewTicket {
   autoMerge: boolean;
   addScreenshots: boolean;
   verifyFeature: boolean;
-  researchPlan: boolean;
+  // Deep parallel-research planning is no longer settable via the UI: persisted false (column kept to avoid a destructive migration).
+  researchPlan?: boolean;
   baseBranch: string | null;
   dependsOn: string | null;
   model: AgentModel | null;
@@ -225,7 +226,7 @@ export class Store {
         input.autoMerge ? 1 : 0,
         input.addScreenshots ? 1 : 0,
         input.verifyFeature ? 1 : 0,
-        input.researchPlan ? 1 : 0,
+        (input.researchPlan ?? false) ? 1 : 0,
         input.baseBranch,
         input.dependsOn,
         input.model,

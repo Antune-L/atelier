@@ -1,5 +1,4 @@
 import {
-  Brain,
   FileText,
   FlaskConical,
   GitMerge,
@@ -16,7 +15,6 @@ const TICKET_OPTION = {
   draft: "draft",
   autoMerge: "auto-merge",
   verify: "verify",
-  research: "research",
 } as const;
 
 const OPTION_ITEM_CLASS =
@@ -29,7 +27,6 @@ export interface TicketOptionValues {
   prDraft: boolean;
   autoMerge: boolean;
   verifyFeature: boolean;
-  researchPlan: boolean;
 }
 
 interface TicketOptionsToggleGroupProps {
@@ -74,7 +71,6 @@ export function TicketOptionsToggleGroup({
     ...(values.prDraft && !values.autoMerge ? [TICKET_OPTION.draft] : []),
     ...(values.autoMerge ? [TICKET_OPTION.autoMerge] : []),
     ...(values.verifyFeature ? [TICKET_OPTION.verify] : []),
-    ...(values.researchPlan ? [TICKET_OPTION.research] : []),
   ];
 
   const onOptionsChange = (toggleValues: string[]): void => {
@@ -102,7 +98,6 @@ export function TicketOptionsToggleGroup({
         prDraft: nextPrDraft,
         autoMerge: nextAutoMerge,
         verifyFeature: toggleValues.includes(TICKET_OPTION.verify),
-        researchPlan: toggleValues.includes(TICKET_OPTION.research),
       },
       { autoMergeChanged },
     );
@@ -153,15 +148,6 @@ export function TicketOptionsToggleGroup({
           className={OPTION_ITEM_CLASS}
         >
           <OptionToggleLabel icon={FlaskConical}>Test approfondi</OptionToggleLabel>
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          value={TICKET_OPTION.research}
-          aria-label="Réflexion approfondie en parallèle"
-          className={cn(OPTION_ITEM_CLASS, "sm:col-span-2")}
-        >
-          <OptionToggleLabel icon={Brain}>
-            Réflexion approfondie en parallèle
-          </OptionToggleLabel>
         </ToggleGroupItem>
       </ToggleGroup>
     </div>

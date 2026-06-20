@@ -76,7 +76,6 @@ export function NewTicketDialog({
     !autoMerge &&
     (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
-  const [researchPlan, setResearchPlan] = useState(false);
   const { tickets } = useBoard();
   const [dependsOn, setDependsOn] = useState<string | null>(null);
   const dependsCandidates = dependencyCandidates(tickets, project, null);
@@ -122,7 +121,6 @@ export function NewTicketDialog({
     setAutoMergeChoice(null);
     setAddScreenshotsChoice(null);
     setVerifyFeature(false);
-    setResearchPlan(false);
     setDependsOn(null);
     agent.reset();
     setError(null);
@@ -165,7 +163,6 @@ export function NewTicketDialog({
         autoMerge,
         addScreenshots,
         verifyFeature,
-        researchPlan,
         baseBranch: baseBranchOverride,
         dependsOn: dependsOnValid,
         model: agent.model,
@@ -323,13 +320,11 @@ export function NewTicketDialog({
                     prDraft,
                     autoMerge,
                     verifyFeature,
-                    researchPlan,
                   }}
                   onChange={(next, { autoMergeChanged }) => {
                     setPrdEnabled(next.prdEnabled);
                     setPrDraft(next.prDraft);
                     setVerifyFeature(next.verifyFeature);
-                    setResearchPlan(next.researchPlan);
                     if (autoMergeChanged) {
                       setAutoMergeChoice(next.autoMerge);
                     }

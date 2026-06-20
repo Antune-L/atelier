@@ -1,5 +1,6 @@
 import { TRIAGE_RAW_REPORT_MAX, TRIAGE_SLOT_ID, TRIAGE_TIMEOUT_MS } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
+import type { AgentEffort, AgentModel } from "../../shared/constants.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
@@ -9,7 +10,7 @@ import { createLogger } from "../logger.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { WorkerHub } from "../workerHub.ts";
 
-import { buildTriageChannelPrompt } from "./triage.ts";
+import { buildTriageChannelPrompt, buildTriagePlusChannelPrompt } from "./triage.ts";
 import { resolveTemplatePaths } from "./slotTemplates.ts";
 
 const log = createLogger("triage");
@@ -17,6 +18,10 @@ const log = createLogger("triage");
 /** Worker-connect poll for a triage session (≈2 min: claude boot + MCP connect can be slow). */
 const TRIAGE_DELIVER_MAX_ATTEMPTS = 240;
 const TRIAGE_DELIVER_DELAY_MS = 500;
+
+/** Deep "Analyse +" model/effort: a stronger model at low effort fans out the parallel sub-agents. */
+const TRIAGE_PLUS_MODEL = "opus" satisfies AgentModel;
+const TRIAGE_PLUS_EFFORT = "low" satisfies AgentEffort;
 
 /** Stub verdict persisted in dry-run so the board stays exercisable without spawning claude. */
 const DRY_RUN_VERDICT: TriageResult = {
@@ -27,6 +32,7 @@ const DRY_RUN_VERDICT: TriageResult = {
   files: [],
   suggestedModel: null,
   suggestedEffort: null,
+  solutions: [],
 };
 
 function triageSessionName(ticketId: string): string {
@@ -65,8 +71,12 @@ export class TriageManager {
     private readonly config: TriageManagerConfig,
   ) {}
 
-  /** Spawn the triage session and deliver the prompt once its worker connects. */
-  async start(ticketId: string): Promise<void> {
+  /**
+   * Spawn the triage session and deliver the prompt once its worker connects. With `deep`, runs the
+   * deeper "Analyse +" variant: a parallel-fan-out feasibility/solutions analysis on opus/low.
+   */
+  async start(ticketId: string, opts?: { deep?: boolean }): Promise<void> {
+    const deep = opts?.deep ?? false;
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) {
       await this.failTriage(ticketId, "projet inconnu");
@@ -99,12 +109,14 @@ export class TriageManager {
         await this.system.seedWorkspaceTrust([project.repoPath]);
         this.seededRepos.add(project.repoPath);
       }
-      const prompt = buildTriageChannelPrompt(ticket, project);
+      const prompt = deep
+        ? buildTriagePlusChannelPrompt(ticket, project)
+        : buildTriageChannelPrompt(ticket, project);
       await this.system.spawnTriageSession({
         sessionName: triageSessionName(ticketId),
         cwd: project.repoPath,
-        model: MODELS.triage,
-        effort: MODELS.triageEffort,
+        model: deep ? TRIAGE_PLUS_MODEL : MODELS.triage,
+        effort: deep ? TRIAGE_PLUS_EFFORT : MODELS.triageEffort,
         mcpConfig: this.buildMcpConfig(ticketId),
         env: { DISABLE_AUTOUPDATER: "1" },
       });

@@ -513,15 +513,6 @@ export function createApiRoutes(deps: RouteDeps) {
         // Never blank an existing title: fall back to it when nothing derivable.
         patch.title = derived || ticket.title;
       }
-      const textChanged =
-        (parsed.data.title !== undefined && parsed.data.title !== ticket.title) ||
-        (parsed.data.description !== undefined && parsed.data.description !== ticket.description);
-      // An edited ticket invalidates any previous feasibility verdict.
-      if (textChanged && ticket.triageStatus !== "none") {
-        patch.triageStatus = "none";
-        patch.triageVerdict = null;
-        patch.triageReport = null;
-      }
       const updated = store.updateTicket(params.id, patch);
       hub.pushTicket(updated);
       return updated;

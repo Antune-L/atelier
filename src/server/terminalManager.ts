@@ -47,6 +47,29 @@ function dataMessage(bytes: Uint8Array | string): TerminalServerMessage {
   return { type: "data", chunk: buffer.toString("base64") };
 }
 
+/** CSI/escape sequences, stripped only to decide whether a captured row is visually blank. */
+// eslint-disable-next-line no-control-regex
+const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])/g;
+
+/**
+ * `tmux capture-pane` returns the whole pane grid, so a shell whose prompt sits near the top comes
+ * back padded with the pane's blank bottom rows. Written verbatim to a freshly-mounted xterm those
+ * trailing newlines scroll the real content up out of the viewport, leaving a blank screen with the
+ * cursor parked at the bottom — the "I have to press Ctrl+L to see the old terminals again" bug that
+ * hits every reseed (split, tab switch, reload). Drop the trailing blank rows so the seed ends on the
+ * last real line, matching where the live cursor actually is.
+ */
+function trimTrailingBlankRows(seed: string): string {
+  const lines = seed.split("\n");
+  let end = lines.length;
+  while (end > 0) {
+    const line = lines[end - 1];
+    if (line === undefined || line.replace(ANSI_ESCAPE, "").trim() !== "") break;
+    end -= 1;
+  }
+  return lines.slice(0, end).join("\n");
+}
+
 /**
  * One live terminal per ticket: seeds each viewer with the current screen, fans out the
  * pane's byte stream to N viewers, and relays their input/resize back. The single pane
@@ -68,7 +91,7 @@ class TerminalSession {
 
   /** Seed this viewer with the current pane, then ensure the live stream is running. */
   async attach(ws: TerminalSocket): Promise<void> {
-    const seed = await this.system.capturePaneAnsi(this.sessionName);
+    const seed = trimTrailingBlankRows(await this.system.capturePaneAnsi(this.sessionName));
     if (seed) send(ws, dataMessage(seed));
     if (this.dead || seed.includes(DEAD_PANE_MARKER)) {
       this.dead = true;

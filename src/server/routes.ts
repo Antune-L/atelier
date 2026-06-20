@@ -398,6 +398,8 @@ export function createApiRoutes(deps: RouteDeps) {
           prNumber: pr.number,
           prHeadBranch: pr.headBranch,
           prUrl: pr.url,
+          // Explicit user override wins; otherwise use the PR's own detected target branch.
+          baseBranch: parsed.data.baseBranch ?? pr.baseBranch,
           reviewDepth: parsed.data.depth,
           postComments: parsed.data.postComments,
           fixComments: parsed.data.fixComments,

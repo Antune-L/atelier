@@ -375,6 +375,9 @@ export const openPrSchema = z.object({
   title: z.string(),
   url: z.string().url(),
   headBranch: z.string(),
+  /** The PR's real target branch, detected via `gh` (`baseRefName`) — argus reviews against it.
+   * Validated like any base branch since it ends up interpolated into the argus `--base` command. */
+  baseBranch: baseBranchSchema,
   isDraft: z.boolean(),
   /** "", "REVIEW_REQUIRED", "APPROVED", "CHANGES_REQUESTED" — drives the "needs attention" highlight. */
   reviewDecision: z.string(),
@@ -390,6 +393,8 @@ export const createReviewSchema = z.object({
   depth: reviewDepthSchema.default("full"),
   postComments: z.boolean().default(true),
   fixComments: z.boolean().default(false),
+  /** Optional override for the argus review base; null means "use each PR's own detected target". */
+  baseBranch: baseBranchSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;

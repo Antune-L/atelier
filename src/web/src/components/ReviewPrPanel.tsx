@@ -1,5 +1,5 @@
 import { GitPullRequest } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   REVIEW_DEPTHS,
@@ -22,11 +22,34 @@ interface ReviewPrPanelProps {
   onClose: () => void;
 }
 
+/** Sentinel value for the "Auto" base-branch option (no override → each PR's own detected target). */
+const BASE_BRANCH_AUTO = "";
+
 export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const panel = useProjectPanel(projects);
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
+  // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
+  const [baseBranch, setBaseBranch] = useState<string>(BASE_BRANCH_AUTO);
+  const [branches, setBranches] = useState<string[] | null>(null);
+  const [branchesKey, setBranchesKey] = useState<string | null>(null);
+  // Tracks the latest requested project so an out-of-order branch fetch is dropped.
+  const latestBranchKey = useRef<string | null>(null);
+
+  // Load the project's branches for the override picker on first render and on each
+  // project change (mirrors the no-useEffect load-on-render pattern).
+  if (project && project !== branchesKey) {
+    const key = project;
+    latestBranchKey.current = key;
+    setBranchesKey(key);
+    setBranches(null);
+    setBaseBranch(BASE_BRANCH_AUTO);
+    void api
+      .projectBranches(key)
+      .then((list) => latestBranchKey.current === key && setBranches(list))
+      .catch(() => latestBranchKey.current === key && setBranches([]));
+  }
 
   const launch = async (): Promise<void> => {
     if (selected.size === 0 || !prs) return;
@@ -40,6 +63,8 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         depth,
         postComments: true,
         fixComments,
+        // Auto → null override (each PR keeps its own detected target branch).
+        baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
         prs: chosen,
       });
       onClose();
@@ -65,6 +90,24 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
           {REVIEW_DEPTHS.map((d) => (
             <option key={d} value={d}>
               {REVIEW_DEPTH_LABELS[d]}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="review-base-branch">Branche de review (cible)</Label>
+        <Select
+          className="ml-2"
+          id="review-base-branch"
+          value={baseBranch}
+          onChange={(e) => setBaseBranch(e.target.value)}
+          disabled={branches === null}
+        >
+          <option value={BASE_BRANCH_AUTO}>Auto — cible réelle de chaque PR</option>
+          {(branches ?? []).map((b) => (
+            <option key={b} value={b}>
+              {b}
             </option>
           ))}
         </Select>

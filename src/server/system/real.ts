@@ -74,7 +74,7 @@ const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 /** `gh pr list --json` fields surfaced to the review picker. */
-const PR_LIST_FIELDS = "number,title,url,headRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
+const PR_LIST_FIELDS = "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
 /** Minimal settings injected inline so a triage session skips the "enable MCP servers?" dialog. */
@@ -110,6 +110,7 @@ const ghPrSchema = z.object({
   title: z.string(),
   url: z.string(),
   headRefName: z.string(),
+  baseRefName: z.string(),
   isDraft: z.boolean(),
   // gh returns "" for "no decision"; tolerate null too so one odd PR never 502s the list.
   reviewDecision: z.string().nullable().default(""),
@@ -453,6 +454,7 @@ export class RealSystemAdapter implements SystemAdapter {
       title: pr.title,
       url: pr.url,
       headBranch: pr.headRefName,
+      baseBranch: pr.baseRefName,
       isDraft: pr.isDraft,
       reviewDecision: pr.reviewDecision ?? "",
       updatedAt: pr.updatedAt,

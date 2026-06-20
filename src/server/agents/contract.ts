@@ -357,19 +357,21 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   const fullFlag = depth === "full" ? " --full" : "";
   const postFlag = ticket.postComments && ticket.prNumber !== null ? ` --post=${ticket.prNumber}` : "";
   const branch = ticket.prHeadBranch ?? "";
-  const argusCmd = `argus ${branch} --base ${project.baseBranch}${fullFlag}${postFlag}`;
+  // Review against the PR's own detected target branch (or the user's override), not the project default.
+  const reviewBase = ticket.baseBranch ?? project.baseBranch;
+  const argusCmd = `argus ${branch} --base ${reviewBase}${fullFlag}${postFlag}`;
 
   // Guard on prHeadBranch too: slotManager only checks out the PR head branch (worktreeAddExisting)
   // and the done gate only requires a push when prHeadBranch is non-null. Branching the contract on
   // the same condition keeps contract/worktree/gate from diverging if prHeadBranch is ever absent.
   if (ticket.fixComments && ticket.prHeadBranch !== null) {
-    return buildReviewFixLines(ticket, opts, { project, depth, branch, argusCmd });
+    return buildReviewFixLines(ticket, opts, { project, depth, branch, argusCmd, reviewBase });
   }
 
   const lines: string[] = [
     `# Revue de PR #${ticket.prNumber} — ${ticket.title}`,
     "",
-    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `Projet : ${project.label} (branche de base : ${reviewBase})`,
     `PR : ${ticket.prUrl}`,
     `Branche de la PR : ${branch}`,
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
@@ -415,14 +417,14 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
 function buildReviewFixLines(
   ticket: Ticket,
   opts: { commitLanguage: CommitLanguage },
-  ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; argusCmd: string },
+  ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; argusCmd: string; reviewBase: string },
 ): string {
-  const { project, depth, branch, argusCmd } = ctx;
+  const { project, depth, branch, argusCmd, reviewBase } = ctx;
 
   const lines: string[] = [
     `# Revue + correction de PR #${ticket.prNumber} — ${ticket.title}`,
     "",
-    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `Projet : ${project.label} (branche de base : ${reviewBase})`,
     `PR : ${ticket.prUrl}`,
     `Branche de la PR : ${branch}`,
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,

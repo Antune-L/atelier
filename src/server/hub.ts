@@ -60,7 +60,7 @@ export class ClientHub {
     this.broadcast({ type: "slots", slots });
   }
 
-  pushNotification(title: string, body: string): void {
-    this.broadcast({ type: "notification", title, body });
+  pushNotification(title: string, body: string, ticketId?: string): void {
+    this.broadcast({ type: "notification", title, body, ...(ticketId ? { ticketId } : {}) });
   }
 }

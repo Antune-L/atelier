@@ -700,7 +700,7 @@ export class SlotManager {
       }),
     );
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
-    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError));
+    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id);
     // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
     if (!mergeError) void this.startDependents(ticketId);
     this.pumpQueue();
@@ -733,7 +733,7 @@ export class SlotManager {
     }
     this.store.logEvent(ticket.id, AUTO_MERGE_RESOLVE_EVENT, { reason });
     log.info("auto-merge échoué — résolution de conflits automatique lancée", { ticketId: ticket.id, reason });
-    await this.notifier.notify("Auto-merge en conflit", `${ticket.title} → rebase automatique en cours`);
+    await this.notifier.notify("Auto-merge en conflit", `${ticket.title} → rebase automatique en cours`, ticket.id);
     // The resolution session already holds its slot (claimed synchronously inside resolveMergeConflicts);
     // the caller skips its own pumpQueue on this early-return path, so wake any other queued ticket here.
     this.pumpQueue();
@@ -765,7 +765,7 @@ export class SlotManager {
     );
     this.store.logEvent(ticketId, "answered", {});
     log.info("question répondue, slot libéré", { ticketId, slotId });
-    await this.notifier.notify("Question répondue", ticket.title);
+    await this.notifier.notify("Question répondue", ticket.title, ticket.id);
     this.pumpQueue();
   }
 
@@ -872,7 +872,7 @@ export class SlotManager {
       this.store.updateSlot(slot.id, { status: "interrupted" });
       this.store.logEvent(ticketId, "interrupted", {});
       log.warn("session tmux disparue à la reprise", { ticketId, slotId: slot.id });
-      void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session tmux disparue`);
+      void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session tmux disparue`, ticketId);
     }
     this.hub.pushSlots(this.store.listSlots());
   }

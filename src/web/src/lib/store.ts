@@ -11,6 +11,7 @@ export interface Toast {
   id: number;
   title: string;
   body: string;
+  ticketId?: string;
 }
 
 export interface BoardState {
@@ -18,13 +19,14 @@ export interface BoardState {
   slots: Slot[];
   connected: boolean;
   toasts: Toast[];
+  openTicketId: string | null;
 }
 
 type Listener = () => void;
 type CommentListener = (comment: Comment) => void;
 
 class BoardStore {
-  private state: BoardState = { tickets: [], slots: [], connected: false, toasts: [] };
+  private state: BoardState = { tickets: [], slots: [], connected: false, toasts: [], openTicketId: null };
   private readonly listeners = new Set<Listener>();
   private readonly commentListeners = new Set<CommentListener>();
   private toastSeq = 0;
@@ -91,10 +93,18 @@ class BoardStore {
         // Not part of the board snapshot; fan out to whichever ticket detail is open.
         for (const listener of this.commentListeners) listener(event.comment);
         break;
-      case "notification":
-        this.pushToast(event.title, event.body);
-        showDesktopNotification(event.title, event.body);
+      case "notification": {
+        const ticketId = event.ticketId;
+        this.pushToast(event.title, event.body, ticketId);
+        // Pass a click callback rather than importing the store into notifications.ts to avoid a
+        // circular import (store imports notifications).
+        showDesktopNotification(
+          event.title,
+          event.body,
+          ticketId ? () => this.openTicket(ticketId) : undefined,
+        );
         break;
+      }
     }
   }
 
@@ -110,15 +120,24 @@ class BoardStore {
     this.pushToast(title, body);
   }
 
-  private pushToast(title: string, body: string): void {
+  private pushToast(title: string, body: string, ticketId?: string): void {
     this.toastSeq += 1;
     const id = this.toastSeq;
-    this.set({ toasts: [...this.state.toasts, { id, title, body }] });
+    this.set({ toasts: [...this.state.toasts, { id, title, body, ticketId }] });
     setTimeout(() => this.dismissToast(id), TOAST_TTL_MS);
   }
 
   dismissToast(id: number): void {
     this.set({ toasts: this.state.toasts.filter((t) => t.id !== id) });
+  }
+
+  /** The currently open ticket detail; lives here since notifications can request opening a ticket. */
+  openTicket(ticketId: string): void {
+    this.set({ openTicketId: ticketId });
+  }
+
+  closeTicket(): void {
+    this.set({ openTicketId: null });
   }
 }
 

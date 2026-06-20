@@ -141,7 +141,7 @@ export class AgentCoordinator {
     const ticket = this.store.updateTicket(ctx.ticketId, { stage: "awaiting_answers" });
     this.hub.pushComment(comment);
     this.hub.pushTicket(ticket);
-    void this.notifier.notify("Question de l'agent", `${ticket.title}: ${parsed.data.question}`);
+    void this.notifier.notify("Question de l'agent", `${ticket.title}: ${parsed.data.question}`, ctx.ticketId);
     this.store.logEvent(ctx.ticketId, "ask_user", { questionId });
     // Non-blocking: the answer returns later via the `answer` channel event.
     return { ok: true, result: `Question enregistrée (id=${questionId}). La réponse arrivera via un événement answer.` };

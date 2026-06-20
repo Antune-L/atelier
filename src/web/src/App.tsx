@@ -42,14 +42,13 @@ const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGr
 export function App() {
   useSuppressEscapeBeep();
   const projects = useProjects();
-  const { slots } = useBoard();
+  const { slots, openTicketId } = useBoard();
   const [view, setView] = useState<SidebarView>("home");
   const [homeView, setHomeView] = useState<HomeView>("kanban");
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const { canUpdate } = useCapabilities();
 
@@ -90,7 +89,7 @@ export function App() {
           projects={projects}
           projectFilter={filter}
           searchQuery={search}
-          onOpenTicket={(t) => setOpenTicketId(t.id)}
+          onOpenTicket={(t) => boardStore.openTicket(t.id)}
           onAddTicket={() => setCreating(true)}
         />
       );
@@ -101,14 +100,14 @@ export function App() {
           projects={projects}
           projectFilter={filter}
           searchQuery={search}
-          onOpenTicket={(t) => setOpenTicketId(t.id)}
+          onOpenTicket={(t) => boardStore.openTicket(t.id)}
         />
       );
     }
     return (
       <WorkflowView
         projectFilter={filter}
-        onOpenTicket={(t) => setOpenTicketId(t.id)}
+        onOpenTicket={(t) => boardStore.openTicket(t.id)}
       />
     );
   };
@@ -204,7 +203,7 @@ export function App() {
       <TicketDetail
         ticket={openTicket}
         projects={projects}
-        onClose={() => setOpenTicketId(null)}
+        onClose={() => boardStore.closeTicket()}
       />
       <Toaster />
 

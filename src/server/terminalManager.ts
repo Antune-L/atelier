@@ -35,6 +35,13 @@ const log = createLogger("terminal");
 /** Marker the dead-pane keep-alive prints once Claude exits (see real.ts spawnSession). */
 const DEAD_PANE_MARKER = "[claude exited";
 
+/**
+ * Home the cursor, clear the screen, and drop the scrollback. Sent before every seed so a reconnect's
+ * frame never stacks on the previous screen, and before a stream-carried reprint so the reprint lands
+ * on a known-empty grid instead of on top of stale content.
+ */
+const CLEAR_SCREEN = "\x1b[H\x1b[2J\x1b[3J";
+
 function send(ws: TerminalSocket, message: TerminalServerMessage): void {
   try {
     ws.send(JSON.stringify(message));
@@ -115,17 +122,43 @@ class TerminalSession {
     private readonly onDead: () => void,
   ) {}
 
-  /** Seed this viewer with the current pane, then ensure the live stream is running. */
-  async attach(ws: TerminalSocket): Promise<void> {
-    const seed = normalizeSeed(await this.system.capturePaneAnsi(this.sessionName, this.seedHistoryLines));
-    if (seed) send(ws, dataMessage(seed));
-    if (this.dead || seed.includes(DEAD_PANE_MARKER)) {
-      this.dead = true;
-      send(ws, { type: "exit" });
-      this.onDead();
+  /**
+   * Bring this viewer up to the live pane. When `willReprint` is set (an agent TUI whose pane is about
+   * to be reflowed to a new size), the resize makes Ink reprint its whole frame; seeding a capture
+   * taken across that reprint leaves the reprint painted on top of stale text. So instead we attach the
+   * live stream first, clear the client, then resize — the reprint flows through the stream onto an
+   * empty grid as one clean frame. Otherwise (user shell, unchanged size, dry-run) no reprint happens,
+   * so we reflow and replay a plain capture seed.
+   */
+  async attach(ws: TerminalSocket, willReprint: boolean): Promise<void> {
+    if (willReprint) {
+      // Probe only to detect a dead pane: a finished agent never reprints, so it must take the seed
+      // path below or the cleared client would stay blank.
+      const probe = await this.system.capturePaneAnsi(this.sessionName, this.seedHistoryLines);
+      if (this.dead || probe.includes(DEAD_PANE_MARKER)) return this.sendDeadFrame(ws, probe);
+      if (!this.stream && !this.streamStarting) await this.startStream();
+      if (this.dead) return;
+      send(ws, dataMessage(CLEAR_SCREEN));
+      await this.system.resizePane(this.sessionName, ws.data.cols, ws.data.rows);
       return;
     }
+    await this.system.resizePane(this.sessionName, ws.data.cols, ws.data.rows);
+    const raw = await this.system.capturePaneAnsi(this.sessionName, this.seedHistoryLines);
+    if (this.dead || raw.includes(DEAD_PANE_MARKER)) return this.sendDeadFrame(ws, raw);
+    send(ws, dataMessage(CLEAR_SCREEN));
+    const seed = normalizeSeed(raw);
+    if (seed) send(ws, dataMessage(seed));
     if (!this.stream && !this.streamStarting) await this.startStream();
+  }
+
+  /** Replay the pane's final frame to a viewer that arrived after it died, then settle it as exited. */
+  private sendDeadFrame(ws: TerminalSocket, raw: string): void {
+    send(ws, dataMessage(CLEAR_SCREEN));
+    const seed = normalizeSeed(raw);
+    if (seed) send(ws, dataMessage(seed));
+    this.dead = true;
+    send(ws, { type: "exit" });
+    this.onDead();
   }
 
   private async startStream(): Promise<void> {
@@ -207,19 +240,26 @@ export class TerminalSessionManager {
       send(ws, { type: "exit" });
       return;
     }
-    // Reflow the pane to this viewer's geometry before seeding: a full-screen TUI positions
-    // by absolute coordinates, so a capture taken at a different width renders garbled in xterm.
-    await this.system.resizePane(sessionName, cols, rows);
     // Cache the resolved name so message/close handlers act on the session opened here, even if the
     // ticket's slot is reassigned mid-connection (see TerminalSocketData.resolvedSessionName).
     ws.data.resolvedSessionName = sessionName;
     // An agent pane is a full-screen TUI whose scrollback stacks duplicate frames on resize, so seed
     // from the visible frame only; a user terminal is a plain shell where past commands are worth
     // replaying on reopen. terminalId addresses a user terminal; ticketId an agent.
-    const seedHistoryLines = ws.data.terminalId !== undefined ? TERMINAL_SEED_HISTORY_LINES : 0;
+    const isUserTerminal = ws.data.terminalId !== undefined;
+    const seedHistoryLines = isUserTerminal ? TERMINAL_SEED_HISTORY_LINES : 0;
+    // Only an agent pane reprints on reflow, and only when the size actually changes. attach() owns the
+    // reflow so that, on the reprint path, the live stream is attached before the resize (see attach()).
+    const willReprint = !isUserTerminal && (await this.willResize(sessionName, cols, rows));
     const session = this.sessions.get(sessionName) ?? this.createSession(sessionName, seedHistoryLines);
     session.viewers.add(ws);
-    await session.attach(ws);
+    await session.attach(ws, willReprint);
+  }
+
+  /** Whether reflowing the pane to (cols, rows) would change its size — i.e. trigger a TUI reprint. */
+  private async willResize(sessionName: string, cols: number, rows: number): Promise<boolean> {
+    const size = await this.system.paneSize(sessionName);
+    return size !== null && (size.cols !== cols || size.rows !== rows);
   }
 
   private createSession(sessionName: string, seedHistoryLines: number): TerminalSession {

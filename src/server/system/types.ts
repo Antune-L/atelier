@@ -68,6 +68,12 @@ export interface DoneGateResult {
   reason: string;
 }
 
+/** A tmux window's geometry, used to decide whether a viewer connect will reflow (and reprint) the pane. */
+export interface PaneSize {
+  cols: number;
+  rows: number;
+}
+
 export interface PrepareSlotFiles {
   /** Absolute slot dir into which to write .mcp.json / .claude/settings.json. */
   slotPath: string;
@@ -156,6 +162,11 @@ export interface SystemAdapter {
    * stacks duplicate frames — capture only the visible frame there.
    */
   capturePaneAnsi(sessionName: string, historyLines: number): Promise<string>;
+  /**
+   * Current tmux window geometry (`display-message #{window_width}/#{window_height}`), or null when
+   * unreadable. Lets the caller tell whether reflowing the pane to a viewer will trigger a reprint.
+   */
+  paneSize(sessionName: string): Promise<PaneSize | null>;
   /** Open a live byte stream of the pane's output (pipe-pane → FIFO in the real adapter). */
   openPaneStream(sessionName: string): Promise<PaneStream>;
   /** Inject raw key bytes (hex pairs) into the pane verbatim (`send-keys -H`). */

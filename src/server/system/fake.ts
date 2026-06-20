@@ -4,6 +4,7 @@ import { createLogger } from "../logger.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  PaneSize,
   PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
@@ -213,6 +214,11 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async capturePaneAnsi(sessionName: string, _historyLines: number): Promise<string> {
     return this.capturePane(sessionName);
+  }
+
+  async paneSize(_sessionName: string): Promise<PaneSize | null> {
+    // Dry-run has no real tmux pane and never reprints, so returning null keeps the plain capture seed.
+    return null;
   }
 
   async openPaneStream(sessionName: string): Promise<PaneStream> {

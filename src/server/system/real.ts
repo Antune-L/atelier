@@ -15,6 +15,7 @@ import type { OpenPr } from "../../shared/schemas.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  PaneSize,
   PaneStream,
   PrepareSlotFiles,
   ReviewDoneOptions,
@@ -396,6 +397,16 @@ export class RealSystemAdapter implements SystemAdapter {
     const scrollback = historyLines > 0 ? ["-S", `-${historyLines}`] : [];
     const res = await $`tmux capture-pane -e -p -t ${sessionName} ${scrollback}`.nothrow().quiet();
     return res.exitCode === 0 ? res.stdout.toString() : "";
+  }
+
+  async paneSize(sessionName: string): Promise<PaneSize | null> {
+    const res = await $`tmux display-message -p -t ${sessionName} -F ${"#{window_width} #{window_height}"}`.nothrow().quiet();
+    if (res.exitCode !== 0) return null;
+    const [width, height] = res.stdout.toString().trim().split(/\s+/);
+    const cols = Number(width);
+    const rows = Number(height);
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) return null;
+    return { cols, rows };
   }
 
   async openPaneStream(sessionName: string): Promise<PaneStream> {

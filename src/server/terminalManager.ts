@@ -47,32 +47,50 @@ function dataMessage(bytes: Uint8Array | string): TerminalServerMessage {
   return { type: "data", chunk: buffer.toString("base64") };
 }
 
-/** CSI/escape sequences, stripped only to decide whether a captured row is visually blank. */
+/** CSI/escape sequences, stripped only to compare rows by their visible text. */
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])/g;
 
+/** A captured row's visible text, escape codes (colour, cursor) removed. */
+function visibleText(line: string): string {
+  return line.replace(ANSI_ESCAPE, "");
+}
+
 /**
- * Prepare a `tmux capture-pane` dump for replay into a freshly-mounted xterm. Two corrections, both
+ * Prepare a `tmux capture-pane` dump for replay into a freshly-mounted xterm. Three corrections, all
  * needed for a reseed (split, tab switch, reload) to reproduce the live view:
  *
  * 1. capture-pane returns the whole pane grid, so a shell whose prompt sits near the top comes back
  *    padded with the pane's blank bottom rows. Written verbatim those trailing newlines scroll the
  *    real content up out of the viewport, leaving a blank screen with the cursor parked at the bottom
- *    (the "I press Ctrl+L to see the old terminals again" bug). Drop the trailing blank rows so the
- *    seed ends on the last real line, where the live cursor actually is.
- * 2. capture-pane separates rows with bare LF, but the viewer runs with convertEol:false, so LF only
+ *    (the "I press Ctrl+L to see the old terminals again" bug). Drop leading/trailing blank rows so
+ *    the seed sits where the live cursor actually is.
+ * 2. The shell re-emits its prompt on a fresh line every time the pane is resized (each connect
+ *    resizes it to the viewer's geometry) and once more at startup when async git info loads — none
+ *    of these redraws happen in place in a detached pane, so the capture stacks N identical prompts.
+ *    Collapse that trailing run of re-renders (lines that are a visible-prefix of the live line) down
+ *    to the one the cursor is on. Real output is untouched: it is never a prefix of the prompt.
+ * 3. capture-pane separates rows with bare LF, but the viewer runs with convertEol:false, so LF only
  *    moves the cursor down — not back to column 0. Replayed rows then cascade diagonally to the right.
  *    Rejoin with CRLF. The live stream is unaffected: its raw pty bytes already end lines with CRLF.
  */
 function normalizeSeed(seed: string): string {
   const lines = seed.split(/\r?\n/);
   let end = lines.length;
-  while (end > 0) {
-    const line = lines[end - 1];
-    if (line === undefined || line.replace(ANSI_ESCAPE, "").trim() !== "") break;
-    end -= 1;
+  while (end > 0 && visibleText(lines[end - 1] ?? "").trim() === "") end -= 1;
+  let begin = 0;
+  while (begin < end && visibleText(lines[begin] ?? "").trim() === "") begin += 1;
+  if (begin >= end) return "";
+
+  const live = lines[end - 1] ?? "";
+  const liveText = visibleText(live);
+  let start = end - 1;
+  while (start > begin) {
+    const prev = visibleText(lines[start - 1] ?? "");
+    if (prev.trim() === "" || prev.length > liveText.length || !liveText.startsWith(prev)) break;
+    start -= 1;
   }
-  return lines.slice(0, end).join("\r\n");
+  return [...lines.slice(begin, start), live].join("\r\n");
 }
 
 /**

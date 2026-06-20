@@ -28,6 +28,7 @@ export interface NewTicket {
   autoMerge: boolean;
   addScreenshots: boolean;
   verifyFeature: boolean;
+  argusMultiLoop: boolean;
   // Deep parallel-research planning is no longer settable via the UI: persisted false (column kept to avoid a destructive migration).
   researchPlan?: boolean;
   baseBranch: string | null;
@@ -96,6 +97,7 @@ export interface TicketPatch {
   autoMerge?: boolean;
   addScreenshots?: boolean;
   verifyFeature?: boolean;
+  argusMultiLoop?: boolean;
   researchPlan?: boolean;
   project?: string;
   baseBranch?: string | null;
@@ -213,8 +215,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -226,6 +228,7 @@ export class Store {
         input.autoMerge ? 1 : 0,
         input.addScreenshots ? 1 : 0,
         input.verifyFeature ? 1 : 0,
+        input.argusMultiLoop ? 1 : 0,
         (input.researchPlan ?? false) ? 1 : 0,
         input.baseBranch,
         input.dependsOn,
@@ -321,6 +324,7 @@ export class Store {
     if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);
     if (patch.addScreenshots !== undefined) set("add_screenshots", patch.addScreenshots ? 1 : 0);
     if (patch.verifyFeature !== undefined) set("verify_feature", patch.verifyFeature ? 1 : 0);
+    if (patch.argusMultiLoop !== undefined) set("argus_multi_loop", patch.argusMultiLoop ? 1 : 0);
     if (patch.researchPlan !== undefined) set("research_plan", patch.researchPlan ? 1 : 0);
     if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);

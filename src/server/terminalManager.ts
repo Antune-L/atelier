@@ -9,10 +9,19 @@ import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
 import type { SystemAdapter } from "./system/index.ts";
 import type { PaneStream } from "./system/types.ts";
+import type { UserTerminalManager } from "./userTerminalManager.ts";
 
 export interface TerminalSocketData {
   kind: "terminal";
-  ticketId: string;
+  /** Exactly one of these addresses the pane: an agent ticket, or a user terminal. */
+  ticketId?: string;
+  terminalId?: string;
+  /**
+   * Session name resolved once at open and cached here. Re-resolving per message/close is unsafe:
+   * a ticket's slot can be reassigned mid-connection, so a later resolution may return a different
+   * name and miss the registry, leaking the original TerminalSession's FIFO. Set in handleOpen.
+   */
+  resolvedSessionName?: string;
   /** Viewer's initial xterm geometry; the pane is reflowed to it before the first capture. */
   cols: number;
   rows: number;
@@ -127,8 +136,9 @@ class TerminalSession {
 }
 
 /**
- * Routes the `/ws/terminal` channel: resolves each viewer's ticket to its tmux session,
- * groups viewers into per-ticket TerminalSessions, and forwards input/resize to tmux.
+ * Routes the `/ws/terminal` channel: resolves each viewer's address (an agent ticket or a user
+ * terminal) to its tmux session, groups viewers into per-session TerminalSessions, and forwards
+ * input/resize to tmux.
  */
 export class TerminalSessionManager {
   private readonly sessions = new Map<string, TerminalSession>();
@@ -138,11 +148,12 @@ export class TerminalSessionManager {
     private readonly system: SystemAdapter,
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
+    private readonly userTerminals: UserTerminalManager,
   ) {}
 
   async handleOpen(ws: TerminalSocket): Promise<void> {
-    const { ticketId, cols, rows } = ws.data;
-    const sessionName = this.resolveSession(ticketId);
+    const { cols, rows } = ws.data;
+    const sessionName = this.resolveSession(ws.data);
     if (!sessionName) {
       send(ws, { type: "exit" });
       return;
@@ -150,24 +161,27 @@ export class TerminalSessionManager {
     // Reflow the pane to this viewer's geometry before seeding: a full-screen TUI positions
     // by absolute coordinates, so a capture taken at a different width renders garbled in xterm.
     await this.system.resizePane(sessionName, cols, rows);
-    const session = this.sessions.get(ticketId) ?? this.createSession(ticketId, sessionName);
+    // Cache the resolved name so message/close handlers act on the session opened here, even if the
+    // ticket's slot is reassigned mid-connection (see TerminalSocketData.resolvedSessionName).
+    ws.data.resolvedSessionName = sessionName;
+    const session = this.sessions.get(sessionName) ?? this.createSession(sessionName);
     session.viewers.add(ws);
     await session.attach(ws);
   }
 
-  private createSession(ticketId: string, sessionName: string): TerminalSession {
+  private createSession(sessionName: string): TerminalSession {
     const session = new TerminalSession(sessionName, this.system, () => {
       // Identity guard: a relaunch may have replaced this entry with a fresh session.
-      if (this.sessions.get(ticketId) === session) this.sessions.delete(ticketId);
+      if (this.sessions.get(sessionName) === session) this.sessions.delete(sessionName);
     });
-    this.sessions.set(ticketId, session);
+    this.sessions.set(sessionName, session);
     return session;
   }
 
   handleMessage(ws: TerminalSocket, raw: string): void {
     const parsed = terminalClientMessageSchema.safeParse(safeParse(raw));
     if (!parsed.success) return;
-    const sessionName = this.resolveSession(ws.data.ticketId);
+    const sessionName = ws.data.resolvedSessionName;
     if (!sessionName) return;
     const message = parsed.data;
     if (message.type === "input") {
@@ -178,17 +192,26 @@ export class TerminalSessionManager {
   }
 
   handleClose(ws: TerminalSocket): void {
-    const session = this.sessions.get(ws.data.ticketId);
+    const sessionName = ws.data.resolvedSessionName;
+    if (!sessionName) return;
+    const session = this.sessions.get(sessionName);
     if (!session) return;
     session.viewers.delete(ws);
     if (session.viewers.size === 0) {
-      this.sessions.delete(ws.data.ticketId);
+      this.sessions.delete(sessionName);
       void session.teardown();
     }
   }
 
+  /** Resolve a viewer's address (ticket or user terminal) to its live tmux session, or null. */
+  private resolveSession(data: TerminalSocketData): string | null {
+    if (data.terminalId !== undefined) return this.userTerminals.resolveSession(data.terminalId);
+    if (data.ticketId === undefined) return null;
+    return this.resolveTicketSession(data.ticketId);
+  }
+
   /** ticketId → tmux session name via its active slot, or its triage session; null when none lives. */
-  private resolveSession(ticketId: string): string | null {
+  private resolveTicketSession(ticketId: string): string | null {
     const ticket = this.store.getTicket(ticketId);
     // A feasibility batch runs on a synthetic id (no real ticket): fall back to its detached session.
     if (!ticket) return this.feasibility.resolveSession(ticketId);

@@ -14,6 +14,7 @@ import type {
   Profile,
   ProjectInfo,
   StatRecord,
+  TerminalDescriptor,
   TerminalOutput,
   Ticket,
   UpdateAppSettingsInput,
@@ -95,6 +96,12 @@ export const api = {
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
   terminal: (id: string): Promise<TerminalOutput> => request(`/api/tickets/${id}/terminal`),
+  listTerminals: (projectKey?: string): Promise<TerminalDescriptor[]> =>
+    request(`/api/terminals${projectKey ? `?projectKey=${encodeURIComponent(projectKey)}` : ""}`),
+  createTerminal: (projectKey: string): Promise<TerminalDescriptor> =>
+    request("/api/terminals", { method: "POST", body: JSON.stringify({ projectKey }) }),
+  deleteTerminal: (id: string): Promise<{ ok: boolean }> =>
+    request(`/api/terminals/${id}`, { method: "DELETE" }),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);

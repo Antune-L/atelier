@@ -1,4 +1,4 @@
-import { BarChart3, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw, Settings } from "lucide-react";
+import { LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -7,8 +7,10 @@ import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { SettingsModal } from "@/components/SettingsModal";
+import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SlotsBar } from "@/components/SlotsBar";
 import { StatsView } from "@/components/StatsView";
+import { TerminalsView } from "@/components/TerminalsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { WorkflowView } from "@/components/WorkflowView";
 import { Toaster } from "@/components/Toaster";
@@ -23,25 +25,26 @@ import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type View = "kanban" | "agents" | "workflow" | "stats";
+/** Home sub-view: the Board/Agents/Workflow toggle (Stats moved to the sidebar). */
+type HomeView = "kanban" | "agents" | "workflow";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
 /** If location.reload() is suppressed (e.g. Electrobun quirk), release the spinner. */
 const RELOAD_WATCHDOG_MS = 5_000;
 
-const VIEW_OPTIONS: { value: View; label: string; Icon: typeof LayoutGrid }[] = [
+const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
   { value: "workflow", label: "Workflow", Icon: Network },
-  { value: "stats", label: "Stats", Icon: BarChart3 },
 ];
 
 export function App() {
   useSuppressEscapeBeep();
   const projects = useProjects();
   const { slots } = useBoard();
-  const [view, setView] = useState<View>("kanban");
+  const [view, setView] = useState<SidebarView>("home");
+  const [homeView, setHomeView] = useState<HomeView>("kanban");
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -80,8 +83,8 @@ export function App() {
     }
   };
 
-  const renderView = (): ReactNode => {
-    if (view === "kanban") {
+  const renderHome = (): ReactNode => {
+    if (homeView === "kanban") {
       return (
         <Board
           projects={projects}
@@ -92,7 +95,7 @@ export function App() {
         />
       );
     }
-    if (view === "agents") {
+    if (homeView === "agents") {
       return (
         <AgentsView
           projects={projects}
@@ -102,93 +105,98 @@ export function App() {
         />
       );
     }
-    if (view === "workflow") {
-      return (
-        <WorkflowView
-          projectFilter={filter}
-          onOpenTicket={(t) => setOpenTicketId(t.id)}
-        />
-      );
-    }
-    return <StatsView projects={projects} />;
+    return (
+      <WorkflowView
+        projectFilter={filter}
+        onOpenTicket={(t) => setOpenTicketId(t.id)}
+      />
+    );
+  };
+
+  const renderView = (): ReactNode => {
+    if (view === "terminals") return <TerminalsView projects={projects} projectFilter={filter} />;
+    if (view === "stats") return <StatsView projects={projects} />;
+    return renderHome();
   };
 
   return (
-    <div className="flex h-screen flex-col bg-background p-6">
-      <header className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {canUpdate && (
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleUpdate}
-              disabled={updating}
-              aria-label="Mettre à jour l'app"
-              title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-            >
-              <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
-            </Button>
-          )}
-          <h1 className="text-xl font-bold">Atelier</h1>
-          <div className="inline-flex items-center rounded-md border bg-card p-0.5">
-            {VIEW_OPTIONS.map(({ value, label, Icon }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setView(value)}
-                aria-pressed={view === value}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                  view === value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+    <div className="flex h-screen flex-row bg-background">
+      <Sidebar view={view} onSelect={setView} onOpenSettings={() => setSettingsOpen(true)} />
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-6">
+        <header className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {canUpdate && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleUpdate}
+                disabled={updating}
+                aria-label="Mettre à jour l'app"
+                title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
               >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </button>
-            ))}
+                <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+              </Button>
+            )}
+            <h1 className="text-xl font-bold">Atelier</h1>
+            {view === "home" && (
+              <div className="inline-flex items-center rounded-md border bg-card p-0.5">
+                {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setHomeView(value)}
+                    aria-pressed={homeView === value}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                      homeView === value
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher…"
-            className="w-48 bg-card"
-            aria-label="Rechercher un ticket"
-          />
-          <Select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="bg-card"
-          >
-            <option value="all">Tous les projets</option>
-            {projects.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="Paramètres"
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
-        </div>
-      </header>
+          {view === "home" && (
+            <div className="flex items-center gap-2">
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher…"
+                className="w-48 bg-card"
+                aria-label="Rechercher un ticket"
+              />
+              <Select
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="bg-card"
+              >
+                <option value="all">Tous les projets</option>
+                {projects.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
+              </Select>
+              <Button onClick={() => setCreating(true)}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </header>
 
-      <div className="mb-4 shrink-0">
-        <SlotsBar slots={slots} />
+        {view !== "terminals" && (
+          <div className="mb-4 shrink-0">
+            <SlotsBar slots={slots} />
+          </div>
+        )}
+
+        <main className="min-h-0 flex-1 overflow-auto">{renderView()}</main>
       </div>
-
-      <main className="min-h-0 flex-1 overflow-auto">{renderView()}</main>
 
       <NewTicketDialog
         open={creating}

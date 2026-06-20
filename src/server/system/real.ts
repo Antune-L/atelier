@@ -18,6 +18,7 @@ import type {
   PrepareSlotFiles,
   ReviewDoneOptions,
   SpawnFeasibilityOptions,
+  SpawnShellOptions,
   SpawnTmuxOptions,
   SpawnTriageOptions,
   SystemAdapter,
@@ -314,6 +315,16 @@ export class RealSystemAdapter implements SystemAdapter {
     const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
     void this.acceptDevChannelsDialog(opts.sessionName);
+  }
+
+  async spawnShellSession(opts: SpawnShellOptions): Promise<void> {
+    // Reclaim a zombie of this name first: user-terminal sessions survive a backend restart (PRD §7),
+    // but `nextId` resets to 1 each process, so the derived name can collide with an orphan — without
+    // this `new-session` would fail and the POST would throw. Killing it (nothrow) is a no-op when absent.
+    await $`tmux kill-session -t ${opts.sessionName}`.nothrow().quiet();
+    // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
+    // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
+    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -l`.quiet();
   }
 
   /** Confirm the unavoidable dev-channels warning so the session starts unattended. */

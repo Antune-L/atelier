@@ -1,14 +1,9 @@
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal, type IDisposable } from "@xterm/xterm";
 import { Keyboard } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-
-import "@xterm/xterm/css/xterm.css";
-
-import { terminalServerMessageSchema } from "@shared/schemas";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
 import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
+import { TERMINAL_BG, terminalWsUrl, useXtermSocket } from "@/hooks/useXtermSocket";
 import { cn } from "@/lib/utils";
 
 interface LiveTerminalProps {
@@ -23,58 +18,10 @@ interface LiveTerminalProps {
   live?: boolean;
 }
 
-const TERMINAL_FONT_SIZE = 12;
-const TERMINAL_SCROLLBACK = 5000;
-/** Retry cadence while reconnecting to a pane that has not produced a live stream yet. */
-const RECONNECT_DELAY_MS = 1000;
-/** Bounded retries so a genuinely dead-but-active pane eventually settles on "session terminée". */
-const MAX_CONNECT_ATTEMPTS = 300;
-/**
- * Delay before the very first connect (initial fit + websocket open). The detail drawer is a
- * right-side sheet that opens via a CSS transform (translate), so the terminal box already has its
- * final dimensions at mount: the ResizeObserver fires immediately, mid-transform. Fitting/rendering
- * then bakes the first xterm canvas into the transformed (blurry) geometry, and since the box size
- * never changes again the observer never refits. Must exceed the modal's open transition
- * (see modal.tsx TRANSITION_MS = 200) so the first render happens at the settled, untransformed box.
- */
-const INITIAL_CONNECT_DELAY_MS = 250;
-/** Shared background so the xterm theme and the wrapper never desync. */
-const TERMINAL_BG = "#001219";
-
-const TERMINAL_THEME = {
-  background: TERMINAL_BG,
-  foreground: "#94d2bd",
-  cursor: "#94d2bd",
-  cursorAccent: TERMINAL_BG,
-} as const;
-
-const textEncoder = new TextEncoder();
-
-function wsUrl(ticketId: string, cols: number, rows: number): string {
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const params = new URLSearchParams({ ticketId, cols: String(cols), rows: String(rows) });
-  return `${protocol}://${location.host}/ws/terminal?${params.toString()}`;
-}
-
-/** UTF-8 string of keystrokes → hex byte string for `tmux send-keys -H`. */
-function toHex(data: string): string {
-  let hex = "";
-  for (const byte of textEncoder.encode(data)) hex += byte.toString(16).padStart(2, "0");
-  return hex;
-}
-
 function badgeLabelFor(exited: boolean, inputActive: boolean): string {
   if (exited) return "session terminée";
   if (inputActive) return "saisie active";
   return "lecture seule";
-}
-
-/** base64 pane chunk → bytes for xterm.write (handles partial UTF-8 across writes). */
-function fromBase64(chunk: string): Uint8Array {
-  const binary = atob(chunk);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 /**
@@ -83,154 +30,26 @@ function fromBase64(chunk: string): Uint8Array {
  * so toggling it sends no signal to the agent); the pane keeps running either way.
  */
 export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTerminalProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
   const inputEnabledRef = useRef(false);
   const liveRef = useRef(live);
 
   const [inputEnabled, setInputEnabled] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [exited, setExited] = useState(false);
 
   // Read the latest liveness inside the socket callbacks without remounting the terminal on change.
   liveRef.current = live;
 
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  const buildWsUrl = useCallback(
+    (cols: number, rows: number) => terminalWsUrl({ ticketId }, cols, rows),
+    [ticketId],
+  );
 
-    const term = new Terminal({
-      convertEol: false,
-      fontSize: TERMINAL_FONT_SIZE,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: { ...TERMINAL_THEME },
-      scrollback: TERMINAL_SCROLLBACK,
-      cursorBlink: true,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(container);
-    termRef.current = term;
-    fitRef.current = fit;
-    setExited(false);
-
-    let socket: WebSocket | null = null;
-    let dataSub: IDisposable | null = null;
-    let resizeSub: IDisposable | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let initialConnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempts = 0;
-    let disposed = false;
-
-    // Connect only once the pane has a real box AND the open transition has settled. A full-screen
-    // TUI is captured by absolute coordinates, so fitting/seeding while the container is still
-    // unsized (detail panel not laid out yet) makes xterm render the seed and the live stream at
-    // the wrong geometry — garbled and seemingly frozen until a manual resize/remount. The drawer
-    // also opens via a CSS transform, so the box reaches its final size mid-transform; the initial
-    // connect is therefore deferred (see INITIAL_CONNECT_DELAY_MS) so the first frame is rendered at
-    // the settled, untransformed geometry.
-    function connect(): void {
-      if (disposed) return;
-      try {
-        fit.fit();
-      } catch {
-        // Not measurable this frame; keep the last good geometry.
-      }
-      // term.cols/rows now hold the real viewport; carry it so the server reflows the pane to
-      // this geometry before its first capture (no resize message fires when fit is a no-op).
-      const ws = new WebSocket(wsUrl(ticketId, term.cols, term.rows));
-      socket = ws;
-      let settled = false;
-
-      // A dropped socket — or an `exit` received while the pane is still spawning (the queued →
-      // setup window before tmux exists) — must not freeze the view. Retry while the session is
-      // expected to be live; settle on the last frame once it is genuinely gone or the retry budget
-      // is spent. Funnel close + exit through one idempotent path so a close after an exit can't
-      // double-fire.
-      const onGone = (): void => {
-        if (settled) return;
-        settled = true;
-        dataSub?.dispose();
-        resizeSub?.dispose();
-        dataSub = null;
-        resizeSub = null;
-        try {
-          ws.close();
-        } catch {
-          // Already closing.
-        }
-        if (disposed) return;
-        if (!liveRef.current || attempts >= MAX_CONNECT_ATTEMPTS) {
-          setExited(true);
-          return;
-        }
-        attempts += 1;
-        retryTimer = setTimeout(connect, RECONNECT_DELAY_MS);
-      };
-
-      ws.addEventListener("message", (event) => {
-        if (typeof event.data !== "string") return;
-        let payload: unknown;
-        try {
-          payload = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-        const parsed = terminalServerMessageSchema.safeParse(payload);
-        if (!parsed.success) return;
-        if (parsed.data.type === "data") {
-          // A live frame resets the budget so it bounds *consecutive* failures, not the lifetime:
-          // a long session that briefly flaps must not eventually freeze while still running.
-          attempts = 0;
-          term.write(fromBase64(parsed.data.chunk));
-        } else onGone();
-      });
-      ws.addEventListener("close", onGone);
-
-      dataSub = term.onData((data) => {
-        if (!inputEnabledRef.current || ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({ type: "input", hex: toHex(data) }));
-      });
-      resizeSub = term.onResize(({ cols, rows }) => {
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", cols, rows }));
-      });
-    }
-
-    const observer = new ResizeObserver(() => {
-      if (container.clientWidth === 0 || container.clientHeight === 0) return;
-      if (!socket) {
-        // Defer the first connect past the drawer's open transition so the first fit/render isn't
-        // baked into a mid-transform (blurry) canvas. Guard against stacking timers across repeated
-        // observations; connect() guards on `disposed`, so a late-firing timer is safe.
-        if (initialConnectTimer) return;
-        initialConnectTimer = setTimeout(() => {
-          initialConnectTimer = null;
-          connect();
-        }, INITIAL_CONNECT_DELAY_MS);
-        return;
-      }
-      try {
-        fit.fit();
-      } catch {
-        // Not measurable this frame; the next observation refits.
-      }
-    });
-    observer.observe(container);
-
-    return () => {
-      disposed = true;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (initialConnectTimer) clearTimeout(initialConnectTimer);
-      observer.disconnect();
-      dataSub?.dispose();
-      resizeSub?.dispose();
-      socket?.close();
-      term.dispose();
-      termRef.current = null;
-      fitRef.current = null;
-    };
-  }, [ticketId]);
+  const { containerRef, termRef, fitRef, exited } = useXtermSocket({
+    target: ticketId,
+    buildWsUrl,
+    inputEnabledRef,
+    liveRef,
+  });
 
   // Refit after the layout settles when toggling fullscreen.
   useEffect(() => {
@@ -242,13 +61,13 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
       }
     }, 0);
     return () => clearTimeout(timer);
-  }, [fullscreen]);
+  }, [fullscreen, fitRef]);
 
   // Keep the onData handler's flag current and focus the pane when input is enabled.
   useEffect(() => {
     inputEnabledRef.current = inputEnabled && !exited;
     if (inputEnabled && !exited) termRef.current?.focus();
-  }, [inputEnabled, exited]);
+  }, [inputEnabled, exited, termRef]);
 
   useFullscreenEscape(fullscreen, () => setFullscreen(false));
 

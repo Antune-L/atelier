@@ -255,7 +255,7 @@ export function PrdReviewDialog({
       onClose={onClose}
       side="center"
       disableEscape={hasFeedback || composing !== null}
-      className="flex h-[85vh] max-h-[85vh] w-[90vw] max-w-5xl flex-col !overflow-hidden"
+      className="flex h-[85vh] max-h-[85vh] w-[80vw] max-w-[80vw] flex-col !overflow-hidden"
     >
       <ModalHeader>
         <div className="flex items-center justify-between gap-3">

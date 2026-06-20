@@ -29,6 +29,15 @@ const TERMINAL_SCROLLBACK = 5000;
 const RECONNECT_DELAY_MS = 1000;
 /** Bounded retries so a genuinely dead-but-active pane eventually settles on "session terminée". */
 const MAX_CONNECT_ATTEMPTS = 300;
+/**
+ * Delay before the very first connect (initial fit + websocket open). The detail drawer is a
+ * right-side sheet that opens via a CSS transform (translate), so the terminal box already has its
+ * final dimensions at mount: the ResizeObserver fires immediately, mid-transform. Fitting/rendering
+ * then bakes the first xterm canvas into the transformed (blurry) geometry, and since the box size
+ * never changes again the observer never refits. Must exceed the modal's open transition
+ * (see modal.tsx TRANSITION_MS = 200) so the first render happens at the settled, untransformed box.
+ */
+const INITIAL_CONNECT_DELAY_MS = 250;
 /** Shared background so the xterm theme and the wrapper never desync. */
 const TERMINAL_BG = "#001219";
 
@@ -110,14 +119,17 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
     let dataSub: IDisposable | null = null;
     let resizeSub: IDisposable | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let initialConnectTimer: ReturnType<typeof setTimeout> | null = null;
     let attempts = 0;
     let disposed = false;
 
-    // Connect only once the pane has a real box. A full-screen TUI is captured by absolute
-    // coordinates, so fitting/seeding while the container is still unsized (detail panel not
-    // laid out yet) makes xterm render the seed and the live stream at the wrong geometry —
-    // garbled and seemingly frozen until a manual resize/remount. Deferring to the first real
-    // size makes the very first frame correct.
+    // Connect only once the pane has a real box AND the open transition has settled. A full-screen
+    // TUI is captured by absolute coordinates, so fitting/seeding while the container is still
+    // unsized (detail panel not laid out yet) makes xterm render the seed and the live stream at
+    // the wrong geometry — garbled and seemingly frozen until a manual resize/remount. The drawer
+    // also opens via a CSS transform, so the box reaches its final size mid-transform; the initial
+    // connect is therefore deferred (see INITIAL_CONNECT_DELAY_MS) so the first frame is rendered at
+    // the settled, untransformed geometry.
     function connect(): void {
       if (disposed) return;
       try {
@@ -188,7 +200,14 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
     const observer = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
       if (!socket) {
-        connect();
+        // Defer the first connect past the drawer's open transition so the first fit/render isn't
+        // baked into a mid-transform (blurry) canvas. Guard against stacking timers across repeated
+        // observations; connect() guards on `disposed`, so a late-firing timer is safe.
+        if (initialConnectTimer) return;
+        initialConnectTimer = setTimeout(() => {
+          initialConnectTimer = null;
+          connect();
+        }, INITIAL_CONNECT_DELAY_MS);
         return;
       }
       try {
@@ -202,6 +221,7 @@ export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTermin
     return () => {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (initialConnectTimer) clearTimeout(initialConnectTimer);
       observer.disconnect();
       dataSub?.dispose();
       resizeSub?.dispose();

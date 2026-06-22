@@ -1,7 +1,7 @@
 # Graph Report - kanban-agents  (2026-06-22)
 
 ## Corpus Check
-- 136 files · ~96,917 words
+- 136 files · ~97,750 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a92b2cc7`
+- Built from commit: `0a772a5d`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -355,20 +355,20 @@ Cohesion: 0.67
 Nodes (4): Dry-Run Safety Model, FakeSystemAdapter, RealSystemAdapter, SystemAdapter (side-effect boundary)
 
 ## Knowledge Gaps
-- **381 isolated node(s):** `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND`, `listeners` (+376 more)
+- **381 isolated node(s):** `BranchComboboxProps`, `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND` (+376 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `FakeSystemAdapter` connect `Fake Adapter (Git Ops)` to `Fake Session Spawning`, `Terminal Manager (Server)`?**
-  _High betweenness centrality (0.060) - this node is a cross-community bridge._
 - **Why does `Ticket` connect `SQL Store Mutations` to `Ticket Action Panels`, `Board Column`, `API Client & Schemas`, `Slot Manager Lifecycle`, `Board & App Views`, `Watchdog & Hub Lifecycle`, `Ticket Detail Helpers`, `Agent Contract Builders`, `API Routes`, `DB Row Schemas`, `Client Hub Broadcast`, `Slot Setup & Templates`, `Notifications & Board Store`, `Stage Progress & Display`, `Ticket Cost & Pricing`?**
-  _High betweenness centrality (0.057) - this node is a cross-community bridge._
-- **Why does `Store` connect `SQL Store Mutations` to `Watchdog & Hub Lifecycle`, `Board Column`, `Terminal Manager (Server)`, `API Routes`, `Coordinator Tool Schemas`, `DB Row Schemas`, `Server Boot & Sockets`, `Client Hub Broadcast`, `Feasibility Batch Manager`, `Slot Setup & Templates`, `Triage Manager`, `Terminal Session Manager`?**
-  _High betweenness centrality (0.044) - this node is a cross-community bridge._
-- **What connects `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN` to the rest of the system?**
+  _High betweenness centrality (0.050) - this node is a cross-community bridge._
+- **Why does `FakeSystemAdapter` connect `Fake Adapter (Git Ops)` to `Fake Session Spawning`, `Terminal Manager (Server)`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+- **Why does `SlotManager` connect `Slot Manager Lifecycle` to `Agent Contract Builders`, `Terminal Manager (Server)`, `API Routes`, `Coordinator Tool Schemas`, `Server Boot & Sockets`, `Client Hub Broadcast`, `Slot Setup & Templates`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **What connects `BranchComboboxProps`, `menuShortcutActionSchema`, `newWindowEventSchema` to the rest of the system?**
   _384 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Terminal Viewer UI` be split into smaller, more focused modules?**
   _Cohesion score 0.07575757575757576 - nodes in this community are weakly interconnected._

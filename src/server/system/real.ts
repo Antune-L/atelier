@@ -95,6 +95,26 @@ const DIALOG_POLL_INTERVAL_MS = 500;
 const DIALOG_POLL_ATTEMPTS = 120;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
+/**
+ * Forced on every setup/install/project script: stdin is already detached, so any tool that would
+ * otherwise prompt (corepack "download pnpm?", pnpm auth, husky) must auto-resolve instead of
+ * blocking forever on a read that never returns. `CI=1` is the broad opt-out; the corepack flag is
+ * its specific prompt (the one that wedged a worktree setup for 10 min before the timeout).
+ */
+const NON_INTERACTIVE_ENV: Record<string, string> = {
+  CI: "1",
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+};
+
+interface ShellRunResult {
+  /** Process exit code, or null when terminated by a signal (e.g. the timeout kill). */
+  exitCode: number | null;
+  /** True when Bun's timeout SIGKILLed the child before it exited on its own. */
+  timedOut: boolean;
+  stdout: string;
+  stderr: string;
+}
+
 /** Conventional worktree setup script paths (relative to the repo), tried in order when no explicit command is configured. */
 const WORKTREE_SETUP_CANDIDATES = ["scripts/setup-worktree.sh", "setup-worktree.sh", ".kanban/setup-worktree.sh"] as const;
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
@@ -259,35 +279,61 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void> {
-    // An explicit config command is trusted input run verbatim through `sh -c` (Bun's `$` quotes the
-    // whole `${command}` as one argument); the auto-detected path is pre-quoted by detectWorktreeSetupCommand.
+    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected
+    // path is pre-quoted by detectWorktreeSetupCommand.
     const command = opts.script ?? (await detectWorktreeSetupCommand(opts.repoPath));
     if (command === null) return;
-    const env = {
-      ...process.env,
+    const res = await this.runShell(command, opts.slotPath, opts.timeoutMs, {
       WORKTREE_PATH: opts.slotPath,
       REPO_PATH: opts.repoPath,
       BRANCH: opts.branch,
       BASE_BRANCH: opts.baseBranch,
-    };
-    const res = await withTimeout(
-      $`sh -c ${command}`.cwd(opts.slotPath).env(env).nothrow().quiet(),
-      opts.timeoutMs,
-      command,
-    );
+    });
+    if (res.timedOut) throw new Error(`timeout (${opts.timeoutMs}ms): ${command}`);
     if (res.exitCode !== 0) {
-      const detail = (res.stderr.toString() + res.stdout.toString()).trim().slice(-INSTALL_ERROR_TAIL);
+      const detail = (res.stderr + res.stdout).trim().slice(-INSTALL_ERROR_TAIL);
       throw new Error(`le script de configuration du worktree a échoué (code ${res.exitCode}) : ${detail}`);
     }
   }
 
   async installDeps(slotPath: string, timeoutMs: number): Promise<void> {
     const command = await detectInstallCommand(slotPath);
-    const res = await withTimeout($`sh -c ${command}`.cwd(slotPath).nothrow().quiet(), timeoutMs, command);
+    const res = await this.runShell(command, slotPath, timeoutMs);
+    if (res.timedOut) throw new Error(`timeout (${timeoutMs}ms): ${command}`);
     if (res.exitCode !== 0) {
-      const detail = (res.stderr.toString() + res.stdout.toString()).trim().slice(-INSTALL_ERROR_TAIL);
+      const detail = (res.stderr + res.stdout).trim().slice(-INSTALL_ERROR_TAIL);
       throw new Error(`${command} a échoué (code ${res.exitCode}) : ${detail}`);
     }
+  }
+
+  /**
+   * Run a shell command in `cwd`, non-interactively and bounded. stdin is detached (`ignore`) so a
+   * stray prompt hits EOF and fails fast instead of hanging; Bun's own `timeout` SIGKILLs the child
+   * on expiry so a wedged command can't leak orphaned processes past its budget (the old
+   * Promise.race timeout abandoned the JS promise but left `sh`/`pnpm` running). stdout+stderr are
+   * drained concurrently with exit to avoid a full-pipe deadlock.
+   */
+  private async runShell(
+    command: string,
+    cwd: string,
+    timeoutMs: number,
+    extraEnv: Record<string, string> = {},
+  ): Promise<ShellRunResult> {
+    const proc = Bun.spawn(["sh", "-c", command], {
+      cwd,
+      env: { ...process.env, ...NON_INTERACTIVE_ENV, ...extraEnv },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return { exitCode, timedOut: proc.signalCode === "SIGKILL", stdout, stderr };
   }
 
   async spawnSession(opts: SpawnTmuxOptions): Promise<void> {
@@ -602,8 +648,9 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {
-    const res = await withTimeout($`sh -c ${command}`.cwd(slotPath).nothrow().quiet(), timeoutMs, command);
-    return { ok: res.exitCode === 0, output: res.stdout.toString() + res.stderr.toString() };
+    const res = await this.runShell(command, slotPath, timeoutMs);
+    const output = res.stdout + res.stderr + (res.timedOut ? `\ntimeout (${timeoutMs}ms)` : "");
+    return { ok: res.exitCode === 0 && !res.timedOut, output };
   }
 
   async gitCurrentBranch(repoPath: string): Promise<string> {
@@ -757,12 +804,3 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const guard = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timeout (${timeoutMs}ms): ${label}`)), timeoutMs);
-  });
-  return Promise.race([promise, guard]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
-}

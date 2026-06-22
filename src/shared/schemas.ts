@@ -50,11 +50,14 @@ export type SessionUsage = z.infer<typeof sessionUsageSchema>;
 export const appSettingsSchema = z.object({
   /** Language the agent writes commit messages and PR title/description in. */
   commitLanguage: commitLanguageSchema,
+  /** Language of the feasibility study (triage) prompt and verdict. */
+  triageLanguage: commitLanguageSchema,
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
 export const updateAppSettingsSchema = z.object({
   commitLanguage: commitLanguageSchema.optional(),
+  triageLanguage: commitLanguageSchema.optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 

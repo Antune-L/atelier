@@ -112,9 +112,10 @@ export class TriageManager {
         await this.system.seedWorkspaceTrust([project.repoPath]);
         this.seededRepos.add(project.repoPath);
       }
+      const triageLanguage = this.store.getAppSettings().triageLanguage;
       const prompt = deep
-        ? buildTriagePlusChannelPrompt(ticket, project)
-        : buildTriageChannelPrompt(ticket, project);
+        ? buildTriagePlusChannelPrompt(ticket, project, triageLanguage)
+        : buildTriageChannelPrompt(ticket, project, triageLanguage);
       await this.system.spawnTriageSession({
         sessionName: triageSessionName(ticketId),
         cwd: project.repoPath,

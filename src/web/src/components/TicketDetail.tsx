@@ -45,7 +45,7 @@ import { extractFigmaUrls } from "@shared/figma";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/ui/markdown";
 import { Modal, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
@@ -949,19 +949,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                       <Label htmlFor="ticket-base-branch">
                         Branche de base du worktree
                       </Label>
-                      <Select
+                      <BranchCombobox
                         id="ticket-base-branch"
                         value={selectedBaseBranch}
-                        onChange={(e) => changeBaseBranch(e.target.value)}
+                        onChange={changeBaseBranch}
+                        options={baseBranchOptions}
                         disabled={branches === null}
-                        className="w-full"
-                      >
-                        {baseBranchOptions.map((b) => (
-                          <option key={b} value={b}>
-                            {b === projectDefaultBranch ? `${b} (défaut)` : b}
-                          </option>
-                        ))}
-                      </Select>
+                      />
                     </div>
                   </section>
                 )}

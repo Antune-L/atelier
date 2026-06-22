@@ -10,7 +10,7 @@ import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import {
   Modal,
   ModalBody,
@@ -263,21 +263,13 @@ export function NewTicketDialog({
                   <Label htmlFor="base-branch">
                     Branche de base du worktree
                   </Label>
-                  <Select
+                  <BranchCombobox
                     id="base-branch"
                     value={baseBranch}
-                    onChange={(e) => setBaseBranchChoice(e.target.value)}
+                    onChange={setBaseBranchChoice}
+                    options={branchOptions}
                     disabled={branches === null}
-                    className="w-full"
-                  >
-                    {branchOptions.map((b) => (
-                      <option key={b} value={b}>
-                        {b === selectedProject?.baseBranch
-                          ? `${b} (défaut)`
-                          : b}
-                      </option>
-                    ))}
-                  </Select>
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="depends-on">

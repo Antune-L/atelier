@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { forwardRef, useId, type InputHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -25,3 +25,43 @@ export const Label = forwardRef<HTMLLabelElement, React.LabelHTMLAttributes<HTML
   ),
 );
 Label.displayName = "Label";
+
+interface BranchComboboxProps {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  disabled?: boolean;
+  className?: string;
+}
+
+/**
+ * Free-text branch input backed by a datalist of existing remote branches.
+ * Allows typing any branch name (including ones not yet on origin) while
+ * still offering existing branches as autocomplete suggestions.
+ */
+export function BranchCombobox({ id, value, onChange, options, disabled, className }: BranchComboboxProps) {
+  const listId = useId();
+  return (
+    <>
+      <input
+        id={id}
+        list={listId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className={cn(
+          "h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+          className,
+        )}
+        placeholder={disabled ? "Chargement…" : "Branche (existante ou nouvelle)"}
+        autoComplete="off"
+      />
+      <datalist id={listId}>
+        {options.map((b) => (
+          <option key={b} value={b} />
+        ))}
+      </datalist>
+    </>
+  );
+}

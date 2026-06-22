@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -239,10 +239,17 @@ export class AgentCoordinator {
       return;
     }
 
-    // Turn ended without protocol after the nudge cap: relaunch in place (keeps the worktree)
-    // up to AUTO_RECLAIM_MAX times before giving up. The slot stays busy across the respawn.
-    // Only a hit cap (escalate) falls through to stalled; a concurrent in-flight reclaim (ignore)
-    // must not clobber the recovering session.
+    // A bare Stop is a weak signal: the orchestrator ends its turn after every `implementer`
+    // sub-agent hand-back (the sub-agent can't call a protocol tool), so "turn ended in an active
+    // stage" alone does NOT mean stalled. Only kill+respawn once the turn has been genuinely idle —
+    // recent progress means it's live work, not a hang. A truly dead turn keeps aging lastProgressAt
+    // and is reclaimed on a later Stop (and the 45-min watchdog is the independent backstop).
+    if (Date.now() - this.store.getLastProgressAt(ticketId) < RECLAIM_IDLE_MS) return;
+
+    // Idle past the threshold without protocol: relaunch in place (keeps the worktree) up to
+    // AUTO_RECLAIM_MAX times before giving up. The slot stays busy across the respawn. Only a hit cap
+    // (escalate) falls through to stalled; a concurrent in-flight reclaim (ignore) must not clobber
+    // the recovering session.
     if ((await this.slots.tryAutoReclaim(ticketId, "tour terminé sans protocole")) !== "escalate") return;
 
     await this.lifecycle.stall(
@@ -297,7 +304,11 @@ export class AgentCoordinator {
   private markProgress(ticketId: string): void {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
-    const patch: TicketPatch = { lastProgressAt: Date.now() };
+    // Reset the nudge budget on every real progress event (same UPDATE, no extra query): the counter
+    // is otherwise a lifetime per-ticket value, which turns AUTO_NUDGE_MAX=1 into "one nudge ever" and
+    // sends the next bare Stop straight to reclaim. Per-idle-period semantics, mirroring how the
+    // done_gate_failed counter resets on an intervening event.
+    const patch: TicketPatch = { lastProgressAt: Date.now(), nudgeCount: 0 };
     if (ticket.watchdogFlagged) patch.watchdogFlagged = false;
     const updated = this.store.updateTicket(ticketId, patch);
     if (ticket.watchdogFlagged) this.hub.pushTicket(updated);

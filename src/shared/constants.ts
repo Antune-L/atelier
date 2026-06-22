@@ -257,6 +257,15 @@ export const WATCHDOG_TIMEOUT_MS = 45 * 60 * 1000;
 export const AUTO_NUDGE_MAX = 1;
 /** Max in-place relaunches of a dead/stalled session before giving up (preserves the worktree). */
 export const AUTO_RECLAIM_MAX = 2;
+/**
+ * A turn can end without a protocol tool call yet not be stalled — the orchestrator routinely ends
+ * its turn right after the `implementer` sub-agent hands work back (the sub-agent can't call done()).
+ * The auto-nudge re-prompts it; only escalate to a session-killing reclaim once the turn has been
+ * genuinely idle this long. Distinct from (and far shorter than) the 45-min soft watchdog: short
+ * enough that a truly dead turn is reclaimed promptly, long enough that a normal hand-back + the
+ * orchestrator's next-turn latency never trips it.
+ */
+export const RECLAIM_IDLE_MS = 10 * 60 * 1000;
 /** Audit event logged when any ticket (feature/review/clean/ask) is first inserted. */
 export const CREATED_EVENT = "created";
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */

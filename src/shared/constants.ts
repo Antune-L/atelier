@@ -95,6 +95,15 @@ export const DEFAULT_COMMIT_LANGUAGE: CommitLanguage = "en";
 /** `meta` table key holding the persisted commit/PR language. */
 export const COMMIT_LANGUAGE_META_KEY = "commit_language";
 
+/**
+ * Default language for the feasibility study (triage). Unlike commit messages,
+ * the feasibility study defaults to French.
+ */
+export const DEFAULT_TRIAGE_LANGUAGE: CommitLanguage = "fr";
+
+/** `meta` table key holding the persisted feasibility-study (triage) language. */
+export const TRIAGE_LANGUAGE_META_KEY = "triage_language";
+
 /** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {
   name: string;

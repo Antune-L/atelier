@@ -9,6 +9,8 @@ import {
   COMMIT_LANGUAGE_META_KEY,
   CREATED_EVENT,
   DEFAULT_COMMIT_LANGUAGE,
+  DEFAULT_TRIAGE_LANGUAGE,
+  TRIAGE_LANGUAGE_META_KEY,
 } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import { commitLanguageSchema } from "../../shared/schemas.ts";
@@ -567,11 +569,17 @@ export class Store {
   getAppSettings(): AppSettings {
     const stored = this.getMeta(COMMIT_LANGUAGE_META_KEY);
     const parsed = commitLanguageSchema.safeParse(stored);
-    return { commitLanguage: parsed.success ? parsed.data : DEFAULT_COMMIT_LANGUAGE };
+    const storedTriage = this.getMeta(TRIAGE_LANGUAGE_META_KEY);
+    const parsedTriage = commitLanguageSchema.safeParse(storedTriage);
+    return {
+      commitLanguage: parsed.success ? parsed.data : DEFAULT_COMMIT_LANGUAGE,
+      triageLanguage: parsedTriage.success ? parsedTriage.data : DEFAULT_TRIAGE_LANGUAGE,
+    };
   }
 
   updateAppSettings(patch: UpdateAppSettingsInput): AppSettings {
     if (patch.commitLanguage !== undefined) this.setMeta(COMMIT_LANGUAGE_META_KEY, patch.commitLanguage);
+    if (patch.triageLanguage !== undefined) this.setMeta(TRIAGE_LANGUAGE_META_KEY, patch.triageLanguage);
     return this.getAppSettings();
   }
 

@@ -21,6 +21,7 @@ import {
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
   DEFAULT_COMMIT_LANGUAGE,
+  DEFAULT_TRIAGE_LANGUAGE,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
   type AgentEffort,
@@ -106,6 +107,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 function GeneralSettings() {
   const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useState<CommitLanguage | null>(null);
+  const [triageLanguage, setTriageLanguage] = useState<CommitLanguage | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,12 +119,15 @@ function GeneralSettings() {
       .then((settings) => {
         // Adopt the persisted value only if the user hasn't already picked one
         // (a click during the in-flight fetch must not be clobbered).
-        if (active)
+        if (active) {
           setLanguage((current) => current ?? settings.commitLanguage);
+          setTriageLanguage((current) => current ?? settings.triageLanguage);
+        }
       })
       .catch((e) => {
         if (active) {
           setLanguage((current) => current ?? DEFAULT_COMMIT_LANGUAGE);
+          setTriageLanguage((current) => current ?? DEFAULT_TRIAGE_LANGUAGE);
           setError(e instanceof Error ? e.message : "Erreur");
         }
       });
@@ -137,6 +144,18 @@ function GeneralSettings() {
       await api.updateSettings({ commitLanguage: next });
     } catch (e) {
       setLanguage(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeTriageLanguage = async (next: CommitLanguage): Promise<void> => {
+    const previous = triageLanguage;
+    setTriageLanguage(next);
+    setError(null);
+    try {
+      await api.updateSettings({ triageLanguage: next });
+    } catch (e) {
+      setTriageLanguage(previous);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -171,8 +190,22 @@ function GeneralSettings() {
             aria-label="Langue des PRs et des commits"
           />
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
       </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Langue de l'étude de faisabilité</Label>
+          <p className="text-sm text-muted-foreground">
+            Langue de l'analyse de faisabilité (triage) menée par les agents.
+          </p>
+          <Tabs
+            options={LANGUAGE_OPTIONS}
+            value={triageLanguage}
+            onChange={(v) => void changeTriageLanguage(v)}
+            aria-label="Langue de l'étude de faisabilité"
+          />
+        </div>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

@@ -1,7 +1,11 @@
 import type { Comment, Slot, Ticket, WsClientEvent } from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
 
-import { ensureNotificationPermission, showDesktopNotification } from "./notifications";
+import {
+  ensureNotificationPermission,
+  playNotificationSound,
+  showDesktopNotification,
+} from "./notifications";
 
 const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 const RECONNECT_DELAY_MS = 1500;
@@ -103,6 +107,8 @@ class BoardStore {
           event.body,
           ticketId ? () => this.openTicket(ticketId) : undefined,
         );
+        // Only completion notifications carry `sound`; other events stay silent.
+        if (event.sound) playNotificationSound();
         break;
       }
     }

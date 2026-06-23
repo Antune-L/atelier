@@ -3,9 +3,29 @@
  * instead of opening whatever native app emitted an OS-level notification.
  */
 
+const NOTIFICATION_SOUND_PATH = "/mouse.mp3";
+
 // Retain references so the notification (and its onclick closure) isn't GC'd
 // before the user clicks it.
 const active = new Set<Notification>();
+
+// Reused across calls so rapid notifications don't spawn overlapping Audio
+// elements; created lazily so importing this module has no side effects.
+let sound: HTMLAudioElement | null = null;
+
+/**
+ * Plays the notification sound. Browsers block audio playback without a prior
+ * user gesture, so the returned promise rejection is swallowed to avoid noise.
+ */
+export function playNotificationSound(): void {
+  if (typeof Audio === "undefined") return;
+
+  sound ??= new Audio(NOTIFICATION_SOUND_PATH);
+  sound.currentTime = 0;
+  void sound.play().catch(() => {
+    // Autoplay was blocked (no user gesture yet); nothing actionable here.
+  });
+}
 
 const isSupported = (): boolean => typeof Notification !== "undefined";
 

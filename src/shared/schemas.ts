@@ -480,7 +480,13 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ticket_removed"), ticketId: z.string() }),
   z.object({ type: z.literal("comment"), comment: commentSchema }),
   z.object({ type: z.literal("slots"), slots: z.array(slotSchema) }),
-  z.object({ type: z.literal("notification"), title: z.string(), body: z.string(), ticketId: z.string().optional() }),
+  z.object({
+    type: z.literal("notification"),
+    title: z.string(),
+    body: z.string(),
+    ticketId: z.string().optional(),
+    sound: z.boolean().optional(),
+  }),
 ]);
 export type WsClientEvent = z.infer<typeof wsClientEventSchema>;
 

@@ -682,7 +682,7 @@ export class SlotManager {
       }),
     );
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
-    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id);
+    await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id, true);
     // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
     if (!mergeError) void this.startDependents(ticketId);
     this.pumpQueue();

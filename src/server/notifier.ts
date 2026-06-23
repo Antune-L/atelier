@@ -15,8 +15,8 @@ export class Notifier {
     private readonly onNative?: NativeNotify,
   ) {}
 
-  notify(title: string, body: string, ticketId?: string): Promise<void> {
-    this.hub.pushNotification(title, body, ticketId);
+  notify(title: string, body: string, ticketId?: string, sound?: boolean): Promise<void> {
+    this.hub.pushNotification(title, body, ticketId, sound);
     this.onNative?.(title, body);
     return Promise.resolve();
   }

@@ -187,7 +187,15 @@ export function NewTicketDialog({
   };
 
   return (
-    <Modal open={open} onClose={onClose} className="max-w-5xl">
+    <Modal
+      open={open}
+      onClose={onClose}
+      className={cn(
+        "max-w-5xl",
+        // Worktree tab is short; give room for the branch dropdown (max-h-48) without clipping.
+        tab === "worktree" && "min-h-[36rem] overflow-visible",
+      )}
+    >
       <ModalHeader>
         <ModalTitle>{TAB_TITLES[tab]}</ModalTitle>
         <div className="mt-3 flex gap-1">

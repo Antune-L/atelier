@@ -77,7 +77,7 @@ export interface RunningServer {
 type SocketData =
   | { kind: "client" }
   | { kind: "worker"; ticketId: string | null; slotId: number | null }
-  | { kind: "terminal"; ticketId?: string; terminalId?: string; cols: number; rows: number };
+  | { kind: "terminal"; ticketId?: string; terminalId?: string; slotId?: number; cols: number; rows: number };
 
 function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
   return ws.data.kind === "worker";
@@ -278,10 +278,15 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return new Response("upgrade failed", { status: 426 });
       }
       if (url.pathname === WS_PATH_TERMINAL) {
-        // Exactly one addressing param: an agent ticket pane, or a user terminal.
+        // Exactly one addressing param: an agent ticket pane, a user terminal, or a worktree-session slot.
         const ticketId = url.searchParams.get("ticketId") ?? undefined;
         const terminalId = url.searchParams.get("terminalId") ?? undefined;
-        if (!ticketId && !terminalId) return new Response("ticketId ou terminalId requis", { status: 400 });
+        const rawSlotId = url.searchParams.get("slotId");
+        const parsedSlotId = rawSlotId === null ? Number.NaN : Number(rawSlotId);
+        const slotId = Number.isInteger(parsedSlotId) ? parsedSlotId : undefined;
+        if (!ticketId && !terminalId && slotId === undefined) {
+          return new Response("ticketId, terminalId ou slotId requis", { status: 400 });
+        }
         // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
         const viewport = terminalViewportSchema.safeParse({
           cols: url.searchParams.get("cols"),
@@ -290,7 +295,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         const { cols, rows } = viewport.success
           ? viewport.data
           : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
-        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, terminalId, cols, rows } })) {
+        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, terminalId, slotId, cols, rows } })) {
           return undefined;
         }
         return new Response("upgrade failed", { status: 426 });

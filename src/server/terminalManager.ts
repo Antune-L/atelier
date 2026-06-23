@@ -17,6 +17,8 @@ export interface TerminalSocketData {
   /** Exactly one of these addresses the pane: an agent ticket, or a user terminal. */
   ticketId?: string;
   terminalId?: string;
+  /** A standalone worktree session's slot; resolves to that slot's tmux shell session. */
+  slotId?: number;
   /**
    * Session name resolved once at open and cached here. Re-resolving per message/close is unsafe:
    * a ticket's slot can be reassigned mid-connection, so a later resolution may return a different
@@ -246,9 +248,11 @@ export class TerminalSessionManager {
     // An agent pane is a full-screen TUI whose scrollback stacks duplicate frames on resize, so seed
     // from the visible frame only; a user terminal — and a test session, which is a plain interactive
     // shell (no Claude) — replays past commands on reopen and never reprints on reflow. terminalId
-    // addresses a user terminal; a `testing` ticket addresses a shell pane; any other ticketId an agent.
+    // addresses a user terminal; a standalone worktree-session slotId addresses its shell pane; a
+    // `testing` ticket addresses a shell pane; any other ticketId an agent.
     const ticket = ws.data.ticketId !== undefined ? this.store.getTicket(ws.data.ticketId) : undefined;
-    const isShellPane = ws.data.terminalId !== undefined || ticket?.testing === true;
+    const isShellPane =
+      ws.data.terminalId !== undefined || ws.data.slotId !== undefined || ticket?.testing === true;
     const seedHistoryLines = isShellPane ? TERMINAL_SEED_HISTORY_LINES : 0;
     // Only an agent pane reprints on reflow, and only when the size actually changes. attach() owns the
     // reflow so that, on the reprint path, the live stream is attached before the resize (see attach()).
@@ -301,6 +305,7 @@ export class TerminalSessionManager {
   /** Resolve a viewer's address (ticket or user terminal) to its live tmux session, or null. */
   private resolveSession(data: TerminalSocketData): string | null {
     if (data.terminalId !== undefined) return this.userTerminals.resolveSession(data.terminalId);
+    if (data.slotId !== undefined) return this.store.getSlot(data.slotId)?.tmuxSession ?? null;
     if (data.ticketId === undefined) return null;
     return this.resolveTicketSession(data.ticketId);
   }

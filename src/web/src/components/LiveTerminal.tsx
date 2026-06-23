@@ -6,8 +6,7 @@ import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
 import { TERMINAL_BG, terminalWsUrl, useXtermSocket } from "@/hooks/useXtermSocket";
 import { cn } from "@/lib/utils";
 
-interface LiveTerminalProps {
-  ticketId: string;
+interface LiveTerminalOptions {
   /** Stretch to fill the parent's height instead of capping at 60vh. */
   fill?: boolean;
   /**
@@ -20,6 +19,9 @@ interface LiveTerminalProps {
   defaultInput?: boolean;
 }
 
+/** Address the pane by ticket (agent/test) or by a standalone worktree-session slot. */
+type LiveTerminalProps = LiveTerminalOptions & ({ ticketId: string } | { slotId: number });
+
 function badgeLabelFor(exited: boolean, inputActive: boolean): string {
   if (exited) return "session terminée";
   if (inputActive) return "saisie active";
@@ -31,7 +33,12 @@ function badgeLabelFor(exited: boolean, inputActive: boolean): string {
  * into xterm.js and relays keystrokes/resize back. Input is off by default (co-control,
  * so toggling it sends no signal to the agent); the pane keeps running either way.
  */
-export function LiveTerminal({ ticketId, fill = false, live = true, defaultInput }: LiveTerminalProps) {
+export function LiveTerminal(props: LiveTerminalProps) {
+  const { fill = false, live = true, defaultInput } = props;
+  const target = "ticketId" in props ? props.ticketId : `slot-${props.slotId}`;
+  const wsParams: Record<string, string> =
+    "ticketId" in props ? { ticketId: props.ticketId } : { slotId: String(props.slotId) };
+
   const inputEnabledRef = useRef(false);
   const liveRef = useRef(live);
 
@@ -42,12 +49,13 @@ export function LiveTerminal({ ticketId, fill = false, live = true, defaultInput
   liveRef.current = live;
 
   const buildWsUrl = useCallback(
-    (cols: number, rows: number) => terminalWsUrl({ ticketId }, cols, rows),
-    [ticketId],
+    (cols: number, rows: number) => terminalWsUrl(wsParams, cols, rows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- wsParams is derived from target, which is stable per address.
+    [target],
   );
 
   const { containerRef, termRef, fitRef, exited } = useXtermSocket({
-    target: ticketId,
+    target,
     buildWsUrl,
     inputEnabledRef,
     liveRef,

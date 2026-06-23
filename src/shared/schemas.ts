@@ -89,6 +89,17 @@ export const triageResultSchema = z.object({
 });
 export type TriageResult = z.infer<typeof triageResultSchema>;
 
+/** Parse a stored triage report (JSON) into its structured result, or null when absent/invalid. */
+export function parseTriageReport(report: string | null): TriageResult | null {
+  if (!report) return null;
+  try {
+    const parsed = triageResultSchema.safeParse(JSON.parse(report));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** One ticket's feasibility verdict in a batch analysis: a triage report keyed by its ticket id. */
 export const feasibilityResultSchema = triageResultSchema.extend({ ticketId: z.string().min(1) });
 export type FeasibilityResult = z.infer<typeof feasibilityResultSchema>;

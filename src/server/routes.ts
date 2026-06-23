@@ -27,6 +27,8 @@ import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.t
 import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
+import { buildReformulatePrompt } from "./agents/reformulate.ts";
+import type { ReformulateOptions } from "./system/types.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
@@ -50,6 +52,7 @@ interface PaneReader {
   gitStatusClean(repoPath: string): Promise<boolean>;
   gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
+  reformulate(opts: ReformulateOptions): Promise<string>;
 }
 
 interface RouteDeps {
@@ -107,6 +110,7 @@ const HTTP_CREATED = 201;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
+const HTTP_INTERNAL_ERROR = 500;
 const HTTP_BAD_GATEWAY = 502;
 
 /** Markdown body shown on a review card, summarizing the target PR. */
@@ -712,6 +716,25 @@ export function createApiRoutes(deps: RouteDeps) {
         });
       });
       return { started: true };
+    })
+    .post("/tickets/:id/reformulate", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
+      if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(ticket.project);
+      const prompt = buildReformulatePrompt(ticket);
+      try {
+        const markdown = await deps.system.reformulate({
+          cwd: project.repoPath,
+          prompt,
+          model: MODELS.triage,
+          effort: MODELS.triageEffort,
+        });
+        return { markdown };
+      } catch (error) {
+        return jsonError(set, HTTP_INTERNAL_ERROR, getErrorMessage(error, "échec de la reformulation"));
+      }
     })
     .delete("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);

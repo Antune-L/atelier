@@ -50,6 +50,13 @@ export interface SpawnTriageOptions {
  */
 export type SpawnFeasibilityOptions = SpawnTriageOptions;
 
+export interface ReformulateOptions {
+  cwd: string;
+  prompt: string;
+  model: string;
+  effort: string | null;
+}
+
 /**
  * A live byte stream of a tmux pane's output. Backed by `pipe-pane` → FIFO → `cat`
  * in the real adapter, or a synthetic echo queue in the fake. The boundary keeps all
@@ -158,6 +165,11 @@ export interface SystemAdapter {
   spawnTriageSession(opts: SpawnTriageOptions): Promise<void>;
   /** Spawn a detached read-only batch feasibility session (fans out sub-agents; no worktree/slot). */
   spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void>;
+  /**
+   * Run a one-shot `claude -p` returning its final text (used to reformulate a ticket need).
+   * Read-only, no worktree/slot.
+   */
+  reformulate(opts: ReformulateOptions): Promise<string>;
   /** Spawn a detached interactive login-shell (zsh) session rooted at cwd for a user terminal. */
   spawnShellSession(opts: SpawnShellOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;

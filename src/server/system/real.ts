@@ -19,6 +19,7 @@ import type {
   PaneSize,
   PaneStream,
   PrepareSlotFiles,
+  ReformulateOptions,
   ReviewDoneOptions,
   SpawnFeasibilityOptions,
   SpawnShellOptions,
@@ -89,6 +90,10 @@ const TRIAGE_PLUS_AGENTS_JSON = JSON.stringify({
     disallowedTools: [...READONLY_SCOUT_DISALLOWED],
   },
 });
+/** Bound the synchronous one-shot reformulation `claude -p` call (2 min). */
+const REFORMULATE_TIMEOUT_MS = 120_000;
+/** Keep only the tail of a failed reformulation's output in the surfaced error. */
+const REFORMULATE_ERROR_TAIL = 600;
 /** How long a crashed pane stays readable before the session closes itself (1 h). */
 const DEAD_PANE_KEEP_ALIVE_S = 3600;
 // The dev-channels warning dialog has no bypass (by design): the backend watches
@@ -432,6 +437,40 @@ export class RealSystemAdapter implements SystemAdapter {
       settingsJson: FEASIBILITY_SETTINGS_JSON,
       agentsJson: FEASIBILITY_SCOUT_AGENTS_JSON,
     });
+  }
+
+  async reformulate(opts: ReformulateOptions): Promise<string> {
+    // `auto` never prompts; `--tools Read` keeps it read-only (the description may reference local
+    // image paths). The prompt is fed via STDIN to avoid shell-quoting it on the command line.
+    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
+    const cmd = `claude -p --model ${opts.model}${effortFlag} --permission-mode auto --tools Read`;
+    const proc = Bun.spawn(["sh", "-c", cmd], {
+      cwd: opts.cwd,
+      env: { ...process.env, ...NON_INTERACTIVE_ENV },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: REFORMULATE_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+    // A child that dies before reading the prompt makes the write reject (EPIPE); swallow it so the
+    // non-zero exit below carries the real diagnostic instead of an unhandled rejection.
+    try {
+      proc.stdin.write(opts.prompt);
+      await proc.stdin.end();
+    } catch {
+      // Fall through: proc.exited + stderr below surface the failure.
+    }
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) {
+      const detail = (stderr + stdout).trim().slice(-REFORMULATE_ERROR_TAIL);
+      throw new Error(`reformulation échouée (code ${exitCode}) : ${detail}`);
+    }
+    return stdout.trim();
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */

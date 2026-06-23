@@ -7,6 +7,7 @@ import type {
   PaneSize,
   PaneStream,
   PrepareSlotFiles,
+  ReformulateOptions,
   ReviewDoneOptions,
   SpawnShellOptions,
   SpawnTmuxOptions,
@@ -173,6 +174,11 @@ export class FakeSystemAdapter implements SystemAdapter {
       effort: opts.effort,
     });
     this.liveSessions.add(opts.sessionName);
+  }
+
+  async reformulate(opts: ReformulateOptions): Promise<string> {
+    this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
+    return "# Besoin reformulé (simulé)\n\nReformulation simulée (dry-run).";
   }
 
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {

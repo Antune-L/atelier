@@ -1,6 +1,7 @@
 import {
   Brush,
   Check,
+  Copy,
   Cpu,
   Eye,
   FlaskConical,
@@ -17,16 +18,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type {
-  Comment,
-  ProjectInfo,
-  Ticket,
-  TriageResult,
-} from "@shared/schemas";
+import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 import {
   TRIAGE_VERDICT_LABELS,
   columnSchema,
-  triageResultSchema,
+  parseTriageReport,
 } from "@shared/schemas";
 import {
   ACTIVE_STAGES,
@@ -77,16 +73,6 @@ import {
 } from "@/components/TicketCard";
 
 const TERMINAL_VISIBLE_KEY = "ticket-terminal-visible";
-
-function parseTriageReport(report: string | null): TriageResult | null {
-  if (!report) return null;
-  try {
-    const parsed = triageResultSchema.safeParse(JSON.parse(report));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Union comments by id (incoming wins) and keep them chronological. Shared by the initial fetch
@@ -740,6 +726,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
               {isTodoSplit && !locked && (
                 <TriageSection
+                  key={current.id}
                   ticket={current}
                   onTriage={async () => {
                     await api.triage(ticket.id);
@@ -753,6 +740,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                       .catch(() => undefined);
                   }}
                   onToggleContext={setFeasibilityContext}
+                  onReformulate={() => api.reformulate(ticket.id)}
                 />
               )}
 
@@ -1135,7 +1123,11 @@ interface TriageSectionProps {
   onTriagePlus: () => Promise<void>;
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
   onToggleContext: (checked: boolean) => void;
+  onReformulate: () => Promise<{ markdown: string }>;
 }
+
+/** How long the reformulation copy button shows its "Copié" confirmation. */
+const REFORMULATE_COPY_FEEDBACK_MS = 1500;
 
 function TriageSection({
   ticket,
@@ -1143,9 +1135,36 @@ function TriageSection({
   onTriagePlus,
   onApplySuggestion,
   onToggleContext,
+  onReformulate,
 }: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
+  const [reformulation, setReformulation] = useState<string | null>(null);
+  const [reformulating, setReformulating] = useState(false);
+  const [reformulateError, setReformulateError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const handleReformulate = async (): Promise<void> => {
+    setReformulating(true);
+    setReformulateError(null);
+    try {
+      const { markdown } = await onReformulate();
+      setReformulation(markdown);
+    } catch (error) {
+      setReformulateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReformulating(false);
+    }
+  };
+
+  const handleCopyReformulation = (event: React.MouseEvent): void => {
+    event.preventDefault();
+    if (!reformulation) return;
+    void navigator.clipboard.writeText(reformulation).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), REFORMULATE_COPY_FEEDBACK_MS);
+    });
+  };
   const suggestion =
     ticket.triageVerdict === "implementable" &&
     result?.suggestedModel &&
@@ -1304,7 +1323,36 @@ function TriageSection({
           <Sparkles className="h-4 w-4" />
           Analyse +
         </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          title="Reformuler proprement le besoin à partir de la description et de l'analyse"
+          disabled={reformulating || running}
+          onClick={() => void handleReformulate()}
+        >
+          {reformulating ? <RotateCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          Reformuler le besoin
+        </Button>
       </div>
+
+      {reformulateError && (
+        <p className="mt-2 text-sm text-destructive">{reformulateError}</p>
+      )}
+
+      {reformulation && (
+        <details className="mt-2">
+          <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
+            Besoin reformulé
+            <Button variant="ghost" size="sm" onClick={handleCopyReformulation}>
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {copied ? "Copié" : "Copier"}
+            </Button>
+          </summary>
+          <div className="mt-2 max-h-64 overflow-y-auto">
+            <Markdown content={reformulation} />
+          </div>
+        </details>
+      )}
     </section>
   );
 }

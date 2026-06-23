@@ -1,7 +1,7 @@
 import { $ } from "bun";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 
 import {
@@ -284,10 +284,18 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void> {
-    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected
-    // path is pre-quoted by detectWorktreeSetupCommand.
-    const command = opts.script ?? (await detectWorktreeSetupCommand(opts.repoPath));
+    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected path
+    // is the slot's own copy, pre-quoted by resolveWorktreeScriptCommand.
+    const command =
+      opts.script ?? (await resolveWorktreeScriptCommand(WORKTREE_SETUP_CANDIDATES, opts.repoPath, opts.slotPath));
     if (command === null) return;
+    // Defense-in-depth: the script body comes from the reviewed branch and mutates files in place, so
+    // never let it run against the canonical checkout even if slotPath were misconfigured to point there.
+    if (await this.isMainCheckout(opts.slotPath)) {
+      throw new Error(
+        `refus d'exécuter le script de setup du worktree : le slot ${opts.slotPath} est le checkout PRINCIPAL`,
+      );
+    }
     const res = await this.runShell(command, opts.slotPath, opts.timeoutMs, {
       WORKTREE_PATH: opts.slotPath,
       REPO_PATH: opts.repoPath,
@@ -302,10 +310,16 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void> {
-    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected
-    // path is pre-quoted by detectWorktreeTeardownCommand.
-    const command = opts.script ?? (await detectWorktreeTeardownCommand(opts.repoPath));
+    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected path
+    // is the slot's own copy, pre-quoted by resolveWorktreeScriptCommand.
+    const command =
+      opts.script ?? (await resolveWorktreeScriptCommand(WORKTREE_TEARDOWN_CANDIDATES, opts.repoPath, opts.slotPath));
     if (command === null) return;
+    // Same guard as setup, but best-effort: skip (never tear down the main checkout) rather than throw.
+    if (await this.isMainCheckout(opts.slotPath)) {
+      log.warn("teardown du worktree ignoré : le slot est le checkout PRINCIPAL", { slotPath: opts.slotPath });
+      return;
+    }
     // Best-effort cleanup: a failure here (timeout or non-zero exit) is logged but never thrown so the
     // worktree removal that follows always proceeds.
     const res = await this.runShell(command, opts.slotPath, opts.timeoutMs, {
@@ -321,6 +335,23 @@ export class RealSystemAdapter implements SystemAdapter {
     if (res.exitCode !== 0) {
       const detail = (res.stderr + res.stdout).trim().slice(-INSTALL_ERROR_TAIL);
       log.warn("script de teardown du worktree en échec (ignoré)", { command, exitCode: res.exitCode, detail });
+    }
+  }
+
+  /**
+   * True only when `dir` is git's MAIN working tree (git-dir === git-common-dir); false for a linked
+   * worktree, which has a distinct git-dir. Fails OPEN (returns false) on any probe error: the primary
+   * safeguard is running the slot's own script copy — this is only a last-resort guard and must not
+   * block setup on a transient git hiccup.
+   */
+  private async isMainCheckout(dir: string): Promise<boolean> {
+    try {
+      const gitDir = (await $`git -C ${dir} rev-parse --absolute-git-dir`.quiet()).stdout.toString().trim();
+      const commonRaw = (await $`git -C ${dir} rev-parse --git-common-dir`.quiet()).stdout.toString().trim();
+      if (!gitDir || !commonRaw) return false;
+      return realpathSafe(gitDir) === realpathSafe(resolve(dir, commonRaw));
+    } catch {
+      return false;
     }
   }
 
@@ -800,27 +831,29 @@ const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
 ];
 
 /**
- * First conventional setup script that exists in the repo, returned as a `sh <absolutePath>` command
- * (so it runs without a +x bit). Null when none is present (no-op). Runs from the slot's cwd, so the
- * script path is anchored to the source repo, not the worktree.
+ * Resolve the first conventional worktree script to a `sh <absolutePath>` command (so it runs without
+ * a +x bit), ALWAYS pointing at the copy that lives inside the slot. Null when no candidate exists.
+ *
+ * Why the slot copy, never the repo copy: daedalus-style scripts derive their target worktree from
+ * their own location (`WORKTREE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`) and ignore cwd.
+ * Running the repo's copy would make them mutate the MAIN checkout (offset its .env, package.json, etc.)
+ * instead of the slot. The script is normally tracked, so `worktree add` already checked it out into the
+ * slot; when a repo keeps it untracked it is absent from the slot, so copy it in first (Bun.write also
+ * creates parent dirs). The copy loses the +x bit, which is fine — we invoke it via `sh <path>`.
  */
-async function detectWorktreeSetupCommand(repoPath: string): Promise<string | null> {
-  for (const rel of WORKTREE_SETUP_CANDIDATES) {
-    const absolute = join(repoPath, rel);
-    if (await Bun.file(absolute).exists()) return `sh ${shQuote(absolute)}`;
-  }
-  return null;
-}
-
-/**
- * First conventional teardown script that exists in the repo, returned as a `sh <absolutePath>`
- * command (so it runs without a +x bit). Null when none is present (no-op). Mirrors
- * detectWorktreeSetupCommand; runs from the slot's cwd.
- */
-async function detectWorktreeTeardownCommand(repoPath: string): Promise<string | null> {
-  for (const rel of WORKTREE_TEARDOWN_CANDIDATES) {
-    const absolute = join(repoPath, rel);
-    if (await Bun.file(absolute).exists()) return `sh ${shQuote(absolute)}`;
+async function resolveWorktreeScriptCommand(
+  candidates: readonly string[],
+  repoPath: string,
+  slotPath: string,
+): Promise<string | null> {
+  for (const rel of candidates) {
+    const inSlot = join(slotPath, rel);
+    if (await Bun.file(inSlot).exists()) return `sh ${shQuote(inSlot)}`;
+    const inRepo = join(repoPath, rel);
+    if (await Bun.file(inRepo).exists()) {
+      await Bun.write(inSlot, Bun.file(inRepo));
+      return `sh ${shQuote(inSlot)}`;
+    }
   }
   return null;
 }
@@ -841,6 +874,15 @@ async function detectInstallCommand(slotPath: string): Promise<string> {
  */
 function shQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** Canonicalize a path (resolving symlinks), falling back to the input when it can't be resolved. */
+function realpathSafe(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
 }
 
 /** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */

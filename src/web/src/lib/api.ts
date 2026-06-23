@@ -13,6 +13,7 @@ import type {
   OpenPr,
   Profile,
   ProjectInfo,
+  StartWorktreeSessionBody,
   StatRecord,
   TerminalDescriptor,
   TerminalOutput,
@@ -22,6 +23,7 @@ import type {
   UpdateProfileInput,
   UpdateTicketInput,
   UploadResult,
+  WorktreeSession,
 } from "@shared/schemas";
 import type { Column } from "@shared/constants";
 
@@ -103,6 +105,11 @@ export const api = {
     request("/api/terminals", { method: "POST", body: JSON.stringify({ projectKey }) }),
   deleteTerminal: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/terminals/${id}`, { method: "DELETE" }),
+  startWorktreeSession: (input: StartWorktreeSessionBody): Promise<{ started: boolean }> =>
+    request("/api/worktree-sessions", { method: "POST", body: JSON.stringify(input) }),
+  listWorktreeSessions: (): Promise<WorktreeSession[]> => request("/api/worktree-sessions"),
+  stopWorktreeSession: (slotId: number): Promise<{ ok: boolean }> =>
+    request(`/api/worktree-sessions/${slotId}`, { method: "DELETE" }),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);

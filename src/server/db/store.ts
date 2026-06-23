@@ -14,10 +14,10 @@ import {
 } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import { commitLanguageSchema } from "../../shared/schemas.ts";
-import type { AppSettings, Comment, Profile, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput } from "../../shared/schemas.ts";
+import type { AppSettings, Comment, Profile, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import type { ProjectKey } from "../config.ts";
 
-import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow } from "./rows.ts";
+import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -526,6 +526,30 @@ export class Store {
     const slot = this.getSlot(id);
     if (!slot) throw new Error(`updateSlot: slot ${id} not found`);
     return slot;
+  }
+
+  // ---- Worktree sessions (standalone, ticket-less runnable worktrees) ----
+
+  listWorktreeSessions(): WorktreeSession[] {
+    const rows = this.db.query("SELECT * FROM worktree_sessions ORDER BY created_at ASC").all();
+    return rows.map(mapWorktreeSessionRow);
+  }
+
+  getWorktreeSession(slotId: number): WorktreeSession | null {
+    const raw = this.db.query("SELECT * FROM worktree_sessions WHERE slot_id = ?").get(slotId);
+    return raw ? mapWorktreeSessionRow(raw) : null;
+  }
+
+  insertWorktreeSession(s: WorktreeSession): void {
+    this.db
+      .prepare(
+        "INSERT OR REPLACE INTO worktree_sessions (slot_id, project, branch, base_branch, session_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(s.slotId, s.project, s.branch, s.baseBranch, s.sessionName, s.createdAt);
+  }
+
+  deleteWorktreeSession(slotId: number): void {
+    this.db.prepare("DELETE FROM worktree_sessions WHERE slot_id = ?").run(slotId);
   }
 
   // ---- Events (audit log) ----

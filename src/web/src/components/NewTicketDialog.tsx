@@ -8,6 +8,7 @@ import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
 import { CleanPrPanel } from "@/components/CleanPrPanel";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
+import { WorktreePanel } from "@/components/WorktreePanel";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { Button } from "@/components/ui/button";
 import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import { dependencyCandidates } from "@/lib/display";
 import { handleMediaPaste } from "@/lib/paste";
 import { cn } from "@/lib/utils";
 
-type Tab = "ticket" | "import" | "review" | "clean" | "ask";
+type Tab = "ticket" | "import" | "review" | "clean" | "ask" | "worktree";
 
 const TAB_TITLES: Record<Tab, string> = {
   ticket: "Nouveau ticket",
@@ -34,6 +35,7 @@ const TAB_TITLES: Record<Tab, string> = {
   review: "Review une PR",
   clean: "PR Cleaner",
   ask: "Poser une question",
+  worktree: "Worktree",
 };
 
 interface NewTicketDialogProps {
@@ -204,6 +206,9 @@ export function NewTicketDialog({
           <TabButton active={tab === "ask"} onClick={() => setTab("ask")}>
             Ask
           </TabButton>
+          <TabButton active={tab === "worktree"} onClick={() => setTab("worktree")}>
+            Worktree
+          </TabButton>
         </div>
       </ModalHeader>
       {tab === "import" && (
@@ -224,6 +229,11 @@ export function NewTicketDialog({
       {tab === "ask" && (
         <ModalBody>
           <AskPanel projects={projects} onClose={onClose} />
+        </ModalBody>
+      )}
+      {tab === "worktree" && (
+        <ModalBody>
+          <WorktreePanel projects={projects} onClose={onClose} />
         </ModalBody>
       )}
       {tab === "ticket" && (

@@ -1,4 +1,4 @@
-import { LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
+import { GitBranch, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -13,6 +13,7 @@ import { StatsView } from "@/components/StatsView";
 import { TerminalsView } from "@/components/TerminalsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { WorkflowView } from "@/components/WorkflowView";
+import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +27,7 @@ import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /** Home sub-view: the Board/Agents/Workflow toggle (Stats moved to the sidebar). */
-type HomeView = "kanban" | "agents" | "workflow";
+type HomeView = "kanban" | "agents" | "workflow" | "worktree";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
@@ -37,6 +38,7 @@ const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGr
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
   { value: "workflow", label: "Workflow", Icon: Network },
+  { value: "worktree", label: "Worktree", Icon: GitBranch },
 ];
 
 export function App() {
@@ -103,6 +105,9 @@ export function App() {
           onOpenTicket={(t) => boardStore.openTicket(t.id)}
         />
       );
+    }
+    if (homeView === "worktree") {
+      return <WorktreeSessionsView projects={projects} />;
     }
     return (
       <WorkflowView

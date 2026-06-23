@@ -12,7 +12,7 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import type { Ticket } from "../../shared/schemas.ts";
+import type { Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -44,6 +44,11 @@ import {
 
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
+
+/** tmux session-name prefix for a standalone (ticket-less) runnable worktree session. */
+const WORKTREE_SESSION_PREFIX = "worktree";
+/** Branch-name prefix of a standalone worktree session's fresh branch. */
+const WORKTREE_BRANCH_PREFIX = "worktree";
 
 /** Worker-connect poll: ~2 min total (claude boot + MCP connect can exceed 20 s on a cold start). */
 const CONTRACT_DELIVER_MAX_ATTEMPTS = 240;
@@ -317,6 +322,146 @@ export class SlotManager {
     this.store.logEvent(ticketId, "test_session_stopped", {});
     log.info("session de test arrêtée", { ticketId });
     this.pumpQueue();
+  }
+
+  // ---- Standalone worktree sessions (no ticket, no card) ----
+
+  listWorktreeSessions(): WorktreeSession[] {
+    return this.store.listWorktreeSessions();
+  }
+
+  /**
+   * Launch a standalone, ticket-less runnable worktree session: reserve a free slot, fork a fresh
+   * branch off the selected base (fetched from origin), run the project setup + install deps, then
+   * spawn a PLAIN interactive shell that auto-runs the project's launch command (`runScript`) and
+   * hands control to the user. Same machinery as startTestSession but tied to no card. The eligibility
+   * (valid project / free slot) is re-checked here so a race can't double-spawn; the slow setup runs
+   * after the slot is reserved, and self-cleans on failure. The route fire-and-forgets this.
+   */
+  async startWorktreeSession(input: { project: string; baseBranch: string }): Promise<void> {
+    if (!isProjectKey(input.project)) {
+      log.error("session worktree refusée : projet inconnu", { project: input.project });
+      return;
+    }
+    const free = this.store.findFreeSlot();
+    if (!free) {
+      log.warn("session worktree refusée : aucun slot libre", { project: input.project });
+      this.hub.pushNotification("Worktree", "Aucun slot libre — réessaie une fois un slot libéré.");
+      return;
+    }
+    const project = getProject(input.project);
+    const createdAt = Date.now();
+    const branch = `${WORKTREE_BRANCH_PREFIX}/${slugify(input.baseBranch)}-${free.id}-${createdAt}`;
+    const sessionName = `${WORKTREE_SESSION_PREFIX}-${free.id}-${createdAt}`;
+    const path = slotPath(free.id);
+    // The slot path may hold a stale worktree from a previous occupant; prune it via that occupant's
+    // repo so a cross-project leftover is removed correctly (a freed slot reports a null repoPath).
+    const previousRepoPath = free.repoPath ?? project.repoPath;
+
+    // Reserve the slot synchronously (single-threaded loop ⇒ no double-spawn). On a DB failure, roll
+    // the slot back to free so it never leaks as "busy" with no backing session row.
+    try {
+      this.store.updateSlot(free.id, {
+        ticketId: null,
+        repoPath: project.repoPath,
+        tmuxSession: sessionName,
+        status: "busy",
+      });
+      this.store.insertWorktreeSession({
+        slotId: free.id,
+        project: input.project,
+        branch,
+        baseBranch: input.baseBranch,
+        sessionName,
+        createdAt,
+      });
+    } catch (error) {
+      this.store.updateSlot(free.id, { ticketId: null, repoPath: null, tmuxSession: null, status: "free" });
+      this.hub.pushSlots(this.store.listSlots());
+      log.error("réservation slot worktree échouée", { slotId: free.id, error: getErrorMessage(error) });
+      this.hub.pushNotification("Worktree", "Échec de la réservation du slot worktree.");
+      return;
+    }
+    this.hub.pushSlots(this.store.listSlots());
+    this.hub.pushWorktreeSessions(this.store.listWorktreeSessions());
+    log.info("démarrage session worktree", { slotId: free.id, project: input.project, branch });
+
+    try {
+      await this.repoMutex.run(project.repoPath, async () => {
+        await this.system.worktreeRemove(previousRepoPath, path);
+        // The fresh branch forks from origin/<base>, so the base must be fetched first.
+        await this.system.fetch(project.repoPath, input.baseBranch);
+        await this.system.worktreeAdd({ repoPath: project.repoPath, slotPath: path, branch, baseBranch: input.baseBranch });
+      });
+
+      await this.system.copyEnvFiles(project.repoPath, path);
+      await this.system.runWorktreeSetupScript({
+        repoPath: project.repoPath,
+        slotPath: path,
+        branch,
+        baseBranch: input.baseBranch,
+        script: project.worktreeScript ?? null,
+        timeoutMs: project.commitTimeoutMs,
+      });
+      await this.system.installDeps(path, project.commitTimeoutMs);
+
+      const runCmd = project.runScript ?? null;
+      await this.system.spawnShellSession({ sessionName, cwd: path, initialCommand: runCmd ?? undefined });
+      log.info("shell worktree lancé", { slotId: free.id, sessionName, runCmd });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("échec setup session worktree", { slotId: free.id, error: message });
+      await this.cleanupWorktreeSession(free.id);
+      this.hub.pushNotification("Worktree", `Échec du lancement du worktree : ${message}`);
+    }
+  }
+
+  /** Stop a standalone worktree session: kill it, tear down infra, drop the worktree + branch, free the slot. */
+  async stopWorktreeSession(slotId: number): Promise<void> {
+    const session = this.store.getWorktreeSession(slotId);
+    if (!session) return;
+    await this.cleanupWorktreeSession(slotId);
+    log.info("session worktree arrêtée", { slotId });
+    this.pumpQueue();
+  }
+
+  /**
+   * Tear down a standalone worktree session's resources and free its slot. Best-effort teardown of any
+   * project infra (e.g. docker compose) the session spun up, then worktree + local branch removal.
+   */
+  private async cleanupWorktreeSession(slotId: number): Promise<void> {
+    const session = this.store.getWorktreeSession(slotId);
+    if (!session) return;
+    // The DB row + slot are always released in the finally, even if git/tmux teardown throws — a
+    // partial failure must never leave the slot stuck "busy" with a dangling row (slot leak).
+    try {
+      await this.system.killSession(session.sessionName);
+      if (!isProjectKey(session.project)) {
+        log.warn("nettoyage worktree : projet inconnu, worktree potentiellement orphelin", {
+          slotId,
+          project: session.project,
+        });
+      } else {
+        const project = getProject(session.project);
+        await this.system.runWorktreeTeardownScript({
+          repoPath: project.repoPath,
+          slotPath: slotPath(slotId),
+          branch: session.branch,
+          baseBranch: session.baseBranch,
+          script: project.worktreeTeardownScript ?? null,
+          timeoutMs: project.commitTimeoutMs,
+        });
+        await this.repoMutex.run(project.repoPath, async () => {
+          await this.system.worktreeRemove(project.repoPath, slotPath(slotId));
+          await this.system.deleteLocalBranch(project.repoPath, session.branch);
+        });
+      }
+    } finally {
+      this.store.deleteWorktreeSession(slotId);
+      this.store.updateSlot(slotId, { ticketId: null, repoPath: null, tmuxSession: null, status: "free" });
+      this.hub.pushSlots(this.store.listSlots());
+      this.hub.pushWorktreeSessions(this.store.listWorktreeSessions());
+    }
   }
 
   private async launchInSlot(slotId: number, ticketId: string): Promise<void> {
@@ -834,6 +979,13 @@ export class SlotManager {
   // ---- Recovery on boot ----
 
   async recover(): Promise<void> {
+    // Standalone worktree sessions are ephemeral: a backend restart ends them. Clean up any whose
+    // tmux session died, freeing the slot for queued tickets.
+    for (const session of this.store.listWorktreeSessions()) {
+      if (await this.system.hasSession(session.sessionName)) continue;
+      log.info("session worktree terminée à la reprise", { slotId: session.slotId });
+      await this.cleanupWorktreeSession(session.slotId);
+    }
     for (const slot of this.store.listSlots()) {
       if (!slot.ticketId || !slot.tmuxSession) continue;
       const alive = await this.system.hasSession(slot.tmuxSession);

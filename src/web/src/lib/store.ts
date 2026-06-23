@@ -1,4 +1,4 @@
-import type { Comment, Slot, Ticket, WsClientEvent } from "@shared/schemas";
+import type { Comment, Slot, Ticket, WorktreeSession, WsClientEvent } from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
 
 import {
@@ -21,6 +21,7 @@ export interface Toast {
 export interface BoardState {
   tickets: Ticket[];
   slots: Slot[];
+  worktreeSessions: WorktreeSession[];
   connected: boolean;
   toasts: Toast[];
   openTicketId: string | null;
@@ -30,7 +31,7 @@ type Listener = () => void;
 type CommentListener = (comment: Comment) => void;
 
 class BoardStore {
-  private state: BoardState = { tickets: [], slots: [], connected: false, toasts: [], openTicketId: null };
+  private state: BoardState = { tickets: [], slots: [], worktreeSessions: [], connected: false, toasts: [], openTicketId: null };
   private readonly listeners = new Set<Listener>();
   private readonly commentListeners = new Set<CommentListener>();
   private toastSeq = 0;
@@ -82,7 +83,7 @@ class BoardStore {
   private apply(event: WsClientEvent): void {
     switch (event.type) {
       case "snapshot":
-        this.set({ tickets: event.tickets, slots: event.slots });
+        this.set({ tickets: event.tickets, slots: event.slots, worktreeSessions: event.worktreeSessions });
         break;
       case "ticket":
         this.set({ tickets: this.upsertTicket(event.ticket) });
@@ -92,6 +93,9 @@ class BoardStore {
         break;
       case "slots":
         this.set({ slots: event.slots });
+        break;
+      case "worktree_sessions":
+        this.set({ worktreeSessions: event.worktreeSessions });
         break;
       case "comment":
         // Not part of the board snapshot; fan out to whichever ticket detail is open.

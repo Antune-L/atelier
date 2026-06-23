@@ -253,6 +253,28 @@ export const slotSchema = z.object({
 });
 export type Slot = z.infer<typeof slotSchema>;
 
+/**
+ * A standalone, ticket-less runnable worktree session: a fresh branch forked off a selected base,
+ * set up exactly like a "Tester la fonctionnalité" session but tied to no card (pure infrastructure).
+ * Persisted so the sessions survive a restart, can be listed/stopped, and are recovered cleanly.
+ */
+export const worktreeSessionSchema = z.object({
+  slotId: z.number().int(),
+  project: projectKeySchema,
+  branch: z.string(),
+  baseBranch: z.string(),
+  sessionName: z.string(),
+  createdAt: z.number().int(),
+});
+export type WorktreeSession = z.infer<typeof worktreeSessionSchema>;
+
+/** browser → backend: launch a standalone worktree session on a fresh branch off the selected base. */
+export const startWorktreeSessionBodySchema = z.object({
+  project: projectKeySchema,
+  baseBranch: z.string().min(1),
+});
+export type StartWorktreeSessionBody = z.infer<typeof startWorktreeSessionBodySchema>;
+
 export const projectInfoSchema = z.object({
   key: projectKeySchema,
   label: z.string(),
@@ -475,11 +497,17 @@ export type Capabilities = z.infer<typeof capabilitiesSchema>;
 // ---- WebSocket (backend → client) ----
 
 export const wsClientEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("snapshot"), tickets: z.array(ticketSchema), slots: z.array(slotSchema) }),
+  z.object({
+    type: z.literal("snapshot"),
+    tickets: z.array(ticketSchema),
+    slots: z.array(slotSchema),
+    worktreeSessions: z.array(worktreeSessionSchema),
+  }),
   z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
   z.object({ type: z.literal("ticket_removed"), ticketId: z.string() }),
   z.object({ type: z.literal("comment"), comment: commentSchema }),
   z.object({ type: z.literal("slots"), slots: z.array(slotSchema) }),
+  z.object({ type: z.literal("worktree_sessions"), worktreeSessions: z.array(worktreeSessionSchema) }),
   z.object({
     type: z.literal("notification"),
     title: z.string(),

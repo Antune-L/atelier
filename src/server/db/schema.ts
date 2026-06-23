@@ -83,6 +83,15 @@ CREATE TABLE IF NOT EXISTS slots (
   status TEXT NOT NULL DEFAULT 'free'
 );
 
+CREATE TABLE IF NOT EXISTS worktree_sessions (
+  slot_id INTEGER PRIMARY KEY REFERENCES slots(id),
+  project TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  base_branch TEXT NOT NULL,
+  session_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

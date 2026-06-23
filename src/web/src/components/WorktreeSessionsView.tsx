@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GitBranch, RotateCw } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, GitBranch, RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
@@ -65,29 +65,49 @@ export function WorktreeSessionsView({ projects }: WorktreeSessionsViewProps): R
         return (
           <div key={session.slotId} className="rounded-md border bg-card">
             <div className="flex items-center justify-between gap-4 p-3">
-              <button
-                type="button"
-                onClick={() => setExpanded((current) => (current === session.slotId ? null : session.slotId))}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                aria-expanded={isExpanded}
-                aria-controls={`worktree-terminal-${session.slotId}`}
-              >
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <div className="flex items-center gap-2">
-                    <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate font-mono text-sm">{session.branch}</span>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setExpanded((current) => (current === session.slotId ? null : session.slotId))}
+                  className="flex min-w-0 items-center gap-2 text-left"
+                  aria-expanded={isExpanded}
+                  aria-controls={`worktree-terminal-${session.slotId}`}
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-mono text-sm">{session.branch}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {labelFor(session.project)} · base {session.baseBranch} · slot {session.slotId} ·{" "}
+                      {new Date(session.createdAt).toLocaleString()}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {labelFor(session.project)} · base {session.baseBranch} · slot {session.slotId} ·{" "}
-                    {new Date(session.createdAt).toLocaleString()}
-                  </p>
-                </div>
-              </button>
+                </button>
+                {session.addresses.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 pl-6">
+                    {session.addresses.map((addr) => (
+                      <a
+                        key={addr.url}
+                        href={addr.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                        <span>{addr.label}</span>
+                        <span className="font-mono">{addr.url}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <Button
                   variant="outline"

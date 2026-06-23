@@ -58,6 +58,13 @@ const projectConfigSchema = z.object({
   instructions: z.string().optional(),
   /** Optional CSS color value used as the background of the project badge on ticket cards. */
   color: z.string().optional(),
+  /**
+   * Per-worktree app/service ports, displayed in the worktree session detail. Each address URL is
+   * `http://localhost:${base + offset}` where `offset` is read from `<slot>/.wt-offset` (written by
+   * the project's setup-worktree.sh). Lets the user open the running frontend/backend/etc. of an
+   * isolated worktree session.
+   */
+  worktreePorts: z.array(z.object({ label: z.string().min(1), base: z.number().int().positive() })).optional(),
 });
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;

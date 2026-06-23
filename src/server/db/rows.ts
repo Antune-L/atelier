@@ -241,5 +241,6 @@ export function mapWorktreeSessionRow(raw: unknown): WorktreeSession {
     baseBranch: row.base_branch,
     sessionName: row.session_name,
     createdAt: row.created_at,
+    addresses: [],
   };
 }

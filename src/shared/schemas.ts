@@ -264,6 +264,10 @@ export const slotSchema = z.object({
 });
 export type Slot = z.infer<typeof slotSchema>;
 
+/** A clickable address of a running worktree app/service (e.g. frontend, backend). */
+export const worktreeAddressSchema = z.object({ label: z.string(), url: z.string() });
+export type WorktreeAddress = z.infer<typeof worktreeAddressSchema>;
+
 /**
  * A standalone, ticket-less runnable worktree session: a fresh branch forked off a selected base,
  * set up exactly like a "Tester la fonctionnalité" session but tied to no card (pure infrastructure).
@@ -276,6 +280,8 @@ export const worktreeSessionSchema = z.object({
   baseBranch: z.string(),
   sessionName: z.string(),
   createdAt: z.number().int(),
+  /** Derived at read time from the project's worktreePorts and the slot's .wt-offset. Never persisted. */
+  addresses: z.array(worktreeAddressSchema).default([]),
 });
 export type WorktreeSession = z.infer<typeof worktreeSessionSchema>;
 

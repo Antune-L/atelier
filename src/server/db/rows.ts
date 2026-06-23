@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { Comment, Profile, Slot, Ticket } from "../../shared/schemas.ts";
+import type { Comment, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentEffortSchema,
   agentModelSchema,
@@ -107,6 +107,16 @@ const slotRowSchema = z.object({
   status: z.string(),
 });
 export type SlotRow = z.infer<typeof slotRowSchema>;
+
+const worktreeSessionRowSchema = z.object({
+  slot_id: z.number(),
+  project: z.string(),
+  branch: z.string(),
+  base_branch: z.string(),
+  session_name: z.string(),
+  created_at: z.number(),
+});
+export type WorktreeSessionRow = z.infer<typeof worktreeSessionRowSchema>;
 
 const ticketColumnSchema = columnSchema;
 const ticketStageSchema = stageSchema.nullable();
@@ -219,5 +229,17 @@ export function mapSlotRow(raw: unknown): Slot {
     repoPath: row.repo_path,
     tmuxSession: row.tmux_session,
     status: slotStatusSchema.parse(row.status),
+  };
+}
+
+export function mapWorktreeSessionRow(raw: unknown): WorktreeSession {
+  const row = worktreeSessionRowSchema.parse(raw);
+  return {
+    slotId: row.slot_id,
+    project: projectSchema.parse(row.project),
+    branch: row.branch,
+    baseBranch: row.base_branch,
+    sessionName: row.session_name,
+    createdAt: row.created_at,
   };
 }

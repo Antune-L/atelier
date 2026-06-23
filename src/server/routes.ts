@@ -16,6 +16,7 @@ import {
   deriveTitleFromDescription,
   importTicketsSchema,
   moveTicketSchema,
+  startWorktreeSessionBodySchema,
   updateAppSettingsSchema,
   updateProfileSchema,
   updateTicketSchema,
@@ -753,6 +754,24 @@ export function createApiRoutes(deps: RouteDeps) {
     .delete("/terminals/:id", async ({ params }) => {
       // Idempotent: closing an unknown/already-dead terminal is a no-op.
       await deps.userTerminals.close(params.id);
+      return { ok: true };
+    })
+    .get("/worktree-sessions", () => slots.listWorktreeSessions())
+    .post("/worktree-sessions", ({ body, set }) => {
+      const parsed = startWorktreeSessionBodySchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      if (!store.findFreeSlot()) return jsonError(set, HTTP_CONFLICT, "Aucun slot libre — réessaie une fois un slot libéré.");
+      // Slow git worktree setup + install runs in the background; the board updates live over WS.
+      void slots.startWorktreeSession(parsed.data).catch((e) => {
+        log.error("démarrage session worktree échoué", { error: getErrorMessage(e) });
+      });
+      return { started: true };
+    })
+    .delete("/worktree-sessions/:slotId", async ({ params, set }) => {
+      const slotId = Number(params.slotId);
+      if (!Number.isInteger(slotId) || slotId <= 0) return jsonError(set, HTTP_BAD_REQUEST, "slotId invalide");
+      await slots.stopWorktreeSession(slotId);
       return { ok: true };
     })
     .post("/uploads", async ({ body, set }) => {

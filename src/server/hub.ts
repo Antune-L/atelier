@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
 
-import type { Comment, Slot, Ticket, WsClientEvent } from "../shared/schemas.ts";
+import type { Comment, Slot, Ticket, WorktreeSession, WsClientEvent } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
 
@@ -33,6 +33,7 @@ export class ClientHub {
       type: "snapshot",
       tickets: this.store.listTickets(false),
       slots: this.store.listSlots(),
+      worktreeSessions: this.store.listWorktreeSessions(),
     };
     ws.send(JSON.stringify(event));
   }
@@ -58,6 +59,10 @@ export class ClientHub {
 
   pushSlots(slots: Slot[]): void {
     this.broadcast({ type: "slots", slots });
+  }
+
+  pushWorktreeSessions(worktreeSessions: WorktreeSession[]): void {
+    this.broadcast({ type: "worktree_sessions", worktreeSessions });
   }
 
   pushNotification(title: string, body: string, ticketId?: string, sound?: boolean): void {

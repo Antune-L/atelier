@@ -142,6 +142,10 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void> {
+    this.log("runWorktreeTeardownScript", { repoPath: opts.repoPath, slotPath: opts.slotPath, script: opts.script });
+  }
+
   async installDeps(slotPath: string, timeoutMs: number): Promise<void> {
     this.log("installDeps", { slotPath, timeoutMs });
     await delay(FAKE_SETTLE_MS);
@@ -172,7 +176,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {
-    this.log("spawnShellSession", { sessionName: opts.sessionName, cwd: opts.cwd });
+    this.log("spawnShellSession", { sessionName: opts.sessionName, cwd: opts.cwd, initialCommand: opts.initialCommand });
     // Overwrite any existing live session of that name (mirrors real.ts reclaiming an orphan): a
     // name collision after a restart must not throw — the Set/Map writes below replace the zombie.
     this.liveSessions.add(opts.sessionName);

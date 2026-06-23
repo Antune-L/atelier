@@ -11,6 +11,7 @@ import {
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
+import { createLogger } from "../logger.ts";
 
 import type {
   DoneGateResult,
@@ -26,6 +27,8 @@ import type {
   SystemAdapter,
   WorktreeSetupOptions,
 } from "./types.ts";
+
+const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
 const PROD_ENV_MARKER = "prod";
@@ -117,6 +120,8 @@ interface ShellRunResult {
 
 /** Conventional worktree setup script paths (relative to the repo), tried in order when no explicit command is configured. */
 const WORKTREE_SETUP_CANDIDATES = ["scripts/setup-worktree.sh", "setup-worktree.sh", ".kanban/setup-worktree.sh"] as const;
+/** Conventional worktree teardown script paths (relative to the repo), tried in order when no explicit command is configured. */
+const WORKTREE_TEARDOWN_CANDIDATES = ["scripts/teardown-worktree.sh", "teardown-worktree.sh", ".kanban/teardown-worktree.sh"] as const;
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
 /** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
@@ -296,6 +301,29 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void> {
+    // An explicit config command is trusted input run verbatim through `sh -c`; the auto-detected
+    // path is pre-quoted by detectWorktreeTeardownCommand.
+    const command = opts.script ?? (await detectWorktreeTeardownCommand(opts.repoPath));
+    if (command === null) return;
+    // Best-effort cleanup: a failure here (timeout or non-zero exit) is logged but never thrown so the
+    // worktree removal that follows always proceeds.
+    const res = await this.runShell(command, opts.slotPath, opts.timeoutMs, {
+      WORKTREE_PATH: opts.slotPath,
+      REPO_PATH: opts.repoPath,
+      BRANCH: opts.branch,
+      BASE_BRANCH: opts.baseBranch,
+    });
+    if (res.timedOut) {
+      log.warn("timeout du script de teardown du worktree (ignoré)", { command, timeoutMs: opts.timeoutMs });
+      return;
+    }
+    if (res.exitCode !== 0) {
+      const detail = (res.stderr + res.stdout).trim().slice(-INSTALL_ERROR_TAIL);
+      log.warn("script de teardown du worktree en échec (ignoré)", { command, exitCode: res.exitCode, detail });
+    }
+  }
+
   async installDeps(slotPath: string, timeoutMs: number): Promise<void> {
     const command = await detectInstallCommand(slotPath);
     const res = await this.runShell(command, slotPath, timeoutMs);
@@ -407,6 +435,13 @@ export class RealSystemAdapter implements SystemAdapter {
     // but `nextId` resets to 1 each process, so the derived name can collide with an orphan — without
     // this `new-session` would fail and the POST would throw. Killing it (nothrow) is a no-op when absent.
     await $`tmux kill-session -t ${opts.sessionName}`.nothrow().quiet();
+    if (opts.initialCommand !== undefined) {
+      // Auto-run the launch command, then `exec zsh -l` so the user keeps an interactive worktree
+      // shell once it exits/stops. `wrapped` is passed as a single `zsh -lc` argument.
+      const wrapped = `${opts.initialCommand}; exec zsh -l`;
+      await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -lc ${wrapped}`.quiet();
+      return;
+    }
     // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
     // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -l`.quiet();
@@ -771,6 +806,19 @@ const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
  */
 async function detectWorktreeSetupCommand(repoPath: string): Promise<string | null> {
   for (const rel of WORKTREE_SETUP_CANDIDATES) {
+    const absolute = join(repoPath, rel);
+    if (await Bun.file(absolute).exists()) return `sh ${shQuote(absolute)}`;
+  }
+  return null;
+}
+
+/**
+ * First conventional teardown script that exists in the repo, returned as a `sh <absolutePath>`
+ * command (so it runs without a +x bit). Null when none is present (no-op). Mirrors
+ * detectWorktreeSetupCommand; runs from the slot's cwd.
+ */
+async function detectWorktreeTeardownCommand(repoPath: string): Promise<string | null> {
+  for (const rel of WORKTREE_TEARDOWN_CANDIDATES) {
     const absolute = join(repoPath, rel);
     if (await Bun.file(absolute).exists()) return `sh ${shQuote(absolute)}`;
   }

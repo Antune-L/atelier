@@ -16,6 +16,8 @@ interface LiveTerminalProps {
    * session should be live, the view retries instead of freezing on "session terminée".
    */
   live?: boolean;
+  /** Start with input enabled — used for the test shell so the user can type immediately. */
+  defaultInput?: boolean;
 }
 
 function badgeLabelFor(exited: boolean, inputActive: boolean): string {
@@ -29,11 +31,11 @@ function badgeLabelFor(exited: boolean, inputActive: boolean): string {
  * into xterm.js and relays keystrokes/resize back. Input is off by default (co-control,
  * so toggling it sends no signal to the agent); the pane keeps running either way.
  */
-export function LiveTerminal({ ticketId, fill = false, live = true }: LiveTerminalProps) {
+export function LiveTerminal({ ticketId, fill = false, live = true, defaultInput }: LiveTerminalProps) {
   const inputEnabledRef = useRef(false);
   const liveRef = useRef(live);
 
-  const [inputEnabled, setInputEnabled] = useState(false);
+  const [inputEnabled, setInputEnabled] = useState(defaultInput ?? false);
   const [fullscreen, setFullscreen] = useState(false);
 
   // Read the latest liveness inside the socket callbacks without remounting the terminal on change.

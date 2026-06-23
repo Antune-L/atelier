@@ -244,13 +244,15 @@ export class TerminalSessionManager {
     // ticket's slot is reassigned mid-connection (see TerminalSocketData.resolvedSessionName).
     ws.data.resolvedSessionName = sessionName;
     // An agent pane is a full-screen TUI whose scrollback stacks duplicate frames on resize, so seed
-    // from the visible frame only; a user terminal is a plain shell where past commands are worth
-    // replaying on reopen. terminalId addresses a user terminal; ticketId an agent.
-    const isUserTerminal = ws.data.terminalId !== undefined;
-    const seedHistoryLines = isUserTerminal ? TERMINAL_SEED_HISTORY_LINES : 0;
+    // from the visible frame only; a user terminal — and a test session, which is a plain interactive
+    // shell (no Claude) — replays past commands on reopen and never reprints on reflow. terminalId
+    // addresses a user terminal; a `testing` ticket addresses a shell pane; any other ticketId an agent.
+    const ticket = ws.data.ticketId !== undefined ? this.store.getTicket(ws.data.ticketId) : undefined;
+    const isShellPane = ws.data.terminalId !== undefined || ticket?.testing === true;
+    const seedHistoryLines = isShellPane ? TERMINAL_SEED_HISTORY_LINES : 0;
     // Only an agent pane reprints on reflow, and only when the size actually changes. attach() owns the
     // reflow so that, on the reprint path, the live stream is attached before the resize (see attach()).
-    const willReprint = !isUserTerminal && (await this.willResize(sessionName, cols, rows));
+    const willReprint = !isShellPane && (await this.willResize(sessionName, cols, rows));
     const session = this.sessions.get(sessionName) ?? this.createSession(sessionName, seedHistoryLines);
     session.viewers.add(ws);
     await session.attach(ws, willReprint);

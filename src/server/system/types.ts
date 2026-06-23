@@ -113,6 +113,11 @@ export interface ReviewDoneOptions {
 export interface SpawnShellOptions {
   sessionName: string;
   cwd: string;
+  /**
+   * Command auto-run when the shell starts; the shell stays interactive afterward (`exec zsh -l`) so
+   * the user keeps the worktree shell after the launched command exits or is stopped.
+   */
+  initialCommand?: string;
 }
 
 export interface SystemAdapter {
@@ -139,6 +144,12 @@ export interface SystemAdapter {
   copyEnvFiles(repoPath: string, slotPath: string): Promise<void>;
   /** Run the project's worktree setup script (explicit config command, else auto-detected) in the freshly-created slot worktree. No-op when neither exists. Throws on non-zero exit. */
   runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void>;
+  /**
+   * Symmetric to runWorktreeSetupScript; best-effort cleanup run before worktree removal (e.g. docker
+   * compose down). Never throws (logs on failure) so the removal always proceeds; no-op when no
+   * teardown command/script exists.
+   */
+  runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void>;
   installDeps(slotPath: string, timeoutMs: number): Promise<void>;
 
   // ---- tmux session ----

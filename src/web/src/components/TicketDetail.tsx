@@ -1037,7 +1037,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
-            <LiveTerminal ticketId={current.id} live={sessionLive} fill />
+            <LiveTerminal ticketId={current.id} live={sessionLive} fill defaultInput={current.testing} />
           </div>
         )}
       </div>

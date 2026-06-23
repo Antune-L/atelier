@@ -13,6 +13,8 @@
         "test": "npm test"
       },
       "worktreeScript": "npm run setup:worktree",
+      "runScript": "npm run dev",
+      "worktreeTeardownScript": "docker compose -f docker-compose.worktree.yml down -v --remove-orphans",
       "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent",
       "color": "#6366f1"
     }

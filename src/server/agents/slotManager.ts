@@ -31,7 +31,6 @@ import {
   buildCleanContract,
   buildConflictResolutionContract,
   buildReviewContract,
-  buildTestContract,
   buildTicketContract,
 } from "./contract.ts";
 import {
@@ -84,6 +83,7 @@ const SETUP_PHASES = {
   worktree: "Préparation du worktree…",
   setup: "Configuration du worktree (script projet)…",
   deps: "Installation des dépendances…",
+  launching: "Lancement du projet…",
   spawning: "Démarrage de la session Claude…",
   waiting: "En attente de la première sortie de l'agent…",
 } as const;
@@ -214,11 +214,12 @@ export class SlotManager {
 
   /**
    * Spawn an interactive test session for a finished feature: reserve a free slot, recreate a
-   * worktree on the card's EXISTING feature branch (fetched from origin after the slot was
-   * released), install deps + run the project setup, then spawn a Claude session the user drives via
-   * the terminal. No pipeline, no gate, no PR, no queue. The card stays in "Fini" (column/stage
-   * untouched) — the `testing` flag is the only marker. Eligibility is re-checked here (the route
-   * also validates) so a double click can't double-spawn.
+   * runnable worktree on the card's EXISTING feature branch (fetched from origin after the slot was
+   * released), run the project setup + install deps, then spawn a PLAIN interactive shell that
+   * auto-runs the project's launch command (`runScript`) and hands control to the user via the
+   * terminal. No Claude, no contract, no pipeline, no gate, no PR, no queue. The card stays in "Fini"
+   * (column/stage untouched) — the `testing` flag is the only marker. Eligibility is re-checked here
+   * (the route also validates) so a double click can't double-spawn.
    */
   async startTestSession(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
@@ -272,7 +273,6 @@ export class SlotManager {
         await this.system.worktreeAddExisting(project.repoPath, path, branch);
       });
 
-      await this.depositSlotFiles(path, ticket, free.id);
       await this.system.copyEnvFiles(project.repoPath, path);
 
       // Testing demands a runnable worktree — never skip setup/install (unlike an ask ticket).
@@ -288,25 +288,15 @@ export class SlotManager {
       this.setPhase(ticketId, SETUP_PHASES.deps);
       await this.system.installDeps(path, project.commitTimeoutMs);
 
-      this.setPhase(ticketId, SETUP_PHASES.spawning);
-      await this.system.spawnSession({
-        sessionName,
-        cwd: path,
-        model: ticket.model ?? MODELS.implement,
-        effort: ticket.effort ?? MODELS.implementEffort,
-        env: {
-          TICKET_ID: ticketId,
-          SLOT_ID: String(free.id),
-          BACKEND_WS: this.config.backendWs,
-          DISABLE_AUTOUPDATER: "1",
-        },
-      });
-      this.setPhase(ticketId, SETUP_PHASES.waiting);
-      this.store.logEvent(ticketId, "session_spawned", { slotId: free.id, sessionName });
-      log.info("session de test spawnée", { ticketId, slotId: free.id, sessionName });
-
-      // Delivers the test contract once the worker connects (stage stays "done" → no escalation).
-      void this.deliverContractWhenReady(ticketId);
+      // Plain interactive shell (no Claude, no contract, no worker) that auto-runs the project's
+      // launch command, then stays open for the user. A project without `runScript` drops into a bare
+      // shell with no auto-launch.
+      const runCmd = project.runScript ?? null;
+      this.setPhase(ticketId, SETUP_PHASES.launching);
+      await this.system.spawnShellSession({ sessionName, cwd: path, initialCommand: runCmd ?? undefined });
+      this.store.logEvent(ticketId, "test_session_launched", { slotId: free.id, sessionName, runCmd });
+      this.clearPhase(ticketId);
+      log.info("shell de test lancé", { ticketId, slotId: free.id, sessionName, runCmd });
     } catch (error) {
       this.clearPhase(ticketId);
       // Not markFailed: a test setup failure must not flip the card to "failed". Free the slot and
@@ -502,7 +492,6 @@ export class SlotManager {
 
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
-    if (ticket.testing) return buildTestContract(ticket);
     if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
     if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
@@ -547,13 +536,6 @@ export class SlotManager {
   private async handleWorkerConnectTimeout(ticketId: string): Promise<void> {
     if (this.workerHub.isConnected(ticketId)) return;
     log.warn("worker jamais connecté dans la fenêtre de spawn", { ticketId });
-    // A test session is never auto-reclaimed (tryAutoReclaim returns "ignore"), which would leave the
-    // slot busy + the card stuck on "Test en cours" forever. Tear it down cleanly instead, as if the
-    // user had clicked "Arrêter le test" (the card stays in "Fini").
-    if (this.store.getTicket(ticketId)?.testing) {
-      await this.stopTestSession(ticketId);
-      return;
-    }
     const outcome = await this.tryAutoReclaim(ticketId, "worker jamais connecté au spawn");
     if (outcome !== "escalate") return;
     const ticket = this.store.getTicket(ticketId);
@@ -789,6 +771,18 @@ export class SlotManager {
     if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
     if (!isProjectKey(ticket.project)) return;
     const project = getProject(ticket.project);
+    // A test session may have spun up project infrastructure (e.g. docker compose) in the worktree.
+    // Tear it down before the worktree is removed; best-effort (never throws) so removal proceeds.
+    if (ticket.testing) {
+      await this.system.runWorktreeTeardownScript({
+        repoPath: project.repoPath,
+        slotPath: slotPath(slotId),
+        branch: ticket.branch ?? "",
+        baseBranch: ticket.baseBranch ?? project.baseBranch,
+        script: project.worktreeTeardownScript ?? null,
+        timeoutMs: project.commitTimeoutMs,
+      });
+    }
     await this.repoMutex.run(project.repoPath, async () => {
       await this.system.worktreeRemove(project.repoPath, slotPath(slotId));
       if (ticket.branch) await this.system.deleteLocalBranch(project.repoPath, ticket.branch);

@@ -43,6 +43,17 @@ const projectConfigSchema = z.object({
    * must write only gitignored paths — any tracked change it leaves would fail the done() clean-tree gate.
    */
   worktreeScript: z.string().optional(),
+  /**
+   * Command auto-run in the interactive test shell to launch the app (e.g. "pnpm dev"). When absent,
+   * "Tester la feature" drops into a plain shell with no auto-launch.
+   */
+  runScript: z.string().optional(),
+  /**
+   * Command run in the worktree when a test session stops, BEFORE the worktree is removed (e.g.
+   * `docker compose down`). Symmetric to `worktreeScript`. If absent, a conventional
+   * `teardown-worktree.sh` is auto-detected. Best-effort: a failure never blocks the worktree removal.
+   */
+  worktreeTeardownScript: z.string().optional(),
   /** Project-specific agent instructions injected into the ticket contract. */
   instructions: z.string().optional(),
   /** Optional CSS color value used as the background of the project badge on ticket cards. */

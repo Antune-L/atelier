@@ -1188,7 +1188,7 @@ function TriageSection({
               <p className="text-xs font-semibold text-muted-foreground">
                 Questions
               </p>
-              <ul className="list-disc pl-5">
+              <ul className="list-disc pl-5 text-amber-600 dark:text-amber-500">
                 {result.questions.map((question) => (
                   <li key={question}>{question}</li>
                 ))}

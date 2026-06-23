@@ -1,7 +1,7 @@
 # Graph Report - kanban-agents  (2026-06-23)
 
 ## Corpus Check
-- 136 files · ~98,354 words
+- 138 files · ~100,423 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `317c6a01`
+- Built from commit: `19fbb7e4`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -352,20 +352,20 @@ Cohesion: 0.67
 Nodes (3): loadOnce(), subscribers, useProjects()
 
 ## Knowledge Gaps
-- **383 isolated node(s):** `log`, `CLAUDE_JSON_PATH`, `READONLY_SCOUT_TOOLS`, `READONLY_SCOUT_DISALLOWED`, `FEASIBILITY_SCOUT_AGENTS_JSON` (+378 more)
+- **383 isolated node(s):** `Tab`, `TAB_TITLES`, `TabButtonProps`, `log`, `CLAUDE_JSON_PATH` (+378 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **11 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Ticket` connect `Ticket Lifecycle` to `Slot & Project Config`, `Agents & Ticket UI`, `Ticket Store Types`, `Agent Config Constants`, `API Schemas & Inputs`, `PR & Ticket Panels`, `Coordinator & Hub Wiring`, `Store & Profiles`, `Triage Manager`, `API Routes & Schemas`, `Board Store & Notifications`, `DB Rows & Mapping`, `Client Hub & Watchdog`, `Pricing & Token Cost`, `App & Board Root`, `Board Columns`?**
-  _High betweenness centrality (0.042) - this node is a cross-community bridge._
 - **Why does `RealSystemAdapter` connect `Review Done Gate (E2E)` to `Terminal Session Manager`, `Triage Prompt Builder`, `Real Worktree Shell Ops`, `System Adapter Types`?**
-  _High betweenness centrality (0.038) - this node is a cross-community bridge._
-- **Why does `boot()` connect `Desktop Bootstrap` to `Terminal Session Manager`, `Server Entry & Static`?**
-  _High betweenness centrality (0.031) - this node is a cross-community bridge._
-- **What connects `log`, `CLAUDE_JSON_PATH`, `READONLY_SCOUT_TOOLS` to the rest of the system?**
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+- **Why does `Ticket` connect `Ticket Lifecycle` to `Slot & Project Config`, `Agents & Ticket UI`, `Ticket Store Types`, `Agent Config Constants`, `API Schemas & Inputs`, `PR & Ticket Panels`, `Coordinator & Hub Wiring`, `Store & Profiles`, `Triage Manager`, `API Routes & Schemas`, `Board Store & Notifications`, `DB Rows & Mapping`, `Client Hub & Watchdog`, `Pricing & Token Cost`, `App & Board Root`, `Board Columns`?**
+  _High betweenness centrality (0.039) - this node is a cross-community bridge._
+- **Why does `cn()` connect `UI Utilities & Layout` to `Agents & Ticket UI`, `Terminal Split View`, `Agent Config Constants`, `PR & Ticket Panels`, `Chart Components`, `Stats Charts & Records`, `Agent Profile & Ask Panel`, `Agent Knobs & Models`, `User Terminal Manager`, `Database Schema & Seed`, `Ticket Detail & Forms`, `Board Store & Notifications`, `PR Selection`, `App & Board Root`, `Board Columns`, `Terminals View & Modals`?**
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **What connects `Tab`, `TAB_TITLES`, `TabButtonProps` to the rest of the system?**
   _386 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Slot & Project Config` be split into smaller, more focused modules?**
   _Cohesion score 0.052503052503052504 - nodes in this community are weakly interconnected._

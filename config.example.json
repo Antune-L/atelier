@@ -16,7 +16,12 @@
       "runScript": "npm run dev",
       "worktreeTeardownScript": "docker compose -f docker-compose.worktree.yml down -v --remove-orphans",
       "instructions": "(optionnel) consignes spécifiques au projet injectées dans le contrat de l'agent",
-      "color": "#6366f1"
+      "color": "#6366f1",
+      "worktreePorts": [
+        { "label": "frontend", "base": 3000 },
+        { "label": "backend", "base": 3001 },
+        { "label": "email", "base": 3002 }
+      ]
     }
   },
   "models": {

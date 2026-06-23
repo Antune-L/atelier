@@ -15,11 +15,17 @@ import {
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import { commitLanguageSchema } from "../../shared/schemas.ts";
 import type { AppSettings, Comment, Profile, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import type { ProjectKey } from "../config.ts";
 
 import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
+
+/** Attach the runtime-derived clickable addresses to a persisted worktree session row. */
+function enrichWorktreeSession(session: WorktreeSession): WorktreeSession {
+  return { ...session, addresses: computeWorktreeAddresses(session.slotId, session.project) };
+}
 
 export interface NewTicket {
   title: string;
@@ -532,15 +538,15 @@ export class Store {
 
   listWorktreeSessions(): WorktreeSession[] {
     const rows = this.db.query("SELECT * FROM worktree_sessions ORDER BY created_at ASC").all();
-    return rows.map(mapWorktreeSessionRow);
+    return rows.map(mapWorktreeSessionRow).map(enrichWorktreeSession);
   }
 
   getWorktreeSession(slotId: number): WorktreeSession | null {
     const raw = this.db.query("SELECT * FROM worktree_sessions WHERE slot_id = ?").get(slotId);
-    return raw ? mapWorktreeSessionRow(raw) : null;
+    return raw ? enrichWorktreeSession(mapWorktreeSessionRow(raw)) : null;
   }
 
-  insertWorktreeSession(s: WorktreeSession): void {
+  insertWorktreeSession(s: Omit<WorktreeSession, "addresses">): void {
     this.db
       .prepare(
         "INSERT OR REPLACE INTO worktree_sessions (slot_id, project, branch, base_branch, session_name, created_at) VALUES (?, ?, ?, ?, ?, ?)",

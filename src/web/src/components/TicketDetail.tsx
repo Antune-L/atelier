@@ -1170,7 +1170,7 @@ function TriageSection({
 
       {ticket.triageStatus === "done" && result && (
         <div className="space-y-2 text-sm">
-          <p>{result.summary}</p>
+          <Markdown content={result.summary} />
           {result.reasons.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-muted-foreground">

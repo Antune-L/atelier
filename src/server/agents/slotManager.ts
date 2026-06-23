@@ -14,6 +14,7 @@ import {
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
+import type { ProjectConfig } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
@@ -426,6 +427,50 @@ export class SlotManager {
   }
 
   /**
+   * Relaunch a standalone worktree session: kill its running shell/process and respawn it (re-running the
+   * project launch command) in the SAME worktree, keeping the DB row, branch and slot. The previous run's
+   * external infra (e.g. docker compose, port-bound dev server) is torn down first via the project teardown
+   * script — otherwise re-running `runScript` would collide with the still-running instance.
+   */
+  async relaunchWorktreeSession(slotId: number): Promise<void> {
+    const session = this.store.getWorktreeSession(slotId);
+    if (!session) return;
+    if (!isProjectKey(session.project)) {
+      log.warn("relance worktree : projet inconnu, relance annulée", { slotId, project: session.project });
+      return;
+    }
+    const project = getProject(session.project);
+    // Kill the running shell first, then tear down its infra — same order as cleanupWorktreeSession,
+    // so the teardown script doesn't run against the still-live process.
+    await this.system.killSession(session.sessionName);
+    await this.runWorktreeTeardown(project, slotId, session.branch, session.baseBranch);
+    const runCmd = project.runScript ?? null;
+    await this.system.spawnShellSession({
+      sessionName: session.sessionName,
+      cwd: slotPath(slotId),
+      initialCommand: runCmd ?? undefined,
+    });
+    log.info("session worktree relancée", { slotId, sessionName: session.sessionName, runCmd });
+  }
+
+  /** Best-effort teardown of any project infra (e.g. docker compose) a worktree session spun up. */
+  private async runWorktreeTeardown(
+    project: ProjectConfig,
+    slotId: number,
+    branch: string,
+    baseBranch: string,
+  ): Promise<void> {
+    await this.system.runWorktreeTeardownScript({
+      repoPath: project.repoPath,
+      slotPath: slotPath(slotId),
+      branch,
+      baseBranch,
+      script: project.worktreeTeardownScript ?? null,
+      timeoutMs: project.commitTimeoutMs,
+    });
+  }
+
+  /**
    * Tear down a standalone worktree session's resources and free its slot. Best-effort teardown of any
    * project infra (e.g. docker compose) the session spun up, then worktree + local branch removal.
    */
@@ -443,14 +488,7 @@ export class SlotManager {
         });
       } else {
         const project = getProject(session.project);
-        await this.system.runWorktreeTeardownScript({
-          repoPath: project.repoPath,
-          slotPath: slotPath(slotId),
-          branch: session.branch,
-          baseBranch: session.baseBranch,
-          script: project.worktreeTeardownScript ?? null,
-          timeoutMs: project.commitTimeoutMs,
-        });
+        await this.runWorktreeTeardown(project, slotId, session.branch, session.baseBranch);
         await this.repoMutex.run(project.repoPath, async () => {
           await this.system.worktreeRemove(project.repoPath, slotPath(slotId));
           await this.system.deleteLocalBranch(project.repoPath, session.branch);
@@ -919,14 +957,7 @@ export class SlotManager {
     // A test session may have spun up project infrastructure (e.g. docker compose) in the worktree.
     // Tear it down before the worktree is removed; best-effort (never throws) so removal proceeds.
     if (ticket.testing) {
-      await this.system.runWorktreeTeardownScript({
-        repoPath: project.repoPath,
-        slotPath: slotPath(slotId),
-        branch: ticket.branch ?? "",
-        baseBranch: ticket.baseBranch ?? project.baseBranch,
-        script: project.worktreeTeardownScript ?? null,
-        timeoutMs: project.commitTimeoutMs,
-      });
+      await this.runWorktreeTeardown(project, slotId, ticket.branch ?? "", ticket.baseBranch ?? project.baseBranch);
     }
     await this.repoMutex.run(project.repoPath, async () => {
       await this.system.worktreeRemove(project.repoPath, slotPath(slotId));

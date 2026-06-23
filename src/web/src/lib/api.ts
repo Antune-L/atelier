@@ -110,6 +110,8 @@ export const api = {
   listWorktreeSessions: (): Promise<WorktreeSession[]> => request("/api/worktree-sessions"),
   stopWorktreeSession: (slotId: number): Promise<{ ok: boolean }> =>
     request(`/api/worktree-sessions/${slotId}`, { method: "DELETE" }),
+  relaunchWorktreeSession: (slotId: number): Promise<{ ok: boolean }> =>
+    request(`/api/worktree-sessions/${slotId}/relaunch`, { method: "POST" }),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);

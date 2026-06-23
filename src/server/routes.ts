@@ -774,6 +774,12 @@ export function createApiRoutes(deps: RouteDeps) {
       await slots.stopWorktreeSession(slotId);
       return { ok: true };
     })
+    .post("/worktree-sessions/:slotId/relaunch", async ({ params, set }) => {
+      const slotId = Number(params.slotId);
+      if (!Number.isInteger(slotId) || slotId <= 0) return jsonError(set, HTTP_BAD_REQUEST, "slotId invalide");
+      await slots.relaunchWorktreeSession(slotId);
+      return { ok: true };
+    })
     .post("/uploads", async ({ body, set }) => {
       const file = body && typeof body === "object" && "file" in body ? body.file : null;
       if (!(file instanceof File)) return jsonError(set, HTTP_BAD_REQUEST, "fichier manquant");

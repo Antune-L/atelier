@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, RotateCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
@@ -15,11 +15,13 @@ interface WorktreeSessionsViewProps {
 
 /**
  * Lists the active standalone (ticket-less) worktree sessions: project, fresh branch, base branch and
- * creation time, each with a Stop button that tears the session down and frees its slot.
+ * creation time, with a Relaunch button that respawns the session's process in the same worktree and a
+ * Stop button that tears the session down and frees its slot.
  */
 export function WorktreeSessionsView({ projects }: WorktreeSessionsViewProps): ReactNode {
   const { worktreeSessions } = useBoard();
   const [stopping, setStopping] = useState<number | null>(null);
+  const [relaunching, setRelaunching] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const labelFor = (key: string): string => projects.find((p) => p.key === key)?.label ?? key;
@@ -32,6 +34,17 @@ export function WorktreeSessionsView({ projects }: WorktreeSessionsViewProps): R
       boardStore.notify("Arrêt impossible", error instanceof Error ? error.message : "échec");
     } finally {
       setStopping(null);
+    }
+  };
+
+  const relaunch = async (slotId: number): Promise<void> => {
+    setRelaunching(slotId);
+    try {
+      await api.relaunchWorktreeSession(slotId);
+    } catch (error) {
+      boardStore.notify("Relance impossible", error instanceof Error ? error.message : "échec");
+    } finally {
+      setRelaunching(null);
     }
   };
 
@@ -75,13 +88,23 @@ export function WorktreeSessionsView({ projects }: WorktreeSessionsViewProps): R
                   </p>
                 </div>
               </button>
-              <Button
-                variant="outline"
-                onClick={() => void stop(session.slotId)}
-                disabled={stopping === session.slotId}
-              >
-                Stop
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void relaunch(session.slotId)}
+                  disabled={relaunching === session.slotId || stopping === session.slotId}
+                >
+                  <RotateCw className="h-4 w-4" />
+                  Relaunch
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void stop(session.slotId)}
+                  disabled={stopping === session.slotId || relaunching === session.slotId}
+                >
+                  Stop
+                </Button>
+              </div>
             </div>
             {isExpanded && (
               <div id={`worktree-terminal-${session.slotId}`} className="border-t p-3">

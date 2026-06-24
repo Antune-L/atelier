@@ -20,6 +20,9 @@ const dryRunLog = createLogger("dry-run");
 
 const FAKE_SETTLE_MS = 50;
 
+/** Base offset for the deterministic dry-run stealth PR number (createPr). */
+const FAKE_STEALTH_PR_BASE = 900;
+
 /** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
 const FAKE_OPEN_PRS: OpenPr[] = [
   {
@@ -265,6 +268,18 @@ export class FakeSystemAdapter implements SystemAdapter {
   async verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     this.log("verifyDone", { slotPath, branch, prUrl });
     return { ok: true, reason: "" };
+  }
+
+  async verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult> {
+    this.log("verifyStealthReady", { slotPath, branch });
+    return { ok: true, reason: "" };
+  }
+
+  async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
+    this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
+    // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).
+    const prNumber = FAKE_STEALTH_PR_BASE + baseBranch.length;
+    return { ok: true, url: `https://github.com/fake/repo/pull/${prNumber}`, reason: "" };
   }
 
   async fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null> {

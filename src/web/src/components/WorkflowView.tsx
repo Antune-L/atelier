@@ -24,6 +24,7 @@ const COLUMN_NODE_COLOR: Partial<Record<Column, string>> = {
   todo: "#64748b",
   implementing: "#3b82f6",
   prd: "#f59e0b",
+  to_review: "#a855f7",
   done: "#22c55e",
   merged: "#16a34a",
   reviewed: "#16a34a",

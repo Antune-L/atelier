@@ -916,6 +916,113 @@ export class SlotManager {
   }
 
   /**
+   * Stealth ready_for_review: verify the branch is committed + pushed (no PR), then kill the agent
+   * session but KEEP the slot busy and the worktree on disk so the user can test locally. The card
+   * lands in "À review" while still owning its slot (queued tickets won't grab it). No PR is created.
+   */
+  async markReadyForReview(ticketId: string, slotId: number): Promise<{ ok: boolean; reason: string }> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || !ticket.branch) return { ok: false, reason: "ticket ou branche introuvable" };
+    const path = slotPath(slotId);
+
+    log.info("vérification de la gate ready_for_review", { ticketId, slotId, branch: ticket.branch });
+    const gate = await this.system.verifyStealthReady(path, ticket.branch);
+    if (!gate.ok) {
+      // Mirror finishTicket's gate-failure handling exactly (uses the same done_gate event/counter).
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
+      const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
+      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      if (retriable) {
+        this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
+        log.info("gate ready_for_review échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
+        return { ok: false, reason: gate.reason };
+      }
+      log.warn("gate ready_for_review échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
+      await this.lifecycle.stall(
+        ticketId,
+        { title: "Gate ready_for_review échouée", body: `${ticket.title}: ${gate.reason}` },
+        { error: gate.reason },
+      );
+      return { ok: false, reason: gate.reason };
+    }
+
+    // Kill the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
+    // still owns its slot so the user can test locally and queued tickets won't grab it.
+    const slot = this.store.getSlot(slotId);
+    if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
+    this.workerHub.disconnect(ticketId);
+    this.store.updateSlot(slotId, { tmuxSession: null, status: "busy" });
+    this.touch(
+      this.store.updateTicket(ticketId, {
+        column: "to_review",
+        stage: "done",
+        error: null,
+      }),
+    );
+    this.store.logEvent(ticketId, "ready_for_review", {});
+    this.hub.pushSlots(this.store.listSlots());
+    log.info("prêt pour review : session arrêtée, worktree conservé", { ticketId, slotId });
+    await this.notifier.notify("Prêt pour review", `${ticket.title} → à tester localement`, ticket.id);
+    // Slot stays occupied: no pumpQueue.
+    return { ok: true, reason: "" };
+  }
+
+  /**
+   * User clicked "Créer la PR" on an "À review" stealth card: open the PR from the pushed branch,
+   * release the slot, and land the card in "Fini" (done). On failure, surface the error on the card
+   * and keep the slot so the user can retry.
+   */
+  async createStealthPr(ticketId: string): Promise<{ ok: boolean; reason: string; prUrl: string | null }> {
+    const ticket = this.store.getTicket(ticketId);
+    if (
+      !ticket ||
+      ticket.column !== "to_review" ||
+      !ticket.stealth ||
+      ticket.slotId === null ||
+      ticket.branch === null ||
+      !isProjectKey(ticket.project)
+    ) {
+      return { ok: false, reason: "création de PR réservée aux tickets stealth en colonne À review", prUrl: null };
+    }
+    // Re-entrancy guard: two concurrent "Créer la PR" clicks would both pass the column check and open
+    // two PRs (the column only flips to "done" AFTER createPr's awaits). Mark the in-flight stage
+    // synchronously (before the first await) so a second call observes "opening_pr" and bails.
+    if (ticket.stage === "opening_pr") {
+      return { ok: false, reason: "création de PR déjà en cours", prUrl: null };
+    }
+    this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
+    const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
+    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft: ticket.prDraft });
+    if (!result.ok) {
+      // Roll the stage back to the resting "done" so the card stays in "À review" and a retry is allowed.
+      this.touch(this.store.updateTicket(ticketId, { stage: "done", error: result.reason }));
+      log.warn("création de PR stealth échouée", { ticketId, reason: result.reason });
+      return { ok: false, reason: result.reason, prUrl: null };
+    }
+    // Capture the agent's work summary from the PR description before releasing the slot (gh cwd).
+    const agentSummary = await this.system.fetchPrSummary(slotPath(ticket.slotId), result.url);
+    await this.releaseSlot(ticket.slotId, ticket);
+    this.touch(
+      this.store.updateTicket(ticketId, {
+        column: "done",
+        stage: "done",
+        prUrl: result.url,
+        slotId: null,
+        error: null,
+        agentSummary,
+        finishedAt: Date.now(),
+      }),
+    );
+    this.store.logEvent(ticketId, "done", { prUrl: result.url });
+    this.store.logEvent(ticketId, "stealth_pr_created", { prUrl: result.url });
+    log.info("PR stealth créée, slot libéré", { ticketId, prUrl: result.url });
+    await this.notifier.notify("PR créée", `${ticket.title} → PR ouverte`, ticket.id, true);
+    void this.startDependents(ticketId);
+    this.pumpQueue();
+    return { ok: true, reason: "", prUrl: result.url };
+  }
+
+  /**
    * Close an ask ticket once the agent submitted its answer: no gate to verify (the answer is
    * already persisted as a comment by the coordinator), so just release the slot and land the card
    * in the "Répondu" column.

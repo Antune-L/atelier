@@ -591,6 +591,48 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult> {
+    const status = await $`git -C ${slotPath} status --porcelain`.nothrow().quiet();
+    if (status.exitCode !== 0) return { ok: false, reason: "git status a échoué" };
+    if (status.stdout.toString().trim().length > 0) {
+      return { ok: false, reason: "arbre de travail non propre (modifications non commitées)" };
+    }
+    const ahead = await $`git -C ${slotPath} rev-list --count origin/${branch}..${branch}`.nothrow().quiet();
+    if (ahead.exitCode !== 0) {
+      return { ok: false, reason: "la branche n'est pas poussée (ref origin absente ?)" };
+    }
+    if (ahead.stdout.toString().trim() !== "0") {
+      return { ok: false, reason: "la branche n'est pas poussée (commits en avance)" };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
+    // The base branch must exist on origin before `gh pr create --base` can target it.
+    const baseExists = await $`git -C ${slotPath} ls-remote --heads origin ${baseBranch}`.nothrow().quiet();
+    if (baseExists.exitCode !== 0 || baseExists.stdout.toString().trim().length === 0) {
+      const push = await $`git -C ${slotPath} push origin HEAD:refs/heads/${baseBranch}`.nothrow().quiet();
+      if (push.exitCode !== 0) {
+        const detail = push.stderr.toString().trim() || push.stdout.toString().trim();
+        return { ok: false, url: "", reason: `création de la branche de base ${baseBranch} échouée : ${detail}` };
+      }
+    }
+    const res = opts.draft
+      ? await $`gh pr create --draft --base ${baseBranch} --fill`.cwd(slotPath).nothrow().quiet()
+      : await $`gh pr create --base ${baseBranch} --fill`.cwd(slotPath).nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      return { ok: false, url: "", reason: detail || `gh pr create a échoué (code ${res.exitCode})` };
+    }
+    const url = extractPrUrl(res.stdout.toString());
+    // gh can exit 0 without a parseable URL in stdout; treat that as failure rather than persisting an
+    // empty prUrl and landing the card in "done" with a PR that has no link.
+    if (!url.startsWith("http")) {
+      return { ok: false, url: "", reason: "URL de PR introuvable dans la sortie de gh pr create" };
+    }
+    return { ok: true, url, reason: "" };
+  }
+
   async fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null> {
     const res = await $`gh pr view ${prUrl} --json body`.cwd(slotPath).nothrow().quiet();
     if (res.exitCode !== 0) return null;
@@ -922,6 +964,16 @@ function realpathSafe(p: string): string {
   } catch {
     return p;
   }
+}
+
+/** Extract the PR URL from `gh pr create` stdout: prefer the github.com line, else the last non-empty line. */
+function extractPrUrl(stdout: string): string {
+  const lines = stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const ghLine = lines.findLast((line) => line.includes("github.com"));
+  return ghLine ?? lines.at(-1) ?? "";
 }
 
 /** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */

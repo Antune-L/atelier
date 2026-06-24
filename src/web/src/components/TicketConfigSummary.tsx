@@ -140,6 +140,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
               label="Merge automatique"
               value={ticket.autoMerge ? YES : NO}
             />
+            <Row label="À review (sans PR)" value={ticket.stealth ? YES : NO} />
             <Row
               label="Captures d'écran dans la PR"
               value={ticket.addScreenshots && !ticket.autoMerge ? YES : NO}

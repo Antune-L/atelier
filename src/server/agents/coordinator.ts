@@ -5,6 +5,7 @@ import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   doneArgsSchema,
+  readyForReviewArgsSchema,
   failArgsSchema,
   submitAnswerArgsSchema,
   submitFeasibilityArgsSchema,
@@ -106,6 +107,7 @@ export class AgentCoordinator {
     submit_prd: (ctx) => this.handleSubmitPrd(ctx),
     submit_answer: (ctx) => this.handleSubmitAnswer(ctx),
     done: (ctx) => this.handleDone(ctx),
+    ready_for_review: (ctx) => this.handleReadyForReview(ctx),
     fail: (ctx) => this.handleFail(ctx),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
@@ -181,6 +183,21 @@ export class AgentCoordinator {
       return { ok: false, result: `Gate échouée: ${outcome.reason}. Corrige et rappelle done().` };
     }
     return { ok: true, result: "Ticket clôturé, slot libéré." };
+  }
+
+  private async handleReadyForReview(ctx: ToolCallContext): Promise<ToolResult> {
+    const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.kind !== "feature" || !ticket.stealth) {
+      return { ok: false, result: "ready_for_review réservé aux tickets stealth." };
+    }
+    this.lifecycle.beginOpeningPr(ctx.ticketId);
+    const outcome = await this.slots.markReadyForReview(ctx.ticketId, ctx.slotId);
+    if (!outcome.ok) {
+      return { ok: false, result: `Gate échouée: ${outcome.reason}: corrige et rappelle ready_for_review().` };
+    }
+    return { ok: true, result: "Prêt pour review : session arrêtée, worktree conservé." };
   }
 
   private async handleFail(ctx: ToolCallContext): Promise<ToolResult> {

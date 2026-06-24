@@ -92,6 +92,7 @@ export const api = {
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
   startTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/test`, { method: "POST" }),
   stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
+  createStealthPr: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/create-pr`, { method: "POST" }),
   triage: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage`, { method: "POST" }),
   triagePlus: (id: string): Promise<{ started: boolean }> =>

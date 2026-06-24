@@ -42,14 +42,24 @@ interface NewTicketDialogProps {
   open: boolean;
   projects: ProjectInfo[];
   onClose: () => void;
+  initialTab?: Tab;
 }
 
 export function NewTicketDialog({
   open,
   projects,
   onClose,
+  initialTab = "ticket",
 }: NewTicketDialogProps) {
   const [tab, setTab] = useState<Tab>("ticket");
+  // Select the requested tab on each closed→open transition (no-useEffect idiom).
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) {
+    wasOpen.current = true;
+    setTab(initialTab);
+  } else if (!open && wasOpen.current) {
+    wasOpen.current = false;
+  }
   const [title, setTitle] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
   const [description, setDescription] = useState("");

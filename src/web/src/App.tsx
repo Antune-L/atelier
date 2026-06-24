@@ -199,6 +199,7 @@ export function App() {
       <NewTicketDialog
         open={creating}
         projects={projects}
+        initialTab={homeView === "worktree" ? "worktree" : "ticket"}
         onClose={() => setCreating(false)}
       />
       <SettingsModal

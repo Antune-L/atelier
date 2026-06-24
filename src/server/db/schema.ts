@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
+  external_url TEXT,
   project TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'feature',
   review_depth TEXT,
@@ -148,6 +149,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "agent_summary", ddl: "ALTER TABLE tickets ADD COLUMN agent_summary TEXT" },
   { column: "session_usage", ddl: "ALTER TABLE tickets ADD COLUMN session_usage TEXT" },
   { column: "depends_on", ddl: "ALTER TABLE tickets ADD COLUMN depends_on TEXT" },
+  { column: "external_url", ddl: "ALTER TABLE tickets ADD COLUMN external_url TEXT" },
 ];
 
 /**

@@ -30,6 +30,7 @@ function enrichWorktreeSession(session: WorktreeSession): WorktreeSession {
 export interface NewTicket {
   title: string;
   description: string;
+  externalUrl: string | null;
   project: ProjectKey;
   prdEnabled: boolean;
   prDraft: boolean;
@@ -100,6 +101,7 @@ export interface NewAsk {
 export interface TicketPatch {
   title?: string;
   description?: string;
+  externalUrl?: string | null;
   prdEnabled?: boolean;
   prDraft?: boolean;
   autoMerge?: boolean;
@@ -223,13 +225,14 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
         input.title,
         input.description,
+        input.externalUrl,
         input.project,
         input.prdEnabled ? 1 : 0,
         input.prDraft ? 1 : 0,
@@ -327,6 +330,7 @@ export class Store {
 
     if (patch.title !== undefined) set("title", patch.title);
     if (patch.description !== undefined) set("description", patch.description);
+    if (patch.externalUrl !== undefined) set("external_url", patch.externalUrl);
     if (patch.prdEnabled !== undefined) set("prd_enabled", patch.prdEnabled ? 1 : 0);
     if (patch.prDraft !== undefined) set("pr_draft", patch.prDraft ? 1 : 0);
     if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);

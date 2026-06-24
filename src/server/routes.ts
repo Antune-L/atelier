@@ -287,6 +287,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.createTicket({
         title,
         description: parsed.data.description,
+        externalUrl: parsed.data.externalUrl,
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
@@ -338,6 +339,7 @@ export function createApiRoutes(deps: RouteDeps) {
         const ticket = store.createTicket({
           title: row.title.trim(),
           description: row.description,
+          externalUrl: null,
           project: input.project,
           prdEnabled: input.prdEnabled,
           prDraft: input.prDraft,

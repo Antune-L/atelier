@@ -51,6 +51,7 @@ export function NewTicketDialog({
 }: NewTicketDialogProps) {
   const [tab, setTab] = useState<Tab>("ticket");
   const [title, setTitle] = useState("");
+  const [externalUrl, setExternalUrl] = useState("");
   const [description, setDescription] = useState("");
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
@@ -117,6 +118,7 @@ export function NewTicketDialog({
 
   const reset = (): void => {
     setTitle("");
+    setExternalUrl("");
     setDescription("");
     setBaseBranchChoice(null);
     setPrdEnabled(false);
@@ -160,6 +162,7 @@ export function NewTicketDialog({
           : null;
       await api.createTicket({
         title,
+        externalUrl,
         description,
         project,
         prdEnabled,
@@ -256,6 +259,16 @@ export function NewTicketDialog({
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Titre du ticket (déduit de la description si vide)"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="external-url">Lien externe (optionnel)</Label>
+                  <Input
+                    id="external-url"
+                    type="url"
+                    value={externalUrl}
+                    onChange={(e) => setExternalUrl(e.target.value)}
+                    placeholder="https://notion.so/… ou Trello"
                   />
                 </div>
                 <div className="flex flex-1 flex-col space-y-1.5">

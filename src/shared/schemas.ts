@@ -114,6 +114,8 @@ export const ticketSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
+  /** Optional URL to an external tracker card (Notion/Trello); null = none. */
+  externalUrl: z.string().nullable(),
   project: projectKeySchema,
   /** What the ticket delivers: a feature implementation or an autonomous PR review. */
   kind: kindSchema,
@@ -307,6 +309,29 @@ export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
 // ---- API input schemas ----
 
+/** Schemes accepted for an external tracker URL — it ends up rendered into an anchor href. */
+const EXTERNAL_URL_PROTOCOLS = ["http:", "https:"];
+
+/** True when `value` parses as a URL on an http(s) scheme. */
+function isHttpUrl(value: string): boolean {
+  const parsed = z.string().url().safeParse(value);
+  if (!parsed.success) return false;
+  return EXTERNAL_URL_PROTOCOLS.includes(new URL(parsed.data).protocol);
+}
+
+/**
+ * Optional external tracker URL submitted by the UI. The UI may send an empty string when the
+ * field is left blank, so we trim, treat empty as null, and require a valid http(s) URL otherwise.
+ */
+const externalUrlSchema = z
+  .union([z.string(), z.null()])
+  .transform((v) => {
+    if (v === null) return null;
+    const trimmed = v.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  .refine((v) => v === null || isHttpUrl(v), { message: "URL invalide" });
+
 /** Max length of a title auto-derived from the description. */
 const DERIVED_TITLE_MAX_LENGTH = 80;
 
@@ -351,6 +376,8 @@ export const createTicketSchema = ticketBatchOptionsSchema
   .extend({
     title: z.string().default(""),
     description: z.string().default(""),
+    /** Optional URL to an external tracker card (Notion/Trello); empty string → null. */
+    externalUrl: externalUrlSchema.default(null),
     /** Parent ticket this one stacks on (null = none). The PR forks from and targets the parent's branch. */
     dependsOn: z.string().nullable().default(null),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
@@ -385,6 +412,8 @@ export const updateTicketSchema = z.object({
   // server-side, mirroring creation (see deriveTitleFromDescription).
   title: z.string().optional(),
   description: z.string().optional(),
+  // Empty string clears it to null; a non-empty value must be a valid URL.
+  externalUrl: externalUrlSchema.optional(),
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),

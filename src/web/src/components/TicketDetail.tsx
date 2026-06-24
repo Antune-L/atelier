@@ -114,6 +114,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
+  const [editExternalUrl, setEditExternalUrl] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -274,7 +275,9 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
     editing &&
-    (editTitle !== current.title || editDescription !== current.description);
+    (editTitle !== current.title ||
+      editExternalUrl !== (current.externalUrl ?? "") ||
+      editDescription !== current.description);
   const hasUncommittedText =
     newComment.trim().length > 0 ||
     Object.values(reply).some((v) => v.trim().length > 0) ||
@@ -382,6 +385,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
 
   const startEdit = (): void => {
     setEditTitle(current.title);
+    setEditExternalUrl(current.externalUrl ?? "");
     setEditDescription(current.description);
     setEditError(null);
     setEditing(true);
@@ -392,6 +396,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     try {
       await api.updateTicket(ticket.id, {
         title: editTitle.trim(),
+        externalUrl: editExternalUrl,
         description: editDescription,
       });
       setEditing(false);
@@ -566,6 +571,20 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                 </p>
               )}
 
+              {current.externalUrl && (
+                <p className="text-sm">
+                  <span className="font-semibold">Lien externe : </span>
+                  <a
+                    href={current.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-all text-primary underline underline-offset-2 hover:opacity-80"
+                  >
+                    {current.externalUrl}
+                  </a>
+                </p>
+              )}
+
               <TicketCost ticket={current} />
 
               <section className="flex flex-wrap items-center gap-2">
@@ -621,6 +640,18 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
                         placeholder="Titre du ticket (déduit de la description si vide)"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-external-url">
+                        Lien externe (optionnel)
+                      </Label>
+                      <Input
+                        id="edit-external-url"
+                        type="url"
+                        value={editExternalUrl}
+                        onChange={(e) => setEditExternalUrl(e.target.value)}
+                        placeholder="https://notion.so/… ou Trello"
                       />
                     </div>
                     <div className="space-y-1.5">

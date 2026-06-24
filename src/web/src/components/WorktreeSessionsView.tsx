@@ -128,29 +128,6 @@ export function WorktreeSessionsView({ projects }: WorktreeSessionsViewProps): R
             </div>
             {isExpanded && (
               <div id={`worktree-terminal-${session.slotId}`} className="border-t">
-                {session.addresses.length > 0 && (
-                  <details className="border-b">
-                    <summary className="cursor-pointer select-none px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
-                      Addresses ({session.addresses.length})
-                    </summary>
-                    <ul className="flex flex-col gap-1 px-3 pb-2">
-                      {session.addresses.map((addr) => (
-                        <li key={addr.url} className="flex items-center gap-2">
-                          <span className="w-20 shrink-0 truncate text-xs text-muted-foreground">{addr.label}</span>
-                          <a
-                            href={addr.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1 font-mono text-xs hover:underline"
-                          >
-                            <ExternalLink className="h-3 w-3 shrink-0" />
-                            {addr.url}
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
                 <div className="p-3">
                   <div className="h-[60vh]">
                     <LiveTerminal slotId={session.slotId} live fill />

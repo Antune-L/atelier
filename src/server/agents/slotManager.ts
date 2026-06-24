@@ -42,6 +42,7 @@ import {
   resolveTemplatePaths,
   type SlotTemplateContext,
 } from "./slotTemplates.ts";
+import { WorktreeAddressWatcher } from "./worktreeAddressWatcher.ts";
 
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
@@ -127,6 +128,10 @@ export class SlotManager {
   private readonly queue: string[] = [];
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
+  /** Watches each active worktree session's `.wt-offset` to re-push addresses once the dev server writes it. */
+  private readonly watcher = new WorktreeAddressWatcher(() =>
+    this.hub.pushWorktreeSessions(this.store.listWorktreeSessions()),
+  );
 
   /** Current pre-output setup phase for a ticket (null once the agent is producing output). */
   getSetupPhase(ticketId: string): string | null {
@@ -394,6 +399,10 @@ export class SlotManager {
         await this.system.fetch(project.repoPath, input.baseBranch);
         await this.system.worktreeAdd({ repoPath: project.repoPath, slotPath: path, branch, baseBranch: input.baseBranch });
       });
+      // Watch only AFTER worktreeAdd has (re)created the final slot dir — watching earlier would bind a
+      // stale inode (later replaced by the add) or throw ENOENT. The dev server writes `.wt-offset`
+      // only later, so this re-pushes the clickable addresses live without a client reconnect.
+      this.watcher.start(free.id);
 
       await this.system.copyEnvFiles(project.repoPath, path);
       await this.system.runWorktreeSetupScript({
@@ -495,6 +504,7 @@ export class SlotManager {
         });
       }
     } finally {
+      this.watcher.stop(slotId);
       this.store.deleteWorktreeSession(slotId);
       this.store.updateSlot(slotId, { ticketId: null, repoPath: null, tmuxSession: null, status: "free" });
       this.hub.pushSlots(this.store.listSlots());
@@ -1002,6 +1012,7 @@ export class SlotManager {
    * detached tmux server (and the `claude` processes it holds) do not leak past the window close.
    */
   async teardownSessions(): Promise<void> {
+    this.watcher.stopAll();
     for (const slot of this.store.listSlots()) {
       if (slot.tmuxSession) await this.system.killSession(slot.tmuxSession);
     }
@@ -1013,9 +1024,14 @@ export class SlotManager {
     // Standalone worktree sessions are ephemeral: a backend restart ends them. Clean up any whose
     // tmux session died, freeing the slot for queued tickets.
     for (const session of this.store.listWorktreeSessions()) {
-      if (await this.system.hasSession(session.sessionName)) continue;
-      log.info("session worktree terminée à la reprise", { slotId: session.slotId });
-      await this.cleanupWorktreeSession(session.slotId);
+      if (!(await this.system.hasSession(session.sessionName))) {
+        log.info("session worktree terminée à la reprise", { slotId: session.slotId });
+        await this.cleanupWorktreeSession(session.slotId);
+        continue;
+      }
+      // A session whose tmux survived the backend restart keeps running: re-arm its `.wt-offset`
+      // watcher so live address pushes resume (the in-memory watcher map was lost with the restart).
+      this.watcher.start(session.slotId);
     }
     for (const slot of this.store.listSlots()) {
       if (!slot.ticketId || !slot.tmuxSession) continue;

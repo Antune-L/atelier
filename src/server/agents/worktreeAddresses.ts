@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { WorktreeAddress } from "../../shared/schemas.ts";
 import { getProject, isProjectKey, SLOTS_ROOT } from "../config.ts";
 
-const OFFSET_FILE = ".wt-offset";
+/** Per-slot file (written by the running dev server) holding the worktree port offset. */
+export const OFFSET_FILE = ".wt-offset";
 /** A `.wt-offset` holds a single non-negative integer (the per-worktree port offset). */
 const OFFSET_PATTERN = /^\d+$/;
 

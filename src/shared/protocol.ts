@@ -64,6 +64,8 @@ export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 
 export const doneArgsSchema = z.object({ pr_url: z.string().url() });
 
+export const readyForReviewArgsSchema = z.object({});
+
 export const failArgsSchema = z.object({
   reason: z.string().min(1),
   findings: z.string().default(""),
@@ -132,6 +134,12 @@ export const WORKER_TOOLS = [
     argsSchema: doneArgsSchema,
   },
   {
+    name: "ready_for_review",
+    description:
+      "Signale qu'un ticket stealth est prêt à être testé (branche commitée et poussée, AUCUNE PR). Le backend vérifie l'arbre propre + branche poussée, arrête la session et conserve le worktree pour test.",
+    argsSchema: readyForReviewArgsSchema,
+  },
+  {
     name: "fail",
     description: "Signale un échec avec une raison et des findings.",
     argsSchema: failArgsSchema,
@@ -166,6 +174,7 @@ const WORKER_TOOL_NAMES = [
   "submit_prd",
   "submit_answer",
   "done",
+  "ready_for_review",
   "fail",
   "submit_triage",
   "submit_feasibility",

@@ -38,6 +38,7 @@ export interface NewTicket {
   addScreenshots: boolean;
   verifyFeature: boolean;
   argusMultiLoop: boolean;
+  stealth: boolean;
   // Deep parallel-research planning is no longer settable via the UI: persisted false (column kept to avoid a destructive migration).
   researchPlan?: boolean;
   baseBranch: string | null;
@@ -109,6 +110,7 @@ export interface TicketPatch {
   verifyFeature?: boolean;
   argusMultiLoop?: boolean;
   researchPlan?: boolean;
+  stealth?: boolean;
   project?: string;
   baseBranch?: string | null;
   dependsOn?: string | null;
@@ -225,8 +227,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -241,6 +243,7 @@ export class Store {
         input.verifyFeature ? 1 : 0,
         input.argusMultiLoop ? 1 : 0,
         (input.researchPlan ?? false) ? 1 : 0,
+        input.stealth ? 1 : 0,
         input.baseBranch,
         input.dependsOn,
         input.model,
@@ -338,6 +341,7 @@ export class Store {
     if (patch.verifyFeature !== undefined) set("verify_feature", patch.verifyFeature ? 1 : 0);
     if (patch.argusMultiLoop !== undefined) set("argus_multi_loop", patch.argusMultiLoop ? 1 : 0);
     if (patch.researchPlan !== undefined) set("research_plan", patch.researchPlan ? 1 : 0);
+    if (patch.stealth !== undefined) set("stealth", patch.stealth ? 1 : 0);
     if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.dependsOn !== undefined) set("depends_on", patch.dependsOn);

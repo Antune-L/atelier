@@ -6,6 +6,7 @@ import {
   Eye,
   FlaskConical,
   GitMerge,
+  GitPullRequest,
   HelpCircle,
   Maximize2,
   PanelRightClose,
@@ -111,6 +112,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [confirmRelaunch, setConfirmRelaunch] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
+  const [createPrBusy, setCreatePrBusy] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -171,6 +173,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const locked = isLocked(current);
   // Per-kind terminal lanes: "merged" for feature PRs, "reviewed" for reviews, "answered" for asks.
   const statusOptions = COLUMN_ORDER.filter((col) => {
+    // "À review" is pipeline-managed (reached via ready_for_review, left via "Créer la PR"/abandon):
+    // never offer it as a manual move target, but keep it as the (disabled) displayed value for a card
+    // that currently rests there so the Select doesn't misrepresent the status.
+    if (col === "to_review") return current.column === "to_review";
     if (col === "merged") return current.kind === "feature";
     if (col === "reviewed")
       return current.kind === "review" || current.kind === "clean";
@@ -598,9 +604,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   id="ticket-status"
                   className="w-auto"
                   value={current.column}
-                  disabled={locked}
+                  disabled={locked || current.column === "to_review"}
                   title={
-                    locked ? "Carte verrouillée (en traitement)" : undefined
+                    locked
+                      ? "Carte verrouillée (en traitement)"
+                      : current.column === "to_review"
+                        ? "En attente de review : crée la PR ou abandonne le ticket"
+                        : undefined
                   }
                   onChange={(e) =>
                     changeStatus(columnSchema.parse(e.target.value))
@@ -879,6 +889,31 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     PR mergée
                   </Button>
                 )}
+                {current.column === "to_review" && current.stealth && current.slotId !== null && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={createPrBusy}
+                    title="Ouvrir la PR depuis la branche poussée, libérer le slot et passer la carte en Fini"
+                    onClick={async () => {
+                      setCreatePrBusy(true);
+                      try {
+                        await api.createStealthPr(ticket.id);
+                        refresh();
+                      } catch (e) {
+                        boardStore.notify(
+                          "Création de PR échouée",
+                          e instanceof Error ? e.message : "Erreur",
+                        );
+                      } finally {
+                        setCreatePrBusy(false);
+                      }
+                    }}
+                  >
+                    <GitPullRequest className="h-4 w-4" />
+                    Créer la PR
+                  </Button>
+                )}
                 {canStartTest && (
                   <Button
                     variant="default"
@@ -1041,6 +1076,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     prdEnabled: current.prdEnabled,
                     prDraft: current.prDraft,
                     autoMerge: current.autoMerge,
+                    stealth: current.stealth,
                     verifyFeature: current.verifyFeature,
                     argusMultiLoop: current.argusMultiLoop,
                   }}

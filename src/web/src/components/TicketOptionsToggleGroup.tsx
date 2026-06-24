@@ -1,4 +1,5 @@
 import {
+  EyeOff,
   FileText,
   FlaskConical,
   GitMerge,
@@ -15,6 +16,7 @@ const TICKET_OPTION = {
   prd: "prd",
   draft: "draft",
   autoMerge: "auto-merge",
+  stealth: "stealth",
   verify: "verify",
   argusMultiLoop: "argus-multi-loop",
 } as const;
@@ -28,6 +30,7 @@ export interface TicketOptionValues {
   prdEnabled: boolean;
   prDraft: boolean;
   autoMerge: boolean;
+  stealth: boolean;
   verifyFeature: boolean;
   argusMultiLoop: boolean;
 }
@@ -73,12 +76,24 @@ export function TicketOptionsToggleGroup({
     ...(values.prdEnabled ? [TICKET_OPTION.prd] : []),
     ...(values.prDraft && !values.autoMerge ? [TICKET_OPTION.draft] : []),
     ...(values.autoMerge ? [TICKET_OPTION.autoMerge] : []),
+    ...(values.stealth ? [TICKET_OPTION.stealth] : []),
     ...(values.verifyFeature ? [TICKET_OPTION.verify] : []),
     ...(values.argusMultiLoop ? [TICKET_OPTION.argusMultiLoop] : []),
   ];
 
   const onOptionsChange = (toggleValues: string[]): void => {
-    const nextAutoMerge = toggleValues.includes(TICKET_OPTION.autoMerge);
+    const stealthBecame = toggleValues.includes(TICKET_OPTION.stealth);
+    const autoMergeToggled = toggleValues.includes(TICKET_OPTION.autoMerge);
+    // stealth ⊕ autoMerge: turning one on forces the other off (the ticket can't both auto-merge and
+    // skip the PR). Whichever just changed wins.
+    let nextStealth = stealthBecame;
+    let nextAutoMerge = autoMergeToggled;
+    if (stealthBecame && !values.stealth) {
+      nextAutoMerge = false;
+    } else if (autoMergeToggled && !values.autoMerge) {
+      nextStealth = false;
+    }
+
     const nextDraft = toggleValues.includes(TICKET_OPTION.draft);
     let nextPrDraft = values.prDraft;
     let autoMergeChanged = false;
@@ -101,6 +116,7 @@ export function TicketOptionsToggleGroup({
         prdEnabled: toggleValues.includes(TICKET_OPTION.prd),
         prDraft: nextPrDraft,
         autoMerge: nextAutoMerge,
+        stealth: nextStealth,
         verifyFeature: toggleValues.includes(TICKET_OPTION.verify),
         argusMultiLoop: toggleValues.includes(TICKET_OPTION.argusMultiLoop),
       },
@@ -140,12 +156,21 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.autoMerge}
+          disabled={values.stealth}
           aria-label="Merge automatique de la PR"
           className={OPTION_ITEM_CLASS}
         >
           <OptionToggleLabel icon={GitMerge}>
             Merge automatique de la PR
           </OptionToggleLabel>
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={TICKET_OPTION.stealth}
+          disabled={values.autoMerge}
+          aria-label="À review (sans PR)"
+          className={OPTION_ITEM_CLASS}
+        >
+          <OptionToggleLabel icon={EyeOff}>À review (sans PR)</OptionToggleLabel>
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.verify}

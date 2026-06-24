@@ -105,6 +105,7 @@ export function ImportTicketsPanel({
         // These exec settings are not exposed in the import panel: fall back to safe defaults for imported tickets.
         prDraft: true,
         autoMerge: false,
+        stealth: false,
         addScreenshots: false,
         verifyFeature: false,
         argusMultiLoop: false,

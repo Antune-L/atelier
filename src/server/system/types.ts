@@ -199,6 +199,17 @@ export interface SystemAdapter {
 
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
+  /**
+   * Stealth ready-for-review gate: clean working tree AND branch fully pushed (no commits ahead of
+   * origin/<branch>). Mirrors verifyDone minus the `gh pr view` check — a stealth ticket has no PR yet.
+   */
+  verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult>;
+  /**
+   * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists
+   * on origin first, then runs `gh pr create [--draft] --base <baseBranch> --fill`. Returns the PR URL
+   * on success; ok=false with the captured stderr/stdout on failure.
+   */
+  createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }>;
   /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult>;
   /** PR description body (`gh pr view --json body`), used as the agent-work summary. null when unreadable. */

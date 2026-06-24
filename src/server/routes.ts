@@ -284,6 +284,7 @@ export function createApiRoutes(deps: RouteDeps) {
       // Title is optional: fall back to a slice of the description when left blank.
       const title =
         parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
+      // stealth ⊕ autoMerge: stealth wins (no PR is opened, so auto-merge is meaningless).
       const ticket = store.createTicket({
         title,
         description: parsed.data.description,
@@ -291,7 +292,8 @@ export function createApiRoutes(deps: RouteDeps) {
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
-        autoMerge: parsed.data.autoMerge,
+        autoMerge: parsed.data.stealth ? false : parsed.data.autoMerge,
+        stealth: parsed.data.stealth,
         addScreenshots: parsed.data.addScreenshots,
         verifyFeature: parsed.data.verifyFeature,
         argusMultiLoop: parsed.data.argusMultiLoop,
@@ -343,7 +345,8 @@ export function createApiRoutes(deps: RouteDeps) {
           project: input.project,
           prdEnabled: input.prdEnabled,
           prDraft: input.prDraft,
-          autoMerge: input.autoMerge,
+          autoMerge: input.stealth ? false : input.autoMerge,
+          stealth: input.stealth,
           addScreenshots: input.addScreenshots,
           verifyFeature: input.verifyFeature,
           argusMultiLoop: input.argusMultiLoop,
@@ -504,6 +507,9 @@ export function createApiRoutes(deps: RouteDeps) {
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
       }
       const patch: TicketPatch = { ...parsed.data };
+      // stealth ⊕ autoMerge: stealth wins. Force autoMerge off whenever the resulting ticket is stealth.
+      const resultingStealth = parsed.data.stealth ?? ticket.stealth;
+      if (resultingStealth) patch.autoMerge = false;
       // A project change invalidates the saved base-branch override (it is
       // project-specific). Reset it unless the same request supplies a new one.
       if (
@@ -540,6 +546,16 @@ export function createApiRoutes(deps: RouteDeps) {
         if (!parsed.data.confirmed) return jsonError(set, HTTP_CONFLICT, "confirmation requise");
         await slots.abandonTicket(params.id);
         return store.getTicket(params.id);
+      }
+      // "À review" is a pipeline-managed lane reached only via the stealth ready_for_review() tool —
+      // never by a manual drag (which would land a card there with no slot/worktree to test).
+      if (target === "to_review") {
+        return jsonError(set, HTTP_CONFLICT, "« À review » est géré par le pipeline (ready_for_review) — déplacement manuel interdit");
+      }
+      // A stealth card in "À review" still owns its slot/worktree: moving it elsewhere manually would
+      // leak the slot (only "Créer la PR" or abandon release it). Force the user through those paths.
+      if (ticket.column === "to_review" && ticket.slotId !== null) {
+        return jsonError(set, HTTP_CONFLICT, "ticket en attente de review : crée la PR ou abandonne-le d'abord (le slot est occupé)");
       }
       if (target === "implementing") {
         // A running triage holds a worker socket keyed by this ticketId; launching now would
@@ -667,6 +683,17 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (!ticket.testing) return jsonError(set, HTTP_CONFLICT, "aucune session de test active");
       await slots.stopTestSession(params.id);
+      return store.getTicket(params.id);
+    })
+    .post("/tickets/:id/create-pr", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      const eligible = ticket.column === "to_review" && ticket.stealth && ticket.slotId !== null;
+      if (!eligible) {
+        return jsonError(set, HTTP_CONFLICT, "création de PR réservée aux tickets stealth en colonne À review");
+      }
+      const result = await slots.createStealthPr(params.id);
+      if (!result.ok) return jsonError(set, HTTP_CONFLICT, result.reason);
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {

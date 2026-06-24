@@ -199,7 +199,7 @@ export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): numb
 }
 
 /** Columns a ticket can't serve as a dependency: only todo/implementing/prd are eligible. */
-const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
+const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["to_review", "done", "merged", "reviewed", "answered", "failed", "abandoned"];
 
 /**
  * Tickets eligible to be picked as a dependency (PR-stack parent): same project, not the ticket

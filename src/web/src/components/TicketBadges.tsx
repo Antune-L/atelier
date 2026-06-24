@@ -1,4 +1,4 @@
-import { AlertTriangle, Brush, Eye, HelpCircle, MessageCircleQuestion } from "lucide-react";
+import { AlertTriangle, Brush, Eye, EyeOff, HelpCircle, MessageCircleQuestion } from "lucide-react";
 
 import type { Ticket } from "@shared/schemas";
 
@@ -25,6 +25,11 @@ export function TicketBadges({ ticket }: TicketBadgesProps) {
       {ticket.kind === "ask" && (
         <Badge variant="secondary" className="gap-1 text-[10px]">
           <HelpCircle className="h-3 w-3" /> Ask
+        </Badge>
+      )}
+      {ticket.kind === "feature" && ticket.stealth && (
+        <Badge variant="secondary" className="gap-1 text-[10px]">
+          <EyeOff className="h-3 w-3" /> Stealth
         </Badge>
       )}
       {ticket.watchdogFlagged && (

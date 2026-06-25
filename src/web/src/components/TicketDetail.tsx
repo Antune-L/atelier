@@ -1077,6 +1077,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     prDraft: current.prDraft,
                     autoMerge: current.autoMerge,
                     stealth: current.stealth,
+                    directPush: current.directPush,
                     verifyFeature: current.verifyFeature,
                     argusMultiLoop: current.argusMultiLoop,
                   }}

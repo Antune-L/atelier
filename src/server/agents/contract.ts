@@ -120,18 +120,52 @@ export function buildTicketContract(
   // A stealth ticket runs the full pipeline but opens NO PR: it commits + pushes the branch and
   // signals readiness via ready_for_review() so the user can test locally before any PR is created.
   const stealth = ticket.stealth;
+  // A directPush ticket runs the full pipeline but pushes its commits DIRECTLY onto the base branch
+  // (no PR), then signals via ready_for_review() so the slot is released and the card lands in "done".
+  const directPush = ticket.directPush;
+  // Both stealth and directPush open NO PR.
+  const noPr = stealth || directPush;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
   const prIsDraft = ticket.prDraft && !ticket.autoMerge;
   // Screenshots only make sense on a PR a human will read; auto-merge skips that.
   // NOTE(ali): `gh` can't upload images to GitHub's user-attachments CDN (that endpoint is
   // internal to the web editor's drag-and-drop, not in the REST API). The agent must host the
   // image elsewhere (commit it, release asset) before referencing it in the PR markdown.
-  const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge && !stealth;
+  const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge && !noPr;
   const wantsVerify = ticket.verifyFeature;
   const verifyWithMockups = wantsVerify && hasMockups(ticket.description);
   const prCreateCmd = `${prIsDraft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`;
   const prdPath = `/tmp/prd-${ticket.id}.md`;
   const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
+
+  // The completion directive, the finalisation step and the signalling step each have three variants
+  // (directPush → stealth → standard PR). Resolved here as plain branches to avoid nested ternaries.
+  let toolDirective: string;
+  if (directPush) {
+    toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` (AUCUNE PR, AUCUN gh pr create).`;
+  } else if (stealth) {
+    toolDirective = "- `ready_for_review()` UNIQUEMENT après avoir commité proprement et poussé la branche (AUCUNE PR, AUCUN gh pr create).";
+  } else {
+    toolDirective = `- \`done(pr_url)\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`;
+  }
+
+  let finalizationStep: string;
+  if (directPush) {
+    finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` : \`git push origin HEAD:refs/heads/${baseBranch}\`. N'ouvre AUCUNE PR. Si le push est rejeté (non-fast-forward parce que \`${baseBranch}\` a avancé), rebase sur \`origin/${baseBranch}\` puis re-pousse.`;
+  } else if (stealth) {
+    finalizationStep = "6. finalisation : commit (conventions du projet), puis pousse la branche (`git push -u origin HEAD`). N'ouvre AUCUNE PR (`gh pr create` est INTERDIT).";
+  } else {
+    finalizationStep = "6. opening_pr : commit (conventions du projet), push, puis ouvre la PR.";
+  }
+
+  let signalStep: string;
+  if (directPush) {
+    signalStep = `7. \`ready_for_review()\` — tes commits sont sur \`${baseBranch}\` ; le worktree sera fermé et la carte passera en « Fini » (aucune PR).`;
+  } else if (stealth) {
+    signalStep = "7. `ready_for_review()` — le worktree restera disponible pour que l'utilisateur teste ; la PR sera créée plus tard par l'utilisateur.";
+  } else {
+    signalStep = "7. done(pr_url).";
+  }
 
   const lines: string[] = [
     `# Ticket ${ticket.id} — ${ticket.title}`,
@@ -151,9 +185,7 @@ export function buildTicketContract(
     ticket.prdEnabled
       ? "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification)."
       : "- (Option PRD désactivée : implémente directement.)",
-    stealth
-      ? "- `ready_for_review()` UNIQUEMENT après avoir commité proprement et poussé la branche (AUCUNE PR, AUCUN gh pr create)."
-      : `- \`done(pr_url)\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`,
+    toolDirective,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     commitLanguageDirective(opts.commitLanguage),
     "",
@@ -187,20 +219,16 @@ export function buildTicketContract(
     verifyWithMockups
       ? "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus."
       : "",
-    stealth
-      ? "6. finalisation : commit (conventions du projet), puis pousse la branche (`git push -u origin HEAD`). N'ouvre AUCUNE PR (`gh pr create` est INTERDIT)."
-      : `6. opening_pr : commit (conventions du projet), push, puis ouvre la PR.`,
-    stealth
+    finalizationStep,
+    noPr
       ? ""
       : `   Si la branche cible \`${baseBranch}\` n'existe pas encore sur origin, crée-la d'abord : \`git ls-remote --heads origin ${baseBranch} | grep -q . || git push origin HEAD:refs/heads/${baseBranch}\``,
-    stealth ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
+    noPr ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
     wantsScreenshots
       ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
       : "",
-    stealth
-      ? "7. `ready_for_review()` — le worktree restera disponible pour que l'utilisateur teste ; la PR sera créée plus tard par l'utilisateur."
-      : "7. done(pr_url).",
-    !stealth && ticket.autoMerge
+    signalStep,
+    !noPr && ticket.autoMerge
       ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
       : "",
     "",

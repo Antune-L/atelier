@@ -106,6 +106,7 @@ export function ImportTicketsPanel({
         prDraft: true,
         autoMerge: false,
         stealth: false,
+        directPush: false,
         addScreenshots: false,
         verifyFeature: false,
         argusMultiLoop: false,

@@ -968,6 +968,57 @@ export class SlotManager {
   }
 
   /**
+   * Direct-push done: verify the worktree's commits were pushed onto the base branch (no PR), then
+   * release the slot and land the card in "Fini" (done). Unlike stealth (markReadyForReview) which
+   * keeps the slot busy in "À review", this closes the worktree immediately. No PR is created.
+   */
+  async markDirectPushDone(ticketId: string, slotId: number): Promise<{ ok: boolean; reason: string }> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || !ticket.branch || !isProjectKey(ticket.project)) {
+      return { ok: false, reason: "ticket, branche ou projet introuvable" };
+    }
+    const path = slotPath(slotId);
+    const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
+    log.info("vérification de la gate push direct", { ticketId, slotId, baseBranch });
+    const gate = await this.system.verifyDirectPushed(path, baseBranch);
+    if (!gate.ok) {
+      // Mirror markReadyForReview's gate-failure handling exactly (same DONE_GATE_FAILED_EVENT counter).
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
+      const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
+      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      if (retriable) {
+        this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
+        log.info("gate push direct échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
+        return { ok: false, reason: gate.reason };
+      }
+      log.warn("gate push direct échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
+      await this.lifecycle.stall(
+        ticketId,
+        { title: "Gate push direct échouée", body: `${ticket.title}: ${gate.reason}` },
+        { error: gate.reason },
+      );
+      return { ok: false, reason: gate.reason };
+    }
+    await this.releaseSlot(slotId, ticket);
+    this.touch(
+      this.store.updateTicket(ticketId, {
+        column: "done",
+        stage: "done",
+        slotId: null,
+        error: null,
+        finishedAt: Date.now(),
+      }),
+    );
+    this.store.logEvent(ticketId, "done", {});
+    this.store.logEvent(ticketId, "direct_pushed", { baseBranch });
+    log.info("push direct terminé, slot libéré", { ticketId, slotId, baseBranch });
+    await this.notifier.notify("Ticket terminé", `${ticket.title} → poussé sur ${baseBranch}`, ticket.id, true);
+    void this.startDependents(ticketId);
+    this.pumpQueue();
+    return { ok: true, reason: "" };
+  }
+
+  /**
    * User clicked "Créer la PR" on an "À review" stealth card: open the PR from the pushed branch,
    * release the slot, and land the card in "Fini" (done). On failure, surface the error on the card
    * and keep the slot so the user can retry.

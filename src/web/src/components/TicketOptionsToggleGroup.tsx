@@ -5,6 +5,7 @@ import {
   GitMerge,
   GitPullRequest,
   Repeat2,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import { useRef } from "react";
@@ -17,6 +18,7 @@ const TICKET_OPTION = {
   draft: "draft",
   autoMerge: "auto-merge",
   stealth: "stealth",
+  directPush: "direct-push",
   verify: "verify",
   argusMultiLoop: "argus-multi-loop",
 } as const;
@@ -31,6 +33,7 @@ export interface TicketOptionValues {
   prDraft: boolean;
   autoMerge: boolean;
   stealth: boolean;
+  directPush: boolean;
   verifyFeature: boolean;
   argusMultiLoop: boolean;
 }
@@ -74,24 +77,32 @@ export function TicketOptionsToggleGroup({
 
   const selectedOptions = [
     ...(values.prdEnabled ? [TICKET_OPTION.prd] : []),
-    ...(values.prDraft && !values.autoMerge ? [TICKET_OPTION.draft] : []),
+    ...(values.prDraft && !values.autoMerge && !values.directPush ? [TICKET_OPTION.draft] : []),
     ...(values.autoMerge ? [TICKET_OPTION.autoMerge] : []),
     ...(values.stealth ? [TICKET_OPTION.stealth] : []),
+    ...(values.directPush ? [TICKET_OPTION.directPush] : []),
     ...(values.verifyFeature ? [TICKET_OPTION.verify] : []),
     ...(values.argusMultiLoop ? [TICKET_OPTION.argusMultiLoop] : []),
   ];
 
   const onOptionsChange = (toggleValues: string[]): void => {
-    const stealthBecame = toggleValues.includes(TICKET_OPTION.stealth);
-    const autoMergeToggled = toggleValues.includes(TICKET_OPTION.autoMerge);
-    // stealth ⊕ autoMerge: turning one on forces the other off (the ticket can't both auto-merge and
-    // skip the PR). Whichever just changed wins.
-    let nextStealth = stealthBecame;
-    let nextAutoMerge = autoMergeToggled;
-    if (stealthBecame && !values.stealth) {
+    const stealthRaw = toggleValues.includes(TICKET_OPTION.stealth);
+    const autoMergeRaw = toggleValues.includes(TICKET_OPTION.autoMerge);
+    const directPushRaw = toggleValues.includes(TICKET_OPTION.directPush);
+    // stealth ⊕ autoMerge ⊕ directPush: turning one on forces the other two off (a ticket can't both
+    // auto-merge and skip the PR, nor be stealth and push direct). Whichever just changed wins.
+    let nextStealth = stealthRaw;
+    let nextAutoMerge = autoMergeRaw;
+    let nextDirectPush = directPushRaw;
+    if (stealthRaw && !values.stealth) {
       nextAutoMerge = false;
-    } else if (autoMergeToggled && !values.autoMerge) {
+      nextDirectPush = false;
+    } else if (autoMergeRaw && !values.autoMerge) {
       nextStealth = false;
+      nextDirectPush = false;
+    } else if (directPushRaw && !values.directPush) {
+      nextStealth = false;
+      nextAutoMerge = false;
     }
 
     const nextDraft = toggleValues.includes(TICKET_OPTION.draft);
@@ -117,6 +128,7 @@ export function TicketOptionsToggleGroup({
         prDraft: nextPrDraft,
         autoMerge: nextAutoMerge,
         stealth: nextStealth,
+        directPush: nextDirectPush,
         verifyFeature: toggleValues.includes(TICKET_OPTION.verify),
         argusMultiLoop: toggleValues.includes(TICKET_OPTION.argusMultiLoop),
       },
@@ -146,7 +158,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.draft}
-          disabled={values.autoMerge}
+          disabled={values.autoMerge || values.directPush}
           aria-label="Ouvrir la PR en draft"
           className={OPTION_ITEM_CLASS}
         >
@@ -156,7 +168,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.autoMerge}
-          disabled={values.stealth}
+          disabled={values.stealth || values.directPush}
           aria-label="Merge automatique de la PR"
           className={OPTION_ITEM_CLASS}
         >
@@ -166,11 +178,19 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.stealth}
-          disabled={values.autoMerge}
+          disabled={values.autoMerge || values.directPush}
           aria-label="À review (sans PR)"
           className={OPTION_ITEM_CLASS}
         >
           <OptionToggleLabel icon={EyeOff}>À review (sans PR)</OptionToggleLabel>
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          value={TICKET_OPTION.directPush}
+          disabled={values.autoMerge || values.stealth}
+          aria-label="Push direct (sans PR)"
+          className={OPTION_ITEM_CLASS}
+        >
+          <OptionToggleLabel icon={Upload}>Push direct (sans PR)</OptionToggleLabel>
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.verify}

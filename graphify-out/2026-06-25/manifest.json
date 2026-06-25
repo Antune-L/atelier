@@ -55,13 +55,13 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1782392833.8958056,
-    "ast_hash": "d3064519632817487dcb716958d28309",
+    "mtime": 1782389277.6335464,
+    "ast_hash": "47d520e2667626162cb1ef0a54b622af",
     "semantic_hash": ""
   },
   "src/server/agents/coordinator.ts": {
-    "mtime": 1782392191.0297863,
-    "ast_hash": "67b086b9cd2a893e7636573128169c0f",
+    "mtime": 1782389277.633856,
+    "ast_hash": "f0f5cfc7ac988f934f0cba8bef6a2602",
     "semantic_hash": ""
   },
   "src/server/agents/feasibilityManager.ts": {
@@ -70,8 +70,8 @@
     "semantic_hash": "0993677cadbcc350901b9d042dae6e27"
   },
   "src/server/agents/slotManager.ts": {
-    "mtime": 1782392228.3183882,
-    "ast_hash": "b76e67dcba1852f51fc252c9be684026",
+    "mtime": 1782389277.6347778,
+    "ast_hash": "9065aecab7c26a8f50f5e65304da256f",
     "semantic_hash": ""
   },
   "src/server/agents/slotTemplates.ts": {
@@ -105,18 +105,18 @@
     "semantic_hash": ""
   },
   "src/server/db/rows.ts": {
-    "mtime": 1782392085.5847213,
-    "ast_hash": "d2b42e730ab33545cb1a46862e176ba6",
+    "mtime": 1782389277.6364005,
+    "ast_hash": "c93c3669610f026311bc7b359a671ff5",
     "semantic_hash": ""
   },
   "src/server/db/schema.ts": {
-    "mtime": 1782392065.6323357,
-    "ast_hash": "09e585f65ef849c2a58b6dfdd1b35699",
+    "mtime": 1782389277.6366308,
+    "ast_hash": "94de38b31d9be0e9fb802f9cd1005c60",
     "semantic_hash": ""
   },
   "src/server/db/store.ts": {
-    "mtime": 1782392076.829503,
-    "ast_hash": "80a25eda9697c2f2ece82732b3cb66f6",
+    "mtime": 1782389277.6368644,
+    "ast_hash": "90d124057fd6a020a1787cb753dfce39",
     "semantic_hash": ""
   },
   "src/server/hub.ts": {
@@ -150,13 +150,13 @@
     "semantic_hash": ""
   },
   "src/server/routes.ts": {
-    "mtime": 1782392139.3789816,
-    "ast_hash": "fd69f79420112eeb5703c407b0d0e495",
+    "mtime": 1782389277.637889,
+    "ast_hash": "50c6d15f790a7925a35ecece3fa26a17",
     "semantic_hash": ""
   },
   "src/server/system/fake.ts": {
-    "mtime": 1782392110.0160751,
-    "ast_hash": "b7c41d9c1a2489549906f031b29fee0a",
+    "mtime": 1782389277.63833,
+    "ast_hash": "4de71d213b72de6e1080d859f7467172",
     "semantic_hash": ""
   },
   "src/server/system/index.ts": {
@@ -165,13 +165,13 @@
     "semantic_hash": "a0d81ede8566688aea0443f95dfcfdfe"
   },
   "src/server/system/real.ts": {
-    "mtime": 1782392101.2217324,
-    "ast_hash": "5f50eb2c42fe42c5fd143a1f64fc415b",
+    "mtime": 1782389277.6387935,
+    "ast_hash": "cf4486802aadb3825c9799bd0ec81df1",
     "semantic_hash": ""
   },
   "src/server/system/types.ts": {
-    "mtime": 1782392096.412393,
-    "ast_hash": "e30d857c15b5a758457241b1909d9785",
+    "mtime": 1782389277.6390903,
+    "ast_hash": "359d5f85a0d23760ed4c39f6d10645f7",
     "semantic_hash": ""
   },
   "src/server/terminalManager.ts": {
@@ -220,13 +220,13 @@
     "semantic_hash": "e499014dd2f4e0aa0a078f2a662c8c69"
   },
   "src/shared/protocol.ts": {
-    "mtime": 1782392177.3327723,
-    "ast_hash": "d3f2353cb8a3134cd42cb0e814cc9f09",
+    "mtime": 1782389277.6405737,
+    "ast_hash": "2de23dde365b438c138711da5ede2f49",
     "semantic_hash": ""
   },
   "src/shared/schemas.ts": {
-    "mtime": 1782392046.9988358,
-    "ast_hash": "4f1de36cabd94904e417c3e76d8dcbd0",
+    "mtime": 1782389277.640849,
+    "ast_hash": "64683b0a77f49b1c6c9798609f3174f9",
     "semantic_hash": ""
   },
   "src/web/src/App.tsx": {
@@ -280,8 +280,8 @@
     "semantic_hash": "a29f5a6e095267c61d7c56fb71d630d3"
   },
   "src/web/src/components/ImportTicketsPanel.tsx": {
-    "mtime": 1782392313.0679214,
-    "ast_hash": "4ea470fec7b9d1228e3da810ee5e5de3",
+    "mtime": 1782389277.6428058,
+    "ast_hash": "70879ac9cbb03b10c5b1e891c5bef5e2",
     "semantic_hash": ""
   },
   "src/web/src/components/LiveTerminal.tsx": {
@@ -290,8 +290,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/NewTicketDialog.tsx": {
-    "mtime": 1782392294.787817,
-    "ast_hash": "b708326c8e8dc479077cc51ac0553eb1",
+    "mtime": 1782389277.6431482,
+    "ast_hash": "08da0f232c5db7084a146b3447647027",
     "semantic_hash": ""
   },
   "src/web/src/components/PrSelectRow.tsx": {
@@ -360,8 +360,8 @@
     "semantic_hash": "dd073920dfb353f65d5ee2d1dcc48f01"
   },
   "src/web/src/components/TicketBadges.tsx": {
-    "mtime": 1782392321.6293633,
-    "ast_hash": "a8aea05b94497b0649a7aaeb4ab91e41",
+    "mtime": 1782389277.6447098,
+    "ast_hash": "22800039bc9a7784a09ec0dfe0c6bb58",
     "semantic_hash": ""
   },
   "src/web/src/components/TicketCard.tsx": {
@@ -370,8 +370,8 @@
     "semantic_hash": "cb5f1721bab534dff54ff97950348d26"
   },
   "src/web/src/components/TicketConfigSummary.tsx": {
-    "mtime": 1782392316.7581258,
-    "ast_hash": "4a01d5f234c292dc7c80990a1126ec57",
+    "mtime": 1782389277.6451938,
+    "ast_hash": "e3a9d8e3002945924883211cc421718a",
     "semantic_hash": ""
   },
   "src/web/src/components/TicketCost.tsx": {
@@ -380,13 +380,13 @@
     "semantic_hash": "1a7a26f41870baf3a8ebc943355a4e3e"
   },
   "src/web/src/components/TicketDetail.tsx": {
-    "mtime": 1782392314.8665023,
-    "ast_hash": "2c543edd1bdb61919e1298b04502c473",
+    "mtime": 1782389277.6455567,
+    "ast_hash": "648fb64d06e582d598534aaae6707f87",
     "semantic_hash": ""
   },
   "src/web/src/components/TicketOptionsToggleGroup.tsx": {
-    "mtime": 1782392271.3596954,
-    "ast_hash": "bcad71769096a46ddce1ec53937d1d8e",
+    "mtime": 1782389277.6457803,
+    "ast_hash": "12bed7be2ce98e49db7f46b9de01c3a5",
     "semantic_hash": ""
   },
   "src/web/src/components/Toaster.tsx": {

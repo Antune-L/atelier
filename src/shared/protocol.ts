@@ -136,7 +136,7 @@ export const WORKER_TOOLS = [
   {
     name: "ready_for_review",
     description:
-      "Signale qu'un ticket stealth est prêt à être testé (branche commitée et poussée, AUCUNE PR). Le backend vérifie l'arbre propre + branche poussée, arrête la session et conserve le worktree pour test.",
+      "Signale qu'un ticket sans PR (stealth ou push direct) a sa branche commitée et poussée. Le backend vérifie l'arbre propre + branche poussée, puis selon le mode conserve le worktree pour test (stealth) ou ferme le worktree et clôture la carte en « Fini » (push direct).",
     argsSchema: readyForReviewArgsSchema,
   },
   {

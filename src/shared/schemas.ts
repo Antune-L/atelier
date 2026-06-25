@@ -136,6 +136,8 @@ export const ticketSchema = z.object({
   autoMerge: z.boolean(),
   /** Feature tickets only: run the full pipeline but, instead of opening a PR, push the branch and land the card in "À review" while keeping the slot busy for local testing. Mutually exclusive with autoMerge. */
   stealth: z.boolean(),
+  /** Feature tickets only: run the full pipeline but, instead of opening a PR, commit and push the commits directly onto the base branch, then release the slot and land in "done". Mutually exclusive with stealth and autoMerge. */
+  directPush: z.boolean(),
   /** Attach Playwright screenshots of the feature to the PR (frontend changes). Unavailable when autoMerge is on. */
   addScreenshots: z.boolean(),
   /** Before opening the PR, mandatorily run the app to verify the feature works, and visually compare to any provided mockups (in addition to argus). */
@@ -362,6 +364,7 @@ const ticketBatchOptionsSchema = z.object({
   prDraft: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
   stealth: z.boolean().default(false),
+  directPush: z.boolean().default(false),
   addScreenshots: z.boolean().default(false),
   verifyFeature: z.boolean().default(false),
   argusMultiLoop: z.boolean().default(false),
@@ -421,6 +424,7 @@ export const updateTicketSchema = z.object({
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
   stealth: z.boolean().optional(),
+  directPush: z.boolean().optional(),
   addScreenshots: z.boolean().optional(),
   verifyFeature: z.boolean().optional(),
   argusMultiLoop: z.boolean().optional(),

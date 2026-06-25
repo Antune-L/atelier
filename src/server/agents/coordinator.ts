@@ -189,15 +189,22 @@ export class AgentCoordinator {
     const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
-    if (!ticket || ticket.kind !== "feature" || !ticket.stealth) {
-      return { ok: false, result: "ready_for_review réservé aux tickets stealth." };
+    if (!ticket || ticket.kind !== "feature" || (!ticket.stealth && !ticket.directPush)) {
+      return { ok: false, result: "ready_for_review réservé aux tickets stealth ou push direct." };
     }
     this.lifecycle.beginOpeningPr(ctx.ticketId);
-    const outcome = await this.slots.markReadyForReview(ctx.ticketId, ctx.slotId);
+    const outcome = ticket.directPush
+      ? await this.slots.markDirectPushDone(ctx.ticketId, ctx.slotId)
+      : await this.slots.markReadyForReview(ctx.ticketId, ctx.slotId);
     if (!outcome.ok) {
       return { ok: false, result: `Gate échouée: ${outcome.reason}: corrige et rappelle ready_for_review().` };
     }
-    return { ok: true, result: "Prêt pour review : session arrêtée, worktree conservé." };
+    return {
+      ok: true,
+      result: ticket.directPush
+        ? "Push direct effectué : commits poussés sur la branche cible, worktree fermé, ticket clôturé."
+        : "Prêt pour review : session arrêtée, worktree conservé.",
+    };
   }
 
   private async handleFail(ctx: ToolCallContext): Promise<ToolResult> {

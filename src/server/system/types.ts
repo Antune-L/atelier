@@ -205,6 +205,11 @@ export interface SystemAdapter {
    */
   verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult>;
   /**
+   * Direct-push gate: clean working tree AND the worktree's HEAD commits have been pushed onto
+   * origin/<baseBranch> (HEAD is an ancestor of, or equal to, the remote target branch tip). No PR.
+   */
+  verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult>;
+  /**
    * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists
    * on origin first, then runs `gh pr create [--draft] --base <baseBranch> --fill`. Returns the PR URL
    * on success; ok=false with the captured stderr/stdout on failure.

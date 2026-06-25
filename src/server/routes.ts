@@ -284,7 +284,10 @@ export function createApiRoutes(deps: RouteDeps) {
       // Title is optional: fall back to a slice of the description when left blank.
       const title =
         parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
-      // stealth ⊕ autoMerge: stealth wins (no PR is opened, so auto-merge is meaningless).
+      // directPush ⊕ stealth ⊕ autoMerge: directPush/stealth open no PR, so auto-merge is meaningless;
+      // directPush also forces stealth off (the two are mutually exclusive no-PR lifecycles).
+      const directPush = parsed.data.directPush;
+      const resultingStealth = directPush ? false : parsed.data.stealth;
       const ticket = store.createTicket({
         title,
         description: parsed.data.description,
@@ -292,8 +295,9 @@ export function createApiRoutes(deps: RouteDeps) {
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
-        autoMerge: parsed.data.stealth ? false : parsed.data.autoMerge,
-        stealth: parsed.data.stealth,
+        autoMerge: (resultingStealth || directPush) ? false : parsed.data.autoMerge,
+        stealth: resultingStealth,
+        directPush,
         addScreenshots: parsed.data.addScreenshots,
         verifyFeature: parsed.data.verifyFeature,
         argusMultiLoop: parsed.data.argusMultiLoop,
@@ -336,6 +340,8 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_BAD_REQUEST, `titre manquant aux lignes : ${blankTitleRows.join(", ")}`);
       }
 
+      const directPush = input.directPush;
+      const resultingStealth = directPush ? false : input.stealth;
       const created: Ticket[] = [];
       for (const row of input.rows) {
         const ticket = store.createTicket({
@@ -345,8 +351,9 @@ export function createApiRoutes(deps: RouteDeps) {
           project: input.project,
           prdEnabled: input.prdEnabled,
           prDraft: input.prDraft,
-          autoMerge: input.stealth ? false : input.autoMerge,
-          stealth: input.stealth,
+          autoMerge: (resultingStealth || directPush) ? false : input.autoMerge,
+          stealth: resultingStealth,
+          directPush,
           addScreenshots: input.addScreenshots,
           verifyFeature: input.verifyFeature,
           argusMultiLoop: input.argusMultiLoop,
@@ -507,9 +514,16 @@ export function createApiRoutes(deps: RouteDeps) {
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
       }
       const patch: TicketPatch = { ...parsed.data };
-      // stealth ⊕ autoMerge: stealth wins. Force autoMerge off whenever the resulting ticket is stealth.
-      const resultingStealth = parsed.data.stealth ?? ticket.stealth;
-      if (resultingStealth) patch.autoMerge = false;
+      // directPush ⊕ stealth ⊕ autoMerge: directPush wins, then stealth. Force the others off
+      // whenever the resulting ticket is in a no-PR mode.
+      const resultingDirectPush = parsed.data.directPush ?? ticket.directPush;
+      if (resultingDirectPush) {
+        patch.stealth = false;
+        patch.autoMerge = false;
+      } else if (parsed.data.stealth ?? ticket.stealth) {
+        patch.autoMerge = false;
+      }
+      patch.directPush = resultingDirectPush;
       // A project change invalidates the saved base-branch override (it is
       // project-specific). Reset it unless the same request supplies a new one.
       if (

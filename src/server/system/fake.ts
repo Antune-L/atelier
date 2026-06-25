@@ -275,6 +275,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult> {
+    this.log("verifyDirectPushed", { slotPath, baseBranch });
+    return { ok: true, reason: "" };
+  }
+
   async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
     this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
     // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).

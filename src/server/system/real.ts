@@ -607,6 +607,23 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult> {
+    const status = await $`git -C ${slotPath} status --porcelain`.nothrow().quiet();
+    if (status.exitCode !== 0) return { ok: false, reason: "git status a échoué" };
+    if (status.stdout.toString().trim().length > 0) {
+      return { ok: false, reason: "arbre de travail non propre (modifications non commitées)" };
+    }
+    const fetch = await $`git -C ${slotPath} fetch origin ${baseBranch}`.nothrow().quiet();
+    if (fetch.exitCode !== 0) {
+      return { ok: false, reason: `git fetch origin ${baseBranch} a échoué` };
+    }
+    const anc = await $`git -C ${slotPath} merge-base --is-ancestor HEAD origin/${baseBranch}`.nothrow().quiet();
+    if (anc.exitCode !== 0) {
+      return { ok: false, reason: `les commits ne sont pas poussés sur ${baseBranch} (push direct manquant ?)` };
+    }
+    return { ok: true, reason: "" };
+  }
+
   async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
     // The base branch must exist on origin before `gh pr create --base` can target it.
     const baseExists = await $`git -C ${slotPath} ls-remote --heads origin ${baseBranch}`.nothrow().quiet();

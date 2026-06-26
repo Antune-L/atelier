@@ -36,8 +36,11 @@ export type AgentSessionEvent =
   | { type: "rate_limit"; status: string; resetsAt: number | null }
   | { type: "error"; message: string };
 
-/** SDK permission modes the backend uses (subset of the SDK's full set). */
-export type AgentPermissionMode = "default" | "acceptEdits" | "bypassPermissions";
+/**
+ * SDK permission modes the backend uses (subset of the SDK's full set). `dontAsk` mirrors the old
+ * `--permission-mode auto`: auto-run pre-approved tools, silently deny everything else (no human to prompt).
+ */
+export type AgentPermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "dontAsk";
 
 /** A programmatic subagent definition forwarded to the SDK `agents` option (read-only scouts, etc.). */
 export interface AgentSubagentDefinition {
@@ -56,6 +59,12 @@ export interface AgentSessionOptions {
   /** Reasoning effort, or null for the model default. */
   effort: string | null;
   permissionMode: AgentPermissionMode;
+  /**
+   * Pre-approved permission rules (SDK `settings.permissions.allow`), e.g. `Bash(git commit:*)`. Under
+   * `dontAsk` these auto-run and everything else is denied — the bash allowlist the old tmux sessions
+   * enforced via `.claude/settings.json`.
+   */
+  permissionAllow?: string[];
   /**
    * Extra tools the agent may auto-use without a prompt. The in-process worker tools
    * (`mcp__kanban__*`) are always allowed; pass the built-in surface (Read/Edit/Bash/Agent…) here.

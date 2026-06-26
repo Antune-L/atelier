@@ -11,7 +11,8 @@
  */
 
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
-import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { HookCallback, Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
 
@@ -26,6 +27,25 @@ import { resolveClaudeBinary } from "./claudeBinary.ts";
 
 const MCP_SERVER_NAME = "kanban";
 const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+const NO_VERIFY_PATTERN = /--no-verify\b/;
+const bashCommandSchema = z.object({ command: z.string() });
+
+/**
+ * Block `git commit/push --no-verify` (it bypasses git hooks) — the old `templates/preToolUse.ts`
+ * deny guard, now an in-process PreToolUse hook. Returning `{}` allows the call.
+ */
+const denyNoVerifyHook: HookCallback = async (input) => {
+  if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") return {};
+  const parsed = bashCommandSchema.safeParse(input.tool_input);
+  if (!parsed.success || !NO_VERIFY_PATTERN.test(parsed.data.command)) return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "L'option --no-verify est interdite (elle contourne les hooks git).",
+    },
+  };
+};
 
 type SdkEffort = NonNullable<Options["effort"]>;
 type SdkAgents = NonNullable<Options["agents"]>;
@@ -103,7 +123,9 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     includePartialMessages: false,
     env: { ...process.env },
     stderr: () => {},
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [denyNoVerifyHook] }] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
+    ...(opts.permissionAllow ? { settings: { permissions: { allow: opts.permissionAllow } } } : {}),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),

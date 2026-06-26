@@ -1,16 +1,16 @@
 # Graph Report - kanban-agents  (2026-06-26)
 
 ## Corpus Check
-- 141 files · ~632,756 words
+- 146 files · ~636,035 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1460 nodes · 3458 edges · 77 communities (65 shown, 12 thin omitted)
+- 1507 nodes · 3564 edges · 83 communities (70 shown, 13 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 12 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8c5cb4cf`
+- Built from commit: `d8fd61f7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -85,17 +85,23 @@
 - [[_COMMUNITY_TriageFeasibility Doc|Triage/Feasibility Doc]]
 - [[_COMMUNITY_Theme Flash Guard Doc|Theme Flash Guard Doc]]
 - [[_COMMUNITY_Community 73|Community 73]]
+- [[_COMMUNITY_Community 74|Community 74]]
+- [[_COMMUNITY_Community 75|Community 75]]
+- [[_COMMUNITY_Community 76|Community 76]]
 - [[_COMMUNITY_Community 77|Community 77]]
+- [[_COMMUNITY_Community 78|Community 78]]
+- [[_COMMUNITY_Community 79|Community 79]]
 - [[_COMMUNITY_Community 80|Community 80]]
+- [[_COMMUNITY_Community 81|Community 81]]
 - [[_COMMUNITY_Community 83|Community 83]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `Ticket` - 64 edges
+1. `Ticket` - 65 edges
 2. `Store` - 62 edges
 3. `cn()` - 58 edges
-4. `RealSystemAdapter` - 51 edges
+4. `RealSystemAdapter` - 52 edges
 5. `SlotManager` - 49 edges
-6. `FakeSystemAdapter` - 44 edges
+6. `FakeSystemAdapter` - 45 edges
 7. `ProjectInfo` - 39 edges
 8. `ClientHub` - 29 edges
 9. `getProject()` - 28 edges
@@ -116,27 +122,27 @@
 ## Import Cycles
 - None detected.
 
-## Communities (77 total, 12 thin omitted)
+## Communities (83 total, 13 thin omitted)
 
 ### Community 0 - "Slot & Project Config"
-Cohesion: 0.17
-Nodes (3): resolveBaseBranch(), SlotManager, slotPath()
+Cohesion: 0.15
+Nodes (3): SlotManager, slotPath(), slugify()
 
 ### Community 1 - "Agents & Ticket UI"
-Cohesion: 0.08
-Nodes (40): AgentCard(), AgentCardProps, PROGRESS_BAR_COLORS, StageProgressBar(), StageProgressBarProps, TicketBadges(), TicketBadgesProps, projectBadgeStyle() (+32 more)
+Cohesion: 0.12
+Nodes (19): PROGRESS_BAR_COLORS, StageProgressBar(), StageProgressBarProps, ANIMATED_STAGES, BadgeVariant, DATETIME_FORMAT, formatDuration(), NON_DEPENDABLE_COLUMNS (+11 more)
 
 ### Community 2 - "Terminal Split View"
 Cohesion: 0.06
-Nodes (46): FullscreenToggle(), FullscreenToggleProps, badgeLabelFor(), LiveTerminal(), LiveTerminalOptions, LiveTerminalProps, TerminalData, TerminalView() (+38 more)
+Nodes (39): TerminalsView(), TerminalsViewProps, loadTree(), saveTree(), storageKey(), useTerminals, ShortcutDetail, useTerminalShortcuts() (+31 more)
 
 ### Community 3 - "MCP Channels & Workers"
 Cohesion: 0.14
 Nodes (15): ClientHub, Column vs Stage axes, Done Gate (server-verified), repoMutex (KeyedMutex), rows.ts (zod row validation), Slot (git-worktree execution unit), SlotManager, Stop Hook Auto-Nudge Escalation (+7 more)
 
 ### Community 4 - "API Schemas & Inputs"
-Cohesion: 0.06
-Nodes (32): appSettingsSchema, baseBranchSchema, capabilitiesSchema, commentAuthorSchema, commentSchema, CreateTerminalBody, EXTERNAL_URL_PROTOCOLS, externalUrlSchema (+24 more)
+Cohesion: 0.05
+Nodes (48): AnalyzeTicketsInput, appSettingsSchema, baseBranchSchema, capabilitiesSchema, commentAuthorSchema, commentSchema, CreateAskInput, CreateCleanInput (+40 more)
 
 ### Community 5 - "UI Utilities & Layout"
 Cohesion: 0.10
@@ -144,55 +150,59 @@ Nodes (21): TabButton(), NAV_ENTRIES, NavEntry, Sidebar(), SidebarProps, Sidebar
 
 ### Community 6 - "Review Done Gate (E2E)"
 Cohesion: 0.07
-Nodes (4): extractPrUrl(), RealSystemAdapter, safeJsonParse(), DoneGateResult
+Nodes (9): detectInstallCommand(), realpathSafe(), RealSystemAdapter, resolveWorktreeScriptCommand(), safeJsonParse(), DoneGateResult, ReviewDoneOptions, SpawnTmuxOptions (+1 more)
 
 ### Community 7 - "PR & Ticket Panels"
 Cohesion: 0.08
 Nodes (27): MCP Channel, No-SDK Design Choice, Two-Channel Agent Protocol, Worker (MCP channel server), WorkerHub, Channel (agent↔backend link), Protocol (wire-format source of truth), Claude Code Channels setup (+19 more)
 
 ### Community 8 - "Terminal Session Manager"
-Cohesion: 0.10
-Nodes (14): dataMessage(), log, normalizeSeed(), safeParse(), send(), TerminalSession, TerminalSessionManager, TerminalSocket (+6 more)
+Cohesion: 0.09
+Nodes (15): dataMessage(), log, normalizeSeed(), safeParse(), send(), TerminalSession, TerminalSessionManager, TerminalSocket (+7 more)
 
 ### Community 9 - "Store & Profiles"
-Cohesion: 0.06
-Nodes (15): SlotsBarProps, TicketCardProps, COLUMN_NODE_COLOR, WorkflowViewProps, mapProfileRow(), mapSlotRow(), Store, BoardState (+7 more)
+Cohesion: 0.13
+Nodes (3): mapProfileRow(), Store, Profile
 
 ### Community 10 - "Stats Charts & Records"
 Cohesion: 0.13
-Nodes (17): ACTIVE_BAR, AREA_CURSOR, AXIS_PROPS, BAR_CURSOR, CHART_PALETTE, CostChart(), DurationChart(), DurationDatum (+9 more)
+Nodes (18): StatsViewProps, ACTIVE_BAR, AREA_CURSOR, AXIS_PROPS, BAR_CURSOR, CHART_PALETTE, CostChart(), DurationChart() (+10 more)
+
+### Community 11 - "Fake System Adapter"
+Cohesion: 0.09
+Nodes (3): delay(), fakeShellPrompt(), FakeSystemAdapter
 
 ### Community 12 - "Agent Profile & Ask Panel"
-Cohesion: 0.16
-Nodes (15): log, ReclaimOutcome, SETUP_PHASES, SlotManagerConfig, AGENT_DIST_SUBPATH, BASH_ALLOWLIST, buildImplementerAgentMd(), buildMcpJson() (+7 more)
+Cohesion: 0.11
+Nodes (18): FullscreenToggle(), FullscreenToggleProps, badgeLabelFor(), LiveTerminal(), LiveTerminalOptions, LiveTerminalProps, TerminalData, TerminalView() (+10 more)
 
 ### Community 13 - "Worker Protocol Schemas"
-Cohesion: 0.12
-Nodes (15): TRIAGE_VERDICTS, AgentSettableStage, agentSettableStageSchema, AssertNamesCovered, channelEventSchema, submitFeasibilityMcpArgsSchema, submitTriageMcpArgsSchema, triageVerdictSchema (+7 more)
+Cohesion: 0.08
+Nodes (27): log, ToolHandler, ToolResult, TRIAGE_VERDICTS, AgentSettableStage, agentSettableStageSchema, askUserArgsSchema, AssertNamesCovered (+19 more)
 
 ### Community 14 - "Real Worktree Shell Ops"
 Cohesion: 0.08
-Nodes (33): createLogger(), log, dryRunLog, FAKE_OPEN_PRS, fakeEncoder, CLAUDE_JSON_PATH, COMPOSER_BINARIES, FEASIBILITY_DENIED_AGENTS (+25 more)
+Nodes (23): CLAUDE_JSON_PATH, COMPOSER_BINARIES, extractPrUrl(), FEASIBILITY_DENIED_AGENTS, FEASIBILITY_SCOUT_AGENTS_JSON, FEASIBILITY_SETTINGS_JSON, ghPrSchema, ghPrStateSchema (+15 more)
 
 ### Community 15 - "Feasibility Batch Manager"
-Cohesion: 0.14
-Nodes (10): buildFeasibilityBatchContract(), DRY_RUN_VERDICT, FeasibilityBatchManager, FeasibilityManagerConfig, FeasibilitySession, feasibilitySessionName(), log, toTriageResult() (+2 more)
+Cohesion: 0.11
+Nodes (8): buildFeasibilityBatchContract(), FeasibilityBatchManager, feasibilitySessionName(), toTriageResult(), RouteDeps, UserTerminalManager, FeasibilityResult, TerminalDescriptor
 
 ### Community 16 - "Stats Aggregation & Cost"
 Cohesion: 0.10
-Nodes (26): effectiveWorkDurationMs(), costByModel(), costByProject(), CostGroup, DurationGroup, KIND_LABELS, KindCount, kindCounts() (+18 more)
+Nodes (26): effectiveWorkDurationMs(), CostGroup, DurationGroup, KIND_LABELS, KindCount, kindCounts(), meanDurationByEffort(), meanDurationByKey() (+18 more)
 
 ### Community 17 - "API Routes & Schemas"
 Cohesion: 0.07
-Nodes (21): agentActiveSchema, log, PaneReader, stopHookSchema, analyzeTicketsSchema, createAskSchema, createCleanSchema, createCommentSchema (+13 more)
+Nodes (23): buildReformulatePrompt(), agentActiveSchema, log, PaneReader, stopHookSchema, analyzeTicketsSchema, createAskSchema, createCleanSchema (+15 more)
 
 ### Community 18 - "Ticket Detail & Forms"
-Cohesion: 0.12
-Nodes (24): AgentsViewProps, AskPanelProps, CleanPrPanel(), CleanPrPanelProps, NewTicketDialogProps, ProjectPrPicker(), ProjectPrPickerProps, ProjectSelectProps (+16 more)
+Cohesion: 0.13
+Nodes (31): AskPanelProps, CleanPrPanel(), CleanPrPanelProps, NewTicketDialogProps, Tab, TAB_TITLES, TabButtonProps, ProjectPrPicker() (+23 more)
 
 ### Community 19 - "Board Store & Notifications"
-Cohesion: 0.12
-Nodes (11): active, ensureNotificationPermission(), isSupported(), playNotificationSound(), showDesktopNotification(), BoardStore, CommentListener, Listener (+3 more)
+Cohesion: 0.15
+Nodes (15): resolveBaseBranch(), log, ReclaimOutcome, SETUP_PHASES, SlotManagerConfig, AGENT_DIST_SUBPATH, BASH_ALLOWLIST, buildImplementerAgentMd() (+7 more)
 
 ### Community 20 - "Dev Dependencies"
 Cohesion: 0.08
@@ -203,12 +213,12 @@ Cohesion: 0.08
 Nodes (24): compilerOptions, allowImportingTsExtensions, baseUrl, esModuleInterop, isolatedModules, jsx, lib, module (+16 more)
 
 ### Community 22 - "DB Rows & Mapping"
-Cohesion: 0.08
-Nodes (25): CommentRow, commentRowSchema, mapTicketRow(), parseSessionUsage(), ProfileRow, profileRowSchema, projectSchema, SlotRow (+17 more)
+Cohesion: 0.09
+Nodes (23): CommentRow, commentRowSchema, mapTicketRow(), parseSessionUsage(), ProfileRow, profileRowSchema, projectSchema, SlotRow (+15 more)
 
 ### Community 23 - "Client Hub & Watchdog"
-Cohesion: 0.09
-Nodes (19): loadOnce(), subscribers, UNKNOWN_CAPABILITIES, AnalyzeTicketsInput, Capabilities, Comment, CreateAskInput, CreateCleanInput (+11 more)
+Cohesion: 0.21
+Nodes (5): AgentsViewProps, TicketCardProps, TicketLifecycle, Stage, Ticket
 
 ### Community 24 - "Build Scripts"
 Cohesion: 0.09
@@ -219,100 +229,100 @@ Cohesion: 0.16
 Nodes (20): formatTokens(), TicketCost(), TicketCostProps, TOKEN_FORMATTER, USD_FORMATTER, costByFamily(), costOf(), costOfModel() (+12 more)
 
 ### Community 26 - "Desktop Bootstrap"
-Cohesion: 0.10
-Nodes (23): createDatabase(), migrate(), PROFILE_MIGRATIONS, seedProfiles(), seedSlots(), TICKET_MIGRATIONS, log, runFirstBootSetup() (+15 more)
+Cohesion: 0.21
+Nodes (12): AgentTurnUsage, resolveClaudeBinary(), bashCommandSchema, createSdkAgentSession(), dispatch(), pumpStream(), SDK_EFFORTS, SdkAgents (+4 more)
 
 ### Community 27 - "Worker Hub & Bridge"
-Cohesion: 0.14
-Nodes (10): isWorkerToolName(), WORKER_TOOLS, workerOutboundSchema, WorkerToolName, BackendBridge, bridge, env, envSchema (+2 more)
-
-### Community 28 - "App & Board Root"
-Cohesion: 0.13
-Nodes (20): AgentsView(), normalize(), Board(), BoardProps, normalize(), NewTicketDialog(), Toaster(), WorkflowView() (+12 more)
+Cohesion: 0.12
+Nodes (11): SessionToolCall, isWorkerToolName(), WORKER_TOOLS, workerOutboundSchema, WorkerToolName, BackendBridge, bridge, env (+3 more)
 
 ### Community 29 - "Board Columns"
-Cohesion: 0.13
-Nodes (13): log, SlotWatch, WorktreeAddressWatcher, AppConfig, config, configSchema, DEFAULT_MODELS, loadConfig() (+5 more)
+Cohesion: 0.12
+Nodes (18): DRY_RUN_VERDICT, FeasibilityManagerConfig, FeasibilitySession, log, log, SlotWatch, AppConfig, config (+10 more)
 
 ### Community 30 - "Logging"
 Cohesion: 0.14
 Nodes (13): ANSI, COLOR_ENABLED, isLevel(), Level, LEVEL_ORDER, LEVEL_TAG, Logger, paint() (+5 more)
 
 ### Community 31 - "Terminals View & Modals"
-Cohesion: 0.10
-Nodes (15): AnnotatedHtml, isInsideAnnotation(), PrdAnnotation, PrdReviewDialog(), PrdReviewDialogProps, SelectionState, wrapFirstOccurrence(), ABSOLUTE_UPLOAD_PATH (+7 more)
+Cohesion: 0.08
+Nodes (23): AnnotatedHtml, isInsideAnnotation(), PrdAnnotation, PrdReviewDialog(), PrdReviewDialogProps, SelectionState, wrapFirstOccurrence(), AUTHOR_BADGES (+15 more)
 
 ### Community 32 - "Ticket Lifecycle"
-Cohesion: 0.05
-Nodes (55): AgentProfileConfigProps, BoardColumn(), BoardColumnProps, DEFAULT_COLLAPSED, resolveAnalyzeAllTitle(), resolveCheckAllTitle(), resolveMoveAllTitle(), SortDir (+47 more)
+Cohesion: 0.13
+Nodes (12): BoardColumn(), DEFAULT_COLLAPSED, resolveAnalyzeAllTitle(), resolveCheckAllTitle(), resolveMoveAllTitle(), SortDir, useWindowedTickets(), ColumnActionsMenu() (+4 more)
 
 ### Community 34 - "Ticket Store Types"
 Cohesion: 0.11
-Nodes (18): dependencies, dompurify, elysia, marked, @modelcontextprotocol/sdk, nanoid, papaparse, @radix-ui/react-toggle (+10 more)
+Nodes (18): dependencies, @anthropic-ai/claude-agent-sdk, dompurify, elysia, marked, @modelcontextprotocol/sdk, nanoid, papaparse (+10 more)
 
 ### Community 35 - "Agent Config Constants"
-Cohesion: 0.42
-Nodes (9): buildContractConstraintsLines(), buildResponseFormatLines(), buildStrictRulesLines(), buildTicketLines(), buildTriageChannelPrompt(), buildTriagePlusChannelPrompt(), isEnglish(), AGENT_MODELS (+1 more)
+Cohesion: 0.14
+Nodes (17): buildContractConstraintsLines(), buildResponseFormatLines(), buildStrictRulesLines(), buildTicketLines(), buildTriageChannelPrompt(), buildTriagePlusChannelPrompt(), isEnglish(), DRY_RUN_VERDICT (+9 more)
 
 ### Community 36 - "Runtime Dependencies"
-Cohesion: 0.16
-Nodes (16): AUTHOR_BADGES, AuthorBadge(), CommentRow(), CommentRowProps, isLocked(), TicketDetail(), TriageSection(), TriageSectionProps (+8 more)
+Cohesion: 0.33
+Nodes (6): resolveProjectColor(), resolveProjectLabel(), isLocked(), TicketDetail(), finishedKindLabel(), stageVariant()
 
 ### Community 37 - "Settings Modal"
-Cohesion: 0.11
-Nodes (22): QuitConfirmModalProps, DragHandleAttributes, DragHandleListeners, GeneralSettings(), IMPLEMENTER_OPTIONS, LANGUAGE_OPTIONS, ProfileRowProps, SettingsModal() (+14 more)
+Cohesion: 0.10
+Nodes (23): QuitConfirmModal(), QuitConfirmModalProps, DragHandleAttributes, DragHandleListeners, GeneralSettings(), IMPLEMENTER_OPTIONS, LANGUAGE_OPTIONS, ProfileRowProps (+15 more)
 
 ### Community 38 - "Server Entry & Static"
-Cohesion: 0.15
-Nodes (15): applyDesktopEnv(), DesktopRoots, ensureConfig(), boot(), installApplicationMenu(), installMenuShortcutBridge(), menuShortcutActionSchema, newWindowEventSchema (+7 more)
+Cohesion: 0.06
+Nodes (41): createDatabase(), migrate(), PROFILE_MIGRATIONS, seedProfiles(), seedSlots(), TICKET_MIGRATIONS, applyDesktopEnv(), DesktopRoots (+33 more)
 
 ### Community 39 - "System Adapter Types"
-Cohesion: 0.15
-Nodes (12): log, ToolHandler, ToolResult, askUserArgsSchema, doneArgsSchema, failArgsSchema, readyForReviewArgsSchema, submitAnswerArgsSchema (+4 more)
+Cohesion: 0.18
+Nodes (15): BASH_ALLOWLIST, buildImplementSessionConfig(), implementerAgent(), ImplementSessionInput, prFixerAgent(), LiveSession, log, SessionHubHandlers (+7 more)
 
 ### Community 40 - "Coordinator & Hub Wiring"
-Cohesion: 0.15
-Nodes (16): AgentProfileConfig(), AskPanel(), ImplementationAgentFields(), ProfilesSettings(), useCapabilities(), emit(), refreshProfiles(), subscribers (+8 more)
+Cohesion: 0.12
+Nodes (20): AgentProfileConfig(), AskPanel(), ImplementationAgentFields(), ProfilesSettings(), loadOnce(), subscribers, UNKNOWN_CAPABILITIES, useCapabilities() (+12 more)
 
 ### Community 41 - "Chart Components"
 Cohesion: 0.16
 Nodes (12): ChartConfig, ChartContainer, ChartContainerProps, ChartContext, ChartContextValue, ChartLegendContent(), ChartLegendContentProps, ChartTooltipContent() (+4 more)
 
 ### Community 42 - "Triage Manager"
-Cohesion: 0.19
-Nodes (8): DRY_RUN_VERDICT, log, TriageManager, TriageManagerConfig, TriageSession, triageSessionName(), TRIAGE_VERDICT_LABELS, TriageResult
+Cohesion: 0.32
+Nodes (10): AgentCard(), AgentCardProps, AgentsView(), normalize(), projectBadgeStyle(), TicketCard(), useTickTimer(), formatRelativeDuration() (+2 more)
 
 ### Community 43 - "Community 43"
-Cohesion: 0.18
-Nodes (3): FakePaneStream, fakeShellPrompt(), hexToBytes()
+Cohesion: 0.17
+Nodes (7): renderChannelEvent(), WorkerHubHandlers, WorkerSocket, WorkerSocketData, ChannelEvent, workerInboundSchema, WorkerOutbound
 
 ### Community 44 - "Theme Management"
 Cohesion: 0.31
 Nodes (8): UseThemeResult, applyTheme(), getStoredTheme(), isTheme(), Theme, ThemeOption, THEMES, root
 
 ### Community 45 - "Agent Knobs & Models"
-Cohesion: 0.20
-Nodes (6): WorkerHubHandlers, WorkerSocket, WorkerSocketData, ChannelEvent, workerInboundSchema, WorkerOutbound
+Cohesion: 0.13
+Nodes (12): log, createLogger(), log, dryRunLog, FAKE_OPEN_PRS, fakeEncoder, hexToBytes(), GitWorktreeAddOptions (+4 more)
 
 ### Community 46 - "Community 46"
-Cohesion: 0.24
-Nodes (4): detectInstallCommand(), realpathSafe(), resolveWorktreeScriptCommand(), shQuote()
+Cohesion: 0.14
+Nodes (15): labelWithDefault(), TicketConfigSummary(), resolveEffort(), resolveModel(), AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, COMMENT_AUTHORS, IMPLEMENTER_LABELS (+7 more)
 
 ### Community 47 - "Triage Prompt Builder"
 Cohesion: 0.22
 Nodes (5): Architecture, Commands, Conventions (enforced — beyond the global ones in ~/.claude/CLAUDE.md), The dry-run safety model — read before running anything, What this is
+
+### Community 48 - "User Terminal Manager"
+Cohesion: 0.14
+Nodes (17): mapCommentRow(), mapWorktreeSessionRow(), enrichWorktreeSession(), NewAsk, NewClean, NewReview, SlotStatus, SqlBindValue (+9 more)
 
 ### Community 49 - "Database Schema & Seed"
 Cohesion: 0.28
 Nodes (7): StatsView(), useStats(), UseStatsResult, StatRecord, StatCard(), StatCardProps, StatEmpty()
 
 ### Community 50 - "Triage Verdicts & Config"
-Cohesion: 0.15
-Nodes (19): ImportTicketsPanel(), ImportTicketsPanelProps, Tab, TAB_TITLES, TabButtonProps, ProjectSelect(), WorktreePanel(), useAgentKnobs() (+11 more)
+Cohesion: 0.48
+Nodes (4): PrSelectRow(), PrSelectRowProps, isPrNeedsAttention(), OpenPr
 
 ### Community 51 - "Community 51"
-Cohesion: 0.25
-Nodes (3): RouteDeps, UserTerminalManager, TerminalDescriptor
+Cohesion: 0.29
+Nodes (8): TicketBadges(), TicketBadgesProps, TriageDot(), triageVerdictDot(), Badge(), BadgeProps, BadgeVariant, badgeVariants
 
 ### Community 52 - "Stop Hook & Usage"
 Cohesion: 0.33
@@ -323,16 +333,16 @@ Cohesion: 0.33
 Nodes (5): CONTEXT — domain glossary, Execution, Proposed (not yet built), Seams, Work items
 
 ### Community 54 - "CONTEXT.md Glossary"
-Cohesion: 0.40
-Nodes (6): nextWeek(), outcomeCounts(), projectCounts(), recordOutcome(), startOfWeek(), weeklyThroughput
+Cohesion: 0.42
+Nodes (11): AgentProfileConfigProps, ImplementationAgentFieldsProps, NewProfile, NewTicket, ProfilePatch, AgentKnobs, AgentProfileConfigValues, ResolvedAgentDefaults (+3 more)
 
 ### Community 55 - "Community 55"
 Cohesion: 0.40
 Nodes (4): name, private, type, version
 
 ### Community 56 - "Community 56"
-Cohesion: 0.48
-Nodes (4): PrSelectRow(), PrSelectRowProps, isPrNeedsAttention(), OpenPr
+Cohesion: 0.17
+Nodes (3): ClientHub, Comment, WorktreeSession
 
 ### Community 57 - "PreToolUse Hook Guard"
 Cohesion: 0.33
@@ -343,44 +353,60 @@ Cohesion: 0.33
 Nodes (3): listeners, mcp, ReplyArgsSchema
 
 ### Community 59 - "Package Manifest"
-Cohesion: 0.13
-Nodes (3): ClientHub, Notifier, WorkerHub
+Cohesion: 0.17
+Nodes (6): log, Watchdog, ClientSocket, ClientSocketData, NativeNotify, ACTIVE_STAGES
+
+### Community 60 - "Community 60"
+Cohesion: 0.12
+Nodes (22): Board(), BoardProps, normalize(), NewTicketDialog(), Toaster(), WorkflowView(), WorktreeSessionsView(), useBoard() (+14 more)
 
 ### Community 61 - "Dry-Run Safety Model"
 Cohesion: 0.67
 Nodes (4): Dry-Run Safety Model, FakeSystemAdapter, RealSystemAdapter, SystemAdapter (side-effect boundary)
 
+### Community 62 - "Projects Hook"
+Cohesion: 0.40
+Nodes (6): costByModel(), costByProject(), meanCostPerIssueUsd(), modelLabel(), totalSpendUsd(), withCost()
+
 ### Community 73 - "Community 73"
-Cohesion: 0.19
-Nodes (20): Composer 2.5 Implementer Path, buildAskContract(), buildCleanContract(), buildConflictResolutionContract(), buildFeasibilityContextSection(), buildImplementingSteps(), buildPlanningStep(), buildReviewContract() (+12 more)
+Cohesion: 0.21
+Nodes (18): Composer 2.5 Implementer Path, buildAskContract(), buildCleanContract(), buildConflictResolutionContract(), buildFeasibilityContextSection(), buildImplementingSteps(), buildPlanningStep(), buildReviewContract() (+10 more)
+
+### Community 74 - "Community 74"
+Cohesion: 0.21
+Nodes (9): ImportTicketsPanel(), ImportTicketsPanelProps, useAgentKnobs(), CsvParseError, ParsedTicketRow, ParsedTicketsCsv, parseTicketsCsv(), Switch (+1 more)
+
+### Community 76 - "Community 76"
+Cohesion: 0.29
+Nodes (4): BoardColumnProps, COLUMN_NODE_COLOR, WorkflowViewProps, Column
 
 ### Community 77 - "Community 77"
-Cohesion: 0.40
-Nodes (5): MIME_EXTENSIONS, resolveExtension(), SavedUpload, saveUpload(), serveUpload()
+Cohesion: 0.32
+Nodes (3): SlotsBarProps, mapSlotRow(), Slot
 
-### Community 80 - "Community 80"
-Cohesion: 0.17
-Nodes (6): log, Watchdog, ClientSocket, ClientSocketData, NativeNotify, ACTIVE_STAGES
+### Community 78 - "Community 78"
+Cohesion: 0.33
+Nodes (4): currentNow, startTicking(), subscribe(), subscribers
 
 ## Knowledge Gaps
-- **391 isolated node(s):** `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND`, `listeners` (+386 more)
+- **400 isolated node(s):** `BASH_ALLOWLIST`, `ImplementSessionInput`, `log`, `SessionHubHandlers`, `AgentSessionToolResult` (+395 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **12 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **13 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Ticket` connect `Store & Profiles` to `Slot & Project Config`, `Agents & Ticket UI`, `API Schemas & Inputs`, `Agent Profile & Ask Panel`, `Feasibility Batch Manager`, `API Routes & Schemas`, `Ticket Detail & Forms`, `Board Store & Notifications`, `DB Rows & Mapping`, `Client Hub & Watchdog`, `Pricing & Token Cost`, `App & Board Root`, `Ticket Lifecycle`, `Agent Config Constants`, `Runtime Dependencies`, `Package Manifest`, `Projects Hook`, `Community 73`, `Community 80`?**
-  _High betweenness centrality (0.063) - this node is a cross-community bridge._
-- **Why does `RealSystemAdapter` connect `Review Done Gate (E2E)` to `Terminal Session Manager`, `Community 46`, `Real Worktree Shell Ops`, `Community 56`, `Community 60`?**
-  _High betweenness centrality (0.050) - this node is a cross-community bridge._
-- **Why does `SlotManager` connect `Slot & Project Config` to `System Adapter Types`, `Community 73`, `Store & Profiles`, `Agent Profile & Ask Panel`, `User Terminal Manager`, `API Routes & Schemas`, `Community 51`, `Desktop Bootstrap`, `Package Manifest`?**
-  _High betweenness centrality (0.039) - this node is a cross-community bridge._
-- **What connects `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN` to the rest of the system?**
-  _394 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `Ticket` connect `Client Hub & Watchdog` to `Slot & Project Config`, `Agents & Ticket UI`, `Terminal Split View`, `API Schemas & Inputs`, `Store & Profiles`, `API Routes & Schemas`, `Ticket Detail & Forms`, `Board Store & Notifications`, `DB Rows & Mapping`, `Pricing & Token Cost`, `Terminals View & Modals`, `Ticket Lifecycle`, `Agent Config Constants`, `System Adapter Types`, `Triage Manager`, `Community 46`, `User Terminal Manager`, `Community 51`, `Community 56`, `Package Manifest`, `Community 60`, `Community 73`, `Community 76`?**
+  _High betweenness centrality (0.064) - this node is a cross-community bridge._
+- **Why does `RealSystemAdapter` connect `Review Done Gate (E2E)` to `System Adapter Types`, `Terminal Session Manager`, `Agent Knobs & Models`, `Real Worktree Shell Ops`, `Community 81`, `Triage Verdicts & Config`?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
+- **Why does `FakeSystemAdapter` connect `Fake System Adapter` to `Community 81`, `Agent Knobs & Models`, `System Adapter Types`?**
+  _High betweenness centrality (0.036) - this node is a cross-community bridge._
+- **What connects `BASH_ALLOWLIST`, `ImplementSessionInput`, `log` to the rest of the system?**
+  _403 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `Slot & Project Config` be split into smaller, more focused modules?**
+  _Cohesion score 0.14634146341463414 - nodes in this community are weakly interconnected._
 - **Should `Agents & Ticket UI` be split into smaller, more focused modules?**
-  _Cohesion score 0.07918367346938776 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.11904761904761904 - nodes in this community are weakly interconnected._
 - **Should `Terminal Split View` be split into smaller, more focused modules?**
-  _Cohesion score 0.05786090005844535 - nodes in this community are weakly interconnected._
-- **Should `MCP Channels & Workers` be split into smaller, more focused modules?**
-  _Cohesion score 0.14285714285714285 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06078316773816481 - nodes in this community are weakly interconnected._

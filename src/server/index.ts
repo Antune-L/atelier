@@ -46,11 +46,11 @@ const SPA_FALLBACK_FILE = "index.html";
  * Only the filesystem roots flow through here. The rest of the desktop boot contract is read from
  * env (set by desktop/bootstrap.applyDesktopEnv before this module is dynamically imported), because
  * config.ts / system / boot.ts read their env at import time, before opts exist: KANBAN_CONFIG +
- * KANBAN_DB (writable paths), KANBAN_AGENT_DIST (spawn the bundled worker/hook .js), KANBAN_BUN_PATH
- * (stock bun via argv0). Web mode leaves all of these unset and inherits the repo-root defaults.
+ * KANBAN_DB (writable paths), KANBAN_CLAUDE_BINARY (override the resolved SDK native binary path).
+ * Web mode leaves all of these unset and inherits the repo-root defaults.
  */
 export interface StartServerOptions {
-  /** Read-only assets: dist/web, worker.js, hooks, templates (default: repo root). */
+  /** Read-only assets: dist/web, templates, the vendored composer driver (default: repo root). */
   resourcesRoot?: string;
   /** Writable data: kanban.db, uploads/, config.json, slots/ (default: repo root). */
   dataRoot?: string;

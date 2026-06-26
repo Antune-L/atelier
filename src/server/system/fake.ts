@@ -7,12 +7,9 @@ import type {
   GitWorktreeAddOptions,
   PaneSize,
   PaneStream,
-  PrepareSlotFiles,
   ReformulateOptions,
   ReviewDoneOptions,
   SpawnShellOptions,
-  SpawnTmuxOptions,
-  SpawnTriageOptions,
   SystemAdapter,
   WorktreeSetupOptions,
 } from "./types.ts";
@@ -129,15 +126,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("deleteLocalBranch", { repoPath, branch });
   }
 
-  async prepareSlotFiles(files: PrepareSlotFiles): Promise<void> {
-    this.log("prepareSlotFiles", {
-      slotPath: files.slotPath,
-      mcpBytes: files.mcpJson.length,
-      implementerAgentBytes: files.implementerAgentMd.length,
-      prFixerAgentBytes: files.prFixerAgentMd.length,
-    });
-  }
-
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
     this.log("copyEnvFiles", { repoPath, slotPath });
   }
@@ -156,11 +144,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
-  async spawnSession(opts: SpawnTmuxOptions): Promise<void> {
-    this.log("spawnSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model, effort: opts.effort });
-    this.liveSessions.add(opts.sessionName);
-  }
-
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
     // Synthetic: no real claude is spawned. Emit `init` on the next tick so the caller can wire its
@@ -172,25 +155,6 @@ export class FakeSystemAdapter implements SystemAdapter {
       interrupt: async () => this.log("agentSession.interrupt", { ticketId: opts.ticketId }),
       close: async () => this.log("agentSession.close", { ticketId: opts.ticketId }),
     };
-  }
-
-  async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
-    // Never reached in practice: the dry-run TriageManager short-circuits to a stub verdict
-    // instead of spawning. Tracked anyway so the terminal viewer stays consistent if it ever is.
-    this.log("spawnTriageSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model, effort: opts.effort });
-    this.liveSessions.add(opts.sessionName);
-  }
-
-  async spawnFeasibilitySession(opts: SpawnTriageOptions): Promise<void> {
-    // Never reached in practice: the dry-run FeasibilityBatchManager short-circuits to stub verdicts
-    // instead of spawning. Tracked anyway so the terminal viewer stays consistent if it ever is.
-    this.log("spawnFeasibilitySession", {
-      sessionName: opts.sessionName,
-      cwd: opts.cwd,
-      model: opts.model,
-      effort: opts.effort,
-    });
-    this.liveSessions.add(opts.sessionName);
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {

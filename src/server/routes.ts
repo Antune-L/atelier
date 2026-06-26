@@ -875,12 +875,10 @@ export function createApiRoutes(deps: RouteDeps) {
       }
 
       try {
+        // The server runs the agent sessions in-process from source, so a non-frontend change only
+        // needs the web bundle rebuilt; the relaunch below picks up the new server source directly.
         const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_BUILD_TIMEOUT_MS);
         if (!web.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-        if (!frontendOnly) {
-          const agents = await system.runProjectScript(repoRoot, "bun run build:agents", UPDATE_BUILD_TIMEOUT_MS);
-          if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-        }
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${getErrorMessage(error)}`);
       }

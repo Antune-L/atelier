@@ -15,43 +15,6 @@ export interface GitWorktreeAddOptions {
   baseBranch: string;
 }
 
-export interface SpawnTmuxOptions {
-  sessionName: string;
-  cwd: string;
-  env: Record<string, string>;
-  /** Model alias for the implementation session (claude --model). */
-  model: string;
-  /** Reasoning effort (claude --effort), or null to use the model default. */
-  effort: string | null;
-}
-
-/**
- * A read-only feasibility triage session: a detached `claude` spawned on the real repo with the
- * worker channel attached but no worktree/slot. Read-only is structural (`--tools Read,Glob,Grep`;
- * with `deep: true`, Task + inline read-only scouts are added for parallel fan-out).
- */
-export interface SpawnTriageOptions {
-  sessionName: string;
-  cwd: string;
-  /** Model alias for the triage session (claude --model). */
-  model: string;
-  /** Reasoning effort (claude --effort), or null to use the model default. */
-  effort: string | null;
-  /** Inline worker MCP config (JSON), passed via `--mcp-config` + `--strict-mcp-config`. */
-  mcpConfig: string;
-  /** Extra tmux env (e.g. DISABLE_AUTOUPDATER); the worker's TICKET_ID/SLOT_ID live in mcpConfig. */
-  env: Record<string, string>;
-  /** "Analyse +" variant: orchestrator may fan out read-only sub-agents via Task. */
-  deep?: boolean;
-}
-
-/**
- * A read-only batch feasibility session: a detached `claude` on the real repo with the worker
- * channel attached but no worktree/slot, allowed to fan out sub-agents (`--tools Read,Glob,Grep,Task`).
- * Same options as a triage session; the wider tool surface is the only difference.
- */
-export type SpawnFeasibilityOptions = SpawnTriageOptions;
-
 export interface ReformulateOptions {
   cwd: string;
   prompt: string;
@@ -81,17 +44,6 @@ export interface DoneGateResult {
 export interface PaneSize {
   cols: number;
   rows: number;
-}
-
-export interface PrepareSlotFiles {
-  /** Absolute slot dir into which to write .mcp.json / .claude/settings.json. */
-  slotPath: string;
-  mcpJson: string;
-  settingsJson: string;
-  /** `.claude/agents/implementer.md` content (the configurable code-writing sub-agent). */
-  implementerAgentMd: string;
-  /** `.claude/agents/pr-fixer.md` content (review-fix sub-agent that applies reviewer findings). */
-  prFixerAgentMd: string;
 }
 
 export interface WorktreeSetupOptions {
@@ -149,7 +101,6 @@ export interface SystemAdapter {
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
 
   // ---- slot preparation ----
-  prepareSlotFiles(files: PrepareSlotFiles): Promise<void>;
   copyEnvFiles(repoPath: string, slotPath: string): Promise<void>;
   /** Run the project's worktree setup script (explicit config command, else auto-detected) in the freshly-created slot worktree. No-op when neither exists. Throws on non-zero exit. */
   runWorktreeSetupScript(opts: WorktreeSetupOptions): Promise<void>;
@@ -170,12 +121,7 @@ export interface SystemAdapter {
    */
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle;
 
-  // ---- tmux session ----
-  spawnSession(opts: SpawnTmuxOptions): Promise<void>;
-  /** Spawn a detached read-only triage session (worker channel attached, no worktree/slot). */
-  spawnTriageSession(opts: SpawnTriageOptions): Promise<void>;
-  /** Spawn a detached read-only batch feasibility session (fans out sub-agents; no worktree/slot). */
-  spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void>;
+  // ---- tmux session (worktree/user/test shells only — agents run in-process via the SDK) ----
   /**
    * Run a one-shot `claude -p` returning its final text (used to reformulate a ticket need).
    * Read-only, no worktree/slot.

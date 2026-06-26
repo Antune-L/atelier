@@ -586,14 +586,9 @@ export {
   doneArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
-  workerHelloSchema,
-  workerToolCallSchema,
-  workerStopSchema,
-  workerInboundSchema,
   channelEventSchema,
-  workerOutboundSchema,
 } from "./protocol.ts";
-export type { WorkerToolName, WorkerInbound, ChannelEvent, WorkerOutbound } from "./protocol.ts";
+export type { WorkerToolName, ChannelEvent } from "./protocol.ts";
 
 /**
  * Strict coordinator-facing `update_stage` args: accepts the FULL stage set (the worker only

@@ -4,6 +4,8 @@
 
 A **"no SDK"** take on agent orchestration: agents are interactive Claude Code sessions in tmux, wired through an **MCP channel**. No Agent SDK, no `claude -p`. The board routes work; the backend verifies gates; the agents do the reasoning.
 
+![Atelier demo](docs/demo.gif)
+
 ## Stack
 
 | Layer       | Choice                                              |

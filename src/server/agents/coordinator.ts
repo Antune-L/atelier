@@ -19,7 +19,7 @@ import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
-import type { AgentSessionEvent, AgentTurnUsage } from "../system/agentSession.ts";
+import type { AgentTurnUsage } from "../system/agentSession.ts";
 
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { SessionHub, SessionToolCall } from "./sessionHub.ts";
@@ -70,13 +70,7 @@ export class AgentCoordinator {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
       onStop: (ticketId, sessionId, usageByModel) => void this.onStop(ticketId, sessionId, usageByModel),
-      onSessionEvent: (ticketId, slotId, event) => this.onSessionEvent(ticketId, slotId, event),
     });
-  }
-
-  /** Every parsed stream event of a live session — reserved for the live transcript viewer. */
-  private onSessionEvent(_ticketId: string, _slotId: number, _event: AgentSessionEvent): void {
-    // Phase 5 wires this to the live viewer; lifecycle is driven by onToolCall + onStop.
   }
 
   private async onToolCall(ctx: SessionToolCall): Promise<ToolResult> {

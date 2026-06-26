@@ -206,6 +206,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     lifecycle,
     slots: slotManager,
     coordinator,
+    sessionHub,
     system,
     triage: triageManager,
     feasibility: feasibilityManager,

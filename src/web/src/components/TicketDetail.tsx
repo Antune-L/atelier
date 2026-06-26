@@ -53,6 +53,7 @@ import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup"
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { TicketCost } from "@/components/TicketCost";
 import { LiveTerminal } from "@/components/LiveTerminal";
+import { TerminalView } from "@/components/TerminalView";
 import {
   dependencyCandidates,
   finishedKindLabel,
@@ -1093,7 +1094,13 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
         </div>
         {terminalPaneVisible && (
           <div className="flex w-[45%] min-w-[420px] flex-col overflow-hidden border-l px-4 py-4">
-            <LiveTerminal ticketId={current.id} live={sessionLive} fill defaultInput={current.testing} />
+            {current.testing ? (
+              // An interactive test session is a real tmux shell — keep the xterm (input + resize).
+              <LiveTerminal ticketId={current.id} live={sessionLive} fill defaultInput />
+            ) : (
+              // An agent session runs in-process via the SDK: poll its rendered live transcript.
+              <TerminalView ticketId={current.id} fill />
+            )}
           </div>
         )}
       </div>
@@ -1359,7 +1366,7 @@ function TriageSection({
 
       {running && (
         <div className="mt-2">
-          <LiveTerminal ticketId={ticket.id} />
+          <TerminalView ticketId={ticket.id} />
         </div>
       )}
 

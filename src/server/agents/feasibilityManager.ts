@@ -194,15 +194,17 @@ export class FeasibilityBatchManager {
     );
   }
 
-  /**
-   * Live-viewer bridge: an SDK batch session has no tmux pane, so the legacy terminal viewer has
-   * nothing to attach to. Returns null until the Phase 5 transcript viewer replaces this path.
-   */
+  /** The batch id (= live transcript key) evaluating `ticketId`, for the polled agent viewer; null if none. */
+  batchKeyForTicket(ticketId: string): string | null {
+    return this.ticketToBatch.get(ticketId) ?? null;
+  }
+
+  /** Legacy terminal-WS bridge: SDK sessions have no tmux pane (the viewer polls the transcript instead). */
   resolveSession(_batchId: string): string | null {
     return null;
   }
 
-  /** Live-viewer bridge for the batch evaluating `ticketId`; null until the Phase 5 viewer lands. */
+  /** Legacy terminal-WS bridge for the batch evaluating `ticketId`; the viewer polls the transcript instead. */
   resolveSessionForTicket(_ticketId: string): string | null {
     return null;
   }

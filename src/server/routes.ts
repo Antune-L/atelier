@@ -28,6 +28,7 @@ import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 import { buildReformulatePrompt } from "./agents/reformulate.ts";
 import type { ReformulateOptions } from "./system/types.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
+import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
@@ -59,6 +60,7 @@ interface RouteDeps {
   lifecycle: TicketLifecycle;
   slots: SlotManager;
   coordinator: AgentCoordinator;
+  sessionHub: SessionHub;
   system: PaneReader;
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
@@ -779,18 +781,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/tickets/:id/terminal", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      // A triage runs in no slot: fall back to its detached session, then to the
-      // feasibility batch session this ticket belongs to (mirrors the WS terminal path).
-      const sessionName =
-        ticket.slotId !== null
-          ? store.getSlot(ticket.slotId)?.tmuxSession ?? null
-          : deps.triage.resolveSession(params.id) ?? deps.feasibility.resolveSessionForTicket(params.id);
-      if (ticket.slotId === null && !sessionName) return jsonError(set, HTTP_CONFLICT, "aucun slot actif");
       const phase = slots.getSetupPhase(params.id);
-      // Before the tmux session exists (worktree/install/spawn), surface the setup phase.
-      if (!sessionName) return { output: "", phase };
-      const output = await deps.system.capturePane(sessionName);
-      return { output, phase };
+      // A testing ticket runs an interactive tmux shell (still captured live); every agent / triage /
+      // feasibility ticket runs an in-process SDK session whose rendered transcript is the viewer source.
+      const slot = ticket.slotId !== null ? store.getSlot(ticket.slotId) : null;
+      if (slot?.tmuxSession) {
+        return { output: await deps.system.capturePane(slot.tmuxSession), phase };
+      }
+      // A feasibility-evaluated ticket's transcript lives under its batch id; everything else under its own id.
+      const transcriptId = deps.feasibility.batchKeyForTicket(params.id) ?? params.id;
+      return { output: deps.sessionHub.getTranscript(transcriptId), phase };
     })
     .get("/terminals", async ({ query }) => {
       const projectKey = typeof query.projectKey === "string" ? query.projectKey : undefined;

@@ -146,9 +146,18 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
-    // Synthetic: no real claude is spawned. Emit `init` on the next tick so the caller can wire its
-    // handle before the first event lands; send/interrupt/close are logged no-ops (zero side effects).
+    // Synthetic: no real claude is spawned. Emit `init` then a couple of display-only events on the
+    // next ticks so the caller can wire its handle and the live transcript viewer has something to
+    // show in dry-run. No `turn_end` is emitted — that would drive the real nudge/stall lifecycle.
     setTimeout(() => opts.onEvent({ type: "init", sessionId: `dry-${opts.ticketId}` }), 0);
+    setTimeout(
+      () =>
+        opts.onEvent({
+          type: "assistant_text",
+          text: "Session simulée (dry-run) : aucune session claude réelle n'est lancée dans le bac à sable.",
+        }),
+      0,
+    );
     return {
       ticketId: opts.ticketId,
       send: (content) => this.log("agentSession.send", { ticketId: opts.ticketId, bytes: content.length }),

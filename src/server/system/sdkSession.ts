@@ -56,6 +56,15 @@ function toSdkEffort(effort: string | null): SdkEffort | undefined {
   return SDK_EFFORTS.find((value) => value === effort);
 }
 
+/** Build the `settings.permissions` partial from the allow/deny rule lists (omit when both empty). */
+function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settings"> {
+  const permissions: { allow?: string[]; deny?: string[] } = {};
+  if (allow && allow.length > 0) permissions.allow = allow;
+  if (deny && deny.length > 0) permissions.deny = deny;
+  if (!permissions.allow && !permissions.deny) return {};
+  return { settings: { permissions } };
+}
+
 function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {
   const out: SdkAgents = {};
   for (const [name, def] of Object.entries(agents)) {
@@ -128,7 +137,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     stderr: () => {},
     hooks: { PreToolUse: [{ matcher: "Bash", hooks: [denyNoVerifyHook] }] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
-    ...(opts.permissionAllow ? { settings: { permissions: { allow: opts.permissionAllow } } } : {}),
+    ...buildSettings(opts.permissionAllow, opts.permissionDeny),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),

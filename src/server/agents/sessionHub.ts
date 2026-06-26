@@ -19,6 +19,7 @@ import type {
   AgentSessionEvent,
   AgentSessionHandle,
   AgentSubagentDefinition,
+  AgentTurnUsage,
 } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
@@ -34,6 +35,8 @@ export interface SessionStartConfig {
   permissionMode: AgentPermissionMode;
   /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
   permissionAllow?: string[];
+  /** Denied permission rules (SDK `settings.permissions.deny`) — e.g. `Agent(general-purpose)` for read-only scouts. */
+  permissionDeny?: string[];
   /** Extra built-in tools the agent may auto-use (Read/Edit/Bash/Agent…). Worker tools are always allowed. */
   allowedTools?: string[];
   /** Tools removed entirely (read-only triage/feasibility bar Edit/Write/Bash). */
@@ -53,8 +56,11 @@ export interface SessionToolCall {
 export interface SessionHubHandlers {
   /** Route a worker tool call to the backend; the returned text is what the agent sees. */
   onToolCall(call: SessionToolCall): Promise<{ ok: boolean; result: string }>;
-  /** A turn ended (the SDK `result` message): drives the auto-nudge → stalled escalation. */
-  onStop(ticketId: string, sessionId: string | null): void;
+  /**
+   * A turn ended (the SDK `result` message): drives the auto-nudge → stalled escalation and persists
+   * the turn's per-model usage (keyed by sessionId, summed across auto-reclaim relaunches).
+   */
+  onStop(ticketId: string, sessionId: string | null, usageByModel: Record<string, AgentTurnUsage>): void;
   /** Every parsed stream event (UI viewer + usage recording). */
   onSessionEvent(ticketId: string, slotId: number, event: AgentSessionEvent): void;
 }
@@ -106,6 +112,7 @@ export class SessionHub {
       effort: config.effort,
       permissionMode: config.permissionMode,
       ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
+      ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
       ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),
       ...(config.disallowedTools ? { disallowedTools: config.disallowedTools } : {}),
       ...(config.agents ? { agents: config.agents } : {}),
@@ -136,6 +143,11 @@ export class SessionHub {
     void live.handle.close();
   }
 
+  /** Stop and evict every live session (desktop shutdown). */
+  disconnectAll(): void {
+    for (const ticketId of [...this.sessions.keys()]) this.disconnect(ticketId);
+  }
+
   private async routeToolCall(
     ticketId: string,
     slotId: number,
@@ -154,7 +166,7 @@ export class SessionHub {
     }
     this.handlers?.onSessionEvent(ticketId, slotId, event);
     if (event.type === "turn_end") {
-      this.handlers?.onStop(ticketId, live?.sessionId ?? null);
+      this.handlers?.onStop(ticketId, live?.sessionId ?? null, event.usageByModel);
     }
   }
 }

@@ -8,12 +8,12 @@ import {
   TERMINAL_DEFAULT_ROWS,
   WS_PATH_CLIENT,
   WS_PATH_TERMINAL,
-  WS_PATH_WORKER,
 } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
+import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
@@ -32,8 +32,6 @@ import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
 import { UserTerminalManager } from "./userTerminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
-import type { WorkerSocket } from "./workerHub.ts";
-import { WorkerHub } from "./workerHub.ts";
 
 const DEFAULT_PORT = 52817;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -76,12 +74,7 @@ export interface RunningServer {
 
 type SocketData =
   | { kind: "client" }
-  | { kind: "worker"; ticketId: string | null; slotId: number | null }
   | { kind: "terminal"; ticketId?: string; terminalId?: string; slotId?: number; cols: number; rows: number };
-
-function isWorkerSocket(ws: { data: SocketData }): ws is WorkerSocket {
-  return ws.data.kind === "worker";
-}
 
 function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
   return ws.data.kind === "client";
@@ -163,29 +156,17 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const port = Number(process.env.PORT ?? DEFAULT_PORT);
   const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");
-  const backendHttp = process.env.BACKEND_HTTP ?? `http://localhost:${port}`;
-  const backendWs = process.env.BACKEND_WS ?? `ws://localhost:${port}${WS_PATH_WORKER}`;
-  // The bundled Electrobun bun is a stock binary reachable via argv0; the desktop main exports
-  // KANBAN_BUN_PATH so spawned worker/hook processes run under it. Falls back to this runtime.
-  const bunPath = process.env.KANBAN_BUN_PATH ?? process.execPath;
 
   const db = createDatabase(dbPath);
   const store = new Store(db);
   const system = createSystemAdapter();
   const clientHub = new ClientHub(store);
-  const workerHub = new WorkerHub();
+  // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
+  const sessionHub = new SessionHub(system);
   const notifier = new Notifier(clientHub, opts.onNotify);
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
-  const triageManager = new TriageManager(store, system, workerHub, clientHub, notifier, {
-    backendWs,
-    projectRoot: resourcesRoot,
-    bunPath,
-  });
-  const feasibilityManager = new FeasibilityBatchManager(store, system, workerHub, clientHub, notifier, {
-    backendWs,
-    projectRoot: resourcesRoot,
-    bunPath,
-  });
+  const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier);
+  const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
   const userTerminals = new UserTerminalManager(system);
   const terminalManager = new TerminalSessionManager(
     store,
@@ -195,16 +176,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     userTerminals,
   );
 
-  const slotManager = new SlotManager(store, system, clientHub, workerHub, notifier, lifecycle, {
-    backendHttp,
-    backendWs,
+  const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
-    bunPath,
   });
   const coordinator = new AgentCoordinator(
     store,
     clientHub,
-    workerHub,
+    sessionHub,
     notifier,
     lifecycle,
     slotManager,
@@ -273,10 +251,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;
         return new Response("upgrade failed", { status: 426 });
       }
-      if (url.pathname === WS_PATH_WORKER) {
-        if (srv.upgrade(request, { data: { kind: "worker", ticketId: null, slotId: null } })) return undefined;
-        return new Response("upgrade failed", { status: 426 });
-      }
       if (url.pathname === WS_PATH_TERMINAL) {
         // Exactly one addressing param: an agent ticket pane, a user terminal, or a worktree-session slot.
         const ticketId = url.searchParams.get("ticketId") ?? undefined;
@@ -314,12 +288,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       },
       message(ws, message) {
         const text = typeof message === "string" ? message : message.toString();
-        if (isWorkerSocket(ws)) void workerHub.handleMessage(ws, text);
         if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
       },
       close(ws) {
         if (isClientSocket(ws)) clientHub.remove(ws);
-        if (isWorkerSocket(ws)) workerHub.handleClose(ws);
         if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
       },
     },
@@ -327,7 +299,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
-  log.info("WebSocket prêts", { client: WS_PATH_CLIENT, worker: WS_PATH_WORKER, terminal: WS_PATH_TERMINAL });
+  log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
 
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.

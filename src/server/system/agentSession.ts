@@ -68,6 +68,12 @@ export interface AgentSessionOptions {
    */
   permissionAllow?: string[];
   /**
+   * Denied permission rules (SDK `settings.permissions.deny`), e.g. `Agent(general-purpose)`. Used by
+   * the read-only feasibility/deep-triage sessions to forbid spawning a recursing built-in sub-agent
+   * so the inline scouts are the only fan-out type — deny-first, enforced by Claude Code itself.
+   */
+  permissionDeny?: string[];
+  /**
    * Extra tools the agent may auto-use without a prompt. The in-process worker tools
    * (`mcp__kanban__*`) are always allowed; pass the built-in surface (Read/Edit/Bash/Agent…) here.
    */

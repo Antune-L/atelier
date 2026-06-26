@@ -1,5 +1,4 @@
 import { Elysia } from "elysia";
-import { z } from "zod";
 
 import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
@@ -20,7 +19,6 @@ import {
   updateAppSettingsSchema,
   updateProfileSchema,
   updateTicketSchema,
-  usageByModelSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
@@ -94,17 +92,6 @@ const GIT_QUERY_TIMEOUT_MS = 5_000;
 function isWebOnlyPath(filePath: string): boolean {
   return filePath.startsWith("src/web/");
 }
-
-const stopHookSchema = z.object({
-  ticketId: z.string(),
-  sessionId: z.string().nullable().default(null),
-  /** Token usage aggregated from this session's transcript (additive; omitted in dry-run). */
-  usageByModel: usageByModelSchema.optional(),
-});
-
-const agentActiveSchema = z.object({
-  ticketId: z.string(),
-});
 
 const HTTP_CREATED = 201;
 const HTTP_BAD_REQUEST = 400;
@@ -853,29 +840,6 @@ export function createApiRoutes(deps: RouteDeps) {
       return { path: saved.path, url: saved.url };
     })
     .get("/slots", () => store.listSlots())
-    .post("/internal/stop", ({ body }) => {
-      const parsed = stopHookSchema.safeParse(body);
-      if (!parsed.success) return { ok: false };
-      const { ticketId, sessionId, usageByModel } = parsed.data;
-      // Persist this session's cumulative usage (idempotent: each Stop overwrites its own
-      // sessionId entry; total = sum across sessions, correct across auto-reclaim relaunches).
-      if (usageByModel && sessionId) {
-        const ticket = store.getTicket(ticketId);
-        if (ticket) {
-          store.updateTicket(ticketId, {
-            sessionUsage: { ...ticket.sessionUsage, [sessionId]: usageByModel },
-          });
-        }
-      }
-      coordinator.handleStopHook(ticketId, sessionId);
-      return { ok: true };
-    })
-    .post("/internal/active", ({ body }) => {
-      const parsed = agentActiveSchema.safeParse(body);
-      if (!parsed.success) return { ok: false };
-      coordinator.handleAgentActive(parsed.data.ticketId);
-      return { ok: true };
-    })
     .post("/internal/update", async ({ set }) => {
       const { onRequestUpdate, repoRoot, system } = deps;
       if (!onRequestUpdate || !repoRoot) return jsonError(set, HTTP_CONFLICT, "mise à jour indisponible");

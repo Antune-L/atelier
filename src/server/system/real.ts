@@ -13,6 +13,8 @@ import {
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
+import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { createSdkAgentSession } from "./sdkSession.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -398,6 +400,11 @@ export class RealSystemAdapter implements SystemAdapter {
       proc.exited,
     ]);
     return { exitCode, timedOut: proc.signalCode === "SIGKILL", stdout, stderr };
+  }
+
+  startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+    log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
+    return createSdkAgentSession(opts);
   }
 
   async spawnSession(opts: SpawnTmuxOptions): Promise<void> {

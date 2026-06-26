@@ -6,6 +6,8 @@
 
 import type { OpenPr } from "../../shared/schemas.ts";
 
+import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+
 export interface GitWorktreeAddOptions {
   repoPath: string;
   slotPath: string;
@@ -158,6 +160,15 @@ export interface SystemAdapter {
    */
   runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void>;
   installDeps(slotPath: string, timeoutMs: number): Promise<void>;
+
+  // ---- SDK agent session (streaming-input `claude` run; the eventual replacement for spawnSession) ----
+  /**
+   * Start a live SDK-driven agent session: a long-lived `claude` run in streaming-input mode.
+   * The handle injects user turns; the session routes worker-tool calls back through `onToolCall`
+   * and surfaces parsed stream events via `onEvent`. Real spawns via the Agent SDK; Fake returns a
+   * synthetic no-op handle so the server still boots and runs in dry-run.
+   */
+  startAgentSession(opts: AgentSessionOptions): AgentSessionHandle;
 
   // ---- tmux session ----
   spawnSession(opts: SpawnTmuxOptions): Promise<void>;

@@ -1,6 +1,7 @@
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
+import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -158,6 +159,19 @@ export class FakeSystemAdapter implements SystemAdapter {
   async spawnSession(opts: SpawnTmuxOptions): Promise<void> {
     this.log("spawnSession", { sessionName: opts.sessionName, cwd: opts.cwd, model: opts.model, effort: opts.effort });
     this.liveSessions.add(opts.sessionName);
+  }
+
+  startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+    this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
+    // Synthetic: no real claude is spawned. Emit `init` on the next tick so the caller can wire its
+    // handle before the first event lands; send/interrupt/close are logged no-ops (zero side effects).
+    setTimeout(() => opts.onEvent({ type: "init", sessionId: `dry-${opts.ticketId}` }), 0);
+    return {
+      ticketId: opts.ticketId,
+      send: (content) => this.log("agentSession.send", { ticketId: opts.ticketId, bytes: content.length }),
+      interrupt: async () => this.log("agentSession.interrupt", { ticketId: opts.ticketId }),
+      close: async () => this.log("agentSession.close", { ticketId: opts.ticketId }),
+    };
   }
 
   async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {

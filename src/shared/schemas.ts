@@ -318,7 +318,7 @@ const EXTERNAL_URL_PROTOCOLS = ["http:", "https:"];
 
 /** True when `value` parses as a URL on an http(s) scheme. */
 function isHttpUrl(value: string): boolean {
-  const parsed = z.string().url().safeParse(value);
+  const parsed = z.url().safeParse(value);
   if (!parsed.success) return false;
   return EXTERNAL_URL_PROTOCOLS.includes(new URL(parsed.data).protocol);
 }
@@ -456,7 +456,7 @@ export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
 export const openPrSchema = z.object({
   number: z.number().int(),
   title: z.string(),
-  url: z.string().url(),
+  url: z.url(),
   headBranch: z.string(),
   /** The PR's real target branch, detected via `gh` (`baseRefName`) — argus reviews against it.
    * Validated like any base branch since it ends up interpolated into the argus `--base` command. */

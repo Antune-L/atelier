@@ -62,7 +62,7 @@ export const submitPrdArgsSchema = z.object({ markdown: z.string().min(1) });
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 
-export const doneArgsSchema = z.object({ pr_url: z.string().url() });
+export const doneArgsSchema = z.object({ pr_url: z.url() });
 
 export const readyForReviewArgsSchema = z.object({});
 

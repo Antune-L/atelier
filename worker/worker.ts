@@ -19,7 +19,6 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { ChannelEvent, WorkerToolName } from "../src/shared/protocol.ts";
 import { WORKER_TOOLS, isWorkerToolName, workerOutboundSchema } from "../src/shared/protocol.ts";
@@ -34,7 +33,7 @@ const CHANNEL_NOTIFICATION_METHOD = "notifications/claude/channel";
 const envSchema = z.object({
   TICKET_ID: z.string().min(1),
   SLOT_ID: z.coerce.number().int(),
-  BACKEND_WS: z.string().url(),
+  BACKEND_WS: z.url(),
 });
 
 const env = envSchema.parse({
@@ -150,7 +149,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: WORKER_TOOLS.map((t) => ({
     name: t.name,
     description: t.description,
-    inputSchema: zodToJsonSchema(t.argsSchema, { target: "openApi3", $refStrategy: "none" }),
+    inputSchema: z.toJSONSchema(t.argsSchema, { reused: "inline" }),
   })),
 }));
 

@@ -64,15 +64,13 @@ To have agents actually spawn `claude` in tmux, create worktrees and open PRs:
 bun run real         # KANBAN_DRY_RUN=0 on kanban-real.db
 ```
 
-Requirements: `tmux` and `gh` installed and authenticated, plus the `claude` (Claude Code) CLI installed and logged in, **v2.1.80 or later** (see Channels below). Real mode runs git/tmux/gh/filesystem for real.
+Requirements: `tmux` and `gh` installed and authenticated, plus `gh` logged in. The Claude Code agent runs via the bundled `@anthropic-ai/claude-agent-sdk` (it ships its own native `claude` binary as an optional dependency — no separately installed CLI is required). Real mode runs git/tmux/gh/filesystem for real.
 
-### Channels (research preview)
+### Agent runtime (Agent SDK)
 
-The backend→agent push (the `ticket`/`answer`/`nudge` events that wake a session) relies on Claude Code's **Channels** feature, still in research preview. The `worker` shipped with this repo (`worker/worker.ts`) **is** the channel server: it declares the `claude/channel` capability and pushes events via `notifications/claude/channel`. There is no webhook to write yourself.
+The backend→agent push (the `ticket`/`answer`/`nudge` events that wake a session) is no longer a research-preview MCP channel: each ticket runs a long-lived `claude` process via the official **`@anthropic-ai/claude-agent-sdk`** (`query()` in streaming-input mode), owned in-process by the backend. Channel events are injected as ordinary user turns and the worker tools are an in-process MCP server — so there is no webhook, no `--dangerously-load-development-channels`, and no `initialized` race to manage.
 
-Since custom channels are not on Anthropic's allowlist during the preview, the app launches every session with `--dangerously-load-development-channels server:worker` automatically — nothing to pass by hand. The local `claude` must be **v2.1.80+**, otherwise the channel never registers and the spawned agent stays idle (it receives no ticket). On a **Team/Enterprise** Claude Code org, an admin must explicitly enable channels (org policy), or the events are dropped silently ("blocked by org policy").
-
-This only matters in real mode. In dry-run (`bun run dev`, the default) no `claude` is spawned, so the channel is moot. See [Claude Code Channels setup](docs/claude-code-channels.md) for the project-specific setup and troubleshooting notes. Reference: <https://code.claude.com/docs/en/channels-reference>.
+In dry-run (`bun run dev`, the default) no `claude` is spawned. The SDK's native binary is resolved by `src/server/system/claudeBinary.ts` (`KANBAN_CLAUDE_BINARY` override → `require.resolve` from `node_modules`).
 
 ## Desktop app (macOS, optional)
 
@@ -87,8 +85,8 @@ bun run build:desktop  # .app → build/dev-macos-arm64/
 
 `bun run dev:desktop` is also a **real-mode** launcher: it starts real `tmux`/`claude` sessions, creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
 
-- it runs `build:web` and `build:agents` before starting the app;
-- agent sessions use the bundled `dist/agents/worker.js` and hook bundles (`KANBAN_AGENT_DIST=1`);
+- it runs `build:web` before starting the app (the agents run in-process — no agent bundles to build);
+- the agent runs the SDK's native `claude` binary; a packaged `.app` embeds it (`claude-bin`) and a dev run resolves it from `node_modules`;
 - the desktop app reads its config and database from `~/Library/Application Support/kanban-agents/` by default, not from the repo root;
 - it repairs the macOS GUI `PATH` before spawning `tmux`, `claude`, `gh`, `git`, or `cursor-agent`.
 

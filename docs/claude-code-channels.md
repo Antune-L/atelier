@@ -1,8 +1,14 @@
 # Claude Code Channels setup
 
+> **OBSOLETE.** Atelier no longer uses Claude Code Channels. Agents now run on the official
+> `@anthropic-ai/claude-agent-sdk` (`query()` streaming-input) in-process; the backend injects
+> events as user turns and exposes the worker tools as an in-process MCP server — there is no
+> channel server, no `--dangerously-load-development-channels`, and no `worker.ts` anymore. This
+> page is kept for historical reference only.
+
 Official reference: <https://code.claude.com/docs/en/channels-reference>
 
-This is the minimum setup required for Atelier agents to receive tickets through Claude Code Channels.
+This was the minimum setup required for Atelier agents to receive tickets through Claude Code Channels.
 
 ## Required On Each Machine
 

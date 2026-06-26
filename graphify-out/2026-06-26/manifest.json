@@ -775,13 +775,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1782505431.1291974,
-    "ast_hash": "fd30c35ab7553844520a40b310918cce",
+    "mtime": 1782506299.9088128,
+    "ast_hash": "986625530a352a9754cd3e649773f2d0",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
-    "mtime": 1782506093.6791565,
-    "ast_hash": "f78824c57e33441bf589416c903b7934",
+    "mtime": 1782506221.2439167,
+    "ast_hash": "f535cc02420819335f034cfaa422b203",
     "semantic_hash": ""
   },
   "src/server/system/claudeBinary.ts": {
@@ -790,8 +790,13 @@
     "semantic_hash": ""
   },
   "src/server/system/sdkSession.ts": {
-    "mtime": 1782506126.5263972,
-    "ast_hash": "7d7eac84ef93861c22d75bc131d79e21",
+    "mtime": 1782506233.769089,
+    "ast_hash": "4710c14b6d6c3dc11e607fdd2ac6702a",
+    "semantic_hash": ""
+  },
+  "src/server/agents/sessionConfig.ts": {
+    "mtime": 1782506275.0534785,
+    "ast_hash": "2727ad21619079f8f146bca66fe414ed",
     "semantic_hash": ""
   }
 }

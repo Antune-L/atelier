@@ -3,9 +3,9 @@ import type { AgentModel } from "./constants.ts";
 import type { ModelUsage, SessionUsage, UsageByModel } from "./schemas.ts";
 
 /**
- * Token-cost model. The Stop hook only ships token counts (never prices); prices live here so they
- * stay editable without a `build:agents` rebuild and so cost is recomputable retroactively from the
- * stored token totals (tokens = source of truth).
+ * Token-cost model. The SDK turn-end event ships only token counts (never prices); prices live here
+ * so they stay editable and cost is recomputable retroactively from the stored token totals
+ * (tokens = source of truth).
  *
  * Prices are Anthropic public list prices, expressed in USD per million tokens (MTok). Cache reads
  * bill at 0.1x the base input rate; cache writes (creation) bill at 1.25x. Maintain manually.

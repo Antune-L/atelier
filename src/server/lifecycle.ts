@@ -11,7 +11,7 @@ import type { Notifier } from "./notifier.ts";
  * the broadcast/log/notify ritual that must accompany it. Sits ABOVE `store`: it calls
  * store.updateTicket / updateSlot / logEvent / addComment, never touches SQL.
  *
- * Does NOT depend on WorkerHub: channel sends (nudge/answer/prd_validated/user_comment) are not
+ * Does NOT depend on SessionHub: channel sends (nudge/answer/prd_validated/user_comment) are not
  * lifecycle transitions and stay in the coordinator.
  */
 export class TicketLifecycle {

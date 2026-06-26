@@ -47,7 +47,9 @@ export interface AgentSubagentDefinition {
   description: string;
   prompt: string;
   tools?: string[];
+  disallowedTools?: string[];
   model?: string;
+  effort?: string;
 }
 
 export interface AgentSessionOptions {

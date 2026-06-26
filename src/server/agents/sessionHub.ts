@@ -32,6 +32,8 @@ export interface SessionStartConfig {
   model: string;
   effort: string | null;
   permissionMode: AgentPermissionMode;
+  /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
+  permissionAllow?: string[];
   /** Extra built-in tools the agent may auto-use (Read/Edit/Bash/Agent…). Worker tools are always allowed. */
   allowedTools?: string[];
   /** Tools removed entirely (read-only triage/feasibility bar Edit/Write/Bash). */
@@ -103,6 +105,7 @@ export class SessionHub {
       model: config.model,
       effort: config.effort,
       permissionMode: config.permissionMode,
+      ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
       ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),
       ...(config.disallowedTools ? { disallowedTools: config.disallowedTools } : {}),
       ...(config.agents ? { agents: config.agents } : {}),

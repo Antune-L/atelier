@@ -59,11 +59,14 @@ function toSdkEffort(effort: string | null): SdkEffort | undefined {
 function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {
   const out: SdkAgents = {};
   for (const [name, def] of Object.entries(agents)) {
+    const effort = toSdkEffort(def.effort ?? null);
     out[name] = {
       description: def.description,
       prompt: def.prompt,
       ...(def.tools ? { tools: def.tools } : {}),
+      ...(def.disallowedTools ? { disallowedTools: def.disallowedTools } : {}),
       ...(def.model ? { model: def.model } : {}),
+      ...(effort ? { effort } : {}),
     };
   }
   return out;

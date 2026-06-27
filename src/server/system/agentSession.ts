@@ -98,3 +98,14 @@ export interface AgentSessionHandle {
   /** Stop the session and release the subprocess. Idempotent. */
   close(): Promise<void>;
 }
+
+/**
+ * The provider seam: an LLM-agent backend that materializes an {@link AgentSessionHandle} from the
+ * transport-agnostic {@link AgentSessionOptions}. The Real adapter holds one of these; today the only
+ * implementation is `claudeProvider` (Agent SDK). A future provider (e.g. Codex) implements the same
+ * contract so the backend above this seam stays unchanged.
+ */
+export interface AgentProvider {
+  readonly name: string;
+  createSession(opts: AgentSessionOptions): AgentSessionHandle;
+}

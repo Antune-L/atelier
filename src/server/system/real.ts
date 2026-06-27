@@ -8,8 +8,8 @@ import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/const
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
-import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { createSdkAgentSession } from "./sdkSession.ts";
+import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { claudeProvider } from "./claudeProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -105,6 +105,8 @@ const PR_MERGE_CONFIRM_DELAY_MS = 1000;
  */
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
+  /** The agent backend behind the session seam. Claude is the only provider today. */
+  private readonly provider: AgentProvider = claudeProvider;
 
   async seedWorkspaceTrust(paths: string[]): Promise<void> {
     const file = Bun.file(CLAUDE_JSON_PATH);
@@ -303,7 +305,7 @@ export class RealSystemAdapter implements SystemAdapter {
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
-    return createSdkAgentSession(opts);
+    return this.provider.createSession(opts);
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {

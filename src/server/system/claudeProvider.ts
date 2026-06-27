@@ -1,6 +1,6 @@
 /**
- * The Real agent session: drives a live `claude` run via the Agent SDK `query()` in streaming-input
- * mode. Replaces the tmux + MCP-channel transport.
+ * The Claude provider: drives a live `claude` run via the Agent SDK `query()` in streaming-input
+ * mode (the only `AgentProvider` today). Replaces the tmux + MCP-channel transport.
  *
  * - Streaming input: a queue-fed async generator keeps the session alive across turns; `send()`
  *   enqueues a user turn (contract / answer / nudge / user_comment).
@@ -17,6 +17,7 @@ import { z } from "zod";
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
 
 import type {
+  AgentProvider,
   AgentSessionEvent,
   AgentSessionHandle,
   AgentSessionOptions,
@@ -234,3 +235,9 @@ function dispatch(message: SDKMessage, onEvent: (event: AgentSessionEvent) => vo
       return;
   }
 }
+
+/** The Claude provider — the only `AgentProvider` implementation today. */
+export const claudeProvider: AgentProvider = {
+  name: "claude",
+  createSession: createSdkAgentSession,
+};

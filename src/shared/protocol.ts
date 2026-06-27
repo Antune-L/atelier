@@ -3,7 +3,7 @@
  *
  * Declares once, derived everywhere:
  * - the tool registry (name → MCP description → args schema) the in-process MCP server exposes and
- *   the coordinator dispatches on (see system/sdkSession.ts),
+ *   the coordinator dispatches on (see system/claudeProvider.ts),
  * - the channel-event union the backend injects as user turns into a live SDK session.
  *
  * Dependency-light ON PURPOSE: imports only `zod` and `./constants.ts`, never anything server-only,

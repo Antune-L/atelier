@@ -14,14 +14,18 @@ Agents run as long-lived Claude Code sessions via the official **`@anthropic-ai/
 | Backend     | ElysiaJS (HTTP) + native Bun WebSocket              |
 | Persistence | SQLite (`bun:sqlite`)                               |
 | Frontend    | React + Vite + Tailwind + dnd-kit                   |
-| Agents      | Claude Code sessions in tmux (1 session = 1 ticket) |
+| Agents      | In-process Claude Code SDK sessions (1 session = 1 ticket) |
 | VCS         | git worktrees + `gh` CLI for PRs                    |
 
 ## Requirements
 
 - [Bun](https://bun.sh)
 - `git`
-- `tmux` and `gh` (authenticated GitHub CLI) — only for real mode (see below)
+
+Real mode only (see below):
+
+- `tmux` and `gh` (authenticated GitHub CLI)
+- An authenticated **Claude Code** session on the machine — the agents reuse the host login. Run `claude` once and log in (Pro/Max OAuth, stored in the macOS Keychain / `~/.claude/.credentials.json`). The app overrides no `HOME`, so every agent uses whichever account `claude` is logged into on this machine.
 
 ## Getting started
 
@@ -64,11 +68,13 @@ To have agents actually spawn `claude`, create worktrees and open PRs:
 bun run real         # KANBAN_DRY_RUN=0 on kanban-real.db
 ```
 
-Requirements: `tmux` and `gh` installed and authenticated, plus `gh` logged in. The Claude Code agent runs via the bundled `@anthropic-ai/claude-agent-sdk` (it ships its own native `claude` binary as an optional dependency — no separately installed CLI is required). Real mode runs git/tmux/gh/filesystem for real.
+Needs the real-mode prerequisites above (`tmux`, authenticated `gh`, a logged-in Claude session). It runs git/tmux/gh/filesystem for real, using the SDK's bundled native `claude` binary — no separately installed CLI required.
 
 ### Agent runtime (Agent SDK)
 
-The backend→agent push (the `ticket`/`answer`/`nudge` events that wake a session) is no longer a research-preview MCP channel: each ticket runs a long-lived `claude` process via the official **`@anthropic-ai/claude-agent-sdk`** (`query()` in streaming-input mode), owned in-process by the backend. Channel events are injected as ordinary user turns and the worker tools are an in-process MCP server — so there is no webhook, no `--dangerously-load-development-channels`, and no `initialized` race to manage.
+Each ticket runs a long-lived `claude` process via the official **`@anthropic-ai/claude-agent-sdk`** (`query()`, streaming-input), owned in-process by the backend.
+
+Wake events (`ticket`/`answer`/`nudge`) are injected as ordinary user turns, and the worker tools run as an in-process MCP server. No webhook, no `--dangerously-load-development-channels`, no `initialized` race.
 
 In dry-run (`bun run dev`, the default) no `claude` is spawned. The SDK's native binary is resolved by `src/server/system/claudeBinary.ts` (`KANBAN_CLAUDE_BINARY` override → `require.resolve` from `node_modules`).
 
@@ -101,13 +107,7 @@ bun run dev:desktop
 
 If you do **not** run `bun run link:desktop-data`, edit the desktop config at `~/Library/Application Support/kanban-agents/config.json`. If you do run it, edit the repo-local `config.json`.
 
-For agents to receive tickets in desktop dev, the same real-mode requirements apply: `tmux`, authenticated `gh`, authenticated `claude` CLI **v2.1.80+**, and Claude Code Channels enabled for the account/org. See [Claude Code Channels setup](docs/claude-code-channels.md) for the channel-specific setup.
-
-The desktop app runs in real mode and uses its own database under `~/Library/Application Support/kanban-agents/`. To share data and config with `bun run real`:
-
-```bash
-bun run link:desktop-data   # symlink AppSupport → repo config/db/uploads
-```
+For agents to receive tickets in desktop dev, the same real-mode requirements apply: `tmux` (interactive test terminals), authenticated `gh`, and a logged-in Claude session.
 
 ⚠️ Desktop, `bun run real` and `bun run dev` all want **port 52817**: one process at a time.
 
@@ -115,17 +115,16 @@ bun run link:desktop-data   # symlink AppSupport → repo config/db/uploads
 
 ```
 src/
-  shared/   types + zod schemas + constants (shared across back/front/worker)
-  server/   Bun.serve: Elysia HTTP + WS, SQLite Store, SlotManager, MCP contract
+  shared/   types + zod schemas + constants (shared across back/front)
+  server/   Bun.serve: Elysia HTTP + WS, SQLite Store, SlotManager, in-process agent SDK + MCP tools
   web/      React frontend (board, dnd-kit columns, detail)
-worker/     MCP channel server (stdio) → outbound WS to the backend
-templates/  session hooks (PreToolUse/Stop) + drivers
+templates/  run_composer.sh (Cursor headless driver)
 ```
 
 ### Ticket flow
 
 1. Card created in **TODO**, dragged to **To implement**.
-2. A slot (git worktree) is acquired; a `claude` session is spawned in tmux.
+2. A slot (git worktree) is acquired; a `claude` SDK session starts in-process.
 3. The agent drives its work through the MCP tools: `update_stage`, `ask_user`, `done`, `fail`.
 4. `done(pr_url)` → the backend verifies on its own (clean tree, branch pushed, PR exists) before closing.
 
@@ -151,6 +150,6 @@ The pipeline contract injected into each session (`src/server/agents/contract.ts
 
 **Ask**, **test**, and **conflict-resolution** tickets do not invoke a dedicated skill — read-only exploration or manual git per the contract.
 
-In real mode, these skills must be available in the Claude Code environment running in tmux; otherwise the agent cannot run the steps that reference them. Source definitions and install instructions: [Antune-L/skillzer](https://github.com/Antune-L/skillzer).
+In real mode, these skills must be available in the Claude Code environment running the agent; otherwise the agent cannot run the steps that reference them. Source definitions and install instructions: [Antune-L/skillzer](https://github.com/Antune-L/skillzer).
 
 For implementation details, see `AGENTS.md`.

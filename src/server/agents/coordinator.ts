@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
-import type { WorkerToolName } from "../../shared/schemas.ts";
+import type { UsageByModel, WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   doneArgsSchema,
@@ -19,13 +19,49 @@ import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
-import type { ToolCallContext, WorkerHub } from "../workerHub.ts";
+import type { AgentTurnUsage } from "../system/agentSession.ts";
 
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
-import { AGENT_ACTIVE_EVENT, CONTRACT_ACKED_EVENT, type SlotManager } from "./slotManager.ts";
+import type { SessionHub, SessionToolCall } from "./sessionHub.ts";
+import type { SlotManager } from "./slotManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 
 const log = createLogger("coordinator");
+
+/** Map the SDK per-model turn usage (camelCase + cost) to the persisted `UsageByModel` (snake_case). */
+function toUsageByModel(usage: Record<string, AgentTurnUsage>): UsageByModel {
+  const out: UsageByModel = {};
+  for (const [model, u] of Object.entries(usage)) {
+    out[model] = {
+      input_tokens: u.inputTokens,
+      output_tokens: u.outputTokens,
+      cache_creation_input_tokens: u.cacheCreationTokens,
+      cache_read_input_tokens: u.cacheReadTokens,
+    };
+  }
+  return out;
+}
+
+/**
+ * Sum a per-turn usage delta into a session's running total, bucket-by-bucket per model. The SDK
+ * reports usage PER TURN (each `result` covers only that turn), so a session's total is the sum of
+ * its turn_end deltas — not the last one.
+ */
+function addUsageByModel(prior: UsageByModel | undefined, delta: UsageByModel): UsageByModel {
+  const out: UsageByModel = { ...(prior ?? {}) };
+  for (const [model, d] of Object.entries(delta)) {
+    const base = out[model];
+    out[model] = base
+      ? {
+          input_tokens: base.input_tokens + d.input_tokens,
+          output_tokens: base.output_tokens + d.output_tokens,
+          cache_creation_input_tokens: base.cache_creation_input_tokens + d.cache_creation_input_tokens,
+          cache_read_input_tokens: base.cache_read_input_tokens + d.cache_read_input_tokens,
+        }
+      : d;
+  }
+  return out;
+}
 
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
@@ -35,41 +71,34 @@ interface ToolResult {
   result: string;
 }
 
-type ToolHandler = (ctx: ToolCallContext) => ToolResult | Promise<ToolResult>;
+type ToolHandler = (ctx: SessionToolCall) => ToolResult | Promise<ToolResult>;
 
 /**
- * Routes worker tool calls and Stop-hook events to state mutations.
- * Implements the auto-nudge ×1 → stalled escalation.
+ * Routes the agent session's worker-tool calls and turn-end events to state mutations.
+ * Implements the auto-nudge ×1 → stalled escalation and persists per-session token usage.
  */
 export class AgentCoordinator {
   constructor(
     private readonly store: Store,
     private readonly hub: ClientHub,
-    private readonly workerHub: WorkerHub,
+    private readonly sessionHub: SessionHub,
     private readonly notifier: Notifier,
     private readonly lifecycle: TicketLifecycle,
     private readonly slots: SlotManager,
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
   ) {
-    this.workerHub.setHandlers({
-      onHello: (ticketId, slotId) => this.onHello(ticketId, slotId),
+    this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
-      onStop: (ticketId, sessionId) => void this.onStop(ticketId, sessionId),
+      onStop: (ticketId, sessionId, usageByModel) => void this.onStop(ticketId, sessionId, usageByModel),
     });
   }
 
-  private onHello(ticketId: string, slotId: number): void {
-    this.store.logEvent(ticketId, "worker_connected", { slotId });
-    // A late or reconnecting worker still gets its contract (once per spawn).
-    this.slots.deliverContractIfPending(ticketId);
-  }
-
-  private async onToolCall(ctx: ToolCallContext): Promise<ToolResult> {
+  private async onToolCall(ctx: SessionToolCall): Promise<ToolResult> {
     // A triage worker identifies with TRIAGE_SLOT_ID: it runs on a stage-null "todo" card outside
     // the slot pipeline and may ONLY submit its verdict. The 5 pipeline tools would corrupt that
-    // card (set column=failed, stamp a stage, run the done gate with slotId=-1…), and `--tools`
-    // can't bar MCP tools — so the gate lives here, before markProgress/ackContract.
+    // card (set column=failed, stamp a stage, run the done gate with slotId=-1…), and the read-only
+    // tool surface can't bar MCP tools — so the gate lives here, before markProgress.
     if (ctx.slotId === TRIAGE_SLOT_ID) {
       log.info("tool call (triage)", { ticketId: ctx.ticketId, tool: ctx.name });
       if (ctx.name === "submit_triage") return this.handleSubmitTriage(ctx);
@@ -92,7 +121,6 @@ export class AgentCoordinator {
       return { ok: false, result: "Session de test interactive : aucun tool de pipeline n'est disponible." };
     }
     this.markProgress(ctx.ticketId);
-    this.ackContract(ctx.ticketId);
     log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
     // Registry-derived dispatch: a tool name without an entry is a COMPILE error (Record over the
     // full WorkerToolName union), not a runtime fallthrough. submit_triage/submit_feasibility are
@@ -113,14 +141,14 @@ export class AgentCoordinator {
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
   };
 
-  private async handleSubmitTriage(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleSubmitTriage(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = submitTriageArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     await this.triage.complete(ctx.ticketId, parsed.data);
     return { ok: true, result: "Verdict de faisabilité enregistré." };
   }
 
-  private async handleSubmitFeasibility(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleSubmitFeasibility(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = submitFeasibilityArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     // ctx.ticketId is the synthetic batch id, not a real ticket.
@@ -128,14 +156,14 @@ export class AgentCoordinator {
     return { ok: true, result: "Verdicts de faisabilité enregistrés." };
   }
 
-  private handleUpdateStage(ctx: ToolCallContext): ToolResult {
+  private handleUpdateStage(ctx: SessionToolCall): ToolResult {
     const parsed = updateStageArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     this.lifecycle.setStage(ctx.ticketId, parsed.data.stage);
     return { ok: true, result: `stage=${parsed.data.stage}` };
   }
 
-  private handleAskUser(ctx: ToolCallContext): ToolResult {
+  private handleAskUser(ctx: SessionToolCall): ToolResult {
     const parsed = askUserArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const questionId = nanoid(8);
@@ -149,14 +177,14 @@ export class AgentCoordinator {
     return { ok: true, result: `Question enregistrée (id=${questionId}). La réponse arrivera via un événement answer.` };
   }
 
-  private handleSubmitPrd(ctx: ToolCallContext): ToolResult {
+  private handleSubmitPrd(ctx: SessionToolCall): ToolResult {
     const parsed = submitPrdArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     this.lifecycle.submitPrd(ctx.ticketId, parsed.data.markdown);
     return { ok: true, result: "PRD enregistré. Attends l'événement prd_validated avant d'implémenter." };
   }
 
-  private async handleSubmitAnswer(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleSubmitAnswer(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = submitAnswerArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
@@ -174,7 +202,7 @@ export class AgentCoordinator {
     return { ok: true, result: "Réponse enregistrée, ticket clôturé, slot libéré." };
   }
 
-  private async handleDone(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     this.lifecycle.beginOpeningPr(ctx.ticketId);
@@ -185,7 +213,7 @@ export class AgentCoordinator {
     return { ok: true, result: "Ticket clôturé, slot libéré." };
   }
 
-  private async handleReadyForReview(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleReadyForReview(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
@@ -207,34 +235,34 @@ export class AgentCoordinator {
     };
   }
 
-  private async handleFail(ctx: ToolCallContext): Promise<ToolResult> {
+  private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     await this.lifecycle.fail(ctx.ticketId, parsed.data.reason, parsed.data.findings);
     return { ok: true, result: "Échec enregistré. Slot conservé." };
   }
 
-  /** Public entry for the Stop hook HTTP endpoint (mirrors the WS stop frame). */
-  handleStopHook(ticketId: string, sessionId: string | null): void {
-    void this.onStop(ticketId, sessionId);
-  }
-
-  /**
-   * Public entry for the agent-active HTTP endpoint. Idempotent: logs the event only once.
-   * Called by the preToolUse hook on the first tool call, before any protocol tool fires.
-   */
-  handleAgentActive(ticketId: string): void {
-    if (this.store.lastEventType(ticketId, [AGENT_ACTIVE_EVENT]) !== null) return;
-    this.store.logEvent(ticketId, AGENT_ACTIVE_EVENT, {});
-  }
-
-  /** Stop hook: turn ended. If no protocol tool resolved the turn → auto-nudge ×1 → stalled. */
-  private async onStop(ticketId: string, sessionId: string | null): Promise<void> {
+  /** Turn ended (SDK `result`). If no protocol tool resolved the turn → auto-nudge ×1 → stalled. */
+  private async onStop(
+    ticketId: string,
+    sessionId: string | null,
+    usageByModel: Record<string, AgentTurnUsage>,
+  ): Promise<void> {
     // Guard first: updateTicket throws on an unknown id, and a read-only (triage/feasibility)
     // session identifies with an id that is not a real pipeline ticket.
     if (!this.store.getTicket(ticketId)) return;
     if (sessionId) {
-      const updated = this.store.updateTicket(ticketId, { sessionId });
+      // Usage is reported PER TURN, so accumulate every turn_end into this session's running total
+      // (overwriting would keep only the last turn). Ticket total = sum across sessionIds, one per
+      // auto-reclaim relaunch.
+      const existing = this.store.getTicket(ticketId);
+      const sessionUsage = existing
+        ? { ...existing.sessionUsage, [sessionId]: addUsageByModel(existing.sessionUsage[sessionId], toUsageByModel(usageByModel)) }
+        : undefined;
+      const updated = this.store.updateTicket(ticketId, {
+        sessionId,
+        ...(sessionUsage ? { sessionUsage } : {}),
+      });
       this.hub.pushTicket(updated);
     }
     const ticket = this.store.getTicket(ticketId);
@@ -257,7 +285,7 @@ export class AgentCoordinator {
     const nudges = this.store.getNudgeCount(ticketId);
     if (nudges < AUTO_NUDGE_MAX) {
       this.store.updateTicket(ticketId, { nudgeCount: nudges + 1 });
-      this.workerHub.sendEvent(ticketId, { type: "nudge", message: NUDGE_MESSAGE });
+      this.sessionHub.sendEvent(ticketId, { type: "nudge", message: NUDGE_MESSAGE });
       this.store.logEvent(ticketId, "auto_nudge", { attempt: nudges + 1 });
       log.warn("auto-nudge (tour fini sans protocole)", { ticketId, attempt: nudges + 1 });
       return;
@@ -287,7 +315,7 @@ export class AgentCoordinator {
   /** User answered a question (comment with questionId). Forward as channel event. */
   answerQuestion(ticketId: string, questionId: string, answer: string): void {
     this.store.markQuestionAnswered(questionId);
-    this.workerHub.sendEvent(ticketId, { type: "answer", questionId, answer });
+    this.sessionHub.sendEvent(ticketId, { type: "answer", questionId, answer });
     const ticket = this.store.getTicket(ticketId);
     if (ticket && ticket.pendingQuestions === 0 && ticket.stage === "awaiting_answers") {
       this.lifecycle.resumeImplementing(ticketId);
@@ -308,21 +336,15 @@ export class AgentCoordinator {
       (existing?.implementer === "claude"
         ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
         : "");
-    this.workerHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
+    this.sessionHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
     this.lifecycle.beginImplementing(ticketId, "prd_validated");
     this.markProgress(ticketId);
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */
   forwardComment(ticketId: string, body: string): void {
-    const delivered = this.workerHub.sendEvent(ticketId, { type: "user_comment", body });
+    const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body });
     if (delivered) this.store.logEvent(ticketId, "user_comment_forwarded", {});
-  }
-
-  /** Ack contract delivery on the first protocol tool call; idempotent (logged once per ticket). */
-  private ackContract(ticketId: string): void {
-    if (this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT]) !== null) return;
-    this.store.logEvent(ticketId, CONTRACT_ACKED_EVENT, {});
   }
 
   private markProgress(ticketId: string): void {

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import {
+  ACTIVE_STAGES,
   AUTO_MERGE_RESOLVE_EVENT,
   AUTO_MERGE_RESOLVE_MAX,
   AUTO_RECLAIM_EVENT,
@@ -8,12 +9,11 @@ import {
   CLEANER_BRANCH_SUFFIX,
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
-  TERMINAL_STAGES,
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket, WorktreeSession } from "../../shared/schemas.ts";
-import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
+import { SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -24,7 +24,6 @@ import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 import type { DoneGateResult } from "../system/types.ts";
-import type { WorkerHub } from "../workerHub.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
 import {
@@ -34,14 +33,9 @@ import {
   buildReviewContract,
   buildTicketContract,
 } from "./contract.ts";
-import {
-  buildImplementerAgentMd,
-  buildPrFixerAgentMd,
-  buildMcpJson,
-  buildSettingsJson,
-  resolveTemplatePaths,
-  type SlotTemplateContext,
-} from "./slotTemplates.ts";
+import { buildImplementSessionConfig } from "./sessionConfig.ts";
+import type { SessionHub } from "./sessionHub.ts";
+import { resolveTemplatePaths } from "./slotTemplates.ts";
 import { WorktreeAddressWatcher } from "./worktreeAddressWatcher.ts";
 
 const MAX_SLUG_WORDS = 6;
@@ -51,29 +45,6 @@ const SLUG_MAX_LENGTH = 40;
 const WORKTREE_SESSION_PREFIX = "worktree";
 /** Branch-name prefix of a standalone worktree session's fresh branch. */
 const WORKTREE_BRANCH_PREFIX = "worktree";
-
-/** Worker-connect poll: ~2 min total (claude boot + MCP connect can exceed 20 s on a cold start). */
-const CONTRACT_DELIVER_MAX_ATTEMPTS = 240;
-const CONTRACT_DELIVER_DELAY_MS = 500;
-/**
- * Delay before checking the agent acked the contract. Kept ABOVE the normal
- * init→first-tool-call latency (~13 s observed) so a healthy review session — whose contract
- * mandates update_stage("reviewing") as step 1 — acks before the check and is never re-pushed.
- * Only a dropped contract leaves no ack within this window.
- */
-const CONTRACT_ACK_CHECK_DELAY_MS = 15_000;
-/** Cap on forced re-pushes when delivery is never acked (≈45 s of dropped-contract recovery). */
-const CONTRACT_REPUSH_MAX_ATTEMPTS = 3;
-
-/** Audit event logged on the agent's first protocol tool call; gates the contract re-push. */
-export const CONTRACT_ACKED_EVENT = "contract_acked";
-/**
- * Audit event logged when the preToolUse hook fires for the first time: the agent is alive and
- * receiving tool calls, even before its first protocol call. Used as an early-life discriminator
- * in the contract re-push guard so feature tickets dropped before their first protocol call are
- * recovered just like review tickets.
- */
-export const AGENT_ACTIVE_EVENT = "agent_active";
 
 /**
  * Outcome of an auto-reclaim attempt:
@@ -96,10 +67,8 @@ const SETUP_PHASES = {
 } as const;
 
 export interface SlotManagerConfig {
-  backendHttp: string;
-  backendWs: string;
+  /** Read-only resources root, used to resolve the vendored composer driver script path. */
   projectRoot: string;
-  bunPath: string;
 }
 
 function slugify(title: string): string {
@@ -151,7 +120,7 @@ export class SlotManager {
     private readonly store: Store,
     private readonly system: SystemAdapter,
     private readonly hub: ClientHub,
-    private readonly workerHub: WorkerHub,
+    private readonly sessionHub: SessionHub,
     private readonly notifier: Notifier,
     private readonly lifecycle: TicketLifecycle,
     private readonly config: SlotManagerConfig,
@@ -548,12 +517,11 @@ export class SlotManager {
       branch = `${ticket.prHeadBranch}${CLEANER_BRANCH_SUFFIX}`;
       startBranch = ticket.prHeadBranch;
     }
-    const sessionName = `ticket-${ticket.id}`;
-
+    // The agent runs in-process via the SDK (no tmux pane), so the slot carries no tmux session name.
     this.store.updateSlot(slotId, {
       ticketId,
       repoPath: project.repoPath,
-      tmuxSession: sessionName,
+      tmuxSession: null,
       status: "busy",
     });
     this.touch(
@@ -595,7 +563,6 @@ export class SlotManager {
         }
       });
 
-      await this.depositSlotFiles(path, ticket, slotId);
       await this.system.copyEnvFiles(project.repoPath, path);
       // An ask ticket is read-only (explore + answer); the project setup script and dep install are
       // pure overhead, so skip both to start answering faster. Feature/review tickets need a built
@@ -616,71 +583,38 @@ export class SlotManager {
       }
 
       this.setPhase(ticketId, SETUP_PHASES.spawning);
-      await this.system.spawnSession({
-        sessionName,
-        cwd: path,
-        model: ticket.model ?? MODELS.implement,
-        effort: ticket.effort ?? MODELS.implementEffort,
-        env: {
-          TICKET_ID: ticket.id,
-          SLOT_ID: String(slotId),
-          BACKEND_WS: this.config.backendWs,
-          DISABLE_AUTOUPDATER: "1",
-        },
-      });
-      this.setPhase(ticketId, SETUP_PHASES.waiting);
-
+      this.startAgentSession(ticket, slotId, path);
       this.touch(this.store.updateTicket(ticketId, { stage: "implementing", lastProgressAt: Date.now() }));
-      this.store.logEvent(ticketId, "session_spawned", { slotId, sessionName });
-      log.info("session spawnée", { ticketId, slotId, sessionName });
+      this.store.logEvent(ticketId, "session_spawned", { slotId });
+      log.info("session spawnée", { ticketId, slotId });
 
-      // Deliver the contract once the worker connects (with a short retry window).
-      void this.deliverContractWhenReady(ticket.id);
+      // The contract is the session's first user turn — no connect poll, no ack, no re-push race.
+      this.deliverContract(ticket);
     } catch (error) {
       this.clearPhase(ticketId);
       this.markFailed(ticketId, slotId, getErrorMessage(error));
     }
   }
 
-  private async depositSlotFiles(path: string, ticket: Ticket, slotId: number): Promise<void> {
-    const templates = resolveTemplatePaths(this.config.projectRoot);
-    const ctx: SlotTemplateContext = {
-      ...templates,
-      backendHttp: this.config.backendHttp,
-      backendWs: this.config.backendWs,
-      ticketId: ticket.id,
-      slotId,
-      bunPath: this.config.bunPath,
-      implementerModel: ticket.implementerModel ?? MODELS.implementerModel,
-      implementerEffort: ticket.implementerEffort ?? MODELS.implementerEffort,
-    };
-    await this.system.prepareSlotFiles({
-      slotPath: path,
-      mcpJson: buildMcpJson(ctx),
-      settingsJson: buildSettingsJson(ctx),
-      implementerAgentMd: buildImplementerAgentMd(ctx),
-      prFixerAgentMd: buildPrFixerAgentMd(ctx),
-    });
+  /** Start the implementation SDK session for a ticket in its slot worktree. */
+  private startAgentSession(ticket: Ticket, slotId: number, path: string): void {
+    this.sessionHub.start(
+      buildImplementSessionConfig({
+        ticket,
+        slotId,
+        cwd: path,
+        composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+      }),
+    );
   }
 
-  /**
-   * Send the contract exactly once per spawned session. Called on worker hello
-   * and from the post-spawn poll; the contract_delivered event marker makes it
-   * idempotent across reconnects and backend restarts.
-   */
-  deliverContractIfPending(ticketId: string): boolean {
-    if (!this.workerHub.isConnected(ticketId)) return false;
-    const last = this.store.lastEventType(ticketId, ["session_spawned", "contract_delivered"]);
-    if (last !== "session_spawned") return last === "contract_delivered";
-    const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return false;
-    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
-    if (sent) {
-      this.store.logEvent(ticketId, "contract_delivered", {});
-      this.clearPhase(ticketId);
-      log.info("contrat délivré à l'agent", { ticketId });
-    }
-    return sent;
+  /** Inject the ticket contract as the session's first user turn; idempotent marker + phase clear. */
+  private deliverContract(ticket: Ticket): void {
+    const sent = this.sessionHub.sendEvent(ticket.id, { type: "ticket", payload: this.buildContractPayload(ticket) });
+    if (!sent) return;
+    this.store.logEvent(ticket.id, "contract_delivered", {});
+    this.clearPhase(ticket.id);
+    log.info("contrat délivré à l'agent", { ticketId: ticket.id });
   }
 
   private buildContractPayload(ticket: Ticket): string {
@@ -699,77 +633,6 @@ export class SlotManager {
       commitLanguage,
       baseBranch,
     });
-  }
-
-  private async deliverContractWhenReady(ticketId: string, attempt = 0): Promise<void> {
-    if (this.deliverContractIfPending(ticketId)) {
-      // Delivery over WS is fire-and-forget: the contract can be dropped if it lands before
-      // Claude's conversation loop is ready. Gate on the agent's ack and re-push if it never comes.
-      this.scheduleContractAckCheck(ticketId);
-      return;
-    }
-    if (attempt >= CONTRACT_DELIVER_MAX_ATTEMPTS) {
-      await this.handleWorkerConnectTimeout(ticketId);
-      return;
-    }
-    setTimeout(() => void this.deliverContractWhenReady(ticketId, attempt + 1), CONTRACT_DELIVER_DELAY_MS);
-  }
-
-  /**
-   * The worker never connected within the poll window (~2 min): claude most likely crashed at
-   * boot, so the contract was never delivered and the session is dead weight. Auto-reclaim
-   * (relaunch in place, reusing the Task 1 counter) instead of letting the card sit in
-   * "implementing" until the 45 min progress watchdog. Past the reclaim cap → fail + notify.
-   *
-   * The poll only resolves false while the worker is disconnected, so reaching here means no
-   * worker_connected event. A connect that has already completed before the synchronous guard is
-   * caught here; one that lands later (a still-booting claude) is fenced off in the escalation
-   * branch by killing the session before markFailed.
-   */
-  private async handleWorkerConnectTimeout(ticketId: string): Promise<void> {
-    if (this.workerHub.isConnected(ticketId)) return;
-    log.warn("worker jamais connecté dans la fenêtre de spawn", { ticketId });
-    const outcome = await this.tryAutoReclaim(ticketId, "worker jamais connecté au spawn");
-    if (outcome !== "escalate") return;
-    const ticket = this.store.getTicket(ticketId);
-    if (ticket?.slotId == null) return;
-    // Past the reclaim cap: tear down the (possibly still-booting) session before marking failed.
-    // Otherwise a late worker hello would reach deliverContractIfPending — which has no terminal
-    // stage guard — and start the agent working on a card the UI already shows as failed.
-    await this.system.killSession(`ticket-${ticketId}`);
-    this.workerHub.disconnect(ticketId);
-    this.markFailed(ticketId, ticket.slotId, "worker jamais connecté après reclaim");
-  }
-
-  private scheduleContractAckCheck(ticketId: string, attempt = 0): void {
-    setTimeout(() => this.repushContractIfUnacked(ticketId, attempt), CONTRACT_ACK_CHECK_DELAY_MS);
-  }
-
-  /**
-   * Re-push the contract when an agent never acked it (no protocol tool call → dropped contract).
-   * The ack lands well before the first check in the nominal case, so this fires only on a real drop;
-   * the re-push then arrives once the session is ready. Bounded by CONTRACT_REPUSH_MAX_ATTEMPTS.
-   *
-   * The early-life discriminator is agent_active (emitted by the preToolUse hook on the first tool
-   * call). A healthy agent emits it before the check window expires → no re-push. An agent that
-   * dropped the contract never calls any tool → no agent_active → re-push.
-   * contract_acked (first protocol tool) and auto_nudge also count as "agent alive".
-   */
-  private repushContractIfUnacked(ticketId: string, attempt: number): void {
-    if (
-      this.store.lastEventType(ticketId, [CONTRACT_ACKED_EVENT, AGENT_ACTIVE_EVENT, "auto_nudge"]) !== null
-    ) return;
-    if (!this.workerHub.isConnected(ticketId)) return;
-    if (attempt >= CONTRACT_REPUSH_MAX_ATTEMPTS) return;
-    const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return;
-    if (ticket.stage !== null && TERMINAL_STAGES.includes(ticket.stage)) return;
-    const sent = this.workerHub.sendEvent(ticketId, { type: "ticket", payload: this.buildContractPayload(ticket) });
-    if (sent) {
-      this.store.logEvent(ticketId, "contract_repushed", { attempt: attempt + 1 });
-      log.warn("contrat re-poussé (ack absent)", { ticketId, attempt: attempt + 1 });
-    }
-    this.scheduleContractAckCheck(ticketId, attempt + 1);
   }
 
   /**
@@ -811,7 +674,7 @@ export class SlotManager {
       // Marking the card "stalled" on the first failure produced false "Bloqué" badges while the
       // session kept working. Escalate to a real stall only once the agent is gone, or it loops on
       // the gate without ever passing it (no progress between attempts → consecutive failures).
-      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      const retriable = this.sessionHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
       if (retriable) {
         // Keep the card active (animated "opening_pr"), clear of any stale error box. The watchdog
         // and Stop-hook still guard a session that genuinely dies in this stage.
@@ -931,7 +794,7 @@ export class SlotManager {
       // Mirror finishTicket's gate-failure handling exactly (uses the same done_gate event/counter).
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
       const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
-      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      const retriable = this.sessionHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
       if (retriable) {
         this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
         log.info("gate ready_for_review échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
@@ -946,11 +809,9 @@ export class SlotManager {
       return { ok: false, reason: gate.reason };
     }
 
-    // Kill the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
+    // Stop the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
     // still owns its slot so the user can test locally and queued tickets won't grab it.
-    const slot = this.store.getSlot(slotId);
-    if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
-    this.workerHub.disconnect(ticketId);
+    this.sessionHub.disconnect(ticketId);
     this.store.updateSlot(slotId, { tmuxSession: null, status: "busy" });
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -985,7 +846,7 @@ export class SlotManager {
       // Mirror markReadyForReview's gate-failure handling exactly (same DONE_GATE_FAILED_EVENT counter).
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
       const consecutiveFailures = this.store.countTrailingEvents(ticketId, DONE_GATE_FAILED_EVENT, DONE_GATE_MAX_FAILURES);
-      const retriable = this.workerHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
+      const retriable = this.sessionHub.isConnected(ticketId) && consecutiveFailures < DONE_GATE_MAX_FAILURES;
       if (retriable) {
         this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
         log.info("gate push direct échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
@@ -1115,9 +976,11 @@ export class SlotManager {
     return `${ticket.title} → PR ${ticket.prDraft ? "draft " : ""}ouverte`;
   }
 
-  /** Cleanup tmux + worktree + local branch. Called on done and on abandon. */
+  /** Cleanup agent session + tmux shell + worktree + local branch. Called on done and on abandon. */
   async releaseSlot(slotId: number, ticket: Ticket): Promise<void> {
     this.clearPhase(ticket.id);
+    // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
+    this.sessionHub.disconnect(ticket.id);
     const slot = this.store.getSlot(slotId);
     if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
     if (!isProjectKey(ticket.project)) return;
@@ -1166,11 +1029,13 @@ export class SlotManager {
   }
 
   /**
-   * Kill every live tmux session backing an occupied slot. Called on desktop app shutdown so the
-   * detached tmux server (and the `claude` processes it holds) do not leak past the window close.
+   * Stop every live agent session and tmux shell backing an occupied slot. Called on desktop app
+   * shutdown so neither the in-process `claude` subprocesses nor the detached tmux server leak past
+   * the window close.
    */
   async teardownSessions(): Promise<void> {
     this.watcher.stopAll();
+    this.sessionHub.disconnectAll();
     for (const slot of this.store.listSlots()) {
       if (slot.tmuxSession) await this.system.killSession(slot.tmuxSession);
     }
@@ -1192,14 +1057,13 @@ export class SlotManager {
       this.watcher.start(session.slotId);
     }
     for (const slot of this.store.listSlots()) {
-      if (!slot.ticketId || !slot.tmuxSession) continue;
-      const alive = await this.system.hasSession(slot.tmuxSession);
-      if (alive) continue;
+      if (!slot.ticketId) continue;
       const ticketId = slot.ticketId;
-
-      // A test session is ephemeral: a backend restart ends it cleanly rather than resurrecting it.
       const recovered = this.store.getTicket(ticketId);
-      if (recovered?.testing) {
+      if (!recovered) continue;
+
+      // A test session is an ephemeral tmux shell on a "done" card: end it cleanly on restart.
+      if (recovered.testing) {
         await this.releaseSlot(slot.id, recovered);
         this.touch(this.store.updateTicket(ticketId, { testing: false, slotId: null }));
         this.store.logEvent(ticketId, "test_session_stopped", { reason: "backend restart" });
@@ -1207,23 +1071,29 @@ export class SlotManager {
         continue;
       }
 
-      // Under the cap, relaunch in place (keeps the worktree); otherwise leave interrupted + notify.
-      if ((await this.tryAutoReclaim(ticketId, "session tmux disparue")) !== "escalate") continue;
+      // The agent's in-process SDK session died with the backend. Only a slot whose ticket was in an
+      // active stage held a live session — a parked slot (to_review/interrupted/done/failed) is left
+      // untouched. Under the cap, relaunch in place (keeps the worktree); otherwise interrupt + notify.
+      const wasActive =
+        recovered.stage !== null &&
+        (ACTIVE_STAGES.includes(recovered.stage) || recovered.stage === "awaiting_answers");
+      if (!wasActive) continue;
+      if ((await this.tryAutoReclaim(ticketId, "session perdue au redémarrage")) !== "escalate") continue;
 
       const ticket = this.store.getTicket(ticketId);
       if (ticket) {
         this.touch(
           this.store.updateTicket(ticket.id, {
             stage: "interrupted",
-            error: "session tmux disparue",
+            error: "session perdue au redémarrage",
             finishedAt: Date.now(),
           }),
         );
       }
       this.store.updateSlot(slot.id, { status: "interrupted" });
       this.store.logEvent(ticketId, "interrupted", {});
-      log.warn("session tmux disparue à la reprise", { ticketId, slotId: slot.id });
-      void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session tmux disparue`, ticketId);
+      log.warn("session perdue à la reprise", { ticketId, slotId: slot.id });
+      void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session perdue au redémarrage`, ticketId);
     }
     this.hub.pushSlots(this.store.listSlots());
   }
@@ -1314,34 +1184,16 @@ export class SlotManager {
     if (!ticket || !isProjectKey(ticket.project)) return;
     // A test session must never be relaunched with a pipeline contract; the user stops it manually.
     if (ticket.testing) return;
-    const sessionName = `ticket-${ticketId}`;
     const path = slotPath(slotId);
     log.info("relance en place", { ticketId, slotId });
 
-    // Drop any live/stale session so the re-spawn below can claim the tmux name,
-    // and evict its worker socket now so the contract re-delivers to the fresh one.
-    await this.system.killSession(sessionName);
-    this.workerHub.disconnect(ticketId);
-    await this.depositSlotFiles(path, ticket, slotId);
+    // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
+    this.sessionHub.disconnect(ticketId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
-    await this.system.spawnSession({
-      sessionName,
-      cwd: path,
-      model: ticket.model ?? MODELS.implement,
-      effort: ticket.effort ?? MODELS.implementEffort,
-      env: {
-        TICKET_ID: ticketId,
-        SLOT_ID: String(slotId),
-        BACKEND_WS: this.config.backendWs,
-        DISABLE_AUTOUPDATER: "1",
-      },
-    });
+    this.startAgentSession(ticket, slotId, path);
     this.setPhase(ticketId, SETUP_PHASES.waiting);
-    this.store.updateSlot(slotId, { status: "busy", tmuxSession: sessionName });
-    // Re-arm contract delivery: deliverContractIfPending keys off the latest
-    // session_spawned marker, so re-logging it makes the contract re-send to the
-    // fresh session (the whole point of a relaunch).
-    this.store.logEvent(ticketId, "session_spawned", { slotId, sessionName });
+    this.store.updateSlot(slotId, { status: "busy", tmuxSession: null });
+    this.store.logEvent(ticketId, "session_spawned", { slotId });
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "implementing",
@@ -1352,6 +1204,6 @@ export class SlotManager {
       }),
     );
     this.hub.pushSlots(this.store.listSlots());
-    void this.deliverContractWhenReady(ticketId);
+    this.deliverContract(ticket);
   }
 }

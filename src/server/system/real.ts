@@ -4,27 +4,20 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 
-import {
-  FEASIBILITY_SCOUT_AGENT_NAME,
-  TERMINAL_DEFAULT_COLS,
-  TERMINAL_DEFAULT_ROWS,
-  TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
-} from "../../shared/constants.ts";
+import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
+import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { claudeProvider } from "./claudeProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   PaneSize,
   PaneStream,
-  PrepareSlotFiles,
   ReformulateOptions,
   ReviewDoneOptions,
-  SpawnFeasibilityOptions,
   SpawnShellOptions,
-  SpawnTmuxOptions,
-  SpawnTriageOptions,
   SystemAdapter,
   WorktreeSetupOptions,
 } from "./types.ts";
@@ -33,74 +26,10 @@ const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
 const PROD_ENV_MARKER = "prod";
-/**
- * Read-only built-in tool allowlist for a triage session: bounding `--tools` to these makes
- * Edit/Write/Bash structurally unloadable regardless of permission-mode. MCP tools survive `--tools`,
- * so `mcp__worker__submit_triage` stays callable.
- */
-const TRIAGE_READONLY_TOOLS = "Read,Glob,Grep";
-/** "Analyse +" orchestrator tool surface: read-only plus Task for parallel sub-agent fan-out. */
-const TRIAGE_PLUS_READONLY_TOOLS = "Read,Glob,Grep,Task";
-/** Read-only inline subagent tool bounds (no Task — cannot recurse). */
-const READONLY_SCOUT_TOOLS = ["Read", "Glob", "Grep"] as const;
-const READONLY_SCOUT_DISALLOWED = ["Task", "Agent", "Bash", "Edit", "Write"] as const;
-/**
- * Feasibility batch tool surface: read-only plus `Task` so the orchestrator can fan out one sub-agent
- * per ticket. Edit/Write/Bash stay unloadable; MCP `submit_feasibility` survives `--tools`.
- */
-const FEASIBILITY_READONLY_TOOLS = "Read,Glob,Grep,Task";
-/**
- * Inline subagent the orchestrator fans out per ticket. `--tools` bounds ONLY the top-level session;
- * subagents default to `general-purpose` (all tools incl. Bash + Task) and recurse without limit. A
- * read-only scout with no Task/Edit/Write/Bash structurally breaks that recursion. Defined inline via
- * `--agents` so nothing is written into the real repo's `.claude/agents/`. The scout alone is not
- * enough — nothing forces the orchestrator to pick it; `permissions.deny` (FEASIBILITY_SETTINGS_JSON)
- * is what removes the recursing built-in fallback.
- */
-const FEASIBILITY_SCOUT_AGENTS_JSON = JSON.stringify({
-  [FEASIBILITY_SCOUT_AGENT_NAME]: {
-    description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
-    prompt:
-      "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
-      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
-      "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.",
-    tools: [...READONLY_SCOUT_TOOLS],
-    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
-  },
-});
-/** Inline subagents for "Analyse +": feasibility scout + solutions scout (orchestrator fans out 1+2). */
-const TRIAGE_PLUS_AGENTS_JSON = JSON.stringify({
-  [FEASIBILITY_SCOUT_AGENT_NAME]: {
-    description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
-    prompt:
-      "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
-      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
-      "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.",
-    tools: [...READONLY_SCOUT_TOOLS],
-    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
-  },
-  [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: {
-    description: "Identifie en lecture seule des approches de solution concrètes pour UN ticket.",
-    prompt:
-      "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
-      "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Pour le ticket " +
-      "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
-      "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).",
-    tools: [...READONLY_SCOUT_TOOLS],
-    disallowedTools: [...READONLY_SCOUT_DISALLOWED],
-  },
-});
 /** Bound the synchronous one-shot reformulation `claude -p` call (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
 /** Keep only the tail of a failed reformulation's output in the surfaced error. */
 const REFORMULATE_ERROR_TAIL = 600;
-/** How long a crashed pane stays readable before the session closes itself (1 h). */
-const DEAD_PANE_KEEP_ALIVE_S = 3600;
-// The dev-channels warning dialog has no bypass (by design): the backend watches
-// the pane after spawn and confirms the default "local development" option.
-const DEV_CHANNELS_DIALOG_MARKER = "I am using this for local development";
-const DIALOG_POLL_INTERVAL_MS = 500;
-const DIALOG_POLL_ATTEMPTS = 120;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
 /**
@@ -137,27 +66,6 @@ const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 const PR_LIST_FIELDS = "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
-/** Minimal settings injected inline so a triage session skips the "enable MCP servers?" dialog. */
-const TRIAGE_SETTINGS_JSON = JSON.stringify({ enableAllProjectMcpServers: true });
-/**
- * Built-in spawnable agent types the feasibility orchestrator must never fan out: each carries the
- * full toolset (incl. Task), so a single fallback to one of them re-opens unbounded recursion. The
- * default when `subagent_type` is omitted is `general-purpose`, which is the observed runaway path.
- */
-const FEASIBILITY_DENIED_AGENTS = ["general-purpose", "Explore", "Plan"];
-/**
- * Feasibility settings: triage's MCP-dialog skip PLUS a deny of every built-in spawnable agent, so the
- * inline `--agents` scout is the ONLY type the orchestrator can spawn. `permissions.deny` is deny-first
- * and enforced by Claude Code itself (not the model), so it structurally closes the recursion the
- * contract wording alone could not. Injected inline (no settings file) to avoid writing into the real
- * repo's `.claude/`.
- */
-const FEASIBILITY_SETTINGS_JSON = JSON.stringify({
-  enableAllProjectMcpServers: true,
-  permissions: { deny: FEASIBILITY_DENIED_AGENTS.map((name) => `Agent(${name})`) },
-});
-/** Same deny as feasibility batch: only the inline scouts may be spawned (no recursing built-ins). */
-const TRIAGE_PLUS_SETTINGS_JSON = FEASIBILITY_SETTINGS_JSON;
 
 /** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
 const ghReviewSchema = z.object({
@@ -197,6 +105,8 @@ const PR_MERGE_CONFIRM_DELAY_MS = 1000;
  */
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
+  /** The agent backend behind the session seam. Claude is the only provider today. */
+  private readonly provider: AgentProvider = claudeProvider;
 
   async seedWorkspaceTrust(paths: string[]): Promise<void> {
     const file = Bun.file(CLAUDE_JSON_PATH);
@@ -268,13 +178,6 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async deleteLocalBranch(repoPath: string, branch: string): Promise<void> {
     await $`git -C ${repoPath} branch -D ${branch}`.nothrow().quiet();
-  }
-
-  async prepareSlotFiles(files: PrepareSlotFiles): Promise<void> {
-    await Bun.write(join(files.slotPath, ".mcp.json"), files.mcpJson);
-    await Bun.write(join(files.slotPath, ".claude", "settings.json"), files.settingsJson);
-    await Bun.write(join(files.slotPath, ".claude", "agents", "implementer.md"), files.implementerAgentMd);
-    await Bun.write(join(files.slotPath, ".claude", "agents", "pr-fixer.md"), files.prFixerAgentMd);
   }
 
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
@@ -400,43 +303,9 @@ export class RealSystemAdapter implements SystemAdapter {
     return { exitCode, timedOut: proc.signalCode === "SIGKILL", stdout, stderr };
   }
 
-  async spawnSession(opts: SpawnTmuxOptions): Promise<void> {
-    const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
-    const claudeCmd = `claude --model ${opts.model}${effortFlag} --dangerously-load-development-channels server:worker --permission-mode auto`;
-    // tmux kills the session when its root command exits, taking the error output
-    // with it. Keep the pane alive after a crash so capture-pane can show why.
-    const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
-    // -x/-y fix the detached pane size; without it an unattached session is 80×24
-    // and the live terminal can't reflow to the viewer's xterm width.
-    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
-    void this.acceptDevChannelsDialog(opts.sessionName);
-  }
-
-  async spawnTriageSession(opts: SpawnTriageOptions): Promise<void> {
-    if (opts.deep) {
-      await this.spawnReadonlySession(opts, {
-        tools: TRIAGE_PLUS_READONLY_TOOLS,
-        settingsJson: TRIAGE_PLUS_SETTINGS_JSON,
-        agentsJson: TRIAGE_PLUS_AGENTS_JSON,
-      });
-      return;
-    }
-    await this.spawnReadonlySession(opts, {
-      tools: TRIAGE_READONLY_TOOLS,
-      settingsJson: TRIAGE_SETTINGS_JSON,
-    });
-  }
-
-  async spawnFeasibilitySession(opts: SpawnFeasibilityOptions): Promise<void> {
-    // Fan-out subagents inherit neither `--tools` nor the contract's read-only wording. The inline
-    // `--agents` scout keeps the fan-out itself non-recursive; FEASIBILITY_SETTINGS_JSON's
-    // `permissions.deny` is what forbids the orchestrator from spawning a recursing built-in instead.
-    await this.spawnReadonlySession(opts, {
-      tools: FEASIBILITY_READONLY_TOOLS,
-      settingsJson: FEASIBILITY_SETTINGS_JSON,
-      agentsJson: FEASIBILITY_SCOUT_AGENTS_JSON,
-    });
+  startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+    log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
+    return this.provider.createSession(opts);
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
@@ -474,32 +343,6 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */
-  private async spawnReadonlySession(
-    opts: SpawnTriageOptions,
-    config: { tools: string; settingsJson: string; agentsJson?: string },
-  ): Promise<void> {
-    const envFlags = Object.entries(opts.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
-    // `auto` never prompts interactively (it auto-approves or silently blocks); the read-only tool
-    // surface via `--tools` (Edit/Write/Bash unloadable) guarantees no write tool can exist anyway.
-    // Every inline JSON arg goes through `shQuote`: tmux re-parses this command via `sh`, and JSON
-    // string contents can hold literal apostrophes (e.g. French in `--agents`) that would otherwise
-    // break naive single-quoting and corrupt the flag.
-    const agentsFlag = config.agentsJson ? ` --agents ${shQuote(config.agentsJson)}` : "";
-    const claudeCmd =
-      `claude --model ${opts.model}${effortFlag}` +
-      ` --mcp-config ${shQuote(opts.mcpConfig)}` +
-      ` --strict-mcp-config` +
-      ` --dangerously-load-development-channels server:worker` +
-      ` --settings ${shQuote(config.settingsJson)}` +
-      ` --tools ${config.tools}` +
-      agentsFlag +
-      ` --permission-mode auto`;
-    const wrapped = `${claudeCmd}; status=$?; echo; echo "[claude exited: $status]"; exec sleep ${DEAD_PANE_KEEP_ALIVE_S}`;
-    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${envFlags} ${wrapped}`.quiet();
-    void this.acceptDevChannelsDialog(opts.sessionName);
-  }
-
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {
     // Reclaim a zombie of this name first: user-terminal sessions survive a backend restart (PRD §7),
     // but `nextId` resets to 1 each process, so the derived name can collide with an orphan — without
@@ -515,18 +358,6 @@ export class RealSystemAdapter implements SystemAdapter {
     // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
     // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
     await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -l`.quiet();
-  }
-
-  /** Confirm the unavoidable dev-channels warning so the session starts unattended. */
-  private async acceptDevChannelsDialog(sessionName: string): Promise<void> {
-    for (let attempt = 0; attempt < DIALOG_POLL_ATTEMPTS; attempt++) {
-      await Bun.sleep(DIALOG_POLL_INTERVAL_MS);
-      const pane = await this.capturePane(sessionName);
-      if (pane.includes(DEV_CHANNELS_DIALOG_MARKER)) {
-        await $`tmux send-keys -t ${sessionName} Enter`.nothrow().quiet();
-        return;
-      }
-    }
   }
 
   async killSession(sessionName: string): Promise<void> {

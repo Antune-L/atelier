@@ -27,12 +27,13 @@ interrupted / stalled). A *different axis* from Column. Use `ACTIVE_STAGES` /
 
 **Slot** — a git-worktree execution unit from a fixed pool (`SLOT_COUNT`), at
 `SLOTS_ROOT/slot-N`. **SlotManager** owns its lifecycle: cleanup → fetch → worktree add →
-deposit config → install → tmux spawn → done gate → release. Git ops per repo serialize
-through `repoMutex`.
+install → start SDK session → inject contract → done gate → release. Git ops per repo
+serialize through `repoMutex`.
 
-**Worker** — the MCP channel server (`worker/worker.ts`) spawned inside each Claude Code
-session. Speaks MCP over stdio to its session, and connects outbound over WS to the
-backend. Opens no listening port; reconnects self-heal a backend restart.
+**SessionHub** — owns each live SDK agent session (`@anthropic-ai/claude-agent-sdk`
+`query()` streaming-input, run in-process). Injects channel events as user turns, exposes
+the worker tools as an in-process MCP server, surfaces turn-end events, and keeps the
+per-session live transcript. Replaced the old `worker.ts` + WorkerHub WS bridge.
 
 **Channel** — the two-way agent↔backend link. backend→agent: MCP notifications
 (`ticket`, `answer`, `prd_validated`, `nudge`, `user_comment`). agent→backend: tool calls
@@ -62,7 +63,7 @@ state transitions, sitting ABOVE `store` (it calls `store`, never SQL). Each ver
 coupling a transition carries — ticket fields + slot status + `finishedAt` — with the
 broadcast/log/notify ritual, so a caller can't move the stage without syncing the slot or
 forget to push. Replaces hand-assembled `store.updateTicket` patches at the
-coordinator/routes/slotManager call sites. Does NOT depend on the Channel (WorkerHub) —
+coordinator/routes/slotManager call sites. Does NOT depend on SessionHub —
 channel sends are not lifecycle transitions. Config-knob edits (model, effort, autoMerge…)
 and pure bookkeeping (sessionId, nudgeCount, progress) stay on `store.updateTicket`.
 *Not yet routed through it:* the slot-mechanics-entangled terminal transitions inside

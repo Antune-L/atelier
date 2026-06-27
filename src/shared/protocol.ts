@@ -1,20 +1,18 @@
 /**
- * protocol.ts — the single source of truth for the agent↔backend Channel wire format.
+ * protocol.ts — the single source of truth for the agent↔backend tool/event contract.
  *
  * Declares once, derived everywhere:
- * - the tool registry (name → MCP description → args schema) the worker advertises and the
- *   coordinator dispatches on,
- * - the channel-event union (backend → worker → session),
- * - the WS frames worker.ts ↔ backend exchange.
+ * - the tool registry (name → MCP description → args schema) the in-process MCP server exposes and
+ *   the coordinator dispatches on (see system/claudeProvider.ts),
+ * - the channel-event union the backend injects as user turns into a live SDK session.
  *
- * Dependency-light ON PURPOSE: imports only `zod` and `./constants.ts`, never anything
- * server-only. `worker/worker.ts` is bundled standalone (`bun build worker/worker.ts`), so
- * pulling a server dep in here would break that bundle. Keep it that way.
+ * Dependency-light ON PURPOSE: imports only `zod` and `./constants.ts`, never anything server-only,
+ * so it can be shared by the server and the web bundle alike. Keep it that way.
  *
  * Naming convention: the strict arg schemas (re-exported via schemas.ts) are the canonical
  * validation surface the coordinator uses. Two tools (submit_triage / submit_feasibility)
- * additionally expose a deliberately TOLERANT mirror that the worker advertises via MCP — the
- * backend always re-validates strictly, so the worker errs toward forwarding (see TOLERANT note).
+ * additionally expose a deliberately TOLERANT mirror advertised via MCP — the backend always
+ * re-validates strictly, so the agent errs toward forwarding (see TOLERANT note).
  */
 
 import { z } from "zod";
@@ -62,7 +60,7 @@ export const submitPrdArgsSchema = z.object({ markdown: z.string().min(1) });
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 
-export const doneArgsSchema = z.object({ pr_url: z.string().url() });
+export const doneArgsSchema = z.object({ pr_url: z.url() });
 
 export const readyForReviewArgsSchema = z.object({});
 
@@ -193,7 +191,7 @@ export function isWorkerToolName(value: string): value is WorkerToolName {
   return workerToolNameSchema.safeParse(value).success;
 }
 
-// ---- Channel events: backend → worker.ts → injected into the session ----
+// ---- Channel events: backend → injected as a user turn into the live SDK session ----
 
 export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ticket"), payload: z.string() }),
@@ -203,39 +201,3 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("user_comment"), body: z.string() }),
 ]);
 export type ChannelEvent = z.infer<typeof channelEventSchema>;
-
-// ---- WS frames: worker.ts → backend ----
-
-export const workerHelloSchema = z.object({
-  type: z.literal("hello"),
-  ticketId: z.string(),
-  slotId: z.number().int(),
-});
-
-export const workerToolCallSchema = z.object({
-  type: z.literal("tool_call"),
-  id: z.string(),
-  name: workerToolNameSchema,
-  args: z.unknown(),
-});
-
-export const workerStopSchema = z.object({
-  type: z.literal("stop"),
-  sessionId: z.string().nullable().default(null),
-});
-
-export const workerInboundSchema = z.discriminatedUnion("type", [
-  workerHelloSchema,
-  workerToolCallSchema,
-  workerStopSchema,
-]);
-export type WorkerInbound = z.infer<typeof workerInboundSchema>;
-
-// ---- WS frames: backend → worker.ts ----
-
-/** Either a channel event, or a tool result for a pending tool_call. */
-export const workerOutboundSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("event"), event: channelEventSchema }),
-  z.object({ type: z.literal("tool_result"), id: z.string(), ok: z.boolean(), result: z.string() }),
-]);
-export type WorkerOutbound = z.infer<typeof workerOutboundSchema>;

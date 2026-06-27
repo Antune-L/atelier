@@ -345,8 +345,7 @@ export const IMPORT_MAX_ROWS = 200;
 
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
-export const WS_PATH_WORKER = "/workers";
-/** Interactive PTY stream for an agent's tmux pane (output + bidirectional input). */
+/** Interactive PTY stream for a worktree/user shell tmux pane (output + bidirectional input). */
 export const WS_PATH_TERMINAL = "/ws/terminal";
 
 /**

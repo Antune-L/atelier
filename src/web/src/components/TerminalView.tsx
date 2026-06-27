@@ -27,7 +27,7 @@ const BOTTOM_THRESHOLD_PX = 24;
 
 const EMPTY_HINT = "La session démarre, en attente de la première sortie de l'agent…";
 
-/** Read-only polled view of an agent tmux pane (with setup phase). */
+/** Read-only polled view of an agent session's rendered live transcript (with setup phase). */
 export function TerminalView({ ticketId, fill = false, compact = false }: TerminalViewProps) {
   const [data, setData] = useState<TerminalData>({ output: "", phase: null });
   const [error, setError] = useState<string | null>(null);

@@ -1,5 +1,4 @@
 import { Elysia } from "elysia";
-import { z } from "zod";
 
 import { ACTIVE_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
@@ -20,7 +19,6 @@ import {
   updateAppSettingsSchema,
   updateProfileSchema,
   updateTicketSchema,
-  usageByModelSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
@@ -30,6 +28,7 @@ import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 import { buildReformulatePrompt } from "./agents/reformulate.ts";
 import type { ReformulateOptions } from "./system/types.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
+import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
@@ -61,6 +60,7 @@ interface RouteDeps {
   lifecycle: TicketLifecycle;
   slots: SlotManager;
   coordinator: AgentCoordinator;
+  sessionHub: SessionHub;
   system: PaneReader;
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
@@ -94,17 +94,6 @@ const GIT_QUERY_TIMEOUT_MS = 5_000;
 function isWebOnlyPath(filePath: string): boolean {
   return filePath.startsWith("src/web/");
 }
-
-const stopHookSchema = z.object({
-  ticketId: z.string(),
-  sessionId: z.string().nullable().default(null),
-  /** Token usage aggregated from this session's transcript (additive; omitted in dry-run). */
-  usageByModel: usageByModelSchema.optional(),
-});
-
-const agentActiveSchema = z.object({
-  ticketId: z.string(),
-});
 
 const HTTP_CREATED = 201;
 const HTTP_BAD_REQUEST = 400;
@@ -792,18 +781,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/tickets/:id/terminal", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      // A triage runs in no slot: fall back to its detached session, then to the
-      // feasibility batch session this ticket belongs to (mirrors the WS terminal path).
-      const sessionName =
-        ticket.slotId !== null
-          ? store.getSlot(ticket.slotId)?.tmuxSession ?? null
-          : deps.triage.resolveSession(params.id) ?? deps.feasibility.resolveSessionForTicket(params.id);
-      if (ticket.slotId === null && !sessionName) return jsonError(set, HTTP_CONFLICT, "aucun slot actif");
       const phase = slots.getSetupPhase(params.id);
-      // Before the tmux session exists (worktree/install/spawn), surface the setup phase.
-      if (!sessionName) return { output: "", phase };
-      const output = await deps.system.capturePane(sessionName);
-      return { output, phase };
+      // A testing ticket runs an interactive tmux shell (still captured live); every agent / triage /
+      // feasibility ticket runs an in-process SDK session whose rendered transcript is the viewer source.
+      const slot = ticket.slotId !== null ? store.getSlot(ticket.slotId) : null;
+      if (slot?.tmuxSession) {
+        return { output: await deps.system.capturePane(slot.tmuxSession), phase };
+      }
+      // A feasibility-evaluated ticket's transcript lives under its batch id; everything else under its own id.
+      const transcriptId = deps.feasibility.batchKeyForTicket(params.id) ?? params.id;
+      return { output: deps.sessionHub.getTranscript(transcriptId), phase };
     })
     .get("/terminals", async ({ query }) => {
       const projectKey = typeof query.projectKey === "string" ? query.projectKey : undefined;
@@ -853,29 +840,6 @@ export function createApiRoutes(deps: RouteDeps) {
       return { path: saved.path, url: saved.url };
     })
     .get("/slots", () => store.listSlots())
-    .post("/internal/stop", ({ body }) => {
-      const parsed = stopHookSchema.safeParse(body);
-      if (!parsed.success) return { ok: false };
-      const { ticketId, sessionId, usageByModel } = parsed.data;
-      // Persist this session's cumulative usage (idempotent: each Stop overwrites its own
-      // sessionId entry; total = sum across sessions, correct across auto-reclaim relaunches).
-      if (usageByModel && sessionId) {
-        const ticket = store.getTicket(ticketId);
-        if (ticket) {
-          store.updateTicket(ticketId, {
-            sessionUsage: { ...ticket.sessionUsage, [sessionId]: usageByModel },
-          });
-        }
-      }
-      coordinator.handleStopHook(ticketId, sessionId);
-      return { ok: true };
-    })
-    .post("/internal/active", ({ body }) => {
-      const parsed = agentActiveSchema.safeParse(body);
-      if (!parsed.success) return { ok: false };
-      coordinator.handleAgentActive(parsed.data.ticketId);
-      return { ok: true };
-    })
     .post("/internal/update", async ({ set }) => {
       const { onRequestUpdate, repoRoot, system } = deps;
       if (!onRequestUpdate || !repoRoot) return jsonError(set, HTTP_CONFLICT, "mise à jour indisponible");
@@ -911,12 +875,10 @@ export function createApiRoutes(deps: RouteDeps) {
       }
 
       try {
+        // The server runs the agent sessions in-process from source, so a non-frontend change only
+        // needs the web bundle rebuilt; the relaunch below picks up the new server source directly.
         const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_BUILD_TIMEOUT_MS);
         if (!web.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-        if (!frontendOnly) {
-          const agents = await system.runProjectScript(repoRoot, "bun run build:agents", UPDATE_BUILD_TIMEOUT_MS);
-          if (!agents.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:agents a échoué : ${agents.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-        }
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${getErrorMessage(error)}`);
       }

@@ -42,6 +42,27 @@ function toUsageByModel(usage: Record<string, AgentTurnUsage>): UsageByModel {
   return out;
 }
 
+/**
+ * Sum a per-turn usage delta into a session's running total, bucket-by-bucket per model. The SDK
+ * reports usage PER TURN (each `result` covers only that turn), so a session's total is the sum of
+ * its turn_end deltas — not the last one.
+ */
+function addUsageByModel(prior: UsageByModel | undefined, delta: UsageByModel): UsageByModel {
+  const out: UsageByModel = { ...(prior ?? {}) };
+  for (const [model, d] of Object.entries(delta)) {
+    const base = out[model];
+    out[model] = base
+      ? {
+          input_tokens: base.input_tokens + d.input_tokens,
+          output_tokens: base.output_tokens + d.output_tokens,
+          cache_creation_input_tokens: base.cache_creation_input_tokens + d.cache_creation_input_tokens,
+          cache_read_input_tokens: base.cache_read_input_tokens + d.cache_read_input_tokens,
+        }
+      : d;
+  }
+  return out;
+}
+
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
 
@@ -231,11 +252,12 @@ export class AgentCoordinator {
     // session identifies with an id that is not a real pipeline ticket.
     if (!this.store.getTicket(ticketId)) return;
     if (sessionId) {
-      // Persist this session's cumulative usage (idempotent: each turn_end overwrites its own
-      // sessionId entry; total = sum across sessions, correct across auto-reclaim relaunches).
+      // Usage is reported PER TURN, so accumulate every turn_end into this session's running total
+      // (overwriting would keep only the last turn). Ticket total = sum across sessionIds, one per
+      // auto-reclaim relaunch.
       const existing = this.store.getTicket(ticketId);
       const sessionUsage = existing
-        ? { ...existing.sessionUsage, [sessionId]: toUsageByModel(usageByModel) }
+        ? { ...existing.sessionUsage, [sessionId]: addUsageByModel(existing.sessionUsage[sessionId], toUsageByModel(usageByModel)) }
         : undefined;
       const updated = this.store.updateTicket(ticketId, {
         sessionId,

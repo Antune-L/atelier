@@ -194,17 +194,17 @@ function dispatch(message: SDKMessage, onEvent: (event: AgentSessionEvent) => vo
       return;
     case "result": {
       const ok = message.subtype === "success";
+      // Both SDKResultSuccess and SDKResultError carry modelUsage: an interrupted or errored turn
+      // still burned tokens, so account it regardless of subtype.
       const usageByModel: Record<string, AgentTurnUsage> = {};
-      if (message.subtype === "success") {
-        for (const [model, usage] of Object.entries(message.modelUsage)) {
-          usageByModel[model] = {
-            inputTokens: usage.inputTokens,
-            outputTokens: usage.outputTokens,
-            cacheReadTokens: usage.cacheReadInputTokens,
-            cacheCreationTokens: usage.cacheCreationInputTokens,
-            costUsd: usage.costUSD,
-          };
-        }
+      for (const [model, usage] of Object.entries(message.modelUsage)) {
+        usageByModel[model] = {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: usage.cacheReadInputTokens,
+          cacheCreationTokens: usage.cacheCreationInputTokens,
+          costUsd: usage.costUSD,
+        };
       }
       onEvent({ type: "turn_end", ok, subtype: message.subtype, usageByModel });
       return;

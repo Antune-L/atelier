@@ -13,6 +13,7 @@ import {
   createTerminalBodySchema,
   createTicketSchema,
   deriveTitleFromDescription,
+  generatePrdSchema,
   importTicketsSchema,
   moveTicketSchema,
   startWorktreeSessionBodySchema,
@@ -37,6 +38,8 @@ import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
+import { buildPrdPrompt } from "./agents/prd.ts";
+import type { ReformulateOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
 import type { UserTerminalManager } from "./userTerminalManager.ts";
 
@@ -53,6 +56,7 @@ interface PaneReader {
   gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
+  reformulate(opts: ReformulateOptions): Promise<string>;
 }
 
 interface RouteDeps {
@@ -906,6 +910,21 @@ export function createApiRoutes(deps: RouteDeps) {
       // idle timeout (which surfaced in the WebView as "Load failed").
       deps.reformulate.start(params.id);
       return { started: true };
+    })
+    .post("/prd/generate", async ({ body, set }) => {
+      const parsed = generatePrdSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "requête invalide");
+      try {
+        const markdown = await deps.system.reformulate({
+          cwd: deps.projectRoot,
+          prompt: buildPrdPrompt(parsed.data),
+          model: MODELS.triage,
+          effort: MODELS.triageEffort,
+        });
+        return { markdown };
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de génération du PRD"));
+      }
     })
     .delete("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);

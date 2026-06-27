@@ -254,6 +254,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const server = Bun.serve<SocketData>({
     port,
+    // NOTE: PRD generation holds the request open up to ~120s (REFORMULATE_TIMEOUT_MS); Bun's default
+    // 10s idleTimeout would drop the connection mid-generation, so bump it to Bun's max (255s).
+    idleTimeout: 255,
     async fetch(request, srv) {
       const url = new URL(request.url);
       if (url.pathname === WS_PATH_CLIENT) {

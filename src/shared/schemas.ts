@@ -529,6 +529,14 @@ export const validatePrdSchema = z.object({
 });
 export type ValidatePrdInput = z.infer<typeof validatePrdSchema>;
 
+/** Generate (or revise) a standalone PRD from a free-form description; nothing is persisted. */
+export const generatePrdSchema = z.object({
+  description: z.string().min(1),
+  previousPrd: z.string().optional(),
+  feedback: z.string().optional(),
+});
+export type GeneratePrdInput = z.infer<typeof generatePrdSchema>;
+
 export const terminalOutputSchema = z.object({
   output: z.string(),
   /** Pre-output setup phase (worktree/install/spawn/waiting), or null once the agent streams. */

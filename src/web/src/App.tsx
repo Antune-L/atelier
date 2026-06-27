@@ -6,6 +6,7 @@ import type { Ticket } from "@shared/schemas";
 import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
+import { PrdView } from "@/components/PrdView";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SlotsBar } from "@/components/SlotsBar";
@@ -120,6 +121,7 @@ export function App() {
   const renderView = (): ReactNode => {
     if (view === "terminals") return <TerminalsView projects={projects} projectFilter={filter} />;
     if (view === "stats") return <StatsView projects={projects} />;
+    if (view === "prd") return <PrdView />;
     return renderHome();
   };
 

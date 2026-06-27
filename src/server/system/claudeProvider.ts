@@ -29,6 +29,10 @@ import { resolveClaudeBinary } from "./claudeBinary.ts";
 const MCP_SERVER_NAME = "kanban";
 /** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
 const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
+/** Bound the one-shot reformulation run (2 min) — mirrors the old `claude -p` subprocess timeout. */
+const ONE_SHOT_TIMEOUT_MS = 120_000;
+/** The one-shot read-only tool surface: the prompt may reference local image paths to Read. */
+const ONE_SHOT_ALLOWED_TOOLS = ["Read"] as const;
 const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
@@ -244,3 +248,68 @@ export const claudeProvider: AgentProvider = {
   name: "claude",
   createSession: createSdkAgentSession,
 };
+
+export interface OneShotQueryOptions {
+  cwd: string;
+  /** The full prompt, passed as a plain string so the SDK runs in single-shot (non-streaming) mode. */
+  prompt: string;
+  /** Model alias for the run (SDK `model`). */
+  model: string;
+  /** Reasoning effort, or null for the model default. */
+  effort: string | null;
+}
+
+/**
+ * Run the Agent SDK `query()` in SINGLE-SHOT mode (the prompt is a plain string, not a streaming
+ * generator, so the run ends on its own `result`) and return the final assistant text. Read-only:
+ * only `Read` is allowed and `dontAsk` auto-runs the pre-approved surface while silently denying the
+ * rest — there is no human to prompt, mirroring the old one-shot `claude -p --permission-mode auto
+ * --tools Read`. No worker MCP server, hooks, or settingSources: this run has no backend tool routing.
+ */
+export async function runOneShotQuery(opts: OneShotQueryOptions): Promise<string> {
+  const sdkEffort = toSdkEffort(opts.effort);
+  const queryOptions: Options = {
+    cwd: opts.cwd,
+    model: opts.model,
+    pathToClaudeCodeExecutable: resolveClaudeBinary(),
+    systemPrompt: { type: "preset", preset: "claude_code" },
+    permissionMode: "dontAsk",
+    allowedTools: [...ONE_SHOT_ALLOWED_TOOLS],
+    includePartialMessages: false,
+    env: { ...process.env },
+    stderr: () => {},
+    ...(sdkEffort ? { effort: sdkEffort } : {}),
+  };
+
+  const session: Query = query({ prompt: opts.prompt, options: queryOptions });
+
+  // Race stream consumption against the timeout; on expiry interrupt + close so the run can't leak.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`reformulation échouée : timeout (${ONE_SHOT_TIMEOUT_MS}ms)`)), ONE_SHOT_TIMEOUT_MS);
+    timer.unref();
+  });
+
+  try {
+    return await Promise.race([consumeOneShot(session), timeout]);
+  } finally {
+    clearTimeout(timer);
+    // close() returns the underlying generator, ending any still-running consumeOneShot iteration (the
+    // teardown for single-shot mode; interrupt() is streaming-only and would just reject here).
+    try {
+      session.close();
+    } catch {
+      // Already torn down; nothing to release.
+    }
+  }
+}
+
+/** Drain the one-shot message stream and return the final result text, or throw on a non-success result. */
+async function consumeOneShot(session: Query): Promise<string> {
+  for await (const message of session) {
+    if (message.type !== "result") continue;
+    if (message.subtype === "success") return message.result.trim();
+    throw new Error(`reformulation échouée (${message.subtype})`);
+  }
+  throw new Error("reformulation échouée : aucun résultat renvoyé");
+}

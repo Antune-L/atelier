@@ -9,7 +9,7 @@ import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { claudeProvider } from "./claudeProvider.ts";
+import { claudeProvider, runOneShotQuery } from "./claudeProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -26,10 +26,6 @@ const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
 const PROD_ENV_MARKER = "prod";
-/** Bound the synchronous one-shot reformulation `claude -p` call (2 min). */
-const REFORMULATE_TIMEOUT_MS = 120_000;
-/** Keep only the tail of a failed reformulation's output in the surfaced error. */
-const REFORMULATE_ERROR_TAIL = 600;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
 /**
@@ -309,37 +305,10 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
-    // `auto` never prompts; `--tools Read` keeps it read-only (the description may reference local
-    // image paths). The prompt is fed via STDIN to avoid shell-quoting it on the command line.
-    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
-    const cmd = `claude -p --model ${opts.model}${effortFlag} --permission-mode auto --tools Read`;
-    const proc = Bun.spawn(["sh", "-c", cmd], {
-      cwd: opts.cwd,
-      env: { ...process.env, ...NON_INTERACTIVE_ENV },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: REFORMULATE_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-    });
-    // A child that dies before reading the prompt makes the write reject (EPIPE); swallow it so the
-    // non-zero exit below carries the real diagnostic instead of an unhandled rejection.
-    try {
-      proc.stdin.write(opts.prompt);
-      await proc.stdin.end();
-    } catch {
-      // Fall through: proc.exited + stderr below surface the failure.
-    }
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) {
-      const detail = (stderr + stdout).trim().slice(-REFORMULATE_ERROR_TAIL);
-      throw new Error(`reformulation échouée (code ${exitCode}) : ${detail}`);
-    }
-    return stdout.trim();
+    // A read-only SDK one-shot: `runOneShotQuery` runs `query()` in single-shot mode with `dontAsk`
+    // (auto-run pre-approved, silently deny the rest) and only the `Read` tool, so the prompt can open
+    // local image paths it references but nothing can mutate. Returns the final assistant text.
+    return runOneShotQuery({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model, effort: opts.effort });
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */

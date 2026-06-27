@@ -1,7 +1,7 @@
 import type { Ticket } from "../../shared/schemas.ts";
 import { parseTriageReport } from "../../shared/schemas.ts";
 
-/** Build the one-shot `claude -p` prompt that reformulates a ticket's need into clean markdown. */
+/** Build the SDK one-shot prompt that reformulates a ticket's need into clean markdown. */
 export function buildReformulatePrompt(ticket: Ticket): string {
   const lines: string[] = [
     "Tu es chargé de reformuler proprement le besoin décrit par un ticket.",

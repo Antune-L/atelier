@@ -1,7 +1,7 @@
-# Graph Report - kanban-agents  (2026-06-27)
+# Graph Report - kanban-agents  (2026-06-26)
 
 ## Corpus Check
-- 142 files · ~631,238 words
+- 142 files · ~630,596 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `1d5d9db6`
+- Built from commit: `f8444419`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -370,20 +370,20 @@ Cohesion: 0.33
 Nodes (4): currentNow, startTicking(), subscribe(), subscribers
 
 ## Knowledge Gaps
-- **372 isolated node(s):** `Stack`, `Requirements`, `Getting started`, `Environment variables`, `Agent runtime (Agent SDK)` (+367 more)
+- **372 isolated node(s):** `menuShortcutActionSchema`, `newWindowEventSchema`, `name`, `version`, `private` (+367 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `RealSystemAdapter` connect `Review Done Gate (E2E)` to `System Adapter Types`, `Terminal Session Manager`, `Agent Profile & Ask Panel`, `Agent Knobs & Models`, `Real Worktree Shell Ops`, `Package Manifest`?**
-  _High betweenness centrality (0.061) - this node is a cross-community bridge._
-- **Why does `Store` connect `Store & Profiles` to `Agent Config Constants`, `Terminal Session Manager`, `Agent Profile & Ask Panel`, `Worker Protocol Schemas`, `Community 46`, `Feasibility Batch Manager`, `User Terminal Manager`, `Community 77`, `API Routes & Schemas`, `Triage Verdicts & Config`, `DB Rows & Mapping`, `Package Manifest`, `Board Columns`?**
-  _High betweenness centrality (0.055) - this node is a cross-community bridge._
 - **Why does `Ticket` connect `Store & Profiles` to `Slot & Project Config`, `Agents & Ticket UI`, `API Schemas & Inputs`, `Feasibility Batch Manager`, `API Routes & Schemas`, `Ticket Detail & Forms`, `DB Rows & Mapping`, `Client Hub & Watchdog`, `Pricing & Token Cost`, `App & Board Root`, `Board Columns`, `Ticket Lifecycle`, `Agent Config Constants`, `Runtime Dependencies`, `System Adapter Types`, `Community 46`, `User Terminal Manager`, `Database Schema & Seed`, `Package Manifest`, `Community 60`, `Community 73`, `Community 77`?**
-  _High betweenness centrality (0.047) - this node is a cross-community bridge._
-- **What connects `Stack`, `Requirements`, `Getting started` to the rest of the system?**
+  _High betweenness centrality (0.079) - this node is a cross-community bridge._
+- **Why does `RealSystemAdapter` connect `Review Done Gate (E2E)` to `System Adapter Types`, `Terminal Session Manager`, `Agent Profile & Ask Panel`, `Agent Knobs & Models`, `Real Worktree Shell Ops`, `Package Manifest`?**
+  _High betweenness centrality (0.054) - this node is a cross-community bridge._
+- **Why does `Store` connect `Store & Profiles` to `Agent Config Constants`, `Terminal Session Manager`, `Agent Profile & Ask Panel`, `Worker Protocol Schemas`, `Community 46`, `Feasibility Batch Manager`, `User Terminal Manager`, `Community 77`, `API Routes & Schemas`, `Triage Verdicts & Config`, `DB Rows & Mapping`, `Package Manifest`, `Board Columns`?**
+  _High betweenness centrality (0.038) - this node is a cross-community bridge._
+- **What connects `menuShortcutActionSchema`, `newWindowEventSchema`, `name` to the rest of the system?**
   _375 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Slot & Project Config` be split into smaller, more focused modules?**
   _Cohesion score 0.13636363636363635 - nodes in this community are weakly interconnected._

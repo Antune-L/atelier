@@ -217,7 +217,10 @@ export class SessionHub {
     const line = renderSessionEvent(event);
     if (line !== null) this.appendTranscript(ticketId, line);
     if (event.type === "turn_end") {
-      this.handlers?.onStop(ticketId, live?.sessionId ?? null, event.usageByModel);
+      // The turn_end carries its own sessionId (from the SDK result), so a turn that flushes AFTER
+      // disconnect (graceful close on done/fail) still persists its usage even though the session
+      // entry is already evicted from the map.
+      this.handlers?.onStop(ticketId, event.sessionId, event.usageByModel);
     }
   }
 

@@ -26,6 +26,8 @@ import type {
 import { resolveClaudeBinary } from "./claudeBinary.ts";
 
 const MCP_SERVER_NAME = "kanban";
+/** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
+const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
@@ -92,11 +94,15 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   let notify: (() => void) | null = null;
   let closed = false;
 
-  function enqueue(content: string): void {
-    inbox.push({ type: "user", parent_tool_use_id: null, message: { role: "user", content } });
+  function wake(): void {
     const resume = notify;
     notify = null;
     resume?.();
+  }
+
+  function enqueue(content: string): void {
+    inbox.push({ type: "user", parent_tool_use_id: null, message: { role: "user", content } });
+    wake();
   }
 
   async function* prompts(): AsyncGenerator<SDKUserMessage> {
@@ -159,13 +165,21 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
       }
     },
     close: async () => {
+      // Graceful teardown: flag EOF and wake the parked generator so it returns (no bogus user turn).
+      // Crucially do NOT hard-abort the stream here — a turn still in flight (e.g. the one in which
+      // done()/fail() ran) must be allowed to emit its final `result`, which carries that turn's
+      // usage; hard-closing drops it. Input EOF makes the CLI exit once the turn completes.
       closed = true;
-      enqueue(""); // wake the parked generator so it can observe `closed` and return (EOF → CLI exits)
-      try {
-        session.close();
-      } catch {
-        // Already torn down; nothing to release.
-      }
+      wake();
+      // Backstop: if the turn never ends (stuck agent), force teardown so the session can't leak.
+      const timer = setTimeout(() => {
+        try {
+          session.close();
+        } catch {
+          // Already torn down; nothing to release.
+        }
+      }, GRACEFUL_CLOSE_TIMEOUT_MS);
+      timer.unref();
     },
   };
 }
@@ -206,7 +220,7 @@ function dispatch(message: SDKMessage, onEvent: (event: AgentSessionEvent) => vo
           costUsd: usage.costUSD,
         };
       }
-      onEvent({ type: "turn_end", ok, subtype: message.subtype, usageByModel });
+      onEvent({ type: "turn_end", ok, subtype: message.subtype, sessionId: message.session_id, usageByModel });
       return;
     }
     case "rate_limit_event":

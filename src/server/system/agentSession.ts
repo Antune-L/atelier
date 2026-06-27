@@ -32,7 +32,7 @@ export type AgentSessionEvent =
   | { type: "assistant_text"; text: string }
   | { type: "thinking"; text: string }
   | { type: "tool_use"; name: string; input: unknown }
-  | { type: "turn_end"; ok: boolean; subtype: string; usageByModel: Record<string, AgentTurnUsage> }
+  | { type: "turn_end"; ok: boolean; subtype: string; sessionId: string; usageByModel: Record<string, AgentTurnUsage> }
   | { type: "rate_limit"; status: string; resetsAt: number | null }
   | { type: "error"; message: string };
 

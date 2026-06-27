@@ -770,8 +770,8 @@
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
-    "mtime": 1782563501.8740573,
-    "ast_hash": "bbd7c4ed62d52b54bfccf25d83b05d9a",
+    "mtime": 1782563845.616526,
+    "ast_hash": "fe38802c63b0234806cd8b741c062384",
     "semantic_hash": ""
   }
 }

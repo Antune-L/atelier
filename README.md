@@ -2,7 +2,7 @@
 
 **Orchestrate coding agents with a kanban board.** Drag tickets across columns; each card spawns a real Claude Code session that implements the work end to end — isolated worktree, blocking review, local tests, GitHub PR.
 
-A **"no SDK"** take on agent orchestration: agents are interactive Claude Code sessions in tmux, wired through an **MCP channel**. No Agent SDK, no `claude -p`. The board routes work; the backend verifies gates; the agents do the reasoning.
+Agents run as long-lived Claude Code sessions via the official **`@anthropic-ai/claude-agent-sdk`** (`query()` streaming-input), owned in-process by the backend — no tmux, no MCP channel. The board routes work; the backend verifies gates; the agents do the reasoning.
 
 ![Atelier demo](docs/demo.gif)
 
@@ -58,7 +58,7 @@ The ports are deliberately unusual to avoid conflicts with other services.
 
 ## Real mode
 
-To have agents actually spawn `claude` in tmux, create worktrees and open PRs:
+To have agents actually spawn `claude`, create worktrees and open PRs:
 
 ```bash
 bun run real         # KANBAN_DRY_RUN=0 on kanban-real.db
@@ -83,7 +83,7 @@ bun run build:desktop  # .app → build/dev-macos-arm64/
 
 ### Electrobun dev on a new machine
 
-`bun run dev:desktop` is also a **real-mode** launcher: it starts real `tmux`/`claude` sessions, creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
+`bun run dev:desktop` is also a **real-mode** launcher: it starts real `claude` sessions (plus `tmux` shells for interactive test terminals), creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
 
 - it runs `build:web` before starting the app (the agents run in-process — no agent bundles to build);
 - the agent runs the SDK's native `claude` binary; a packaged `.app` embeds it (`claude-bin`) and a dev run resolves it from `node_modules`;

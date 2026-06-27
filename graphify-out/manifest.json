@@ -645,13 +645,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1782560977.3737655,
-    "ast_hash": "3201b73982b2e5a7c04ec4eff3f4eda7",
-    "semantic_hash": ""
-  },
-  "docs/claude-code-channels.md": {
-    "mtime": 1782509382.9032445,
-    "ast_hash": "9f7e2386743a66253141f2fd549609ae",
+    "mtime": 1782563300.13718,
+    "ast_hash": "093ae834c1a278c0b2125e3cd09201ef",
     "semantic_hash": ""
   },
   "src/web/index.html": {
@@ -755,13 +750,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1782508935.2422762,
-    "ast_hash": "33ba50c9682e912e9ecc5b55fd30b2e2",
+    "mtime": 1782563074.6620398,
+    "ast_hash": "7594c75629f6030bee5dacb389b315f6",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
-    "mtime": 1782506929.4267433,
-    "ast_hash": "0ca3a7e621a12f82d800757c879b7213",
+    "mtime": 1782563059.3014884,
+    "ast_hash": "a5d4d8420e5f3971f7d8a73e68b183a6",
     "semantic_hash": ""
   },
   "src/server/system/claudeBinary.ts": {
@@ -770,8 +765,8 @@
     "semantic_hash": ""
   },
   "src/server/system/sdkSession.ts": {
-    "mtime": 1782561758.7826066,
-    "ast_hash": "f5b33a34c729e0d132413ea818797169",
+    "mtime": 1782563104.7157547,
+    "ast_hash": "c7770b84328d6972d052039b1a03deea",
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.ts": {

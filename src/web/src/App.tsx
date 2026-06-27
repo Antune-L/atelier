@@ -121,7 +121,6 @@ export function App() {
   const renderView = (): ReactNode => {
     if (view === "terminals") return <TerminalsView projects={projects} projectFilter={filter} />;
     if (view === "stats") return <StatsView projects={projects} />;
-    if (view === "prd") return <PrdView />;
     return renderHome();
   };
 
@@ -195,7 +194,12 @@ export function App() {
           </div>
         )}
 
-        <main className="min-h-0 flex-1 overflow-auto">{renderView()}</main>
+        <main className={cn("min-h-0 flex-1", view === "prd" ? "overflow-hidden" : "overflow-auto")}>
+          <div className={view === "prd" ? "flex flex-col min-h-0 h-full" : "hidden"}>
+            <PrdView />
+          </div>
+          {view !== "prd" && renderView()}
+        </main>
       </div>
 
       <NewTicketDialog

@@ -649,11 +649,6 @@
     "ast_hash": "093ae834c1a278c0b2125e3cd09201ef",
     "semantic_hash": ""
   },
-  "docs/claude-code-channels.md": {
-    "mtime": 1782509382.9032445,
-    "ast_hash": "9f7e2386743a66253141f2fd549609ae",
-    "semantic_hash": ""
-  },
   "src/web/index.html": {
     "mtime": 1781424023.2857413,
     "ast_hash": "f27fd144a4c125d51d57035d257284ca",

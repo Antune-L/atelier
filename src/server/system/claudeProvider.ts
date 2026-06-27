@@ -59,13 +59,16 @@ function toSdkEffort(effort: string | null): SdkEffort | undefined {
   return SDK_EFFORTS.find((value) => value === effort);
 }
 
-/** Build the `settings.permissions` partial from the allow/deny rule lists (omit when both empty). */
+const HIDDEN_COMMIT_ATTRIBUTION = { commit: "" };
+
+/** Build the `settings` partial: hide commit attribution always, add allow/deny permissions when set. */
 function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settings"> {
+  const settings: NonNullable<Options["settings"]> = { attribution: HIDDEN_COMMIT_ATTRIBUTION };
   const permissions: { allow?: string[]; deny?: string[] } = {};
   if (allow && allow.length > 0) permissions.allow = allow;
   if (deny && deny.length > 0) permissions.deny = deny;
-  if (!permissions.allow && !permissions.deny) return {};
-  return { settings: { permissions } };
+  if (permissions.allow || permissions.deny) settings.permissions = permissions;
+  return { settings };
 }
 
 function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {

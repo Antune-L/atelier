@@ -8,6 +8,7 @@
 import {
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
+  SPLIT_SLOT_ID,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
   TRIAGE_SLOT_ID,
 } from "../../shared/constants.ts";
@@ -115,6 +116,28 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
       [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(),
       [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(),
     },
+  };
+}
+
+export interface SplitSessionInput {
+  ticketId: string;
+  cwd: string;
+  model: string;
+  effort: string | null;
+}
+
+/** Config for a read-only ticket-split session (no worktree/slot; only `submit_split` is gated in). */
+export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartConfig {
+  const { ticketId, cwd, model, effort } = input;
+  return {
+    ticketId,
+    slotId: SPLIT_SLOT_ID,
+    cwd,
+    model,
+    effort,
+    permissionMode: "dontAsk",
+    allowedTools: [...READONLY_TOOLS],
+    disallowedTools: READONLY_PLAIN_DISALLOWED,
   };
 }
 

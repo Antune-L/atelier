@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import type { UsageByModel, WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -10,6 +10,7 @@ import {
   submitAnswerArgsSchema,
   submitFeasibilityArgsSchema,
   submitPrdArgsSchema,
+  submitSplitArgsSchema,
   submitTriageArgsSchema,
   updateStageArgsSchema,
 } from "../../shared/schemas.ts";
@@ -24,6 +25,7 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { SessionHub, SessionToolCall } from "./sessionHub.ts";
 import type { SlotManager } from "./slotManager.ts";
+import type { SplitManager } from "./splitManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 
 const log = createLogger("coordinator");
@@ -87,6 +89,7 @@ export class AgentCoordinator {
     private readonly slots: SlotManager,
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
+    private readonly split: SplitManager,
   ) {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
@@ -114,6 +117,13 @@ export class AgentCoordinator {
         result: "Session de faisabilité en lecture seule : seul submit_feasibility est autorisé.",
       };
     }
+    // A split worker identifies with SPLIT_SLOT_ID: it runs on a stage-null card outside the slot
+    // pipeline and may ONLY submit its decomposition (same rationale as the triage guard above).
+    if (ctx.slotId === SPLIT_SLOT_ID) {
+      log.info("tool call (split)", { ticketId: ctx.ticketId, tool: ctx.name });
+      if (ctx.name === "submit_split") return this.handleSubmitSplit(ctx);
+      return { ok: false, result: "Session de découpage en lecture seule : seul submit_split est autorisé." };
+    }
     // An interactive test session runs on a "done" card; it has no pipeline. `--tools` can't bar MCP
     // tools, so bar every pipeline tool here (same rationale as the triage/feasibility guards above).
     const testingTicket = this.store.getTicket(ctx.ticketId);
@@ -139,7 +149,15 @@ export class AgentCoordinator {
     fail: (ctx) => this.handleFail(ctx),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
+    submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
   };
+
+  private async handleSubmitSplit(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = submitSplitArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    await this.split.complete(ctx.ticketId, parsed.data);
+    return { ok: true, result: "Découpage enregistré." };
+  }
 
   private async handleSubmitTriage(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = submitTriageArgsSchema.safeParse(ctx.args);

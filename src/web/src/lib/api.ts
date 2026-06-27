@@ -97,6 +97,8 @@ export const api = {
     request(`/api/tickets/${id}/triage`, { method: "POST" }),
   triagePlus: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/triage-plus`, { method: "POST" }),
+  split: (id: string): Promise<{ created: Ticket[]; mother: Ticket }> =>
+    request(`/api/tickets/${id}/split`, { method: "POST" }),
   reformulate: (id: string): Promise<{ markdown: string }> =>
     request(`/api/tickets/${id}/reformulate`, { method: "POST" }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>

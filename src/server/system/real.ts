@@ -183,6 +183,16 @@ export class RealSystemAdapter implements SystemAdapter {
     await $`git -C ${repoPath} branch -D ${branch}`.nothrow().quiet();
   }
 
+  async createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void> {
+    await this.fetch(repoPath, baseBranch);
+    const res =
+      await $`git -C ${repoPath} push origin origin/${baseBranch}:refs/heads/${branch}`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`création de la branche ${branch} depuis ${baseBranch} a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+  }
+
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
     // Monorepos keep .env files in nested workspaces (apps/*, packages/*).
     const glob = new Bun.Glob("**/.env*");

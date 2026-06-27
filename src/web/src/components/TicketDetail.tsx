@@ -14,6 +14,7 @@ import {
   Rocket,
   RotateCw,
   Sparkles,
+  Split,
   Square,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import {
   AGENT_MODEL_LABELS,
   COLUMN_LABELS,
   COLUMN_ORDER,
+  SPLIT_BRANCH_PREFIX,
   TERMINAL_STAGES,
   type AgentEffort,
   type AgentModel,
@@ -114,6 +116,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testBusy, setTestBusy] = useState(false);
   const [createPrBusy, setCreatePrBusy] = useState(false);
+  const [splitBusy, setSplitBusy] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -242,6 +245,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     boardTickets,
     current.project,
     current.id,
+    current.dependsOn,
   );
   const changeDependsOn = (value: string): void => {
     void api
@@ -271,13 +275,21 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     current.slotId === null &&
     current.prUrl !== null &&
     current.branch !== null;
-  // A finished feature can spawn an interactive test session on its existing branch.
+  // A finished feature can spawn an interactive test session on its existing branch. A split mother
+  // lands in "done" with only an empty integration branch (split/…), so there is nothing to test there.
   const canStartTest =
     current.column === "done" &&
     current.kind === "feature" &&
     current.branch !== null &&
+    !current.branch.startsWith(SPLIT_BRANCH_PREFIX) &&
     current.slotId === null &&
     !current.testing;
+  // A feature in TODO or PRD can be decomposed into child tickets via the split sub-agent. In PRD the
+  // button is shown but disabled until a PRD markdown exists (the sub-agent needs it as context).
+  const canSplit =
+    current.kind === "feature" && (current.column === "todo" || current.column === "prd");
+  const splitDisabled =
+    splitBusy || (current.column === "prd" && current.prdMarkdown === null);
 
   // Escape must not silently discard uncommitted comment/answer/edit text.
   const editDirty =
@@ -953,6 +965,32 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   >
                     <Square className="h-4 w-4" />
                     Arrêter le test
+                  </Button>
+                )}
+                {canSplit && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    disabled={splitDisabled}
+                    title="Découper le ticket en plusieurs sous-tickets via un sous-agent dédié (lecture seule)"
+                    onClick={async () => {
+                      setSplitBusy(true);
+                      try {
+                        await api.split(ticket.id);
+                        boardStore.notify("Ticket découpé", "Les sous-tickets ont été créés.");
+                        onClose();
+                      } catch (e) {
+                        boardStore.notify(
+                          "Découpage échoué",
+                          e instanceof Error ? e.message : "Erreur",
+                        );
+                      } finally {
+                        setSplitBusy(false);
+                      }
+                    }}
+                  >
+                    <Split className="h-4 w-4" />
+                    Découper en sous-tickets
                   </Button>
                 )}
                 {current.column !== "abandoned" && (

@@ -99,6 +99,8 @@ export interface SystemAdapter {
    */
   worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
+  /** Create <branch> on origin at origin/<baseBranch> without a worktree (split mother integration branch). */
+  createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
 
   // ---- slot preparation ----
   copyEnvFiles(repoPath: string, slotPath: string): Promise<void>;

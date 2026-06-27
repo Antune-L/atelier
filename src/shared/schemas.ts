@@ -603,6 +603,19 @@ export const submitTriageArgsSchema = triageResultSchema;
 /** Batch feasibility verdicts the orchestrator session submits once (one entry per imported ticket). */
 export const submitFeasibilityArgsSchema = z.object({ results: z.array(feasibilityResultSchema) });
 
+/**
+ * Strict split decomposition the split session submits via the worker channel: at least one child,
+ * each with a non-empty title + self-contained summary, plus an overall summary. This is the
+ * coordinator-facing validation surface (the worker advertises a tolerant mirror via protocol.ts).
+ */
+export const submitSplitArgsSchema = z.object({
+  summary: z.string(),
+  children: z
+    .array(z.object({ title: z.string().min(1), summary: z.string().min(1) }))
+    .min(1),
+});
+export type SplitResult = z.infer<typeof submitSplitArgsSchema>;
+
 // ---- Interactive terminal channel: browser ↔ backend (xterm.js ↔ tmux pane) ----
 
 /** Hex-encoded byte string (pairs of hex digits), as produced from xterm.js raw key bytes. */

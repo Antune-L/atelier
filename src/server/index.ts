@@ -16,6 +16,7 @@ import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
+import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
 import { runFirstBootSetup } from "./boot.ts";
@@ -167,6 +168,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
   const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier);
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
+  const splitManager = new SplitManager(store, system, sessionHub);
   const userTerminals = new UserTerminalManager(system);
   const terminalManager = new TerminalSessionManager(
     store,
@@ -188,6 +190,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     slotManager,
     triageManager,
     feasibilityManager,
+    splitManager,
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
 
@@ -210,6 +213,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     system,
     triage: triageManager,
     feasibility: feasibilityManager,
+    split: splitManager,
     userTerminals,
     projectRoot: dataRoot,
     composerAvailable,

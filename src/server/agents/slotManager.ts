@@ -71,7 +71,7 @@ export interface SlotManagerConfig {
   projectRoot: string;
 }
 
-function slugify(title: string): string {
+export function slugify(title: string): string {
   return title
     .toLowerCase()
     .normalize("NFD")

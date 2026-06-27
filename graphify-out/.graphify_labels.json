@@ -55,12 +55,17 @@
   "53": "User Terminal Manager",
   "54": "Worktree Address Watcher",
   "55": "App Settings Store",
+  "56": "CSV Parsing",
   "57": "Cost Aggregation",
   "58": "File Uploads",
   "59": "Webhook MCP",
   "60": "Package Manifest",
+  "61": "Fake Pane Stream",
+  "62": "Badge Component",
+  "63": "Community 63",
   "64": "Composer Run Script",
   "65": "Vite Config",
+  "66": "Community 66",
   "67": "No-Type-Casting Convention",
   "68": "CLAUDE.md Doc",
   "69": "Electrobun Deps Types",
@@ -68,5 +73,7 @@
   "71": "PostCSS Config",
   "72": "Tailwind Config",
   "73": "React Root Mount",
-  "74": "Theme Flash Guard"
+  "74": "Theme Flash Guard",
+  "75": "Community 75",
+  "76": "Community 76"
 }

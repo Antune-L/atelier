@@ -1,3 +1,5 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { $ } from "bun";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -9,7 +11,8 @@ import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { claudeProvider } from "./claudeProvider.ts";
+import { resolveClaudeBinary } from "./claudeBinary.ts";
+import { claudeProvider, toSdkEffort } from "./claudeProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -26,10 +29,10 @@ const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
 const PROD_ENV_MARKER = "prod";
-/** Bound the synchronous one-shot reformulation `claude -p` call (2 min). */
+/** Bound the synchronous one-shot reformulation SDK query (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
-/** Keep only the tail of a failed reformulation's output in the surfaced error. */
-const REFORMULATE_ERROR_TAIL = 600;
+/** Read-only toolset for the reformulation query (the description may reference local image paths). */
+const REFORMULATE_ALLOWED_TOOLS = ["Read"] as const;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
 /**
@@ -309,37 +312,55 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
-    // `auto` never prompts; `--tools Read` keeps it read-only (the description may reference local
-    // image paths). The prompt is fed via STDIN to avoid shell-quoting it on the command line.
-    const effortFlag = opts.effort ? ` --effort ${opts.effort}` : "";
-    const cmd = `claude -p --model ${opts.model}${effortFlag} --permission-mode auto --tools Read`;
-    const proc = Bun.spawn(["sh", "-c", cmd], {
+    // `dontAsk` never prompts and denies anything not pre-approved; the read-only toolset keeps it
+    // safe while still letting it open local image paths referenced by the description.
+    const sdkEffort = toSdkEffort(opts.effort);
+    const queryOptions: Options = {
       cwd: opts.cwd,
-      env: { ...process.env, ...NON_INTERACTIVE_ENV },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      timeout: REFORMULATE_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-    });
-    // A child that dies before reading the prompt makes the write reject (EPIPE); swallow it so the
-    // non-zero exit below carries the real diagnostic instead of an unhandled rejection.
+      model: opts.model,
+      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      systemPrompt: { type: "preset", preset: "claude_code" },
+      permissionMode: "dontAsk",
+      allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
+      env: { ...process.env },
+      stderr: () => {},
+      ...(sdkEffort ? { effort: sdkEffort } : {}),
+    };
+    const session = query({ prompt: opts.prompt, options: queryOptions });
+
+    // The SDK exposes no native timeout: bound consumption ourselves and close() the query on expiry.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      session.close();
+    }, REFORMULATE_TIMEOUT_MS);
+
+    const assistantText: string[] = [];
+    let resultText = "";
+    let resultError = "";
     try {
-      proc.stdin.write(opts.prompt);
-      await proc.stdin.end();
-    } catch {
-      // Fall through: proc.exited + stderr below surface the failure.
+      for await (const message of session) {
+        if (message.type === "assistant") {
+          for (const block of message.message.content) {
+            if (block.type === "text") assistantText.push(block.text);
+          }
+        } else if (message.type === "result") {
+          if (message.subtype === "success") resultText = message.result;
+          else resultError = message.subtype;
+        }
+      }
+    } catch (error) {
+      if (timedOut) throw new Error(`reformulation échouée : timeout (${REFORMULATE_TIMEOUT_MS}ms)`);
+      throw new Error(`reformulation échouée : ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      clearTimeout(timer);
     }
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    if (exitCode !== 0) {
-      const detail = (stderr + stdout).trim().slice(-REFORMULATE_ERROR_TAIL);
-      throw new Error(`reformulation échouée (code ${exitCode}) : ${detail}`);
-    }
-    return stdout.trim();
+
+    if (timedOut) throw new Error(`reformulation échouée : timeout (${REFORMULATE_TIMEOUT_MS}ms)`);
+    if (resultError) throw new Error(`reformulation échouée : ${resultError}`);
+    const text = (resultText.trim() || assistantText.join("").trim());
+    if (!text) throw new Error("reformulation échouée : réponse vide");
+    return text;
   }
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */

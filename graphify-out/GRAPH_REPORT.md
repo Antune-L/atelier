@@ -1,7 +1,7 @@
-# Graph Report - kanban-agents  (2026-06-27)
+# Graph Report - slot-1  (2026-06-27)
 
 ## Corpus Check
-- 144 files · ~634,688 words
+- 143 files · ~634,805 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `50cc9474`
+- Built from commit: `de8d7e88`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -323,7 +323,7 @@ Cohesion: 0.33
 Nodes (4): currentNow, startTicking(), subscribe(), subscribers
 
 ## Knowledge Gaps
-- **371 isolated node(s):** `log`, `ticketRowSchema`, `TicketRow`, `commentRowSchema`, `CommentRow` (+366 more)
+- **371 isolated node(s):** `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES`, `log`, `ticketRowSchema` (+366 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **10 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -331,12 +331,12 @@ Nodes (4): currentNow, startTicking(), subscribe(), subscribers
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Ticket` connect `Ticket Action Panels` to `Contract Building & Slots`, `Terminals UI & Notifications`, `Shared Zod Schemas`, `Slot Config & Worktree Watch`, `Database Store Operations`, `API Routes & Reformulate`, `Live Terminal Views`, `Stage Progress & Display`, `DB Row Schemas & Mappers`, `Client Hub & Watchdog`, `Cost & Pricing`, `Workflow View & Lifecycle`, `Agents View & Ticket Cards`, `User Terminal & Fake IO`, `Board Columns`, `Agent Coordinator Handlers`, `API Client Inputs`, `Ticket Detail & Triage UI`, `Slot State`, `Stats Hooks & Cards`, `CSV Parsing`?**
-  _High betweenness centrality (0.069) - this node is a cross-community bridge._
+  _High betweenness centrality (0.068) - this node is a cross-community bridge._
 - **Why does `RealSystemAdapter` connect `Real System Adapter` to `Desktop Bootstrap & Menus`, `Real Adapter GH/Composer`, `Claude SDK Provider`, `Badge Component`?**
   _High betweenness centrality (0.048) - this node is a cross-community bridge._
 - **Why does `Store` connect `Database Store Operations` to `Contract Building & Slots`, `User Terminal & Fake IO`, `Desktop Bootstrap & Menus`, `Feasibility Batch Management`, `Ticket Action Panels`, `API Client Inputs`, `Ticket Config & Constants`, `Slot Config & Worktree Watch`, `Chart Primitives`, `Coordinator & Protocol`, `API Routes & Reformulate`, `Slot State`, `Triage & Server Hub`, `Tick Timer Hook`, `Client Hub & Watchdog`, `Workflow View & Lifecycle`?**
-  _High betweenness centrality (0.045) - this node is a cross-community bridge._
-- **What connects `log`, `ticketRowSchema`, `TicketRow` to the rest of the system?**
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
+- **What connects `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES` to the rest of the system?**
   _372 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Contract Building & Slots` be split into smaller, more focused modules?**
   _Cohesion score 0.05512308015989901 - nodes in this community are weakly interconnected._

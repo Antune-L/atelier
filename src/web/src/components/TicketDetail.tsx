@@ -1,6 +1,8 @@
 import {
   Brush,
   Check,
+  ChevronDown,
+  ClipboardPaste,
   Copy,
   Cpu,
   Eye,
@@ -795,6 +797,11 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                   }}
                   onToggleContext={setFeasibilityContext}
                   onReformulate={() => api.reformulate(ticket.id)}
+                  onApplyReformulation={(text) =>
+                    api
+                      .updateTicket(current.id, { description: text })
+                      .then(() => undefined)
+                  }
                 />
               )}
 
@@ -1237,10 +1244,13 @@ interface TriageSectionProps {
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
   onToggleContext: (checked: boolean) => void;
   onReformulate: () => Promise<{ started: boolean }>;
+  onApplyReformulation: (text: string) => Promise<void>;
 }
 
 /** How long the reformulation copy button shows its "Copié" confirmation. */
 const REFORMULATE_COPY_FEEDBACK_MS = 1500;
+/** How long the reformulation apply button shows its "Appliqué" confirmation. */
+const REFORMULATE_APPLY_FEEDBACK_MS = 1500;
 
 function TriageSection({
   ticket,
@@ -1249,6 +1259,7 @@ function TriageSection({
   onApplySuggestion,
   onToggleContext,
   onReformulate,
+  onApplyReformulation,
 }: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
@@ -1260,6 +1271,7 @@ function TriageSection({
   // failure reason comes from the ticket.
   const [startError, setStartError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [applied, setApplied] = useState(false);
   const reformulateError = startError ?? statusError;
 
   const handleReformulate = async (): Promise<void> => {
@@ -1278,6 +1290,21 @@ function TriageSection({
       setCopied(true);
       setTimeout(() => setCopied(false), REFORMULATE_COPY_FEEDBACK_MS);
     });
+  };
+
+  const handleApplyReformulation = async (
+    event: React.MouseEvent,
+  ): Promise<void> => {
+    event.preventDefault();
+    if (!reformulation) return;
+    setStartError(null);
+    try {
+      await onApplyReformulation(reformulation);
+      setApplied(true);
+      setTimeout(() => setApplied(false), REFORMULATE_APPLY_FEEDBACK_MS);
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : String(error));
+    }
   };
   const suggestion =
     ticket.triageVerdict === "implementable" &&
@@ -1454,13 +1481,30 @@ function TriageSection({
       )}
 
       {reformulation && (
-        <details className="mt-2">
+        <details className="group mt-2">
           <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-semibold">
-            Besoin reformulé
-            <Button variant="ghost" size="sm" onClick={handleCopyReformulation}>
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied ? "Copié" : "Copier"}
-            </Button>
+            <span className="flex items-center gap-2">
+              <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+              Besoin reformulé
+            </span>
+            <span className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(event) => void handleApplyReformulation(event)}
+              >
+                {applied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <ClipboardPaste className="h-4 w-4" />
+                )}
+                {applied ? "Appliqué" : "Appliquer"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleCopyReformulation}>
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copied ? "Copié" : "Copier"}
+              </Button>
+            </span>
           </summary>
           <div className="mt-2 max-h-64 overflow-y-auto">
             <Markdown content={reformulation} />

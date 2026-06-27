@@ -71,6 +71,12 @@ export { TRIAGE_VERDICTS };
 export const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 export type TriageVerdict = z.infer<typeof triageVerdictSchema>;
 
+// ---- Need reformulation ("Reformuler le besoin"): async, result delivered on the ticket ----
+
+export const REFORMULATE_STATUSES = ["none", "running", "done", "failed"] as const;
+export const reformulateStatusSchema = z.enum(REFORMULATE_STATUSES);
+export type ReformulateStatus = z.infer<typeof reformulateStatusSchema>;
+
 /** Shape the triage agent must emit (and we re-parse on both server and client). */
 export const triageResultSchema = z.object({
   verdict: triageVerdictSchema,
@@ -178,6 +184,10 @@ export const ticketSchema = z.object({
   triageStatus: triageStatusSchema,
   triageVerdict: triageVerdictSchema.nullable(),
   triageReport: z.string().nullable(),
+  /** Lifecycle of the async "Reformuler le besoin" run (none until first triggered). */
+  reformulateStatus: reformulateStatusSchema,
+  /** Reformulated need (markdown) when done, or the failure reason when failed; null otherwise. */
+  reformulation: z.string().nullable(),
   /** Inject the feasibility-triage findings as a dedicated section of the implementation contract. */
   feasibilityContext: z.boolean(),
   /** Epoch ms when the ticket reached a terminal state (done/failed/stalled/interrupted/abandoned); null otherwise. */

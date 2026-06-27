@@ -16,6 +16,7 @@ import { AgentCoordinator } from "./agents/coordinator.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
+import { ReformulateManager } from "./agents/reformulateManager.ts";
 import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
@@ -169,6 +170,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier);
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
   const splitManager = new SplitManager(store, system, sessionHub);
+  const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
   const userTerminals = new UserTerminalManager(system);
   const terminalManager = new TerminalSessionManager(
     store,
@@ -198,6 +200,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await slotManager.recover();
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
+  reformulateManager.recoverStale();
   watchdog.start();
 
   const composerAvailable = await system.checkComposerAvailable();
@@ -214,6 +217,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     triage: triageManager,
     feasibility: feasibilityManager,
     split: splitManager,
+    reformulate: reformulateManager,
     userTerminals,
     projectRoot: dataRoot,
     composerAvailable,

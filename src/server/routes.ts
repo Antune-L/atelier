@@ -25,12 +25,11 @@ import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.t
 import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
 import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
 
-import { buildReformulatePrompt } from "./agents/reformulate.ts";
-import type { ReformulateOptions } from "./system/types.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
+import type { ReformulateManager } from "./agents/reformulateManager.ts";
 import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
@@ -53,7 +52,6 @@ interface PaneReader {
   gitStatusClean(repoPath: string): Promise<boolean>;
   gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
-  reformulate(opts: ReformulateOptions): Promise<string>;
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
 }
 
@@ -68,6 +66,7 @@ interface RouteDeps {
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
   split: SplitManager;
+  reformulate: ReformulateManager;
   userTerminals: UserTerminalManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
@@ -896,24 +895,17 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_INTERNAL_ERROR, getErrorMessage(error, "échec du découpage"));
       }
     })
-    .post("/tickets/:id/reformulate", async ({ params, set }) => {
+    .post("/tickets/:id/reformulate", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
-      const project = getProject(ticket.project);
-      const prompt = buildReformulatePrompt(ticket);
-      try {
-        const markdown = await deps.system.reformulate({
-          cwd: project.repoPath,
-          prompt,
-          model: MODELS.triage,
-          effort: MODELS.triageEffort,
-        });
-        return { markdown };
-      } catch (error) {
-        return jsonError(set, HTTP_INTERNAL_ERROR, getErrorMessage(error, "échec de la reformulation"));
-      }
+      if (ticket.reformulateStatus === "running") return jsonError(set, HTTP_CONFLICT, "reformulation déjà en cours");
+      // Fire-and-forget: the SDK query runs in the background and pushes its result onto the ticket
+      // over WS, so the request returns instantly instead of holding the connection open past Bun's
+      // idle timeout (which surfaced in the WebView as "Load failed").
+      deps.reformulate.start(params.id);
+      return { started: true };
     })
     .delete("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);

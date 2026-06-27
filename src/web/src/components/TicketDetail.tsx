@@ -1236,7 +1236,7 @@ interface TriageSectionProps {
   onTriagePlus: () => Promise<void>;
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
   onToggleContext: (checked: boolean) => void;
-  onReformulate: () => Promise<{ markdown: string }>;
+  onReformulate: () => Promise<{ started: boolean }>;
 }
 
 /** How long the reformulation copy button shows its "Copié" confirmation. */
@@ -1252,21 +1252,22 @@ function TriageSection({
 }: TriageSectionProps) {
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
-  const [reformulation, setReformulation] = useState<string | null>(null);
-  const [reformulating, setReformulating] = useState(false);
-  const [reformulateError, setReformulateError] = useState<string | null>(null);
+  // Reformulation runs async server-side: status + result live on the ticket and arrive over WS.
+  const reformulating = ticket.reformulateStatus === "running";
+  const reformulation = ticket.reformulateStatus === "done" ? ticket.reformulation : null;
+  const statusError = ticket.reformulateStatus === "failed" ? ticket.reformulation : null;
+  // Only a failed POST (e.g. 409 while one is already running) is tracked locally; the run's own
+  // failure reason comes from the ticket.
+  const [startError, setStartError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const reformulateError = startError ?? statusError;
 
   const handleReformulate = async (): Promise<void> => {
-    setReformulating(true);
-    setReformulateError(null);
+    setStartError(null);
     try {
-      const { markdown } = await onReformulate();
-      setReformulation(markdown);
+      await onReformulate();
     } catch (error) {
-      setReformulateError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setReformulating(false);
+      setStartError(error instanceof Error ? error.message : String(error));
     }
   };
 

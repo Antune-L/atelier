@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   triage_status TEXT NOT NULL DEFAULT 'none',
   triage_verdict TEXT,
   triage_report TEXT,
+  reformulate_status TEXT NOT NULL DEFAULT 'none',
+  reformulation TEXT,
   feasibility_context INTEGER NOT NULL DEFAULT 1,
   session_usage TEXT,
   finished_at INTEGER,
@@ -154,6 +156,8 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "session_usage", ddl: "ALTER TABLE tickets ADD COLUMN session_usage TEXT" },
   { column: "depends_on", ddl: "ALTER TABLE tickets ADD COLUMN depends_on TEXT" },
   { column: "external_url", ddl: "ALTER TABLE tickets ADD COLUMN external_url TEXT" },
+  { column: "reformulate_status", ddl: "ALTER TABLE tickets ADD COLUMN reformulate_status TEXT NOT NULL DEFAULT 'none'" },
+  { column: "reformulation", ddl: "ALTER TABLE tickets ADD COLUMN reformulation TEXT" },
 ];
 
 /**

@@ -32,7 +32,7 @@ interface NavEntry {
 
 const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Home", Icon: LayoutGrid },
-  { value: "terminals", label: "Terminals", Icon: SquareTerminal },
+  { value: "terminals", label: "Terminal", Icon: SquareTerminal },
   { value: "stats", label: "Stats", Icon: BarChart3 },
 ];
 
@@ -44,7 +44,7 @@ function loadCollapsed(): boolean {
   }
 }
 
-/** Primary navigation: Home / Terminals / Stats, with Settings pinned at the bottom. Collapsible. */
+/** Primary navigation: Home / Terminal / Stats, with Settings pinned at the bottom. Collapsible. */
 export function Sidebar({
   view,
   onSelect,
@@ -119,7 +119,9 @@ export function Sidebar({
               title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
               className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
-              <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+              <RefreshCw
+                className={cn("h-4 w-4", updating && "animate-spin")}
+              />
             </button>
           )}
         </div>
@@ -134,7 +136,9 @@ export function Sidebar({
               title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
               className="relative z-10 flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
-              <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+              <RefreshCw
+                className={cn("h-4 w-4", updating && "animate-spin")}
+              />
             </button>
           )}
           <span className="pointer-events-none absolute inset-x-0 text-center text-sm font-semibold">
@@ -152,7 +156,13 @@ export function Sidebar({
       )}
 
       {NAV_ENTRIES.map((entry) =>
-        renderItem(view === entry.value, entry.label, entry.Icon, () => onSelect(entry.value), entry.value),
+        renderItem(
+          view === entry.value,
+          entry.label,
+          entry.Icon,
+          () => onSelect(entry.value),
+          entry.value,
+        ),
       )}
 
       <div className="flex-1" />

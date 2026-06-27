@@ -616,7 +616,13 @@ export function createApiRoutes(deps: RouteDeps) {
       if (ticket.column !== "done" || ticket.kind !== "feature") {
         return jsonError(set, HTTP_CONFLICT, "vérification réservée aux features en colonne Fini");
       }
-      if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
+      if (!ticket.prUrl) {
+        if (ticket.directPush) {
+          const merged = lifecycle.markMerged(params.id);
+          return { merged: true, state: "direct_push", ticket: merged };
+        }
+        return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
+      }
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
       const project = getProject(ticket.project);
       let result: { merged: boolean; state: string };

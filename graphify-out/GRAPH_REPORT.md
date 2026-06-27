@@ -1,13 +1,18 @@
-# Graph Report - .  (2026-06-27)
+# Graph Report - kanban-agents  (2026-06-27)
 
 ## Corpus Check
-- 57 files · ~631,056 words
+- 141 files · ~631,058 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
 - 1418 nodes · 3272 edges · 75 communities (63 shown, 12 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 16 edges (avg confidence: 0.82)
-- Token cost: 100,281 input · 0 output
+- Token cost: 0 input · 0 output
+
+## Graph Freshness
+- Built from commit: `d375b85c`
+- Run `git rev-parse HEAD` and compare to check if the graph is stale.
+- Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - [[_COMMUNITY_Contract Building & Slots|Contract Building & Slots]]
@@ -350,7 +355,7 @@ Cohesion: 0.67
 Nodes (3): loadOnce(), subscribers, useProjects()
 
 ## Knowledge Gaps
-- **364 isolated node(s):** `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND`, `listeners`, `mcp`, `ReplyArgsSchema` (+359 more)
+- **364 isolated node(s):** `SidebarProps`, `NavEntry`, `NAV_ENTRIES`, `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND` (+359 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **12 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -358,12 +363,12 @@ Nodes (3): loadOnce(), subscribers, useProjects()
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Ticket` connect `Workflow View & Lifecycle` to `Contract Building & Slots`, `Terminals UI & Notifications`, `Feasibility Batch Management`, `Shared Zod Schemas`, `Slot Config & Worktree Watch`, `Board & Sidebar Layout`, `Database Store Operations`, `API Routes & Reformulate`, `Triage & Server Hub`, `Stage Progress & Display`, `Store Types & Agent Knobs`, `DB Row Schemas & Mappers`, `Client Hub & Watchdog`, `Cost & Pricing`, `Agents View & Ticket Cards`, `Board Columns`, `API Client Inputs`, `Ticket Config & Constants`, `Ticket Detail & Triage UI`, `Triage Prompts & Mockups`, `Slot State`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
-- **Why does `ProjectInfo` connect `Ticket Action Panels` to `Terminals UI & Notifications`, `Board Columns`, `Shared Zod Schemas`, `API Client Inputs`, `Ticket Detail & Triage UI`, `Board & Sidebar Layout`, `Stats Aggregation`, `Stats Hooks & Cards`, `Workflow View & Lifecycle`, `Stats Charts`, `Agents View & Ticket Cards`, `Projects Hook`?**
-  _High betweenness centrality (0.033) - this node is a cross-community bridge._
+  _High betweenness centrality (0.052) - this node is a cross-community bridge._
 - **Why does `cn()` connect `PR Selection & Slots Bar` to `Terminals UI & Notifications`, `Board Columns`, `Ticket Action Panels`, `Ticket Detail & Triage UI`, `Board & Sidebar Layout`, `Chart Primitives`, `Modal Dialogs`, `Live Terminal Views`, `Stage Progress & Display`, `Badge Component`, `Stats Charts`, `Agents View & Ticket Cards`, `PRD Review & Markdown`?**
   _High betweenness centrality (0.028) - this node is a cross-community bridge._
-- **What connects `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND`, `listeners` to the rest of the system?**
+- **Why does `FakeSystemAdapter` connect `Fake System Adapter` to `User Terminal & Fake IO`?**
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._
+- **What connects `SidebarProps`, `NavEntry`, `NAV_ENTRIES` to the rest of the system?**
   _365 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Contract Building & Slots` be split into smaller, more focused modules?**
   _Cohesion score 0.09672619047619048 - nodes in this community are weakly interconnected._

@@ -14,3 +14,11 @@ slots/
 config.json
 .env
 .env.local
+
+# graphify: keep canonical graph outputs tracked, ignore redundant/local artifacts.
+# Dated backup snapshots (git history is the backup) + local extraction cache.
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+graphify-out/cache/
+graphify-out/.needs_update
+graphify-out/.graphify_*.json
+!graphify-out/.graphify_labels.json

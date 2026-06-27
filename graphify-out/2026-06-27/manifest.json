@@ -165,8 +165,8 @@
     "semantic_hash": "a0d81ede8566688aea0443f95dfcfdfe"
   },
   "src/server/system/real.ts": {
-    "mtime": 1782508341.679328,
-    "ast_hash": "af3ca63dbd8f2de43993036b67bff410",
+    "mtime": 1782563524.6973886,
+    "ast_hash": "50a3a083d84abb360ccd97ca7b606666",
     "semantic_hash": ""
   },
   "src/server/system/types.ts": {
@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "src/shared/protocol.ts": {
-    "mtime": 1782508441.503999,
-    "ast_hash": "ede679ea5749c52cd032db7ec110556f",
+    "mtime": 1782563531.0758436,
+    "ast_hash": "718ace9daf0e23261dccfa9253de3e45",
     "semantic_hash": ""
   },
   "src/shared/schemas.ts": {
@@ -755,8 +755,8 @@
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
-    "mtime": 1782563059.3014884,
-    "ast_hash": "a5d4d8420e5f3971f7d8a73e68b183a6",
+    "mtime": 1782563457.9911263,
+    "ast_hash": "83f63fe6b9b2f4e5144fbce4b33626cb",
     "semantic_hash": ""
   },
   "src/server/system/claudeBinary.ts": {
@@ -764,14 +764,14 @@
     "ast_hash": "13b97580dda92cc6aef7a94c631148bf",
     "semantic_hash": ""
   },
-  "src/server/system/sdkSession.ts": {
-    "mtime": 1782563104.7157547,
-    "ast_hash": "c7770b84328d6972d052039b1a03deea",
-    "semantic_hash": ""
-  },
   "src/server/agents/sessionConfig.ts": {
     "mtime": 1782507205.3612227,
     "ast_hash": "294ff61220c9b2ef41425021fa33e2da",
+    "semantic_hash": ""
+  },
+  "src/server/system/claudeProvider.ts": {
+    "mtime": 1782563501.8740573,
+    "ast_hash": "bbd7c4ed62d52b54bfccf25d83b05d9a",
     "semantic_hash": ""
   }
 }

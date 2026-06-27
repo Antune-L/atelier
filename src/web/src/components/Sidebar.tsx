@@ -2,6 +2,7 @@ import {
   BarChart3,
   ChevronLeft,
   ChevronRight,
+  FileText,
   LayoutGrid,
   RefreshCw,
   Settings,
@@ -11,7 +12,7 @@ import { useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "terminals" | "stats";
+export type SidebarView = "home" | "terminals" | "stats" | "prd";
 
 interface SidebarProps {
   view: SidebarView;
@@ -34,6 +35,7 @@ const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Home", Icon: LayoutGrid },
   { value: "terminals", label: "Terminal", Icon: SquareTerminal },
   { value: "stats", label: "Stats", Icon: BarChart3 },
+  { value: "prd", label: "PRD", Icon: FileText },
 ];
 
 function loadCollapsed(): boolean {

@@ -9,6 +9,7 @@ import type {
   CreateProfileInput,
   CreateReviewInput,
   CreateTicketInput,
+  GeneratePrdInput,
   ImportTicketsInput,
   OpenPr,
   Profile,
@@ -103,6 +104,8 @@ export const api = {
     request(`/api/tickets/${id}/reformulate`, { method: "POST" }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
+  generatePrd: (input: GeneratePrdInput): Promise<{ markdown: string }> =>
+    request("/api/prd/generate", { method: "POST", body: JSON.stringify(input) }),
   terminal: (id: string): Promise<TerminalOutput> => request(`/api/tickets/${id}/terminal`),
   listTerminals: (projectKey?: string): Promise<TerminalDescriptor[]> =>
     request(`/api/terminals${projectKey ? `?projectKey=${encodeURIComponent(projectKey)}` : ""}`),

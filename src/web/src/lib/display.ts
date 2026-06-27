@@ -205,9 +205,19 @@ const NON_DEPENDABLE_COLUMNS: Ticket["column"][] = ["to_review", "done", "merged
  * Tickets eligible to be picked as a dependency (PR-stack parent): same project, not the ticket
  * itself, and able to reach a PR. Shared by the creation dialog and the ticket detail editor.
  */
-export function dependencyCandidates(tickets: Ticket[], project: string, selfId: string | null): Ticket[] {
+export function dependencyCandidates(
+  tickets: Ticket[],
+  project: string,
+  selfId: string | null,
+  currentDependsOn: string | null = null,
+): Ticket[] {
   return tickets.filter(
-    (t) => t.project === project && t.id !== selfId && !NON_DEPENDABLE_COLUMNS.includes(t.column),
+    (t) =>
+      t.project === project &&
+      t.id !== selfId &&
+      // The current dependsOn parent stays selectable even from a normally non-dependable column
+      // (e.g. a split mother in "done"), so the select renders the real current value.
+      (t.id === currentDependsOn || !NON_DEPENDABLE_COLUMNS.includes(t.column)),
   );
 }
 

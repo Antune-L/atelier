@@ -126,6 +126,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("deleteLocalBranch", { repoPath, branch });
   }
 
+  async createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void> {
+    this.log("createBranchFromBase", { repoPath, branch, baseBranch });
+    await delay(FAKE_SETTLE_MS);
+  }
+
   async copyEnvFiles(repoPath: string, slotPath: string): Promise<void> {
     this.log("copyEnvFiles", { repoPath, slotPath });
   }

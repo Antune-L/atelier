@@ -312,6 +312,21 @@ export const TRIAGE_SLOT_ID = -1;
 /** Max chars of raw CLI output stored as the report when triage fails to parse. */
 export const TRIAGE_RAW_REPORT_MAX = 4000;
 
+/** Ticket-split decomposition ("Découper"): read-only, user-initiated. Same generous bound as triage. */
+export const SPLIT_TIMEOUT_MS = 15 * 60 * 1000;
+/**
+ * SLOT_ID a split worker identifies with (distinct from TRIAGE/FEASIBILITY slot ids): a split runs in
+ * NO slot. The coordinator uses it to recognize a split session and bar it from the slot-pipeline
+ * tools (it may only submit_split).
+ */
+export const SPLIT_SLOT_ID = -3;
+/**
+ * Prefix of a split mother's integration branch (`split/<motherId>-<slug>`). Identifies a split mother
+ * by its branch alone: it lands in "done" with this branch set but no PR, and its children are allowed
+ * to start despite the missing PR (see isBlocked in routes.ts).
+ */
+export const SPLIT_BRANCH_PREFIX = "split/";
+
 /**
  * Batch feasibility analysis ("Import CSV"): ONE orchestrator session fans out X read-only
  * sub-agents (one per imported ticket), each returning a verdict reusing the triage fields.

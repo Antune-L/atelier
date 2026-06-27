@@ -94,6 +94,17 @@ const submitFeasibilityMcpArgsSchema = z.object({
   results: z.array(submitTriageMcpArgsSchema.extend({ ticketId: z.string().min(1) })),
 });
 
+/**
+ * TOLERANT mirror of the strict split result (schemas.ts `submitSplitArgsSchema`), advertised to the
+ * split worker's session via MCP. Kept loose on purpose (summary/children default to empty) so the
+ * worker forwards a slightly-off decomposition rather than rejecting it locally; the backend
+ * re-validates strictly before creating any ticket.
+ */
+const submitSplitMcpArgsSchema = z.object({
+  summary: z.string().default(""),
+  children: z.array(z.object({ title: z.string(), summary: z.string() })).default([]),
+});
+
 // ---- Tool registry ----
 
 /**
@@ -154,6 +165,11 @@ export const WORKER_TOOLS = [
       "Soumet en UN SEUL appel les verdicts de faisabilité d'un lot (un par ticket importé, keyé par ticketId). Le backend les persiste puis détruit la session.",
     argsSchema: submitFeasibilityMcpArgsSchema,
   },
+  {
+    name: "submit_split",
+    description: "Soumet le découpage du ticket en sous-tickets (titre + synthèse par fille).",
+    argsSchema: submitSplitMcpArgsSchema,
+  },
 ] as const;
 
 export type WorkerTool = (typeof WORKER_TOOLS)[number];
@@ -176,6 +192,7 @@ const WORKER_TOOL_NAMES = [
   "fail",
   "submit_triage",
   "submit_feasibility",
+  "submit_split",
 ] as const satisfies readonly WorkerToolName[];
 
 // Guard the other direction at type level: every registry name must appear in the tuple above.

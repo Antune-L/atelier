@@ -1,6 +1,6 @@
 import { Elysia } from "elysia";
 
-import { ACTIVE_STAGES } from "../shared/constants.ts";
+import { ACTIVE_STAGES, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import {
@@ -31,6 +31,8 @@ import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
+import type { SplitManager } from "./agents/splitManager.ts";
+import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import type { Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
@@ -52,6 +54,7 @@ interface PaneReader {
   gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
   reformulate(opts: ReformulateOptions): Promise<string>;
+  createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
 }
 
 interface RouteDeps {
@@ -64,6 +67,7 @@ interface RouteDeps {
   system: PaneReader;
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
+  split: SplitManager;
   userTerminals: UserTerminalManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
@@ -145,7 +149,12 @@ function isProcessing(stage: Stage | null): boolean {
 function isBlocked(ticket: Ticket, store: Store): boolean {
   if (!ticket.dependsOn) return false;
   const parent = store.getTicket(ticket.dependsOn);
-  return !parent || parent.prUrl === null || parent.branch === null;
+  if (!parent || parent.branch === null) return true;
+  // A split mother lands in "done" with its integration branch (split/…) set but no PR; its children
+  // must still be allowed to start. Every other parent is blocked until it opens its PR (this keeps the
+  // stacked-PR blocking behavior, incl. directPush parents whose feat/… branch has no PR either).
+  if (parent.prUrl === null && !parent.branch.startsWith(SPLIT_BRANCH_PREFIX)) return true;
+  return false;
 }
 
 /**
@@ -166,6 +175,126 @@ function dependencyError(store: Store, ticketId: string | null, dependsOn: strin
     cursor = cursor.dependsOn ? store.getTicket(cursor.dependsOn) : null;
   }
   return null;
+}
+
+/** Mother branch name for a split: `split/<motherId>-<slug>`. */
+function splitMotherBranch(ticket: Ticket): string {
+  return `${SPLIT_BRANCH_PREFIX}${ticket.id}-${slugify(ticket.title)}`;
+}
+
+/**
+ * A split of a PRD card has already disconnected its planning session by the time the work commits.
+ * On failure past that point the card can't go back to awaiting PRD validation, so land it in "failed"
+ * with the reason (and free its slot if still held). A TODO card never held a slot — leave it untouched.
+ */
+async function failSplitMother(deps: RouteDeps, ticket: Ticket, reason: string): Promise<void> {
+  const { store, hub, slots } = deps;
+  if (ticket.slotId === null) return;
+  if (store.getSlot(ticket.slotId)?.ticketId === ticket.id) {
+    await slots.releaseSlot(ticket.slotId, ticket);
+  }
+  const failed = store.updateTicket(ticket.id, {
+    column: "failed",
+    stage: null,
+    slotId: null,
+    error: `Découpage échoué : ${reason}`,
+  });
+  hub.pushTicket(failed);
+}
+
+/**
+ * Run the split sub-agent then orchestrate the documented workaround: create the children (no
+ * dependsOn yet), create + push the mother integration branch, link the children to the mother, and
+ * move the mother to Done with a summary. The sub-agent runs FIRST (it disconnects a PRD card's
+ * planning session anyway); only once it succeeds do we commit side effects. If the mother branch push
+ * fails the just-created children are rolled back so no orphan child cards survive.
+ */
+async function performSplit(
+  deps: RouteDeps,
+  ticket: Ticket,
+  project: { repoPath: string; baseBranch: string },
+): Promise<{ created: Ticket[]; mother: Ticket }> {
+  const { store, hub, system, split, slots } = deps;
+
+  // Decompose first. For a PRD card this disconnects the planning session (the split session is keyed
+  // by the same ticketId); a failure here means we have not created any child or branch yet, so a TODO
+  // card stays untouched and a PRD card is moved to "failed" (its planning session is already gone).
+  let result;
+  try {
+    result = await split.run(ticket.id);
+  } catch (error) {
+    const reason = getErrorMessage(error, "découpage interrompu");
+    await failSplitMother(deps, ticket, reason);
+    throw error;
+  }
+
+  // Committed to mutating now: release the (defunct) planning slot a PRD card still holds. A TODO card
+  // has no slot, so this is a no-op.
+  if (ticket.slotId !== null && store.getSlot(ticket.slotId)?.ticketId === ticket.id) {
+    await slots.releaseSlot(ticket.slotId, ticket);
+  }
+
+  // Create every child (no dependsOn yet — the mother branch doesn't exist until the next step).
+  const created: Ticket[] = [];
+  for (const child of result.children) {
+    const childTicket = store.createTicket({
+      title: child.title,
+      description: child.summary,
+      externalUrl: null,
+      project: ticket.project,
+      prdEnabled: false,
+      prDraft: true,
+      autoMerge: true,
+      addScreenshots: false,
+      verifyFeature: false,
+      argusMultiLoop: false,
+      stealth: false,
+      directPush: false,
+      baseBranch: null,
+      dependsOn: null,
+      model: ticket.model,
+      effort: ticket.effort,
+      implementerModel: ticket.implementerModel,
+      implementerEffort: ticket.implementerEffort,
+      implementer: ticket.implementer,
+    });
+    created.push(childTicket);
+  }
+
+  // Children exist: create + push the mother integration branch from the project default base, or the
+  // mother's own override when set (the mother has no dependsOn parent of its own to stack on). On
+  // failure, roll the children back so a wedged push never leaves orphan child cards behind.
+  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+  const motherBranch = splitMotherBranch(ticket);
+  try {
+    await system.createBranchFromBase(project.repoPath, motherBranch, baseBranch);
+  } catch (error) {
+    for (const child of created) {
+      store.deleteTicket(child.id);
+      hub.pushTicketRemoved(child.id);
+    }
+    await failSplitMother(deps, ticket, getErrorMessage(error, "création de la branche mère échouée"));
+    throw error;
+  }
+
+  // Link each child to the mother (resolved via dependsOn at start time).
+  const linked = created.map((child) => store.updateTicket(child.id, { dependsOn: ticket.id }));
+  for (const child of linked) hub.pushTicket(child);
+
+  // Move the mother to Done with the children list + overall summary.
+  const childList = result.children.map((c) => `- ${c.title}`).join("\n");
+  const agentSummary = `## Découpage en sous-tickets\n\n${childList}\n\n${result.summary}`;
+  const mother = store.updateTicket(ticket.id, {
+    branch: motherBranch,
+    column: "done",
+    stage: null,
+    slotId: null,
+    finishedAt: Date.now(),
+    agentSummary,
+  });
+  hub.pushTicket(mother);
+
+  return { created: linked, mother };
 }
 
 export function createApiRoutes(deps: RouteDeps) {
@@ -748,6 +877,24 @@ export function createApiRoutes(deps: RouteDeps) {
         });
       });
       return { started: true };
+    })
+    .post("/tickets/:id/split", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (ticket.kind !== "feature") return jsonError(set, HTTP_CONFLICT, "découpage réservé aux tickets feature");
+      // Gate (re-validated server-side): column todo, OR column prd with a non-null PRD markdown.
+      const eligible =
+        ticket.column === "todo" || (ticket.column === "prd" && ticket.prdMarkdown !== null);
+      if (!eligible) {
+        return jsonError(set, HTTP_CONFLICT, "découpage réservé aux features en TODO ou en PRD (PRD requis)");
+      }
+      if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_CONFLICT, "projet inconnu");
+      const project = getProject(ticket.project);
+      try {
+        return await performSplit(deps, ticket, project);
+      } catch (error) {
+        return jsonError(set, HTTP_INTERNAL_ERROR, getErrorMessage(error, "échec du découpage"));
+      }
     })
     .post("/tickets/:id/reformulate", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);

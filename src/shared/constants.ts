@@ -62,17 +62,17 @@ export const AGENT_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type AgentEffort = (typeof AGENT_EFFORTS)[number];
 
 export const AGENT_MODEL_LABELS: Record<AgentModel, string> = {
-  opus: "Opus",
-  sonnet: "Sonnet",
-  haiku: "Haiku",
+  opus: "O",
+  sonnet: "S",
+  haiku: "H",
 };
 
 export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Très haut",
-  max: "Max",
+  low: "L",
+  medium: "M",
+  high: "H",
+  xhigh: "XH",
+  max: "MAX",
 };
 
 /** Who writes the implementation code (the CLI driver for the implementing stage). */

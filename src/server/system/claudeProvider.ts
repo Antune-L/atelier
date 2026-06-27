@@ -50,11 +50,11 @@ const denyNoVerifyHook: HookCallback = async (input) => {
   };
 };
 
-type SdkEffort = NonNullable<Options["effort"]>;
+export type SdkEffort = NonNullable<Options["effort"]>;
 type SdkAgents = NonNullable<Options["agents"]>;
 
 /** Narrow our free-form effort string to the SDK's enum; null/unknown → model default (undefined). */
-function toSdkEffort(effort: string | null): SdkEffort | undefined {
+export function toSdkEffort(effort: string | null): SdkEffort | undefined {
   if (effort === null) return undefined;
   return SDK_EFFORTS.find((value) => value === effort);
 }

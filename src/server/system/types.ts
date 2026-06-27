@@ -123,7 +123,7 @@ export interface SystemAdapter {
 
   // ---- tmux session (worktree/user/test shells only — agents run in-process via the SDK) ----
   /**
-   * Run a one-shot `claude -p` returning its final text (used to reformulate a ticket need).
+   * Run a one-shot Agent SDK query returning its final text (used to reformulate a ticket need).
    * Read-only, no worktree/slot.
    */
   reformulate(opts: ReformulateOptions): Promise<string>;

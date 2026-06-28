@@ -14,6 +14,7 @@ import {
   createTicketSchema,
   deriveTitleFromDescription,
   generatePrdSchema,
+  importNotionSchema,
   importTicketsSchema,
   moveTicketSchema,
   startWorktreeSessionBodySchema,
@@ -39,7 +40,8 @@ import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { buildPrdPrompt } from "./agents/prd.ts";
-import type { ReformulateOptions } from "./system/types.ts";
+import { buildNotionImportPrompt } from "./agents/notionImport.ts";
+import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
 import type { UserTerminalManager } from "./userTerminalManager.ts";
 
@@ -57,6 +59,7 @@ interface PaneReader {
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
   reformulate(opts: ReformulateOptions): Promise<string>;
+  importNotion(opts: ImportNotionOptions): Promise<string>;
 }
 
 interface RouteDeps {
@@ -924,6 +927,21 @@ export function createApiRoutes(deps: RouteDeps) {
         return { markdown };
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de génération du PRD"));
+      }
+    })
+    .post("/notion/import", async ({ body, set }) => {
+      const parsed = importNotionSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "URL Notion invalide");
+      try {
+        const markdown = await deps.system.importNotion({
+          cwd: deps.projectRoot,
+          prompt: buildNotionImportPrompt(parsed.data.url),
+          model: MODELS.triage,
+          effort: MODELS.triageEffort,
+        });
+        return { markdown };
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de l'import Notion"));
       }
     })
     .delete("/tickets/:id", ({ params, set }) => {

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 
+import { isNotionUrl } from "@shared/notion";
 import type { ProjectInfo } from "@shared/schemas";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
@@ -62,6 +63,7 @@ export function NewTicketDialog({
   }
   const [title, setTitle] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
+  const [importingNotion, setImportingNotion] = useState(false);
   const [description, setDescription] = useState("");
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
@@ -131,6 +133,7 @@ export function NewTicketDialog({
   const reset = (): void => {
     setTitle("");
     setExternalUrl("");
+    setImportingNotion(false);
     setDescription("");
     setBaseBranchChoice(null);
     setPrdEnabled(false);
@@ -153,6 +156,19 @@ export function NewTicketDialog({
         ? `${prev}${markdown}\n`
         : `${prev}\n${markdown}\n`,
     );
+  };
+
+  const importFromNotion = async (): Promise<void> => {
+    setError(null);
+    setImportingNotion(true);
+    try {
+      const { markdown } = await api.importNotion(externalUrl);
+      appendToDescription(markdown);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Échec de l'import Notion");
+    } finally {
+      setImportingNotion(false);
+    }
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -286,6 +302,15 @@ export function NewTicketDialog({
                     onChange={(e) => setExternalUrl(e.target.value)}
                     placeholder="https://notion.so/… ou Trello"
                   />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void importFromNotion()}
+                    disabled={!isNotionUrl(externalUrl) || importingNotion}
+                  >
+                    {importingNotion ? "Import en cours…" : "Importer depuis Notion"}
+                  </Button>
                 </div>
                 <div className="flex flex-1 flex-col space-y-1.5">
                   <Label htmlFor="description">Description (markdown)</Label>

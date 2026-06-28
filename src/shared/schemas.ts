@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { isNotionUrl } from "./notion.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -536,6 +537,12 @@ export const generatePrdSchema = z.object({
   feedback: z.string().optional(),
 });
 export type GeneratePrdInput = z.infer<typeof generatePrdSchema>;
+
+/** Read a linked Notion card and synthesize its problem as markdown to append to a ticket description. */
+export const importNotionSchema = z.object({
+  url: z.url().refine(isNotionUrl, { message: "URL Notion invalide" }),
+});
+export type ImportNotionInput = z.infer<typeof importNotionSchema>;
 
 export const terminalOutputSchema = z.object({
   output: z.string(),

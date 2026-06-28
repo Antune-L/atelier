@@ -5,6 +5,7 @@ import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts"
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  ImportNotionOptions,
   PaneSize,
   PaneStream,
   ReformulateOptions,
@@ -174,6 +175,11 @@ export class FakeSystemAdapter implements SystemAdapter {
   async reformulate(opts: ReformulateOptions): Promise<string> {
     this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
     return "# Besoin reformulé (simulé)\n\nReformulation simulée (dry-run).";
+  }
+
+  async importNotion(opts: ImportNotionOptions): Promise<string> {
+    this.log("importNotion", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
+    return "## Synthèse Notion (simulée)\n\nImport Notion simulé (dry-run).";
   }
 
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {

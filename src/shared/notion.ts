@@ -1,4 +1,4 @@
-const NOTION_HOSTS = ["notion.so", "notion.site"] as const;
+const NOTION_HOSTS = ["notion.so", "notion.site", "notion.com"] as const;
 
 /** True when the string is an http(s) URL whose host is or ends with a Notion domain. */
 export function isNotionUrl(url: string): boolean {

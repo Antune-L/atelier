@@ -16,6 +16,7 @@ import { claudeProvider, toSdkEffort } from "./claudeProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  ImportNotionOptions,
   PaneSize,
   PaneStream,
   ReformulateOptions,
@@ -33,6 +34,12 @@ const PROD_ENV_MARKER = "prod";
 const REFORMULATE_TIMEOUT_MS = 120_000;
 /** Read-only toolset for the reformulation query (the description may reference local image paths). */
 const REFORMULATE_ALLOWED_TOOLS = ["Read"] as const;
+/** Bound the synchronous one-shot Notion import SDK query (4 min, under Bun's 255s idle timeout). */
+const NOTION_IMPORT_TIMEOUT_MS = 240_000;
+const NOTION_MCP_SERVER_NAME = "notion";
+const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+/** Read-only allowlist for the Notion import query: only Read and the hosted Notion MCP tools. */
+const NOTION_IMPORT_ALLOWED_TOOLS = ["Read", `mcp__${NOTION_MCP_SERVER_NAME}`] as const;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
 /**
@@ -336,14 +343,46 @@ export class RealSystemAdapter implements SystemAdapter {
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
-    const session = query({ prompt: opts.prompt, options: queryOptions });
+    return this.runOneShotQuery(opts.prompt, queryOptions, REFORMULATE_TIMEOUT_MS, "reformulation échouée");
+  }
 
-    // The SDK exposes no native timeout: bound consumption ourselves and close() the query on expiry.
+  async importNotion(opts: ImportNotionOptions): Promise<string> {
+    // `dontAsk` + an allowlist keeps the run read-only: only Read and the hosted Notion MCP tools are
+    // pre-approved, everything else is denied without prompting (mirrors reformulate's safe posture).
+    const sdkEffort = toSdkEffort(opts.effort);
+    const queryOptions: Options = {
+      cwd: opts.cwd,
+      model: opts.model,
+      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      systemPrompt: { type: "preset", preset: "claude_code" },
+      permissionMode: "dontAsk",
+      mcpServers: { [NOTION_MCP_SERVER_NAME]: { type: "http", url: NOTION_MCP_URL } },
+      allowedTools: [...NOTION_IMPORT_ALLOWED_TOOLS],
+      env: { ...process.env },
+      stderr: () => {},
+      ...(sdkEffort ? { effort: sdkEffort } : {}),
+    };
+    return this.runOneShotQuery(opts.prompt, queryOptions, NOTION_IMPORT_TIMEOUT_MS, "import Notion échoué");
+  }
+
+  /**
+   * Drive a synchronous one-shot SDK query to completion and return its final text. The SDK exposes no
+   * native timeout, so consumption is bounded here: `close()` on expiry, then `label`-prefixed errors
+   * for timeout / non-success result / empty output.
+   */
+  private async runOneShotQuery(
+    prompt: string,
+    queryOptions: Options,
+    timeoutMs: number,
+    label: string,
+  ): Promise<string> {
+    const session = query({ prompt, options: queryOptions });
+
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       session.close();
-    }, REFORMULATE_TIMEOUT_MS);
+    }, timeoutMs);
 
     const assistantText: string[] = [];
     let resultText = "";
@@ -360,16 +399,16 @@ export class RealSystemAdapter implements SystemAdapter {
         }
       }
     } catch (error) {
-      if (timedOut) throw new Error(`reformulation échouée : timeout (${REFORMULATE_TIMEOUT_MS}ms)`);
-      throw new Error(`reformulation échouée : ${error instanceof Error ? error.message : String(error)}`);
+      if (timedOut) throw new Error(`${label} : timeout (${timeoutMs}ms)`);
+      throw new Error(`${label} : ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       clearTimeout(timer);
     }
 
-    if (timedOut) throw new Error(`reformulation échouée : timeout (${REFORMULATE_TIMEOUT_MS}ms)`);
-    if (resultError) throw new Error(`reformulation échouée : ${resultError}`);
-    const text = (resultText.trim() || assistantText.join("").trim());
-    if (!text) throw new Error("reformulation échouée : réponse vide");
+    if (timedOut) throw new Error(`${label} : timeout (${timeoutMs}ms)`);
+    if (resultError) throw new Error(`${label} : ${resultError}`);
+    const text = resultText.trim() || assistantText.join("").trim();
+    if (!text) throw new Error(`${label} : réponse vide`);
     return text;
   }
 

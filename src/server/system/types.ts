@@ -22,6 +22,13 @@ export interface ReformulateOptions {
   effort: string | null;
 }
 
+export interface ImportNotionOptions {
+  cwd: string;
+  prompt: string;
+  model: string;
+  effort: string | null;
+}
+
 /**
  * A live byte stream of a tmux pane's output. Backed by `pipe-pane` → FIFO → `cat`
  * in the real adapter, or a synthetic echo queue in the fake. The boundary keeps all
@@ -129,6 +136,8 @@ export interface SystemAdapter {
    * Read-only, no worktree/slot.
    */
   reformulate(opts: ReformulateOptions): Promise<string>;
+  /** One-shot read-only Agent SDK query that reads a Notion card via the hosted Notion MCP and returns a markdown synthesis. */
+  importNotion(opts: ImportNotionOptions): Promise<string>;
   /** Spawn a detached interactive login-shell (zsh) session rooted at cwd for a user terminal. */
   spawnShellSession(opts: SpawnShellOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;

@@ -102,6 +102,8 @@ export const api = {
     request(`/api/tickets/${id}/split`, { method: "POST" }),
   reformulate: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/reformulate`, { method: "POST" }),
+  importNotion: (url: string): Promise<{ markdown: string }> =>
+    request(`/api/notion/import`, { method: "POST", body: JSON.stringify({ url }) }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
   generatePrd: (input: GeneratePrdInput): Promise<{ markdown: string }> =>

@@ -17,8 +17,8 @@ const log = createLogger("split");
 const DRY_RUN_RESULT: SplitResult = {
   summary: "Découpage simulé (dry-run) : aucune session claude n'est lancée dans le bac à sable.",
   children: [
-    { title: "Sous-ticket simulé 1", summary: "Première fille simulée (dry-run)." },
-    { title: "Sous-ticket simulé 2", summary: "Seconde fille simulée (dry-run)." },
+    { title: "Sous-ticket simulé 1", summary: "Première fille simulée (dry-run).", children: [] },
+    { title: "Sous-ticket simulé 2", summary: "Seconde fille simulée (dry-run).", children: [] },
   ],
 };
 

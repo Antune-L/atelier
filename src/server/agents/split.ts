@@ -91,6 +91,12 @@ export function buildSplitChannelPrompt(
         "For each child, produce a concise title and a SELF-CONTAINED summary: it is the spec the child's",
         "implementer agent will read, with no access to this conversation — include the relevant context,",
         "scope, and acceptance criteria.",
+        "Return the children SORTED IN IMPLEMENTATION ORDER (the order they should be built within their",
+        "group, earlier dependencies first).",
+        "Each child MAY nest its own `children` array to express a multi-level breakdown when the work",
+        "genuinely warrants sub-grouping; a child with children becomes an intermediate integration node",
+        "and its own children stack on it. Keep the tree as shallow as the work requires — prefer flat",
+        "unless nesting adds real clarity.",
       ]
     : [
         "## Ta mission",
@@ -100,6 +106,12 @@ export function buildSplitChannelPrompt(
         "Pour chaque fille, produis un titre concis et une synthèse AUTONOME : c'est le cahier des charges",
         "que l'agent d'implémentation de la fille lira, sans accès à cette conversation — inclus le contexte",
         "pertinent, le périmètre et les critères d'acceptation.",
+        "Renvoie les filles TRIÉES DANS L'ORDRE D'IMPLÉMENTATION (l'ordre dans lequel elles doivent être",
+        "réalisées au sein de leur groupe, les dépendances d'abord).",
+        "Chaque fille PEUT contenir son propre tableau `children` pour exprimer un découpage multi-niveaux",
+        "quand le travail le justifie réellement ; une fille qui a des enfants devient un nœud d'intégration",
+        "intermédiaire sur lequel ses propres enfants s'empilent. Garde l'arbre aussi plat que possible —",
+        "préfère le plat sauf si l'imbrication apporte une réelle clarté.",
       ];
 
   const responseFormat = en
@@ -107,14 +119,18 @@ export function buildSplitChannelPrompt(
         "## Response format",
         "When your analysis is done, call the `submit_split` tool (MCP `worker` server) with:",
         "- `summary`: a short overall summary of the decomposition rationale.",
-        "- `children`: a non-empty list of `{ title, summary }` (at least one child).",
+        "- `children`: a non-empty list, in implementation order, of recursive nodes shaped",
+        "  `{ title, summary, children }` where `children` is itself a (possibly empty) list of the same",
+        "  shape (omit it or leave it empty for a leaf).",
         "Do not write the decomposition as text: only the `submit_split` call is taken into account.",
       ]
     : [
         "## Format de réponse",
         "Quand ton analyse est terminée, appelle le tool `submit_split` (serveur MCP `worker`) avec :",
         "- `summary` : un court résumé global de la logique de découpage.",
-        "- `children` : une liste non vide de `{ title, summary }` (au moins une fille).",
+        "- `children` : une liste non vide, dans l'ordre d'implémentation, de nœuds récursifs de forme",
+        "  `{ title, summary, children }` où `children` est elle-même une liste (éventuellement vide) de la",
+        "  même forme (omets-la ou laisse-la vide pour une feuille).",
         "N'écris pas le découpage en texte : seul l'appel à `submit_split` est pris en compte.",
       ];
 

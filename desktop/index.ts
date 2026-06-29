@@ -35,6 +35,7 @@ const MENU_ACTION_SHORTCUT_T = "atelier:shortcut-t";
 const MENU_ACTION_SHORTCUT_W = "atelier:shortcut-w";
 const MENU_ACTION_SHORTCUT_D = "atelier:shortcut-d";
 const MENU_ACTION_SHORTCUT_SHIFT_D = "atelier:shortcut-shift-d";
+const MENU_ACTION_SHORTCUT_F = "atelier:shortcut-f";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -56,6 +57,7 @@ const menuShortcutActionSchema = z.object({
 function shortcutFromMenuAction(action: string): { key: string; shiftKey: boolean } | null {
   if (action.includes(MENU_ACTION_SHORTCUT_T)) return { key: "t", shiftKey: false };
   if (action.includes(MENU_ACTION_SHORTCUT_W)) return { key: "w", shiftKey: false };
+  if (action.includes(MENU_ACTION_SHORTCUT_F)) return { key: "f", shiftKey: false };
   if (action.includes(MENU_ACTION_SHORTCUT_SHIFT_D)) return { key: "d", shiftKey: true };
   if (action.includes(MENU_ACTION_SHORTCUT_D)) return { key: "d", shiftKey: false };
   return null;
@@ -141,6 +143,8 @@ function installApplicationMenu(): void {
         { role: "pasteAndMatchStyle", accelerator: "Shift+Option+Command+V" },
         { role: "delete" },
         { role: "selectAll", accelerator: "Command+A" },
+        { type: "divider" },
+        { label: "Rechercher", accelerator: "Command+F", action: MENU_ACTION_SHORTCUT_F },
       ],
     },
     {

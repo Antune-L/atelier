@@ -818,5 +818,840 @@
     "mtime": 1782759494.9483051,
     "ast_hash": "32e470f4d994e93b922f34d1234f1a5a",
     "semantic_hash": ""
+  },
+  "/Users/antoineliu/kanban-agents/.claude/settings.json": {
+    "mtime": 1782755374.5134072,
+    "ast_hash": "e1073342e958ac9f00716938c8f165e3",
+    "semantic_hash": "e1073342e958ac9f00716938c8f165e3"
+  },
+  "/Users/antoineliu/kanban-agents/.claude/settings.local.json": {
+    "mtime": 1781298792.6182685,
+    "ast_hash": "ab8e7dbad29bf6e20323409a65ebb044",
+    "semantic_hash": "ab8e7dbad29bf6e20323409a65ebb044"
+  },
+  "/Users/antoineliu/kanban-agents/config.example.json": {
+    "mtime": 1782286435.7630918,
+    "ast_hash": "d53b560a684cbb69c53fbba9486f74bf",
+    "semantic_hash": "d53b560a684cbb69c53fbba9486f74bf"
+  },
+  "/Users/antoineliu/kanban-agents/desktop/bootstrap.ts": {
+    "mtime": 1782760577.9866078,
+    "ast_hash": "3589d43632b619b9de90039dbca0b93f",
+    "semantic_hash": "3589d43632b619b9de90039dbca0b93f"
+  },
+  "/Users/antoineliu/kanban-agents/desktop/electrobun-deps.d.ts": {
+    "mtime": 1781382396.9316463,
+    "ast_hash": "c41c9ec7d952ecc12546b2a5aaf9d3e3",
+    "semantic_hash": "c41c9ec7d952ecc12546b2a5aaf9d3e3"
+  },
+  "/Users/antoineliu/kanban-agents/desktop/index.ts": {
+    "mtime": 1782760338.4511173,
+    "ast_hash": "0c22d28f01ddd81160d5bcef856d600b",
+    "semantic_hash": "0c22d28f01ddd81160d5bcef856d600b"
+  },
+  "/Users/antoineliu/kanban-agents/desktop/relaunch.ts": {
+    "mtime": 1781428746.4450576,
+    "ast_hash": "d7caa4472aee39d001979a3084bb3ccc",
+    "semantic_hash": "d7caa4472aee39d001979a3084bb3ccc"
+  },
+  "/Users/antoineliu/kanban-agents/desktop/repairPath.ts": {
+    "mtime": 1781382396.9320953,
+    "ast_hash": "54fbd8473e23f7f96fd5882c03826504",
+    "semantic_hash": "54fbd8473e23f7f96fd5882c03826504"
+  },
+  "/Users/antoineliu/kanban-agents/docs/examples/webhook-channel/webhook.ts": {
+    "mtime": 1781809052.5638585,
+    "ast_hash": "57ba9362a9a4a5bb9b83c0281a2caf75",
+    "semantic_hash": "57ba9362a9a4a5bb9b83c0281a2caf75"
+  },
+  "/Users/antoineliu/kanban-agents/electrobun.config.ts": {
+    "mtime": 1782574162.1663043,
+    "ast_hash": "c2882b819d5454e05ec7fc655371a82a",
+    "semantic_hash": "c2882b819d5454e05ec7fc655371a82a"
+  },
+  "/Users/antoineliu/kanban-agents/package.json": {
+    "mtime": 1782574162.1876774,
+    "ast_hash": "a561da290c2d64cecea716023f31272a",
+    "semantic_hash": "a561da290c2d64cecea716023f31272a"
+  },
+  "/Users/antoineliu/kanban-agents/postcss.config.js": {
+    "mtime": 1781293016.4222598,
+    "ast_hash": "c735540bb63936a123bc867d950c9f69",
+    "semantic_hash": "c735540bb63936a123bc867d950c9f69"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/baseBranch.ts": {
+    "mtime": 1781643805.6366415,
+    "ast_hash": "f2233324b1853a52b57c3cb06affa423",
+    "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/contract.ts": {
+    "mtime": 1782393028.253432,
+    "ast_hash": "d3064519632817487dcb716958d28309",
+    "semantic_hash": "d3064519632817487dcb716958d28309"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/coordinator.ts": {
+    "mtime": 1782580191.3656456,
+    "ast_hash": "c4d384b85f03cc17726e99207fc80ab7",
+    "semantic_hash": "c4d384b85f03cc17726e99207fc80ab7"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/feasibilityManager.ts": {
+    "mtime": 1782574162.189342,
+    "ast_hash": "ac23a9c8aef25e921ae55fc80565ef34",
+    "semantic_hash": "ac23a9c8aef25e921ae55fc80565ef34"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/notionImport.ts": {
+    "mtime": 1782651131.833626,
+    "ast_hash": "083367d03e1e33c067b009cec79d6631",
+    "semantic_hash": "083367d03e1e33c067b009cec79d6631"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/prd.ts": {
+    "mtime": 1782591922.526531,
+    "ast_hash": "03c3c2a1dc0faf1c9a8e3a87e6c2b4de",
+    "semantic_hash": "03c3c2a1dc0faf1c9a8e3a87e6c2b4de"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/reformulate.ts": {
+    "mtime": 1782580191.3658395,
+    "ast_hash": "8ee5f0fbb5213ce416c7d4f8a828f882",
+    "semantic_hash": "8ee5f0fbb5213ce416c7d4f8a828f882"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/reformulateManager.ts": {
+    "mtime": 1782588055.2086933,
+    "ast_hash": "1ed8196d974474f873b4ae2703515d33",
+    "semantic_hash": "1ed8196d974474f873b4ae2703515d33"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/sessionConfig.ts": {
+    "mtime": 1782760320.6202009,
+    "ast_hash": "b36a8be1f4e7916285281e5fc8d0c00a",
+    "semantic_hash": "b36a8be1f4e7916285281e5fc8d0c00a"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/sessionHub.ts": {
+    "mtime": 1782760320.620453,
+    "ast_hash": "7594c75629f6030bee5dacb389b315f6",
+    "semantic_hash": "7594c75629f6030bee5dacb389b315f6"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/slotManager.ts": {
+    "mtime": 1782580191.3665946,
+    "ast_hash": "417dd5cd9148937c663e8fe10dd41239",
+    "semantic_hash": "417dd5cd9148937c663e8fe10dd41239"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/slotTemplates.ts": {
+    "mtime": 1782574162.1911762,
+    "ast_hash": "283f42bcf56a50465e50b9dc1ae729e4",
+    "semantic_hash": "283f42bcf56a50465e50b9dc1ae729e4"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/split.ts": {
+    "mtime": 1782760338.4582489,
+    "ast_hash": "0fd7a5d23e195acb397acb2540c50b30",
+    "semantic_hash": "0fd7a5d23e195acb397acb2540c50b30"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/splitManager.ts": {
+    "mtime": 1782760338.4595406,
+    "ast_hash": "946402edbe07cea25ecf92ad70f42911",
+    "semantic_hash": "946402edbe07cea25ecf92ad70f42911"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/triage.ts": {
+    "mtime": 1782154194.6718388,
+    "ast_hash": "f5eac81ef1d0e1a67d6dac8e6a4d9bae",
+    "semantic_hash": "f5eac81ef1d0e1a67d6dac8e6a4d9bae"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/triageManager.ts": {
+    "mtime": 1782574162.1952195,
+    "ast_hash": "294c199996d867beeae062fc349c399f",
+    "semantic_hash": "294c199996d867beeae062fc349c399f"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/watchdog.ts": {
+    "mtime": 1781973777.8847847,
+    "ast_hash": "e5baf1999cdbae2f75ce3a064c47fe6c",
+    "semantic_hash": "e5baf1999cdbae2f75ce3a064c47fe6c"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/worktreeAddressWatcher.ts": {
+    "mtime": 1782292553.8539243,
+    "ast_hash": "ef339c3dff2643438aa879173efeb83b",
+    "semantic_hash": "ef339c3dff2643438aa879173efeb83b"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/agents/worktreeAddresses.ts": {
+    "mtime": 1782292553.8543963,
+    "ast_hash": "c7ffff15a3f256c2e8000434c3a876e9",
+    "semantic_hash": "c7ffff15a3f256c2e8000434c3a876e9"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/boot.ts": {
+    "mtime": 1782760577.9935699,
+    "ast_hash": "ad73237a3f52bdace8ac0aadaeb4738c",
+    "semantic_hash": "ad73237a3f52bdace8ac0aadaeb4738c"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/config.ts": {
+    "mtime": 1782760577.9937663,
+    "ast_hash": "670a9a0d6049ff8e35d4291538a8cf41",
+    "semantic_hash": "670a9a0d6049ff8e35d4291538a8cf41"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/db/rows.ts": {
+    "mtime": 1782760338.4602785,
+    "ast_hash": "6866c9b79b8e4b7ec2789d786a057765",
+    "semantic_hash": "6866c9b79b8e4b7ec2789d786a057765"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/db/schema.ts": {
+    "mtime": 1782760338.460507,
+    "ast_hash": "9f65d4e9f8fa4a6fedb02c4904bd7f37",
+    "semantic_hash": "9f65d4e9f8fa4a6fedb02c4904bd7f37"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/db/store.ts": {
+    "mtime": 1782760719.1102195,
+    "ast_hash": "c5af49d27129fa9d1df17b227b25d539",
+    "semantic_hash": "c5af49d27129fa9d1df17b227b25d539"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/hub.ts": {
+    "mtime": 1782241764.5479975,
+    "ast_hash": "ac817929c7c33764cd79ea56b51edcf3",
+    "semantic_hash": "ac817929c7c33764cd79ea56b51edcf3"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/index.ts": {
+    "mtime": 1782760577.9960234,
+    "ast_hash": "7b818d701f8836205cd9745d2b9bd1d4",
+    "semantic_hash": "7b818d701f8836205cd9745d2b9bd1d4"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/lifecycle.ts": {
+    "mtime": 1782574162.1959164,
+    "ast_hash": "8c7b9b765c129960a8b1a97cfaec032b",
+    "semantic_hash": "8c7b9b765c129960a8b1a97cfaec032b"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/logger.ts": {
+    "mtime": 1781339009.4914129,
+    "ast_hash": "b0724c274699bf1b95b1f59e048dfc11",
+    "semantic_hash": "b0724c274699bf1b95b1f59e048dfc11"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/mutex.ts": {
+    "mtime": 1781293231.737862,
+    "ast_hash": "504d3626fbf97c59e8589b7c42664811",
+    "semantic_hash": "504d3626fbf97c59e8589b7c42664811"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/notifier.ts": {
+    "mtime": 1782240217.6161747,
+    "ast_hash": "1888cf6a2f7ebc34b9e3497cf1e355ad",
+    "semantic_hash": "1888cf6a2f7ebc34b9e3497cf1e355ad"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/routes.ts": {
+    "mtime": 1782760577.9975631,
+    "ast_hash": "5452fa7a05344f03de523fb7679cd3eb",
+    "semantic_hash": "5452fa7a05344f03de523fb7679cd3eb"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/agentSession.ts": {
+    "mtime": 1782760320.6272054,
+    "ast_hash": "83f63fe6b9b2f4e5144fbce4b33626cb",
+    "semantic_hash": "83f63fe6b9b2f4e5144fbce4b33626cb"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/claudeBinary.ts": {
+    "mtime": 1782574162.1969652,
+    "ast_hash": "13b97580dda92cc6aef7a94c631148bf",
+    "semantic_hash": "13b97580dda92cc6aef7a94c631148bf"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/claudeProvider.ts": {
+    "mtime": 1782760320.6274395,
+    "ast_hash": "3b3ad3cecfe35a7f66a5c521c76edcf1",
+    "semantic_hash": "3b3ad3cecfe35a7f66a5c521c76edcf1"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/fake.ts": {
+    "mtime": 1782651131.8353765,
+    "ast_hash": "5825f4ef1d59b156fb6a6bba2132f020",
+    "semantic_hash": "5825f4ef1d59b156fb6a6bba2132f020"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/index.ts": {
+    "mtime": 1781293197.0363672,
+    "ast_hash": "a0d81ede8566688aea0443f95dfcfdfe",
+    "semantic_hash": "a0d81ede8566688aea0443f95dfcfdfe"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/real.ts": {
+    "mtime": 1782651131.8358395,
+    "ast_hash": "3d81ea0c9ab8b50c28c91521957cff73",
+    "semantic_hash": "3d81ea0c9ab8b50c28c91521957cff73"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/system/types.ts": {
+    "mtime": 1782651131.8363132,
+    "ast_hash": "783e39a562de9458b3f63d9eac24b2be",
+    "semantic_hash": "783e39a562de9458b3f63d9eac24b2be"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/terminalManager.ts": {
+    "mtime": 1782243310.5861192,
+    "ast_hash": "62dad1bc8b870e76f0ebcc8080ed13c6",
+    "semantic_hash": "62dad1bc8b870e76f0ebcc8080ed13c6"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/uploads.ts": {
+    "mtime": 1781295840.3058736,
+    "ast_hash": "77c4c7a6faf3bb69a8ec778d3af52cfb",
+    "semantic_hash": "77c4c7a6faf3bb69a8ec778d3af52cfb"
+  },
+  "/Users/antoineliu/kanban-agents/src/server/userTerminalManager.ts": {
+    "mtime": 1781966995.6107442,
+    "ast_hash": "66fd6855da641dd15421939bb5500795",
+    "semantic_hash": "66fd6855da641dd15421939bb5500795"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/constants.ts": {
+    "mtime": 1782760711.7948747,
+    "ast_hash": "1f10d386eaca4b9357fa356aeea54223",
+    "semantic_hash": "1f10d386eaca4b9357fa356aeea54223"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/errors.ts": {
+    "mtime": 1781639573.1862965,
+    "ast_hash": "b30d050d5ff61dfdab863489edf0ae8b",
+    "semantic_hash": "b30d050d5ff61dfdab863489edf0ae8b"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/figma.ts": {
+    "mtime": 1781296871.5665889,
+    "ast_hash": "471b8a56558b5965fbea473d74a03759",
+    "semantic_hash": "471b8a56558b5965fbea473d74a03759"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/mockups.ts": {
+    "mtime": 1781440410.394032,
+    "ast_hash": "2e98876af90b99cdefcf35accc6b6ed6",
+    "semantic_hash": "2e98876af90b99cdefcf35accc6b6ed6"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/notion.ts": {
+    "mtime": 1782651306.6207855,
+    "ast_hash": "7d6d437dccb4ec7fe46e95c3117d15ba",
+    "semantic_hash": "7d6d437dccb4ec7fe46e95c3117d15ba"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/pricing.ts": {
+    "mtime": 1782574162.2004511,
+    "ast_hash": "49c8fbc176d095f7b66eb93d3290051b",
+    "semantic_hash": "49c8fbc176d095f7b66eb93d3290051b"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/protocol.ts": {
+    "mtime": 1782760338.4619784,
+    "ast_hash": "7cdbe59238b151cc79449b2599e7e330",
+    "semantic_hash": "7cdbe59238b151cc79449b2599e7e330"
+  },
+  "/Users/antoineliu/kanban-agents/src/shared/schemas.ts": {
+    "mtime": 1782760338.4622116,
+    "ast_hash": "175ec48a2176fb9f0805474786fb70d6",
+    "semantic_hash": "175ec48a2176fb9f0805474786fb70d6"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/App.tsx": {
+    "mtime": 1782760338.462492,
+    "ast_hash": "98599cad80e05ba7cdb680bc20918f84",
+    "semantic_hash": "98599cad80e05ba7cdb680bc20918f84"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/AgentProfileConfig.tsx": {
+    "mtime": 1781639573.1869776,
+    "ast_hash": "d884b698508af47817885b75530ab4e0",
+    "semantic_hash": "d884b698508af47817885b75530ab4e0"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/AgentsView.tsx": {
+    "mtime": 1781644680.6776788,
+    "ast_hash": "e3557c8d8215e7b2e98179c5d4de0855",
+    "semantic_hash": "e3557c8d8215e7b2e98179c5d4de0855"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/AskPanel.tsx": {
+    "mtime": 1781639573.1874368,
+    "ast_hash": "b3cc95730df26454e0513b09cdba4455",
+    "semantic_hash": "b3cc95730df26454e0513b09cdba4455"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/Board.tsx": {
+    "mtime": 1781643805.6405408,
+    "ast_hash": "67b77a9b262d8d2d566399b8db01b048",
+    "semantic_hash": "67b77a9b262d8d2d566399b8db01b048"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/BoardColumn.tsx": {
+    "mtime": 1782760338.462822,
+    "ast_hash": "4922743a21cfe6ec23b6a3bdde2726a3",
+    "semantic_hash": "4922743a21cfe6ec23b6a3bdde2726a3"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/CleanPrPanel.tsx": {
+    "mtime": 1781639573.1876974,
+    "ast_hash": "4c6683e9ac75468cebaac4ea3dafbe86",
+    "semantic_hash": "4c6683e9ac75468cebaac4ea3dafbe86"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ColumnActionsMenu.tsx": {
+    "mtime": 1781638117.513422,
+    "ast_hash": "5b9b2c6ca63f040fdc07f62e2d126327",
+    "semantic_hash": "5b9b2c6ca63f040fdc07f62e2d126327"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/FullscreenToggle.tsx": {
+    "mtime": 1781639573.1879482,
+    "ast_hash": "d47ff40acab5367beecb4653b5f85fc6",
+    "semantic_hash": "d47ff40acab5367beecb4653b5f85fc6"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ImplementationAgentFields.tsx": {
+    "mtime": 1781639573.188236,
+    "ast_hash": "a29f5a6e095267c61d7c56fb71d630d3",
+    "semantic_hash": "a29f5a6e095267c61d7c56fb71d630d3"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ImportTicketsPanel.tsx": {
+    "mtime": 1782393028.2593896,
+    "ast_hash": "4ea470fec7b9d1228e3da810ee5e5de3",
+    "semantic_hash": "4ea470fec7b9d1228e3da810ee5e5de3"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/LiveTerminal.tsx": {
+    "mtime": 1782243310.5868874,
+    "ast_hash": "09cf69dbfdec66395bc986847d37a4a2",
+    "semantic_hash": "09cf69dbfdec66395bc986847d37a4a2"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/NewTicketDialog.tsx": {
+    "mtime": 1782651131.8374887,
+    "ast_hash": "1e9279314969cab161bbc77414d48040",
+    "semantic_hash": "1e9279314969cab161bbc77414d48040"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/PrSelectRow.tsx": {
+    "mtime": 1781639573.1894007,
+    "ast_hash": "ad6d47666f0ab62ef8b04179991eb86f",
+    "semantic_hash": "ad6d47666f0ab62ef8b04179991eb86f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/PrdAnnotator.tsx": {
+    "mtime": 1782760338.4631689,
+    "ast_hash": "64eb2bc8de8dbe4ec8c133b87ebfee5f",
+    "semantic_hash": "64eb2bc8de8dbe4ec8c133b87ebfee5f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/PrdReviewDialog.tsx": {
+    "mtime": 1782760338.4634588,
+    "ast_hash": "5c758bc63525b970fca7c42bd827c8bb",
+    "semantic_hash": "5c758bc63525b970fca7c42bd827c8bb"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/PrdView.tsx": {
+    "mtime": 1782591922.5300474,
+    "ast_hash": "855f4457117659ce933b9ea02ebdd1a0",
+    "semantic_hash": "855f4457117659ce933b9ea02ebdd1a0"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ProjectPrPicker.tsx": {
+    "mtime": 1781639573.1895995,
+    "ast_hash": "51d8f9fe07b9d0df64af91058e468e6c",
+    "semantic_hash": "51d8f9fe07b9d0df64af91058e468e6c"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ProjectSelect.tsx": {
+    "mtime": 1781639573.1898375,
+    "ast_hash": "ea750e6172684523e56f0e724a9ffec6",
+    "semantic_hash": "ea750e6172684523e56f0e724a9ffec6"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ProjectsSettings.tsx": {
+    "mtime": 1782760338.463679,
+    "ast_hash": "09894e2036460940ad4fc74ec9d598d5",
+    "semantic_hash": "09894e2036460940ad4fc74ec9d598d5"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/QuitConfirmModal.tsx": {
+    "mtime": 1781968244.674814,
+    "ast_hash": "00f7e533521b7b3268858a1b9f5f17f6",
+    "semantic_hash": "00f7e533521b7b3268858a1b9f5f17f6"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ReviewPrPanel.tsx": {
+    "mtime": 1781966995.6136587,
+    "ast_hash": "2aca50ab14de83be273563de499c51a5",
+    "semantic_hash": "2aca50ab14de83be273563de499c51a5"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/SettingsModal.tsx": {
+    "mtime": 1782760338.4638715,
+    "ast_hash": "292afbc99f15a25ac1d4f90060af17e9",
+    "semantic_hash": "292afbc99f15a25ac1d4f90060af17e9"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/Sidebar.tsx": {
+    "mtime": 1782591922.5302942,
+    "ast_hash": "0da91b2611058edf665d84d8894317f4",
+    "semantic_hash": "0da91b2611058edf665d84d8894317f4"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/SlotsBar.tsx": {
+    "mtime": 1781371368.1693704,
+    "ast_hash": "716b7f14eff947bc933b015d5b07b883",
+    "semantic_hash": "716b7f14eff947bc933b015d5b07b883"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/StageProgressBar.tsx": {
+    "mtime": 1781377325.1918116,
+    "ast_hash": "2228e0d39d6bc0d525b368f3404cebbf",
+    "semantic_hash": "2228e0d39d6bc0d525b368f3404cebbf"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/StatsView.tsx": {
+    "mtime": 1781643805.6417105,
+    "ast_hash": "2db8cc35283e5ddbe718e1bf2f390189",
+    "semantic_hash": "2db8cc35283e5ddbe718e1bf2f390189"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TerminalView.tsx": {
+    "mtime": 1782574162.2017596,
+    "ast_hash": "abf3c7991bac8e2ba6dcf0433b72e03f",
+    "semantic_hash": "abf3c7991bac8e2ba6dcf0433b72e03f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TerminalsView.tsx": {
+    "mtime": 1781968249.5194404,
+    "ast_hash": "dd073920dfb353f65d5ee2d1dcc48f01",
+    "semantic_hash": "dd073920dfb353f65d5ee2d1dcc48f01"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketBadges.tsx": {
+    "mtime": 1782393028.2599373,
+    "ast_hash": "a8aea05b94497b0649a7aaeb4ab91e41",
+    "semantic_hash": "a8aea05b94497b0649a7aaeb4ab91e41"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketCard.tsx": {
+    "mtime": 1781644680.6781688,
+    "ast_hash": "cb5f1721bab534dff54ff97950348d26",
+    "semantic_hash": "cb5f1721bab534dff54ff97950348d26"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketConfigSummary.tsx": {
+    "mtime": 1782393028.2603514,
+    "ast_hash": "4a01d5f234c292dc7c80990a1126ec57",
+    "semantic_hash": "4a01d5f234c292dc7c80990a1126ec57"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketCost.tsx": {
+    "mtime": 1781643805.6421704,
+    "ast_hash": "1a7a26f41870baf3a8ebc943355a4e3e",
+    "semantic_hash": "1a7a26f41870baf3a8ebc943355a4e3e"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketDetail.tsx": {
+    "mtime": 1782738819.9553087,
+    "ast_hash": "5a13686c2ecc5bda9df826997537ee7a",
+    "semantic_hash": "5a13686c2ecc5bda9df826997537ee7a"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/TicketOptionsToggleGroup.tsx": {
+    "mtime": 1782393028.2611604,
+    "ast_hash": "bcad71769096a46ddce1ec53937d1d8e",
+    "semantic_hash": "bcad71769096a46ddce1ec53937d1d8e"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/Toaster.tsx": {
+    "mtime": 1781973777.8885896,
+    "ast_hash": "246466371199962a7dfbb94b8b9e5bfe",
+    "semantic_hash": "246466371199962a7dfbb94b8b9e5bfe"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/WorkflowView.tsx": {
+    "mtime": 1782302959.1012309,
+    "ast_hash": "d5d8e4474707940b6294e136e1152ec5",
+    "semantic_hash": "d5d8e4474707940b6294e136e1152ec5"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/WorktreePanel.tsx": {
+    "mtime": 1782241764.5501308,
+    "ast_hash": "051d846f8afb5c1e2b48b0d632f15885",
+    "semantic_hash": "051d846f8afb5c1e2b48b0d632f15885"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/WorktreeSessionsView.tsx": {
+    "mtime": 1782307161.107011,
+    "ast_hash": "f6c0d8f25cc84f5dccaafc4c88c40b18",
+    "semantic_hash": "f6c0d8f25cc84f5dccaafc4c88c40b18"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/stats/StatCard.tsx": {
+    "mtime": 1781440410.397031,
+    "ast_hash": "abef81ed2427ca27e06de35f5658edca",
+    "semantic_hash": "abef81ed2427ca27e06de35f5658edca"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/stats/StatCharts.tsx": {
+    "mtime": 1781643805.6432242,
+    "ast_hash": "6cab84072a06b9599c358ee59ce96d7c",
+    "semantic_hash": "6cab84072a06b9599c358ee59ce96d7c"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/terminals/SplitTree.tsx": {
+    "mtime": 1781968028.0855367,
+    "ast_hash": "fa157d5478fa26d54d8e70e24cf610f8",
+    "semantic_hash": "fa157d5478fa26d54d8e70e24cf610f8"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/terminals/TerminalCell.tsx": {
+    "mtime": 1781968028.2999654,
+    "ast_hash": "6afed45fcb8a37b371ee18de1eb90fa0",
+    "semantic_hash": "6afed45fcb8a37b371ee18de1eb90fa0"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/terminals/tree.ts": {
+    "mtime": 1781966995.6154628,
+    "ast_hash": "51c9149120b9c34a813802f47e6f2dd6",
+    "semantic_hash": "51c9149120b9c34a813802f47e6f2dd6"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/badge.tsx": {
+    "mtime": 1781364995.8110607,
+    "ast_hash": "54f947a49742074a033b1e3448b4e8d0",
+    "semantic_hash": "54f947a49742074a033b1e3448b4e8d0"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/button.tsx": {
+    "mtime": 1781293671.1592922,
+    "ast_hash": "df36e37c0db1f01ce678e9087ac1e7ab",
+    "semantic_hash": "df36e37c0db1f01ce678e9087ac1e7ab"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/chart.tsx": {
+    "mtime": 1781440410.397641,
+    "ast_hash": "c51c9f0d830b01053bb27b32988540bc",
+    "semantic_hash": "c51c9f0d830b01053bb27b32988540bc"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/confirm.tsx": {
+    "mtime": 1781293721.6861906,
+    "ast_hash": "1a415d585695311c43e9e67fd83cec5a",
+    "semantic_hash": "1a415d585695311c43e9e67fd83cec5a"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/input.tsx": {
+    "mtime": 1782154336.2246947,
+    "ast_hash": "1483528d10b4aea0136e6ef3d456bbca",
+    "semantic_hash": "1483528d10b4aea0136e6ef3d456bbca"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/markdown.tsx": {
+    "mtime": 1781515959.6119738,
+    "ast_hash": "c3d37752c23a66a29d56250edc79d0f1",
+    "semantic_hash": "c3d37752c23a66a29d56250edc79d0f1"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/modal.tsx": {
+    "mtime": 1781350653.883227,
+    "ast_hash": "0b969793bdf6af57ae570d19b18d252f",
+    "semantic_hash": "0b969793bdf6af57ae570d19b18d252f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/select.tsx": {
+    "mtime": 1781293713.853873,
+    "ast_hash": "bbeec6bb3ef08914453fd08e548f9c59",
+    "semantic_hash": "bbeec6bb3ef08914453fd08e548f9c59"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/switch.tsx": {
+    "mtime": 1781295907.6607764,
+    "ast_hash": "1d266c8d2341c9e69917243df04741ad",
+    "semantic_hash": "1d266c8d2341c9e69917243df04741ad"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/tabs.tsx": {
+    "mtime": 1781370806.8223772,
+    "ast_hash": "aa74aa53628935f65aeee1caafc2190f",
+    "semantic_hash": "aa74aa53628935f65aeee1caafc2190f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/toggle-group.tsx": {
+    "mtime": 1781721101.2923005,
+    "ast_hash": "47a02d7315f983d62825a00190d38b1a",
+    "semantic_hash": "47a02d7315f983d62825a00190d38b1a"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/components/ui/toggle.tsx": {
+    "mtime": 1781721870.6558523,
+    "ast_hash": "cd8c873104e887ad1f720edcdc161175",
+    "semantic_hash": "cd8c873104e887ad1f720edcdc161175"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useAgentKnobs.ts": {
+    "mtime": 1781639573.1914527,
+    "ast_hash": "cdfad71bbaea182983263d94ffc42bcf",
+    "semantic_hash": "cdfad71bbaea182983263d94ffc42bcf"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useBoard.ts": {
+    "mtime": 1781293750.417604,
+    "ast_hash": "08afadef2ce763fc9bcd5d2529256fb1",
+    "semantic_hash": "08afadef2ce763fc9bcd5d2529256fb1"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useCapabilities.ts": {
+    "mtime": 1782760338.464044,
+    "ast_hash": "75548256fd196e77876226b6efc53c31",
+    "semantic_hash": "75548256fd196e77876226b6efc53c31"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useFullscreenEscape.ts": {
+    "mtime": 1781639573.1916833,
+    "ast_hash": "583ba1e90032afd7bf091cc9626e43cb",
+    "semantic_hash": "583ba1e90032afd7bf091cc9626e43cb"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/usePrdSearch.ts": {
+    "mtime": 1782760338.4641843,
+    "ast_hash": "b4fb62fee108d6f34a24c11e8d054cf7",
+    "semantic_hash": "b4fb62fee108d6f34a24c11e8d054cf7"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useProfiles.ts": {
+    "mtime": 1781424023.288123,
+    "ast_hash": "9a49cbabdafa68b4e60f32fa0ecc279e",
+    "semantic_hash": "9a49cbabdafa68b4e60f32fa0ecc279e"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useProjectPanel.ts": {
+    "mtime": 1781639573.1919298,
+    "ast_hash": "d1b57d19c96a1319a9631abc0c8140d4",
+    "semantic_hash": "d1b57d19c96a1319a9631abc0c8140d4"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useProjects.ts": {
+    "mtime": 1782760338.4643743,
+    "ast_hash": "4c0beec022cdf978457a6a8a0ac073c7",
+    "semantic_hash": "4c0beec022cdf978457a6a8a0ac073c7"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useStats.ts": {
+    "mtime": 1781440410.3981824,
+    "ast_hash": "48cc6ebb865281ffb082f350c3e1ae8b",
+    "semantic_hash": "48cc6ebb865281ffb082f350c3e1ae8b"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useSuppressEscapeBeep.ts": {
+    "mtime": 1781435798.6012275,
+    "ast_hash": "e168b28b6cd4f4752fbe294baf6d4476",
+    "semantic_hash": "e168b28b6cd4f4752fbe294baf6d4476"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useTerminalShortcuts.ts": {
+    "mtime": 1781968817.8717084,
+    "ast_hash": "b4c8ccfa40018e1063ac6abae95d01ed",
+    "semantic_hash": "b4c8ccfa40018e1063ac6abae95d01ed"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useTerminals.ts": {
+    "mtime": 1781968245.2198455,
+    "ast_hash": "b04ebc8d66cbee12d849d0abe44a16cd",
+    "semantic_hash": "b04ebc8d66cbee12d849d0abe44a16cd"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useTheme.ts": {
+    "mtime": 1781424023.288258,
+    "ast_hash": "531ad568f7db7421abd6bde0968f2526",
+    "semantic_hash": "531ad568f7db7421abd6bde0968f2526"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useTickTimer.ts": {
+    "mtime": 1781370452.2700155,
+    "ast_hash": "e37a716b4e6734717ddb767d28c8faaf",
+    "semantic_hash": "e37a716b4e6734717ddb767d28c8faaf"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/hooks/useXtermSocket.ts": {
+    "mtime": 1781969630.769889,
+    "ast_hash": "46495c281fb749b998e14094965cffb4",
+    "semantic_hash": "46495c281fb749b998e14094965cffb4"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/agentDefaults.ts": {
+    "mtime": 1781639573.1921372,
+    "ast_hash": "522bb5b25bcc3463f7b904d5843ffec1",
+    "semantic_hash": "522bb5b25bcc3463f7b904d5843ffec1"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/api.ts": {
+    "mtime": 1782760338.4648213,
+    "ast_hash": "edca9639df0777418ee3fc8238ef557a",
+    "semantic_hash": "edca9639df0777418ee3fc8238ef557a"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/csv.ts": {
+    "mtime": 1781440410.3988042,
+    "ast_hash": "c2ccd3793f87f72858e4ebd7346b5eab",
+    "semantic_hash": "c2ccd3793f87f72858e4ebd7346b5eab"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/display.ts": {
+    "mtime": 1782580191.3702173,
+    "ast_hash": "ff928ec17c9ce856741301c604327db8",
+    "semantic_hash": "ff928ec17c9ce856741301c604327db8"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/notifications.ts": {
+    "mtime": 1782580191.3707125,
+    "ast_hash": "59e5ccc41864c54fd7a5b38e9bedb472",
+    "semantic_hash": "59e5ccc41864c54fd7a5b38e9bedb472"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/paste.ts": {
+    "mtime": 1781295937.995548,
+    "ast_hash": "1db1e8d52a8809efa1cc498a3af19a20",
+    "semantic_hash": "1db1e8d52a8809efa1cc498a3af19a20"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/pr.ts": {
+    "mtime": 1781639573.1926794,
+    "ast_hash": "bd4ffabc32e4a4549259a1090e08ada7",
+    "semantic_hash": "bd4ffabc32e4a4549259a1090e08ada7"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/prdAnnotations.ts": {
+    "mtime": 1782591922.5306673,
+    "ast_hash": "82c737a53e41457bf81a3c8fed94d7c5",
+    "semantic_hash": "82c737a53e41457bf81a3c8fed94d7c5"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/stats.ts": {
+    "mtime": 1781643805.643883,
+    "ast_hash": "b3c4b5d46f0f37ef6e107d1eb1a2a1ae",
+    "semantic_hash": "b3c4b5d46f0f37ef6e107d1eb1a2a1ae"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/store.ts": {
+    "mtime": 1782241764.5512557,
+    "ast_hash": "1e70c2750cdd7e2944bdf3efcfbef6cb",
+    "semantic_hash": "1e70c2750cdd7e2944bdf3efcfbef6cb"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/theme.ts": {
+    "mtime": 1781424023.2894373,
+    "ast_hash": "57b02a9f29e12901dad1861141624ec1",
+    "semantic_hash": "57b02a9f29e12901dad1861141624ec1"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/lib/utils.ts": {
+    "mtime": 1781293663.8716342,
+    "ast_hash": "a201fb9f1c5fefe41b771aa8d7f99957",
+    "semantic_hash": "a201fb9f1c5fefe41b771aa8d7f99957"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/src/main.tsx": {
+    "mtime": 1781424023.2897391,
+    "ast_hash": "5a2a7bc3a4c728b0299dbf4e672d7425",
+    "semantic_hash": "5a2a7bc3a4c728b0299dbf4e672d7425"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/vite.config.ts": {
+    "mtime": 1781375444.2268505,
+    "ast_hash": "fe757d4b148d3c8655a880044eb65a3d",
+    "semantic_hash": "fe757d4b148d3c8655a880044eb65a3d"
+  },
+  "/Users/antoineliu/kanban-agents/tailwind.config.js": {
+    "mtime": 1781440410.3994045,
+    "ast_hash": "00b7660cfe1ebbe6e3502037a86bc9bb",
+    "semantic_hash": "00b7660cfe1ebbe6e3502037a86bc9bb"
+  },
+  "/Users/antoineliu/kanban-agents/templates/run_composer.sh": {
+    "mtime": 1781353910.1741927,
+    "ast_hash": "771471d27aaf0d94e4ca14c033a69b27",
+    "semantic_hash": "771471d27aaf0d94e4ca14c033a69b27"
+  },
+  "/Users/antoineliu/kanban-agents/tsconfig.json": {
+    "mtime": 1781382396.934811,
+    "ast_hash": "9e6f26df737799cccc53c1f0af56bfac",
+    "semantic_hash": "9e6f26df737799cccc53c1f0af56bfac"
+  },
+  "/Users/antoineliu/kanban-agents/AGENTS.md": {
+    "mtime": 1782755395.452508,
+    "ast_hash": "2fcf087447bbf4dd2c20833f4254b4d1",
+    "semantic_hash": "2fcf087447bbf4dd2c20833f4254b4d1"
+  },
+  "/Users/antoineliu/kanban-agents/CLAUDE.md": {
+    "mtime": 1782755387.8408456,
+    "ast_hash": "5d654808430db6709dd1e47b024dd1d0",
+    "semantic_hash": "5d654808430db6709dd1e47b024dd1d0"
+  },
+  "/Users/antoineliu/kanban-agents/CONTEXT.md": {
+    "mtime": 1782574162.1638162,
+    "ast_hash": "860e7ad1dd0291b2fcc460a428ff7301",
+    "semantic_hash": "860e7ad1dd0291b2fcc460a428ff7301"
+  },
+  "/Users/antoineliu/kanban-agents/README.md": {
+    "mtime": 1782718287.3578596,
+    "ast_hash": "093ae834c1a278c0b2125e3cd09201ef",
+    "semantic_hash": "093ae834c1a278c0b2125e3cd09201ef"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/index.html": {
+    "mtime": 1781424023.2857413,
+    "ast_hash": "f27fd144a4c125d51d57035d257284ca",
+    "semantic_hash": "f27fd144a4c125d51d57035d257284ca"
+  },
+  "/Users/antoineliu/kanban-agents/docs/demo.gif": {
+    "mtime": 1782472235.1051028,
+    "ast_hash": "950c44aa9b25072bf628a5fab08ce4e1",
+    "semantic_hash": "950c44aa9b25072bf628a5fab08ce4e1"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_128x128.png": {
+    "mtime": 1781385325.7255793,
+    "ast_hash": "194be25d5f436fa940d222b5bd93ec74",
+    "semantic_hash": "194be25d5f436fa940d222b5bd93ec74"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_128x128@2x.png": {
+    "mtime": 1781385325.739668,
+    "ast_hash": "8ffccfa6a003e8f8ebb5f41b0bb91803",
+    "semantic_hash": "8ffccfa6a003e8f8ebb5f41b0bb91803"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_16x16.png": {
+    "mtime": 1781385325.664641,
+    "ast_hash": "722fd1d15983d63e56278e9feba9b9c8",
+    "semantic_hash": "722fd1d15983d63e56278e9feba9b9c8"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_16x16@2x.png": {
+    "mtime": 1781385325.6811492,
+    "ast_hash": "a807b5ab2e18c8d09b35357d37307e41",
+    "semantic_hash": "a807b5ab2e18c8d09b35357d37307e41"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_256x256.png": {
+    "mtime": 1781385325.7533596,
+    "ast_hash": "8ffccfa6a003e8f8ebb5f41b0bb91803",
+    "semantic_hash": "8ffccfa6a003e8f8ebb5f41b0bb91803"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_256x256@2x.png": {
+    "mtime": 1781385325.7709968,
+    "ast_hash": "6ea19e74d730b023267c12764c6784dc",
+    "semantic_hash": "6ea19e74d730b023267c12764c6784dc"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_32x32.png": {
+    "mtime": 1781385325.696556,
+    "ast_hash": "a807b5ab2e18c8d09b35357d37307e41",
+    "semantic_hash": "a807b5ab2e18c8d09b35357d37307e41"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_32x32@2x.png": {
+    "mtime": 1781385325.7112834,
+    "ast_hash": "eb3b50f2c07235a2ea1388205f389fa1",
+    "semantic_hash": "eb3b50f2c07235a2ea1388205f389fa1"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_512x512.png": {
+    "mtime": 1781385325.787601,
+    "ast_hash": "6ea19e74d730b023267c12764c6784dc",
+    "semantic_hash": "6ea19e74d730b023267c12764c6784dc"
+  },
+  "/Users/antoineliu/kanban-agents/icon.iconset/icon_512x512@2x.png": {
+    "mtime": 1781385325.7984612,
+    "ast_hash": "fcbf63615d107b0196b73d39041a1d1f",
+    "semantic_hash": "fcbf63615d107b0196b73d39041a1d1f"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/public/favicon.svg": {
+    "mtime": 1781355833.9241004,
+    "ast_hash": "b55bafe7f76660f0882c9d31b85f67bb",
+    "semantic_hash": "b55bafe7f76660f0882c9d31b85f67bb"
+  },
+  "/Users/antoineliu/kanban-agents/src/web/public/mouse.mp3": {
+    "mtime": 1782240217.6173096,
+    "ast_hash": "3b45627df5812416a40087dbaded82c3",
+    "semantic_hash": "3b45627df5812416a40087dbaded82c3"
   }
 }

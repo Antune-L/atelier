@@ -23,7 +23,7 @@ import {
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { OpenPr, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
+import type { OpenPr, SplitChildInput, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
 import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
 import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
 
@@ -35,7 +35,7 @@ import type { ReformulateManager } from "./agents/reformulateManager.ts";
 import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
-import type { Store, TicketPatch } from "./db/store.ts";
+import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -98,6 +98,8 @@ const BUILD_ERROR_TAIL = 600;
 const GIT_QUERY_TIMEOUT_MS = 5_000;
 /** Reported PR state for directPush tickets, which have no real PR to query. */
 const DIRECT_PUSH_MERGED_STATE = "MERGED";
+/** Reported PR state for split mothers, whose integration branch carries no real PR to query. */
+const SPLIT_MERGED_STATE = "MERGED";
 /**
  * Strict allowlist: only paths under src/web/ are considered frontend-only.
  * src/shared/** is excluded — it is consumed by the server at runtime, so a change there requires
@@ -153,6 +155,11 @@ function isProcessing(stage: Stage | null): boolean {
   return ACTIVE_STAGES.includes(stage);
 }
 
+/** A split mother lands in "done" with its integration branch (split/…) set but no PR. */
+function isSplitMother(ticket: Ticket): boolean {
+  return ticket.branch !== null && ticket.branch.startsWith(SPLIT_BRANCH_PREFIX) && ticket.prUrl === null;
+}
+
 /** A ticket can't start while its dependency hasn't opened its PR yet (no branch/prUrl). */
 function isBlocked(ticket: Ticket, store: Store): boolean {
   if (!ticket.dependsOn) return false;
@@ -161,7 +168,7 @@ function isBlocked(ticket: Ticket, store: Store): boolean {
   // A split mother lands in "done" with its integration branch (split/…) set but no PR; its children
   // must still be allowed to start. Every other parent is blocked until it opens its PR (this keeps the
   // stacked-PR blocking behavior, incl. directPush parents whose feat/… branch has no PR either).
-  if (parent.prUrl === null && !parent.branch.startsWith(SPLIT_BRANCH_PREFIX)) return true;
+  if (parent.prUrl === null && !isSplitMother(parent)) return true;
   return false;
 }
 
@@ -210,11 +217,104 @@ async function failSplitMother(deps: RouteDeps, ticket: Ticket, reason: string):
   hub.pushTicket(failed);
 }
 
+/** Default pipeline toggles a split child inherits (the family runs auto-merge stacked PRs). */
+function splitChildDefaults(ticket: Ticket): Pick<
+  NewTicket,
+  | "externalUrl"
+  | "project"
+  | "prdEnabled"
+  | "prDraft"
+  | "autoMerge"
+  | "addScreenshots"
+  | "verifyFeature"
+  | "argusMultiLoop"
+  | "stealth"
+  | "directPush"
+  | "baseBranch"
+  | "model"
+  | "effort"
+  | "implementerModel"
+  | "implementerEffort"
+  | "implementer"
+> {
+  return {
+    externalUrl: null,
+    project: ticket.project,
+    prdEnabled: false,
+    prDraft: true,
+    autoMerge: true,
+    addScreenshots: false,
+    verifyFeature: false,
+    argusMultiLoop: false,
+    stealth: false,
+    directPush: false,
+    baseBranch: null,
+    model: ticket.model,
+    effort: ticket.effort,
+    implementerModel: ticket.implementerModel,
+    implementerEffort: ticket.implementerEffort,
+    implementer: ticket.implementer,
+  };
+}
+
 /**
- * Run the split sub-agent then orchestrate the documented workaround: create the children (no
- * dependsOn yet), create + push the mother integration branch, link the children to the mother, and
+ * Recursively create a split subtree under `parentTicket` (whose `parentBranch` already exists). Each
+ * leaf becomes a regular todo child depending on its parent; each node with children becomes an
+ * intermediate sub-mother: its own split/… branch is forked from the parent branch, it lands in "done",
+ * and its children stack on it. Every created ticket id is collected so the caller can roll back on a
+ * mid-tree branch failure.
+ */
+async function createSplitChildren(
+  deps: RouteDeps,
+  project: { repoPath: string },
+  ticket: Ticket,
+  parentTicket: Ticket,
+  parentBranch: string,
+  nodes: SplitChildInput[],
+  createdIds: string[],
+): Promise<Ticket[]> {
+  const { store, hub, system } = deps;
+  const created: Ticket[] = [];
+  for (const [i, node] of nodes.entries()) {
+    const child = store.createTicket({
+      ...splitChildDefaults(ticket),
+      title: node.title,
+      description: node.summary,
+      dependsOn: parentTicket.id,
+      childOrder: i,
+    });
+    createdIds.push(child.id);
+
+    if (node.children.length > 0) {
+      const subBranch = splitMotherBranch(child);
+      await system.createBranchFromBase(project.repoPath, subBranch, parentBranch);
+      const subList = node.children.map((c) => `- ${c.title}`).join("\n");
+      const subMother = store.updateTicket(child.id, {
+        branch: subBranch,
+        column: "done",
+        stage: null,
+        slotId: null,
+        finishedAt: Date.now(),
+        agentSummary: `## Découpage en sous-tickets\n\n${subList}`,
+      });
+      hub.pushTicket(subMother);
+      created.push(subMother);
+      const descendants = await createSplitChildren(deps, project, ticket, subMother, subBranch, node.children, createdIds);
+      created.push(...descendants);
+      continue;
+    }
+
+    hub.pushTicket(child);
+    created.push(child);
+  }
+  return created;
+}
+
+/**
+ * Run the split sub-agent then orchestrate the documented workaround: create + push the mother
+ * integration branch, then recursively create the (possibly multi-level) subtree of children, and
  * move the mother to Done with a summary. The sub-agent runs FIRST (it disconnects a PRD card's
- * planning session anyway); only once it succeeds do we commit side effects. If the mother branch push
+ * planning session anyway); only once it succeeds do we commit side effects. If any branch push
  * fails the just-created children are rolled back so no orphan child cards survive.
  */
 async function performSplit(
@@ -242,54 +342,27 @@ async function performSplit(
     await slots.releaseSlot(ticket.slotId, ticket);
   }
 
-  // Create every child (no dependsOn yet — the mother branch doesn't exist until the next step).
-  const created: Ticket[] = [];
-  for (const child of result.children) {
-    const childTicket = store.createTicket({
-      title: child.title,
-      description: child.summary,
-      externalUrl: null,
-      project: ticket.project,
-      prdEnabled: false,
-      prDraft: true,
-      autoMerge: true,
-      addScreenshots: false,
-      verifyFeature: false,
-      argusMultiLoop: false,
-      stealth: false,
-      directPush: false,
-      baseBranch: null,
-      dependsOn: null,
-      model: ticket.model,
-      effort: ticket.effort,
-      implementerModel: ticket.implementerModel,
-      implementerEffort: ticket.implementerEffort,
-      implementer: ticket.implementer,
-    });
-    created.push(childTicket);
-  }
-
-  // Children exist: create + push the mother integration branch from the project default base, or the
-  // mother's own override when set (the mother has no dependsOn parent of its own to stack on). On
-  // failure, roll the children back so a wedged push never leaves orphan child cards behind.
+  // Create + push the mother integration branch from the project default base, or the mother's own
+  // override when set (the mother has no dependsOn parent of its own to stack on), then recursively
+  // create the subtree forked from it. On any failure, roll back every created child so a wedged push
+  // never leaves orphan child cards behind.
   const baseBranch = ticket.baseBranch ?? project.baseBranch;
   const motherBranch = splitMotherBranch(ticket);
+  const createdIds: string[] = [];
+  let created: Ticket[];
   try {
     await system.createBranchFromBase(project.repoPath, motherBranch, baseBranch);
+    created = await createSplitChildren(deps, project, ticket, ticket, motherBranch, result.children, createdIds);
   } catch (error) {
-    for (const child of created) {
-      store.deleteTicket(child.id);
-      hub.pushTicketRemoved(child.id);
+    for (const id of createdIds) {
+      store.deleteTicket(id);
+      hub.pushTicketRemoved(id);
     }
     await failSplitMother(deps, ticket, getErrorMessage(error, "création de la branche mère échouée"));
     throw error;
   }
 
-  // Link each child to the mother (resolved via dependsOn at start time).
-  const linked = created.map((child) => store.updateTicket(child.id, { dependsOn: ticket.id }));
-  for (const child of linked) hub.pushTicket(child);
-
-  // Move the mother to Done with the children list + overall summary.
+  // Move the mother to Done with the (top-level) children list + overall summary.
   const childList = result.children.map((c) => `- ${c.title}`).join("\n");
   const agentSummary = `## Découpage en sous-tickets\n\n${childList}\n\n${result.summary}`;
   const mother = store.updateTicket(ticket.id, {
@@ -302,7 +375,7 @@ async function performSplit(
   });
   hub.pushTicket(mother);
 
-  return { created: linked, mother };
+  return { created, mother };
 }
 
 export function createApiRoutes(deps: RouteDeps) {
@@ -348,6 +421,8 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
       canQuit: deps.onRequestQuit != null,
+      // NOTE(ali): native folder picker is wired by the projects backend-routes ticket; false until then.
+      canPickFolder: false,
     }))
     .get("/settings", () => store.getAppSettings())
     .patch("/settings", ({ body, set }) => {
@@ -758,6 +833,12 @@ export function createApiRoutes(deps: RouteDeps) {
       if (ticket.directPush) {
         const merged = lifecycle.markMerged(params.id);
         return { merged: true, state: DIRECT_PUSH_MERGED_STATE, ticket: merged };
+      }
+      // A split mother has no PR but its integration branch carries the children's merged work; treat
+      // it like directPush — its work IS integrated, so move it straight to "PR mergée".
+      if (isSplitMother(ticket)) {
+        const merged = lifecycle.markMerged(params.id);
+        return { merged: true, state: SPLIT_MERGED_STATE, ticket: merged };
       }
       if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");

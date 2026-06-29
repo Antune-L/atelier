@@ -100,9 +100,21 @@ const submitFeasibilityMcpArgsSchema = z.object({
  * worker forwards a slightly-off decomposition rather than rejecting it locally; the backend
  * re-validates strictly before creating any ticket.
  */
+interface SplitChildMcpInput {
+  title: string;
+  summary: string;
+  children: SplitChildMcpInput[];
+}
+const splitChildMcpSchema: z.ZodType<SplitChildMcpInput> = z.lazy(() =>
+  z.object({
+    title: z.string().default(""),
+    summary: z.string().default(""),
+    children: z.array(splitChildMcpSchema).default([]),
+  }),
+);
 const submitSplitMcpArgsSchema = z.object({
   summary: z.string().default(""),
-  children: z.array(z.object({ title: z.string(), summary: z.string() })).default([]),
+  children: z.array(splitChildMcpSchema).default([]),
 });
 
 // ---- Tool registry ----

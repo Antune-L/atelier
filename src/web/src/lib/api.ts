@@ -7,10 +7,12 @@ import type {
   CreateCleanInput,
   CreateCommentInput,
   CreateProfileInput,
+  CreateProjectInput,
   CreateReviewInput,
   CreateTicketInput,
   GeneratePrdInput,
   ImportTicketsInput,
+  ManagedProject,
   OpenPr,
   Profile,
   ProjectInfo,
@@ -22,11 +24,16 @@ import type {
   UpdateAppSettingsInput,
   UpdateMode,
   UpdateProfileInput,
+  UpdateProjectInput,
   UpdateTicketInput,
   UploadResult,
   WorktreeSession,
 } from "@shared/schemas";
 import type { Column } from "@shared/constants";
+
+const HTTP_CONFLICT = 409;
+const HTTP_NOT_FOUND = 404;
+const PROJECT_IN_USE_MESSAGE = "Ce projet a des tickets associés";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -43,6 +50,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
+  manageProjects: (): Promise<ManagedProject[]> => request("/api/projects/manage"),
+  createProject: (input: CreateProjectInput): Promise<ManagedProject> =>
+    request("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+  updateProject: (key: string, patch: UpdateProjectInput): Promise<ManagedProject> =>
+    request(`/api/projects/${encodeURIComponent(key)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteProject: async (key: string): Promise<void> => {
+    const response = await fetch(`/api/projects/${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+    });
+    if (response.status === HTTP_CONFLICT) throw new Error(PROJECT_IN_USE_MESSAGE);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: response.statusText }));
+      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
+      throw new Error(message);
+    }
+  },
+  pickFolder: async (): Promise<string | null> => {
+    const response = await fetch("/api/native/pick-folder", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    if (response.status === HTTP_NOT_FOUND) return null;
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: response.statusText }));
+      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
+      throw new Error(message);
+    }
+    const body: unknown = await response.json().catch(() => null);
+    if (body && typeof body === "object" && "path" in body && typeof body.path === "string") return body.path;
+    return null;
+  },
   capabilities: (): Promise<Capabilities> => request("/api/capabilities"),
   settings: (): Promise<AppSettings> => request("/api/settings"),
   updateSettings: (input: UpdateAppSettingsInput): Promise<AppSettings> =>

@@ -421,6 +421,8 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
       canQuit: deps.onRequestQuit != null,
+      // NOTE(ali): native folder picker is wired by the projects backend-routes ticket; false until then.
+      canPickFolder: false,
     }))
     .get("/settings", () => store.getAppSettings())
     .patch("/settings", ({ body, set }) => {

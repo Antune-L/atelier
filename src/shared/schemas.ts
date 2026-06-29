@@ -336,6 +336,47 @@ export const projectInfoSchema = z.object({
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
+/** A project's full editable config (incl. its key), returned by GET /api/projects/manage. */
+export const managedProjectSchema = z.object({
+  key: projectKeySchema,
+  label: z.string(),
+  repoPath: z.string(),
+  baseBranch: z.string(),
+  commitTimeoutMs: z.number().int().positive(),
+  defaultAutoMerge: z.boolean(),
+  defaultAddScreenshots: z.boolean(),
+  color: z.string().optional(),
+  instructions: z.string().optional(),
+  worktreeScript: z.string().optional(),
+  runScript: z.string().optional(),
+  worktreeTeardownScript: z.string().optional(),
+  scripts: z
+    .object({ typecheck: z.string().optional(), lint: z.string().optional(), test: z.string().optional() })
+    .optional(),
+  worktreePorts: z.array(z.object({ label: z.string().min(1), base: z.number().int().positive() })).optional(),
+});
+export type ManagedProject = z.infer<typeof managedProjectSchema>;
+
+/** POST /api/projects body: the basic fields edited in the UI (the backend derives the key). */
+export const createProjectSchema = z.object({
+  label: z.string().min(1),
+  repoPath: z.string().min(1),
+  baseBranch: z.string().min(1),
+  commitTimeoutMs: z.number().int().positive(),
+  color: z.string().optional(),
+});
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+/** PATCH /api/projects/:key body: any subset of the basic editable fields. */
+export const updateProjectSchema = z.object({
+  label: z.string().min(1).optional(),
+  repoPath: z.string().min(1).optional(),
+  baseBranch: z.string().min(1).optional(),
+  commitTimeoutMs: z.number().int().positive().optional(),
+  color: z.string().nullable().optional(),
+});
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
 // ---- API input schemas ----
 
 /** Schemes accepted for an external tracker URL — it ends up rendered into an anchor href. */
@@ -584,6 +625,8 @@ export const capabilitiesSchema = z.object({
   canUpdate: z.boolean(),
   /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
   canQuit: z.boolean(),
+  /** A native folder picker is available (desktop/native host); gates the "Parcourir" button. */
+  canPickFolder: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

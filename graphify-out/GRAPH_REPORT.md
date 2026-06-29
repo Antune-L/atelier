@@ -1,7 +1,7 @@
-# Graph Report - slot-3  (2026-06-29)
+# Graph Report - slot-2  (2026-06-29)
 
 ## Corpus Check
-- 149 files · ~636,575 words
+- 149 files · ~636,643 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `37e744e1`
+- Built from commit: `8f4a957b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -406,7 +406,7 @@ Cohesion: 0.50
 Nodes (4): Badge(), BadgeProps, BadgeVariant, badgeVariants
 
 ## Knowledge Gaps
-- **374 isolated node(s):** `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES`, `log`, `PaneReader` (+369 more)
+- **374 isolated node(s):** `log`, `PaneReader`, `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES` (+369 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -419,7 +419,7 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Why does `FakeSystemAdapter` connect `Fake System Adapter` to `Community 81`, `Real Adapter GH/Composer`, `Real System Adapter`?**
   _High betweenness centrality (0.033) - this node is a cross-community bridge._
-- **What connects `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES` to the rest of the system?**
+- **What connects `log`, `PaneReader`, `TriageSectionProps` to the rest of the system?**
   _375 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Terminals UI & Notifications` be split into smaller, more focused modules?**
   _Cohesion score 0.08669354838709678 - nodes in this community are weakly interconnected._

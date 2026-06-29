@@ -69,7 +69,7 @@ const projectConfigSchema = z.object({
 
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
-const DEFAULT_MODELS = {
+export const DEFAULT_MODELS = {
   implement: "opus",
   triage: "sonnet",
   implementEffort: "medium",

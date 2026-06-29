@@ -201,7 +201,23 @@ function groupTicketsByFamily(tickets: Ticket[], ticketsById: Map<string, Ticket
     }
     existing.members.push(ticket);
   }
+  // Order each family's members by their explicit implementation order (childOrder), falling back to
+  // createdAt for ties / nulls so the sequence stays deterministic. Done in-place so sortableIds and
+  // the rendered cards share one order.
+  for (const group of familyGroupByKey.values()) {
+    group.members.sort(compareFamilyMembers);
+  }
   return groups;
+}
+
+/** Family member ordering: childOrder ascending, then createdAt ascending (nulls/ties last by time). */
+function compareFamilyMembers(a: Ticket, b: Ticket): number {
+  const orderA = a.childOrder;
+  const orderB = b.childOrder;
+  if (orderA !== null && orderB !== null && orderA !== orderB) return orderA - orderB;
+  if (orderA !== null && orderB === null) return -1;
+  if (orderA === null && orderB !== null) return 1;
+  return a.createdAt - b.createdAt;
 }
 
 /** Flatten a render group back to its ticket ids in render order, for the sortable items list. */
@@ -438,7 +454,14 @@ export function BoardColumn({
                     </span>
                   </div>
                 )}
-                {group.members.map(renderCard)}
+                {group.members.map((member, index) => (
+                  <div key={member.id} className="flex items-start gap-1.5">
+                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
+                      {member.childOrder !== null ? member.childOrder + 1 : index + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">{renderCard(member)}</div>
+                  </div>
+                ))}
               </div>
             );
           })}

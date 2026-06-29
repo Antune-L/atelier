@@ -44,6 +44,7 @@ export interface NewTicket {
   researchPlan?: boolean;
   baseBranch: string | null;
   dependsOn: string | null;
+  childOrder?: number | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementerModel: AgentModel | null;
@@ -116,6 +117,7 @@ export interface TicketPatch {
   project?: string;
   baseBranch?: string | null;
   dependsOn?: string | null;
+  childOrder?: number | null;
   prdMarkdown?: string | null;
   agentSummary?: string | null;
   column?: Column;
@@ -231,8 +233,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -251,6 +253,7 @@ export class Store {
         input.directPush ? 1 : 0,
         input.baseBranch,
         input.dependsOn,
+        input.childOrder ?? null,
         input.model,
         input.effort,
         input.implementerModel,
@@ -351,6 +354,7 @@ export class Store {
     if (patch.project !== undefined) set("project", patch.project);
     if (patch.baseBranch !== undefined) set("base_branch", patch.baseBranch);
     if (patch.dependsOn !== undefined) set("depends_on", patch.dependsOn);
+    if (patch.childOrder !== undefined) set("child_order", patch.childOrder);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
     if (patch.agentSummary !== undefined) set("agent_summary", patch.agentSummary);
     if (patch.column !== undefined) {

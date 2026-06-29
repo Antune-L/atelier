@@ -64,6 +64,8 @@ export interface StartServerOptions {
   onRequestUpdate?: () => void;
   /** Tear down tmux sessions + server and quit the desktop app. */
   onRequestQuit?: () => void;
+  /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
+  onPickFolder?: () => Promise<string | null>;
 }
 
 export interface RunningServer {
@@ -224,6 +226,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
     onRequestQuit: opts.onRequestQuit,
+    pickFolder: opts.onPickFolder,
   });
 
   const app = new Elysia()

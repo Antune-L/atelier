@@ -336,6 +336,37 @@ export const projectInfoSchema = z.object({
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
+/** Full editable shape of a managed project as surfaced by the project management API. */
+export const managedProjectSchema = z.object({
+  key: projectKeySchema,
+  label: z.string().min(1),
+  repoPath: z.string().min(1),
+  baseBranch: baseBranchSchema,
+  commitTimeoutMs: z.number().int().positive(),
+  color: z.string().optional(),
+});
+export type ManagedProject = z.infer<typeof managedProjectSchema>;
+
+/** Payload to create a managed project (the key is generated server-side). */
+export const createProjectSchema = z.object({
+  label: z.string().min(1),
+  repoPath: z.string().min(1),
+  baseBranch: baseBranchSchema,
+  commitTimeoutMs: z.number().int().positive(),
+  color: z.string().optional(),
+});
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+/** Partial patch of a managed project: every create field, all optional. */
+export const updateProjectSchema = z.object({
+  label: z.string().min(1).optional(),
+  repoPath: z.string().min(1).optional(),
+  baseBranch: baseBranchSchema.optional(),
+  commitTimeoutMs: z.number().int().positive().optional(),
+  color: z.string().optional(),
+});
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
 // ---- API input schemas ----
 
 /** Schemes accepted for an external tracker URL — it ends up rendered into an anchor href. */
@@ -584,6 +615,8 @@ export const capabilitiesSchema = z.object({
   canUpdate: z.boolean(),
   /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
   canQuit: z.boolean(),
+  /** Desktop app: the native folder picker (POST /api/native/pick-folder) is wired. */
+  canPickFolder: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

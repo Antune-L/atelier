@@ -581,6 +581,15 @@ export class Store {
     return rows.map(mapProjectRow);
   }
 
+  listProjectKeys(): string[] {
+    const rows = this.db.query("SELECT key FROM projects ORDER BY sort_order ASC, created_at ASC").all();
+    const keys: string[] = [];
+    for (const row of rows) {
+      if (row && typeof row === "object" && "key" in row && typeof row.key === "string") keys.push(row.key);
+    }
+    return keys;
+  }
+
   getProjectRow(key: string): ProjectConfig | undefined {
     const raw = this.db.query("SELECT * FROM projects WHERE key = ?").get(key);
     return raw ? mapProjectRow(raw) : undefined;

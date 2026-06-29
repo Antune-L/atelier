@@ -1,24 +1,24 @@
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import { AGENT_EFFORTS } from "../shared/constants.ts";
-import { getErrorMessage } from "../shared/errors.ts";
+import type { AgentEffort } from "../shared/constants.ts";
+import type { AppSettings } from "../shared/schemas.ts";
+
+import type { Store } from "./db/store.ts";
 
 /**
- * Single source of machine-specific configuration. Everything that used to be
- * hardcoded in `src/shared` (project repo paths, base branches, claude models,
- * slot root) lives in a gitignored `config.json`, validated here at boot.
+ * Single source of machine-specific configuration. Project repo paths, base
+ * branches and claude models now live in the SQLite Store (projects table +
+ * meta-backed app settings); this module delegates project lookups there.
  *
- * Infrastructure knobs (PORT, KANBAN_DB, BACKEND_*) stay in env (see index.ts);
- * this file owns the structured, user-specific config instead.
+ * Infrastructure knobs (PORT, KANBAN_DB, BACKEND_*) stay in env (see index.ts).
  */
 
 export const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const projectConfigSchema = z.object({
+const _projectConfigSchema = z.object({
   label: z.string().min(1),
   repoPath: z.string().min(1),
   /** Base branch and PR target. */
@@ -67,7 +67,7 @@ const projectConfigSchema = z.object({
   worktreePorts: z.array(z.object({ label: z.string().min(1), base: z.number().int().positive() })).optional(),
 });
 
-export type ProjectConfig = z.infer<typeof projectConfigSchema>;
+export type ProjectConfig = z.infer<typeof _projectConfigSchema>;
 
 export const DEFAULT_MODELS = {
   implement: "opus",
@@ -78,86 +78,62 @@ export const DEFAULT_MODELS = {
   implementerEffort: "low",
 } as const;
 
-const configSchema = z.object({
-  projects: z.record(z.string(), projectConfigSchema),
-  models: z
-    .object({
-      /** Model spawned for the implementation session. */
-      implement: z.string().min(1),
-      /** Model used for the read-only feasibility triage. */
-      triage: z.string().min(1),
-      /** Default reasoning effort of the orchestrator session (per-ticket override wins). */
-      implementEffort: z.enum(AGENT_EFFORTS).default("medium"),
-      /** Reasoning effort of the read-only feasibility triage session. */
-      triageEffort: z.enum(AGENT_EFFORTS).default("low"),
-      /** Model of the implementer sub-agent that writes code (claude mode; per-ticket override wins). */
-      implementerModel: z.string().default("opus"),
-      /** Reasoning effort of the implementer sub-agent (claude mode; per-ticket override wins). */
-      implementerEffort: z.enum(AGENT_EFFORTS).default("low"),
-    })
-    .default(DEFAULT_MODELS),
-  /** Root holding the fixed per-slot worktrees (default: <repo>/slots). */
-  slotsRoot: z.string().optional(),
-});
+export const MODELS: {
+  implement: string;
+  triage: string;
+  implementEffort: AgentEffort;
+  triageEffort: AgentEffort;
+  implementerModel: string;
+  implementerEffort: AgentEffort;
+} = { ...DEFAULT_MODELS };
 
-export type AppConfig = z.infer<typeof configSchema>;
-
-const CONFIG_PATH = process.env.KANBAN_CONFIG ?? join(PROJECT_ROOT, "config.json");
-
-function loadConfig(): AppConfig {
-  let raw: string;
-  try {
-    raw = readFileSync(CONFIG_PATH, "utf8");
-  } catch {
-    throw new Error(
-      `[config] fichier introuvable: ${CONFIG_PATH}. Copie config.example.json vers config.json et adapte-le.`,
-    );
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`[config] JSON invalide (${CONFIG_PATH}): ${getErrorMessage(error)}`);
-  }
-  const parsed = configSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new Error(`[config] config invalide (${CONFIG_PATH}): ${parsed.error.message}`);
-  }
-  if (Object.keys(parsed.data.projects).length === 0) {
-    throw new Error(`[config] au moins un projet est requis dans ${CONFIG_PATH}`);
-  }
-  return parsed.data;
+/**
+ * Sync the mutable MODELS registry with the persisted app settings.
+ * NOTE: AppSettings carries no implementerModel/implementerEffort, so those two MODELS keys keep
+ * their DEFAULT_MODELS values (per-ticket overrides still apply at the call sites).
+ */
+export function applyAppSettingsToModels(settings: AppSettings): void {
+  MODELS.implement = settings.implementModel;
+  MODELS.triage = settings.triageModel;
+  MODELS.implementEffort = settings.implementEffort;
+  MODELS.triageEffort = settings.triageEffort;
 }
 
-export const config = loadConfig();
+let _store: Store | undefined;
 
-export const PROJECTS = config.projects;
-export const MODELS = config.models;
+/** Wire the project/app-settings registry to the Store at boot. */
+export function initProjectRegistry(store: Store): void {
+  _store = store;
+  applyAppSettingsToModels(store.getAppSettings());
+}
+
+function requireStore(): Store {
+  if (!_store) throw new Error("[config] project registry non initialisé (appelle initProjectRegistry au boot)");
+  return _store;
+}
+
+// Desktop dev: PROJECT_ROOT resolves inside the bundled launcher (under build/), which
+// `electrobun dev` wipes on every relaunch — a relaunch would delete the slot worktrees out
+// from under live agents. KANBAN_REPO_ROOT (the real checkout, exported by the dev:desktop
+// script and the relauncher) anchors slots at <repoRoot>/slots, outside build/, like `bun run dev`.
+const repoRoot = process.env.KANBAN_REPO_ROOT;
 
 /** Absolute root of the per-slot worktrees. */
-export const SLOTS_ROOT = resolveSlotsRoot(config.slotsRoot);
-
-function resolveSlotsRoot(configured: string | undefined): string {
-  if (configured) return isAbsolute(configured) ? configured : join(PROJECT_ROOT, configured);
-  // Desktop dev: PROJECT_ROOT resolves inside the bundled launcher (under build/), which
-  // `electrobun dev` wipes on every relaunch — a relaunch would delete the slot worktrees out
-  // from under live agents. KANBAN_REPO_ROOT (the real checkout, exported by the dev:desktop
-  // script and the relauncher) anchors slots at <repoRoot>/slots, outside build/, like `bun run dev`.
-  const repoRoot = process.env.KANBAN_REPO_ROOT;
-  return join(repoRoot ?? PROJECT_ROOT, "slots");
-}
+export const SLOTS_ROOT = join(repoRoot ?? PROJECT_ROOT, "slots");
 
 /** Project keys are runtime-defined, so this is a plain string narrowing guard. */
 export type ProjectKey = string;
 
 export function isProjectKey(value: string): value is ProjectKey {
-  return Object.prototype.hasOwnProperty.call(PROJECTS, value);
+  return requireStore().getProjectRow(value) !== undefined;
 }
 
-export const PROJECT_KEYS: ProjectKey[] = Object.keys(PROJECTS);
-
 export function getProject(key: string): ProjectConfig {
-  const project = PROJECTS[key];
+  const project = requireStore().getProjectRow(key);
   if (!project) throw new Error(`projet inconnu: ${key}`);
   return project;
+}
+
+export function listProjectKeys(): string[] {
+  return requireStore().listProjectKeys();
 }

@@ -20,7 +20,7 @@ import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, Revie
 import { agentEffortSchema, agentModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
 import type { AppSettings, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
-import { DEFAULT_MODELS } from "../config.ts";
+import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
 import { mapCommentRow, mapProfileRow, mapProjectRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
@@ -577,6 +577,15 @@ export class Store {
     return rows.map(mapProjectRow);
   }
 
+  listProjectKeys(): string[] {
+    const rows = this.db.query("SELECT key FROM projects ORDER BY sort_order ASC, created_at ASC").all();
+    const keys: string[] = [];
+    for (const row of rows) {
+      if (row && typeof row === "object" && "key" in row && typeof row.key === "string") keys.push(row.key);
+    }
+    return keys;
+  }
+
   getProjectRow(key: string): ProjectConfig | undefined {
     const raw = this.db.query("SELECT * FROM projects WHERE key = ?").get(key);
     return raw ? mapProjectRow(raw) : undefined;
@@ -775,7 +784,9 @@ export class Store {
     if (patch.triageModel !== undefined) this.setMeta(TRIAGE_MODEL_META_KEY, patch.triageModel);
     if (patch.implementEffort !== undefined) this.setMeta(IMPLEMENT_EFFORT_META_KEY, patch.implementEffort);
     if (patch.triageEffort !== undefined) this.setMeta(TRIAGE_EFFORT_META_KEY, patch.triageEffort);
-    return this.getAppSettings();
+    const settings = this.getAppSettings();
+    applyAppSettingsToModels(settings);
+    return settings;
   }
 
   // ---- Meta (first-boot flag) ----

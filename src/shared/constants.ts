@@ -116,6 +116,8 @@ export const TRIAGE_MODEL_META_KEY = "triage_model";
 export const IMPLEMENT_EFFORT_META_KEY = "implement_effort";
 /** `meta` table key holding the persisted default triage reasoning effort. */
 export const TRIAGE_EFFORT_META_KEY = "triage_effort";
+/** `meta` table key flagging that the legacy config.json has been migrated into the Store. */
+export const CONFIG_MIGRATED_META_KEY = "config_migrated";
 
 /** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {

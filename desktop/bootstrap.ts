@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * Desktop bootstrap. MUST run before any static import of the server: `loadConfig()` is evaluated at
- * import time in src/server/config.ts and throws when config.json is missing. So the desktop main
- * (1) ensures a writable config.json + data dir exist under dataRoot, (2) exports the env the server
- * reads at boot, then (3) imports startServer dynamically.
+ * Desktop bootstrap. Runs before importing the server: (1) ensures the writable data dirs exist under
+ * dataRoot (dataRoot itself + uploads/), (2) exports the env the server reads at boot, then (3) imports
+ * startServer dynamically. The server seeds its own config (legacy config.json is migrated into the
+ * SQLite Store on first boot — see src/server/migration.ts), so this no longer seeds a config file.
  */
 
 const CONFIG_FILE = "config.json";
@@ -19,17 +19,14 @@ export interface DesktopRoots {
 }
 
 /**
- * Seed the writable data dir on first launch by copying the bundled config.example.json into
- * dataRoot/config.json (never overwrites an existing user config). Returns the config path.
+ * Ensure the writable data dirs exist on launch (dataRoot + uploads/) and return the config path used
+ * for KANBAN_CONFIG. Does NOT seed a config file: the server migrates any legacy config.json into the
+ * SQLite Store on first boot (see src/server/migration.ts).
  */
 export function ensureConfig(roots: DesktopRoots): string {
   mkdirSync(roots.dataRoot, { recursive: true });
   mkdirSync(join(roots.dataRoot, UPLOADS_DIR), { recursive: true });
-  const configPath = join(roots.dataRoot, CONFIG_FILE);
-  if (!existsSync(configPath)) {
-    copyFileSync(join(roots.resourcesRoot, "config.example.json"), configPath);
-  }
-  return configPath;
+  return join(roots.dataRoot, CONFIG_FILE);
 }
 
 /**

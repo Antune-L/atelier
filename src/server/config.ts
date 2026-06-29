@@ -18,7 +18,7 @@ import type { Store } from "./db/store.ts";
 
 export const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const _projectConfigSchema = z.object({
+export const projectConfigSchema = z.object({
   label: z.string().min(1),
   repoPath: z.string().min(1),
   /** Base branch and PR target. */
@@ -67,7 +67,7 @@ const _projectConfigSchema = z.object({
   worktreePorts: z.array(z.object({ label: z.string().min(1), base: z.number().int().positive() })).optional(),
 });
 
-export type ProjectConfig = z.infer<typeof _projectConfigSchema>;
+export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 
 export const DEFAULT_MODELS = {
   implement: "opus",

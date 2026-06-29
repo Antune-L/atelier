@@ -226,6 +226,11 @@ export class ProjectInUseError extends Error {
 export class Store {
   constructor(private readonly db: Database) {}
 
+  /** Run `fn` inside a single SQLite transaction: commit on return, roll back if it throws. */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)();
+  }
+
   /** Run a `SELECT … AS n` aggregate and return the numeric scalar (0 when absent). */
   private scalar(sql: string, ...params: (string | number)[]): number {
     const row = this.db.query(sql).get(...params);

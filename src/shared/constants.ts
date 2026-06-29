@@ -108,6 +108,17 @@ export const DEFAULT_TRIAGE_LANGUAGE: CommitLanguage = "fr";
 /** `meta` table key holding the persisted feasibility-study (triage) language. */
 export const TRIAGE_LANGUAGE_META_KEY = "triage_language";
 
+/** `meta` table key holding the persisted default implementation-agent model. */
+export const IMPLEMENT_MODEL_META_KEY = "implement_model";
+/** `meta` table key holding the persisted default triage model. */
+export const TRIAGE_MODEL_META_KEY = "triage_model";
+/** `meta` table key holding the persisted default implementation-agent reasoning effort. */
+export const IMPLEMENT_EFFORT_META_KEY = "implement_effort";
+/** `meta` table key holding the persisted default triage reasoning effort. */
+export const TRIAGE_EFFORT_META_KEY = "triage_effort";
+/** `meta` table key flagging that the legacy config.json has been migrated into the Store. */
+export const CONFIG_MIGRATED_META_KEY = "config_migrated";
+
 /** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {
   name: string;

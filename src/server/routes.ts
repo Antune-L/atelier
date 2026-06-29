@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
@@ -9,6 +10,7 @@ import {
   createCleanSchema,
   createCommentSchema,
   createProfileSchema,
+  createProjectSchema,
   createReviewSchema,
   createTerminalBodySchema,
   createTicketSchema,
@@ -20,12 +22,14 @@ import {
   startWorktreeSessionBodySchema,
   updateAppSettingsSchema,
   updateProfileSchema,
+  updateProjectSchema,
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { OpenPr, SplitChildInput, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
+import type { ManagedProject, OpenPr, SplitChildInput, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
 import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
-import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
+import type { ProjectConfig } from "./config.ts";
+import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
@@ -35,6 +39,7 @@ import type { ReformulateManager } from "./agents/reformulateManager.ts";
 import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
+import { ProjectInUseError } from "./db/store.ts";
 import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
@@ -84,6 +89,8 @@ interface RouteDeps {
   onRequestUpdate?: () => void;
   /** Tear down tmux sessions + server and quit the desktop app. */
   onRequestQuit?: () => void;
+  /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
+  pickFolder?: () => Promise<string | null>;
 }
 
 /** Branch the self-update tracks; mismatch blocks the update (no auto-switch). */
@@ -100,6 +107,8 @@ const GIT_QUERY_TIMEOUT_MS = 5_000;
 const DIRECT_PUSH_MERGED_STATE = "MERGED";
 /** Reported PR state for split mothers, whose integration branch carries no real PR to query. */
 const SPLIT_MERGED_STATE = "MERGED";
+/** Length of the generated, opaque project key (nanoid). */
+const PROJECT_KEY_LENGTH = 10;
 /**
  * Strict allowlist: only paths under src/web/ are considered frontend-only.
  * src/shared/** is excluded — it is consumed by the server at runtime, so a change there requires
@@ -110,6 +119,7 @@ function isWebOnlyPath(filePath: string): boolean {
 }
 
 const HTTP_CREATED = 201;
+const HTTP_NO_CONTENT = 204;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
@@ -141,6 +151,18 @@ function cleanDescription(pr: OpenPr, context: string): string {
     "## Contexte fourni",
     context.trim() || "(aucun)",
   ].join("\n");
+}
+
+/** Project the stored config onto the 6-field managed-project DTO (omit color when unset). */
+function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
+  return {
+    key,
+    label: p.label,
+    repoPath: p.repoPath,
+    baseBranch: p.baseBranch,
+    commitTimeoutMs: p.commitTimeoutMs,
+    ...(p.color !== undefined ? { color: p.color } : {}),
+  };
 }
 
 function jsonError(set: { status?: number | string }, status: number, message: string): { error: string } {
@@ -383,7 +405,7 @@ export function createApiRoutes(deps: RouteDeps) {
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () =>
-      PROJECT_KEYS.map((key) => {
+      listProjectKeys().map((key) => {
         const project = getProject(key);
         return {
           key,
@@ -395,6 +417,56 @@ export function createApiRoutes(deps: RouteDeps) {
         };
       }),
     )
+    .get("/projects/manage", () => {
+      const projects: ManagedProject[] = [];
+      for (const key of store.listProjectKeys()) {
+        const row = store.getProjectRow(key);
+        if (!row) continue;
+        projects.push(toManagedProject(key, row));
+      }
+      return projects;
+    })
+    .post("/projects", ({ body, set }) => {
+      const parsed = createProjectSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const { label, repoPath, baseBranch, commitTimeoutMs, color } = parsed.data;
+      const key = nanoid(PROJECT_KEY_LENGTH);
+      const created = store.createProject(key, {
+        label,
+        repoPath,
+        baseBranch,
+        commitTimeoutMs,
+        defaultAutoMerge: false,
+        defaultAddScreenshots: false,
+        ...(color !== undefined ? { color } : {}),
+      });
+      set.status = HTTP_CREATED;
+      return toManagedProject(key, created);
+    })
+    .patch("/projects/:key", ({ params, body, set }) => {
+      if (!store.getProjectRow(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
+      const parsed = updateProjectSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const updated = store.updateProject(params.key, parsed.data);
+      // NOTE(ali): WS project broadcast (hub.pushProjects) lands with the projects-frontend ticket;
+      // the PATCH response returns the fresh project so a refetching client stays consistent.
+      return toManagedProject(params.key, updated);
+    })
+    .delete("/projects/:key", ({ params, set }) => {
+      if (!store.getProjectRow(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
+      try {
+        store.deleteProject(params.key);
+      } catch (error) {
+        if (error instanceof ProjectInUseError) return jsonError(set, HTTP_CONFLICT, error.message);
+        throw error;
+      }
+      return new Response(null, { status: HTTP_NO_CONTENT });
+    })
+    .post("/native/pick-folder", async ({ set }) => {
+      if (!deps.pickFolder) return jsonError(set, HTTP_NOT_FOUND, "sélecteur de dossier indisponible");
+      const path = await deps.pickFolder();
+      return { path: path ?? "" };
+    })
     .get("/projects/:key/prs", async ({ params, set }) => {
       if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
       const project = getProject(params.key);
@@ -421,6 +493,7 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultImplementerEffort: MODELS.implementerEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
       canQuit: deps.onRequestQuit != null,
+      canPickFolder: deps.pickFolder != null,
     }))
     .get("/settings", () => store.getAppSettings())
     .patch("/settings", ({ body, set }) => {

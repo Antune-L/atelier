@@ -225,6 +225,15 @@ async function boot(): Promise<void> {
     repoRoot: canSelfUpdate ? repoRoot : undefined,
     onRequestUpdate: canSelfUpdate ? () => requestUpdate?.() : undefined,
     onRequestQuit: () => quitHandler.run?.(),
+    onPickFolder: async () => {
+      const paths = await Utils.openFileDialog({
+        canChooseFiles: false,
+        canChooseDirectory: true,
+        allowsMultipleSelection: false,
+      });
+      const picked = paths.find((entry) => entry.trim().length > 0);
+      return picked ?? null;
+    },
   });
 
   let tornDown = false;

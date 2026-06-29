@@ -111,6 +111,13 @@ export function stageProgress(stage: Stage): StageProgress {
   return { percent, color };
 }
 
+const TOKEN_FORMATTER = new Intl.NumberFormat("fr-FR");
+
+/** Thousands-grouped token count (e.g. "1 234 567"). Shared by the ticket detail and stats charts. */
+export function formatTokens(n: number): string {
+  return TOKEN_FORMATTER.format(n);
+}
+
 const DATETIME_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
 
 export function formatDateTime(ms: number): string {

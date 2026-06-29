@@ -5,13 +5,13 @@ import type { ProjectInfo } from "@shared/schemas";
 
 import { StatCard } from "@/components/stats/StatCard";
 import {
-  CostChart,
   DurationChart,
   KindChart,
   OutcomeChart,
   ProjectChart,
   SuccessRateChart,
   ThroughputChart,
+  TokensByProjectChart,
 } from "@/components/stats/StatCharts";
 import { Button } from "@/components/ui/button";
 import { useStats } from "@/hooks/useStats";
@@ -98,12 +98,12 @@ export function StatsView({ projects }: StatsViewProps): ReactNode {
         </StatCard>
 
         <StatCard
-          title="Coût"
-          description="Dépense des sessions Claude (Cursor non inclus)"
+          title="Tokens par projet"
+          description="Nombre de tokens par projet"
           projects={projects}
           records={records}
         >
-          {(filtered) => <CostChart records={filtered} projects={projects} />}
+          {(filtered) => <TokensByProjectChart records={filtered} projects={projects} />}
         </StatCard>
       </div>
     </div>

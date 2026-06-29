@@ -28,6 +28,7 @@ import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
+import { migrateConfigJsonIfPresent } from "./migration.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { createSystemAdapter } from "./system/index.ts";
@@ -162,6 +163,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const db = createDatabase(dbPath);
   const store = new Store(db);
+  await migrateConfigJsonIfPresent(store, process.env.KANBAN_CONFIG ?? join(dataRoot, "config.json"));
   initProjectRegistry(store);
   const system = createSystemAdapter();
   const clientHub = new ClientHub(store);

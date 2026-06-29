@@ -1,9 +1,10 @@
-import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, MessageSquarePlus, Search, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { renderMarkdownToSafeHtml } from "@/components/ui/markdown";
+import { usePrdSearch } from "@/hooks/usePrdSearch";
 import {
   SELECTION_BUTTON_GAP_PX,
   compileFeedback,
@@ -21,6 +22,8 @@ interface PrdAnnotatorProps {
   onFeedbackChange?: (feedback: string, hasFeedback: boolean) => void;
   /** Reports whether the annotation composer is open (e.g. to guard escape-to-close). */
   onComposingChange?: (composing: boolean) => void;
+  /** Reports whether the in-app search bar is open (e.g. to guard escape-to-close). */
+  onSearchingChange?: (searching: boolean) => void;
 }
 
 /**
@@ -33,6 +36,7 @@ export function PrdAnnotator({
   actionable,
   onFeedbackChange,
   onComposingChange,
+  onSearchingChange,
 }: PrdAnnotatorProps) {
   const [annotations, setAnnotations] = useState<PrdAnnotation[]>([]);
   const [generalNote, setGeneralNote] = useState("");
@@ -54,6 +58,8 @@ export function PrdAnnotator({
     () => injectAnnotations(baseHtml, annotations, activeId),
     [baseHtml, annotations, activeId],
   );
+
+  const search = usePrdSearch({ contentRef, htmlVersion: html, onSearchingChange });
 
   const reportFeedback = (nextAnnotations: PrdAnnotation[], nextNote: string): void => {
     const hasFeedback = nextAnnotations.length > 0 || nextNote.trim().length > 0;
@@ -141,6 +147,55 @@ export function PrdAnnotator({
         onClick={onContentClick}
         className="relative min-w-0 flex-1 overflow-y-auto px-6 py-4"
       >
+        {search.open && (
+          <div className="sticky top-0 z-20 -mx-6 -mt-4 mb-2 flex justify-end px-6 pt-4">
+            <div className="flex items-center gap-1 rounded-md border bg-card p-1 shadow-md">
+              <Search className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                ref={search.inputRef}
+                value={search.query}
+                onChange={(e) => search.onQueryChange(e.target.value)}
+                onKeyDown={search.onInputKeyDown}
+                placeholder="Rechercher…"
+                className="h-7 w-44 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground"
+              />
+              <span className="w-14 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
+                {search.query && search.total === 0
+                  ? "Aucun"
+                  : `${search.current}/${search.total}`}
+              </span>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                aria-label="Résultat précédent"
+                disabled={search.total === 0}
+                onClick={search.prev}
+              >
+                <ChevronUp className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                aria-label="Résultat suivant"
+                disabled={search.total === 0}
+                onClick={search.next}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7"
+                aria-label="Fermer la recherche"
+                onClick={search.close}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
         {actionable && (
           <p className="mb-3 text-xs text-muted-foreground">
             Sélectionne un passage pour y attacher un retour.

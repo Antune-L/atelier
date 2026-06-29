@@ -157,6 +157,8 @@ export const ticketSchema = z.object({
   baseBranch: z.string().nullable(),
   /** Parent ticket this one stacks on: its worktree forks from the parent's branch and its PR targets it (null = none). */
   dependsOn: z.string().nullable(),
+  /** Implementation order within a split family (0-based); null for non-split-child tickets. */
+  childOrder: z.number().int().nullable(),
   prdMarkdown: z.string().nullable(),
   /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
   agentSummary: z.string().nullable(),
@@ -633,11 +635,21 @@ export const submitFeasibilityArgsSchema = z.object({ results: z.array(feasibili
  * each with a non-empty title + self-contained summary, plus an overall summary. This is the
  * coordinator-facing validation surface (the worker advertises a tolerant mirror via protocol.ts).
  */
+export interface SplitChildInput {
+  title: string;
+  summary: string;
+  children: SplitChildInput[];
+}
+const splitChildSchema: z.ZodType<SplitChildInput> = z.lazy(() =>
+  z.object({
+    title: z.string().min(1),
+    summary: z.string().min(1),
+    children: z.array(splitChildSchema).default([]),
+  }),
+);
 export const submitSplitArgsSchema = z.object({
   summary: z.string(),
-  children: z
-    .array(z.object({ title: z.string().min(1), summary: z.string().min(1) }))
-    .min(1),
+  children: z.array(splitChildSchema).min(1),
 });
 export type SplitResult = z.infer<typeof submitSplitArgsSchema>;
 

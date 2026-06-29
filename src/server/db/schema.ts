@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   direct_push INTEGER NOT NULL DEFAULT 0,
   base_branch TEXT,
   depends_on TEXT,
+  child_order INTEGER,
   prd_markdown TEXT,
   agent_summary TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
@@ -158,6 +159,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "external_url", ddl: "ALTER TABLE tickets ADD COLUMN external_url TEXT" },
   { column: "reformulate_status", ddl: "ALTER TABLE tickets ADD COLUMN reformulate_status TEXT NOT NULL DEFAULT 'none'" },
   { column: "reformulation", ddl: "ALTER TABLE tickets ADD COLUMN reformulation TEXT" },
+  { column: "child_order", ddl: "ALTER TABLE tickets ADD COLUMN child_order INTEGER" },
 ];
 
 /**

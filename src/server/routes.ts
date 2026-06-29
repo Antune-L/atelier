@@ -96,6 +96,8 @@ const UPDATE_RELAUNCH_DELAY_MS = 200;
 const BUILD_ERROR_TAIL = 600;
 /** Timeout for lightweight git introspection commands (rev-parse, diff --name-only). */
 const GIT_QUERY_TIMEOUT_MS = 5_000;
+/** Reported PR state for directPush tickets, which have no real PR to query. */
+const DIRECT_PUSH_MERGED_STATE = "MERGED";
 /**
  * Strict allowlist: only paths under src/web/ are considered frontend-only.
  * src/shared/** is excluded — it is consumed by the server at runtime, so a change there requires
@@ -750,6 +752,12 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.column !== "done" || ticket.kind !== "feature") {
         return jsonError(set, HTTP_CONFLICT, "vérification réservée aux features en colonne Fini");
+      }
+      // directPush tickets push commits straight onto the base branch and never open a PR, so the
+      // work is already merged; skip the PR existence check and the gh query entirely.
+      if (ticket.directPush) {
+        const merged = lifecycle.markMerged(params.id);
+        return { merged: true, state: DIRECT_PUSH_MERGED_STATE, ticket: merged };
       }
       if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");

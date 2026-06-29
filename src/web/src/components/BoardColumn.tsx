@@ -3,6 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  GitBranch,
   GitMerge,
   PanelLeftClose,
   PanelLeftOpen,
@@ -13,7 +14,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { COLUMN_LABELS, COLUMN_SORT_FIELD, type Column } from "@shared/constants";
+import { COLUMN_LABELS, COLUMN_SORT_FIELD, SPLIT_BRANCH_PREFIX, type Column } from "@shared/constants";
 
 import { ColumnActionsMenu } from "@/components/ColumnActionsMenu";
 import { TicketCard, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
@@ -156,6 +157,59 @@ function resolveCheckAllTitle(count: number, busy: boolean): string {
   return `Vérifier le merge de ${count} carte(s)`;
 }
 
+/** A split mother carries a branch under the dedicated split prefix. */
+function isSplitMother(ticket: Ticket): boolean {
+  return ticket.branch !== null && ticket.branch.startsWith(SPLIT_BRANCH_PREFIX);
+}
+
+/**
+ * The split-family key for a ticket: its own id when it is a split mother, the mother's id when it
+ * directly depends on a split mother, or null for non-family / regular dependency tickets.
+ */
+function familyKeyOf(ticket: Ticket, ticketsById: Map<string, Ticket>): string | null {
+  if (isSplitMother(ticket)) return ticket.id;
+  if (ticket.dependsOn === null) return null;
+  const parent = ticketsById.get(ticket.dependsOn);
+  if (parent !== undefined && isSplitMother(parent)) return parent.id;
+  return null;
+}
+
+type RenderGroup =
+  | { kind: "single"; ticket: Ticket }
+  | { kind: "family"; familyKey: string; members: Ticket[] };
+
+/**
+ * Partition an already-sorted, windowed list into ordered render groups: standalone cards keep their
+ * position, while tickets sharing a split-family key collapse into one framed group ordered by first
+ * appearance and preserving member order.
+ */
+function groupTicketsByFamily(tickets: Ticket[], ticketsById: Map<string, Ticket>): RenderGroup[] {
+  const groups: RenderGroup[] = [];
+  const familyGroupByKey = new Map<string, { kind: "family"; familyKey: string; members: Ticket[] }>();
+  for (const ticket of tickets) {
+    const familyKey = familyKeyOf(ticket, ticketsById);
+    if (familyKey === null) {
+      groups.push({ kind: "single", ticket });
+      continue;
+    }
+    const existing = familyGroupByKey.get(familyKey);
+    if (existing === undefined) {
+      const group = { kind: "family" as const, familyKey, members: [ticket] };
+      familyGroupByKey.set(familyKey, group);
+      groups.push(group);
+      continue;
+    }
+    existing.members.push(ticket);
+  }
+  return groups;
+}
+
+/** Flatten a render group back to its ticket ids in render order, for the sortable items list. */
+function groupTicketIds(group: RenderGroup): string[] {
+  if (group.kind === "single") return [group.ticket.id];
+  return group.members.map((member) => member.id);
+}
+
 export function BoardColumn({
   column,
   tickets,
@@ -188,6 +242,15 @@ export function BoardColumn({
 
   // Every column windows its card list so long piles stay responsive.
   const { visibleTickets, sentinelRef, scrollRef, hasMore } = useWindowedTickets(sortedTickets);
+
+  const renderGroups = useMemo(
+    () => groupTicketsByFamily(visibleTickets, ticketsById),
+    [visibleTickets, ticketsById],
+  );
+
+  // The sortable items must list ids in the actual rendered (grouped) order, not the raw sort order,
+  // or dnd-kit's vertical strategy maps drop targets to the wrong indices for framed members.
+  const sortableIds = useMemo(() => renderGroups.flatMap(groupTicketIds), [renderGroups]);
 
   // The card container is both the dnd droppable and the windowing scroll root, so compose both refs.
   const setCardContainerRef = (node: HTMLDivElement | null): void => {
@@ -343,18 +406,42 @@ export function BoardColumn({
           isOver && "bg-accent/70",
         )}
       >
-        <SortableContext items={visibleTickets.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          {visibleTickets.map((ticket) => (
-            <TicketCard
-              key={ticket.id}
-              ticket={ticket}
-              projectLabel={resolveProjectLabel(projects, ticket.project)}
-              projectColor={resolveProjectColor(projects, ticket.project)}
-              parent={ticket.dependsOn ? ticketsById.get(ticket.dependsOn) ?? null : null}
-              onOpen={onOpenTicket}
-              onCheckMerge={onCheckMerge}
-            />
-          ))}
+        <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+          {renderGroups.map((group) => {
+            const renderCard = (ticket: Ticket): React.ReactElement => (
+              <TicketCard
+                key={ticket.id}
+                ticket={ticket}
+                projectLabel={resolveProjectLabel(projects, ticket.project)}
+                projectColor={resolveProjectColor(projects, ticket.project)}
+                parent={ticket.dependsOn ? ticketsById.get(ticket.dependsOn) ?? null : null}
+                onOpen={onOpenTicket}
+                onCheckMerge={onCheckMerge}
+              />
+            );
+
+            if (group.kind === "single") return renderCard(group.ticket);
+
+            const mother = ticketsById.get(group.familyKey);
+            const headerTitle = mother?.title ?? null;
+
+            return (
+              <div
+                key={group.familyKey}
+                className="flex flex-col gap-2 rounded-lg border border-dashed border-border/80 bg-background/30 p-2"
+              >
+                {headerTitle !== null && (
+                  <div className="flex items-center gap-1.5 px-0.5 text-xs font-medium text-muted-foreground">
+                    <GitBranch className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate" title={headerTitle}>
+                      {headerTitle}
+                    </span>
+                  </div>
+                )}
+                {group.members.map(renderCard)}
+              </div>
+            );
+          })}
         </SortableContext>
         {hasMore && <div ref={sentinelRef} className="h-px shrink-0" aria-hidden />}
       </div>

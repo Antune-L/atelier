@@ -31,6 +31,7 @@ import {
 } from "@shared/constants";
 import type { Profile } from "@shared/schemas";
 
+import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import {
@@ -64,12 +65,19 @@ const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({
   label: t.label,
 }));
 
-type SettingsTab = "general" | "agents";
+type SettingsTab = "general" | "projects" | "agents";
 
 const TAB_OPTIONS: TabOption<SettingsTab>[] = [
   { value: "general", label: "Options générales" },
+  { value: "projects", label: "Projets" },
   { value: "agents", label: "Agents d'implémentation" },
 ];
+
+function renderTab(tab: SettingsTab): React.ReactNode {
+  if (tab === "general") return <GeneralSettings />;
+  if (tab === "projects") return <ProjectsSettings />;
+  return <ProfilesSettings />;
+}
 
 interface SettingsModalProps {
   open: boolean;
@@ -94,7 +102,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             aria-label="Sections des réglages"
           />
         </div>
-        {tab === "general" ? <GeneralSettings /> : <ProfilesSettings />}
+        {renderTab(tab)}
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose}>Fermer</Button>
@@ -110,6 +118,12 @@ function GeneralSettings() {
   const [triageLanguage, setTriageLanguage] = useState<CommitLanguage | null>(
     null,
   );
+  const [implementModel, setImplementModel] = useState<AgentModel | null>(null);
+  const [triageModel, setTriageModel] = useState<AgentModel | null>(null);
+  const [implementEffort, setImplementEffort] = useState<AgentEffort | null>(
+    null,
+  );
+  const [triageEffort, setTriageEffort] = useState<AgentEffort | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -122,6 +136,10 @@ function GeneralSettings() {
         if (active) {
           setLanguage((current) => current ?? settings.commitLanguage);
           setTriageLanguage((current) => current ?? settings.triageLanguage);
+          setImplementModel((current) => current ?? settings.implementModel);
+          setTriageModel((current) => current ?? settings.triageModel);
+          setImplementEffort((current) => current ?? settings.implementEffort);
+          setTriageEffort((current) => current ?? settings.triageEffort);
         }
       })
       .catch((e) => {
@@ -156,6 +174,54 @@ function GeneralSettings() {
       await api.updateSettings({ triageLanguage: next });
     } catch (e) {
       setTriageLanguage(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeImplementModel = async (next: AgentModel): Promise<void> => {
+    const previous = implementModel;
+    setImplementModel(next);
+    setError(null);
+    try {
+      await api.updateSettings({ implementModel: next });
+    } catch (e) {
+      setImplementModel(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeImplementEffort = async (next: AgentEffort): Promise<void> => {
+    const previous = implementEffort;
+    setImplementEffort(next);
+    setError(null);
+    try {
+      await api.updateSettings({ implementEffort: next });
+    } catch (e) {
+      setImplementEffort(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeTriageModel = async (next: AgentModel): Promise<void> => {
+    const previous = triageModel;
+    setTriageModel(next);
+    setError(null);
+    try {
+      await api.updateSettings({ triageModel: next });
+    } catch (e) {
+      setTriageModel(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeTriageEffort = async (next: AgentEffort): Promise<void> => {
+    const previous = triageEffort;
+    setTriageEffort(next);
+    setError(null);
+    try {
+      await api.updateSettings({ triageEffort: next });
+    } catch (e) {
+      setTriageEffort(previous);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -202,6 +268,62 @@ function GeneralSettings() {
             value={triageLanguage}
             onChange={(v) => void changeTriageLanguage(v)}
             aria-label="Langue de l'étude de faisabilité"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Modèle d'implémentation</Label>
+          <p className="text-sm text-muted-foreground">
+            Modèle par défaut de la session d'implémentation.
+          </p>
+          <Tabs
+            options={AGENT_MODEL_OPTIONS}
+            value={implementModel}
+            onChange={(v) => void changeImplementModel(v)}
+            aria-label="Modèle d'implémentation"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Effort d'implémentation</Label>
+          <p className="text-sm text-muted-foreground">
+            Effort de raisonnement par défaut de la session d'implémentation.
+          </p>
+          <Tabs
+            options={AGENT_EFFORT_OPTIONS}
+            value={implementEffort}
+            onChange={(v) => void changeImplementEffort(v)}
+            aria-label="Effort d'implémentation"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Modèle de triage</Label>
+          <p className="text-sm text-muted-foreground">
+            Modèle par défaut de l'étude de faisabilité (triage).
+          </p>
+          <Tabs
+            options={AGENT_MODEL_OPTIONS}
+            value={triageModel}
+            onChange={(v) => void changeTriageModel(v)}
+            aria-label="Modèle de triage"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Effort de triage</Label>
+          <p className="text-sm text-muted-foreground">
+            Effort de raisonnement par défaut de l'étude de faisabilité (triage).
+          </p>
+          <Tabs
+            options={AGENT_EFFORT_OPTIONS}
+            value={triageEffort}
+            onChange={(v) => void changeTriageEffort(v)}
+            aria-label="Effort de triage"
           />
         </div>
       </div>

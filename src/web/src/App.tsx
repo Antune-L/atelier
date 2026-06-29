@@ -7,6 +7,7 @@ import { AgentsView } from "@/components/AgentsView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { PrdView } from "@/components/PrdView";
+import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SlotsBar } from "@/components/SlotsBar";
@@ -18,10 +19,11 @@ import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Modal, ModalBody, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
 import { useCapabilities } from "@/hooks/useCapabilities";
-import { useProjects } from "@/hooks/useProjects";
+import { useProjects, useProjectsLoaded } from "@/hooks/useProjects";
 import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
@@ -45,6 +47,8 @@ const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGr
 export function App() {
   useSuppressEscapeBeep();
   const projects = useProjects();
+  const projectsLoaded = useProjectsLoaded();
+  const showOnboarding = projectsLoaded && projects.length === 0;
   const { slots, openTicketId } = useBoard();
   const [view, setView] = useState<SidebarView>("home");
   const [homeView, setHomeView] = useState<HomeView>("kanban");
@@ -218,6 +222,18 @@ export function App() {
         onClose={() => boardStore.closeTicket()}
       />
       <Toaster />
+
+      <Modal open={showOnboarding} onClose={() => {}} disableEscape>
+        <ModalHeader>
+          <ModalTitle>Bienvenue — configurez votre premier projet</ModalTitle>
+        </ModalHeader>
+        <ModalBody>
+          <p className="text-sm text-muted-foreground">
+            Ajoutez au moins un projet pour commencer à créer des tickets.
+          </p>
+          <ProjectsSettings />
+        </ModalBody>
+      </Modal>
 
       {updating && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">

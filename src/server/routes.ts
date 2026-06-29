@@ -29,7 +29,7 @@ import {
 import type { ManagedProject, OpenPr, SplitChildInput, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
 import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
 import type { ProjectConfig } from "./config.ts";
-import { MODELS, PROJECT_KEYS, getProject, isProjectKey } from "./config.ts";
+import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
@@ -405,7 +405,7 @@ export function createApiRoutes(deps: RouteDeps) {
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () =>
-      PROJECT_KEYS.map((key) => {
+      listProjectKeys().map((key) => {
         const project = getProject(key);
         return {
           key,

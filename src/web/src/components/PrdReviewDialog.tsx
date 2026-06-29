@@ -29,6 +29,7 @@ export function PrdReviewDialog({
   const [feedback, setFeedback] = useState("");
   const [hasFeedback, setHasFeedback] = useState(false);
   const [composing, setComposing] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastMarkdown, setLastMarkdown] = useState(prdMarkdown);
 
@@ -39,6 +40,7 @@ export function PrdReviewDialog({
     setFeedback("");
     setHasFeedback(false);
     setComposing(false);
+    setSearching(false);
   }
 
   const onFeedbackChange = (next: string, present: boolean): void => {
@@ -76,7 +78,7 @@ export function PrdReviewDialog({
       open={open}
       onClose={onClose}
       side="center"
-      disableEscape={hasFeedback || composing}
+      disableEscape={hasFeedback || composing || searching}
       className="flex h-[85vh] max-h-[85vh] w-[80vw] max-w-[80vw] flex-col !overflow-hidden"
     >
       <ModalHeader>
@@ -99,6 +101,7 @@ export function PrdReviewDialog({
         actionable={actionable}
         onFeedbackChange={onFeedbackChange}
         onComposingChange={setComposing}
+        onSearchingChange={setSearching}
       />
 
       {actionable && (

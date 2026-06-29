@@ -14,6 +14,7 @@ import {
   triageStatusSchema,
   triageVerdictSchema,
 } from "../../shared/schemas.ts";
+import type { ProjectConfig } from "../config.ts";
 import { isProjectKey } from "../config.ts";
 
 /**
@@ -104,6 +105,31 @@ const profileRowSchema = z.object({
   updated_at: z.number(),
 });
 export type ProfileRow = z.infer<typeof profileRowSchema>;
+
+const projectRowSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  repo_path: z.string(),
+  base_branch: z.string(),
+  commit_timeout_ms: z.number(),
+  default_auto_merge: z.number(),
+  default_add_screenshots: z.number(),
+  color: z.string().nullable(),
+  instructions: z.string().nullable(),
+  worktree_script: z.string().nullable(),
+  run_script: z.string().nullable(),
+  worktree_teardown_script: z.string().nullable(),
+  scripts_typecheck: z.string().nullable(),
+  scripts_lint: z.string().nullable(),
+  scripts_test: z.string().nullable(),
+  worktree_ports: z.string().nullable(),
+  sort_order: z.number(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type ProjectRow = z.infer<typeof projectRowSchema>;
+
+const worktreePortsSchema = z.array(z.object({ label: z.string().min(1), base: z.number().int().positive() }));
 
 const slotRowSchema = z.object({
   id: z.number(),
@@ -230,6 +256,51 @@ export function mapProfileRow(raw: unknown): Profile {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/** Parse the JSON worktree_ports column; null/malformed/invalid → undefined. */
+function parseWorktreePorts(raw: string | null): ProjectConfig["worktreePorts"] {
+  if (raw === null) return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const parsed = worktreePortsSchema.safeParse(json);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Rebuild the optional scripts overrides from the three flat columns; all null → undefined. */
+function buildScripts(row: ProjectRow): ProjectConfig["scripts"] {
+  if (row.scripts_typecheck === null && row.scripts_lint === null && row.scripts_test === null) return undefined;
+  const scripts: NonNullable<ProjectConfig["scripts"]> = {};
+  if (row.scripts_typecheck !== null) scripts.typecheck = row.scripts_typecheck;
+  if (row.scripts_lint !== null) scripts.lint = row.scripts_lint;
+  if (row.scripts_test !== null) scripts.test = row.scripts_test;
+  return scripts;
+}
+
+export function mapProjectRow(raw: unknown): ProjectConfig {
+  const row = projectRowSchema.parse(raw);
+  const project: ProjectConfig = {
+    label: row.label,
+    repoPath: row.repo_path,
+    baseBranch: row.base_branch,
+    defaultAutoMerge: row.default_auto_merge === 1,
+    defaultAddScreenshots: row.default_add_screenshots === 1,
+    commitTimeoutMs: row.commit_timeout_ms,
+  };
+  const scripts = buildScripts(row);
+  if (scripts !== undefined) project.scripts = scripts;
+  if (row.worktree_script !== null) project.worktreeScript = row.worktree_script;
+  if (row.run_script !== null) project.runScript = row.run_script;
+  if (row.worktree_teardown_script !== null) project.worktreeTeardownScript = row.worktree_teardown_script;
+  if (row.instructions !== null) project.instructions = row.instructions;
+  if (row.color !== null) project.color = row.color;
+  const worktreePorts = parseWorktreePorts(row.worktree_ports);
+  if (worktreePorts !== undefined) project.worktreePorts = worktreePorts;
+  return project;
 }
 
 export function mapSlotRow(raw: unknown): Slot {

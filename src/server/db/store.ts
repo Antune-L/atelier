@@ -10,15 +10,20 @@ import {
   CREATED_EVENT,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
+  IMPLEMENT_EFFORT_META_KEY,
+  IMPLEMENT_MODEL_META_KEY,
+  TRIAGE_EFFORT_META_KEY,
   TRIAGE_LANGUAGE_META_KEY,
+  TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
-import { commitLanguageSchema } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
 import type { AppSettings, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
-import type { ProjectKey } from "../config.ts";
+import { DEFAULT_MODELS } from "../config.ts";
+import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapCommentRow, mapProfileRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapCommentRow, mapProfileRow, mapProjectRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -68,6 +73,39 @@ export interface ProfilePatch {
   implementerModel?: AgentModel;
   implementerEffort?: AgentEffort;
   implementer?: Implementer;
+  sortOrder?: number;
+}
+
+export interface NewProject {
+  label: string;
+  repoPath: string;
+  baseBranch: string;
+  commitTimeoutMs: number;
+  defaultAutoMerge: boolean;
+  defaultAddScreenshots: boolean;
+  color?: string;
+  instructions?: string;
+  worktreeScript?: string;
+  runScript?: string;
+  worktreeTeardownScript?: string;
+  scripts?: { typecheck?: string; lint?: string; test?: string };
+  worktreePorts?: { label: string; base: number }[];
+}
+
+export interface ProjectPatch {
+  label?: string;
+  repoPath?: string;
+  baseBranch?: string;
+  commitTimeoutMs?: number;
+  defaultAutoMerge?: boolean;
+  defaultAddScreenshots?: boolean;
+  color?: string | null;
+  instructions?: string | null;
+  worktreeScript?: string | null;
+  runScript?: string | null;
+  worktreeTeardownScript?: string | null;
+  scripts?: { typecheck?: string; lint?: string; test?: string } | null;
+  worktreePorts?: { label: string; base: number }[] | null;
   sortOrder?: number;
 }
 
@@ -169,7 +207,21 @@ class SqlUpdateBuilder {
   }
 
   run(db: Database, table: string, id: SqlBindValue): void {
-    db.query(`UPDATE ${table} SET ${this.fields.join(", ")} WHERE id = ?`).run(...this.values, id);
+    this.runWhere(db, table, "id", id);
+  }
+
+  runWhere(db: Database, table: string, whereColumn: string, whereValue: SqlBindValue): void {
+    db.query(`UPDATE ${table} SET ${this.fields.join(", ")} WHERE ${whereColumn} = ?`).run(...this.values, whereValue);
+  }
+}
+
+/** Thrown when a project still has tickets referencing it; routes map it to HTTP 409. */
+export class ProjectInUseError extends Error {
+  readonly conflict = true;
+
+  constructor(public readonly projectKey: string, public readonly ticketCount: number) {
+    super(`projet « ${projectKey} » référencé par ${ticketCount} ticket(s) : impossible de le supprimer`);
+    this.name = "ProjectInUseError";
   }
 }
 
@@ -522,6 +574,87 @@ export class Store {
     this.db.query("DELETE FROM profiles WHERE id = ?").run(id);
   }
 
+  // ---- Projects ----
+
+  listProjects(): ProjectConfig[] {
+    const rows = this.db.query("SELECT * FROM projects ORDER BY sort_order ASC, created_at ASC").all();
+    return rows.map(mapProjectRow);
+  }
+
+  getProjectRow(key: string): ProjectConfig | undefined {
+    const raw = this.db.query("SELECT * FROM projects WHERE key = ?").get(key);
+    return raw ? mapProjectRow(raw) : undefined;
+  }
+
+  createProject(key: string, data: NewProject): ProjectConfig {
+    const now = Date.now();
+    const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
+    this.db
+      .query(
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        key,
+        data.label,
+        data.repoPath,
+        data.baseBranch,
+        data.commitTimeoutMs,
+        data.defaultAutoMerge ? 1 : 0,
+        data.defaultAddScreenshots ? 1 : 0,
+        data.color ?? null,
+        data.instructions ?? null,
+        data.worktreeScript ?? null,
+        data.runScript ?? null,
+        data.worktreeTeardownScript ?? null,
+        data.scripts?.typecheck ?? null,
+        data.scripts?.lint ?? null,
+        data.scripts?.test ?? null,
+        data.worktreePorts ? JSON.stringify(data.worktreePorts) : null,
+        nextOrder,
+        now,
+        now,
+      );
+    const project = this.getProjectRow(key);
+    if (!project) throw new Error(`createProject: projet ${key} introuvable après insertion`);
+    return project;
+  }
+
+  updateProject(key: string, patch: ProjectPatch): ProjectConfig {
+    const builder = new SqlUpdateBuilder();
+    if (patch.label !== undefined) builder.set("label", patch.label);
+    if (patch.repoPath !== undefined) builder.set("repo_path", patch.repoPath);
+    if (patch.baseBranch !== undefined) builder.set("base_branch", patch.baseBranch);
+    if (patch.commitTimeoutMs !== undefined) builder.set("commit_timeout_ms", patch.commitTimeoutMs);
+    if (patch.defaultAutoMerge !== undefined) builder.set("default_auto_merge", patch.defaultAutoMerge ? 1 : 0);
+    if (patch.defaultAddScreenshots !== undefined) builder.set("default_add_screenshots", patch.defaultAddScreenshots ? 1 : 0);
+    if (patch.color !== undefined) builder.set("color", patch.color);
+    if (patch.instructions !== undefined) builder.set("instructions", patch.instructions);
+    if (patch.worktreeScript !== undefined) builder.set("worktree_script", patch.worktreeScript);
+    if (patch.runScript !== undefined) builder.set("run_script", patch.runScript);
+    if (patch.worktreeTeardownScript !== undefined) builder.set("worktree_teardown_script", patch.worktreeTeardownScript);
+    if (patch.scripts !== undefined) {
+      builder.set("scripts_typecheck", patch.scripts === null ? null : patch.scripts.typecheck ?? null);
+      builder.set("scripts_lint", patch.scripts === null ? null : patch.scripts.lint ?? null);
+      builder.set("scripts_test", patch.scripts === null ? null : patch.scripts.test ?? null);
+    }
+    if (patch.worktreePorts !== undefined) {
+      builder.set("worktree_ports", patch.worktreePorts === null ? null : JSON.stringify(patch.worktreePorts));
+    }
+    if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
+    builder.set("updated_at", Date.now());
+    builder.runWhere(this.db, "projects", "key", key);
+    const project = this.getProjectRow(key);
+    if (!project) throw new Error(`updateProject: projet ${key} introuvable`);
+    return project;
+  }
+
+  deleteProject(key: string): void {
+    const count = this.scalar("SELECT COUNT(*) AS n FROM tickets WHERE project = ?", key);
+    if (count > 0) throw new ProjectInUseError(key, count);
+    this.db.query("DELETE FROM projects WHERE key = ?").run(key);
+  }
+
   // ---- Slots ----
 
   listSlots(): Slot[] {
@@ -621,15 +754,31 @@ export class Store {
     const parsed = commitLanguageSchema.safeParse(stored);
     const storedTriage = this.getMeta(TRIAGE_LANGUAGE_META_KEY);
     const parsedTriage = commitLanguageSchema.safeParse(storedTriage);
+    const storedImplementModel = this.getMeta(IMPLEMENT_MODEL_META_KEY);
+    const parsedImplementModel = agentModelSchema.safeParse(storedImplementModel);
+    const storedTriageModel = this.getMeta(TRIAGE_MODEL_META_KEY);
+    const parsedTriageModel = agentModelSchema.safeParse(storedTriageModel);
+    const storedImplementEffort = this.getMeta(IMPLEMENT_EFFORT_META_KEY);
+    const parsedImplementEffort = agentEffortSchema.safeParse(storedImplementEffort);
+    const storedTriageEffort = this.getMeta(TRIAGE_EFFORT_META_KEY);
+    const parsedTriageEffort = agentEffortSchema.safeParse(storedTriageEffort);
     return {
       commitLanguage: parsed.success ? parsed.data : DEFAULT_COMMIT_LANGUAGE,
       triageLanguage: parsedTriage.success ? parsedTriage.data : DEFAULT_TRIAGE_LANGUAGE,
+      implementModel: parsedImplementModel.success ? parsedImplementModel.data : DEFAULT_MODELS.implement,
+      triageModel: parsedTriageModel.success ? parsedTriageModel.data : DEFAULT_MODELS.triage,
+      implementEffort: parsedImplementEffort.success ? parsedImplementEffort.data : DEFAULT_MODELS.implementEffort,
+      triageEffort: parsedTriageEffort.success ? parsedTriageEffort.data : DEFAULT_MODELS.triageEffort,
     };
   }
 
   updateAppSettings(patch: UpdateAppSettingsInput): AppSettings {
     if (patch.commitLanguage !== undefined) this.setMeta(COMMIT_LANGUAGE_META_KEY, patch.commitLanguage);
     if (patch.triageLanguage !== undefined) this.setMeta(TRIAGE_LANGUAGE_META_KEY, patch.triageLanguage);
+    if (patch.implementModel !== undefined) this.setMeta(IMPLEMENT_MODEL_META_KEY, patch.implementModel);
+    if (patch.triageModel !== undefined) this.setMeta(TRIAGE_MODEL_META_KEY, patch.triageModel);
+    if (patch.implementEffort !== undefined) this.setMeta(IMPLEMENT_EFFORT_META_KEY, patch.implementEffort);
+    if (patch.triageEffort !== undefined) this.setMeta(TRIAGE_EFFORT_META_KEY, patch.triageEffort);
     return this.getAppSettings();
   }
 

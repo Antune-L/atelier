@@ -116,6 +116,28 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS projects (
+  key TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  repo_path TEXT NOT NULL,
+  base_branch TEXT NOT NULL,
+  commit_timeout_ms INTEGER NOT NULL,
+  default_auto_merge INTEGER NOT NULL DEFAULT 0,
+  default_add_screenshots INTEGER NOT NULL DEFAULT 0,
+  color TEXT,
+  instructions TEXT,
+  worktree_script TEXT,
+  run_script TEXT,
+  worktree_teardown_script TEXT,
+  scripts_typecheck TEXT,
+  scripts_lint TEXT,
+  scripts_test TEXT,
+  worktree_ports TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
 `;

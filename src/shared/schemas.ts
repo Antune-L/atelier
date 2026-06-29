@@ -53,12 +53,24 @@ export const appSettingsSchema = z.object({
   commitLanguage: commitLanguageSchema,
   /** Language of the feasibility study (triage) prompt and verdict. */
   triageLanguage: commitLanguageSchema,
+  /** Default model spawned for the implementation session. */
+  implementModel: agentModelSchema,
+  /** Default model used for the read-only feasibility triage. */
+  triageModel: agentModelSchema,
+  /** Default reasoning effort of the implementation session. */
+  implementEffort: agentEffortSchema,
+  /** Default reasoning effort of the read-only feasibility triage. */
+  triageEffort: agentEffortSchema,
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
 export const updateAppSettingsSchema = z.object({
   commitLanguage: commitLanguageSchema.optional(),
   triageLanguage: commitLanguageSchema.optional(),
+  implementModel: agentModelSchema.optional(),
+  triageModel: agentModelSchema.optional(),
+  implementEffort: agentEffortSchema.optional(),
+  triageEffort: agentEffortSchema.optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 

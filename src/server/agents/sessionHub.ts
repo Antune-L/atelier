@@ -43,6 +43,8 @@ export interface SessionStartConfig {
   disallowedTools?: string[];
   /** Programmatic subagents (feasibility scout, implementer…) forwarded to the SDK `agents` option. */
   agents?: Record<string, AgentSubagentDefinition>;
+  /** Skills enabled for the session (SDK `skills` filter): `[]` loads none, a list scopes context to those. */
+  skills?: string[];
 }
 
 export interface SessionToolCall {
@@ -165,6 +167,7 @@ export class SessionHub {
       ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
       ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),
       ...(config.disallowedTools ? { disallowedTools: config.disallowedTools } : {}),
+      ...(config.skills ? { skills: config.skills } : {}),
       ...(config.agents ? { agents: config.agents } : {}),
       onToolCall: (name, args) => this.routeToolCall(config.ticketId, config.slotId, name, args),
       onEvent: (event) => this.handleEvent(config.ticketId, config.slotId, event),

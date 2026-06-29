@@ -40,6 +40,16 @@ const IMPLEMENTER_SAFE_TOOLS = [
   "KillShell",
 ];
 
+/**
+ * Claude Code skills the pipeline contract drives (argus review, regression map, mockup fidelity, PR
+ * feedback triage). Passed as the SDK `skills` filter so only these load into the session context
+ * instead of every host-installed skill; discovery is enabled by the provider's `user` settingSource.
+ */
+const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-review", "minos-pr-feedback"];
+
+/** Read-only triage/feasibility/split sessions invoke no skill; scope context to none. */
+const NO_SKILLS: string[] = [];
+
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */
 const READONLY_TOOLS = ["Read", "Glob", "Grep"];
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
@@ -107,6 +117,7 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     permissionMode: "dontAsk",
     allowedTools: deep ? [...READONLY_TOOLS, "Agent"] : [...READONLY_TOOLS],
     disallowedTools: deep ? READONLY_FANOUT_DISALLOWED : READONLY_PLAIN_DISALLOWED,
+    skills: NO_SKILLS,
   };
   if (!deep) return base;
   return {
@@ -138,6 +149,7 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
     permissionMode: "dontAsk",
     allowedTools: [...READONLY_TOOLS],
     disallowedTools: READONLY_PLAIN_DISALLOWED,
+    skills: NO_SKILLS,
   };
 }
 
@@ -162,6 +174,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
     agents: { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent() },
+    skills: NO_SKILLS,
   };
 }
 
@@ -273,6 +286,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     permissionMode: "dontAsk",
     permissionAllow: [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`],
     allowedTools: IMPLEMENTER_SAFE_TOOLS,
+    skills: CONTRACT_SKILLS,
     agents: {
       implementer: implementerAgent(implementerModel, implementerEffort),
       "pr-fixer": prFixerAgent(implementerModel, implementerEffort),

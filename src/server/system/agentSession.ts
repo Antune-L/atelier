@@ -82,6 +82,12 @@ export interface AgentSessionOptions {
   disallowedTools?: string[];
   /** Programmatic subagents forwarded to the SDK `agents` option. */
   agents?: Record<string, AgentSubagentDefinition>;
+  /**
+   * Skills to enable for the session (SDK `skills` filter). Restricts which discovered skills load into
+   * context — `[]` loads none, omitted loads every discovered skill. Discovery itself is driven by the
+   * provider's `settingSources` (the host `~/.claude/skills` via the `user` source).
+   */
+  skills?: string[];
   /** Routes a worker tool call to the backend; the returned text is what the agent sees. */
   onToolCall(name: WorkerToolName, args: unknown): Promise<AgentSessionToolResult>;
   /** Receives parsed stream events (assistant text, tool uses, turn boundaries, errors). */

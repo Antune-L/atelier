@@ -138,7 +138,10 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     model: opts.model,
     pathToClaudeCodeExecutable: resolveClaudeBinary(),
     systemPrompt: { type: "preset", preset: "claude_code" },
-    settingSources: ["project"],
+    // NOTE: "user" is required so host-installed skills (`~/.claude/skills`, e.g. argus-review) are
+    // discovered — `skills` below is only a filter over what `settingSources` finds, not a source. It
+    // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) into the session.
+    settingSources: ["user", "project"],
     permissionMode: opts.permissionMode,
     mcpServers: { [MCP_SERVER_NAME]: mcpServer },
     allowedTools: [...workerToolNames(), ...(opts.allowedTools ?? [])],
@@ -149,6 +152,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     ...buildSettings(opts.permissionAllow, opts.permissionDeny),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
+    ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };

@@ -29,6 +29,17 @@ The agent sessions run in-process via the Agent SDK — there are no agent bundl
 
 Run `typecheck` + `lint` after edits. There is no `format` script; eslint is the gate.
 
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+
 ## The dry-run safety model — read before running anything
 
 Every external mutation (git, tmux, `gh`, `osascript`, `~/.claude.json`, `bun install`, filesystem) goes through one injectable interface: `src/server/system/types.ts` (`SystemAdapter`). Two implementations:
@@ -37,6 +48,7 @@ Every external mutation (git, tmux, `gh`, `osascript`, `~/.claude.json`, `bun in
 - **`RealSystemAdapter`** — only when `KANBAN_DRY_RUN=0`. Actually runs git/tmux/gh. **Never instantiated in the dev/test path.**
 
 Consequences for working in this repo:
+
 - `bun run dev` is a safe sandbox — it spawns no real `claude`, touches no real repos, never writes `~/.claude.json`, and the app creates **no git commits** in this repo.
 - Live `claude`/tmux spawning is only exercisable under `bun run real` (`KANBAN_DRY_RUN=0`).
 - `KANBAN_SETUP=1` (gated, off by default; requires `KANBAN_DRY_RUN=0`) mutates `~/.claude.json` and each project's `.git/info/exclude`. Don't enable casually.
@@ -68,6 +80,7 @@ templates/       run_composer.sh (the Cursor headless driver)
 ```
 
 **Agent protocol (in-process SDK).** Each ticket runs one `query()` streaming-input session owned by `SessionHub`:
+
 - backend → agent: channel events (`ticket`, `answer`, `prd_validated`, `nudge`, `user_comment`) are injected as user turns via a queue-fed async generator — no connect poll, no `initialized` race (the contract is simply the first turn).
 - agent → backend: the worker tools (`update_stage`, `ask_user`, `submit_prd`, `submit_answer`, `done`, `ready_for_review`, `fail`, plus `submit_triage`/`submit_feasibility`) are an in-process `createSdkMcpServer`; each handler routes to the coordinator. Security posture is `permissionMode: 'dontAsk'` + an explicit allow-list (bash patterns; non-bash safe tools), an in-process PreToolUse hook denying `--no-verify`, and `permissions.deny` for read-only triage/feasibility scouts.
 

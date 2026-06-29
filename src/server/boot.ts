@@ -1,4 +1,4 @@
-import { PROJECT_KEYS, getProject } from "./config.ts";
+import { getProject, listProjectKeys } from "./config.ts";
 
 import type { Store } from "./db/store.ts";
 import { slotPath } from "./agents/slotManager.ts";
@@ -29,7 +29,7 @@ export async function runFirstBootSetup(store: Store, system: SystemAdapter): Pr
 
   const slotPaths = Array.from({ length: SLOT_COUNT }, (_, i) => slotPath(i + 1));
   await system.seedWorkspaceTrust(slotPaths);
-  for (const key of PROJECT_KEYS) {
+  for (const key of listProjectKeys()) {
     await system.excludeAgentFilesInRepo(getProject(key).repoPath);
   }
 

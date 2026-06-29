@@ -21,6 +21,7 @@ import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
 import { runFirstBootSetup } from "./boot.ts";
+import { initProjectRegistry } from "./config.ts";
 import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
 import type { ClientSocket } from "./hub.ts";
@@ -161,6 +162,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const db = createDatabase(dbPath);
   const store = new Store(db);
+  initProjectRegistry(store);
   const system = createSystemAdapter();
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.

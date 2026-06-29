@@ -503,6 +503,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               )}
               {current.stage && (
                 <Badge
+                  key={current.stage}
                   variant={stageVariant(current.stage)}
                   className={cn(
                     isStageAnimated(current.stage) && "animate-pulse",

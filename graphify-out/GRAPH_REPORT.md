@@ -1,7 +1,7 @@
-# Graph Report - slot-1  (2026-06-28)
+# Graph Report - slot-3  (2026-06-29)
 
 ## Corpus Check
-- 149 files · ~636,573 words
+- 149 files · ~636,575 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `040ca8bc`
+- Built from commit: `37e744e1`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -406,7 +406,7 @@ Cohesion: 0.50
 Nodes (4): Badge(), BadgeProps, BadgeVariant, badgeVariants
 
 ## Knowledge Gaps
-- **374 isolated node(s):** `log`, `PaneReader`, `dryRunLog`, `FAKE_OPEN_PRS`, `fakeEncoder` (+369 more)
+- **374 isolated node(s):** `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES`, `log`, `PaneReader` (+369 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -416,10 +416,10 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `Ticket` connect `Ticket Action Panels` to `Contract Building & Slots`, `Terminals UI & Notifications`, `Shared Zod Schemas`, `Board & Sidebar Layout`, `Database Store Operations`, `API Routes & Reformulate`, `Stage Progress & Display`, `Store Types & Agent Knobs`, `DB Row Schemas & Mappers`, `Client Hub & Watchdog`, `Cost & Pricing`, `Workflow View & Lifecycle`, `Agents View & Ticket Cards`, `PRD Review & Markdown`, `User Terminal & Fake IO`, `Board Columns`, `Agent Coordinator Handlers`, `API Client Inputs`, `Ticket Detail & Triage UI`, `Chart Primitives`, `Community 46`, `Stats Hooks & Cards`, `Community 51`, `CSV Parsing`, `Community 63`, `Community 80`, `Community 89`?**
   _High betweenness centrality (0.078) - this node is a cross-community bridge._
 - **Why does `RealSystemAdapter` connect `Real System Adapter` to `Desktop Bootstrap & Menus`, `Claude SDK Provider`, `Real Adapter GH/Composer`, `Community 61`, `Badge Component`?**
-  _High betweenness centrality (0.037) - this node is a cross-community bridge._
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
 - **Why does `FakeSystemAdapter` connect `Fake System Adapter` to `Community 81`, `Real Adapter GH/Composer`, `Real System Adapter`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
-- **What connects `log`, `PaneReader`, `dryRunLog` to the rest of the system?**
+  _High betweenness centrality (0.033) - this node is a cross-community bridge._
+- **What connects `TriageSectionProps`, `CommentRowProps`, `AUTHOR_BADGES` to the rest of the system?**
   _375 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Terminals UI & Notifications` be split into smaller, more focused modules?**
   _Cohesion score 0.08669354838709678 - nodes in this community are weakly interconnected._

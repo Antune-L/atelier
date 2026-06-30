@@ -11,6 +11,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
+import { resolveBaseBranch } from "./baseBranch.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { buildTriageChannelPrompt, buildTriagePlusChannelPrompt } from "./triage.ts";
@@ -87,9 +88,10 @@ export class TriageManager {
       this.cleanup(ticketId);
 
       const triageLanguage = this.store.getAppSettings().triageLanguage;
+      const baseBranch = resolveBaseBranch(ticket, project, this.store);
       const prompt = deep
-        ? buildTriagePlusChannelPrompt(ticket, project, triageLanguage)
-        : buildTriageChannelPrompt(ticket, project, triageLanguage);
+        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage)
+        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage);
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,

@@ -1,16 +1,16 @@
-# Graph Report - kanban-agents  (2026-06-29)
+# Graph Report - slot-2  (2026-06-30)
 
 ## Corpus Check
-- 154 files · ~643,113 words
+- 152 files · ~642,571 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1602 nodes · 3875 edges · 83 communities (69 shown, 14 thin omitted)
+- 1602 nodes · 3878 edges · 83 communities (69 shown, 14 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 27 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `d3abe63a`
+- Built from commit: `35124f8c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -96,7 +96,7 @@
 - [[_COMMUNITY_Community 90|Community 90]]
 
 ## God Nodes (most connected - your core abstractions)
-1. `Store` - 75 edges
+1. `Store` - 76 edges
 2. `Ticket` - 70 edges
 3. `cn()` - 61 edges
 4. `RealSystemAdapter` - 50 edges
@@ -390,7 +390,7 @@ Cohesion: 1.00
 Nodes (4): Dry-run safety model, FakeSystemAdapter, RealSystemAdapter, SystemAdapter (side-effect boundary)
 
 ## Knowledge Gaps
-- **412 isolated node(s):** `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN`, `PATH_PROBE_COMMAND`, `listeners` (+407 more)
+- **412 isolated node(s):** `log`, `DRY_RUN_VERDICT`, `log`, `DRY_RUN_VERDICT`, `TriageSession` (+407 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -398,15 +398,15 @@ Nodes (4): Dry-run safety model, FakeSystemAdapter, RealSystemAdapter, SystemAda
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Ticket` connect `Board Columns` to `Contract Building & Slots`, `User Terminal & Fake IO`, `Desktop Bootstrap & Menus`, `NPM Scripts`, `Fake System Adapter`, `Shared Zod Schemas`, `PR Selection & Slots Bar`, `Ticket Detail & Triage UI`, `Slot Config & Worktree Watch`, `Database Store Operations`, `Stats Hooks & Cards`, `Store Types & Agent Knobs`, `DB Row Schemas & Mappers`, `CSV Parsing`, `Package Manifest`, `Session Hub & Agent Session`, `Agents View & Ticket Cards`?**
-  _High betweenness centrality (0.051) - this node is a cross-community bridge._
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
 - **Why does `Store` connect `Shared Zod Schemas` to `Contract Building & Slots`, `Terminals UI & Notifications`, `Board Columns`, `Cost & Pricing`, `Ticket Action Panels`, `Fake System Adapter`, `Settings & Profiles UI`, `PR Selection & Slots Bar`, `Demo Pipeline Concepts`, `Community 54`, `Community 55`, `File Uploads`, `Stats Charts`, `Community 61`, `Agents View & Ticket Cards`, `Community 63`?**
-  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+  _High betweenness centrality (0.042) - this node is a cross-community bridge._
 - **Why does `Worker tools (update_stage, ask_user, done, ...)` connect `Dev Dependencies` to `Settings & Profiles UI`?**
-  _High betweenness centrality (0.033) - this node is a cross-community bridge._
-- **What connects `menuShortcutActionSchema`, `newWindowEventSchema`, `ELECTROBUN_BIN` to the rest of the system?**
+  _High betweenness centrality (0.034) - this node is a cross-community bridge._
+- **What connects `log`, `DRY_RUN_VERDICT`, `log` to the rest of the system?**
   _415 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Contract Building & Slots` be split into smaller, more focused modules?**
-  _Cohesion score 0.057821782178217825 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05801980198019802 - nodes in this community are weakly interconnected._
 - **Should `Terminals UI & Notifications` be split into smaller, more focused modules?**
   _Cohesion score 0.1380952380952381 - nodes in this community are weakly interconnected._
 - **Should `Desktop Bootstrap & Menus` be split into smaller, more focused modules?**

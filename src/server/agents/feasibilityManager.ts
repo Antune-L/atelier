@@ -131,7 +131,7 @@ export class FeasibilityBatchManager {
     log.info("faisabilité en lot démarrée", { batchId, count: tickets.length, attempt });
 
     try {
-      const prompt = buildFeasibilityBatchContract(tickets, project);
+      const prompt = buildFeasibilityBatchContract(tickets, project, this.store);
       this.sessionHub.start(
         buildFeasibilitySessionConfig({
           batchId,

@@ -12,6 +12,7 @@
 
 import { nanoid } from "nanoid";
 
+import type { Implementer } from "../../shared/constants.ts";
 import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
 import { createLogger } from "../logger.ts";
 import type {
@@ -30,6 +31,8 @@ export interface SessionStartConfig {
   ticketId: string;
   slotId: number;
   cwd: string;
+  /** Which provider drives this session. Triage/split/feasibility builders always pass "claude". */
+  provider: Extract<Implementer, "claude" | "codex">;
   model: string;
   effort: string | null;
   permissionMode: AgentPermissionMode;
@@ -160,6 +163,7 @@ export class SessionHub {
       ticketId: config.ticketId,
       slotId: config.slotId,
       cwd: config.cwd,
+      provider: config.provider,
       model: config.model,
       effort: config.effort,
       permissionMode: config.permissionMode,

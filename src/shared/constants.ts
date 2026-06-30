@@ -76,12 +76,13 @@ export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {
 };
 
 /** Who writes the implementation code (the CLI driver for the implementing stage). */
-export const IMPLEMENTERS = ["claude", "composer"] as const;
+export const IMPLEMENTERS = ["claude", "composer", "codex"] as const;
 export type Implementer = (typeof IMPLEMENTERS)[number];
 
 export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   claude: "Claude",
   composer: "Composer 2.5",
+  codex: "Codex",
 };
 
 /** Language the agent writes commit messages and PR title/description in. */
@@ -185,6 +186,18 @@ export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 /** The PR cleaner runs Opus at low effort: triaging reviewer feedback is light work that doesn't warrant a heavier reasoning budget. */
 export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
+
+/** Reasoning effort levels the Codex SDK's `modelReasoningEffort` accepts (distinct enum from AgentEffort). */
+export const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+export type CodexEffort = (typeof CODEX_EFFORTS)[number];
+
+/**
+ * Fixed v1 default for every `implementer: "codex"` ticket — no per-ticket override, no settings-modal
+ * knob. AgentModel/AgentEffort are Claude-only enums (and Codex's effort enum doesn't even line up:
+ * no "max", has "minimal"), so this stays a standalone constant rather than widening either type.
+ */
+export const CODEX_MODEL = "gpt-5.1-codex-max";
+export const CODEX_EFFORT: CodexEffort = "medium";
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;
@@ -369,10 +382,17 @@ export const FEASIBILITY_AUTO_RELAUNCH_EVENT = "feasibility_auto_relaunch";
 /** Max rows a single CSV import may create (bounds a batch; average ~20). */
 export const IMPORT_MAX_ROWS = 200;
 
+/** Default HTTP/WS port when `process.env.PORT` is unset. Shared so any in-process caller (e.g. the
+ * codexProvider worker-bridge subprocess spawn) can resolve the backend's own address without
+ * duplicating the fallback. */
+export const DEFAULT_PORT = 52817;
+
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 /** Interactive PTY stream for a worktree/user shell tmux pane (output + bidirectional input). */
 export const WS_PATH_TERMINAL = "/ws/terminal";
+/** Internal bridge a codexProvider worker-tool MCP subprocess uses to call back into onToolCall. */
+export const WS_PATH_WORKER_BRIDGE = "/ws/worker-bridge";
 
 /**
  * Default tmux pane size for a detached agent session. Spawn NARROW on purpose: a viewer almost

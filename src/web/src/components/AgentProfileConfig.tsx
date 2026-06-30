@@ -71,7 +71,7 @@ export function AgentProfileConfig({
       p.model === effectiveModel &&
       p.effort === effectiveEffort &&
       p.implementer === implementer &&
-      // Implementer knobs only differentiate profiles in claude mode (ignored under composer).
+      // Implementer knobs only differentiate profiles in claude mode (ignored under composer/codex).
       (implementer !== "claude" ||
         (p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort)),
   );

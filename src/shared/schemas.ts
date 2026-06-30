@@ -603,6 +603,8 @@ export type UploadResult = z.infer<typeof uploadResultSchema>;
 export const capabilitiesSchema = z.object({
   /** The Cursor headless CLI (Composer driver) is installed and authenticated. */
   composerAvailable: z.boolean(),
+  /** The Codex CLI binary is resolvable and authenticated. */
+  codexAvailable: z.boolean(),
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */

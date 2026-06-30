@@ -201,6 +201,10 @@ async function boot(): Promise<void> {
   const bundledClaude = join(roots.resourcesRoot, "claude-bin");
   if (existsSync(bundledClaude)) process.env.KANBAN_CLAUDE_BINARY = bundledClaude;
 
+  // Same reasoning for the Codex SDK's native `codex` binary (electrobun.config copy → codex-bin).
+  const bundledCodex = join(roots.resourcesRoot, "codex-bin");
+  if (existsSync(bundledCodex)) process.env.KANBAN_CODEX_BINARY = bundledCodex;
+
   // 2. Repair the GUI PATH so tmux/claude/gh/git/cursor-agent resolve (macOS Finder launch).
   process.env.PATH = await repairPath();
 

@@ -23,16 +23,27 @@ function commitLanguageDirective(language: CommitLanguage): string {
 }
 
 /**
- * Builds the `implementing` step(s) of the contract. Three modes:
- * Composer delegates code-writing to Cursor headless; a PRD-enabled Claude ticket
- * delegates it to a fresh-context sub-agent (kept separate from the planning
- * session, with the validated PRD as its contract); otherwise Claude implements inline.
+ * Builds the `implementing` step(s) of the contract. Four modes:
+ * Composer delegates code-writing to Cursor headless; Codex implements inline in the SAME session
+ * (no sub-agent — Codex has no Agent tool); a PRD-enabled Claude ticket delegates it to a
+ * fresh-context sub-agent (kept separate from the planning session, with the validated PRD as its
+ * contract); otherwise Claude implements inline via that same sub-agent.
  */
 function buildImplementingSteps(
   ticket: Ticket,
   opts: { composerScriptPath: string },
   prdPath: string,
 ): string[] {
+  if (ticket.implementer === "codex") {
+    if (ticket.prdEnabled) {
+      return [
+        "2. implementing :",
+        `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est ta source de vérité pour l'implémentation.`,
+        "   b. Implémente intégralement la fonctionnalité décrite, dans le worktree courant.",
+      ];
+    }
+    return ["2. implementing : implémente intégralement la fonctionnalité décrite dans la description du ticket, dans le worktree courant."];
+  }
   if (ticket.implementer === "composer") {
     return [
       "2. implementing (délégué à Composer 2.5) :",
@@ -72,6 +83,59 @@ function buildImplementingSteps(
 function buildPlanningStep(ticket: Ticket): string {
   if (ticket.prdEnabled) return "1. planning → submit_prd → (attente prd_validated)";
   return "1. implementing";
+}
+
+/**
+ * Builds the reviewing/anti-régression/fixing steps (3, 3b, 4). Claude delegates each pass to a
+ * fresh-context sub-agent via the named skill (Agent tool); Codex has neither skills nor the Agent
+ * tool, so its session re-reviews its own diff inline instead.
+ */
+function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: string[] }): string[] {
+  const figmaLines = opts.isUi
+    ? [
+        "   + comparaison aux maquettes Figma référencées (récupère TOUJOURS la frame parente de chaque node-id) :",
+        ...opts.figmaUrls.map((url) => `     - ${url}`),
+      ]
+    : [];
+  const loopBudget = ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction";
+  if (ticket.implementer === "codex") {
+    return [
+      "3. reviewing : relis ton propre diff (git diff) comme le ferait un reviewer indépendant et corrige ce que tu trouves.",
+      ...figmaLines,
+      "3b. anti-régression : grep les autres appelants des symboles que tu as modifiés (fonctions, types, routes, composants) et vérifie qu'aucun n'est cassé par ton changement.",
+      `4. fixing : corrige les findings (review + anti-régression), puis relis à nouveau ton diff pour confirmer. ${loopBudget}, sinon fail().`,
+    ];
+  }
+  return [
+    "3. reviewing : lance un subagent à contexte frais (outil Agent) avec le skill `argus` sur ton diff.",
+    ...figmaLines,
+    "3b. anti-régression : lance un AUTRE subagent à contexte frais (outil Agent) avec le skill `regression-check` sur ton diff, en modèle sonnet et effort low. Il cartographie les consommateurs des symboles modifiés et signale les régressions potentielles. C'est un subagent distinct de la review argus.",
+    `4. fixing : corrige les findings (argus + anti-régression), puis relance les DEUX subagents (review argus ET anti-régression) pour confirmer. ${loopBudget}, sinon fail().`,
+  ];
+}
+
+/** Step 5c (optional): mandatory visual diff against referenced mockups, before opening the PR. */
+function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): string {
+  if (!verifyWithMockups) return "";
+  if (ticket.implementer === "codex") {
+    return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images) ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de l'étape 3.";
+  }
+  return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus.";
+}
+
+/** Opening line of the "## Contrat de pipeline" section: names the agent driving the session. */
+function buildSessionFramingLine(ticket: Ticket): string {
+  if (ticket.implementer === "codex") return "Tu es une session Codex autonome. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :";
+  return "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :";
+}
+
+/** The `submit_prd` bullet: Claude hands the validated PRD to a fresh sub-agent; Codex implements inline (no Agent tool). */
+function buildPrdBullet(ticket: Ticket): string {
+  if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
+  if (ticket.implementer === "codex") {
+    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant d'implémenter (ne l'implémente pas dans cette phase de planification).";
+  }
+  return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification).";
 }
 
 /**
@@ -181,12 +245,10 @@ export function buildTicketContract(
     "",
     buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
-    "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `worker` :",
+    buildSessionFramingLine(ticket),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` dès qu'une décision te dépasse (ne devine jamais une exigence critique).",
-    ticket.prdEnabled
-      ? "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification)."
-      : "- (Option PRD désactivée : implémente directement.)",
+    buildPrdBullet(ticket),
     toolDirective,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     commitLanguageDirective(opts.commitLanguage),
@@ -200,17 +262,7 @@ export function buildTicketContract(
     "## Étapes",
     buildPlanningStep(ticket),
     ...implementingSteps,
-    "3. reviewing : lance un subagent à contexte frais (outil Agent) avec le skill `argus` sur ton diff.",
-    ...(isUi
-      ? [
-          "   + comparaison aux maquettes Figma référencées (récupère TOUJOURS la frame parente de chaque node-id) :",
-          ...figmaUrls.map((url) => `     - ${url}`),
-        ]
-      : []),
-    "3b. anti-régression : lance un AUTRE subagent à contexte frais (outil Agent) avec le skill `regression-check` sur ton diff, en modèle sonnet et effort low. Il cartographie les consommateurs des symboles modifiés et signale les régressions potentielles. C'est un subagent distinct de la review argus.",
-    `4. fixing : corrige les findings (argus + anti-régression), puis relance les DEUX subagents (review argus ET anti-régression) pour confirmer. ${
-      ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction"
-    }, sinon fail().`,
+    ...buildReviewSteps(ticket, { isUi, figmaUrls }),
     [
       "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
       `   Note serveur/DB : si tu dois lancer un serveur pour les tests, utilise un port libre (pas le port par défaut de l'app — trouve-en un avec \`lsof\`/\`ss\` ou laisse l'OS en assigner un) et une base de données isolée et vierge (ex. \`/tmp/test-${ticket.id}.db\` — jamais \`kanban.db\` ni \`kanban-real.db\`). Si le schéma DB a changé, initialise/migre la DB de test avant de lancer les tests.`,
@@ -218,9 +270,7 @@ export function buildTicketContract(
     wantsVerify
       ? "5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (via Playwright/navigateur pour un changement frontend, ou en exerçant le code/CLI/endpoint concerné sinon). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie."
       : "",
-    verifyWithMockups
-      ? "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus."
-      : "",
+    buildMockupReviewStep(ticket, verifyWithMockups),
     finalizationStep,
     noPr
       ? ""

@@ -330,6 +330,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return true;
   }
 
+  async checkCodexAvailable(): Promise<boolean> {
+    // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
+    return true;
+  }
+
   async gitCurrentBranch(): Promise<string> {
     return "main";
   }

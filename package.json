@@ -27,6 +27,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.193",
     "@modelcontextprotocol/sdk": "^1.12.0",
+    "@openai/codex-sdk": "^0.142.4",
     "@radix-ui/react-toggle": "^1.1.12",
     "@radix-ui/react-toggle-group": "^1.1.13",
     "@xterm/addon-fit": "^0.10.0",
@@ -41,6 +42,9 @@
     "react-resizable-panels": "^4.11.2",
     "reactflow": "^11.11.4",
     "recharts": "^3.8.1",
+    "zod": "^4"
+  },
+  "overrides": {
     "zod": "^4"
   },
   "devDependencies": {

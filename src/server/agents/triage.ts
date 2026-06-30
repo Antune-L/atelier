@@ -140,6 +140,7 @@ function buildContractConstraintsLines(en: boolean): string[] {
 export function buildTriageChannelPrompt(
   ticket: Ticket,
   project: ProjectConfig,
+  baseBranch: string,
   language: CommitLanguage,
 ): string {
   const en = isEnglish(language);
@@ -148,7 +149,7 @@ export function buildTriageChannelPrompt(
     ? [
         `# Feasibility triage — Ticket ${ticket.id}`,
         "",
-        `Project: ${project.label} (base branch: ${project.baseBranch})`,
+        `Project: ${project.label} (base branch: ${baseBranch})`,
         "",
         "You are a READ-ONLY triage session (only Read, Glob, Grep are available;",
         "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
@@ -156,7 +157,7 @@ export function buildTriageChannelPrompt(
     : [
         `# Triage de faisabilité — Ticket ${ticket.id}`,
         "",
-        `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+        `Projet : ${project.label} (branche de base : ${baseBranch})`,
         "",
         "Tu es une session de triage en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;",
         "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
@@ -200,6 +201,7 @@ export function buildTriageChannelPrompt(
 export function buildTriagePlusChannelPrompt(
   ticket: Ticket,
   project: ProjectConfig,
+  baseBranch: string,
   language: CommitLanguage,
 ): string {
   const en = isEnglish(language);
@@ -208,7 +210,7 @@ export function buildTriagePlusChannelPrompt(
     ? [
         `# Deep feasibility analysis (Analyse +) — Ticket ${ticket.id}`,
         "",
-        `Project: ${project.label} (base branch: ${project.baseBranch})`,
+        `Project: ${project.label} (base branch: ${baseBranch})`,
         "",
         "You are a READ-ONLY deep-analysis session on the real repository (no worktree).",
         "Only Read, Glob, Grep and Task (sub-agents) are available; Edit/Write/Bash are uncallable.",
@@ -217,7 +219,7 @@ export function buildTriagePlusChannelPrompt(
     : [
         `# Analyse + de faisabilité (approfondie) — Ticket ${ticket.id}`,
         "",
-        `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+        `Projet : ${project.label} (branche de base : ${baseBranch})`,
         "",
         "Tu es une session d'analyse approfondie en LECTURE SEULE sur le dépôt réel (pas de worktree).",
         "Seuls Read, Glob, Grep et Task (sous-agents) sont disponibles ; Edit/Write/Bash sont inappelables.",

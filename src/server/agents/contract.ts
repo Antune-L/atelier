@@ -6,6 +6,8 @@ import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
+import type { Store } from "../db/store.ts";
+import { resolveBaseBranch } from "./baseBranch.ts";
 
 /** Max chars of each ticket's description injected into the feasibility list (keeps the prompt bounded). */
 const FEASIBILITY_DESC_MAX = 1200;
@@ -307,10 +309,13 @@ function truncateDescription(description: string): string {
  * aggregates the verdicts, and submits them all at once via the `submit_feasibility` worker tool.
  * Non-readable attachments (e.g. Trello links) are flagged in `questions` with an explicit prefix.
  */
-export function buildFeasibilityBatchContract(tickets: Ticket[], project: ProjectConfig): string {
-  const ticketList = tickets.map(
-    (ticket) => `- [${ticket.id}] ${ticket.title} :: ${truncateDescription(ticket.description)}`,
-  );
+export function buildFeasibilityBatchContract(tickets: Ticket[], project: ProjectConfig, store: Store): string {
+  const ticketList = tickets.map((ticket) => {
+    const resolvedBase = resolveBaseBranch(ticket, project, store);
+    const baseAnnotation =
+      resolvedBase === project.baseBranch ? "" : ` (branche de base : ${resolvedBase})`;
+    return `- [${ticket.id}] ${ticket.title}${baseAnnotation} :: ${truncateDescription(ticket.description)}`;
+  });
 
   const lines: string[] = [
     `# Analyse de faisabilité en lot — ${tickets.length} ticket(s)`,

@@ -120,6 +120,8 @@ export interface NewReview {
   postComments: boolean;
   fixComments: boolean;
   baseBranch?: string | null;
+  model: AgentModel | null;
+  effort: AgentEffort | null;
 }
 
 export interface NewClean {
@@ -329,14 +331,16 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.title,
         input.description,
         input.project,
+        input.model,
+        input.effort,
         input.reviewDepth,
         input.prNumber,
         input.prHeadBranch,

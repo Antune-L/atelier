@@ -25,7 +25,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.193",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.197",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@radix-ui/react-toggle": "^1.1.12",
     "@radix-ui/react-toggle-group": "^1.1.13",

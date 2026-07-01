@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import {
   REVIEW_DEPTHS,
   REVIEW_DEPTH_LABELS,
+  type AgentEffort,
+  type AgentModel,
   type ReviewDepth,
 } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
@@ -14,8 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs } from "@/components/ui/tabs";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
+import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 
 interface ReviewPrPanelProps {
   projects: ProjectInfo[];
@@ -27,9 +33,14 @@ const BASE_BRANCH_AUTO = "";
 
 export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const panel = useProjectPanel(projects);
+  const capabilities = useCapabilities();
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
+  // null = follow the server default; resolve it so the matching tab is highlighted.
+  const [model, setModel] = useState<AgentModel | null>(null);
+  const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const { model: resolvedDefaultModel, effort: resolvedDefaultEffort } = resolveAgentDefaults(capabilities);
   // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
   const [baseBranch, setBaseBranch] = useState<string>(BASE_BRANCH_AUTO);
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -65,6 +76,8 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         fixComments,
         // Auto → null override (each PR keeps its own detected target branch).
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
+        model,
+        effort,
         prs: chosen,
       });
       onClose();
@@ -111,6 +124,26 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
             </option>
           ))}
         </Select>
+      </div>
+
+      <div className="flex flex-col items-start gap-1.5">
+        <Label id="review-model">Modèle</Label>
+        <Tabs
+          options={AGENT_MODEL_OPTIONS}
+          value={model ?? resolvedDefaultModel}
+          onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
+          aria-labelledby="review-model"
+        />
+      </div>
+
+      <div className="flex flex-col items-start gap-1.5">
+        <Label id="review-effort">Réflexion (effort)</Label>
+        <Tabs
+          options={AGENT_EFFORT_OPTIONS}
+          value={effort ?? resolvedDefaultEffort}
+          onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
+          aria-labelledby="review-effort"
+        />
       </div>
 
       <div className="space-y-1">

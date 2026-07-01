@@ -534,6 +534,9 @@ export const createReviewSchema = z.object({
   fixComments: z.boolean().default(false),
   /** Optional override for the argus review base; null means "use each PR's own detected target". */
   baseBranch: baseBranchSchema.nullable().default(null),
+  // Agent model + reasoning effort picked at creation (null = fall back to server config).
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;

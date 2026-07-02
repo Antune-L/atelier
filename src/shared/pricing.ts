@@ -51,6 +51,7 @@ export const PRICING: Record<ModelFamily, FamilyPricing> = {
   opus: familyPricing(15, 75),
   sonnet: familyPricing(3, 15),
   haiku: familyPricing(0.8, 4),
+  fable: familyPricing(10, 50),
 };
 
 /**
@@ -62,6 +63,7 @@ export function normalizeModel(modelId: string): ModelFamily | null {
   if (lower.includes("opus")) return "opus";
   if (lower.includes("sonnet")) return "sonnet";
   if (lower.includes("haiku")) return "haiku";
+  if (lower.includes("fable")) return "fable";
   return null;
 }
 

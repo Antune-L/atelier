@@ -1,7 +1,7 @@
-# Graph Report - slot-1  (2026-07-01)
+# Graph Report - slot-1  (2026-07-02)
 
 ## Corpus Check
-- 152 files · ~642,731 words
+- 152 files · ~642,741 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `46e4c233`
+- Built from commit: `a6fa0c05`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -390,20 +390,20 @@ Cohesion: 1.00
 Nodes (4): Dry-run safety model, FakeSystemAdapter, RealSystemAdapter, SystemAdapter (side-effect boundary)
 
 ## Knowledge Gaps
-- **412 isolated node(s):** `SlotStatus`, `NewProject`, `ProjectPatch`, `SqlBindValue`, `log` (+407 more)
+- **412 isolated node(s):** `ProfileConfig`, `FamilyPricing`, `PRICING`, `warnedUnknownModels`, `TokenBreakdown` (+407 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Store` connect `Shared Zod Schemas` to `Contract Building & Slots`, `Terminals UI & Notifications`, `Board Columns`, `Cost & Pricing`, `Ticket Action Panels`, `Fake System Adapter`, `Settings & Profiles UI`, `PR Selection & Slots Bar`, `Demo Pipeline Concepts`, `Community 54`, `Community 55`, `File Uploads`, `Stats Charts`, `Community 61`, `Agents View & Ticket Cards`, `Community 63`?**
-  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Why does `Ticket` connect `Board Columns` to `Contract Building & Slots`, `User Terminal & Fake IO`, `Desktop Bootstrap & Menus`, `NPM Scripts`, `Fake System Adapter`, `Shared Zod Schemas`, `PR Selection & Slots Bar`, `Ticket Detail & Triage UI`, `Slot Config & Worktree Watch`, `Database Store Operations`, `Stats Hooks & Cards`, `Store Types & Agent Knobs`, `DB Row Schemas & Mappers`, `CSV Parsing`, `Package Manifest`, `Session Hub & Agent Session`, `Agents View & Ticket Cards`?**
-  _High betweenness centrality (0.044) - this node is a cross-community bridge._
+  _High betweenness centrality (0.045) - this node is a cross-community bridge._
 - **Why does `FakeSystemAdapter` connect `Feasibility Batch Management` to `Agent Profile Config`, `PR Selection & Slots Bar`, `Demo Pipeline Concepts`, `API Routes & Reformulate`, `Community 48`, `Live Terminal Views`?**
-  _High betweenness centrality (0.037) - this node is a cross-community bridge._
-- **What connects `SlotStatus`, `NewProject`, `ProjectPatch` to the rest of the system?**
+  _High betweenness centrality (0.041) - this node is a cross-community bridge._
+- **Why does `boot()` connect `Session Hub Transcript` to `Demo Pipeline Concepts`, `Ticket Action Panels`?**
+  _High betweenness centrality (0.038) - this node is a cross-community bridge._
+- **What connects `ProfileConfig`, `FamilyPricing`, `PRICING` to the rest of the system?**
   _415 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Contract Building & Slots` be split into smaller, more focused modules?**
   _Cohesion score 0.05801980198019802 - nodes in this community are weakly interconnected._

@@ -55,7 +55,7 @@ export const COLUMN_SORT_FIELD: Partial<
 };
 
 /** Implementation agent knobs the user can pick per ticket (CLI: --model / --effort). */
-export const AGENT_MODELS = ["opus", "sonnet", "haiku"] as const;
+export const AGENT_MODELS = ["opus", "sonnet", "haiku", "fable"] as const;
 export type AgentModel = (typeof AGENT_MODELS)[number];
 
 export const AGENT_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -65,6 +65,7 @@ export const AGENT_MODEL_LABELS: Record<AgentModel, string> = {
   opus: "O",
   sonnet: "S",
   haiku: "H",
+  fable: "F",
 };
 
 export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {

@@ -260,6 +260,8 @@ function splitChildDefaults(ticket: Ticket): Pick<
   | "implementerModel"
   | "implementerEffort"
   | "implementer"
+  | "codexModel"
+  | "codexEffort"
 > {
   return {
     externalUrl: null,
@@ -278,6 +280,8 @@ function splitChildDefaults(ticket: Ticket): Pick<
     implementerModel: ticket.implementerModel,
     implementerEffort: ticket.implementerEffort,
     implementer: ticket.implementer,
+    codexModel: ticket.codexModel,
+    codexEffort: ticket.codexEffort,
   };
 }
 
@@ -494,6 +498,8 @@ export function createApiRoutes(deps: RouteDeps) {
       defaultEffort: MODELS.implementEffort,
       defaultImplementerModel: MODELS.implementerModel,
       defaultImplementerEffort: MODELS.implementerEffort,
+      defaultCodexModel: MODELS.codexModel,
+      defaultCodexEffort: MODELS.codexEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
       canQuit: deps.onRequestQuit != null,
       canPickFolder: deps.pickFolder != null,
@@ -583,6 +589,8 @@ export function createApiRoutes(deps: RouteDeps) {
         implementerModel: parsed.data.implementerModel,
         implementerEffort: parsed.data.implementerEffort,
         implementer: parsed.data.implementer,
+        codexModel: parsed.data.codexModel,
+        codexEffort: parsed.data.codexEffort,
       });
       // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
       if (!parsed.data.start || isBlocked(ticket, store)) {
@@ -639,6 +647,8 @@ export function createApiRoutes(deps: RouteDeps) {
           implementerModel: input.implementerModel,
           implementerEffort: input.implementerEffort,
           implementer: input.implementer,
+          codexModel: input.codexModel,
+          codexEffort: input.codexEffort,
         });
         hub.pushTicket(ticket);
         created.push(ticket);
@@ -702,6 +712,9 @@ export function createApiRoutes(deps: RouteDeps) {
           reviewDepth: parsed.data.depth,
           postComments: parsed.data.postComments,
           fixComments: parsed.data.fixComments,
+          implementer: parsed.data.implementer,
+          codexModel: parsed.data.codexModel,
+          codexEffort: parsed.data.codexEffort,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it
@@ -729,6 +742,9 @@ export function createApiRoutes(deps: RouteDeps) {
           prNumber: pr.number,
           prHeadBranch: pr.headBranch,
           prUrl: pr.url,
+          implementer: parsed.data.implementer,
+          codexModel: parsed.data.codexModel,
+          codexEffort: parsed.data.codexEffort,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
@@ -754,6 +770,9 @@ export function createApiRoutes(deps: RouteDeps) {
         project: parsed.data.project,
         model: parsed.data.model,
         effort: parsed.data.effort,
+        implementer: parsed.data.implementer,
+        codexModel: parsed.data.codexModel,
+        codexEffort: parsed.data.codexEffort,
       });
       hub.pushTicket(ticket);
       // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).

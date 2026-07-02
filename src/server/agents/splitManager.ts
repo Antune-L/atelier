@@ -67,7 +67,9 @@ export class SplitManager {
     this.cleanup(ticketId);
 
     const splitLanguage = this.store.getAppSettings().triageLanguage;
-    const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage);
+    // A codex ticket splits on Codex too (its knobs), so Claude never enters its pipeline.
+    const driver = ticket.implementer === "codex" ? "codex" : "claude";
+    const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
 
     return new Promise<SplitResult>((resolve, reject) => {
       try {
@@ -75,8 +77,9 @@ export class SplitManager {
           buildSplitSessionConfig({
             ticketId,
             cwd: project.repoPath,
-            model: MODELS.triage,
-            effort: MODELS.triageEffort,
+            model: driver === "codex" ? ticket.codexModel ?? MODELS.codexModel : MODELS.triage,
+            effort: driver === "codex" ? ticket.codexEffort ?? MODELS.codexEffort : MODELS.triageEffort,
+            driver,
           }),
         );
         this.sessionHub.sendEvent(ticketId, { type: "ticket", payload: prompt });

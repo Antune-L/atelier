@@ -1,9 +1,12 @@
 import { z } from "zod";
 
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL } from "../../shared/constants.ts";
 import type { Comment, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentEffortSchema,
   agentModelSchema,
+  codexEffortSchema,
+  codexModelSchema,
   columnSchema,
   implementerSchema,
   kindSchema,
@@ -54,6 +57,8 @@ const ticketRowSchema = z.object({
   effort: z.string().nullable(),
   implementer_model: z.string().nullable(),
   implementer_effort: z.string().nullable(),
+  codex_model: z.string().nullable(),
+  codex_effort: z.string().nullable(),
   implementer: z.string(),
   review_rounds: z.number(),
   nudge_count: z.number(),
@@ -101,6 +106,8 @@ const profileRowSchema = z.object({
   implementer_model: z.string(),
   implementer_effort: z.string(),
   implementer: z.string(),
+  codex_model: z.string(),
+  codex_effort: z.string(),
   sort_order: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
@@ -203,6 +210,10 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     effort: row.effort === null ? null : agentEffortSchema.parse(row.effort),
     implementerModel: row.implementer_model === null ? null : agentModelSchema.parse(row.implementer_model),
     implementerEffort: row.implementer_effort === null ? null : agentEffortSchema.parse(row.implementer_effort),
+    // A retired Codex model id persisted on an old ticket must not brick the whole board: fall back
+    // to "unset" (the current default applies) instead of throwing on the enum parse.
+    codexModel: codexModelSchema.nullable().catch(null).parse(row.codex_model),
+    codexEffort: codexEffortSchema.nullable().catch(null).parse(row.codex_effort),
     implementer: implementerSchema.parse(row.implementer),
     reviewRounds: row.review_rounds,
     sessionId: row.session_id,
@@ -254,6 +265,9 @@ export function mapProfileRow(raw: unknown): Profile {
     implementerModel: agentModelSchema.parse(row.implementer_model),
     implementerEffort: agentEffortSchema.parse(row.implementer_effort),
     implementer: implementerSchema.parse(row.implementer),
+    // Same resilience as tickets: a retired Codex model id falls back to the current default.
+    codexModel: codexModelSchema.catch(DEFAULT_CODEX_MODEL).parse(row.codex_model),
+    codexEffort: codexEffortSchema.catch(DEFAULT_CODEX_EFFORT).parse(row.codex_effort),
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

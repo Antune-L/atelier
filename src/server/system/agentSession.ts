@@ -65,6 +65,17 @@ export interface AgentSessionOptions {
   effort: string | null;
   permissionMode: AgentPermissionMode;
   /**
+   * Structurally read-only session. Codex maps it to its `read-only` sandbox (any write is blocked
+   * by the sandbox itself); Claude sessions enforce read-only via allowed/disallowed tools instead.
+   */
+  readOnly?: boolean;
+  /**
+   * Resume the provider-side conversation with this id instead of starting fresh (auto-reclaim).
+   * Codex maps it to `resumeThread` (threads persist under ~/.codex/sessions); Claude ignores it —
+   * its relaunch semantics deliberately start a fresh transcript.
+   */
+  resumeSessionId?: string;
+  /**
    * Pre-approved permission rules (SDK `settings.permissions.allow`), e.g. `Bash(git commit:*)`. Under
    * `dontAsk` these auto-run and everything else is denied — the bash allowlist the old tmux sessions
    * enforced via `.claude/settings.json`.

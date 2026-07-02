@@ -117,6 +117,8 @@ export function ImportTicketsPanel({
         implementerModel: agent.implementerModel,
         implementerEffort: agent.implementerEffort,
         implementer: agent.implementer,
+        codexModel: agent.codexModel,
+        codexEffort: agent.codexEffort,
         runFeasibility: runFeasibility && !feasibilityDisabled,
       });
       onClose();
@@ -250,11 +252,15 @@ export function ImportTicketsPanel({
           implementerModel={agent.implementerModel}
           implementerEffort={agent.implementerEffort}
           implementer={agent.implementer}
+          codexModel={agent.codexModel}
+          codexEffort={agent.codexEffort}
           onModelChange={agent.setModel}
           onEffortChange={agent.setEffort}
           onImplementerModelChange={agent.setImplementerModel}
           onImplementerEffortChange={agent.setImplementerEffort}
           onImplementerChange={agent.setImplementer}
+          onCodexModelChange={agent.setCodexModel}
+          onCodexEffortChange={agent.setCodexEffort}
           onApplyProfile={agent.applyProfile}
         />
       </div>

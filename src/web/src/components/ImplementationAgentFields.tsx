@@ -5,9 +5,12 @@ import {
   IMPLEMENTER_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type Implementer,
 } from "@shared/constants";
 
+import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Label } from "@/components/ui/input";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -29,11 +32,15 @@ interface ImplementationAgentFieldsProps {
   implementerModel: AgentModel | null;
   implementerEffort: AgentEffort | null;
   implementer: Implementer;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
   onImplementerModelChange: (model: AgentModel | null) => void;
   onImplementerEffortChange: (effort: AgentEffort | null) => void;
   onImplementerChange: (implementer: Implementer) => void;
+  onCodexModelChange: (model: CodexModel | null) => void;
+  onCodexEffortChange: (effort: CodexEffort | null) => void;
 }
 
 /** Per-ticket implementation-agent knobs (orchestrator + implementer sub-agent) as segmented controls. */
@@ -43,11 +50,15 @@ export function ImplementationAgentFields({
   implementerModel,
   implementerEffort,
   implementer,
+  codexModel,
+  codexEffort,
   onModelChange,
   onEffortChange,
   onImplementerModelChange,
   onImplementerEffortChange,
   onImplementerChange,
+  onCodexModelChange,
+  onCodexEffortChange,
 }: ImplementationAgentFieldsProps) {
   const capabilities = useCapabilities();
   const { composerAvailable, codexAvailable } = capabilities;
@@ -143,11 +154,19 @@ export function ImplementationAgentFields({
         </p>
       )}
       {implementer === "codex" && (
-        <p className="text-xs text-muted-foreground">
-          {codexAvailable
-            ? "Codex pilote la session de bout en bout (planification, implémentation, review, tests, PR) — Claude n'intervient pas."
-            : "Codex non détecté : installe le CLI puis authentifie-toi (CODEX_API_KEY ou `codex login`) (sinon le lancement échouera)."}
-        </p>
+        <>
+          <CodexAgentFields
+            codexModel={codexModel}
+            codexEffort={codexEffort}
+            onCodexModelChange={onCodexModelChange}
+            onCodexEffortChange={onCodexEffortChange}
+          />
+          <p className="text-xs text-muted-foreground">
+            {codexAvailable
+              ? "Codex pilote la session de bout en bout (planification, implémentation, review, tests, PR) — Claude n'intervient pas."
+              : "Codex non détecté : installe le CLI puis authentifie-toi (CODEX_API_KEY ou `codex login`) (sinon le lancement échouera)."}
+          </p>
+        </>
       )}
     </div>
   );

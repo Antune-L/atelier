@@ -130,7 +130,23 @@ export interface ProfileConfig {
   /** Implementer sub-agent reasoning effort (claude mode only). */
   implementerEffort: AgentEffort;
   implementer: Implementer;
+  /** Codex session model (codex mode only). */
+  codexModel: CodexModel;
+  /** Codex session reasoning effort (codex mode only). */
+  codexEffort: CodexEffort;
 }
+
+/** The built-in Codex preset, also seeded once into pre-existing DBs (see schema.ts). */
+export const CODEX_SEED_PROFILE: ProfileConfig = {
+  name: "Codex",
+  model: "opus",
+  effort: "medium",
+  implementerModel: "opus",
+  implementerEffort: "low",
+  implementer: "codex",
+  codexModel: "gpt-5.5",
+  codexEffort: "high",
+};
 
 /** Seeded into the DB on first boot; editable afterwards via the settings modal. */
 export const DEFAULT_PROFILES: ProfileConfig[] = [
@@ -141,6 +157,8 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Debug -",
@@ -149,6 +167,8 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Debug +",
@@ -157,6 +177,8 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Délégation",
@@ -165,7 +187,10 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "composer",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
+  CODEX_SEED_PROFILE,
 ];
 
 /** Sentinel "profile" shown when a ticket's knobs match no stored profile. */
@@ -187,17 +212,40 @@ export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
 
-/** Reasoning effort levels the Codex SDK's `modelReasoningEffort` accepts (distinct enum from AgentEffort). */
-export const CODEX_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"] as const;
-export type CodexEffort = (typeof CODEX_EFFORTS)[number];
+/** Codex models pickable per ticket (kept in sync with developers.openai.com/codex/models). */
+export const CODEX_MODELS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
+export type CodexModel = (typeof CODEX_MODELS)[number];
+
+export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
+  "gpt-5.5": "5.5",
+  "gpt-5.4": "5.4",
+  "gpt-5.4-mini": "5.4 mini",
+};
 
 /**
- * Fixed v1 default for every `implementer: "codex"` ticket — no per-ticket override, no settings-modal
- * knob. AgentModel/AgentEffort are Claude-only enums (and Codex's effort enum doesn't even line up:
- * no "max", has "minimal"), so this stays a standalone constant rather than widening either type.
+ * Reasoning effort levels exposed for Codex (distinct enum from AgentEffort — no "max"). Bounded on
+ * both ends by what current codex models accept: "minimal" is rejected outright (API 400,
+ * unsupported_value) and "xhigh" isn't supported by every model (gpt-5.4-mini tops out at high).
  */
-export const CODEX_MODEL = "gpt-5.1-codex-max";
-export const CODEX_EFFORT: CodexEffort = "medium";
+export const CODEX_EFFORTS = ["low", "medium", "high"] as const;
+export type CodexEffort = (typeof CODEX_EFFORTS)[number];
+
+export const CODEX_EFFORT_LABELS: Record<CodexEffort, string> = {
+  low: "L",
+  medium: "M",
+  high: "H",
+};
+
+/** Fallback Codex knobs when neither the ticket nor the persisted app settings pin them. */
+export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-5.5";
+export const DEFAULT_CODEX_EFFORT: CodexEffort = "medium";
+
+/** `meta` table key holding the persisted default Codex model. */
+export const CODEX_MODEL_META_KEY = "codex_model";
+/** `meta` table key holding the persisted default Codex reasoning effort. */
+export const CODEX_EFFORT_META_KEY = "codex_effort";
+/** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
+export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;

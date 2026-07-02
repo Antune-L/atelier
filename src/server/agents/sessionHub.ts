@@ -36,6 +36,10 @@ export interface SessionStartConfig {
   model: string;
   effort: string | null;
   permissionMode: AgentPermissionMode;
+  /** Structurally read-only session (Codex read-only sandbox; Claude enforces via tool gating). */
+  readOnly?: boolean;
+  /** Resume the provider-side conversation with this id (auto-reclaim; Codex only). */
+  resumeSessionId?: string;
   /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
   permissionAllow?: string[];
   /** Denied permission rules (SDK `settings.permissions.deny`) — e.g. `Agent(general-purpose)` for read-only scouts. */
@@ -167,6 +171,8 @@ export class SessionHub {
       model: config.model,
       effort: config.effort,
       permissionMode: config.permissionMode,
+      ...(config.readOnly !== undefined ? { readOnly: config.readOnly } : {}),
+      ...(config.resumeSessionId ? { resumeSessionId: config.resumeSessionId } : {}),
       ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
       ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
       ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),

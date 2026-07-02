@@ -3,11 +3,13 @@ import type { z } from "zod";
 import {
   AGENT_EFFORT_LABELS,
   AGENT_MODEL_LABELS,
+  CODEX_EFFORT_LABELS,
+  CODEX_MODEL_LABELS,
   IMPLEMENTER_LABELS,
   REVIEW_DEPTH_LABELS,
 } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
-import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema } from "@shared/schemas";
 
 import { useCapabilities } from "@/hooks/useCapabilities";
 
@@ -46,7 +48,10 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
     defaultEffort,
     defaultImplementerModel,
     defaultImplementerEffort,
+    defaultCodexModel,
+    defaultCodexEffort,
   } = useCapabilities();
+  const isCodex = ticket.implementer === "codex";
 
   // A null per-ticket knob falls back to the configured default: show it explicitly.
   const modelValue = labelWithDefault(
@@ -73,6 +78,18 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
     agentEffortSchema,
     AGENT_EFFORT_LABELS,
   );
+  const codexModelValue = labelWithDefault(
+    ticket.codexModel,
+    defaultCodexModel,
+    codexModelSchema,
+    CODEX_MODEL_LABELS,
+  );
+  const codexEffortValue = labelWithDefault(
+    ticket.codexEffort,
+    defaultCodexEffort,
+    codexEffortSchema,
+    CODEX_EFFORT_LABELS,
+  );
 
   return (
     <details className="rounded-md border bg-muted/30 p-3">
@@ -80,8 +97,13 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
         Options de création
       </summary>
       <dl className="mt-3 space-y-2">
-        {/* A feature ticket on Codex ignores the orchestrator model/effort knobs entirely (fixed Codex default instead — see CODEX_MODEL/CODEX_EFFORT); showing them here would misleadingly imply Claude drove the session. */}
-        {!(ticket.kind === "feature" && ticket.implementer === "codex") && (
+        {/* A Codex ticket ignores the Claude orchestrator knobs: its own model/effort pair drives the session. */}
+        {isCodex ? (
+          <>
+            <Row label="Modèle (Codex)" value={codexModelValue} />
+            <Row label="Effort (Codex)" value={codexEffortValue} />
+          </>
+        ) : (
           <>
             <Row label="Modèle (orchestrateur)" value={modelValue} />
             <Row label="Effort (orchestrateur)" value={effortValue} />

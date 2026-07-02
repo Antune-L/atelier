@@ -38,6 +38,8 @@ import {
   TERMINAL_STAGES,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type Column,
   type Implementer,
 } from "@shared/constants";
@@ -340,6 +342,14 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
+  const setCodexModel = (codexModel: CodexModel | null): void => {
+    void api.updateTicket(current.id, { codexModel }).catch(() => undefined);
+  };
+
+  const setCodexEffort = (codexEffort: CodexEffort | null): void => {
+    void api.updateTicket(current.id, { codexEffort }).catch(() => undefined);
+  };
+
   // Apply a whole profile in a single PATCH so the knobs never land in an intermediate state.
   const applyProfile = (config: {
     model: AgentModel;
@@ -347,6 +357,8 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     implementerModel: AgentModel;
     implementerEffort: AgentEffort;
     implementer: Implementer;
+    codexModel: CodexModel;
+    codexEffort: CodexEffort;
   }): void => {
     void api.updateTicket(current.id, config).catch(() => undefined);
   };
@@ -1094,11 +1106,15 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     implementerModel={current.implementerModel}
                     implementerEffort={current.implementerEffort}
                     implementer={current.implementer}
+                    codexModel={current.codexModel}
+                    codexEffort={current.codexEffort}
                     onModelChange={setAgentModel}
                     onEffortChange={setAgentEffort}
                     onImplementerModelChange={setImplementerModel}
                     onImplementerEffortChange={setImplementerEffort}
                     onImplementerChange={setImplementer}
+                    onCodexModelChange={setCodexModel}
+                    onCodexEffortChange={setCodexEffort}
                     onApplyProfile={applyProfile}
                   />
                   <div className="mt-3">

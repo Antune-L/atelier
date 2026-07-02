@@ -11,6 +11,8 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultEffort: "",
   defaultImplementerModel: "",
   defaultImplementerEffort: "",
+  defaultCodexModel: "",
+  defaultCodexEffort: "",
   canUpdate: false,
   canQuit: false,
   canPickFolder: false,

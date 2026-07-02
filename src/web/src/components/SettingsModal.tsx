@@ -26,6 +26,8 @@ import {
   IMPLEMENTER_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type CommitLanguage,
   type Implementer,
 } from "@shared/constants";
@@ -43,7 +45,7 @@ import {
 } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS, CODEX_EFFORT_OPTIONS, CODEX_MODEL_OPTIONS } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 import { useTheme } from "@/hooks/useTheme";
@@ -124,6 +126,8 @@ function GeneralSettings() {
     null,
   );
   const [triageEffort, setTriageEffort] = useState<AgentEffort | null>(null);
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,6 +144,8 @@ function GeneralSettings() {
           setTriageModel((current) => current ?? settings.triageModel);
           setImplementEffort((current) => current ?? settings.implementEffort);
           setTriageEffort((current) => current ?? settings.triageEffort);
+          setCodexModel((current) => current ?? settings.codexModel);
+          setCodexEffort((current) => current ?? settings.codexEffort);
         }
       })
       .catch((e) => {
@@ -222,6 +228,30 @@ function GeneralSettings() {
       await api.updateSettings({ triageEffort: next });
     } catch (e) {
       setTriageEffort(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeCodexModel = async (next: CodexModel): Promise<void> => {
+    const previous = codexModel;
+    setCodexModel(next);
+    setError(null);
+    try {
+      await api.updateSettings({ codexModel: next });
+    } catch (e) {
+      setCodexModel(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeCodexEffort = async (next: CodexEffort): Promise<void> => {
+    const previous = codexEffort;
+    setCodexEffort(next);
+    setError(null);
+    try {
+      await api.updateSettings({ codexEffort: next });
+    } catch (e) {
+      setCodexEffort(previous);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -327,6 +357,34 @@ function GeneralSettings() {
           />
         </div>
       </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Modèle Codex</Label>
+          <p className="text-sm text-muted-foreground">
+            Modèle par défaut des sessions pilotées par Codex.
+          </p>
+          <Tabs
+            options={CODEX_MODEL_OPTIONS}
+            value={codexModel}
+            onChange={(v) => void changeCodexModel(v)}
+            aria-label="Modèle Codex"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Effort Codex</Label>
+          <p className="text-sm text-muted-foreground">
+            Effort de raisonnement par défaut des sessions pilotées par Codex.
+          </p>
+          <Tabs
+            options={CODEX_EFFORT_OPTIONS}
+            value={codexEffort}
+            onChange={(v) => void changeCodexEffort(v)}
+            aria-label="Effort Codex"
+          />
+        </div>
+      </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
@@ -365,6 +423,8 @@ function ProfilesSettings() {
         implementerModel: "opus",
         implementerEffort: "low",
         implementer: "claude",
+        codexModel: "gpt-5.5",
+        codexEffort: "medium",
       });
       await refreshProfiles();
     } catch (e) {
@@ -528,6 +588,10 @@ function ProfileRow({
   const [implementer, setImplementer] = useState<Implementer>(
     profile.implementer,
   );
+  const [codexModel, setCodexModel] = useState<CodexModel>(profile.codexModel);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort>(
+    profile.codexEffort,
+  );
   const [busy, setBusy] = useState(false);
 
   const dirty =
@@ -536,7 +600,9 @@ function ProfileRow({
     effort !== profile.effort ||
     implementerModel !== profile.implementerModel ||
     implementerEffort !== profile.implementerEffort ||
-    implementer !== profile.implementer;
+    implementer !== profile.implementer ||
+    codexModel !== profile.codexModel ||
+    codexEffort !== profile.codexEffort;
 
   const save = async (): Promise<void> => {
     onError(null);
@@ -549,6 +615,8 @@ function ProfileRow({
         implementerModel,
         implementerEffort,
         implementer,
+        codexModel,
+        codexEffort,
       });
       await refreshProfiles();
     } catch (e) {
@@ -660,6 +728,26 @@ function ProfileRow({
                 />
               </Field>
             </div>
+          )}
+          {implementer === "codex" && (
+            <>
+              <Field label="Modèle (Codex)">
+                <Tabs
+                  options={CODEX_MODEL_OPTIONS}
+                  value={codexModel}
+                  onChange={setCodexModel}
+                  aria-label="Modèle Codex"
+                />
+              </Field>
+              <Field label="Effort (Codex)">
+                <Tabs
+                  options={CODEX_EFFORT_OPTIONS}
+                  value={codexEffort}
+                  onChange={setCodexEffort}
+                  aria-label="Effort Codex"
+                />
+              </Field>
+            </>
           )}
         </div>
       </details>

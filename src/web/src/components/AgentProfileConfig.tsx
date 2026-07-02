@@ -5,6 +5,8 @@ import {
   CUSTOM_PROFILE_LABEL,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type Implementer,
 } from "@shared/constants";
 
@@ -21,11 +23,15 @@ interface AgentProfileConfigProps {
   implementerModel: AgentModel | null;
   implementerEffort: AgentEffort | null;
   implementer: Implementer;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
   onImplementerModelChange: (model: AgentModel | null) => void;
   onImplementerEffortChange: (effort: AgentEffort | null) => void;
   onImplementerChange: (implementer: Implementer) => void;
+  onCodexModelChange: (model: CodexModel | null) => void;
+  onCodexEffortChange: (effort: CodexEffort | null) => void;
   /** Apply a whole profile at once (lets a single call site batch all knobs). */
   onApplyProfile: (config: {
     model: AgentModel;
@@ -33,6 +39,8 @@ interface AgentProfileConfigProps {
     implementerModel: AgentModel;
     implementerEffort: AgentEffort;
     implementer: Implementer;
+    codexModel: CodexModel;
+    codexEffort: CodexEffort;
   }) => void;
 }
 
@@ -47,11 +55,15 @@ export function AgentProfileConfig({
   implementerModel,
   implementerEffort,
   implementer,
+  codexModel,
+  codexEffort,
   onModelChange,
   onEffortChange,
   onImplementerModelChange,
   onImplementerEffortChange,
   onImplementerChange,
+  onCodexModelChange,
+  onCodexEffortChange,
   onApplyProfile,
 }: AgentProfileConfigProps) {
   const profiles = useProfiles();
@@ -65,16 +77,22 @@ export function AgentProfileConfig({
   const effectiveEffort = effort ?? defaults.effort;
   const effectiveImplementerModel = implementerModel ?? defaults.implementerModel;
   const effectiveImplementerEffort = implementerEffort ?? defaults.implementerEffort;
+  const effectiveCodexModel = codexModel ?? defaults.codexModel;
+  const effectiveCodexEffort = codexEffort ?? defaults.codexEffort;
 
-  const selectedProfile = profiles.find(
-    (p) =>
-      p.model === effectiveModel &&
-      p.effort === effectiveEffort &&
-      p.implementer === implementer &&
-      // Implementer knobs only differentiate profiles in claude mode (ignored under composer/codex).
-      (implementer !== "claude" ||
-        (p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort)),
-  );
+  const selectedProfile = profiles.find((p) => {
+    if (p.implementer !== implementer) return false;
+    // Codex mode: the Claude orchestrator/implementer knobs are ignored, only the Codex pair counts.
+    if (implementer === "codex") {
+      return p.codexModel === effectiveCodexModel && p.codexEffort === effectiveCodexEffort;
+    }
+    if (p.model !== effectiveModel || p.effort !== effectiveEffort) return false;
+    // Implementer knobs only differentiate profiles in claude mode (ignored under composer).
+    return (
+      implementer !== "claude" ||
+      (p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort)
+    );
+  });
   const selectedId = selectedProfile?.id ?? CUSTOM_PROFILE_ID;
 
   const onSelectProfile = (value: string): void => {
@@ -86,6 +104,8 @@ export function AgentProfileConfig({
       implementerModel: profile.implementerModel,
       implementerEffort: profile.implementerEffort,
       implementer: profile.implementer,
+      codexModel: profile.codexModel,
+      codexEffort: profile.codexEffort,
     });
   };
 
@@ -116,11 +136,15 @@ export function AgentProfileConfig({
             implementerModel={implementerModel}
             implementerEffort={implementerEffort}
             implementer={implementer}
+            codexModel={codexModel}
+            codexEffort={codexEffort}
             onModelChange={onModelChange}
             onEffortChange={onEffortChange}
             onImplementerModelChange={onImplementerModelChange}
             onImplementerEffortChange={onImplementerEffortChange}
             onImplementerChange={onImplementerChange}
+            onCodexModelChange={onCodexModelChange}
+            onCodexEffortChange={onCodexEffortChange}
           />
         </div>
       </details>

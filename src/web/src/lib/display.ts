@@ -3,9 +3,15 @@ import {
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  CODEX_EFFORTS,
+  CODEX_EFFORT_LABELS,
+  CODEX_MODELS,
+  CODEX_MODEL_LABELS,
   STAGE_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type Stage,
 } from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
@@ -24,6 +30,18 @@ export const AGENT_MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m)
 export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
   value: e,
   label: AGENT_EFFORT_LABELS[e],
+}));
+
+/** Ready-made segmented-control options for the Codex model picker. */
+export const CODEX_MODEL_OPTIONS: TabOption<CodexModel>[] = CODEX_MODELS.map((m) => ({
+  value: m,
+  label: CODEX_MODEL_LABELS[m],
+}));
+
+/** Ready-made segmented-control options for the Codex reasoning-effort picker. */
+export const CODEX_EFFORT_OPTIONS: TabOption<CodexEffort>[] = CODEX_EFFORTS.map((e) => ({
+  value: e,
+  label: CODEX_EFFORT_LABELS[e],
 }));
 
 const TRIAGE_VERDICT_VARIANTS: Record<TriageVerdict, BadgeVariant> = {

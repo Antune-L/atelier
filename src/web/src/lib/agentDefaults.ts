@@ -1,6 +1,6 @@
-import type { AgentEffort, AgentModel } from "@shared/constants";
+import type { AgentEffort, AgentModel, CodexEffort, CodexModel } from "@shared/constants";
 import type { Capabilities } from "@shared/schemas";
-import { agentEffortSchema, agentModelSchema } from "@shared/schemas";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema } from "@shared/schemas";
 
 function resolveModel(value: string): AgentModel | null {
   const parsed = agentModelSchema.safeParse(value);
@@ -9,6 +9,16 @@ function resolveModel(value: string): AgentModel | null {
 
 function resolveEffort(value: string): AgentEffort | null {
   const parsed = agentEffortSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function resolveCodexModel(value: string): CodexModel | null {
+  const parsed = codexModelSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function resolveCodexEffort(value: string): CodexEffort | null {
+  const parsed = codexEffortSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -22,6 +32,8 @@ export interface ResolvedAgentDefaults {
   effort: AgentEffort | null;
   implementerModel: AgentModel | null;
   implementerEffort: AgentEffort | null;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
 }
 
 /** Parse the agent-config defaults from backend capabilities into typed values. */
@@ -31,5 +43,7 @@ export function resolveAgentDefaults(capabilities: Capabilities): ResolvedAgentD
     effort: resolveEffort(capabilities.defaultEffort),
     implementerModel: resolveModel(capabilities.defaultImplementerModel),
     implementerEffort: resolveEffort(capabilities.defaultImplementerEffort),
+    codexModel: resolveCodexModel(capabilities.defaultCodexModel),
+    codexEffort: resolveCodexEffort(capabilities.defaultCodexEffort),
   };
 }

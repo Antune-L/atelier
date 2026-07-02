@@ -14,7 +14,7 @@
  */
 
 import { Codex } from "@openai/codex-sdk";
-import type { ModelReasoningEffort, Thread, ThreadEvent } from "@openai/codex-sdk";
+import type { ModelReasoningEffort, Thread, ThreadEvent, ThreadOptions } from "@openai/codex-sdk";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 
@@ -41,6 +41,22 @@ function toCodexEffort(effort: string | null): ModelReasoningEffort | undefined 
   return CODEX_EFFORTS.find((value) => value === effort);
 }
 
+/**
+ * Prefix well-known Codex run failures with an actionable hint. A raw 401 or model-rejection lands
+ * on the card verbatim otherwise, and neither says what the user must actually do (log in / change
+ * the model in the settings). Conservative matching to avoid mislabeling unrelated errors.
+ */
+function describeCodexError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("401") || lower.includes("unauthorized") || lower.includes("not logged in") || lower.includes("token expired")) {
+    return `Authentification Codex refusée — connecte-toi (\`codex login\`, abonnement ChatGPT actif requis) ou exporte CODEX_API_KEY. Détail : ${message}`;
+  }
+  if (lower.includes("model_not_found") || lower.includes("unsupported model") || lower.includes("model is deprecated") || (lower.includes("model") && lower.includes("does not exist"))) {
+    return `Modèle Codex indisponible — choisis un autre modèle dans les réglages ou sur le ticket. Détail : ${message}`;
+  }
+  return message;
+}
+
 function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: WorkerBridgeManager): AgentSessionHandle {
   const token = nanoid(21);
   bridgeManager.register(token, {
@@ -59,20 +75,34 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
           command: Bun.which("bun") ?? "bun",
           args: [BRIDGE_SCRIPT_PATH],
           env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
+          // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
+          // with "user cancelled MCP tool call" (there is no human to answer the prompt).
+          default_tools_approval_mode: "approve",
         },
       },
     },
   });
 
-  const thread: Thread = codex.startThread({
+  const threadOptions: ThreadOptions = {
     model: opts.model,
-    sandboxMode: "workspace-write",
+    sandboxMode: opts.readOnly ? "read-only" : "workspace-write",
     approvalPolicy: "never",
     networkAccessEnabled: true,
+    // NOTE: web_search is rejected by the API under reasoning effort "minimal" — if "minimal" ever
+    // returns to CODEX_EFFORTS, this must become conditional again.
     webSearchEnabled: true,
     workingDirectory: opts.cwd,
     modelReasoningEffort: toCodexEffort(opts.effort),
-  });
+    // The backend fully controls cwd (a slot worktree it just created); without this, `codex exec`
+    // refuses to start in a directory the user never marked trusted in ~/.codex and the run dies
+    // with "Not inside a trusted directory".
+    skipGitRepoCheck: true,
+  };
+  // Auto-reclaim resumes the persisted thread (~/.codex/sessions) so the relaunched session keeps
+  // the dead run's context instead of rediscovering the worktree from scratch.
+  const thread: Thread = opts.resumeSessionId
+    ? codex.resumeThread(opts.resumeSessionId, threadOptions)
+    : codex.startThread(threadOptions);
 
   // ---- queueing: a turn-blocking SDK reproduces send() by joining queued turns into the next call ----
   const inbox: string[] = [];
@@ -140,10 +170,10 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
       }
       case "turn.failed":
         onEvent({ type: "turn_end", ok: false, subtype: "error", sessionId: sessionId ?? "", usageByModel: {} });
-        onEvent({ type: "error", message: event.error.message });
+        onEvent({ type: "error", message: describeCodexError(event.error.message) });
         return;
       case "error":
-        onEvent({ type: "error", message: event.message });
+        onEvent({ type: "error", message: describeCodexError(event.message) });
         return;
       default:
         return;
@@ -164,7 +194,10 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
             // Expected: interrupt() (or close()'s backstop) killed the in-flight `codex exec` subprocess.
             opts.onEvent({ type: "turn_end", ok: false, subtype: "interrupted", sessionId: sessionId ?? "", usageByModel: {} });
           } else {
-            opts.onEvent({ type: "error", message: error instanceof Error ? error.message : String(error) });
+            opts.onEvent({ type: "error", message: describeCodexError(error instanceof Error ? error.message : String(error)) });
+            // A failed spawn/turn must still close the turn: without a turn_end the coordinator's
+            // Stop logic never fires and the card sits inert until the 45-min watchdog.
+            opts.onEvent({ type: "turn_end", ok: false, subtype: "error", sessionId: sessionId ?? "", usageByModel: {} });
           }
         } finally {
           turnController = null;

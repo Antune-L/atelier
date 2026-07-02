@@ -6,15 +6,13 @@
  */
 
 import {
-  CODEX_EFFORT,
-  CODEX_MODEL,
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
   SPLIT_SLOT_ID,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
   TRIAGE_SLOT_ID,
 } from "../../shared/constants.ts";
-import type { Ticket } from "../../shared/schemas.ts";
+import type { SessionDriver, Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSubagentDefinition } from "../system/agentSession.ts";
 
@@ -105,11 +103,25 @@ export interface TriageSessionInput {
   effort: string | null;
   /** "Analyse +" deep variant: fan out the feasibility + solutions scouts via the `Agent` tool. */
   deep: boolean;
+  /** Which agent drives the triage (codex = read-only sandbox, no scouts — deep runs inline). */
+  driver: SessionDriver;
 }
 
 /** Config for a read-only feasibility-triage session (no worktree/slot; only `submit_triage` is gated in). */
 export function buildTriageSessionConfig(input: TriageSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort, deep } = input;
+  const { ticketId, cwd, model, effort, deep, driver } = input;
+  if (driver === "codex") {
+    return {
+      ticketId,
+      slotId: TRIAGE_SLOT_ID,
+      cwd,
+      provider: "codex",
+      model,
+      effort,
+      permissionMode: "dontAsk",
+      readOnly: true,
+    };
+  }
   const base: SessionStartConfig = {
     ticketId,
     slotId: TRIAGE_SLOT_ID,
@@ -138,11 +150,25 @@ export interface SplitSessionInput {
   cwd: string;
   model: string;
   effort: string | null;
+  /** Which agent drives the split (codex = read-only sandbox). */
+  driver: SessionDriver;
 }
 
 /** Config for a read-only ticket-split session (no worktree/slot; only `submit_split` is gated in). */
 export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort } = input;
+  const { ticketId, cwd, model, effort, driver } = input;
+  if (driver === "codex") {
+    return {
+      ticketId,
+      slotId: SPLIT_SLOT_ID,
+      cwd,
+      provider: "codex",
+      model,
+      effort,
+      permissionMode: "dontAsk",
+      readOnly: true,
+    };
+  }
   return {
     ticketId,
     slotId: SPLIT_SLOT_ID,
@@ -275,25 +301,36 @@ export interface ImplementSessionInput {
   cwd: string;
   /** Absolute path to the vendored Composer driver script (allowed bash for the composer implementer). */
   composerScriptPath: string;
+  /** Provider-side conversation to resume on a relaunch (Codex only; Claude restarts fresh). */
+  resumeSessionId?: string;
+}
+
+/** Resolved Codex knobs for a ticket: per-ticket override, else the persisted app-settings default. */
+function codexKnobs(ticket: Ticket): { model: string; effort: string } {
+  return {
+    model: ticket.codexModel ?? MODELS.codexModel,
+    effort: ticket.codexEffort ?? MODELS.codexEffort,
+  };
 }
 
 /** Config for a feature/ask/review/clean/conflict implementation session (full tools, git-owning). */
 export function buildImplementSessionConfig(input: ImplementSessionInput): SessionStartConfig {
-  const { ticket, slotId, cwd, composerScriptPath } = input;
-  // Conflict resolution is an internal, auto-triggered session (not the user-facing implement step) —
-  // its contract (buildConflictResolutionContract) always assumes a Claude session, same as
-  // triage/split/feasibility. A ticket's implementer choice only gates the primary implement session.
-  // (review/clean tickets never carry implementer "codex" either: their DB rows never set that
-  // column, so it defaults to 'claude' — see schema.ts's `implementer TEXT NOT NULL DEFAULT 'claude'`.)
-  if (ticket.implementer === "codex" && !ticket.resolvingConflicts) {
+  const { ticket, slotId, cwd, composerScriptPath, resumeSessionId } = input;
+  // A ticket whose implementer is "codex" runs EVERY session on Codex, including the auto-triggered
+  // conflict-resolution one (buildConflictResolutionContract carries a codex-flavored framing).
+  if (ticket.implementer === "codex") {
+    const knobs = codexKnobs(ticket);
     return {
       ticketId: ticket.id,
       slotId,
       cwd,
       provider: "codex",
-      model: CODEX_MODEL,
-      effort: CODEX_EFFORT,
+      model: knobs.model,
+      effort: knobs.effort,
       permissionMode: "dontAsk",
+      // An ask ticket never writes: pin the Codex sandbox to read-only instead of tool-gating.
+      ...(ticket.kind === "ask" ? { readOnly: true } : {}),
+      ...(resumeSessionId ? { resumeSessionId } : {}),
     };
   }
   const implementerModel = ticket.implementerModel ?? MODELS.implementerModel;

@@ -11,9 +11,11 @@
  * Standalone entrypoint — run directly by Codex (`bun codexWorkerMcpServer.ts`), never imported.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { nanoid } from "nanoid";
+import { z } from "zod";
 
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
 
@@ -90,24 +92,31 @@ async function callBackend(name: string, args: unknown): Promise<{ ok: boolean; 
   return outcome;
 }
 
-const server = new McpServer({ name: "kanban", version: "0.0.0" });
-for (const entry of WORKER_TOOLS) {
-  server.registerTool(
-    entry.name,
-    { description: entry.description, inputSchema: entry.argsSchema.shape },
-    async (args: unknown) => {
-      try {
-        const outcome = await callBackend(entry.name, args);
-        return {
-          content: [{ type: "text" as const, text: outcome.result || (outcome.ok ? "ok" : "échec") }],
-          isError: !outcome.ok,
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text" as const, text: message }], isError: true };
-      }
-    },
-  );
-}
+// Low-level Server API on purpose: the SDK's zod-compat layer types against ITS OWN nested zod copy,
+// which conflicts with the repo's zod at the type level. Tools are advertised as plain JSON Schemas
+// (z.toJSONSchema) and args are forwarded as-is — the backend coordinator re-validates them anyway.
+const server = new Server({ name: "kanban", version: "0.0.0" }, { capabilities: { tools: {} } });
+
+server.setRequestHandler(ListToolsRequestSchema, () => ({
+  tools: WORKER_TOOLS.map((entry) => ({
+    name: entry.name,
+    description: entry.description,
+    // io: "input" keeps defaulted fields optional (output mode would mark them required).
+    inputSchema: z.toJSONSchema(entry.argsSchema, { io: "input" }),
+  })),
+}));
+
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  try {
+    const outcome = await callBackend(request.params.name, request.params.arguments ?? {});
+    return {
+      content: [{ type: "text", text: outcome.result || (outcome.ok ? "ok" : "échec") }],
+      isError: !outcome.ok,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { content: [{ type: "text", text: message }], isError: true };
+  }
+});
 
 await server.connect(new StdioServerTransport());

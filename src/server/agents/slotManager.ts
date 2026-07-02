@@ -597,13 +597,15 @@ export class SlotManager {
   }
 
   /** Start the implementation SDK session for a ticket in its slot worktree. */
-  private startAgentSession(ticket: Ticket, slotId: number, path: string): void {
+  private startAgentSession(ticket: Ticket, slotId: number, path: string, opts?: { resume?: boolean }): void {
     this.sessionHub.start(
       buildImplementSessionConfig({
         ticket,
         slotId,
         cwd: path,
         composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+        // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
+        ...(opts?.resume && ticket.sessionId ? { resumeSessionId: ticket.sessionId } : {}),
       }),
     );
   }
@@ -1190,7 +1192,7 @@ export class SlotManager {
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
     this.sessionHub.disconnect(ticketId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
-    this.startAgentSession(ticket, slotId, path);
+    this.startAgentSession(ticket, slotId, path, { resume: true });
     this.setPhase(ticketId, SETUP_PHASES.waiting);
     this.store.updateSlot(slotId, { status: "busy", tmuxSession: null });
     this.store.logEvent(ticketId, "session_spawned", { slotId });

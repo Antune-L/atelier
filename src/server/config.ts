@@ -3,7 +3,8 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import type { AgentEffort } from "../shared/constants.ts";
+import type { AgentEffort, CodexEffort, CodexModel } from "../shared/constants.ts";
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL } from "../shared/constants.ts";
 import type { AppSettings } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
@@ -76,6 +77,8 @@ export const DEFAULT_MODELS = {
   triageEffort: "low",
   implementerModel: "opus",
   implementerEffort: "low",
+  codexModel: DEFAULT_CODEX_MODEL,
+  codexEffort: DEFAULT_CODEX_EFFORT,
 } as const;
 
 export const MODELS: {
@@ -85,6 +88,8 @@ export const MODELS: {
   triageEffort: AgentEffort;
   implementerModel: string;
   implementerEffort: AgentEffort;
+  codexModel: CodexModel;
+  codexEffort: CodexEffort;
 } = { ...DEFAULT_MODELS };
 
 /**
@@ -97,6 +102,8 @@ export function applyAppSettingsToModels(settings: AppSettings): void {
   MODELS.triage = settings.triageModel;
   MODELS.implementEffort = settings.implementEffort;
   MODELS.triageEffort = settings.triageEffort;
+  MODELS.codexModel = settings.codexModel;
+  MODELS.codexEffort = settings.codexEffort;
 }
 
 let _store: Store | undefined;

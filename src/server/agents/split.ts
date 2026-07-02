@@ -1,4 +1,4 @@
-import type { Ticket } from "../../shared/schemas.ts";
+import type { SessionDriver, Ticket } from "../../shared/schemas.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -61,26 +61,41 @@ export function buildSplitChannelPrompt(
   ticket: Ticket,
   project: ProjectConfig,
   language: CommitLanguage,
+  driver: SessionDriver = "claude",
 ): string {
   const en = isEnglish(language);
 
-  const header = en
-    ? [
-        `# Ticket split — Ticket ${ticket.id}`,
-        "",
-        `Project: ${project.label} (base branch: ${project.baseBranch})`,
-        "",
-        "You are a READ-ONLY split session (only Read, Glob, Grep are available;",
-        "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
-      ]
-    : [
-        `# Découpage de ticket — Ticket ${ticket.id}`,
-        "",
-        `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
-        "",
-        "Tu es une session de découpage en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;",
-        "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
-      ];
+  // Read-only framing per driver: Claude is tool-gated, Codex runs in its read-only sandbox.
+  const framing =
+    driver === "codex"
+      ? en
+        ? [
+            "You are a READ-ONLY Codex split session (read-only sandbox: any write to the repository",
+            "is blocked). Explore the repository with your read tools only.",
+          ]
+        : [
+            "Tu es une session Codex de découpage en LECTURE SEULE (sandbox en lecture seule : toute",
+            "écriture dans le dépôt est bloquée). Explore le dépôt avec tes outils de lecture uniquement.",
+          ]
+      : en
+        ? [
+            "You are a READ-ONLY split session (only Read, Glob, Grep are available;",
+            "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
+          ]
+        : [
+            "Tu es une session de découpage en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;",
+            "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
+          ];
+
+  const header = [
+    en ? `# Ticket split — Ticket ${ticket.id}` : `# Découpage de ticket — Ticket ${ticket.id}`,
+    "",
+    en
+      ? `Project: ${project.label} (base branch: ${project.baseBranch})`
+      : `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    "",
+    ...framing,
+  ];
 
   const mission = en
     ? [
@@ -117,7 +132,7 @@ export function buildSplitChannelPrompt(
   const responseFormat = en
     ? [
         "## Response format",
-        "When your analysis is done, call the `submit_split` tool (MCP `worker` server) with:",
+        "When your analysis is done, call the `submit_split` tool (MCP `kanban` server) with:",
         "- `summary`: a short overall summary of the decomposition rationale.",
         "- `children`: a non-empty list, in implementation order, of recursive nodes shaped",
         "  `{ title, summary, children }` where `children` is itself a (possibly empty) list of the same",
@@ -126,7 +141,7 @@ export function buildSplitChannelPrompt(
       ]
     : [
         "## Format de réponse",
-        "Quand ton analyse est terminée, appelle le tool `submit_split` (serveur MCP `worker`) avec :",
+        "Quand ton analyse est terminée, appelle le tool `submit_split` (serveur MCP `kanban`) avec :",
         "- `summary` : un court résumé global de la logique de découpage.",
         "- `children` : une liste non vide, dans l'ordre d'implémentation, de nœuds récursifs de forme",
         "  `{ title, summary, children }` où `children` est elle-même une liste (éventuellement vide) de la",

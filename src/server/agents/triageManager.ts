@@ -89,16 +89,21 @@ export class TriageManager {
 
       const triageLanguage = this.store.getAppSettings().triageLanguage;
       const baseBranch = resolveBaseBranch(ticket, project, this.store);
+      // A codex ticket triages on Codex too (its knobs), so Claude never enters its pipeline.
+      const driver = ticket.implementer === "codex" ? "codex" : "claude";
       const prompt = deep
-        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage)
-        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage);
+        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver)
+        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver);
+      const claudeModel = deep ? TRIAGE_PLUS_MODEL : MODELS.triage;
+      const claudeEffort = deep ? TRIAGE_PLUS_EFFORT : MODELS.triageEffort;
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,
           cwd: project.repoPath,
-          model: deep ? TRIAGE_PLUS_MODEL : MODELS.triage,
-          effort: deep ? TRIAGE_PLUS_EFFORT : MODELS.triageEffort,
+          model: driver === "codex" ? ticket.codexModel ?? MODELS.codexModel : claudeModel,
+          effort: driver === "codex" ? ticket.codexEffort ?? MODELS.codexEffort : claudeEffort,
           deep,
+          driver,
         }),
       );
       // The contract is the session's first user turn — no connect poll, no drop race.

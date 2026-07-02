@@ -4,12 +4,15 @@ import { useRef, useState } from "react";
 import {
   REVIEW_DEPTHS,
   REVIEW_DEPTH_LABELS,
+  type CodexEffort,
+  type CodexModel,
   type ReviewDepth,
 } from "@shared/constants";
-import type { ProjectInfo } from "@shared/schemas";
+import type { ProjectInfo, SessionDriver } from "@shared/schemas";
 import { reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
+import { SessionDriverFields } from "@/components/SessionDriverFields";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -30,6 +33,9 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
+  const [driver, setDriver] = useState<SessionDriver>("claude");
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
   const [baseBranch, setBaseBranch] = useState<string>(BASE_BRANCH_AUTO);
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -65,6 +71,9 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         fixComments,
         // Auto → null override (each PR keeps its own detected target branch).
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
+        implementer: driver,
+        codexModel,
+        codexEffort,
         prs: chosen,
       });
       onClose();
@@ -122,6 +131,15 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
           Un sous-agent applique les corrections puis pousse sur la branche de la PR.
         </p>
       </div>
+
+      <SessionDriverFields
+        driver={driver}
+        codexModel={codexModel}
+        codexEffort={codexEffort}
+        onDriverChange={setDriver}
+        onCodexModelChange={setCodexModel}
+        onCodexEffortChange={setCodexEffort}
+      />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

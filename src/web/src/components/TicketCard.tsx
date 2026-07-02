@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Clock, CornerDownRight, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
+import { Bot, Clock, CornerDownRight, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
@@ -104,6 +104,11 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
         {ticket.implementer === "composer" && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Sparkles className="h-3 w-3" /> Composer
+          </Badge>
+        )}
+        {ticket.implementer === "codex" && (
+          <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Bot className="h-3 w-3" /> Codex
           </Badge>
         )}
         {ticket.prUrl && (

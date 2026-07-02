@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 
 const UNKNOWN_CAPABILITIES: Capabilities = {
   composerAvailable: false,
+  codexAvailable: false,
   defaultModel: "",
   defaultEffort: "",
   defaultImplementerModel: "",

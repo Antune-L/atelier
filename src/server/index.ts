@@ -4,10 +4,12 @@ import { fileURLToPath } from "node:url";
 import { Elysia } from "elysia";
 
 import {
+  DEFAULT_PORT,
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS,
   WS_PATH_CLIENT,
   WS_PATH_TERMINAL,
+  WS_PATH_WORKER_BRIDGE,
 } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
@@ -36,8 +38,9 @@ import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
 import { UserTerminalManager } from "./userTerminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
+import type { WorkerBridgeSocket } from "./workerBridgeManager.ts";
+import { WorkerBridgeManager } from "./workerBridgeManager.ts";
 
-const DEFAULT_PORT = 52817;
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 /** Subpath, relative to resourcesRoot, holding the built web UI served as a static SPA. */
@@ -80,7 +83,8 @@ export interface RunningServer {
 
 type SocketData =
   | { kind: "client" }
-  | { kind: "terminal"; ticketId?: string; terminalId?: string; slotId?: number; cols: number; rows: number };
+  | { kind: "terminal"; ticketId?: string; terminalId?: string; slotId?: number; cols: number; rows: number }
+  | { kind: "worker-bridge"; token: string };
 
 function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
   return ws.data.kind === "client";
@@ -88,6 +92,10 @@ function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
 
 function isTerminalSocket(ws: { data: SocketData }): ws is TerminalSocket {
   return ws.data.kind === "terminal";
+}
+
+function isWorkerBridgeSocket(ws: { data: SocketData }): ws is WorkerBridgeSocket {
+  return ws.data.kind === "worker-bridge";
 }
 
 const HTTP_NOT_FOUND = 404;
@@ -167,7 +175,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const store = new Store(db);
   await migrateConfigJsonIfPresent(store, process.env.KANBAN_CONFIG ?? join(dataRoot, "config.json"));
   initProjectRegistry(store);
-  const system = createSystemAdapter();
+  const workerBridgeManager = new WorkerBridgeManager();
+  const system = createSystemAdapter(workerBridgeManager);
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
   const sessionHub = new SessionHub(system);
@@ -211,6 +220,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
+  const codexAvailable = await system.checkCodexAvailable();
+  createLogger("boot").info("Codex CLI détecté", { codexAvailable });
 
   const api = createApiRoutes({
     store,
@@ -227,6 +238,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     userTerminals,
     projectRoot: dataRoot,
     composerAvailable,
+    codexAvailable,
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
     onRequestQuit: opts.onRequestQuit,
@@ -293,6 +305,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         }
         return new Response("upgrade failed", { status: 426 });
       }
+      if (url.pathname === WS_PATH_WORKER_BRIDGE) {
+        const token = url.searchParams.get("token") ?? "";
+        if (!token) return new Response("token requis", { status: 400 });
+        if (srv.upgrade(request, { data: { kind: "worker-bridge", token } })) return undefined;
+        return new Response("upgrade failed", { status: 426 });
+      }
       if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
         return serveUpload(dataRoot, url.pathname);
       }
@@ -304,14 +322,17 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       open(ws) {
         if (isClientSocket(ws)) clientHub.add(ws);
         if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
+        if (isWorkerBridgeSocket(ws)) workerBridgeManager.handleOpen(ws);
       },
       message(ws, message) {
         const text = typeof message === "string" ? message : message.toString();
         if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
+        if (isWorkerBridgeSocket(ws)) workerBridgeManager.handleMessage(ws, text);
       },
       close(ws) {
         if (isClientSocket(ws)) clientHub.remove(ws);
         if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
+        if (isWorkerBridgeSocket(ws)) workerBridgeManager.handleClose(ws);
       },
     },
   });

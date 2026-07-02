@@ -9,6 +9,7 @@
  * with a synthetic no-op handle, so the server still boots and runs end-to-end in dry-run.
  */
 
+import type { Implementer } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 
 /** What a worker tool call resolves to — mirrors the coordinator's tool-call return shape. */
@@ -56,6 +57,8 @@ export interface AgentSessionOptions {
   ticketId: string;
   slotId: number;
   cwd: string;
+  /** Which provider drives this session. Triage/split/feasibility sessions are always "claude". */
+  provider: Extract<Implementer, "claude" | "codex">;
   /** Model alias for the session (SDK `model`). */
   model: string;
   /** Reasoning effort, or null for the model default. */
@@ -107,9 +110,9 @@ export interface AgentSessionHandle {
 
 /**
  * The provider seam: an LLM-agent backend that materializes an {@link AgentSessionHandle} from the
- * transport-agnostic {@link AgentSessionOptions}. The Real adapter holds one of these; today the only
- * implementation is `claudeProvider` (Agent SDK). A future provider (e.g. Codex) implements the same
- * contract so the backend above this seam stays unchanged.
+ * transport-agnostic {@link AgentSessionOptions}. The Real adapter holds a registry of these, keyed by
+ * `AgentSessionOptions.provider`: `claudeProvider` (Agent SDK) and `codexProvider` (Codex SDK). Each
+ * implements the same contract so the backend above this seam stays unchanged.
  */
 export interface AgentProvider {
   readonly name: string;

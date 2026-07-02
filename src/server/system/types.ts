@@ -208,6 +208,8 @@ export interface SystemAdapter {
   // ---- capability probe ----
   /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
   checkComposerAvailable(): Promise<boolean>;
+  /** Whether the Codex CLI binary is resolvable AND authenticated (CODEX_API_KEY or ~/.codex/auth.json). */
+  checkCodexAvailable(): Promise<boolean>;
 
   // ---- desktop self-update guards (dev desktop only) ----
   /** Current checked-out branch (`git rev-parse --abbrev-ref HEAD`); "" when it can't be read. */

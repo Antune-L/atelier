@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { Codex } from "@openai/codex-sdk";
 import { $ } from "bun";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -9,10 +10,13 @@ import { z } from "zod";
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
+import type { WorkerBridgeManager } from "../workerBridgeManager.ts";
 
 import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, toSdkEffort } from "./claudeProvider.ts";
+import { resolveCodexBinaryOverride } from "./codexBinary.ts";
+import { createCodexProvider } from "./codexProvider.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -115,8 +119,12 @@ const PR_MERGE_CONFIRM_DELAY_MS = 1000;
  */
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
-  /** The agent backend behind the session seam. Claude is the only provider today. */
-  private readonly provider: AgentProvider = claudeProvider;
+  /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
+  private readonly providers: Record<"claude" | "codex", AgentProvider>;
+
+  constructor(workerBridgeManager: WorkerBridgeManager) {
+    this.providers = { claude: claudeProvider, codex: createCodexProvider(workerBridgeManager) };
+  }
 
   async seedWorkspaceTrust(paths: string[]): Promise<void> {
     const file = Bun.file(CLAUDE_JSON_PATH);
@@ -324,8 +332,8 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
-    log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
-    return this.provider.createSession(opts);
+    log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model, provider: opts.provider });
+    return this.providers[opts.provider].createSession(opts);
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
@@ -751,6 +759,19 @@ export class RealSystemAdapter implements SystemAdapter {
       }
     }
     return false;
+  }
+
+  async checkCodexAvailable(): Promise<boolean> {
+    // The SDK's own binary resolution (no Bun.which/spawn probe needed): CodexExec's constructor
+    // synchronously throws when the platform binary package isn't resolvable.
+    try {
+      new Codex({ codexPathOverride: resolveCodexBinaryOverride() });
+    } catch {
+      return false;
+    }
+    if (process.env.CODEX_API_KEY) return true;
+    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+    return existsSync(join(codexHome, "auth.json"));
   }
 }
 

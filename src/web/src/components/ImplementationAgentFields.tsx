@@ -50,7 +50,7 @@ export function ImplementationAgentFields({
   onImplementerChange,
 }: ImplementationAgentFieldsProps) {
   const capabilities = useCapabilities();
-  const { composerAvailable } = capabilities;
+  const { composerAvailable, codexAvailable } = capabilities;
   const id = useId();
   const modelLabelId = `${id}-model`;
   const effortLabelId = `${id}-effort`;
@@ -66,30 +66,46 @@ export function ImplementationAgentFields({
     implementerEffort: resolvedDefaultImplementerEffort,
   } = resolveAgentDefaults(capabilities);
 
-  const implementerOptions: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
-    value: i,
-    label: i === "composer" && !composerAvailable ? `${IMPLEMENTER_LABELS[i]} — Cursor non détecté` : IMPLEMENTER_LABELS[i],
-    disabled: i === "composer" && !composerAvailable,
-  }));
+  const implementerOptions: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => {
+    if (i === "composer") {
+      return {
+        value: i,
+        label: composerAvailable ? IMPLEMENTER_LABELS[i] : `${IMPLEMENTER_LABELS[i]} — Cursor non détecté`,
+        disabled: !composerAvailable,
+      };
+    }
+    if (i === "codex") {
+      return {
+        value: i,
+        label: codexAvailable ? IMPLEMENTER_LABELS[i] : `${IMPLEMENTER_LABELS[i]} — Codex non détecté`,
+        disabled: !codexAvailable,
+      };
+    }
+    return { value: i, label: IMPLEMENTER_LABELS[i] };
+  });
 
   return (
     <div className="flex flex-col gap-3">
-      <Field labelId={modelLabelId} label="Modèle (orchestrateur)">
-        <Tabs
-          options={AGENT_MODEL_OPTIONS}
-          value={model ?? resolvedDefaultModel}
-          onChange={(value) => onModelChange(value === resolvedDefaultModel ? null : value)}
-          aria-labelledby={modelLabelId}
-        />
-      </Field>
-      <Field labelId={effortLabelId} label="Effort (orchestrateur)">
-        <Tabs
-          options={AGENT_EFFORT_OPTIONS}
-          value={effort ?? resolvedDefaultEffort}
-          onChange={(value) => onEffortChange(value === resolvedDefaultEffort ? null : value)}
-          aria-labelledby={effortLabelId}
-        />
-      </Field>
+      {implementer !== "codex" && (
+        <>
+          <Field labelId={modelLabelId} label="Modèle (orchestrateur)">
+            <Tabs
+              options={AGENT_MODEL_OPTIONS}
+              value={model ?? resolvedDefaultModel}
+              onChange={(value) => onModelChange(value === resolvedDefaultModel ? null : value)}
+              aria-labelledby={modelLabelId}
+            />
+          </Field>
+          <Field labelId={effortLabelId} label="Effort (orchestrateur)">
+            <Tabs
+              options={AGENT_EFFORT_OPTIONS}
+              value={effort ?? resolvedDefaultEffort}
+              onChange={(value) => onEffortChange(value === resolvedDefaultEffort ? null : value)}
+              aria-labelledby={effortLabelId}
+            />
+          </Field>
+        </>
+      )}
       <Field labelId={implementerLabelId} label="Implémenté par">
         <Tabs
           options={implementerOptions}
@@ -124,6 +140,13 @@ export function ImplementationAgentFields({
           {composerAvailable
             ? "Composer 2.5 écrit le code ; le modèle orchestrateur (Claude) planifie, relit et ouvre la PR."
             : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
+        </p>
+      )}
+      {implementer === "codex" && (
+        <p className="text-xs text-muted-foreground">
+          {codexAvailable
+            ? "Codex pilote la session de bout en bout (planification, implémentation, review, tests, PR) — Claude n'intervient pas."
+            : "Codex non détecté : installe le CLI puis authentifie-toi (CODEX_API_KEY ou `codex login`) (sinon le lancement échouera)."}
         </p>
       )}
     </div>

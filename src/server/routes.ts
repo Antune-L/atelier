@@ -83,6 +83,8 @@ interface RouteDeps {
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
+  /** Probed once at boot: is the Codex CLI usable? */
+  codexAvailable: boolean;
   /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
@@ -487,6 +489,7 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/capabilities", () => ({
       composerAvailable: deps.composerAvailable,
+      codexAvailable: deps.codexAvailable,
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
       defaultImplementerModel: MODELS.implementerModel,

@@ -6,6 +6,8 @@
  */
 
 import {
+  CODEX_EFFORT,
+  CODEX_MODEL,
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
   SPLIT_SLOT_ID,
@@ -112,6 +114,7 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     ticketId,
     slotId: TRIAGE_SLOT_ID,
     cwd,
+    provider: "claude",
     model,
     effort,
     permissionMode: "dontAsk",
@@ -144,6 +147,7 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
     ticketId,
     slotId: SPLIT_SLOT_ID,
     cwd,
+    provider: "claude",
     model,
     effort,
     permissionMode: "dontAsk",
@@ -167,6 +171,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     ticketId: batchId,
     slotId: FEASIBILITY_SLOT_ID,
     cwd,
+    provider: "claude",
     model,
     effort,
     permissionMode: "dontAsk",
@@ -275,12 +280,29 @@ export interface ImplementSessionInput {
 /** Config for a feature/ask/review/clean/conflict implementation session (full tools, git-owning). */
 export function buildImplementSessionConfig(input: ImplementSessionInput): SessionStartConfig {
   const { ticket, slotId, cwd, composerScriptPath } = input;
+  // Conflict resolution is an internal, auto-triggered session (not the user-facing implement step) —
+  // its contract (buildConflictResolutionContract) always assumes a Claude session, same as
+  // triage/split/feasibility. A ticket's implementer choice only gates the primary implement session.
+  // (review/clean tickets never carry implementer "codex" either: their DB rows never set that
+  // column, so it defaults to 'claude' — see schema.ts's `implementer TEXT NOT NULL DEFAULT 'claude'`.)
+  if (ticket.implementer === "codex" && !ticket.resolvingConflicts) {
+    return {
+      ticketId: ticket.id,
+      slotId,
+      cwd,
+      provider: "codex",
+      model: CODEX_MODEL,
+      effort: CODEX_EFFORT,
+      permissionMode: "dontAsk",
+    };
+  }
   const implementerModel = ticket.implementerModel ?? MODELS.implementerModel;
   const implementerEffort = ticket.implementerEffort ?? MODELS.implementerEffort;
   return {
     ticketId: ticket.id,
     slotId,
     cwd,
+    provider: "claude",
     model: ticket.model ?? MODELS.implement,
     effort: ticket.effort ?? MODELS.implementEffort,
     permissionMode: "dontAsk",

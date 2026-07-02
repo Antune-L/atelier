@@ -610,22 +610,26 @@ function ProfileRow({
           Configuration
         </summary>
         <div className="mt-3 flex flex-col gap-2">
-          <Field label="Modèle">
-            <Tabs
-              options={AGENT_MODEL_OPTIONS}
-              value={model}
-              onChange={setModel}
-              aria-label="Modèle"
-            />
-          </Field>
-          <Field label="Effort">
-            <Tabs
-              options={AGENT_EFFORT_OPTIONS}
-              value={effort}
-              onChange={setEffort}
-              aria-label="Effort"
-            />
-          </Field>
+          {implementer !== "codex" && (
+            <>
+              <Field label="Modèle">
+                <Tabs
+                  options={AGENT_MODEL_OPTIONS}
+                  value={model}
+                  onChange={setModel}
+                  aria-label="Modèle"
+                />
+              </Field>
+              <Field label="Effort">
+                <Tabs
+                  options={AGENT_EFFORT_OPTIONS}
+                  value={effort}
+                  onChange={setEffort}
+                  aria-label="Effort"
+                />
+              </Field>
+            </>
+          )}
           <Field label="Implémenté par">
             <Tabs
               options={IMPLEMENTER_OPTIONS}

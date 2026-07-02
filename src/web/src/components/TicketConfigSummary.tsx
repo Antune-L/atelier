@@ -80,8 +80,13 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
         Options de création
       </summary>
       <dl className="mt-3 space-y-2">
-        <Row label="Modèle (orchestrateur)" value={modelValue} />
-        <Row label="Effort (orchestrateur)" value={effortValue} />
+        {/* A feature ticket on Codex ignores the orchestrator model/effort knobs entirely (fixed Codex default instead — see CODEX_MODEL/CODEX_EFFORT); showing them here would misleadingly imply Claude drove the session. */}
+        {!(ticket.kind === "feature" && ticket.implementer === "codex") && (
+          <>
+            <Row label="Modèle (orchestrateur)" value={modelValue} />
+            <Row label="Effort (orchestrateur)" value={effortValue} />
+          </>
+        )}
         {ticket.kind === "review" && (
           <>
             {ticket.reviewDepth && (

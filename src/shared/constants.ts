@@ -370,6 +370,25 @@ export const FEASIBILITY_AUTO_RELAUNCH_EVENT = "feasibility_auto_relaunch";
 /** Max rows a single CSV import may create (bounds a batch; average ~20). */
 export const IMPORT_MAX_ROWS = 200;
 
+// ---- Automations (background prompts on a trigger) ----
+
+export const AUTOMATION_TRIGGERS = ["on_launch", "recurring"] as const;
+export type AutomationTrigger = (typeof AUTOMATION_TRIGGERS)[number];
+
+export const AUTOMATION_TRIGGER_LABELS: Record<AutomationTrigger, string> = {
+  on_launch: "Au lancement",
+  recurring: "Récurrent",
+};
+
+export const AUTOMATION_RUN_STATUSES = ["running", "success", "failure"] as const;
+export type AutomationRunStatus = (typeof AUTOMATION_RUN_STATUSES)[number];
+
+/** Max run-history entries kept/returned per automation. */
+export const AUTOMATION_RUNS_LIMIT = 50;
+
+/** Bounds on a recurring automation's interval (minutes). */
+export const AUTOMATION_MIN_INTERVAL_MINUTES = 1;
+
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 /** Interactive PTY stream for a worktree/user shell tmux pane (output + bidirectional input). */

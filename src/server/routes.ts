@@ -7,6 +7,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import {
   analyzeTicketsSchema,
   createAskSchema,
+  createAutomationSchema,
   createCleanSchema,
   createCommentSchema,
   createProfileSchema,
@@ -21,6 +22,7 @@ import {
   moveTicketSchema,
   startWorktreeSessionBodySchema,
   updateAppSettingsSchema,
+  updateAutomationSchema,
   updateProfileSchema,
   updateProjectSchema,
   updateTicketSchema,
@@ -32,6 +34,7 @@ import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
+import type { AutomationManager } from "./agents/automationManager.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
@@ -79,6 +82,7 @@ interface RouteDeps {
   feasibility: FeasibilityBatchManager;
   split: SplitManager;
   reformulate: ReformulateManager;
+  automations: AutomationManager;
   userTerminals: UserTerminalManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
@@ -401,7 +405,7 @@ async function performSplit(
 }
 
 export function createApiRoutes(deps: RouteDeps) {
-  const { store, hub, lifecycle, slots, coordinator } = deps;
+  const { store, hub, lifecycle, slots, coordinator, automations } = deps;
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () =>
@@ -517,6 +521,45 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!store.getProfile(params.id)) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
       store.deleteProfile(params.id);
       return { ok: true };
+    })
+    .get("/automations", () => store.listAutomations())
+    .post("/automations", ({ body, set }) => {
+      const parsed = createAutomationSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const { name, prompt, trigger, model, effort, enabled } = parsed.data;
+      // on_launch automations never recur, so drop any interval defensively (the refine already guards recurring).
+      const intervalMinutes = trigger === "recurring" ? parsed.data.intervalMinutes : null;
+      const created = store.createAutomation({ name, prompt, trigger, intervalMinutes, model, effort, enabled });
+      automations.reschedule(created.id);
+      hub.pushAutomations(store.listAutomations());
+      return created;
+    })
+    .patch("/automations/:id", ({ params, body, set }) => {
+      const existing = store.getAutomation(params.id);
+      if (!existing) return jsonError(set, HTTP_NOT_FOUND, "automatisation introuvable");
+      const parsed = updateAutomationSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      // Enforce the invariant "on_launch ⟹ interval null" on update too (the POST path already does),
+      // so flipping the trigger to on_launch clears any stale interval instead of leaving it dangling.
+      const patch = { ...parsed.data };
+      const effectiveTrigger = parsed.data.trigger ?? existing.trigger;
+      if (effectiveTrigger !== "recurring") patch.intervalMinutes = null;
+      const updated = store.updateAutomation(params.id, patch);
+      automations.reschedule(params.id);
+      hub.pushAutomations(store.listAutomations());
+      return updated;
+    })
+    .delete("/automations/:id", ({ params, set }) => {
+      if (!store.getAutomation(params.id)) return jsonError(set, HTTP_NOT_FOUND, "automatisation introuvable");
+      automations.unschedule(params.id);
+      store.deleteAutomation(params.id);
+      hub.pushAutomations(store.listAutomations());
+      return { ok: true };
+    })
+    .post("/automations/:id/run", ({ params, set }) => {
+      if (!store.getAutomation(params.id)) return jsonError(set, HTTP_NOT_FOUND, "automatisation introuvable");
+      void automations.runNow(params.id);
+      return { started: true };
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/stats", () =>

@@ -21,6 +21,7 @@ import type {
   PaneStream,
   ReformulateOptions,
   ReviewDoneOptions,
+  RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
@@ -40,6 +41,8 @@ const NOTION_MCP_SERVER_NAME = "notion";
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 /** Read-only allowlist for the Notion import query: only Read and the hosted Notion MCP tools. */
 const NOTION_IMPORT_ALLOWED_TOOLS = ["Read", `mcp__${NOTION_MCP_SERVER_NAME}`] as const;
+/** Bound a background automation SDK query (30 min): not tied to an HTTP request. */
+const AUTOMATION_TIMEOUT_MS = 30 * 60 * 1000;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
 /**
@@ -363,6 +366,24 @@ export class RealSystemAdapter implements SystemAdapter {
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
     return this.runOneShotQuery(opts.prompt, queryOptions, NOTION_IMPORT_TIMEOUT_MS, "import Notion échoué");
+  }
+
+  async runAutomation(opts: RunAutomationOptions): Promise<string> {
+    // A user-authored automation should be able to actually DO things (write files, run bash), so it
+    // bypasses permissions and keeps the full default toolset — unlike the read-only reformulate/import.
+    const sdkEffort = toSdkEffort(opts.effort);
+    const queryOptions: Options = {
+      cwd: opts.cwd,
+      model: opts.model,
+      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      systemPrompt: { type: "preset", preset: "claude_code" },
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+      env: { ...process.env },
+      stderr: () => {},
+      ...(sdkEffort ? { effort: sdkEffort } : {}),
+    };
+    return this.runOneShotQuery(opts.prompt, queryOptions, AUTOMATION_TIMEOUT_MS, "automation échouée");
   }
 
   /**

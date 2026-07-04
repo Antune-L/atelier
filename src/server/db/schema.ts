@@ -138,8 +138,32 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS automations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  trigger_type TEXT NOT NULL,
+  interval_minutes INTEGER,
+  model TEXT NOT NULL,
+  effort TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS automation_runs (
+  id TEXT PRIMARY KEY,
+  automation_id TEXT NOT NULL REFERENCES automations(id),
+  status TEXT NOT NULL,
+  result TEXT,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 `;
 
 // Leftover columns in older DBs (tags, is_ui, figma_url) are harmless: row

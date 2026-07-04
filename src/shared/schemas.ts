@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
 import { isNotionUrl } from "./notion.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
@@ -623,6 +623,68 @@ export const capabilitiesSchema = z.object({
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 
+// ---- Automations (background prompts on a trigger) ----
+
+export const automationTriggerSchema = z.enum(AUTOMATION_TRIGGERS);
+export const automationRunStatusSchema = z.enum(AUTOMATION_RUN_STATUSES);
+
+export const automationRunSchema = z.object({
+  id: z.string(),
+  automationId: z.string(),
+  status: automationRunStatusSchema,
+  /** Final agent output on success, or the failure reason on failure; null while running / no output. */
+  result: z.string().nullable(),
+  startedAt: z.number().int(),
+  finishedAt: z.number().int().nullable(),
+});
+export type AutomationRun = z.infer<typeof automationRunSchema>;
+
+export const automationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  trigger: automationTriggerSchema,
+  /** Recurring interval in minutes; null for on_launch triggers. */
+  intervalMinutes: z.number().int().nullable(),
+  model: agentModelSchema,
+  effort: agentEffortSchema,
+  enabled: z.boolean(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+  /** Most-recent runs (descending by startedAt), capped at AUTOMATION_RUNS_LIMIT. */
+  runs: z.array(automationRunSchema),
+});
+export type Automation = z.infer<typeof automationSchema>;
+
+export const createAutomationSchema = z
+  .object({
+    name: z.string().min(1),
+    prompt: z.string().min(1),
+    trigger: automationTriggerSchema,
+    intervalMinutes: z.number().int().positive().nullable().default(null),
+    model: agentModelSchema,
+    effort: agentEffortSchema.default("medium"),
+    enabled: z.boolean().default(true),
+  })
+  .refine(
+    (d) =>
+      d.trigger !== "recurring" ||
+      (d.intervalMinutes !== null && d.intervalMinutes >= AUTOMATION_MIN_INTERVAL_MINUTES),
+    { message: "Intervalle requis pour une automatisation récurrente", path: ["intervalMinutes"] },
+  );
+export type CreateAutomationInput = z.infer<typeof createAutomationSchema>;
+
+export const updateAutomationSchema = z.object({
+  name: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+  trigger: automationTriggerSchema.optional(),
+  intervalMinutes: z.number().int().positive().nullable().optional(),
+  model: agentModelSchema.optional(),
+  effort: agentEffortSchema.optional(),
+  enabled: z.boolean().optional(),
+});
+export type UpdateAutomationInput = z.infer<typeof updateAutomationSchema>;
+
 // ---- WebSocket (backend → client) ----
 
 export const wsClientEventSchema = z.discriminatedUnion("type", [
@@ -631,8 +693,10 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     tickets: z.array(ticketSchema),
     slots: z.array(slotSchema),
     worktreeSessions: z.array(worktreeSessionSchema),
+    automations: z.array(automationSchema),
   }),
   z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
+  z.object({ type: z.literal("automations"), automations: z.array(automationSchema) }),
   z.object({ type: z.literal("ticket_removed"), ticketId: z.string() }),
   z.object({ type: z.literal("comment"), comment: commentSchema }),
   z.object({ type: z.literal("slots"), slots: z.array(slotSchema) }),

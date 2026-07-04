@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import type { Ticket } from "@shared/schemas";
 
 import { AgentsView } from "@/components/AgentsView";
+import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NewTicketDialog } from "@/components/NewTicketDialog";
 import { PrdView } from "@/components/PrdView";
@@ -125,6 +126,7 @@ export function App() {
   const renderView = (): ReactNode => {
     if (view === "terminals") return <TerminalsView projects={projects} projectFilter={filter} />;
     if (view === "stats") return <StatsView projects={projects} />;
+    if (view === "automation") return <AutomationView />;
     return renderHome();
   };
 

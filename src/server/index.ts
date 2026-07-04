@@ -13,6 +13,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
+import { AutomationManager } from "./agents/automationManager.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
@@ -201,6 +202,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     splitManager,
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
+  const automationManager = new AutomationManager(store, system, clientHub);
 
   await runFirstBootSetup(store, system);
   await slotManager.recover();
@@ -208,6 +210,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await feasibilityManager.recoverStale();
   reformulateManager.recoverStale();
   watchdog.start();
+  automationManager.start();
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
@@ -224,6 +227,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     feasibility: feasibilityManager,
     split: splitManager,
     reformulate: reformulateManager,
+    automations: automationManager,
     userTerminals,
     projectRoot: dataRoot,
     composerAvailable,
@@ -330,6 +334,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     },
     stop() {
       watchdog.stop();
+      automationManager.stop();
       server.stop(true);
       db.close();
     },

@@ -7,12 +7,13 @@ import {
   RefreshCw,
   Settings,
   SquareTerminal,
+  Zap,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "terminals" | "stats" | "prd";
+export type SidebarView = "home" | "terminals" | "stats" | "prd" | "automation";
 
 interface SidebarProps {
   view: SidebarView;
@@ -36,6 +37,7 @@ const NAV_ENTRIES: NavEntry[] = [
   { value: "terminals", label: "Terminal", Icon: SquareTerminal },
   { value: "stats", label: "Stats", Icon: BarChart3 },
   { value: "prd", label: "PRD", Icon: FileText },
+  { value: "automation", label: "Automation", Icon: Zap },
 ];
 
 function loadCollapsed(): boolean {

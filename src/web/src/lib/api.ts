@@ -1,9 +1,11 @@
 import type {
   AnalyzeTicketsInput,
   AppSettings,
+  Automation,
   Capabilities,
   Comment,
   CreateAskInput,
+  CreateAutomationInput,
   CreateCleanInput,
   CreateCommentInput,
   CreateProfileInput,
@@ -22,6 +24,7 @@ import type {
   TerminalOutput,
   Ticket,
   UpdateAppSettingsInput,
+  UpdateAutomationInput,
   UpdateMode,
   UpdateProfileInput,
   UpdateProjectInput,
@@ -93,6 +96,15 @@ export const api = {
     request(`/api/profiles/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   deleteProfile: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/profiles/${id}`, { method: "DELETE" }),
+  automations: (): Promise<Automation[]> => request("/api/automations"),
+  createAutomation: (input: CreateAutomationInput): Promise<Automation> =>
+    request("/api/automations", { method: "POST", body: JSON.stringify(input) }),
+  updateAutomation: (id: string, patch: UpdateAutomationInput): Promise<Automation> =>
+    request(`/api/automations/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteAutomation: (id: string): Promise<{ ok: boolean }> =>
+    request(`/api/automations/${id}`, { method: "DELETE" }),
+  runAutomation: (id: string): Promise<{ started: boolean }> =>
+    request(`/api/automations/${id}/run`, { method: "POST" }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>

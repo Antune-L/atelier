@@ -16,14 +16,15 @@ import {
   TRIAGE_LANGUAGE_META_KEY,
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
+import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
 import { agentEffortSchema, agentModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
-import type { AppSettings, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { AppSettings, Automation, AutomationRun, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapCommentRow, mapProfileRow, mapProjectRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapProfileRow, mapProjectRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -74,6 +75,26 @@ export interface ProfilePatch {
   implementerEffort?: AgentEffort;
   implementer?: Implementer;
   sortOrder?: number;
+}
+
+export interface NewAutomation {
+  name: string;
+  prompt: string;
+  trigger: AutomationTrigger;
+  intervalMinutes: number | null;
+  model: AgentModel;
+  effort: AgentEffort;
+  enabled: boolean;
+}
+
+export interface AutomationPatch {
+  name?: string;
+  prompt?: string;
+  trigger?: AutomationTrigger;
+  intervalMinutes?: number | null;
+  model?: AgentModel;
+  effort?: AgentEffort;
+  enabled?: boolean;
 }
 
 export interface NewProject {
@@ -581,6 +602,110 @@ export class Store {
 
   deleteProfile(id: string): void {
     this.db.query("DELETE FROM profiles WHERE id = ?").run(id);
+  }
+
+  // ---- Automations ----
+
+  listAutomations(): Automation[] {
+    const rows = this.db.query("SELECT * FROM automations ORDER BY sort_order ASC, created_at ASC").all();
+    return rows.map((raw) => {
+      const base = mapAutomationRow(raw, []);
+      return { ...base, runs: this.listAutomationRuns(base.id) };
+    });
+  }
+
+  getAutomation(id: string): Automation | null {
+    const raw = this.db.query("SELECT * FROM automations WHERE id = ?").get(id);
+    if (!raw) return null;
+    return mapAutomationRow(raw, this.listAutomationRuns(id));
+  }
+
+  createAutomation(input: NewAutomation): Automation {
+    const id = nanoid(10);
+    const now = Date.now();
+    const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM automations");
+    this.db
+      .query(
+        "INSERT INTO automations (id, name, prompt, trigger_type, interval_minutes, model, effort, enabled, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        id,
+        input.name,
+        input.prompt,
+        input.trigger,
+        input.intervalMinutes,
+        input.model,
+        input.effort,
+        input.enabled ? 1 : 0,
+        nextOrder,
+        now,
+        now,
+      );
+    const automation = this.getAutomation(id);
+    if (!automation) throw new Error("createAutomation: automatisation introuvable après insertion");
+    return automation;
+  }
+
+  updateAutomation(id: string, patch: AutomationPatch): Automation {
+    const builder = new SqlUpdateBuilder();
+    if (patch.name !== undefined) builder.set("name", patch.name);
+    if (patch.prompt !== undefined) builder.set("prompt", patch.prompt);
+    if (patch.trigger !== undefined) builder.set("trigger_type", patch.trigger);
+    if (patch.intervalMinutes !== undefined) builder.set("interval_minutes", patch.intervalMinutes);
+    if (patch.model !== undefined) builder.set("model", patch.model);
+    if (patch.effort !== undefined) builder.set("effort", patch.effort);
+    if (patch.enabled !== undefined) builder.set("enabled", patch.enabled ? 1 : 0);
+    builder.set("updated_at", Date.now());
+    builder.run(this.db, "automations", id);
+    const automation = this.getAutomation(id);
+    if (!automation) throw new Error(`updateAutomation: automatisation ${id} introuvable`);
+    return automation;
+  }
+
+  deleteAutomation(id: string): void {
+    const tx = this.db.transaction(() => {
+      this.db.query("DELETE FROM automation_runs WHERE automation_id = ?").run(id);
+      this.db.query("DELETE FROM automations WHERE id = ?").run(id);
+    });
+    tx();
+  }
+
+  listAutomationRuns(automationId: string): AutomationRun[] {
+    const rows = this.db
+      .query("SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT ?")
+      .all(automationId, AUTOMATION_RUNS_LIMIT);
+    return rows.map(mapAutomationRunRow);
+  }
+
+  startAutomationRun(automationId: string): AutomationRun {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query("INSERT INTO automation_runs (id, automation_id, status, result, started_at, finished_at) VALUES (?, ?, 'running', NULL, ?, NULL)")
+      .run(id, automationId, now);
+    const raw = this.db.query("SELECT * FROM automation_runs WHERE id = ?").get(id);
+    if (!raw) throw new Error("startAutomationRun: exécution introuvable après insertion");
+    return mapAutomationRunRow(raw);
+  }
+
+  finishAutomationRun(runId: string, status: AutomationRunStatus, result: string | null): AutomationRun | null {
+    this.db
+      .query("UPDATE automation_runs SET status = ?, result = ?, finished_at = ? WHERE id = ?")
+      .run(status, result, Date.now(), runId);
+    const raw = this.db.query("SELECT * FROM automation_runs WHERE id = ?").get(runId);
+    return raw ? mapAutomationRunRow(raw) : null;
+  }
+
+  /**
+   * Reconcile runs left in `running` by a crash/shutdown mid-execution (there is no in-process handle
+   * to finish them): mark them failed. Called once at boot, mirroring the other managers' recoverStale.
+   * Returns the number of rows swept.
+   */
+  failStaleAutomationRuns(reason: string): number {
+    const result = this.db
+      .query("UPDATE automation_runs SET status = 'failure', result = ?, finished_at = ? WHERE status = 'running'")
+      .run(reason, Date.now());
+    return result.changes;
   }
 
   // ---- Projects ----

@@ -1,9 +1,11 @@
 import { z } from "zod";
 
-import type { Comment, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { Automation, AutomationRun, Comment, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentEffortSchema,
   agentModelSchema,
+  automationRunStatusSchema,
+  automationTriggerSchema,
   columnSchema,
   implementerSchema,
   kindSchema,
@@ -313,6 +315,60 @@ export function mapSlotRow(raw: unknown): Slot {
     repoPath: row.repo_path,
     tmuxSession: row.tmux_session,
     status: slotStatusSchema.parse(row.status),
+  };
+}
+
+const automationRowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  prompt: z.string(),
+  trigger_type: z.string(),
+  interval_minutes: z.number().nullable(),
+  model: z.string(),
+  effort: z.string(),
+  enabled: z.number(),
+  sort_order: z.number(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+export type AutomationRow = z.infer<typeof automationRowSchema>;
+
+const automationRunRowSchema = z.object({
+  id: z.string(),
+  automation_id: z.string(),
+  status: z.string(),
+  result: z.string().nullable(),
+  started_at: z.number(),
+  finished_at: z.number().nullable(),
+});
+export type AutomationRunRow = z.infer<typeof automationRunRowSchema>;
+
+export function mapAutomationRunRow(raw: unknown): AutomationRun {
+  const row = automationRunRowSchema.parse(raw);
+  return {
+    id: row.id,
+    automationId: row.automation_id,
+    status: automationRunStatusSchema.parse(row.status),
+    result: row.result,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+export function mapAutomationRow(raw: unknown, runs: AutomationRun[]): Automation {
+  const row = automationRowSchema.parse(raw);
+  return {
+    id: row.id,
+    name: row.name,
+    prompt: row.prompt,
+    trigger: automationTriggerSchema.parse(row.trigger_type),
+    intervalMinutes: row.interval_minutes,
+    model: agentModelSchema.parse(row.model),
+    effort: agentEffortSchema.parse(row.effort),
+    enabled: row.enabled === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    runs,
   };
 }
 

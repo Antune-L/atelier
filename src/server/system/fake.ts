@@ -10,6 +10,7 @@ import type {
   PaneStream,
   ReformulateOptions,
   ReviewDoneOptions,
+  RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
@@ -180,6 +181,11 @@ export class FakeSystemAdapter implements SystemAdapter {
   async importNotion(opts: ImportNotionOptions): Promise<string> {
     this.log("importNotion", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
     return "## Synthèse Notion (simulée)\n\nImport Notion simulé (dry-run).";
+  }
+
+  async runAutomation(opts: RunAutomationOptions): Promise<string> {
+    this.log("runAutomation", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
+    return "Exécution simulée (dry-run) de l'automatisation.";
   }
 
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {

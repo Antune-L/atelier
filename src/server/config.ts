@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -112,14 +113,12 @@ function requireStore(): Store {
   return _store;
 }
 
-// Desktop dev: PROJECT_ROOT resolves inside the bundled launcher (under build/), which
-// `electrobun dev` wipes on every relaunch — a relaunch would delete the slot worktrees out
-// from under live agents. KANBAN_REPO_ROOT (the real checkout, exported by the dev:desktop
-// script and the relauncher) anchors slots at <repoRoot>/slots, outside build/, like `bun run dev`.
-const repoRoot = process.env.KANBAN_REPO_ROOT;
-
-/** Absolute root of the per-slot worktrees. */
-export const SLOTS_ROOT = join(repoRoot ?? PROJECT_ROOT, "slots");
+// Absolute root of the per-slot worktrees.
+// NOTE: must live OUTSIDE any repo that has a node_modules: tsc auto-includes @types from every
+// parent directory, so slots under this repo inherited its bun-types (TS 5.x syntax) and broke
+// worktree setup for TS 4.x projects. Anchoring on homedir also makes the old KANBAN_REPO_ROOT
+// workaround (electrobun dev wiping PROJECT_ROOT under build/) irrelevant for slots.
+export const SLOTS_ROOT = join(homedir(), "kanban-worktrees");
 
 /** Project keys are runtime-defined, so this is a plain string narrowing guard. */
 export type ProjectKey = string;

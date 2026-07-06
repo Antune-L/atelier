@@ -29,6 +29,5 @@
     "triage": "sonnet",
     "implementEffort": "medium",
     "triageEffort": "low"
-  },
-  "slotsRoot": "slots"
+  }
 }

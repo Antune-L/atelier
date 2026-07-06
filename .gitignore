@@ -14,6 +14,7 @@ slots/
 config.json
 .env
 .env.local
+.tokensave/
 
 # graphify: keep canonical graph outputs tracked, ignore redundant/local artifacts.
 # Dated backup snapshots (git history is the backup) + local extraction cache.

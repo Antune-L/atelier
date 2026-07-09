@@ -1,8 +1,8 @@
 import { MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 
-import type { ProjectInfo, SessionDriver } from "@shared/schemas";
-import { type AgentEffort, type AgentModel, type CodexEffort, type CodexModel } from "@shared/constants";
+import type { ProjectInfo } from "@shared/schemas";
+import { type AgentEffort, type AgentModel, type CodexEffort, type CodexModel, type Orchestrator } from "@shared/constants";
 
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { SessionDriverFields } from "@/components/SessionDriverFields";
@@ -32,7 +32,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
-  const [driver, setDriver] = useState<SessionDriver>("claude");
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,7 +65,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
         project,
         model,
         effort,
-        implementer: driver,
+        orchestrator,
         codexModel,
         codexEffort,
       });
@@ -94,15 +94,15 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
       </div>
 
       <SessionDriverFields
-        driver={driver}
+        orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
-        onDriverChange={setDriver}
+        onOrchestratorChange={setOrchestrator}
         onCodexModelChange={setCodexModel}
         onCodexEffortChange={setCodexEffort}
       />
 
-      {driver === "claude" && (
+      {orchestrator === "claude" && (
         <>
           <div className="flex flex-col items-start gap-1.5">
             <Label id="ask-model">Modèle</Label>

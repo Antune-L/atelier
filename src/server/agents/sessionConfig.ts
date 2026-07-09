@@ -12,7 +12,8 @@ import {
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
   TRIAGE_SLOT_ID,
 } from "../../shared/constants.ts";
-import type { SessionDriver, Ticket } from "../../shared/schemas.ts";
+import type { Orchestrator } from "../../shared/constants.ts";
+import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSubagentDefinition } from "../system/agentSession.ts";
 
@@ -104,7 +105,7 @@ export interface TriageSessionInput {
   /** "Analyse +" deep variant: fan out the feasibility + solutions scouts via the `Agent` tool. */
   deep: boolean;
   /** Which agent drives the triage (codex = read-only sandbox, no scouts — deep runs inline). */
-  driver: SessionDriver;
+  driver: Orchestrator;
 }
 
 /** Config for a read-only feasibility-triage session (no worktree/slot; only `submit_triage` is gated in). */
@@ -151,7 +152,7 @@ export interface SplitSessionInput {
   model: string;
   effort: string | null;
   /** Which agent drives the split (codex = read-only sandbox). */
-  driver: SessionDriver;
+  driver: Orchestrator;
 }
 
 /** Config for a read-only ticket-split session (no worktree/slot; only `submit_split` is gated in). */
@@ -316,9 +317,9 @@ function codexKnobs(ticket: Ticket): { model: string; effort: string } {
 /** Config for a feature/ask/review/clean/conflict implementation session (full tools, git-owning). */
 export function buildImplementSessionConfig(input: ImplementSessionInput): SessionStartConfig {
   const { ticket, slotId, cwd, composerScriptPath, resumeSessionId } = input;
-  // A ticket whose implementer is "codex" runs EVERY session on Codex, including the auto-triggered
+  // A ticket whose ORCHESTRATOR is "codex" runs EVERY session on Codex, including the auto-triggered
   // conflict-resolution one (buildConflictResolutionContract carries a codex-flavored framing).
-  if (ticket.implementer === "codex") {
+  if (ticket.orchestrator === "codex") {
     const knobs = codexKnobs(ticket);
     return {
       ticketId: ticket.id,

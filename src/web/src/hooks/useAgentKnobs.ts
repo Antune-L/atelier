@@ -1,9 +1,12 @@
 import { useState } from "react";
 
-import type { AgentEffort, AgentModel, CodexEffort, CodexModel, Implementer } from "@shared/constants";
+import type { AgentEffort, AgentModel, CodexEffort, CodexModel, Implementer, Orchestrator } from "@shared/constants";
+
+import { pairedImplementer } from "@/lib/agentPairing";
 
 /** A complete profile applied to the agent knobs in one batch. */
 export interface AgentProfileConfigValues {
+  orchestrator: Orchestrator;
   model: AgentModel;
   effort: AgentEffort;
   implementerModel: AgentModel;
@@ -14,6 +17,7 @@ export interface AgentProfileConfigValues {
 }
 
 export interface AgentKnobs {
+  orchestrator: Orchestrator;
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementerModel: AgentModel | null;
@@ -21,6 +25,7 @@ export interface AgentKnobs {
   implementer: Implementer;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  setOrchestrator: (orchestrator: Orchestrator) => void;
   setModel: (model: AgentModel | null) => void;
   setEffort: (effort: AgentEffort | null) => void;
   setImplementerModel: (model: AgentModel | null) => void;
@@ -33,11 +38,12 @@ export interface AgentKnobs {
 }
 
 /**
- * Per-ticket implementation-agent knobs (model/effort/implementer + sub-agent model/effort + Codex
- * model/effort) with profile application and reset. A null knob means "fall back to server config".
- * Shared by the new ticket and CSV import panels.
+ * Per-ticket implementation-agent knobs (orchestrator + model/effort/implementer + sub-agent
+ * model/effort + Codex model/effort) with profile application and reset. A null knob means "fall
+ * back to server config". Shared by the new ticket and CSV import panels.
  */
 export function useAgentKnobs(): AgentKnobs {
+  const [orchestrator, setOrchestratorState] = useState<Orchestrator>("claude");
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
   const [implementerModel, setImplementerModel] = useState<AgentModel | null>(null);
@@ -46,7 +52,15 @@ export function useAgentKnobs(): AgentKnobs {
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
 
+  // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex,
+  // switching back to claude drops a codex implementer to claude.
+  const setOrchestrator = (next: Orchestrator): void => {
+    setOrchestratorState(next);
+    setImplementer((current) => pairedImplementer(next, current));
+  };
+
   const applyProfile = (config: AgentProfileConfigValues): void => {
+    setOrchestratorState(config.orchestrator);
     setModel(config.model);
     setEffort(config.effort);
     setImplementerModel(config.implementerModel);
@@ -57,6 +71,7 @@ export function useAgentKnobs(): AgentKnobs {
   };
 
   const reset = (): void => {
+    setOrchestratorState("claude");
     setModel(null);
     setEffort(null);
     setImplementerModel(null);
@@ -67,6 +82,7 @@ export function useAgentKnobs(): AgentKnobs {
   };
 
   return {
+    orchestrator,
     model,
     effort,
     implementerModel,
@@ -74,6 +90,7 @@ export function useAgentKnobs(): AgentKnobs {
     implementer,
     codexModel,
     codexEffort,
+    setOrchestrator,
     setModel,
     setEffort,
     setImplementerModel,

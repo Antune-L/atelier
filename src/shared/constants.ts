@@ -85,6 +85,24 @@ export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   codex: "Codex",
 };
 
+/** Who pilots the full session (planning, review, tests, git, PR) — distinct from who writes the code. */
+export const ORCHESTRATORS = ["claude", "codex"] as const;
+export type Orchestrator = (typeof ORCHESTRATORS)[number];
+
+export const ORCHESTRATOR_LABELS: Record<Orchestrator, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/**
+ * Allowed orchestrator × implementer pairs. Codex orchestrates only itself (it has no Agent tool to
+ * delegate), and a Codex implementer requires the Codex orchestrator until the backend delegation
+ * tool lands (PR2 relaxes that second half to allow Claude orchestrating a Codex implementer).
+ */
+export function isAllowedAgentPair(orchestrator: Orchestrator, implementer: Implementer): boolean {
+  return orchestrator === "codex" ? implementer === "codex" : implementer !== "codex";
+}
+
 /** Language the agent writes commit messages and PR title/description in. */
 export const COMMIT_LANGUAGES = ["en", "fr"] as const;
 export type CommitLanguage = (typeof COMMIT_LANGUAGES)[number];
@@ -123,6 +141,7 @@ export const CONFIG_MIGRATED_META_KEY = "config_migrated";
 /** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {
   name: string;
+  orchestrator: Orchestrator;
   model: AgentModel;
   effort: AgentEffort;
   /** Implementer sub-agent model (claude mode only). */
@@ -130,15 +149,16 @@ export interface ProfileConfig {
   /** Implementer sub-agent reasoning effort (claude mode only). */
   implementerEffort: AgentEffort;
   implementer: Implementer;
-  /** Codex session model (codex mode only). */
+  /** Codex session model (codex orchestrator/implementer only). */
   codexModel: CodexModel;
-  /** Codex session reasoning effort (codex mode only). */
+  /** Codex session reasoning effort (codex orchestrator/implementer only). */
   codexEffort: CodexEffort;
 }
 
 /** The built-in Codex preset, also seeded once into pre-existing DBs (see schema.ts). */
 export const CODEX_SEED_PROFILE: ProfileConfig = {
   name: "Codex",
+  orchestrator: "codex",
   model: "opus",
   effort: "medium",
   implementerModel: "opus",
@@ -152,6 +172,7 @@ export const CODEX_SEED_PROFILE: ProfileConfig = {
 export const DEFAULT_PROFILES: ProfileConfig[] = [
   {
     name: "Basique",
+    orchestrator: "claude",
     model: "opus",
     effort: "medium",
     implementerModel: "opus",
@@ -162,6 +183,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
   },
   {
     name: "Debug -",
+    orchestrator: "claude",
     model: "opus",
     effort: "low",
     implementerModel: "opus",
@@ -172,6 +194,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
   },
   {
     name: "Debug +",
+    orchestrator: "claude",
     model: "opus",
     effort: "max",
     implementerModel: "opus",
@@ -182,6 +205,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
   },
   {
     name: "Délégation",
+    orchestrator: "claude",
     model: "opus",
     effort: "medium",
     implementerModel: "opus",
@@ -246,6 +270,12 @@ export const CODEX_MODEL_META_KEY = "codex_model";
 export const CODEX_EFFORT_META_KEY = "codex_effort";
 /** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
 export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
+/**
+ * `meta` table key flagging that the one-shot orchestrator backfill ran (implementer=codex →
+ * orchestrator=codex on tickets and profiles). MUST stay one-shot: once cross-provider pairs are
+ * allowed (PR2), re-running it would silently rewrite a claude-orchestrated codex-implementer ticket.
+ */
+export const ORCHESTRATOR_BACKFILL_META_KEY = "orchestrator_backfilled";
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;

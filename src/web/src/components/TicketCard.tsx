@@ -106,7 +106,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
             <Sparkles className="h-3 w-3" /> Composer
           </Badge>
         )}
-        {ticket.implementer === "codex" && (
+        {ticket.orchestrator === "codex" && (
           <Badge variant="secondary" className="gap-1 text-[10px]">
             <Bot className="h-3 w-3" /> Codex
           </Badge>

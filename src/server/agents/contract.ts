@@ -24,8 +24,8 @@ function commitLanguageDirective(language: CommitLanguage): string {
 
 /**
  * Builds the `implementing` step(s) of the contract. Four modes:
- * Composer delegates code-writing to Cursor headless; Codex implements inline in the SAME session
- * (no sub-agent — Codex has no Agent tool); a PRD-enabled Claude ticket delegates it to a
+ * Composer delegates code-writing to Cursor headless; a Codex orchestrator implements inline in the
+ * SAME session (no sub-agent — Codex has no Agent tool); a PRD-enabled Claude ticket delegates it to a
  * fresh-context sub-agent (kept separate from the planning session, with the validated PRD as its
  * contract); otherwise Claude implements inline via that same sub-agent.
  */
@@ -34,7 +34,7 @@ function buildImplementingSteps(
   opts: { composerScriptPath: string },
   prdPath: string,
 ): string[] {
-  if (ticket.implementer === "codex") {
+  if (ticket.orchestrator === "codex") {
     if (ticket.prdEnabled) {
       return [
         "2. implementing :",
@@ -98,7 +98,7 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
       ]
     : [];
   const loopBudget = ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction";
-  if (ticket.implementer === "codex") {
+  if (ticket.orchestrator === "codex") {
     return [
       "3. reviewing : relis ton propre diff (git diff) comme le ferait un reviewer indépendant et corrige ce que tu trouves.",
       ...figmaLines,
@@ -117,7 +117,7 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
 /** Step 5c (optional): mandatory visual diff against referenced mockups, before opening the PR. */
 function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): string {
   if (!verifyWithMockups) return "";
-  if (ticket.implementer === "codex") {
+  if (ticket.orchestrator === "codex") {
     return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images) ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de l'étape 3.";
   }
   return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus.";
@@ -125,14 +125,14 @@ function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): stri
 
 /** Opening line of the "## Contrat de pipeline" section: names the agent driving the session. */
 function buildSessionFramingLine(ticket: Ticket): string {
-  if (ticket.implementer === "codex") return "Tu es une session Codex autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
+  if (ticket.orchestrator === "codex") return "Tu es une session Codex autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
   return "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
 }
 
 /** The `submit_prd` bullet: Claude hands the validated PRD to a fresh sub-agent; Codex implements inline (no Agent tool). */
 function buildPrdBullet(ticket: Ticket): string {
   if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
-  if (ticket.implementer === "codex") {
+  if (ticket.orchestrator === "codex") {
     return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant d'implémenter (ne l'implémente pas dans cette phase de planification).";
   }
   return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification).";
@@ -319,7 +319,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
     "",
     "## Contrat de pipeline",
-    `Tu es une session ${ticket.implementer === "codex" ? "Codex" : "Claude Code"} autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
+    `Tu es une session ${ticket.orchestrator === "codex" ? "Codex" : "Claude Code"} autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
     "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
@@ -447,7 +447,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     return buildReviewFixLines(ticket, opts, { project, depth, branch, argusCmd, reviewBase });
   }
 
-  const isCodex = ticket.implementer === "codex";
+  const isCodex = ticket.orchestrator === "codex";
   // Codex has no argus skill: it reviews the diff itself, one dimension at a time, then posts inline
   // via `gh api` (the done gate checks a posted review by the current gh user, so posting is mandatory
   // when postComments is on).
@@ -518,7 +518,7 @@ function buildReviewFixLines(
   ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; argusCmd: string; reviewBase: string },
 ): string {
   const { project, depth, branch, argusCmd, reviewBase } = ctx;
-  const isCodex = ticket.implementer === "codex";
+  const isCodex = ticket.orchestrator === "codex";
 
   // Codex: no argus skill, no pr-fixer sub-agent — review the diff inline, post via gh api, fix inline.
   const codexSteps = [
@@ -585,7 +585,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
   const project = getProject(ticket.project);
   const branch = ticket.prHeadBranch ?? "";
   const localBranch = branch ? `${branch}${CLEANER_BRANCH_SUFFIX}` : "";
-  const isCodex = ticket.implementer === "codex";
+  const isCodex = ticket.orchestrator === "codex";
 
   // Codex has no minos-pr-feedback skill: it fetches and triages the reviewer threads itself via gh.
   const codexTriageStep = `2. \`update_stage("fixing")\` puis : récupère TOUS les fils de retours de la PR #${ticket.prNumber} via \`gh\` — commentaires inline (\`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/comments\`), reviews (\`gh pr view ${ticket.prUrl} --json reviews\`) et commentaires de conversation (\`gh api /repos/{owner}/{repo}/issues/${ticket.prNumber}/comments\`). Trie-les par pertinence et n'applique QUE les corrections pertinentes qui respectent le contexte de la PR ci-dessus ; écarte les nits et ignore les fils résolus/obsolètes. Si rien n'est pertinent, n'applique rien.`;
@@ -642,7 +642,7 @@ export function buildAskContract(ticket: Ticket): string {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
   const project = getProject(ticket.project);
-  const isCodex = ticket.implementer === "codex";
+  const isCodex = ticket.orchestrator === "codex";
 
   const lines: string[] = [
     `# Question ${ticket.id} — ${ticket.title}`,

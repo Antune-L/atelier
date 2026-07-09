@@ -89,8 +89,8 @@ export class TriageManager {
 
       const triageLanguage = this.store.getAppSettings().triageLanguage;
       const baseBranch = resolveBaseBranch(ticket, project, this.store);
-      // A codex ticket triages on Codex too (its knobs), so Claude never enters its pipeline.
-      const driver = ticket.implementer === "codex" ? "codex" : "claude";
+      // A codex-orchestrated ticket triages on Codex too (its knobs), so Claude never enters its pipeline.
+      const driver = ticket.orchestrator;
       const prompt = deep
         ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver)
         : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver);

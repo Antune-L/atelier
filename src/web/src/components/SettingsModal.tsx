@@ -22,14 +22,13 @@ import {
   COMMIT_LANGUAGE_LABELS,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
-  IMPLEMENTERS,
-  IMPLEMENTER_LABELS,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
   type CodexModel,
   type CommitLanguage,
   type Implementer,
+  type Orchestrator,
 } from "@shared/constants";
 import type { Profile } from "@shared/schemas";
 
@@ -44,18 +43,23 @@ import {
   ModalTitle,
 } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
-import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS, CODEX_EFFORT_OPTIONS, CODEX_MODEL_OPTIONS } from "@/lib/display";
+import { pairedImplementer } from "@/lib/agentPairing";
+import {
+  AGENT_EFFORT_OPTIONS,
+  AGENT_MODEL_OPTIONS,
+  CODEX_EFFORT_OPTIONS,
+  CODEX_MODEL_OPTIONS,
+  implementerTabOptions,
+  orchestratorTabOptions,
+} from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 import { useTheme } from "@/hooks/useTheme";
 
 const DRAG_ACTIVATION_DISTANCE = 6;
 
-const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
-  value: i,
-  label: IMPLEMENTER_LABELS[i],
-}));
 const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map(
   (l) => ({
     value: l,
@@ -418,6 +422,7 @@ function ProfilesSettings() {
     try {
       await api.createProfile({
         name: "Nouveau profil",
+        orchestrator: "claude",
         model: "opus",
         effort: "medium",
         implementerModel: "opus",
@@ -576,7 +581,11 @@ function ProfileRow({
   dragHandleAttributes,
   setActivatorNodeRef,
 }: ProfileRowProps) {
+  const { composerAvailable, codexAvailable } = useCapabilities();
   const [name, setName] = useState(profile.name);
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>(
+    profile.orchestrator,
+  );
   const [model, setModel] = useState<AgentModel>(profile.model);
   const [effort, setEffort] = useState<AgentEffort>(profile.effort);
   const [implementerModel, setImplementerModel] = useState<AgentModel>(
@@ -594,8 +603,18 @@ function ProfileRow({
   );
   const [busy, setBusy] = useState(false);
 
+  // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex.
+  const changeOrchestrator = (next: Orchestrator): void => {
+    setOrchestrator(next);
+    setImplementer((current) => pairedImplementer(next, current));
+  };
+
+  const orchestratorOptions = orchestratorTabOptions(codexAvailable);
+  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable);
+
   const dirty =
     name !== profile.name ||
+    orchestrator !== profile.orchestrator ||
     model !== profile.model ||
     effort !== profile.effort ||
     implementerModel !== profile.implementerModel ||
@@ -610,6 +629,7 @@ function ProfileRow({
     try {
       await api.updateProfile(profile.id, {
         name: name.trim(),
+        orchestrator,
         model,
         effort,
         implementerModel,
@@ -678,7 +698,15 @@ function ProfileRow({
           Configuration
         </summary>
         <div className="mt-3 flex flex-col gap-2">
-          {implementer !== "codex" && (
+          <Field label="Orchestrateur">
+            <Tabs
+              options={orchestratorOptions}
+              value={orchestrator}
+              onChange={changeOrchestrator}
+              aria-label="Orchestrateur"
+            />
+          </Field>
+          {orchestrator === "claude" && (
             <>
               <Field label="Modèle">
                 <Tabs
@@ -698,9 +726,29 @@ function ProfileRow({
               </Field>
             </>
           )}
+          {orchestrator === "codex" && (
+            <>
+              <Field label="Modèle (Codex)">
+                <Tabs
+                  options={CODEX_MODEL_OPTIONS}
+                  value={codexModel}
+                  onChange={setCodexModel}
+                  aria-label="Modèle Codex"
+                />
+              </Field>
+              <Field label="Effort (Codex)">
+                <Tabs
+                  options={CODEX_EFFORT_OPTIONS}
+                  value={codexEffort}
+                  onChange={setCodexEffort}
+                  aria-label="Effort Codex"
+                />
+              </Field>
+            </>
+          )}
           <Field label="Implémenté par">
             <Tabs
-              options={IMPLEMENTER_OPTIONS}
+              options={implementerOptions}
               value={implementer}
               onChange={setImplementer}
               aria-label="Implémenté par"
@@ -728,26 +776,6 @@ function ProfileRow({
                 />
               </Field>
             </div>
-          )}
-          {implementer === "codex" && (
-            <>
-              <Field label="Modèle (Codex)">
-                <Tabs
-                  options={CODEX_MODEL_OPTIONS}
-                  value={codexModel}
-                  onChange={setCodexModel}
-                  aria-label="Modèle Codex"
-                />
-              </Field>
-              <Field label="Effort (Codex)">
-                <Tabs
-                  options={CODEX_EFFORT_OPTIONS}
-                  value={codexEffort}
-                  onChange={setCodexEffort}
-                  aria-label="Effort Codex"
-                />
-              </Field>
-            </>
           )}
         </div>
       </details>

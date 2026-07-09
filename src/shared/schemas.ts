@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
 import { isNotionUrl } from "./notion.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
@@ -20,9 +20,8 @@ export const agentEffortSchema = z.enum(AGENT_EFFORTS);
 export const codexModelSchema = z.enum(CODEX_MODELS);
 export const codexEffortSchema = z.enum(CODEX_EFFORTS);
 export const implementerSchema = z.enum(IMPLEMENTERS);
-/** Drivers that can own a full review/clean/ask session (Composer only ever writes feature code). */
-export const sessionDriverSchema = z.enum(["claude", "codex"]);
-export type SessionDriver = z.infer<typeof sessionDriverSchema>;
+/** Who pilots a full session (planning, review, tests, git, PR) — Composer only ever writes feature code. */
+export const orchestratorSchema = z.enum(ORCHESTRATORS);
 export const kindSchema = z.enum(KINDS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
 export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
@@ -193,9 +192,11 @@ export const ticketSchema = z.object({
   /** Implementer sub-agent overrides (null = fall back to the server config defaults). */
   implementerModel: agentModelSchema.nullable(),
   implementerEffort: agentEffortSchema.nullable(),
-  /** Codex session overrides (codex implementer only; null = fall back to the app-settings defaults). */
+  /** Codex session overrides (codex orchestrator/implementer only; null = fall back to the app-settings defaults). */
   codexModel: codexModelSchema.nullable(),
   codexEffort: codexEffortSchema.nullable(),
+  /** Who pilots the session end-to-end; constrained by isAllowedAgentPair against `implementer`. */
+  orchestrator: orchestratorSchema,
   implementer: implementerSchema,
   reviewRounds: z.number().int(),
   sessionId: z.string().nullable(),
@@ -241,6 +242,7 @@ export const statRecordSchema = z.object({
   stage: stageSchema.nullable(),
   model: agentModelSchema.nullable(),
   effort: agentEffortSchema.nullable(),
+  orchestrator: orchestratorSchema,
   implementer: implementerSchema,
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
@@ -256,6 +258,7 @@ export type StatRecord = z.infer<typeof statRecordSchema>;
 export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),
+  orchestrator: orchestratorSchema,
   model: agentModelSchema,
   effort: agentEffortSchema,
   implementerModel: agentModelSchema,
@@ -272,6 +275,7 @@ export type Profile = z.infer<typeof profileSchema>;
 
 export const createProfileSchema = z.object({
   name: z.string().min(1),
+  orchestrator: orchestratorSchema.default("claude"),
   model: agentModelSchema,
   effort: agentEffortSchema,
   implementerModel: agentModelSchema.default("opus"),
@@ -284,6 +288,7 @@ export type CreateProfileInput = z.infer<typeof createProfileSchema>;
 
 export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
+  orchestrator: orchestratorSchema.optional(),
   model: agentModelSchema.optional(),
   effort: agentEffortSchema.optional(),
   implementerModel: agentModelSchema.optional(),
@@ -451,6 +456,7 @@ const ticketBatchOptionsSchema = z.object({
   effort: agentEffortSchema.nullable().default(null),
   implementerModel: agentModelSchema.nullable().default(null),
   implementerEffort: agentEffortSchema.nullable().default(null),
+  orchestrator: orchestratorSchema.default("claude"),
   implementer: implementerSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
@@ -513,6 +519,7 @@ export const updateTicketSchema = z.object({
   effort: agentEffortSchema.nullable().optional(),
   implementerModel: agentModelSchema.nullable().optional(),
   implementerEffort: agentEffortSchema.nullable().optional(),
+  orchestrator: orchestratorSchema.optional(),
   implementer: implementerSchema.optional(),
   codexModel: codexModelSchema.nullable().optional(),
   codexEffort: codexEffortSchema.nullable().optional(),
@@ -559,7 +566,7 @@ export const createReviewSchema = z.object({
   /** Optional override for the argus review base; null means "use each PR's own detected target". */
   baseBranch: baseBranchSchema.nullable().default(null),
   /** Which agent drives the review session (claude = argus skill, codex = inline review). */
-  implementer: sessionDriverSchema.default("claude"),
+  orchestrator: orchestratorSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
@@ -572,7 +579,7 @@ export const createCleanSchema = z.object({
   /** Optional free-text context of the PR; the cleaner only applies feedback that respects it. */
   context: z.string().default(""),
   /** Which agent drives the clean session (claude = minos skill, codex = inline feedback triage). */
-  implementer: sessionDriverSchema.default("claude"),
+  orchestrator: orchestratorSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
@@ -589,7 +596,7 @@ export const createAskSchema = z
     model: agentModelSchema.nullable().default(null),
     effort: agentEffortSchema.nullable().default(null),
     /** Which agent answers (claude tool-gated read-only, codex read-only sandbox). */
-    implementer: sessionDriverSchema.default("claude"),
+    orchestrator: orchestratorSchema.default("claude"),
     codexModel: codexModelSchema.nullable().default(null),
     codexEffort: codexEffortSchema.nullable().default(null),
   })

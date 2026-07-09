@@ -67,8 +67,8 @@ export class SplitManager {
     this.cleanup(ticketId);
 
     const splitLanguage = this.store.getAppSettings().triageLanguage;
-    // A codex ticket splits on Codex too (its knobs), so Claude never enters its pipeline.
-    const driver = ticket.implementer === "codex" ? "codex" : "claude";
+    // A codex-orchestrated ticket splits on Codex too (its knobs), so Claude never enters its pipeline.
+    const driver = ticket.orchestrator;
     const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
 
     return new Promise<SplitResult>((resolve, reject) => {

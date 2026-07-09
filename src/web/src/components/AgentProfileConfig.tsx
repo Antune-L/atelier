@@ -8,6 +8,7 @@ import {
   type CodexEffort,
   type CodexModel,
   type Implementer,
+  type Orchestrator,
 } from "@shared/constants";
 
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
@@ -18,6 +19,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 
 interface AgentProfileConfigProps {
+  orchestrator: Orchestrator;
   model: AgentModel | null;
   effort: AgentEffort | null;
   implementerModel: AgentModel | null;
@@ -25,6 +27,7 @@ interface AgentProfileConfigProps {
   implementer: Implementer;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  onOrchestratorChange: (orchestrator: Orchestrator) => void;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
   onImplementerModelChange: (model: AgentModel | null) => void;
@@ -34,6 +37,7 @@ interface AgentProfileConfigProps {
   onCodexEffortChange: (effort: CodexEffort | null) => void;
   /** Apply a whole profile at once (lets a single call site batch all knobs). */
   onApplyProfile: (config: {
+    orchestrator: Orchestrator;
     model: AgentModel;
     effort: AgentEffort;
     implementerModel: AgentModel;
@@ -50,6 +54,7 @@ interface AgentProfileConfigProps {
  * no longer matches a profile surfaces the "Personnalisé" entry (derived, never persisted).
  */
 export function AgentProfileConfig({
+  orchestrator,
   model,
   effort,
   implementerModel,
@@ -57,6 +62,7 @@ export function AgentProfileConfig({
   implementer,
   codexModel,
   codexEffort,
+  onOrchestratorChange,
   onModelChange,
   onEffortChange,
   onImplementerModelChange,
@@ -81,11 +87,12 @@ export function AgentProfileConfig({
   const effectiveCodexEffort = codexEffort ?? defaults.codexEffort;
 
   const selectedProfile = profiles.find((p) => {
-    if (p.implementer !== implementer) return false;
-    // Codex mode: the Claude orchestrator/implementer knobs are ignored, only the Codex pair counts.
-    if (implementer === "codex") {
+    if (p.orchestrator !== orchestrator) return false;
+    // Codex orchestrator: the Claude orchestrator/implementer knobs are ignored, only the Codex pair counts.
+    if (orchestrator === "codex") {
       return p.codexModel === effectiveCodexModel && p.codexEffort === effectiveCodexEffort;
     }
+    if (p.implementer !== implementer) return false;
     if (p.model !== effectiveModel || p.effort !== effectiveEffort) return false;
     // Implementer knobs only differentiate profiles in claude mode (ignored under composer).
     return (
@@ -99,6 +106,7 @@ export function AgentProfileConfig({
     const profile = profiles.find((p) => p.id === value);
     if (!profile) return;
     onApplyProfile({
+      orchestrator: profile.orchestrator,
       model: profile.model,
       effort: profile.effort,
       implementerModel: profile.implementerModel,
@@ -131,6 +139,7 @@ export function AgentProfileConfig({
         <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration avancée</summary>
         <div className="mt-3">
           <ImplementationAgentFields
+            orchestrator={orchestrator}
             model={model}
             effort={effort}
             implementerModel={implementerModel}
@@ -138,6 +147,7 @@ export function AgentProfileConfig({
             implementer={implementer}
             codexModel={codexModel}
             codexEffort={codexEffort}
+            onOrchestratorChange={onOrchestratorChange}
             onModelChange={onModelChange}
             onEffortChange={onEffortChange}
             onImplementerModelChange={onImplementerModelChange}

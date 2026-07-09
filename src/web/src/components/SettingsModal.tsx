@@ -20,8 +20,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
+  DEFAULT_CODEX_EFFORT,
+  DEFAULT_CODEX_MODEL,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
+  pairedCodexEffort,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
@@ -49,8 +52,8 @@ import { pairedImplementer } from "@/lib/agentPairing";
 import {
   AGENT_EFFORT_OPTIONS,
   AGENT_MODEL_OPTIONS,
-  CODEX_EFFORT_OPTIONS,
   CODEX_MODEL_OPTIONS,
+  codexEffortTabOptions,
   implementerTabOptions,
   orchestratorTabOptions,
 } from "@/lib/display";
@@ -238,12 +241,17 @@ function GeneralSettings() {
 
   const changeCodexModel = async (next: CodexModel): Promise<void> => {
     const previous = codexModel;
+    const previousEffort = codexEffort;
+    // Re-pair the effort with the picked model (e.g. ultra clamps to max outside Terra).
+    const nextEffort = pairedCodexEffort(next, codexEffort ?? DEFAULT_CODEX_EFFORT);
     setCodexModel(next);
+    setCodexEffort(nextEffort);
     setError(null);
     try {
-      await api.updateSettings({ codexModel: next });
+      await api.updateSettings({ codexModel: next, ...(nextEffort !== previousEffort ? { codexEffort: nextEffort } : {}) });
     } catch (e) {
       setCodexModel(previous);
+      setCodexEffort(previousEffort);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -382,7 +390,7 @@ function GeneralSettings() {
             Effort de raisonnement par défaut des sessions pilotées par Codex.
           </p>
           <Tabs
-            options={CODEX_EFFORT_OPTIONS}
+            options={codexEffortTabOptions(codexModel ?? DEFAULT_CODEX_MODEL)}
             value={codexEffort}
             onChange={(v) => void changeCodexEffort(v)}
             aria-label="Effort Codex"
@@ -732,13 +740,16 @@ function ProfileRow({
                 <Tabs
                   options={CODEX_MODEL_OPTIONS}
                   value={codexModel}
-                  onChange={setCodexModel}
+                  onChange={(next) => {
+                    setCodexModel(next);
+                    setCodexEffort((current) => pairedCodexEffort(next, current));
+                  }}
                   aria-label="Modèle Codex"
                 />
               </Field>
               <Field label="Effort (Codex)">
                 <Tabs
-                  options={CODEX_EFFORT_OPTIONS}
+                  options={codexEffortTabOptions(codexModel)}
                   value={codexEffort}
                   onChange={setCodexEffort}
                   aria-label="Effort Codex"

@@ -3,9 +3,9 @@ import {
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
-  CODEX_EFFORTS,
   CODEX_EFFORT_LABELS,
   CODEX_MODELS,
+  CODEX_MODEL_EFFORTS,
   CODEX_MODEL_LABELS,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
@@ -44,11 +44,13 @@ export const CODEX_MODEL_OPTIONS: TabOption<CodexModel>[] = CODEX_MODELS.map((m)
   label: CODEX_MODEL_LABELS[m],
 }));
 
-/** Ready-made segmented-control options for the Codex reasoning-effort picker. */
-export const CODEX_EFFORT_OPTIONS: TabOption<CodexEffort>[] = CODEX_EFFORTS.map((e) => ({
-  value: e,
-  label: CODEX_EFFORT_LABELS[e],
-}));
+/** Codex reasoning-effort options for a given model: only the efforts that model accepts. */
+export function codexEffortTabOptions(model: CodexModel): TabOption<CodexEffort>[] {
+  return CODEX_MODEL_EFFORTS[model].map((e) => ({
+    value: e,
+    label: CODEX_EFFORT_LABELS[e],
+  }));
+}
 
 /** Orchestrator picker options; the Codex orchestrator is disabled (with a hint) when its CLI is absent. */
 export function orchestratorTabOptions(codexAvailable: boolean): TabOption<Orchestrator>[] {

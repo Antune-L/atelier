@@ -236,32 +236,63 @@ export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
 
-/** Codex models pickable per ticket (kept in sync with developers.openai.com/codex/models). */
-export const CODEX_MODELS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
+/**
+ * Codex models pickable per ticket (kept in sync with the live Codex model catalog; GPT-5.6 Sol is
+ * excluded because the catalog does not expose it to this account). Requires codex CLI ≥ 0.144 for
+ * the gpt-5.6-* models (older CLIs reject them with "requires a newer version of Codex").
+ */
+export const CODEX_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
 export type CodexModel = (typeof CODEX_MODELS)[number];
 
 export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
+  "gpt-5.6-terra": "5.6 Terra",
+  "gpt-5.6-luna": "5.6 Luna",
   "gpt-5.5": "5.5",
   "gpt-5.4": "5.4",
   "gpt-5.4-mini": "5.4 mini",
 };
 
 /**
- * Reasoning effort levels exposed for Codex (distinct enum from AgentEffort — no "max"). Bounded on
- * both ends by what current codex models accept: "minimal" is rejected outright (API 400,
- * unsupported_value) and "xhigh" isn't supported by every model (gpt-5.4-mini tops out at high).
+ * Reasoning effort levels exposed for Codex (distinct enum from AgentEffort). The full union across
+ * models; per-model support is a PREFIX of this list (see CODEX_MODEL_EFFORTS). "minimal" stays
+ * excluded: it is rejected outright by the API (400, unsupported_value) and breaks web_search.
  */
-export const CODEX_EFFORTS = ["low", "medium", "high"] as const;
+export const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type CodexEffort = (typeof CODEX_EFFORTS)[number];
 
 export const CODEX_EFFORT_LABELS: Record<CodexEffort, string> = {
   low: "L",
   medium: "M",
   high: "H",
+  xhigh: "XH",
+  max: "Max",
+  ultra: "Ultra",
 };
 
+/**
+ * Efforts each Codex model accepts (from the live model catalog). Every entry is a prefix of
+ * CODEX_EFFORTS: "max" needs a 5.6 model, "ultra" (multi-agent reasoning) is Terra-only.
+ */
+export const CODEX_MODEL_EFFORTS: Record<CodexModel, readonly CodexEffort[]> = {
+  "gpt-5.6-terra": CODEX_EFFORTS,
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
+};
+
+/**
+ * Coerce an effort to something the model accepts after a model change: an unsupported effort clamps
+ * to the model's strongest one (supported lists are prefixes, so "ultra" on Luna clamps to "max").
+ */
+export function pairedCodexEffort(model: CodexModel, effort: CodexEffort): CodexEffort {
+  const supported = CODEX_MODEL_EFFORTS[model];
+  if (supported.includes(effort)) return effort;
+  return supported[supported.length - 1] ?? DEFAULT_CODEX_EFFORT;
+}
+
 /** Fallback Codex knobs when neither the ticket nor the persisted app settings pin them. */
-export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-5.5";
+export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-5.6-terra";
 export const DEFAULT_CODEX_EFFORT: CodexEffort = "medium";
 
 /** `meta` table key holding the persisted default Codex model. */

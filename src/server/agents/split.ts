@@ -138,6 +138,7 @@ export function buildSplitChannelPrompt(
         "  `{ title, summary, children }` where `children` is itself a (possibly empty) list of the same",
         "  shape (omit it or leave it empty for a leaf).",
         "Do not write the decomposition as text: only the `submit_split` call is taken into account.",
+        "If the tool is not in your static tool list, it is exposed lazily: find it via your tool search (`mcp__kanban` namespace) before concluding it is unavailable.",
       ]
     : [
         "## Format de réponse",
@@ -147,6 +148,7 @@ export function buildSplitChannelPrompt(
         "  `{ title, summary, children }` où `children` est elle-même une liste (éventuellement vide) de la",
         "  même forme (omets-la ou laisse-la vide pour une feuille).",
         "N'écris pas le découpage en texte : seul l'appel à `submit_split` est pris en compte.",
+        "Si le tool n'apparaît pas dans ta liste statique de tools, il est exposé en différé : retrouve-le via ta recherche de tools (namespace `mcp__kanban`) avant de conclure qu'il est indisponible.",
       ];
 
   const lines: string[] = [

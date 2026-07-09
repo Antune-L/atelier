@@ -10,10 +10,13 @@ Agents run as long-lived Claude Code sessions via the official **`@anthropic-ai/
 
 Download the latest `Atelier-vX.Y.Z-arm64.dmg` from the [GitHub Releases](https://github.com/Antune-L/atelier/releases), open it and drag **Atelier** to Applications.
 
-The app is not signed/notarized yet, so macOS quarantines the first launch. Since macOS 15 the right-click → Open trick no longer works; instead:
+The app is not signed/notarized yet, so macOS blocks the first launch with a misleading **"Atelier is damaged and can't be opened"** dialog (the app is fine — that is Gatekeeper's message for unsigned downloads; for fully unsigned apps the "Open Anyway" button usually never shows up). Clear the quarantine flag instead:
 
-1. Launch Atelier once (macOS refuses), then go to **System Settings → Privacy & Security** and click **"Open Anyway"**;
-2. or clear the quarantine flag directly: `xattr -dr com.apple.quarantine /Applications/Atelier.app`.
+```bash
+xattr -dr com.apple.quarantine /Applications/Atelier.app
+```
+
+Then launch normally. (Right-click → Open no longer bypasses Gatekeeper since macOS 15.)
 
 First launch:
 

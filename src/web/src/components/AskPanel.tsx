@@ -2,9 +2,10 @@ import { MessageCircleQuestion } from "lucide-react";
 import { useState } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
-import { type AgentEffort, type AgentModel } from "@shared/constants";
+import { type AgentEffort, type AgentModel, type CodexEffort, type CodexModel, type Orchestrator } from "@shared/constants";
 
 import { ProjectSelect } from "@/components/ProjectSelect";
+import { SessionDriverFields } from "@/components/SessionDriverFields";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
@@ -31,6 +32,9 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,7 +59,16 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
     setError(null);
     try {
       // Title left blank: the server derives it from the question (deriveTitleFromDescription).
-      await api.createAsk({ title: "", description: question, project, model, effort });
+      await api.createAsk({
+        title: "",
+        description: question,
+        project,
+        model,
+        effort,
+        orchestrator,
+        codexModel,
+        codexEffort,
+      });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec du lancement de la question");
@@ -80,25 +93,38 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
         />
       </div>
 
-      <div className="flex flex-col items-start gap-1.5">
-        <Label id="ask-model">Modèle</Label>
-        <Tabs
-          options={AGENT_MODEL_OPTIONS}
-          value={model ?? resolvedDefaultModel}
-          onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
-          aria-labelledby="ask-model"
-        />
-      </div>
+      <SessionDriverFields
+        orchestrator={orchestrator}
+        codexModel={codexModel}
+        codexEffort={codexEffort}
+        onOrchestratorChange={setOrchestrator}
+        onCodexModelChange={setCodexModel}
+        onCodexEffortChange={setCodexEffort}
+      />
 
-      <div className="flex flex-col items-start gap-1.5">
-        <Label id="ask-effort">Réflexion (effort)</Label>
-        <Tabs
-          options={AGENT_EFFORT_OPTIONS}
-          value={effort ?? resolvedDefaultEffort}
-          onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
-          aria-labelledby="ask-effort"
-        />
-      </div>
+      {orchestrator === "claude" && (
+        <>
+          <div className="flex flex-col items-start gap-1.5">
+            <Label id="ask-model">Modèle</Label>
+            <Tabs
+              options={AGENT_MODEL_OPTIONS}
+              value={model ?? resolvedDefaultModel}
+              onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
+              aria-labelledby="ask-model"
+            />
+          </div>
+
+          <div className="flex flex-col items-start gap-1.5">
+            <Label id="ask-effort">Réflexion (effort)</Label>
+            <Tabs
+              options={AGENT_EFFORT_OPTIONS}
+              value={effort ?? resolvedDefaultEffort}
+              onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
+              aria-labelledby="ask-effort"
+            />
+          </div>
+        </>
+      )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

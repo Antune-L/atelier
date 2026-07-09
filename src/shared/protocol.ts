@@ -69,6 +69,12 @@ export const failArgsSchema = z.object({
   findings: z.string().default(""),
 });
 
+/**
+ * Plan handed to the delegated Codex implementation child (the validated PRD verbatim, or a concise
+ * plan written from the ticket description). The child receives it as its single user turn.
+ */
+export const delegateImplementationArgsSchema = z.object({ plan: z.string().min(1) });
+
 const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 
 /**
@@ -166,6 +172,12 @@ export const WORKER_TOOLS = [
     argsSchema: failArgsSchema,
   },
   {
+    name: "delegate_implementation",
+    description:
+      "Délègue l'implémentation à une session Codex lancée en arrière-plan par le backend dans le worktree courant (elle écrit le code, ne commit jamais). Retourne immédiatement : termine ton tour et attends l'événement implementation_done.",
+    argsSchema: delegateImplementationArgsSchema,
+  },
+  {
     name: "submit_triage",
     description:
       "Soumet le verdict de faisabilité (triage en lecture seule). Le backend le persiste puis détruit la session.",
@@ -202,6 +214,7 @@ const WORKER_TOOL_NAMES = [
   "done",
   "ready_for_review",
   "fail",
+  "delegate_implementation",
   "submit_triage",
   "submit_feasibility",
   "submit_split",
@@ -226,6 +239,7 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ticket"), payload: z.string() }),
   z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
   z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
+  z.object({ type: z.literal("implementation_done"), ok: z.boolean(), summary: z.string().default("") }),
   z.object({ type: z.literal("nudge"), message: z.string() }),
   z.object({ type: z.literal("user_comment"), body: z.string() }),
 ]);

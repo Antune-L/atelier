@@ -12,7 +12,7 @@ const CONFIG_FILE = "config.json";
 const UPLOADS_DIR = "uploads";
 
 export interface DesktopRoots {
-  /** Read-only bundle assets: dist/web, claude-bin, templates, config.example.json. */
+  /** Read-only bundle assets: dist/web, claude-bin, codex-bin, templates, config.example.json. */
   resourcesRoot: string;
   /** Writable user data: config.json, kanban.db, uploads/, slots/. */
   dataRoot: string;

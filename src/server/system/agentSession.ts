@@ -9,6 +9,7 @@
  * with a synthetic no-op handle, so the server still boots and runs end-to-end in dry-run.
  */
 
+import type { Implementer } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 
 /** What a worker tool call resolves to — mirrors the coordinator's tool-call return shape. */
@@ -56,11 +57,31 @@ export interface AgentSessionOptions {
   ticketId: string;
   slotId: number;
   cwd: string;
+  /** Which provider drives this session. Triage/split/feasibility sessions are always "claude". */
+  provider: Extract<Implementer, "claude" | "codex">;
   /** Model alias for the session (SDK `model`). */
   model: string;
   /** Reasoning effort, or null for the model default. */
   effort: string | null;
   permissionMode: AgentPermissionMode;
+  /**
+   * Structurally read-only session. Codex maps it to its `read-only` sandbox (any write is blocked
+   * by the sandbox itself); Claude sessions enforce read-only via allowed/disallowed tools instead.
+   */
+  readOnly?: boolean;
+  /**
+   * Resume the provider-side conversation with this id instead of starting fresh (auto-reclaim).
+   * Codex maps it to `resumeThread` (threads persist under ~/.codex/sessions); Claude ignores it —
+   * its relaunch semantics deliberately start a fresh transcript.
+   */
+  resumeSessionId?: string;
+  /**
+   * Bare session: expose NO kanban worker tools to the agent. Used by the delegated Codex
+   * implementation child, which must only write code — the parent session keeps the protocol.
+   * Honored by codexProvider (skips the MCP bridge entirely); Claude sessions always carry the
+   * in-process worker tools today.
+   */
+  disableWorkerTools?: boolean;
   /**
    * Pre-approved permission rules (SDK `settings.permissions.allow`), e.g. `Bash(git commit:*)`. Under
    * `dontAsk` these auto-run and everything else is denied — the bash allowlist the old tmux sessions
@@ -107,9 +128,9 @@ export interface AgentSessionHandle {
 
 /**
  * The provider seam: an LLM-agent backend that materializes an {@link AgentSessionHandle} from the
- * transport-agnostic {@link AgentSessionOptions}. The Real adapter holds one of these; today the only
- * implementation is `claudeProvider` (Agent SDK). A future provider (e.g. Codex) implements the same
- * contract so the backend above this seam stays unchanged.
+ * transport-agnostic {@link AgentSessionOptions}. The Real adapter holds a registry of these, keyed by
+ * `AgentSessionOptions.provider`: `claudeProvider` (Agent SDK) and `codexProvider` (Codex SDK). Each
+ * implements the same contract so the backend above this seam stays unchanged.
  */
 export interface AgentProvider {
   readonly name: string;

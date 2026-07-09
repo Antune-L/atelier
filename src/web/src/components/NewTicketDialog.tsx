@@ -205,11 +205,14 @@ export function NewTicketDialog({
         argusMultiLoop,
         baseBranch: baseBranchOverride,
         dependsOn: dependsOnValid,
+        orchestrator: agent.orchestrator,
         model: agent.model,
         effort: agent.effort,
         implementerModel: agent.implementerModel,
         implementerEffort: agent.implementerEffort,
         implementer: agent.implementer,
+        codexModel: agent.codexModel,
+        codexEffort: agent.codexEffort,
         start,
       });
       reset();
@@ -366,16 +369,22 @@ export function NewTicketDialog({
                     Agent d'implémentation
                   </h3>
                   <AgentProfileConfig
+                    orchestrator={agent.orchestrator}
                     model={agent.model}
                     effort={agent.effort}
                     implementerModel={agent.implementerModel}
                     implementerEffort={agent.implementerEffort}
                     implementer={agent.implementer}
+                    codexModel={agent.codexModel}
+                    codexEffort={agent.codexEffort}
+                    onOrchestratorChange={agent.setOrchestrator}
                     onModelChange={agent.setModel}
                     onEffortChange={agent.setEffort}
                     onImplementerModelChange={agent.setImplementerModel}
                     onImplementerEffortChange={agent.setImplementerEffort}
                     onImplementerChange={agent.setImplementer}
+                    onCodexModelChange={agent.setCodexModel}
+                    onCodexEffortChange={agent.setCodexEffort}
                     onApplyProfile={agent.applyProfile}
                   />
                 </div>

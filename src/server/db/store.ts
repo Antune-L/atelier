@@ -6,8 +6,12 @@ import {
   AUTO_RECLAIM_EVENT,
   CLEANER_EFFORT,
   CLEANER_MODEL,
+  CODEX_EFFORT_META_KEY,
+  CODEX_MODEL_META_KEY,
   COMMIT_LANGUAGE_META_KEY,
   CREATED_EVENT,
+  DEFAULT_CODEX_EFFORT,
+  DEFAULT_CODEX_MODEL,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
   IMPLEMENT_EFFORT_META_KEY,
@@ -17,8 +21,8 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, Column, CommentAuthor, Implementer, ReviewDepth, Stage } from "../../shared/constants.ts";
-import { agentEffortSchema, agentModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, Implementer, Orchestrator, ReviewDepth, Stage } from "../../shared/constants.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
 import type { AppSettings, Automation, AutomationRun, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
@@ -56,24 +60,33 @@ export interface NewTicket {
   implementerModel: AgentModel | null;
   implementerEffort: AgentEffort | null;
   implementer: Implementer;
+  orchestrator: Orchestrator;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
 }
 
 export interface NewProfile {
   name: string;
+  orchestrator: Orchestrator;
   model: AgentModel;
   effort: AgentEffort;
   implementerModel: AgentModel;
   implementerEffort: AgentEffort;
   implementer: Implementer;
+  codexModel: CodexModel;
+  codexEffort: CodexEffort;
 }
 
 export interface ProfilePatch {
   name?: string;
+  orchestrator?: Orchestrator;
   model?: AgentModel;
   effort?: AgentEffort;
   implementerModel?: AgentModel;
   implementerEffort?: AgentEffort;
   implementer?: Implementer;
+  codexModel?: CodexModel;
+  codexEffort?: CodexEffort;
   sortOrder?: number;
 }
 
@@ -143,6 +156,9 @@ export interface NewReview {
   baseBranch?: string | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
+  orchestrator: Orchestrator;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
 }
 
 export interface NewClean {
@@ -152,6 +168,9 @@ export interface NewClean {
   prNumber: number;
   prHeadBranch: string;
   prUrl: string;
+  orchestrator: Orchestrator;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
 }
 
 export interface NewAsk {
@@ -160,6 +179,9 @@ export interface NewAsk {
   project: ProjectKey;
   model: AgentModel | null;
   effort: AgentEffort | null;
+  orchestrator: Orchestrator;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
 }
 
 export interface TicketPatch {
@@ -188,6 +210,9 @@ export interface TicketPatch {
   implementerModel?: AgentModel | null;
   implementerEffort?: AgentEffort | null;
   implementer?: Implementer;
+  orchestrator?: Orchestrator;
+  codexModel?: CodexModel | null;
+  codexEffort?: CodexEffort | null;
   reviewRounds?: number;
   nudgeCount?: number;
   sessionId?: string | null;
@@ -313,8 +338,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -339,6 +364,9 @@ export class Store {
         input.implementerModel,
         input.implementerEffort,
         input.implementer,
+        input.orchestrator,
+        input.codexModel,
+        input.codexEffort,
         now,
         now,
         now,
@@ -352,8 +380,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -369,6 +397,12 @@ export class Store {
         input.postComments ? 1 : 0,
         input.fixComments ? 1 : 0,
         input.prUrl,
+        // A review/clean/ask kind has no implementing stage: mirror the orchestrator into implementer
+        // so the column stays coherent (and the codex-orchestrator branches keyed on either agree).
+        input.orchestrator,
+        input.orchestrator,
+        input.codexModel,
+        input.codexEffort,
         now,
         now,
         now,
@@ -383,8 +417,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, pr_number, pr_head_branch, pr_url, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'clean', ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, pr_number, pr_head_branch, pr_url, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'clean', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -396,6 +430,11 @@ export class Store {
         input.prNumber,
         input.prHeadBranch,
         input.prUrl,
+        // No implementing stage on a clean: mirror orchestrator into implementer for column coherence.
+        input.orchestrator,
+        input.orchestrator,
+        input.codexModel,
+        input.codexEffort,
         now,
         now,
         now,
@@ -410,10 +449,11 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'ask', ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'ask', ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
-      .run(id, input.title, input.description, input.project, input.model, input.effort, now, now, now, now);
+      // No implementing stage on an ask: mirror orchestrator into implementer for column coherence.
+      .run(id, input.title, input.description, input.project, input.model, input.effort, input.orchestrator, input.orchestrator, input.codexModel, input.codexEffort, now, now, now, now);
     return this.finalizeCreate(id, "createAsk", { title: input.title, kind: "ask" });
   }
 
@@ -461,6 +501,9 @@ export class Store {
     if (patch.implementerModel !== undefined) set("implementer_model", patch.implementerModel);
     if (patch.implementerEffort !== undefined) set("implementer_effort", patch.implementerEffort);
     if (patch.implementer !== undefined) set("implementer", patch.implementer);
+    if (patch.orchestrator !== undefined) set("orchestrator", patch.orchestrator);
+    if (patch.codexModel !== undefined) set("codex_model", patch.codexModel);
+    if (patch.codexEffort !== undefined) set("codex_effort", patch.codexEffort);
     if (patch.reviewRounds !== undefined) set("review_rounds", patch.reviewRounds);
     if (patch.nudgeCount !== undefined) set("nudge_count", patch.nudgeCount);
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
@@ -565,7 +608,7 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM profiles");
     this.db
       .query(
-        "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         id,
@@ -575,6 +618,9 @@ export class Store {
         input.implementerModel,
         input.implementerEffort,
         input.implementer,
+        input.orchestrator,
+        input.codexModel,
+        input.codexEffort,
         nextOrder,
         now,
         now,
@@ -592,6 +638,9 @@ export class Store {
     if (patch.implementerModel !== undefined) builder.set("implementer_model", patch.implementerModel);
     if (patch.implementerEffort !== undefined) builder.set("implementer_effort", patch.implementerEffort);
     if (patch.implementer !== undefined) builder.set("implementer", patch.implementer);
+    if (patch.orchestrator !== undefined) builder.set("orchestrator", patch.orchestrator);
+    if (patch.codexModel !== undefined) builder.set("codex_model", patch.codexModel);
+    if (patch.codexEffort !== undefined) builder.set("codex_effort", patch.codexEffort);
     if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
     builder.set("updated_at", Date.now());
     builder.run(this.db, "profiles", id);
@@ -905,6 +954,8 @@ export class Store {
     const parsedImplementEffort = agentEffortSchema.safeParse(storedImplementEffort);
     const storedTriageEffort = this.getMeta(TRIAGE_EFFORT_META_KEY);
     const parsedTriageEffort = agentEffortSchema.safeParse(storedTriageEffort);
+    const parsedCodexModel = codexModelSchema.safeParse(this.getMeta(CODEX_MODEL_META_KEY));
+    const parsedCodexEffort = codexEffortSchema.safeParse(this.getMeta(CODEX_EFFORT_META_KEY));
     return {
       commitLanguage: parsed.success ? parsed.data : DEFAULT_COMMIT_LANGUAGE,
       triageLanguage: parsedTriage.success ? parsedTriage.data : DEFAULT_TRIAGE_LANGUAGE,
@@ -912,6 +963,8 @@ export class Store {
       triageModel: parsedTriageModel.success ? parsedTriageModel.data : DEFAULT_MODELS.triage,
       implementEffort: parsedImplementEffort.success ? parsedImplementEffort.data : DEFAULT_MODELS.implementEffort,
       triageEffort: parsedTriageEffort.success ? parsedTriageEffort.data : DEFAULT_MODELS.triageEffort,
+      codexModel: parsedCodexModel.success ? parsedCodexModel.data : DEFAULT_CODEX_MODEL,
+      codexEffort: parsedCodexEffort.success ? parsedCodexEffort.data : DEFAULT_CODEX_EFFORT,
     };
   }
 
@@ -922,6 +975,8 @@ export class Store {
     if (patch.triageModel !== undefined) this.setMeta(TRIAGE_MODEL_META_KEY, patch.triageModel);
     if (patch.implementEffort !== undefined) this.setMeta(IMPLEMENT_EFFORT_META_KEY, patch.implementEffort);
     if (patch.triageEffort !== undefined) this.setMeta(TRIAGE_EFFORT_META_KEY, patch.triageEffort);
+    if (patch.codexModel !== undefined) this.setMeta(CODEX_MODEL_META_KEY, patch.codexModel);
+    if (patch.codexEffort !== undefined) this.setMeta(CODEX_EFFORT_META_KEY, patch.codexEffort);
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;

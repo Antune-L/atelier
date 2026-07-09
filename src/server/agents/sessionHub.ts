@@ -12,6 +12,7 @@
 
 import { nanoid } from "nanoid";
 
+import type { Implementer } from "../../shared/constants.ts";
 import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
 import { createLogger } from "../logger.ts";
 import type {
@@ -30,9 +31,15 @@ export interface SessionStartConfig {
   ticketId: string;
   slotId: number;
   cwd: string;
+  /** Which provider drives this session. Triage/split/feasibility builders always pass "claude". */
+  provider: Extract<Implementer, "claude" | "codex">;
   model: string;
   effort: string | null;
   permissionMode: AgentPermissionMode;
+  /** Structurally read-only session (Codex read-only sandbox; Claude enforces via tool gating). */
+  readOnly?: boolean;
+  /** Resume the provider-side conversation with this id (auto-reclaim; Codex only). */
+  resumeSessionId?: string;
   /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
   permissionAllow?: string[];
   /** Denied permission rules (SDK `settings.permissions.deny`) — e.g. `Agent(general-purpose)` for read-only scouts. */
@@ -80,6 +87,10 @@ export function renderChannelEvent(event: ChannelEvent): string {
       return `Réponse de l'utilisateur (question ${event.questionId}) : ${event.answer}`;
     case "prd_validated":
       return `PRD validé par l'utilisateur. ${event.note}`;
+    case "implementation_done":
+      return event.ok
+        ? `Implémentation déléguée terminée : la session Codex a rendu la main. Résumé : ${event.summary || "(aucun résumé)"}\nReprends la main : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis poursuis le contrat (review).`
+        : `Implémentation déléguée ÉCHOUÉE : ${event.summary || "(raison inconnue)"}\nRelance delegate_implementation UNE seule fois si l'échec semble transitoire ; sinon implémente toi-même ou appelle fail().`;
     case "nudge":
       return event.message;
     case "user_comment":
@@ -135,11 +146,17 @@ export class SessionHub {
   /** Per-session live transcript (rendered stream events), read by the polled agent viewer. */
   private readonly transcripts = new Map<string, string>();
   private handlers: SessionHubHandlers | null = null;
+  /** Fired on every disconnect(ticketId) — lets attached child work (delegation) die with the parent. */
+  private readonly disconnectListeners: Array<(ticketId: string) => void> = [];
 
   constructor(private readonly system: SystemAdapter) {}
 
   setHandlers(handlers: SessionHubHandlers): void {
     this.handlers = handlers;
+  }
+
+  onDisconnect(listener: (ticketId: string) => void): void {
+    this.disconnectListeners.push(listener);
   }
 
   isConnected(ticketId: string): boolean {
@@ -160,9 +177,12 @@ export class SessionHub {
       ticketId: config.ticketId,
       slotId: config.slotId,
       cwd: config.cwd,
+      provider: config.provider,
       model: config.model,
       effort: config.effort,
       permissionMode: config.permissionMode,
+      ...(config.readOnly !== undefined ? { readOnly: config.readOnly } : {}),
+      ...(config.resumeSessionId ? { resumeSessionId: config.resumeSessionId } : {}),
       ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
       ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
       ...(config.allowedTools ? { allowedTools: config.allowedTools } : {}),
@@ -190,6 +210,9 @@ export class SessionHub {
 
   /** Stop and evict a ticket's session. Idempotent. */
   disconnect(ticketId: string): void {
+    // Listeners fire even without a live session: a slot release must cascade to attached child
+    // sessions (delegation) even if the parent session already died on its own.
+    for (const listener of this.disconnectListeners) listener(ticketId);
     const live = this.sessions.get(ticketId);
     if (!live) return;
     this.sessions.delete(ticketId);
@@ -225,6 +248,11 @@ export class SessionHub {
       // entry is already evicted from the map.
       this.handlers?.onStop(ticketId, event.sessionId, event.usageByModel);
     }
+  }
+
+  /** Append an externally-produced line (e.g. delegated child session activity) to a transcript. */
+  appendExternalLine(id: string, line: string): void {
+    this.appendTranscript(id, line);
   }
 
   /** Append a rendered line to a session's transcript, trimming the oldest lines past the cap. */

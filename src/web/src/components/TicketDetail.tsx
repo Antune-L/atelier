@@ -38,8 +38,11 @@ import {
   TERMINAL_STAGES,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type Column,
   type Implementer,
+  type Orchestrator,
 } from "@shared/constants";
 import { extractFigmaUrls } from "@shared/figma";
 
@@ -68,6 +71,7 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { useBoard } from "@/hooks/useBoard";
+import { pairedImplementer } from "@/lib/agentPairing";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { handleMediaPaste } from "@/lib/paste";
@@ -340,13 +344,33 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     void api.updateTicket(current.id, { implementer }).catch(() => undefined);
   };
 
+  // Changing the orchestrator re-pairs the implementer (isAllowedAgentPair) in a single PATCH so the
+  // ticket never lands on a forbidden orchestrator/implementer pair between two requests.
+  const setOrchestrator = (orchestrator: Orchestrator): void => {
+    const implementer = pairedImplementer(orchestrator, current.implementer);
+    void api
+      .updateTicket(current.id, { orchestrator, implementer })
+      .catch(() => undefined);
+  };
+
+  const setCodexModel = (codexModel: CodexModel | null): void => {
+    void api.updateTicket(current.id, { codexModel }).catch(() => undefined);
+  };
+
+  const setCodexEffort = (codexEffort: CodexEffort | null): void => {
+    void api.updateTicket(current.id, { codexEffort }).catch(() => undefined);
+  };
+
   // Apply a whole profile in a single PATCH so the knobs never land in an intermediate state.
   const applyProfile = (config: {
+    orchestrator: Orchestrator;
     model: AgentModel;
     effort: AgentEffort;
     implementerModel: AgentModel;
     implementerEffort: AgentEffort;
     implementer: Implementer;
+    codexModel: CodexModel;
+    codexEffort: CodexEffort;
   }): void => {
     void api.updateTicket(current.id, config).catch(() => undefined);
   };
@@ -1089,16 +1113,22 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     Agent d'implémentation
                   </h3>
                   <AgentProfileConfig
+                    orchestrator={current.orchestrator}
                     model={current.model}
                     effort={current.effort}
                     implementerModel={current.implementerModel}
                     implementerEffort={current.implementerEffort}
                     implementer={current.implementer}
+                    codexModel={current.codexModel}
+                    codexEffort={current.codexEffort}
+                    onOrchestratorChange={setOrchestrator}
                     onModelChange={setAgentModel}
                     onEffortChange={setAgentEffort}
                     onImplementerModelChange={setImplementerModel}
                     onImplementerEffortChange={setImplementerEffort}
                     onImplementerChange={setImplementer}
+                    onCodexModelChange={setCodexModel}
+                    onCodexEffortChange={setCodexEffort}
                     onApplyProfile={applyProfile}
                   />
                   <div className="mt-3">

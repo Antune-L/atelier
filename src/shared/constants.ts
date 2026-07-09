@@ -77,13 +77,32 @@ export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {
 };
 
 /** Who writes the implementation code (the CLI driver for the implementing stage). */
-export const IMPLEMENTERS = ["claude", "composer"] as const;
+export const IMPLEMENTERS = ["claude", "composer", "codex"] as const;
 export type Implementer = (typeof IMPLEMENTERS)[number];
 
 export const IMPLEMENTER_LABELS: Record<Implementer, string> = {
   claude: "Claude",
   composer: "Composer 2.5",
+  codex: "Codex",
 };
+
+/** Who pilots the full session (planning, review, tests, git, PR) — distinct from who writes the code. */
+export const ORCHESTRATORS = ["claude", "codex"] as const;
+export type Orchestrator = (typeof ORCHESTRATORS)[number];
+
+export const ORCHESTRATOR_LABELS: Record<Orchestrator, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/**
+ * Allowed orchestrator × implementer pairs. Codex orchestrates only itself (it has no Agent tool to
+ * delegate); Claude orchestrates any implementer — a Codex implementer runs as a backend-delegated
+ * child session (worker tool `delegate_implementation`).
+ */
+export function isAllowedAgentPair(orchestrator: Orchestrator, implementer: Implementer): boolean {
+  return orchestrator === "codex" ? implementer === "codex" : true;
+}
 
 /** Language the agent writes commit messages and PR title/description in. */
 export const COMMIT_LANGUAGES = ["en", "fr"] as const;
@@ -123,6 +142,7 @@ export const CONFIG_MIGRATED_META_KEY = "config_migrated";
 /** A reusable implementation-agent preset (orchestrator + implementer sub-agent knobs). */
 export interface ProfileConfig {
   name: string;
+  orchestrator: Orchestrator;
   model: AgentModel;
   effort: AgentEffort;
   /** Implementer sub-agent model (claude mode only). */
@@ -130,42 +150,72 @@ export interface ProfileConfig {
   /** Implementer sub-agent reasoning effort (claude mode only). */
   implementerEffort: AgentEffort;
   implementer: Implementer;
+  /** Codex session model (codex orchestrator/implementer only). */
+  codexModel: CodexModel;
+  /** Codex session reasoning effort (codex orchestrator/implementer only). */
+  codexEffort: CodexEffort;
 }
+
+/** The built-in Codex preset, also seeded once into pre-existing DBs (see schema.ts). */
+export const CODEX_SEED_PROFILE: ProfileConfig = {
+  name: "Codex",
+  orchestrator: "codex",
+  model: "opus",
+  effort: "medium",
+  implementerModel: "opus",
+  implementerEffort: "low",
+  implementer: "codex",
+  codexModel: "gpt-5.5",
+  codexEffort: "high",
+};
 
 /** Seeded into the DB on first boot; editable afterwards via the settings modal. */
 export const DEFAULT_PROFILES: ProfileConfig[] = [
   {
     name: "Basique",
+    orchestrator: "claude",
     model: "opus",
     effort: "medium",
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Debug -",
+    orchestrator: "claude",
     model: "opus",
     effort: "low",
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Debug +",
+    orchestrator: "claude",
     model: "opus",
     effort: "max",
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
   {
     name: "Délégation",
+    orchestrator: "claude",
     model: "opus",
     effort: "medium",
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "composer",
+    codexModel: "gpt-5.5",
+    codexEffort: "medium",
   },
+  CODEX_SEED_PROFILE,
 ];
 
 /** Sentinel "profile" shown when a ticket's knobs match no stored profile. */
@@ -186,6 +236,78 @@ export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 /** The PR cleaner runs Opus at low effort: triaging reviewer feedback is light work that doesn't warrant a heavier reasoning budget. */
 export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
+
+/**
+ * Codex models pickable per ticket (kept in sync with the live Codex model catalog; GPT-5.6 Sol is
+ * excluded because the catalog does not expose it to this account). Requires codex CLI ≥ 0.144 for
+ * the gpt-5.6-* models (older CLIs reject them with "requires a newer version of Codex").
+ */
+export const CODEX_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
+export type CodexModel = (typeof CODEX_MODELS)[number];
+
+export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
+  "gpt-5.6-terra": "5.6 Terra",
+  "gpt-5.6-luna": "5.6 Luna",
+  "gpt-5.5": "5.5",
+  "gpt-5.4": "5.4",
+  "gpt-5.4-mini": "5.4 mini",
+};
+
+/**
+ * Reasoning effort levels exposed for Codex (distinct enum from AgentEffort). The full union across
+ * models; per-model support is a PREFIX of this list (see CODEX_MODEL_EFFORTS). "minimal" stays
+ * excluded: it is rejected outright by the API (400, unsupported_value) and breaks web_search.
+ */
+export const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
+export type CodexEffort = (typeof CODEX_EFFORTS)[number];
+
+export const CODEX_EFFORT_LABELS: Record<CodexEffort, string> = {
+  low: "L",
+  medium: "M",
+  high: "H",
+  xhigh: "XH",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+/**
+ * Efforts each Codex model accepts (from the live model catalog). Every entry is a prefix of
+ * CODEX_EFFORTS: "max" needs a 5.6 model, "ultra" (multi-agent reasoning) is Terra-only.
+ */
+export const CODEX_MODEL_EFFORTS: Record<CodexModel, readonly CodexEffort[]> = {
+  "gpt-5.6-terra": CODEX_EFFORTS,
+  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
+  "gpt-5.5": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4": ["low", "medium", "high", "xhigh"],
+  "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
+};
+
+/**
+ * Coerce an effort to something the model accepts after a model change: an unsupported effort clamps
+ * to the model's strongest one (supported lists are prefixes, so "ultra" on Luna clamps to "max").
+ */
+export function pairedCodexEffort(model: CodexModel, effort: CodexEffort): CodexEffort {
+  const supported = CODEX_MODEL_EFFORTS[model];
+  if (supported.includes(effort)) return effort;
+  return supported[supported.length - 1] ?? DEFAULT_CODEX_EFFORT;
+}
+
+/** Fallback Codex knobs when neither the ticket nor the persisted app settings pin them. */
+export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-5.6-terra";
+export const DEFAULT_CODEX_EFFORT: CodexEffort = "medium";
+
+/** `meta` table key holding the persisted default Codex model. */
+export const CODEX_MODEL_META_KEY = "codex_model";
+/** `meta` table key holding the persisted default Codex reasoning effort. */
+export const CODEX_EFFORT_META_KEY = "codex_effort";
+/** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
+export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
+/**
+ * `meta` table key flagging that the one-shot orchestrator backfill ran (implementer=codex →
+ * orchestrator=codex on tickets and profiles). MUST stay one-shot: once cross-provider pairs are
+ * allowed (PR2), re-running it would silently rewrite a claude-orchestrated codex-implementer ticket.
+ */
+export const ORCHESTRATOR_BACKFILL_META_KEY = "orchestrator_backfilled";
 
 /** Argus review depth picked per review ticket (light = 4 reviewers, full = 6). */
 export const REVIEW_DEPTHS = ["light", "full"] as const;
@@ -350,6 +472,13 @@ export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
  * submit_feasibility.
  */
 export const FEASIBILITY_SLOT_ID = -2;
+
+/**
+ * SLOT_ID a delegated Codex implementation child identifies with: the child runs INSIDE the parent
+ * ticket's slot worktree but has no worker tools of its own — if one of its calls ever reaches the
+ * coordinator, this id bars every pipeline tool.
+ */
+export const DELEGATION_SLOT_ID = -4;
 /** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
 export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
 /**
@@ -389,10 +518,17 @@ export const AUTOMATION_RUNS_LIMIT = 50;
 /** Bounds on a recurring automation's interval (minutes). */
 export const AUTOMATION_MIN_INTERVAL_MINUTES = 1;
 
+/** Default HTTP/WS port when `process.env.PORT` is unset. Shared so any in-process caller (e.g. the
+ * codexProvider worker MCP URL) can resolve the backend's own address without duplicating the
+ * fallback. */
+export const DEFAULT_PORT = 52817;
+
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 /** Interactive PTY stream for a worktree/user shell tmux pane (output + bidirectional input). */
 export const WS_PATH_TERMINAL = "/ws/terminal";
+/** Streamable-HTTP MCP endpoint serving the worker tools to Codex sessions (see workerMcp.ts). */
+export const HTTP_PATH_WORKER_MCP = "/mcp/worker";
 
 /**
  * Default tmux pane size for a detached agent session. Spawn NARROW on purpose: a viewer almost

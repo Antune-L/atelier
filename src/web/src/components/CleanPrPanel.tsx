@@ -1,9 +1,11 @@
 import { GitPullRequest } from "lucide-react";
 import { useState } from "react";
 
+import type { CodexEffort, CodexModel, Orchestrator } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
+import { SessionDriverFields } from "@/components/SessionDriverFields";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
@@ -18,6 +20,9 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
   const panel = useProjectPanel(projects);
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [context, setContext] = useState("");
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
 
   const launch = async (): Promise<void> => {
     if (selected.size === 0 || !prs) return;
@@ -25,7 +30,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
     setError(null);
     try {
       const chosen = prs.filter((p) => selected.has(p.number));
-      await api.createCleaners({ project, context, prs: chosen });
+      await api.createCleaners({ project, context, orchestrator, codexModel, codexEffort, prs: chosen });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec du lancement du nettoyage");
@@ -52,6 +57,15 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
           hors-périmètre sont ignorés.
         </p>
       </div>
+
+      <SessionDriverFields
+        orchestrator={orchestrator}
+        codexModel={codexModel}
+        codexEffort={codexEffort}
+        onOrchestratorChange={setOrchestrator}
+        onCodexModelChange={setCodexModel}
+        onCodexEffortChange={setCodexEffort}
+      />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

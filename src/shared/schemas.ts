@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
 import { isNotionUrl } from "./notion.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
@@ -17,7 +17,11 @@ export const stageSchema = z.enum(STAGES);
 export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
 export const agentModelSchema = z.enum(AGENT_MODELS);
 export const agentEffortSchema = z.enum(AGENT_EFFORTS);
+export const codexModelSchema = z.enum(CODEX_MODELS);
+export const codexEffortSchema = z.enum(CODEX_EFFORTS);
 export const implementerSchema = z.enum(IMPLEMENTERS);
+/** Who pilots a full session (planning, review, tests, git, PR) — Composer only ever writes feature code. */
+export const orchestratorSchema = z.enum(ORCHESTRATORS);
 export const kindSchema = z.enum(KINDS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
 export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
@@ -61,6 +65,10 @@ export const appSettingsSchema = z.object({
   implementEffort: agentEffortSchema,
   /** Default reasoning effort of the read-only feasibility triage. */
   triageEffort: agentEffortSchema,
+  /** Default model of a Codex-driven session. */
+  codexModel: codexModelSchema,
+  /** Default reasoning effort of a Codex-driven session. */
+  codexEffort: codexEffortSchema,
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -71,6 +79,8 @@ export const updateAppSettingsSchema = z.object({
   triageModel: agentModelSchema.optional(),
   implementEffort: agentEffortSchema.optional(),
   triageEffort: agentEffortSchema.optional(),
+  codexModel: codexModelSchema.optional(),
+  codexEffort: codexEffortSchema.optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 
@@ -182,6 +192,11 @@ export const ticketSchema = z.object({
   /** Implementer sub-agent overrides (null = fall back to the server config defaults). */
   implementerModel: agentModelSchema.nullable(),
   implementerEffort: agentEffortSchema.nullable(),
+  /** Codex session overrides (codex orchestrator/implementer only; null = fall back to the app-settings defaults). */
+  codexModel: codexModelSchema.nullable(),
+  codexEffort: codexEffortSchema.nullable(),
+  /** Who pilots the session end-to-end; constrained by isAllowedAgentPair against `implementer`. */
+  orchestrator: orchestratorSchema,
   implementer: implementerSchema,
   reviewRounds: z.number().int(),
   sessionId: z.string().nullable(),
@@ -227,6 +242,7 @@ export const statRecordSchema = z.object({
   stage: stageSchema.nullable(),
   model: agentModelSchema.nullable(),
   effort: agentEffortSchema.nullable(),
+  orchestrator: orchestratorSchema,
   implementer: implementerSchema,
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
@@ -242,11 +258,14 @@ export type StatRecord = z.infer<typeof statRecordSchema>;
 export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),
+  orchestrator: orchestratorSchema,
   model: agentModelSchema,
   effort: agentEffortSchema,
   implementerModel: agentModelSchema,
   implementerEffort: agentEffortSchema,
   implementer: implementerSchema,
+  codexModel: codexModelSchema,
+  codexEffort: codexEffortSchema,
   /** Display order in the picker (ascending). */
   sortOrder: z.number().int(),
   createdAt: z.number().int(),
@@ -256,21 +275,27 @@ export type Profile = z.infer<typeof profileSchema>;
 
 export const createProfileSchema = z.object({
   name: z.string().min(1),
+  orchestrator: orchestratorSchema.default("claude"),
   model: agentModelSchema,
   effort: agentEffortSchema,
   implementerModel: agentModelSchema.default("opus"),
   implementerEffort: agentEffortSchema.default("low"),
   implementer: implementerSchema.default("claude"),
+  codexModel: codexModelSchema.default("gpt-5.5"),
+  codexEffort: codexEffortSchema.default("medium"),
 });
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
 
 export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
+  orchestrator: orchestratorSchema.optional(),
   model: agentModelSchema.optional(),
   effort: agentEffortSchema.optional(),
   implementerModel: agentModelSchema.optional(),
   implementerEffort: agentEffortSchema.optional(),
   implementer: implementerSchema.optional(),
+  codexModel: codexModelSchema.optional(),
+  codexEffort: codexEffortSchema.optional(),
   sortOrder: z.number().int().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
@@ -431,7 +456,10 @@ const ticketBatchOptionsSchema = z.object({
   effort: agentEffortSchema.nullable().default(null),
   implementerModel: agentModelSchema.nullable().default(null),
   implementerEffort: agentEffortSchema.nullable().default(null),
+  orchestrator: orchestratorSchema.default("claude"),
   implementer: implementerSchema.default("claude"),
+  codexModel: codexModelSchema.nullable().default(null),
+  codexEffort: codexEffortSchema.nullable().default(null),
 });
 
 export const createTicketSchema = ticketBatchOptionsSchema
@@ -491,7 +519,10 @@ export const updateTicketSchema = z.object({
   effort: agentEffortSchema.nullable().optional(),
   implementerModel: agentModelSchema.nullable().optional(),
   implementerEffort: agentEffortSchema.nullable().optional(),
+  orchestrator: orchestratorSchema.optional(),
   implementer: implementerSchema.optional(),
+  codexModel: codexModelSchema.nullable().optional(),
+  codexEffort: codexEffortSchema.nullable().optional(),
   feasibilityContext: z.boolean().optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
@@ -537,6 +568,10 @@ export const createReviewSchema = z.object({
   // Agent model + reasoning effort picked at creation (null = fall back to server config).
   model: agentModelSchema.nullable().default(null),
   effort: agentEffortSchema.nullable().default(null),
+  /** Which agent drives the review session (claude = argus skill, codex = inline review). */
+  orchestrator: orchestratorSchema.default("claude"),
+  codexModel: codexModelSchema.nullable().default(null),
+  codexEffort: codexEffortSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
@@ -546,6 +581,10 @@ export const createCleanSchema = z.object({
   project: projectKeySchema,
   /** Optional free-text context of the PR; the cleaner only applies feedback that respects it. */
   context: z.string().default(""),
+  /** Which agent drives the clean session (claude = minos skill, codex = inline feedback triage). */
+  orchestrator: orchestratorSchema.default("claude"),
+  codexModel: codexModelSchema.nullable().default(null),
+  codexEffort: codexEffortSchema.nullable().default(null),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateCleanInput = z.infer<typeof createCleanSchema>;
@@ -559,6 +598,10 @@ export const createAskSchema = z
     // Agent model + reasoning effort picked at creation (null = fall back to server config).
     model: agentModelSchema.nullable().default(null),
     effort: agentEffortSchema.nullable().default(null),
+    /** Which agent answers (claude tool-gated read-only, codex read-only sandbox). */
+    orchestrator: orchestratorSchema.default("claude"),
+    codexModel: codexModelSchema.nullable().default(null),
+    codexEffort: codexEffortSchema.nullable().default(null),
   })
   .refine((data) => data.description.trim().length > 0, {
     message: "Question requise",
@@ -606,6 +649,8 @@ export type UploadResult = z.infer<typeof uploadResultSchema>;
 export const capabilitiesSchema = z.object({
   /** The Cursor headless CLI (Composer driver) is installed and authenticated. */
   composerAvailable: z.boolean(),
+  /** The Codex CLI binary is resolvable and authenticated. */
+  codexAvailable: z.boolean(),
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
@@ -614,6 +659,10 @@ export const capabilitiesSchema = z.object({
   defaultImplementerModel: z.string(),
   /** Implementer sub-agent reasoning effort used when a ticket leaves it unset (e.g. "low"). */
   defaultImplementerEffort: z.string(),
+  /** Codex session model used when a ticket leaves it unset (e.g. "gpt-5.5"). */
+  defaultCodexModel: z.string(),
+  /** Codex session reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
+  defaultCodexEffort: z.string(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
   /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
@@ -725,6 +774,7 @@ export {
   doneArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
+  delegateImplementationArgsSchema,
   channelEventSchema,
 } from "./protocol.ts";
 export type { WorkerToolName, ChannelEvent } from "./protocol.ts";

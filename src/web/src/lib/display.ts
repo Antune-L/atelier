@@ -3,9 +3,21 @@ import {
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  CODEX_EFFORT_LABELS,
+  CODEX_MODELS,
+  CODEX_MODEL_EFFORTS,
+  CODEX_MODEL_LABELS,
+  IMPLEMENTERS,
+  IMPLEMENTER_LABELS,
+  ORCHESTRATORS,
+  ORCHESTRATOR_LABELS,
   STAGE_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
+  type Implementer,
+  type Orchestrator,
   type Stage,
 } from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
@@ -25,6 +37,66 @@ export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map(
   value: e,
   label: AGENT_EFFORT_LABELS[e],
 }));
+
+/** Ready-made segmented-control options for the Codex model picker. */
+export const CODEX_MODEL_OPTIONS: TabOption<CodexModel>[] = CODEX_MODELS.map((m) => ({
+  value: m,
+  label: CODEX_MODEL_LABELS[m],
+}));
+
+/** Codex reasoning-effort options for a given model: only the efforts that model accepts. */
+export function codexEffortTabOptions(model: CodexModel): TabOption<CodexEffort>[] {
+  return CODEX_MODEL_EFFORTS[model].map((e) => ({
+    value: e,
+    label: CODEX_EFFORT_LABELS[e],
+  }));
+}
+
+/** Orchestrator picker options; the Codex orchestrator is disabled (with a hint) when its CLI is absent. */
+export function orchestratorTabOptions(codexAvailable: boolean): TabOption<Orchestrator>[] {
+  return ORCHESTRATORS.map((o) => {
+    if (o === "codex") {
+      return {
+        value: o,
+        label: codexAvailable ? ORCHESTRATOR_LABELS[o] : `${ORCHESTRATOR_LABELS[o]} — Codex non détecté`,
+        disabled: !codexAvailable,
+      };
+    }
+    return { value: o, label: ORCHESTRATOR_LABELS[o] };
+  });
+}
+
+/**
+ * Implementer picker options for a given orchestrator. A Codex orchestrator pilots only itself, so
+ * every non-codex implementer is disabled; under a Claude orchestrator, composer needs Cursor and
+ * the codex implementer (backend-delegated child session) needs the Codex CLI.
+ */
+export function implementerTabOptions(
+  orchestrator: Orchestrator,
+  composerAvailable: boolean,
+  codexAvailable: boolean,
+): TabOption<Implementer>[] {
+  return IMPLEMENTERS.map((i) => {
+    if (orchestrator === "codex") {
+      return { value: i, label: IMPLEMENTER_LABELS[i], disabled: i !== "codex" };
+    }
+    if (i === "composer") {
+      return {
+        value: i,
+        label: composerAvailable ? IMPLEMENTER_LABELS[i] : `${IMPLEMENTER_LABELS[i]} — Cursor non détecté`,
+        disabled: !composerAvailable,
+      };
+    }
+    if (i === "codex") {
+      return {
+        value: i,
+        label: codexAvailable ? `${IMPLEMENTER_LABELS[i]} — via délégation` : `${IMPLEMENTER_LABELS[i]} — Codex non détecté`,
+        disabled: !codexAvailable,
+      };
+    }
+    return { value: i, label: IMPLEMENTER_LABELS[i] };
+  });
+}
 
 const TRIAGE_VERDICT_VARIANTS: Record<TriageVerdict, BadgeVariant> = {
   implementable: "success",

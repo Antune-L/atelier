@@ -20,14 +20,18 @@ import { useEffect, useRef, useState } from "react";
 import {
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
+  DEFAULT_CODEX_EFFORT,
+  DEFAULT_CODEX_MODEL,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
-  IMPLEMENTERS,
-  IMPLEMENTER_LABELS,
+  pairedCodexEffort,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
   type CommitLanguage,
   type Implementer,
+  type Orchestrator,
 } from "@shared/constants";
 import type { Profile } from "@shared/schemas";
 
@@ -42,18 +46,23 @@ import {
   ModalTitle,
 } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
-import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
+import { pairedImplementer } from "@/lib/agentPairing";
+import {
+  AGENT_EFFORT_OPTIONS,
+  AGENT_MODEL_OPTIONS,
+  CODEX_MODEL_OPTIONS,
+  codexEffortTabOptions,
+  implementerTabOptions,
+  orchestratorTabOptions,
+} from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { refreshProfiles, useProfiles } from "@/hooks/useProfiles";
 import { useTheme } from "@/hooks/useTheme";
 
 const DRAG_ACTIVATION_DISTANCE = 6;
 
-const IMPLEMENTER_OPTIONS: TabOption<Implementer>[] = IMPLEMENTERS.map((i) => ({
-  value: i,
-  label: IMPLEMENTER_LABELS[i],
-}));
 const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map(
   (l) => ({
     value: l,
@@ -124,6 +133,8 @@ function GeneralSettings() {
     null,
   );
   const [triageEffort, setTriageEffort] = useState<AgentEffort | null>(null);
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,6 +151,8 @@ function GeneralSettings() {
           setTriageModel((current) => current ?? settings.triageModel);
           setImplementEffort((current) => current ?? settings.implementEffort);
           setTriageEffort((current) => current ?? settings.triageEffort);
+          setCodexModel((current) => current ?? settings.codexModel);
+          setCodexEffort((current) => current ?? settings.codexEffort);
         }
       })
       .catch((e) => {
@@ -222,6 +235,35 @@ function GeneralSettings() {
       await api.updateSettings({ triageEffort: next });
     } catch (e) {
       setTriageEffort(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeCodexModel = async (next: CodexModel): Promise<void> => {
+    const previous = codexModel;
+    const previousEffort = codexEffort;
+    // Re-pair the effort with the picked model (e.g. ultra clamps to max outside Terra).
+    const nextEffort = pairedCodexEffort(next, codexEffort ?? DEFAULT_CODEX_EFFORT);
+    setCodexModel(next);
+    setCodexEffort(nextEffort);
+    setError(null);
+    try {
+      await api.updateSettings({ codexModel: next, ...(nextEffort !== previousEffort ? { codexEffort: nextEffort } : {}) });
+    } catch (e) {
+      setCodexModel(previous);
+      setCodexEffort(previousEffort);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeCodexEffort = async (next: CodexEffort): Promise<void> => {
+    const previous = codexEffort;
+    setCodexEffort(next);
+    setError(null);
+    try {
+      await api.updateSettings({ codexEffort: next });
+    } catch (e) {
+      setCodexEffort(previous);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -327,6 +369,34 @@ function GeneralSettings() {
           />
         </div>
       </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Modèle Codex</Label>
+          <p className="text-sm text-muted-foreground">
+            Modèle par défaut des sessions pilotées par Codex.
+          </p>
+          <Tabs
+            options={CODEX_MODEL_OPTIONS}
+            value={codexModel}
+            onChange={(v) => void changeCodexModel(v)}
+            aria-label="Modèle Codex"
+          />
+        </div>
+      </div>
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-col items-start gap-1.5">
+          <Label>Effort Codex</Label>
+          <p className="text-sm text-muted-foreground">
+            Effort de raisonnement par défaut des sessions pilotées par Codex.
+          </p>
+          <Tabs
+            options={codexEffortTabOptions(codexModel ?? DEFAULT_CODEX_MODEL)}
+            value={codexEffort}
+            onChange={(v) => void changeCodexEffort(v)}
+            aria-label="Effort Codex"
+          />
+        </div>
+      </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
@@ -360,11 +430,14 @@ function ProfilesSettings() {
     try {
       await api.createProfile({
         name: "Nouveau profil",
+        orchestrator: "claude",
         model: "opus",
         effort: "medium",
         implementerModel: "opus",
         implementerEffort: "low",
         implementer: "claude",
+        codexModel: "gpt-5.5",
+        codexEffort: "medium",
       });
       await refreshProfiles();
     } catch (e) {
@@ -516,7 +589,11 @@ function ProfileRow({
   dragHandleAttributes,
   setActivatorNodeRef,
 }: ProfileRowProps) {
+  const { composerAvailable, codexAvailable } = useCapabilities();
   const [name, setName] = useState(profile.name);
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>(
+    profile.orchestrator,
+  );
   const [model, setModel] = useState<AgentModel>(profile.model);
   const [effort, setEffort] = useState<AgentEffort>(profile.effort);
   const [implementerModel, setImplementerModel] = useState<AgentModel>(
@@ -528,15 +605,31 @@ function ProfileRow({
   const [implementer, setImplementer] = useState<Implementer>(
     profile.implementer,
   );
+  const [codexModel, setCodexModel] = useState<CodexModel>(profile.codexModel);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort>(
+    profile.codexEffort,
+  );
   const [busy, setBusy] = useState(false);
+
+  // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex.
+  const changeOrchestrator = (next: Orchestrator): void => {
+    setOrchestrator(next);
+    setImplementer((current) => pairedImplementer(next, current));
+  };
+
+  const orchestratorOptions = orchestratorTabOptions(codexAvailable);
+  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable, codexAvailable);
 
   const dirty =
     name !== profile.name ||
+    orchestrator !== profile.orchestrator ||
     model !== profile.model ||
     effort !== profile.effort ||
     implementerModel !== profile.implementerModel ||
     implementerEffort !== profile.implementerEffort ||
-    implementer !== profile.implementer;
+    implementer !== profile.implementer ||
+    codexModel !== profile.codexModel ||
+    codexEffort !== profile.codexEffort;
 
   const save = async (): Promise<void> => {
     onError(null);
@@ -544,11 +637,14 @@ function ProfileRow({
     try {
       await api.updateProfile(profile.id, {
         name: name.trim(),
+        orchestrator,
         model,
         effort,
         implementerModel,
         implementerEffort,
         implementer,
+        codexModel,
+        codexEffort,
       });
       await refreshProfiles();
     } catch (e) {
@@ -610,25 +706,60 @@ function ProfileRow({
           Configuration
         </summary>
         <div className="mt-3 flex flex-col gap-2">
-          <Field label="Modèle">
+          <Field label="Orchestrateur">
             <Tabs
-              options={AGENT_MODEL_OPTIONS}
-              value={model}
-              onChange={setModel}
-              aria-label="Modèle"
+              options={orchestratorOptions}
+              value={orchestrator}
+              onChange={changeOrchestrator}
+              aria-label="Orchestrateur"
             />
           </Field>
-          <Field label="Effort">
-            <Tabs
-              options={AGENT_EFFORT_OPTIONS}
-              value={effort}
-              onChange={setEffort}
-              aria-label="Effort"
-            />
-          </Field>
+          {orchestrator === "claude" && (
+            <>
+              <Field label="Modèle">
+                <Tabs
+                  options={AGENT_MODEL_OPTIONS}
+                  value={model}
+                  onChange={setModel}
+                  aria-label="Modèle"
+                />
+              </Field>
+              <Field label="Effort">
+                <Tabs
+                  options={AGENT_EFFORT_OPTIONS}
+                  value={effort}
+                  onChange={setEffort}
+                  aria-label="Effort"
+                />
+              </Field>
+            </>
+          )}
+          {orchestrator === "codex" && (
+            <>
+              <Field label="Modèle (Codex)">
+                <Tabs
+                  options={CODEX_MODEL_OPTIONS}
+                  value={codexModel}
+                  onChange={(next) => {
+                    setCodexModel(next);
+                    setCodexEffort((current) => pairedCodexEffort(next, current));
+                  }}
+                  aria-label="Modèle Codex"
+                />
+              </Field>
+              <Field label="Effort (Codex)">
+                <Tabs
+                  options={codexEffortTabOptions(codexModel)}
+                  value={codexEffort}
+                  onChange={setCodexEffort}
+                  aria-label="Effort Codex"
+                />
+              </Field>
+            </>
+          )}
           <Field label="Implémenté par">
             <Tabs
-              options={IMPLEMENTER_OPTIONS}
+              options={implementerOptions}
               value={implementer}
               onChange={setImplementer}
               aria-label="Implémenté par"

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
 
-import { DEFAULT_PROFILES, SLOT_COUNT } from "../../shared/constants.ts";
+import { CODEX_PROFILE_SEEDED_META_KEY, CODEX_SEED_PROFILE, DEFAULT_PROFILES, ORCHESTRATOR_BACKFILL_META_KEY, SLOT_COUNT, type ProfileConfig } from "../../shared/constants.ts";
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS tickets (
@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS tickets (
   effort TEXT,
   implementer_model TEXT,
   implementer_effort TEXT,
+  codex_model TEXT,
+  codex_effort TEXT,
   implementer TEXT NOT NULL DEFAULT 'claude',
+  orchestrator TEXT NOT NULL DEFAULT 'claude',
   review_rounds INTEGER NOT NULL DEFAULT 0,
   nudge_count INTEGER NOT NULL DEFAULT 0,
   session_id TEXT,
@@ -111,6 +114,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   implementer_model TEXT NOT NULL DEFAULT 'opus',
   implementer_effort TEXT NOT NULL DEFAULT 'low',
   implementer TEXT NOT NULL DEFAULT 'claude',
+  orchestrator TEXT NOT NULL DEFAULT 'claude',
+  codex_model TEXT NOT NULL DEFAULT 'gpt-5.5',
+  codex_effort TEXT NOT NULL DEFAULT 'medium',
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -181,6 +187,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "implementer_model", ddl: "ALTER TABLE tickets ADD COLUMN implementer_model TEXT" },
   { column: "implementer_effort", ddl: "ALTER TABLE tickets ADD COLUMN implementer_effort TEXT" },
   { column: "implementer", ddl: "ALTER TABLE tickets ADD COLUMN implementer TEXT NOT NULL DEFAULT 'claude'" },
+  { column: "orchestrator", ddl: "ALTER TABLE tickets ADD COLUMN orchestrator TEXT NOT NULL DEFAULT 'claude'" },
   { column: "pr_draft", ddl: "ALTER TABLE tickets ADD COLUMN pr_draft INTEGER NOT NULL DEFAULT 1" },
   { column: "auto_merge", ddl: "ALTER TABLE tickets ADD COLUMN auto_merge INTEGER NOT NULL DEFAULT 0" },
   { column: "add_screenshots", ddl: "ALTER TABLE tickets ADD COLUMN add_screenshots INTEGER NOT NULL DEFAULT 0" },
@@ -206,6 +213,8 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "reformulate_status", ddl: "ALTER TABLE tickets ADD COLUMN reformulate_status TEXT NOT NULL DEFAULT 'none'" },
   { column: "reformulation", ddl: "ALTER TABLE tickets ADD COLUMN reformulation TEXT" },
   { column: "child_order", ddl: "ALTER TABLE tickets ADD COLUMN child_order INTEGER" },
+  { column: "codex_model", ddl: "ALTER TABLE tickets ADD COLUMN codex_model TEXT" },
+  { column: "codex_effort", ddl: "ALTER TABLE tickets ADD COLUMN codex_effort TEXT" },
 ];
 
 /**
@@ -215,6 +224,9 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
 const PROFILE_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "implementer_model", ddl: "ALTER TABLE profiles ADD COLUMN implementer_model TEXT NOT NULL DEFAULT 'opus'" },
   { column: "implementer_effort", ddl: "ALTER TABLE profiles ADD COLUMN implementer_effort TEXT NOT NULL DEFAULT 'low'" },
+  { column: "orchestrator", ddl: "ALTER TABLE profiles ADD COLUMN orchestrator TEXT NOT NULL DEFAULT 'claude'" },
+  { column: "codex_model", ddl: "ALTER TABLE profiles ADD COLUMN codex_model TEXT NOT NULL DEFAULT 'gpt-5.5'" },
+  { column: "codex_effort", ddl: "ALTER TABLE profiles ADD COLUMN codex_effort TEXT NOT NULL DEFAULT 'medium'" },
 ];
 
 export function createDatabase(path: string): Database {
@@ -224,9 +236,27 @@ export function createDatabase(path: string): Database {
   db.exec(SCHEMA_SQL);
   migrate(db, "tickets", TICKET_MIGRATIONS);
   migrate(db, "profiles", PROFILE_MIGRATIONS);
+  backfillOrchestrator(db);
   seedSlots(db);
   seedProfiles(db);
+  seedCodexProfile(db);
   return db;
+}
+
+/**
+ * One-shot backfill of the orchestrator column on DBs that predate it: a legacy `implementer = 'codex'`
+ * ticket/profile meant "the whole session runs on Codex", which is now carried by `orchestrator`.
+ * Meta-flagged so it runs EXACTLY once (see seedCodexProfile's read/write pattern): PR2 legalizes the
+ * cross-provider pair (claude orchestrator + codex implementer), and re-running this would silently
+ * rewrite such a row back to a codex orchestrator.
+ */
+function backfillOrchestrator(db: Database): void {
+  const flagged = db.query("SELECT value FROM meta WHERE key = ?").get(ORCHESTRATOR_BACKFILL_META_KEY);
+  if (flagged) return;
+  db.exec("UPDATE tickets SET orchestrator = 'codex' WHERE implementer = 'codex'");
+  db.exec("UPDATE profiles SET orchestrator = 'codex' WHERE implementer = 'codex'");
+  // Flag LAST: a failed UPDATE must leave the backfill retryable on the next boot.
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(ORCHESTRATOR_BACKFILL_META_KEY);
 }
 
 /** Adds new columns to a pre-existing table (no-op on fresh DBs). */
@@ -249,27 +279,47 @@ function seedSlots(db: Database): void {
   }
 }
 
+function insertProfile(db: Database, profile: ProfileConfig, sortOrder: number, now: number): void {
+  db.prepare(
+    "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    nanoid(10),
+    profile.name,
+    profile.model,
+    profile.effort,
+    profile.implementerModel,
+    profile.implementerEffort,
+    profile.implementer,
+    profile.orchestrator,
+    profile.codexModel,
+    profile.codexEffort,
+    sortOrder,
+    now,
+    now,
+  );
+}
+
 /** Seed the built-in implementation profiles once (no-op when the table already holds any). */
 function seedProfiles(db: Database): void {
   const row = db.query("SELECT COUNT(*) AS n FROM profiles").get();
   const count = row && typeof row === "object" && "n" in row && typeof row.n === "number" ? row.n : 0;
   if (count > 0) return;
   const now = Date.now();
-  const insert = db.prepare(
-    "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  );
-  DEFAULT_PROFILES.forEach((profile, index) => {
-    insert.run(
-      nanoid(10),
-      profile.name,
-      profile.model,
-      profile.effort,
-      profile.implementerModel,
-      profile.implementerEffort,
-      profile.implementer,
-      index,
-      now,
-      now,
-    );
-  });
+  DEFAULT_PROFILES.forEach((profile, index) => insertProfile(db, profile, index, now));
+}
+
+/**
+ * One-shot seed of the built-in Codex preset into DBs that predate it (seedProfiles only runs on an
+ * empty table). Meta-flagged so deleting the profile later doesn't resurrect it on next boot.
+ */
+function seedCodexProfile(db: Database): void {
+  const flagged = db.query("SELECT value FROM meta WHERE key = ?").get(CODEX_PROFILE_SEEDED_META_KEY);
+  if (flagged) return;
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(CODEX_PROFILE_SEEDED_META_KEY);
+  const existing = db.query("SELECT COUNT(*) AS n FROM profiles WHERE implementer = 'codex'").get();
+  const count = existing && typeof existing === "object" && "n" in existing && typeof existing.n === "number" ? existing.n : 0;
+  if (count > 0) return;
+  const maxRow = db.query("SELECT COALESCE(MAX(sort_order), -1) AS m FROM profiles").get();
+  const maxOrder = maxRow && typeof maxRow === "object" && "m" in maxRow && typeof maxRow.m === "number" ? maxRow.m : -1;
+  insertProfile(db, CODEX_SEED_PROFILE, maxOrder + 1, Date.now());
 }

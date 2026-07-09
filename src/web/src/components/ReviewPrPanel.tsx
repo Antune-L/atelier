@@ -6,12 +6,16 @@ import {
   REVIEW_DEPTH_LABELS,
   type AgentEffort,
   type AgentModel,
+  type CodexEffort,
+  type CodexModel,
+  type Orchestrator,
   type ReviewDepth,
 } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
 import { reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
+import { SessionDriverFields } from "@/components/SessionDriverFields";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -41,6 +45,9 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
   const { model: resolvedDefaultModel, effort: resolvedDefaultEffort } = resolveAgentDefaults(capabilities);
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
+  const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
+  const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
   const [baseBranch, setBaseBranch] = useState<string>(BASE_BRANCH_AUTO);
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -78,6 +85,9 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
         model,
         effort,
+        orchestrator,
+        codexModel,
+        codexEffort,
         prs: chosen,
       });
       onClose();
@@ -126,25 +136,38 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         </Select>
       </div>
 
-      <div className="flex flex-col items-start gap-1.5">
-        <Label id="review-model">Modèle</Label>
-        <Tabs
-          options={AGENT_MODEL_OPTIONS}
-          value={model ?? resolvedDefaultModel}
-          onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
-          aria-labelledby="review-model"
-        />
-      </div>
+      <SessionDriverFields
+        orchestrator={orchestrator}
+        codexModel={codexModel}
+        codexEffort={codexEffort}
+        onOrchestratorChange={setOrchestrator}
+        onCodexModelChange={setCodexModel}
+        onCodexEffortChange={setCodexEffort}
+      />
 
-      <div className="flex flex-col items-start gap-1.5">
-        <Label id="review-effort">Réflexion (effort)</Label>
-        <Tabs
-          options={AGENT_EFFORT_OPTIONS}
-          value={effort ?? resolvedDefaultEffort}
-          onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
-          aria-labelledby="review-effort"
-        />
-      </div>
+      {orchestrator === "claude" && (
+        <>
+          <div className="flex flex-col items-start gap-1.5">
+            <Label id="review-model">Modèle</Label>
+            <Tabs
+              options={AGENT_MODEL_OPTIONS}
+              value={model ?? resolvedDefaultModel}
+              onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
+              aria-labelledby="review-model"
+            />
+          </div>
+
+          <div className="flex flex-col items-start gap-1.5">
+            <Label id="review-effort">Réflexion (effort)</Label>
+            <Tabs
+              options={AGENT_EFFORT_OPTIONS}
+              value={effort ?? resolvedDefaultEffort}
+              onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
+              aria-labelledby="review-effort"
+            />
+          </div>
+        </>
+      )}
 
       <div className="space-y-1">
         <div className="flex items-center gap-2">

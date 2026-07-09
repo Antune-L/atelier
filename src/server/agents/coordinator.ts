@@ -1,9 +1,10 @@
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
-import type { UsageByModel, WorkerToolName } from "../../shared/schemas.ts";
+import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
+  delegateImplementationArgsSchema,
   doneArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
@@ -22,48 +23,15 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { AgentTurnUsage } from "../system/agentSession.ts";
 
+import type { DelegationManager } from "./delegationManager.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { SessionHub, SessionToolCall } from "./sessionHub.ts";
 import type { SlotManager } from "./slotManager.ts";
 import type { SplitManager } from "./splitManager.ts";
 import type { TriageManager } from "./triageManager.ts";
+import { addUsageByModel, toUsageByModel } from "./usage.ts";
 
 const log = createLogger("coordinator");
-
-/** Map the SDK per-model turn usage (camelCase + cost) to the persisted `UsageByModel` (snake_case). */
-function toUsageByModel(usage: Record<string, AgentTurnUsage>): UsageByModel {
-  const out: UsageByModel = {};
-  for (const [model, u] of Object.entries(usage)) {
-    out[model] = {
-      input_tokens: u.inputTokens,
-      output_tokens: u.outputTokens,
-      cache_creation_input_tokens: u.cacheCreationTokens,
-      cache_read_input_tokens: u.cacheReadTokens,
-    };
-  }
-  return out;
-}
-
-/**
- * Sum a per-turn usage delta into a session's running total, bucket-by-bucket per model. The SDK
- * reports usage PER TURN (each `result` covers only that turn), so a session's total is the sum of
- * its turn_end deltas — not the last one.
- */
-function addUsageByModel(prior: UsageByModel | undefined, delta: UsageByModel): UsageByModel {
-  const out: UsageByModel = { ...(prior ?? {}) };
-  for (const [model, d] of Object.entries(delta)) {
-    const base = out[model];
-    out[model] = base
-      ? {
-          input_tokens: base.input_tokens + d.input_tokens,
-          output_tokens: base.output_tokens + d.output_tokens,
-          cache_creation_input_tokens: base.cache_creation_input_tokens + d.cache_creation_input_tokens,
-          cache_read_input_tokens: base.cache_read_input_tokens + d.cache_read_input_tokens,
-        }
-      : d;
-  }
-  return out;
-}
 
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
@@ -90,6 +58,7 @@ export class AgentCoordinator {
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
     private readonly split: SplitManager,
+    private readonly delegation: DelegationManager,
   ) {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
@@ -147,6 +116,7 @@ export class AgentCoordinator {
     done: (ctx) => this.handleDone(ctx),
     ready_for_review: (ctx) => this.handleReadyForReview(ctx),
     fail: (ctx) => this.handleFail(ctx),
+    delegate_implementation: (ctx) => this.handleDelegateImplementation(ctx),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
@@ -253,6 +223,24 @@ export class AgentCoordinator {
     };
   }
 
+  private handleDelegateImplementation(ctx: SessionToolCall): ToolResult {
+    const parsed = delegateImplementationArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.orchestrator !== "claude" || ticket.implementer !== "codex") {
+      return {
+        ok: false,
+        result: "delegate_implementation réservé aux tickets avec implémenteur Codex sous orchestrateur Claude.",
+      };
+    }
+    // A conflict-resolution session fixes merge conflicts inline; delegating a fresh implementation
+    // pass there would rewrite the PR branch instead of resolving it.
+    if (ticket.resolvingConflicts) {
+      return { ok: false, result: "delegate_implementation indisponible en résolution de conflits : résous les conflits inline." };
+    }
+    return this.delegation.start(ticket, ctx.slotId, parsed.data.plan);
+  }
+
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
@@ -295,6 +283,11 @@ export class AgentCoordinator {
       ticket.stage === "awaiting_answers" &&
       (ticket.pendingQuestions > 0 || ticket.column === "prd");
     if (waitingOnUser) return;
+
+    // Parked on a delegated Codex implementation: the parent legitimately ends its turn right after
+    // delegate_implementation and resumes on the implementation_done event. Not a stall — the child's
+    // stream events heartbeat lastProgressAt, and a dead child always settles into an event.
+    if (this.delegation.isActive(ticketId)) return;
 
     // Otherwise the turn must have ended in an active/awaiting stage to warrant escalation.
     const needsResolution = ACTIVE_STAGES.includes(ticket.stage) || ticket.stage === "awaiting_answers";
@@ -349,14 +342,22 @@ export class AgentCoordinator {
    */
   validatePrd(ticketId: string, note = ""): void {
     const existing = this.store.getTicket(ticketId);
-    const resolvedNote =
-      note ||
-      (existing?.implementer === "claude"
-        ? "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification."
-        : "");
+    const resolvedNote = note || this.defaultPrdNote(existing);
     this.sessionHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
     this.lifecycle.beginImplementing(ticketId, "prd_validated");
     this.markProgress(ticketId);
+  }
+
+  /** Default prd_validated note steering the Claude orchestrator toward its implementer's delegation path. */
+  private defaultPrdNote(ticket: ReturnType<Store["getTicket"]>): string {
+    if (!ticket || ticket.orchestrator !== "claude") return "";
+    if (ticket.implementer === "codex") {
+      return "Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan), puis termine ton tour et attends l'événement implementation_done ; ne poursuis pas l'implémentation dans cette session de planification.";
+    }
+    if (ticket.implementer === "claude") {
+      return "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification.";
+    }
+    return "";
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */

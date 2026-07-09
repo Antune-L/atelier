@@ -5,13 +5,40 @@ import {
   FEASIBILITY_SCOUT_AGENT_NAME,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
-import type { CommitLanguage } from "../../shared/constants.ts";
+import type { CommitLanguage, Orchestrator } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
 
 /** Whether the triage prompt should be rendered in English (vs the French default). */
 function isEnglish(language: CommitLanguage): boolean {
   return language === "en";
+}
+
+/**
+ * Read-only framing per driver: Claude sessions are tool-gated (Read/Glob/Grep only), a Codex
+ * session runs in the CLI's read-only sandbox with its own shell-based exploration tools.
+ */
+function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { en: string; fr: string }): string[] {
+  if (driver === "codex") {
+    return en
+      ? [
+          `You are a READ-ONLY Codex ${sessionKind.en} session (read-only sandbox: any write to the`,
+          "repository is blocked). Explore the repository with your read tools only.",
+        ]
+      : [
+          `Tu es une session Codex de ${sessionKind.fr} en LECTURE SEULE (sandbox en lecture seule :`,
+          "toute écriture dans le dépôt est bloquée). Explore le dépôt avec tes outils de lecture uniquement.",
+        ];
+  }
+  return en
+    ? [
+        `You are a READ-ONLY ${sessionKind.en} session (only Read, Glob, Grep are available;`,
+        "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
+      ]
+    : [
+        `Tu es une session de ${sessionKind.fr} en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;`,
+        "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
+      ];
 }
 
 /**
@@ -77,7 +104,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
   return en
     ? [
         "## Response format",
-        "When your analysis is done, call the `submit_triage` tool (MCP `worker` server) with:",
+        "When your analysis is done, call the `submit_triage` tool (MCP `kanban` server) with:",
         "- `verdict`: `implementable` | `needs_info` | `needs_rework`",
         "- `summary`: 2-3 sentences",
         "- `reasons`: list of reasons (mandatory for `needs_rework`)",
@@ -86,10 +113,11 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `suggestedModel` / `suggestedEffort`: see below, otherwise `null`",
         ...extraFields,
         "Do not write the verdict as text: only the `submit_triage` call is taken into account.",
+        "If the tool is not in your static tool list, it is exposed lazily: find it via your tool search (`mcp__kanban` namespace) before concluding it is unavailable.",
       ]
     : [
         "## Format de réponse",
-        "Quand ton analyse est terminée, appelle le tool `submit_triage` (serveur MCP `worker`) avec :",
+        "Quand ton analyse est terminée, appelle le tool `submit_triage` (serveur MCP `kanban`) avec :",
         "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
         "- `summary` : 2-3 phrases",
         "- `reasons` : liste de raisons (obligatoire pour `needs_rework`)",
@@ -98,6 +126,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `suggestedModel` / `suggestedEffort` : voir ci-dessous, sinon `null`",
         ...extraFields,
         "N'écris pas le verdict en texte : seul l'appel à `submit_triage` est pris en compte.",
+        "Si le tool n'apparaît pas dans ta liste statique de tools, il est exposé en différé : retrouve-le via ta recherche de tools (namespace `mcp__kanban`) avant de conclure qu'il est indisponible.",
       ];
 }
 
@@ -142,26 +171,19 @@ export function buildTriageChannelPrompt(
   project: ProjectConfig,
   baseBranch: string,
   language: CommitLanguage,
+  driver: Orchestrator = "claude",
 ): string {
   const en = isEnglish(language);
 
-  const header = en
-    ? [
-        `# Feasibility triage — Ticket ${ticket.id}`,
-        "",
-        `Project: ${project.label} (base branch: ${baseBranch})`,
-        "",
-        "You are a READ-ONLY triage session (only Read, Glob, Grep are available;",
-        "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
-      ]
-    : [
-        `# Triage de faisabilité — Ticket ${ticket.id}`,
-        "",
-        `Projet : ${project.label} (branche de base : ${baseBranch})`,
-        "",
-        "Tu es une session de triage en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;",
-        "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
-      ];
+  const header = [
+    en ? `# Feasibility triage — Ticket ${ticket.id}` : `# Triage de faisabilité — Ticket ${ticket.id}`,
+    "",
+    en
+      ? `Project: ${project.label} (base branch: ${baseBranch})`
+      : `Projet : ${project.label} (branche de base : ${baseBranch})`,
+    "",
+    ...readOnlyFramingLines(driver, en, { en: "triage", fr: "triage" }),
+  ];
 
   const mission = en
     ? [
@@ -203,30 +225,64 @@ export function buildTriagePlusChannelPrompt(
   project: ProjectConfig,
   baseBranch: string,
   language: CommitLanguage,
+  driver: Orchestrator = "claude",
 ): string {
   const en = isEnglish(language);
 
-  const header = en
+  const header = [
+    en
+      ? `# Deep feasibility analysis (Analyse +) — Ticket ${ticket.id}`
+      : `# Analyse + de faisabilité (approfondie) — Ticket ${ticket.id}`,
+    "",
+    en
+      ? `Project: ${project.label} (base branch: ${baseBranch})`
+      : `Projet : ${project.label} (branche de base : ${baseBranch})`,
+    "",
+    ...(driver === "codex"
+      ? readOnlyFramingLines("codex", en, { en: "deep analysis", fr: "analyse approfondie" })
+      : en
+        ? [
+            "You are a READ-ONLY deep-analysis session on the real repository (no worktree).",
+            "Only Read, Glob, Grep and Task (sub-agents) are available; Edit/Write/Bash are uncallable.",
+            "Do not attempt to modify the repository.",
+          ]
+        : [
+            "Tu es une session d'analyse approfondie en LECTURE SEULE sur le dépôt réel (pas de worktree).",
+            "Seuls Read, Glob, Grep et Task (sous-agents) sont disponibles ; Edit/Write/Bash sont inappelables.",
+            "N'essaie pas de modifier le dépôt.",
+          ]),
+  ];
+
+  // Codex has no sub-agents: the deep variant runs the three angles itself, sequentially, in-session.
+  const codexMission = en
     ? [
-        `# Deep feasibility analysis (Analyse +) — Ticket ${ticket.id}`,
+        "## Your mission",
+        "Run a deep analysis of THIS ticket against THIS repository, covering SUCCESSIVELY these three",
+        "angles yourself (no sub-agents available):",
         "",
-        `Project: ${project.label} (base branch: ${baseBranch})`,
+        "1. Feasibility: is the ticket implementable EXACTLY as written? Contradictions, missing",
+        "   dependencies, gray areas. Conclude on a verdict (`implementable` | `needs_info` | `needs_rework`).",
+        "2. Conventional solution: the documented / mainstream approach for this repository.",
+        "3. Alternative solution: a distinct angle (simplicity, performance, or a contrarian take).",
         "",
-        "You are a READ-ONLY deep-analysis session on the real repository (no worktree).",
-        "Only Read, Glob, Grep and Task (sub-agents) are available; Edit/Write/Bash are uncallable.",
-        "Do not attempt to modify the repository.",
+        "Then JUDGE: compare feasibility and solutions, decide on the final verdict and the retained",
+        "options, then synthesize.",
       ]
     : [
-        `# Analyse + de faisabilité (approfondie) — Ticket ${ticket.id}`,
+        "## Ta mission",
+        "Mène une analyse approfondie de CE ticket contre CE dépôt, en couvrant SUCCESSIVEMENT ces trois",
+        "angles toi-même (aucun sous-agent disponible) :",
         "",
-        `Projet : ${project.label} (branche de base : ${baseBranch})`,
+        "1. Faisabilité : le ticket est-il implémentable EXACTEMENT tel qu'il est écrit ? Contradictions,",
+        "   dépendances manquantes, zones d'ombre. Conclus sur un verdict (`implementable` | `needs_info` | `needs_rework`).",
+        "2. Solution conventionnelle : l'approche documentée / mainstream pour ce dépôt.",
+        "3. Solution alternative : un angle distinct (simplicité, performance, ou parti pris contrarian).",
         "",
-        "Tu es une session d'analyse approfondie en LECTURE SEULE sur le dépôt réel (pas de worktree).",
-        "Seuls Read, Glob, Grep et Task (sous-agents) sont disponibles ; Edit/Write/Bash sont inappelables.",
-        "N'essaie pas de modifier le dépôt.",
+        "Ensuite JUGE : compare faisabilité et solutions, tranche sur le verdict final et les options",
+        "retenues, puis synthétise.",
       ];
 
-  const mission = en
+  const claudeMission = en
     ? [
         "## Your mission",
         "Run a deep analysis of THIS ticket against THIS repository. Launch IN PARALLEL (fan-out, a single",
@@ -283,7 +339,7 @@ export function buildTriagePlusChannelPrompt(
     "",
     ...buildTicketLines(ticket, en),
     "",
-    ...mission,
+    ...(driver === "codex" ? codexMission : claudeMission),
     "",
     ...buildStrictRulesLines(en),
     "",

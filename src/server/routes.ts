@@ -1,8 +1,8 @@
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
-import type { Stage } from "../shared/constants.ts";
+import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
+import type { Implementer, Orchestrator, Stage } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import {
   analyzeTicketsSchema,
@@ -55,6 +55,10 @@ import type { UserTerminalManager } from "./userTerminalManager.ts";
 
 const log = createLogger("triage");
 
+/** 400 message when an orchestrator/implementer pair violates isAllowedAgentPair (see PR1 invariant). */
+const DISALLOWED_AGENT_PAIR_MSG =
+  "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).";
+
 interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
@@ -87,6 +91,8 @@ interface RouteDeps {
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
+  /** Probed once at boot: is the Codex CLI usable? */
+  codexAvailable: boolean;
   /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
@@ -172,6 +178,16 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
 function jsonError(set: { status?: number | string }, status: number, message: string): { error: string } {
   set.status = status;
   return { error: message };
+}
+
+/** 400 response when the (orchestrator, implementer) pair is disallowed (Codex orchestrates only Codex — PR1), else null. */
+function agentPairError(
+  set: { status?: number | string },
+  orchestrator: Orchestrator,
+  implementer: Implementer,
+): { error: string } | null {
+  if (isAllowedAgentPair(orchestrator, implementer)) return null;
+  return jsonError(set, HTTP_BAD_REQUEST, DISALLOWED_AGENT_PAIR_MSG);
 }
 
 /** A ticket is locked (only comments + abandon allowed) while it is being processed. */
@@ -262,6 +278,9 @@ function splitChildDefaults(ticket: Ticket): Pick<
   | "implementerModel"
   | "implementerEffort"
   | "implementer"
+  | "orchestrator"
+  | "codexModel"
+  | "codexEffort"
 > {
   return {
     externalUrl: null,
@@ -280,6 +299,9 @@ function splitChildDefaults(ticket: Ticket): Pick<
     implementerModel: ticket.implementerModel,
     implementerEffort: ticket.implementerEffort,
     implementer: ticket.implementer,
+    orchestrator: ticket.orchestrator,
+    codexModel: ticket.codexModel,
+    codexEffort: ticket.codexEffort,
   };
 }
 
@@ -491,10 +513,13 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/capabilities", () => ({
       composerAvailable: deps.composerAvailable,
+      codexAvailable: deps.codexAvailable,
       defaultModel: MODELS.implement,
       defaultEffort: MODELS.implementEffort,
       defaultImplementerModel: MODELS.implementerModel,
       defaultImplementerEffort: MODELS.implementerEffort,
+      defaultCodexModel: MODELS.codexModel,
+      defaultCodexEffort: MODELS.codexEffort,
       canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
       canQuit: deps.onRequestQuit != null,
       canPickFolder: deps.pickFolder != null,
@@ -509,12 +534,22 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/profiles", ({ body, set }) => {
       const parsed = createProfileSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const pairError = agentPairError(set, parsed.data.orchestrator, parsed.data.implementer);
+      if (pairError) return pairError;
       return store.createProfile(parsed.data);
     })
     .patch("/profiles/:id", ({ params, body, set }) => {
-      if (!store.getProfile(params.id)) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
+      const profile = store.getProfile(params.id);
+      if (!profile) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
       const parsed = updateProfileSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      // Validate the MERGED profile (patch value else existing) — Codex orchestrates only Codex (PR1).
+      const pairError = agentPairError(
+        set,
+        parsed.data.orchestrator ?? profile.orchestrator,
+        parsed.data.implementer ?? profile.implementer,
+      );
+      if (pairError) return pairError;
       return store.updateProfile(params.id, parsed.data);
     })
     .delete("/profiles/:id", ({ params, set }) => {
@@ -573,6 +608,7 @@ export function createApiRoutes(deps: RouteDeps) {
           stage: t.stage,
           model: t.model,
           effort: t.effort,
+          orchestrator: t.orchestrator,
           implementer: t.implementer,
           createdAt: t.createdAt,
           implementingStartedAt: t.implementingStartedAt,
@@ -592,6 +628,8 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const pairError = agentPairError(set, parsed.data.orchestrator, parsed.data.implementer);
+      if (pairError) return pairError;
       if (parsed.data.dependsOn !== null) {
         const depError = dependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
@@ -623,6 +661,9 @@ export function createApiRoutes(deps: RouteDeps) {
         implementerModel: parsed.data.implementerModel,
         implementerEffort: parsed.data.implementerEffort,
         implementer: parsed.data.implementer,
+        orchestrator: parsed.data.orchestrator,
+        codexModel: parsed.data.codexModel,
+        codexEffort: parsed.data.codexEffort,
       });
       // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
       if (!parsed.data.start || isBlocked(ticket, store)) {
@@ -645,6 +686,8 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const input = parsed.data;
       if (!isProjectKey(input.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const pairError = agentPairError(set, input.orchestrator, input.implementer);
+      if (pairError) return pairError;
       // Server-side re-validation (never trust the client): every row needs a non-empty title.
       // All-or-nothing — reject the whole batch listing the offending rows before creating anything.
       const blankTitleRows = input.rows
@@ -679,6 +722,9 @@ export function createApiRoutes(deps: RouteDeps) {
           implementerModel: input.implementerModel,
           implementerEffort: input.implementerEffort,
           implementer: input.implementer,
+          orchestrator: input.orchestrator,
+          codexModel: input.codexModel,
+          codexEffort: input.codexEffort,
         });
         hub.pushTicket(ticket);
         created.push(ticket);
@@ -744,6 +790,9 @@ export function createApiRoutes(deps: RouteDeps) {
           fixComments: parsed.data.fixComments,
           model: parsed.data.model,
           effort: parsed.data.effort,
+          orchestrator: parsed.data.orchestrator,
+          codexModel: parsed.data.codexModel,
+          codexEffort: parsed.data.codexEffort,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it
@@ -771,6 +820,9 @@ export function createApiRoutes(deps: RouteDeps) {
           prNumber: pr.number,
           prHeadBranch: pr.headBranch,
           prUrl: pr.url,
+          orchestrator: parsed.data.orchestrator,
+          codexModel: parsed.data.codexModel,
+          codexEffort: parsed.data.codexEffort,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
@@ -796,6 +848,9 @@ export function createApiRoutes(deps: RouteDeps) {
         project: parsed.data.project,
         model: parsed.data.model,
         effort: parsed.data.effort,
+        orchestrator: parsed.data.orchestrator,
+        codexModel: parsed.data.codexModel,
+        codexEffort: parsed.data.codexEffort,
       });
       hub.pushTicket(ticket);
       // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
@@ -829,6 +884,19 @@ export function createApiRoutes(deps: RouteDeps) {
       if (parsed.data.dependsOn !== undefined && parsed.data.dependsOn !== null) {
         const depError = dependencyError(store, ticket.id, parsed.data.dependsOn, parsed.data.project ?? ticket.project);
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
+      }
+      // The agent pair pins the whole session's driver: like the project, it can only move in TODO,
+      // and the resulting (merged) pair must stay allowed (Codex orchestrates only Codex — PR1 invariant).
+      if (parsed.data.orchestrator !== undefined || parsed.data.implementer !== undefined) {
+        if (ticket.column !== "todo") {
+          return jsonError(set, HTTP_CONFLICT, "orchestrateur/implémenteur modifiables uniquement dans TODO");
+        }
+        const pairError = agentPairError(
+          set,
+          parsed.data.orchestrator ?? ticket.orchestrator,
+          parsed.data.implementer ?? ticket.implementer,
+        );
+        if (pairError) return pairError;
       }
       const patch: TicketPatch = { ...parsed.data };
       // directPush ⊕ stealth ⊕ autoMerge: directPush wins, then stealth. Force the others off

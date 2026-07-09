@@ -23,3 +23,5 @@ graphify-out/cache/
 graphify-out/.needs_update
 graphify-out/.graphify_*.json
 !graphify-out/.graphify_labels.json
+
+.codex/

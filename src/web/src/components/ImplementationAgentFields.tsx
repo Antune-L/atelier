@@ -87,7 +87,7 @@ export function ImplementationAgentFields({
   } = resolveAgentDefaults(capabilities);
 
   const orchestratorOptions = orchestratorTabOptions(codexAvailable);
-  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable);
+  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable, codexAvailable);
 
   return (
     <div className="flex flex-col gap-3">
@@ -169,6 +169,20 @@ export function ImplementationAgentFields({
             ? "Composer 2.5 écrit le code ; le modèle orchestrateur (Claude) planifie, relit et ouvre la PR."
             : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
         </p>
+      )}
+      {implementer === "codex" && orchestrator === "claude" && (
+        <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+          <p className="text-xs font-medium text-muted-foreground">Session Codex déléguée</p>
+          <CodexAgentFields
+            codexModel={codexModel}
+            codexEffort={codexEffort}
+            onCodexModelChange={onCodexModelChange}
+            onCodexEffortChange={onCodexEffortChange}
+          />
+          <p className="text-xs text-muted-foreground">
+            Codex écrit le code dans une session déléguée en arrière-plan ; l'orchestrateur Claude planifie, relit, teste et ouvre la PR.
+          </p>
+        </div>
       )}
     </div>
   );

@@ -67,9 +67,13 @@ export function orchestratorTabOptions(codexAvailable: boolean): TabOption<Orche
 /**
  * Implementer picker options for a given orchestrator. A Codex orchestrator pilots only itself, so
  * every non-codex implementer is disabled; under a Claude orchestrator, composer needs Cursor and
- * the cross-provider codex delegation isn't wired yet (PR2).
+ * the codex implementer (backend-delegated child session) needs the Codex CLI.
  */
-export function implementerTabOptions(orchestrator: Orchestrator, composerAvailable: boolean): TabOption<Implementer>[] {
+export function implementerTabOptions(
+  orchestrator: Orchestrator,
+  composerAvailable: boolean,
+  codexAvailable: boolean,
+): TabOption<Implementer>[] {
   return IMPLEMENTERS.map((i) => {
     if (orchestrator === "codex") {
       return { value: i, label: IMPLEMENTER_LABELS[i], disabled: i !== "codex" };
@@ -82,7 +86,11 @@ export function implementerTabOptions(orchestrator: Orchestrator, composerAvaila
       };
     }
     if (i === "codex") {
-      return { value: i, label: `${IMPLEMENTER_LABELS[i]} — via délégation (à venir)`, disabled: true };
+      return {
+        value: i,
+        label: codexAvailable ? `${IMPLEMENTER_LABELS[i]} — via délégation` : `${IMPLEMENTER_LABELS[i]} — Codex non détecté`,
+        disabled: !codexAvailable,
+      };
     }
     return { value: i, label: IMPLEMENTER_LABELS[i] };
   });

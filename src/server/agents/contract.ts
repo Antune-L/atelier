@@ -23,11 +23,13 @@ function commitLanguageDirective(language: CommitLanguage): string {
 }
 
 /**
- * Builds the `implementing` step(s) of the contract. Four modes:
- * Composer delegates code-writing to Cursor headless; a Codex orchestrator implements inline in the
- * SAME session (no sub-agent — Codex has no Agent tool); a PRD-enabled Claude ticket delegates it to a
- * fresh-context sub-agent (kept separate from the planning session, with the validated PRD as its
- * contract); otherwise Claude implements inline via that same sub-agent.
+ * Builds the `implementing` step(s) of the contract. Five modes:
+ * a Codex orchestrator implements inline in the SAME session (no sub-agent — Codex has no Agent
+ * tool); a Codex implementer under Claude goes through the backend-delegated child session
+ * (`delegate_implementation` tool, resumed by the `implementation_done` event); Composer delegates
+ * code-writing to Cursor headless; a PRD-enabled Claude ticket delegates it to a fresh-context
+ * sub-agent (kept separate from the planning session, with the validated PRD as its contract);
+ * otherwise Claude implements inline via that same sub-agent.
  */
 function buildImplementingSteps(
   ticket: Ticket,
@@ -43,6 +45,20 @@ function buildImplementingSteps(
       ];
     }
     return ["2. implementing : implémente intégralement la fonctionnalité décrite dans la description du ticket, dans le worktree courant."];
+  }
+  if (ticket.implementer === "codex") {
+    const planSource = ticket.prdEnabled
+      ? "le PRD validé tel quel"
+      : "un plan concis et complet rédigé depuis la description du ticket";
+    return [
+      "2. implementing (délégué à une session Codex en arrière-plan) :",
+      ...(ticket.prdEnabled
+        ? [`   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation.`]
+        : []),
+      `   ${ticket.prdEnabled ? "b" : "a"}. Appelle le tool delegate_implementation en passant ${planSource} dans \`plan\`. Le backend lance une session Codex dans le worktree courant : elle écrit le code et ne commit JAMAIS.`,
+      `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après l'appel (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras l'événement implementation_done quand Codex aura fini.`,
+      `   ${ticket.prdEnabled ? "d" : "c"}. À réception d'implementation_done : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review. Si l'événement signale un échec, relance delegate_implementation UNE seule fois ; sinon implémente toi-même ou appelle fail().`,
+    ];
   }
   if (ticket.implementer === "composer") {
     return [
@@ -129,11 +145,14 @@ function buildSessionFramingLine(ticket: Ticket): string {
   return "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
 }
 
-/** The `submit_prd` bullet: Claude hands the validated PRD to a fresh sub-agent; Codex implements inline (no Agent tool). */
+/** The `submit_prd` bullet: Claude hands the validated PRD to its implementer's delegation path; Codex implements inline (no Agent tool). */
 function buildPrdBullet(ticket: Ticket): string {
   if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
   if (ticket.orchestrator === "codex") {
     return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant d'implémenter (ne l'implémente pas dans cette phase de planification).";
+  }
+  if (ticket.implementer === "codex") {
+    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via le tool `delegate_implementation` (ne l'implémente pas dans cette session de planification).";
   }
   return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification).";
 }

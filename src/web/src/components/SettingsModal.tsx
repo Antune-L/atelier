@@ -610,7 +610,7 @@ function ProfileRow({
   };
 
   const orchestratorOptions = orchestratorTabOptions(codexAvailable);
-  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable);
+  const implementerOptions = implementerTabOptions(orchestrator, composerAvailable, codexAvailable);
 
   const dirty =
     name !== profile.name ||

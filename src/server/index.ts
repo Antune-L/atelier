@@ -15,6 +15,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AgentCoordinator } from "./agents/coordinator.ts";
+import { DelegationManager } from "./agents/delegationManager.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
@@ -198,6 +199,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
   });
+  const delegationManager = new DelegationManager(store, system, sessionHub, clientHub);
+  // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated Codex child.
+  sessionHub.onDisconnect((ticketId) => delegationManager.stop(ticketId));
   const coordinator = new AgentCoordinator(
     store,
     clientHub,
@@ -208,6 +212,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     triageManager,
     feasibilityManager,
     splitManager,
+    delegationManager,
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
 

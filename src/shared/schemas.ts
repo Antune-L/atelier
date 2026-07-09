@@ -707,6 +707,7 @@ export {
   doneArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
+  delegateImplementationArgsSchema,
   channelEventSchema,
 } from "./protocol.ts";
 export type { WorkerToolName, ChannelEvent } from "./protocol.ts";

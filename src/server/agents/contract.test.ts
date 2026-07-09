@@ -69,6 +69,16 @@ describe("buildTicketContract — orchestrator/implementer framing", () => {
     expect(contract).not.toContain(TICKET_OPTS.composerScriptPath);
     expect(contract).not.toContain("argus");
   });
+
+  test("Claude×Codex delegates implementing via delegate_implementation, Claude keeps review/PR (argus)", () => {
+    const contract = buildTicketContract(makeTicket({ id: "tc-delegate", orchestrator: "claude", implementer: "codex" }), TICKET_OPTS);
+    expect(contract).toContain("session Claude Code");
+    expect(contract).toContain("delegate_implementation");
+    expect(contract).toContain("implementation_done");
+    expect(contract).not.toContain("subagent_type: implementer");
+    expect(contract).not.toContain(TICKET_OPTS.composerScriptPath);
+    expect(contract).toContain("argus");
+  });
 });
 
 describe("buildTicketContract — PRD variants", () => {
@@ -83,6 +93,14 @@ describe("buildTicketContract — PRD variants", () => {
     const ticket = makeTicket({ id: "tp-codex", orchestrator: "codex", implementer: "codex", prdEnabled: true });
     const contract = buildTicketContract(ticket, TICKET_OPTS);
     expect(contract).toContain(`/tmp/prd-${ticket.id}.md`);
+    expect(contract).not.toContain("subagent_type: implementer");
+  });
+
+  test("Claude×Codex with PRD writes the PRD then passes it as the delegation plan", () => {
+    const ticket = makeTicket({ id: "tp-delegate", orchestrator: "claude", implementer: "codex", prdEnabled: true });
+    const contract = buildTicketContract(ticket, TICKET_OPTS);
+    expect(contract).toContain(`/tmp/prd-${ticket.id}.md`);
+    expect(contract).toContain("delegate_implementation");
     expect(contract).not.toContain("subagent_type: implementer");
   });
 });
@@ -202,10 +220,10 @@ describe("buildConflictResolutionContract", () => {
 });
 
 describe("isAllowedAgentPair — full truth table", () => {
-  test("codex orchestrates only codex; codex implementer requires codex orchestrator", () => {
+  test("codex orchestrates only codex; claude orchestrates any implementer (codex via delegation)", () => {
     expect(isAllowedAgentPair("claude", "claude")).toBe(true);
     expect(isAllowedAgentPair("claude", "composer")).toBe(true);
-    expect(isAllowedAgentPair("claude", "codex")).toBe(false);
+    expect(isAllowedAgentPair("claude", "codex")).toBe(true);
     expect(isAllowedAgentPair("codex", "claude")).toBe(false);
     expect(isAllowedAgentPair("codex", "composer")).toBe(false);
     expect(isAllowedAgentPair("codex", "codex")).toBe(true);

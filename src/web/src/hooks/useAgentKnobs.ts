@@ -53,7 +53,7 @@ export function useAgentKnobs(): AgentKnobs {
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
 
   // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex,
-  // switching back to claude drops a codex implementer to claude.
+  // claude accepts any implementer, so the choice is preserved.
   const setOrchestrator = (next: Orchestrator): void => {
     setOrchestratorState(next);
     setImplementer((current) => pairedImplementer(next, current));

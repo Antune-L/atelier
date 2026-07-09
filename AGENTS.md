@@ -22,10 +22,13 @@ bun test path/x.test.ts        # run a single test file
 bun test -t "name substring"   # run tests matching a name
 bun run real           # REAL side effects: KANBAN_DRY_RUN=0 KANBAN_SETUP=1 on kanban-real.db
 bun run dev:desktop    # Electrobun dev window (builds web first)
-bun run build:desktop  # package macOS .app (embeds the SDK's native claude binary)
+bun run build:desktop  # package macOS .app (dev build, no DMG)
+bun run release:desktop 0.1.0  # release DMG into release/ (CI entrypoint, see .github/workflows/release.yml)
 ```
 
-The agent sessions run in-process via the Agent SDK — there are no agent bundles to build. The packaged desktop `.app` embeds the SDK's native `claude` binary (electrobun `copy` → `claude-bin`, pointed to via `KANBAN_CLAUDE_BINARY`); dev/web mode resolves it from `node_modules`.
+The agent sessions run in-process via the Agent SDK — there are no agent bundles to build. The packaged desktop `.app` does NOT embed the SDK's native `claude` binary (proprietary, no redistribution grant): `src/server/system/claudeBinary.ts` provisions it at runtime (`KANBAN_CLAUDE_BINARY` override → `node_modules` → provisioned `dataRoot/bin` → detected user install → pinned npm download). Only the Apache-2.0 `codex` binary is embedded (`copy` → `codex-bin`).
+
+**When bumping `@anthropic-ai/claude-agent-sdk`, update `CLAUDE_SDK_VERSION` in `src/server/system/claudeBinary.ts` to the exact installed version** — the packaged app downloads that pinned version at runtime. `scripts/release-desktop.ts` fails the release build on drift, but only at release time; keeping them in sync at bump time avoids the late failure.
 
 Run `typecheck` + `lint` after edits. There is no `format` script; eslint is the gate.
 

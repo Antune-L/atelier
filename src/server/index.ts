@@ -35,6 +35,7 @@ import { createLogger } from "./logger.ts";
 import { migrateConfigJsonIfPresent } from "./migration.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
+import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
@@ -166,6 +167,15 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const port = Number(process.env.PORT ?? DEFAULT_PORT);
   const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");
+
+  // Warm the claude binary early (packaged app: detect a user install or download the pinned one) so
+  // it is usually ready before the first ticket launch. Non-blocking: a cold download must not delay
+  // the window, and a failure here simply defers provisioning to the first session launch (retried).
+  configureClaudeProvisionDir(join(dataRoot, "bin"));
+  void ensureClaudeBinary().then(
+    (binary) => createLogger("boot").info("binaire claude prêt", { binary }),
+    (error: unknown) => createLogger("boot").warn("provisioning claude différé au premier lancement", { error: getErrorMessage(error) }),
+  );
 
   const db = createDatabase(dbPath);
   const store = new Store(db);

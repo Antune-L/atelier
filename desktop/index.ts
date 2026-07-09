@@ -195,13 +195,9 @@ async function boot(): Promise<void> {
   const configPath = ensureConfig(roots);
   applyDesktopEnv(roots, configPath, BUN_PATH);
 
-  // A packaged .app embeds the Agent SDK's native `claude` binary (electrobun.config copy → claude-bin);
-  // point the SDK at it. dev:desktop has no embedded binary, so resolveClaudeBinary falls back to
-  // require.resolve from node_modules.
-  const bundledClaude = join(roots.resourcesRoot, "claude-bin");
-  if (existsSync(bundledClaude)) process.env.KANBAN_CLAUDE_BINARY = bundledClaude;
-
-  // Same reasoning for the Codex SDK's native `codex` binary (electrobun.config copy → codex-bin).
+  // The `claude` binary is NOT embedded (proprietary — see claudeBinary.ts): the server provisions it
+  // at boot (user install detection, else pinned npm download into dataRoot/bin). Only the Apache-2.0
+  // Codex SDK native `codex` binary is embedded (electrobun.config copy → codex-bin).
   const bundledCodex = join(roots.resourcesRoot, "codex-bin");
   if (existsSync(bundledCodex)) process.env.KANBAN_CODEX_BINARY = bundledCodex;
 

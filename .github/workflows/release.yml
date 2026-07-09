@@ -1,0 +1,80 @@
+# Desktop release: every `v*` tag builds the macOS (Apple Silicon) DMG and publishes it as a GitHub
+# Release. `workflow_dispatch` runs the same pipeline as a dry run (build + checks, no publication).
+# Unsigned in v1 — when Apple signing lands, only the packaging step gains secrets (t3code pattern:
+# auto-detect the secrets, keep producing unsigned artifacts when they are absent).
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version du dry-run (X.Y.Z, sans le v) — aucun artefact publié"
+        required: false
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Résoudre la version
+        id: meta
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            raw="${GITHUB_REF_NAME}"
+            version="${raw#v}"
+          else
+            version="${DISPATCH_VERSION}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version invalide: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Installer les dépendances
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Tests
+        run: bun test
+
+      - name: Packager le DMG
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+        run: bun run release:desktop "$RELEASE_VERSION"
+
+      - name: Publier la release GitHub
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.meta.outputs.version }}
+          name: Atelier v${{ steps.meta.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.prerelease == 'false' }}
+          fail_on_unmatched_files: true
+          files: |
+            release/Atelier-v${{ steps.meta.outputs.version }}-arm64.dmg
+            release/Atelier-v${{ steps.meta.outputs.version }}-arm64.dmg.sha256

@@ -6,6 +6,23 @@ Agents run as long-lived Claude Code sessions via the official **`@anthropic-ai/
 
 ![Atelier demo](docs/demo.gif)
 
+## Install (macOS, Apple Silicon)
+
+Download the latest `Atelier-vX.Y.Z-arm64.dmg` from the [GitHub Releases](https://github.com/Antune-L/atelier/releases), open it and drag **Atelier** to Applications.
+
+The app is not signed/notarized yet, so macOS quarantines the first launch. Since macOS 15 the right-click → Open trick no longer works; instead:
+
+1. Launch Atelier once (macOS refuses), then go to **System Settings → Privacy & Security** and click **"Open Anyway"**;
+2. or clear the quarantine flag directly: `xattr -dr com.apple.quarantine /Applications/Atelier.app`.
+
+First launch:
+
+- The `claude` agent binary is **not** bundled (it is proprietary). The app first looks for an existing Claude Code install (PATH, `~/.local/bin`, Homebrew); if none is found it downloads the exact pinned version from the npm registry (~220 MB, one-time) into the app's data folder.
+- An authenticated Claude session is required (run `claude` once and log in), plus `git`, `tmux` and an authenticated `gh` CLI — see [Requirements](#requirements).
+- App data (config, database, uploads, provisioned binaries) lives in `~/Library/Application Support/kanban-agents/`.
+
+No auto-update yet: to update, download the next release and replace the app. Releases are cut by CI from `v*` tags (`.github/workflows/release.yml` → `bun run release:desktop`).
+
 ## Stack
 
 | Layer       | Choice                                              |
@@ -76,7 +93,7 @@ Each ticket runs a long-lived `claude` process via the official **`@anthropic-ai
 
 Wake events (`ticket`/`answer`/`nudge`) are injected as ordinary user turns, and the worker tools run as an in-process MCP server. No webhook, no `--dangerously-load-development-channels`, no `initialized` race.
 
-In dry-run (`bun run dev`, the default) no `claude` is spawned. The SDK's native binary is resolved by `src/server/system/claudeBinary.ts` (`KANBAN_CLAUDE_BINARY` override → `require.resolve` from `node_modules`).
+In dry-run (`bun run dev`, the default) no `claude` is spawned. The SDK's native binary is resolved by `src/server/system/claudeBinary.ts`: `KANBAN_CLAUDE_BINARY` override → `node_modules` → previously provisioned binary → detected Claude Code install → pinned npm download (packaged app only; dev always hits `node_modules`).
 
 ## Desktop app (macOS, optional)
 
@@ -92,7 +109,7 @@ bun run build:desktop  # .app → build/dev-macos-arm64/
 `bun run dev:desktop` is also a **real-mode** launcher: it starts real `claude` sessions (plus `tmux` shells for interactive test terminals), creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
 
 - it runs `build:web` before starting the app (the agents run in-process — no agent bundles to build);
-- the agent runs the SDK's native `claude` binary; a packaged `.app` embeds it (`claude-bin`) and a dev run resolves it from `node_modules`;
+- the agent runs the SDK's native `claude` binary; a dev run resolves it from `node_modules`, while a packaged `.app` detects a user install or downloads the pinned version at first launch (only the Apache-2.0 `codex` binary is embedded);
 - the desktop app reads its config and database from `~/Library/Application Support/kanban-agents/` by default, not from the repo root;
 - it repairs the macOS GUI `PATH` before spawning `tmux`, `claude`, `gh`, `git`, or `cursor-agent`.
 

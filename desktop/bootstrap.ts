@@ -12,7 +12,7 @@ const CONFIG_FILE = "config.json";
 const UPLOADS_DIR = "uploads";
 
 export interface DesktopRoots {
-  /** Read-only bundle assets: dist/web, claude-bin, codex-bin, templates, config.example.json. */
+  /** Read-only bundle assets: dist/web, codex-bin, templates, config.example.json. */
   resourcesRoot: string;
   /** Writable user data: config.json, kanban.db, uploads/, slots/. */
   dataRoot: string;
@@ -37,8 +37,8 @@ export function ensureConfig(roots: DesktopRoots): string {
  *  - KANBAN_DRY_RUN=0 / KANBAN_SETUP=1 → real adapter + first-boot trust seeding
  *
  * The agent sessions run in-process via the Agent SDK; the SDK's native `claude` binary is resolved
- * by system/claudeBinary.ts (KANBAN_CLAUDE_BINARY override → require.resolve fallback). A packaged
- * `.app` sets KANBAN_CLAUDE_BINARY to the extracted binary path (see the desktop build).
+ * by system/claudeBinary.ts (KANBAN_CLAUDE_BINARY override → node_modules → provisioned/detected/
+ * downloaded — the packaged `.app` does NOT embed it, see claudeBinary.ts).
  */
 export function applyDesktopEnv(roots: DesktopRoots, configPath: string, bunPath: string): void {
   process.env.KANBAN_CONFIG = configPath;

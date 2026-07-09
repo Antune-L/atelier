@@ -24,7 +24,7 @@ import type {
   AgentSubagentDefinition,
   AgentTurnUsage,
 } from "./agentSession.ts";
-import { resolveClaudeBinary } from "./claudeBinary.ts";
+import { ensureClaudeBinary } from "./claudeBinary.ts";
 
 const MCP_SERVER_NAME = "kanban";
 /** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
@@ -136,7 +136,6 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   const queryOptions: Options = {
     cwd: opts.cwd,
     model: opts.model,
-    pathToClaudeCodeExecutable: resolveClaudeBinary(),
     systemPrompt: { type: "preset", preset: "claude_code" },
     // NOTE: "user" is required so host-installed skills (`~/.claude/skills`, e.g. argus-review) are
     // discovered — `skills` below is only a filter over what `settingSources` finds, not a source. It
@@ -157,16 +156,24 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };
 
-  const session: Query = query({ prompt: prompts(), options: queryOptions });
+  // The query starts only once a runnable binary exists (instant when resolved; on a cold packaged
+  // install this downloads it, streaming progress lines into the session transcript). The inbox
+  // generator above already buffers any turns sent in the meantime, so callers stay synchronous.
+  const sessionPromise: Promise<Query> = ensureClaudeBinary((message) =>
+    opts.onEvent({ type: "assistant_text", text: message }),
+  ).then((binary) =>
+    query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } }),
+  );
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
-  void pumpStream(session, opts.onEvent);
+  void pumpStream(sessionPromise, opts.onEvent);
 
   return {
     ticketId: opts.ticketId,
     send: (content) => enqueue(content),
     interrupt: async () => {
       try {
+        const session = await sessionPromise;
         await session.interrupt();
       } catch {
         // interrupt() can reject if the turn already ended; the turn_end event is the source of truth.
@@ -181,19 +188,20 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
       wake();
       // Backstop: if the turn never ends (stuck agent), force teardown so the session can't leak.
       const timer = setTimeout(() => {
-        try {
-          session.close();
-        } catch {
-          // Already torn down; nothing to release.
-        }
+        void sessionPromise
+          .then((session) => session.close())
+          .catch(() => {
+            // Already torn down (or never started); nothing to release.
+          });
       }, GRACEFUL_CLOSE_TIMEOUT_MS);
       timer.unref();
     },
   };
 }
 
-async function pumpStream(session: Query, onEvent: (event: AgentSessionEvent) => void): Promise<void> {
+async function pumpStream(sessionPromise: Promise<Query>, onEvent: (event: AgentSessionEvent) => void): Promise<void> {
   try {
+    const session = await sessionPromise;
     for await (const message of session) {
       dispatch(message, onEvent);
     }

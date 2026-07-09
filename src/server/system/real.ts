@@ -13,7 +13,7 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { resolveClaudeBinary } from "./claudeBinary.ts";
+import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, toSdkEffort } from "./claudeProvider.ts";
 import { resolveCodexBinaryOverride } from "./codexBinary.ts";
 import { createCodexProvider } from "./codexProvider.ts";
@@ -346,7 +346,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const queryOptions: Options = {
       cwd: opts.cwd,
       model: opts.model,
-      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      pathToClaudeCodeExecutable: await ensureClaudeBinary(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "dontAsk",
       allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
@@ -364,7 +364,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const queryOptions: Options = {
       cwd: opts.cwd,
       model: opts.model,
-      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      pathToClaudeCodeExecutable: await ensureClaudeBinary(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "dontAsk",
       mcpServers: { [NOTION_MCP_SERVER_NAME]: { type: "http", url: NOTION_MCP_URL } },
@@ -383,7 +383,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const queryOptions: Options = {
       cwd: opts.cwd,
       model: opts.model,
-      pathToClaudeCodeExecutable: resolveClaudeBinary(),
+      pathToClaudeCodeExecutable: await ensureClaudeBinary(),
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,

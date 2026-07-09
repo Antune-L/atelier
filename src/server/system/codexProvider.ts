@@ -5,9 +5,9 @@
  * - Turn-blocking, not true streaming-input: `runStreamed()` only resolves a full turn at a time (no
  *   documented way to inject input mid-turn). A `send()` arriving mid-turn just enqueues; it's joined
  *   into the next `runStreamed()` call instead of landing live.
- * - No in-process MCP: the worker tools are exposed by a spawned bridge subprocess
- *   (codexWorkerMcpServer.ts) that Codex itself launches per `mcp_servers.kanban`, forwarding each
- *   call back to this backend over one WS connection (see workerBridgeManager.ts).
+ * - No in-process MCP handler API: the worker tools are served by the backend's own HTTP MCP
+ *   endpoint (see workerMcp.ts) — each session's codex connects to it over HTTP with a per-session
+ *   bearer token, so no subprocess and no script file are involved.
  * - `interrupt()` IS real here (unlike the draft's original assumption): `runStreamed(input, {
  *   signal })` wires straight into the spawned `codex exec` subprocess's `child_process.spawn`, so
  *   aborting the turn's AbortController actually kills it.
@@ -15,21 +15,18 @@
 
 import { Codex } from "@openai/codex-sdk";
 import type { Thread, ThreadEvent, ThreadOptions } from "@openai/codex-sdk";
-import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 
-import { CODEX_EFFORTS, DEFAULT_PORT, WS_PATH_WORKER_BRIDGE } from "../../shared/constants.ts";
+import { CODEX_EFFORTS, DEFAULT_PORT, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
 import type { CodexEffort } from "../../shared/constants.ts";
 import { isWorkerToolName } from "../../shared/protocol.ts";
-import type { WorkerBridgeManager } from "../workerBridgeManager.ts";
+import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "./agentSession.ts";
 import { resolveCodexBinaryOverride } from "./codexBinary.ts";
 
 /** Graceful close lets the in-flight turn finish (so a done()/fail() tool call isn't dropped); force-abort past this. */
 const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
-
-const BRIDGE_SCRIPT_PATH = fileURLToPath(new URL("./codexWorkerMcpServer.ts", import.meta.url));
 
 function resolveBackendPort(): number {
   const parsed = Number(process.env.PORT ?? DEFAULT_PORT);
@@ -58,13 +55,13 @@ function describeCodexError(message: string): string {
   return message;
 }
 
-function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: WorkerBridgeManager): AgentSessionHandle {
+function createCodexAgentSession(opts: AgentSessionOptions, mcpManager: WorkerMcpManager): AgentSessionHandle {
   // A bare session (delegated implementation child) gets NO kanban MCP server at all: the worker
   // tools structurally don't exist for it, so no coordinator-side gating is ever needed.
   const bare = opts.disableWorkerTools === true;
   const token = nanoid(21);
   if (!bare) {
-    bridgeManager.register(token, {
+    mcpManager.register(token, {
       onToolCall: async (name, args) => {
         if (!isWorkerToolName(name)) return { ok: false, result: `outil inconnu : ${name}` };
         return opts.onToolCall(name, args);
@@ -72,7 +69,6 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
     });
   }
 
-  const bridgeUrl = `ws://127.0.0.1:${resolveBackendPort()}${WS_PATH_WORKER_BRIDGE}?token=${token}`;
   // Reasoning effort travels as a raw `-c model_reasoning_effort=…` override, NOT the SDK's typed
   // `modelReasoningEffort` thread option: the SDK type caps at "xhigh" while the CLI accepts the
   // 5.6 models' "max"/"ultra".
@@ -86,9 +82,8 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
         : {
             mcp_servers: {
               kanban: {
-                command: Bun.which("bun") ?? "bun",
-                args: [BRIDGE_SCRIPT_PATH],
-                env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
+                url: `http://127.0.0.1:${resolveBackendPort()}${HTTP_PATH_WORKER_MCP}`,
+                http_headers: { Authorization: `Bearer ${token}` },
                 // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
                 // with "user cancelled MCP tool call" (there is no human to answer the prompt).
                 default_tools_approval_mode: "approve",
@@ -218,7 +213,7 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
         }
       }
     } finally {
-      if (!bare) bridgeManager.unregister(token);
+      if (!bare) mcpManager.unregister(token);
     }
   }
 
@@ -243,10 +238,10 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
   };
 }
 
-/** Build the Codex provider, bound to the backend's worker-bridge registry. */
-export function createCodexProvider(bridgeManager: WorkerBridgeManager): AgentProvider {
+/** Build the Codex provider, bound to the backend's worker MCP registry. */
+export function createCodexProvider(mcpManager: WorkerMcpManager): AgentProvider {
   return {
     name: "codex",
-    createSession: (opts) => createCodexAgentSession(opts, bridgeManager),
+    createSession: (opts) => createCodexAgentSession(opts, mcpManager),
   };
 }

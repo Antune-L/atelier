@@ -13,6 +13,9 @@ import type { ElectrobunConfig } from "electrobun";
  *  - codex-bin       → the Codex SDK's native `codex` binary, same reasoning, pointed at via
  *                      KANBAN_CODEX_BINARY (codexBinary.ts's override — the SDK resolves the
  *                      binary itself otherwise, see codexBinary.ts's doc comment)
+ *  - codex-code-mode-host → codex's companion binary for MCP tool execution ("code mode"); codex
+ *                      resolves it as a sibling of its own executable, so it must land next to
+ *                      codex-bin or every MCP tool call dies with "codex-code-mode-host not found"
  *  - templates       → run_composer.sh driver
  *  - config.example.json → seeded into the writable dataRoot on first launch
  *
@@ -39,6 +42,7 @@ export default {
       "dist/web": "dist/web",
       "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude": "claude-bin",
       "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex": "codex-bin",
+      "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host": "codex-code-mode-host",
       "templates/run_composer.sh": "templates/run_composer.sh",
       "config.example.json": "config.example.json",
     },

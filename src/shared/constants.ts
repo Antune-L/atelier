@@ -499,16 +499,16 @@ export const FEASIBILITY_AUTO_RELAUNCH_EVENT = "feasibility_auto_relaunch";
 export const IMPORT_MAX_ROWS = 200;
 
 /** Default HTTP/WS port when `process.env.PORT` is unset. Shared so any in-process caller (e.g. the
- * codexProvider worker-bridge subprocess spawn) can resolve the backend's own address without
- * duplicating the fallback. */
+ * codexProvider worker MCP URL) can resolve the backend's own address without duplicating the
+ * fallback. */
 export const DEFAULT_PORT = 52817;
 
 /** WebSocket channels. */
 export const WS_PATH_CLIENT = "/ws";
 /** Interactive PTY stream for a worktree/user shell tmux pane (output + bidirectional input). */
 export const WS_PATH_TERMINAL = "/ws/terminal";
-/** Internal bridge a codexProvider worker-tool MCP subprocess uses to call back into onToolCall. */
-export const WS_PATH_WORKER_BRIDGE = "/ws/worker-bridge";
+/** Streamable-HTTP MCP endpoint serving the worker tools to Codex sessions (see workerMcp.ts). */
+export const HTTP_PATH_WORKER_MCP = "/mcp/worker";
 
 /**
  * Default tmux pane size for a detached agent session. Spawn NARROW on purpose: a viewer almost

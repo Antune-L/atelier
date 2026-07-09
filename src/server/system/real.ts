@@ -10,7 +10,7 @@ import { z } from "zod";
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 import { createLogger } from "../logger.ts";
-import type { WorkerBridgeManager } from "../workerBridgeManager.ts";
+import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { resolveClaudeBinary } from "./claudeBinary.ts";
@@ -122,8 +122,8 @@ export class RealSystemAdapter implements SystemAdapter {
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
 
-  constructor(workerBridgeManager: WorkerBridgeManager) {
-    this.providers = { claude: claudeProvider, codex: createCodexProvider(workerBridgeManager) };
+  constructor(workerMcpManager: WorkerMcpManager) {
+    this.providers = { claude: claudeProvider, codex: createCodexProvider(workerMcpManager) };
   }
 
   async seedWorkspaceTrust(paths: string[]): Promise<void> {

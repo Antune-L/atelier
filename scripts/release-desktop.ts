@@ -18,7 +18,8 @@ import { CLAUDE_SDK_VERSION } from "../src/server/system/claudeBinary.ts";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const REPO_ROOT = resolve(import.meta.dir, "..");
-const STABLE_BUILD_FOLDER = join(REPO_ROOT, "build", "stable-macos-arm64");
+/** electrobun's final "moving artifacts" step relocates the DMG here as `<platformPrefix>-<name>`. */
+const BUILT_DMG = join(REPO_ROOT, "artifacts", "stable-macos-arm64-Atelier.dmg");
 const RELEASE_FOLDER = join(REPO_ROOT, "release");
 const ELECTROBUN_BIN = join(REPO_ROOT, "node_modules", ".bin", "electrobun");
 
@@ -67,13 +68,12 @@ assertClaudeSdkVersionInSync();
 await run(["bun", "run", "build:web"]);
 await run([ELECTROBUN_BIN, "build", "--env=stable"], { ATELIER_VERSION: version, ATELIER_RELEASE: "1" });
 
-const builtDmg = join(STABLE_BUILD_FOLDER, "Atelier.dmg");
-if (!existsSync(builtDmg)) fail(`DMG introuvable : ${builtDmg}`);
+if (!existsSync(BUILT_DMG)) fail(`DMG introuvable : ${BUILT_DMG}`);
 
 mkdirSync(RELEASE_FOLDER, { recursive: true });
 const artifactName = `Atelier-v${version}-arm64.dmg`;
 const artifactPath = join(RELEASE_FOLDER, artifactName);
-copyFileSync(builtDmg, artifactPath);
+copyFileSync(BUILT_DMG, artifactPath);
 await writeSha256(artifactPath, artifactName);
 
 console.log(`release-desktop: OK → release/${artifactName} (+ .sha256)`);

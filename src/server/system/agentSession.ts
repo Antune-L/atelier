@@ -76,6 +76,13 @@ export interface AgentSessionOptions {
    */
   resumeSessionId?: string;
   /**
+   * Bare session: expose NO kanban worker tools to the agent. Used by the delegated Codex
+   * implementation child, which must only write code — the parent session keeps the protocol.
+   * Honored by codexProvider (skips the MCP bridge entirely); Claude sessions always carry the
+   * in-process worker tools today.
+   */
+  disableWorkerTools?: boolean;
+  /**
    * Pre-approved permission rules (SDK `settings.permissions.allow`), e.g. `Bash(git commit:*)`. Under
    * `dontAsk` these auto-run and everything else is denied — the bash allowlist the old tmux sessions
    * enforced via `.claude/settings.json`.

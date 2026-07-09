@@ -96,11 +96,11 @@ export const ORCHESTRATOR_LABELS: Record<Orchestrator, string> = {
 
 /**
  * Allowed orchestrator × implementer pairs. Codex orchestrates only itself (it has no Agent tool to
- * delegate), and a Codex implementer requires the Codex orchestrator until the backend delegation
- * tool lands (PR2 relaxes that second half to allow Claude orchestrating a Codex implementer).
+ * delegate); Claude orchestrates any implementer — a Codex implementer runs as a backend-delegated
+ * child session (worker tool `delegate_implementation`).
  */
 export function isAllowedAgentPair(orchestrator: Orchestrator, implementer: Implementer): boolean {
-  return orchestrator === "codex" ? implementer === "codex" : implementer !== "codex";
+  return orchestrator === "codex" ? implementer === "codex" : true;
 }
 
 /** Language the agent writes commit messages and PR title/description in. */
@@ -440,6 +440,13 @@ export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
  * submit_feasibility.
  */
 export const FEASIBILITY_SLOT_ID = -2;
+
+/**
+ * SLOT_ID a delegated Codex implementation child identifies with: the child runs INSIDE the parent
+ * ticket's slot worktree but has no worker tools of its own — if one of its calls ever reaches the
+ * coordinator, this id bars every pipeline tool.
+ */
+export const DELEGATION_SLOT_ID = -4;
 /** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
 export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
 /**

@@ -58,29 +58,36 @@ function describeCodexError(message: string): string {
 }
 
 function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: WorkerBridgeManager): AgentSessionHandle {
+  // A bare session (delegated implementation child) gets NO kanban MCP server at all: the worker
+  // tools structurally don't exist for it, so no coordinator-side gating is ever needed.
+  const bare = opts.disableWorkerTools === true;
   const token = nanoid(21);
-  bridgeManager.register(token, {
-    onToolCall: async (name, args) => {
-      if (!isWorkerToolName(name)) return { ok: false, result: `outil inconnu : ${name}` };
-      return opts.onToolCall(name, args);
-    },
-  });
+  if (!bare) {
+    bridgeManager.register(token, {
+      onToolCall: async (name, args) => {
+        if (!isWorkerToolName(name)) return { ok: false, result: `outil inconnu : ${name}` };
+        return opts.onToolCall(name, args);
+      },
+    });
+  }
 
   const bridgeUrl = `ws://127.0.0.1:${resolveBackendPort()}${WS_PATH_WORKER_BRIDGE}?token=${token}`;
   const codex = new Codex({
     codexPathOverride: resolveCodexBinaryOverride(),
-    config: {
-      mcp_servers: {
-        kanban: {
-          command: Bun.which("bun") ?? "bun",
-          args: [BRIDGE_SCRIPT_PATH],
-          env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
-          // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
-          // with "user cancelled MCP tool call" (there is no human to answer the prompt).
-          default_tools_approval_mode: "approve",
+    config: bare
+      ? {}
+      : {
+          mcp_servers: {
+            kanban: {
+              command: Bun.which("bun") ?? "bun",
+              args: [BRIDGE_SCRIPT_PATH],
+              env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
+              // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
+              // with "user cancelled MCP tool call" (there is no human to answer the prompt).
+              default_tools_approval_mode: "approve",
+            },
+          },
         },
-      },
-    },
   });
 
   const threadOptions: ThreadOptions = {
@@ -204,7 +211,7 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
         }
       }
     } finally {
-      bridgeManager.unregister(token);
+      if (!bare) bridgeManager.unregister(token);
     }
   }
 

@@ -160,6 +160,13 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
                 />
               </>
             )}
+            {/* Claude orchestrator + Codex implementer: the codex knobs drive the delegated child session. */}
+            {!isCodex && ticket.implementer === "codex" && (
+              <>
+                <Row label="Modèle (Codex délégué)" value={codexModelValue} />
+                <Row label="Effort (Codex délégué)" value={codexEffortValue} />
+              </>
+            )}
             <Row label="PRD" value={ticket.prdEnabled ? YES : NO} />
             <Row
               label="PR en draft"

@@ -307,7 +307,7 @@ export interface ImplementSessionInput {
 }
 
 /** Resolved Codex knobs for a ticket: per-ticket override, else the persisted app-settings default. */
-function codexKnobs(ticket: Ticket): { model: string; effort: string } {
+export function codexKnobs(ticket: Ticket): { model: string; effort: string } {
   return {
     model: ticket.codexModel ?? MODELS.codexModel,
     effort: ticket.codexEffort ?? MODELS.codexEffort,

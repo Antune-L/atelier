@@ -113,6 +113,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `suggestedModel` / `suggestedEffort`: see below, otherwise `null`",
         ...extraFields,
         "Do not write the verdict as text: only the `submit_triage` call is taken into account.",
+        "If the tool is not in your static tool list, it is exposed lazily: find it via your tool search (`mcp__kanban` namespace) before concluding it is unavailable.",
       ]
     : [
         "## Format de réponse",
@@ -125,6 +126,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `suggestedModel` / `suggestedEffort` : voir ci-dessous, sinon `null`",
         ...extraFields,
         "N'écris pas le verdict en texte : seul l'appel à `submit_triage` est pris en compte.",
+        "Si le tool n'apparaît pas dans ta liste statique de tools, il est exposé en différé : retrouve-le via ta recherche de tools (namespace `mcp__kanban`) avant de conclure qu'il est indisponible.",
       ];
 }
 

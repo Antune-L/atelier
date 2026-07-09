@@ -1,12 +1,13 @@
 import { useId } from "react";
 
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, pairedCodexEffort } from "@shared/constants";
 import type { CodexEffort, CodexModel } from "@shared/constants";
 
 import { Label } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
-import { CODEX_EFFORT_OPTIONS, CODEX_MODEL_OPTIONS } from "@/lib/display";
+import { CODEX_MODEL_OPTIONS, codexEffortTabOptions } from "@/lib/display";
 
 interface CodexAgentFieldsProps {
   codexModel: CodexModel | null;
@@ -28,6 +29,16 @@ export function CodexAgentFields({
   const effortLabelId = `${id}-codex-effort`;
 
   const { codexModel: defaultModel, codexEffort: defaultEffort } = resolveAgentDefaults(capabilities);
+  const resolvedModel = codexModel ?? defaultModel ?? DEFAULT_CODEX_MODEL;
+
+  // Picking a model re-pairs the effort: an effort the new model doesn't support (e.g. ultra on
+  // Luna) clamps to the model's strongest supported one.
+  const changeModel = (value: CodexModel): void => {
+    onCodexModelChange(value === defaultModel ? null : value);
+    const currentEffort = codexEffort ?? defaultEffort ?? DEFAULT_CODEX_EFFORT;
+    const paired = pairedCodexEffort(value, currentEffort);
+    if (paired !== currentEffort) onCodexEffortChange(paired === defaultEffort ? null : paired);
+  };
 
   return (
     <>
@@ -35,15 +46,15 @@ export function CodexAgentFields({
         <Label id={modelLabelId}>Modèle (Codex)</Label>
         <Tabs
           options={CODEX_MODEL_OPTIONS}
-          value={codexModel ?? defaultModel}
-          onChange={(value) => onCodexModelChange(value === defaultModel ? null : value)}
+          value={resolvedModel}
+          onChange={changeModel}
           aria-labelledby={modelLabelId}
         />
       </div>
       <div className="flex flex-col items-start gap-1.5">
         <Label id={effortLabelId}>Effort (Codex)</Label>
         <Tabs
-          options={CODEX_EFFORT_OPTIONS}
+          options={codexEffortTabOptions(resolvedModel)}
           value={codexEffort ?? defaultEffort}
           onChange={(value) => onCodexEffortChange(value === defaultEffort ? null : value)}
           aria-labelledby={effortLabelId}

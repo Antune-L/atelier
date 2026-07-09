@@ -139,10 +139,27 @@ function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): stri
   return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus.";
 }
 
+/**
+ * Deferred-tools hint for Codex sessions. Some Codex accounts/versions don't inject MCP tools into
+ * the static tool list: they sit behind `tool_search` (namespace `mcp__kanban`). Without this hint a
+ * session concludes the protocol tools are missing and parks itself (seen live on an ask ticket).
+ */
+const CODEX_DEFERRED_TOOLS_HINT =
+  "IMPORTANT : si les tools `kanban` n'apparaissent pas dans ta liste statique de tools, ils sont exposés en DIFFÉRÉ — retrouve-les via `tool_search` (namespace `mcp__kanban`, ex. requête « update_stage » ou « kanban ») puis appelle-les normalement. Ne conclus JAMAIS qu'ils sont indisponibles sans avoir fait cette recherche.";
+
+/**
+ * Framing line naming the agent driving the session, with the deferred-tools hint for Codex. Pass
+ * `mission` for a specialized contract ("... dédiée <mission>."); omit it for the generic contract.
+ */
+function buildSpecializedFraming(isCodex: boolean, mission?: string): string {
+  const dedicated = mission ? ` dédiée ${mission}` : "";
+  const framing = `Tu es une session ${isCodex ? "Codex" : "Claude Code"} autonome${dedicated}. Tu DOIS piloter la carte via les tools du serveur MCP \`kanban\` :`;
+  return isCodex ? `${framing}\n${CODEX_DEFERRED_TOOLS_HINT}` : framing;
+}
+
 /** Opening line of the "## Contrat de pipeline" section: names the agent driving the session. */
 function buildSessionFramingLine(ticket: Ticket): string {
-  if (ticket.orchestrator === "codex") return "Tu es une session Codex autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
-  return "Tu es une session Claude Code autonome. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :";
+  return buildSpecializedFraming(ticket.orchestrator === "codex");
 }
 
 /** The `submit_prd` bullet: Claude hands the validated PRD to its implementer's delegation path; Codex implements inline (no Agent tool). */
@@ -338,7 +355,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
     "",
     "## Contrat de pipeline",
-    `Tu es une session ${ticket.orchestrator === "codex" ? "Codex" : "Claude Code"} autonome dédiée à la résolution de conflits. Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
+    buildSpecializedFraming(ticket.orchestrator === "codex", "à la résolution de conflits"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
     "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
@@ -500,7 +517,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     `Poster les commentaires sur GitHub : ${ticket.postComments ? "OUI" : "NON"}`,
     "",
     "## Contrat de pipeline",
-    `Tu es une session ${isCodex ? "Codex" : "Claude Code"} autonome dédiée à la REVUE d'une PR (lecture seule). Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
+    buildSpecializedFraming(isCodex, "à la REVUE d'une PR (lecture seule)"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (ex. PR introuvable ou ambiguë).",
     "- `done(pr_url)` UNIQUEMENT une fois la revue terminée (et postée si demandé).",
@@ -563,7 +580,7 @@ function buildReviewFixLines(
     `Le worktree courant est DÉJÀ positionné sur la branche head de la PR (\`${branch}\`). Tu vas reviewer la PR, corriger les retours, puis commiter et pousser sur CETTE MÊME branche (aucune nouvelle PR).`,
     "",
     "## Contrat de pipeline",
-    `Tu es une session ${isCodex ? "Codex" : "Claude Code"} autonome dédiée à la REVUE puis la CORRECTION d'une PR. Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
+    buildSpecializedFraming(isCodex, "à la REVUE puis la CORRECTION d'une PR"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (ex. retour ambigu, arbitrage de périmètre).",
     "- `done(pr_url)` UNIQUEMENT après qu'argus a posté la revue, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
@@ -624,6 +641,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     "",
     "## Contrat de pipeline",
     `Tu es une session ${isCodex ? "Codex" : "Claude Code"} autonome dédiée au TRI puis à l'APPLICATION des retours de review d'une PR. Le worktree courant est sur une branche locale dédiée \`` + localBranch + "` qui porte les commits de la PR (partie de la head de la PR `" + branch + "`). Tu commites tes corrections sur cette branche locale et les pousses vers la head de la PR `" + branch + "` pour mettre à jour la MÊME PR — ce nom local volontairement différent de la head de la PR est attendu. Tu DOIS piloter la carte via les tools du serveur MCP `kanban` :",
+    isCodex ? CODEX_DEFERRED_TOOLS_HINT : "",
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision est ambiguë (ex. retour au périmètre incertain).",
     "- `done(pr_url)` UNIQUEMENT après avoir appliqué les corrections pertinentes (ou déterminé qu'aucune ne l'est), commité et poussé via `git push origin HEAD:" + branch + "` (passe la MÊME URL de PR, ne crée JAMAIS de nouvelle PR).",
@@ -673,7 +691,7 @@ export function buildAskContract(ticket: Ticket): string {
     `La question peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire${isCodex ? "" : " avec l'outil Read"}.`,
     "",
     "## Contrat de pipeline",
-    `Tu es une session ${isCodex ? "Codex" : "Claude Code"} autonome dédiée à RÉPONDRE à une question (lecture seule${isCodex ? ", sandbox en lecture seule" : ""}, aucune modification). Tu DOIS piloter la carte via les tools du serveur MCP \`worker\` :`,
+    buildSpecializedFraming(isCodex, `à RÉPONDRE à une question (lecture seule${isCodex ? ", sandbox en lecture seule" : ""}, aucune modification)`),
     '- `update_stage("implementing")` dès le début (accuse réception du contrat et signale l\'activité).',
     "- `ask_user(question)` UNIQUEMENT si la question est ambiguë au point de t'empêcher de répondre (ne devine pas une intention critique).",
     "- `submit_answer(answer)` avec ta réponse complète en markdown une fois ton analyse terminée. Ceci clôt le ticket.",

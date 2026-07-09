@@ -14,11 +14,12 @@
  */
 
 import { Codex } from "@openai/codex-sdk";
-import type { ModelReasoningEffort, Thread, ThreadEvent, ThreadOptions } from "@openai/codex-sdk";
+import type { Thread, ThreadEvent, ThreadOptions } from "@openai/codex-sdk";
 import { fileURLToPath } from "node:url";
 import { nanoid } from "nanoid";
 
 import { CODEX_EFFORTS, DEFAULT_PORT, WS_PATH_WORKER_BRIDGE } from "../../shared/constants.ts";
+import type { CodexEffort } from "../../shared/constants.ts";
 import { isWorkerToolName } from "../../shared/protocol.ts";
 import type { WorkerBridgeManager } from "../workerBridgeManager.ts";
 
@@ -35,8 +36,8 @@ function resolveBackendPort(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PORT;
 }
 
-/** Narrow our free-form effort string to the Codex SDK's enum; null/unknown → model default (undefined). */
-function toCodexEffort(effort: string | null): ModelReasoningEffort | undefined {
+/** Narrow our free-form effort string to the Codex effort enum; null/unknown → model default (undefined). */
+function toCodexEffort(effort: string | null): CodexEffort | undefined {
   if (effort === null) return undefined;
   return CODEX_EFFORTS.find((value) => value === effort);
 }
@@ -72,22 +73,29 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
   }
 
   const bridgeUrl = `ws://127.0.0.1:${resolveBackendPort()}${WS_PATH_WORKER_BRIDGE}?token=${token}`;
+  // Reasoning effort travels as a raw `-c model_reasoning_effort=…` override, NOT the SDK's typed
+  // `modelReasoningEffort` thread option: the SDK type caps at "xhigh" while the CLI accepts the
+  // 5.6 models' "max"/"ultra".
+  const codexEffort = toCodexEffort(opts.effort);
   const codex = new Codex({
     codexPathOverride: resolveCodexBinaryOverride(),
-    config: bare
-      ? {}
-      : {
-          mcp_servers: {
-            kanban: {
-              command: Bun.which("bun") ?? "bun",
-              args: [BRIDGE_SCRIPT_PATH],
-              env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
-              // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
-              // with "user cancelled MCP tool call" (there is no human to answer the prompt).
-              default_tools_approval_mode: "approve",
+    config: {
+      ...(codexEffort ? { model_reasoning_effort: codexEffort } : {}),
+      ...(bare
+        ? {}
+        : {
+            mcp_servers: {
+              kanban: {
+                command: Bun.which("bun") ?? "bun",
+                args: [BRIDGE_SCRIPT_PATH],
+                env: { KANBAN_BRIDGE_TOKEN: token, KANBAN_BRIDGE_WS_URL: bridgeUrl },
+                // `codex exec` runs headless: without auto-approval every worker-tool call is rejected
+                // with "user cancelled MCP tool call" (there is no human to answer the prompt).
+                default_tools_approval_mode: "approve",
+              },
             },
-          },
-        },
+          }),
+    },
   });
 
   const threadOptions: ThreadOptions = {
@@ -99,7 +107,6 @@ function createCodexAgentSession(opts: AgentSessionOptions, bridgeManager: Worke
     // returns to CODEX_EFFORTS, this must become conditional again.
     webSearchEnabled: true,
     workingDirectory: opts.cwd,
-    modelReasoningEffort: toCodexEffort(opts.effort),
     // The backend fully controls cwd (a slot worktree it just created); without this, `codex exec`
     // refuses to start in a directory the user never marked trusted in ~/.codex and the run dies
     // with "Not inside a trusted directory".

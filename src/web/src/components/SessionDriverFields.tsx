@@ -1,7 +1,6 @@
 import { useId } from "react";
 
-import { IMPLEMENTER_LABELS, type CodexEffort, type CodexModel } from "@shared/constants";
-import type { SessionDriver } from "@shared/schemas";
+import { ORCHESTRATOR_LABELS, type CodexEffort, type CodexModel, type Orchestrator } from "@shared/constants";
 
 import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Label } from "@/components/ui/input";
@@ -9,35 +8,35 @@ import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 
 interface SessionDriverFieldsProps {
-  driver: SessionDriver;
+  orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
-  onDriverChange: (driver: SessionDriver) => void;
+  onOrchestratorChange: (orchestrator: Orchestrator) => void;
   onCodexModelChange: (model: CodexModel | null) => void;
   onCodexEffortChange: (effort: CodexEffort | null) => void;
 }
 
 /**
- * Driver picker for a review/clean/ask session (Claude or Codex — Composer only writes feature
+ * Orchestrator picker for a review/clean/ask session (Claude or Codex — Composer only writes feature
  * code), plus the Codex model/effort knobs when Codex is selected.
  */
 export function SessionDriverFields({
-  driver,
+  orchestrator,
   codexModel,
   codexEffort,
-  onDriverChange,
+  onOrchestratorChange,
   onCodexModelChange,
   onCodexEffortChange,
 }: SessionDriverFieldsProps) {
   const { codexAvailable } = useCapabilities();
   const id = useId();
-  const driverLabelId = `${id}-driver`;
+  const orchestratorLabelId = `${id}-orchestrator`;
 
-  const options: TabOption<SessionDriver>[] = [
-    { value: "claude", label: IMPLEMENTER_LABELS.claude },
+  const options: TabOption<Orchestrator>[] = [
+    { value: "claude", label: ORCHESTRATOR_LABELS.claude },
     {
       value: "codex",
-      label: codexAvailable ? IMPLEMENTER_LABELS.codex : `${IMPLEMENTER_LABELS.codex} — non détecté`,
+      label: codexAvailable ? ORCHESTRATOR_LABELS.codex : `${ORCHESTRATOR_LABELS.codex} — non détecté`,
       disabled: !codexAvailable,
     },
   ];
@@ -45,10 +44,15 @@ export function SessionDriverFields({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={driverLabelId}>Agent</Label>
-        <Tabs options={options} value={driver} onChange={onDriverChange} aria-labelledby={driverLabelId} />
+        <Label id={orchestratorLabelId}>Agent</Label>
+        <Tabs
+          options={options}
+          value={orchestrator}
+          onChange={onOrchestratorChange}
+          aria-labelledby={orchestratorLabelId}
+        />
       </div>
-      {driver === "codex" && (
+      {orchestrator === "codex" && (
         <CodexAgentFields
           codexModel={codexModel}
           codexEffort={codexEffort}

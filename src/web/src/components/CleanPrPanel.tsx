@@ -1,8 +1,8 @@
 import { GitPullRequest } from "lucide-react";
 import { useState } from "react";
 
-import type { CodexEffort, CodexModel } from "@shared/constants";
-import type { ProjectInfo, SessionDriver } from "@shared/schemas";
+import type { CodexEffort, CodexModel, Orchestrator } from "@shared/constants";
+import type { ProjectInfo } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
 import { SessionDriverFields } from "@/components/SessionDriverFields";
@@ -20,7 +20,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
   const panel = useProjectPanel(projects);
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [context, setContext] = useState("");
-  const [driver, setDriver] = useState<SessionDriver>("claude");
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
 
@@ -30,7 +30,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
     setError(null);
     try {
       const chosen = prs.filter((p) => selected.has(p.number));
-      await api.createCleaners({ project, context, implementer: driver, codexModel, codexEffort, prs: chosen });
+      await api.createCleaners({ project, context, orchestrator, codexModel, codexEffort, prs: chosen });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec du lancement du nettoyage");
@@ -59,10 +59,10 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
       </div>
 
       <SessionDriverFields
-        driver={driver}
+        orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
-        onDriverChange={setDriver}
+        onOrchestratorChange={setOrchestrator}
         onCodexModelChange={setCodexModel}
         onCodexEffortChange={setCodexEffort}
       />

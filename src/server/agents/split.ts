@@ -1,5 +1,5 @@
-import type { SessionDriver, Ticket } from "../../shared/schemas.ts";
-import type { CommitLanguage } from "../../shared/constants.ts";
+import type { Ticket } from "../../shared/schemas.ts";
+import type { CommitLanguage, Orchestrator } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
 
@@ -61,7 +61,7 @@ export function buildSplitChannelPrompt(
   ticket: Ticket,
   project: ProjectConfig,
   language: CommitLanguage,
-  driver: SessionDriver = "claude",
+  driver: Orchestrator = "claude",
 ): string {
   const en = isEnglish(language);
 

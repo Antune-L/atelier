@@ -1,11 +1,11 @@
-import type { SessionDriver, Ticket } from "../../shared/schemas.ts";
+import type { Ticket } from "../../shared/schemas.ts";
 import {
   AGENT_EFFORTS,
   AGENT_MODELS,
   FEASIBILITY_SCOUT_AGENT_NAME,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
-import type { CommitLanguage } from "../../shared/constants.ts";
+import type { CommitLanguage, Orchestrator } from "../../shared/constants.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import type { ProjectConfig } from "../config.ts";
 
@@ -18,7 +18,7 @@ function isEnglish(language: CommitLanguage): boolean {
  * Read-only framing per driver: Claude sessions are tool-gated (Read/Glob/Grep only), a Codex
  * session runs in the CLI's read-only sandbox with its own shell-based exploration tools.
  */
-function readOnlyFramingLines(driver: SessionDriver, en: boolean, sessionKind: { en: string; fr: string }): string[] {
+function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { en: string; fr: string }): string[] {
   if (driver === "codex") {
     return en
       ? [
@@ -169,7 +169,7 @@ export function buildTriageChannelPrompt(
   project: ProjectConfig,
   baseBranch: string,
   language: CommitLanguage,
-  driver: SessionDriver = "claude",
+  driver: Orchestrator = "claude",
 ): string {
   const en = isEnglish(language);
 
@@ -223,7 +223,7 @@ export function buildTriagePlusChannelPrompt(
   project: ProjectConfig,
   baseBranch: string,
   language: CommitLanguage,
-  driver: SessionDriver = "claude",
+  driver: Orchestrator = "claude",
 ): string {
   const en = isEnglish(language);
 

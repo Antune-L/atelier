@@ -7,11 +7,17 @@ import {
   CODEX_EFFORT_LABELS,
   CODEX_MODELS,
   CODEX_MODEL_LABELS,
+  IMPLEMENTERS,
+  IMPLEMENTER_LABELS,
+  ORCHESTRATORS,
+  ORCHESTRATOR_LABELS,
   STAGE_LABELS,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
   type CodexModel,
+  type Implementer,
+  type Orchestrator,
   type Stage,
 } from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
@@ -43,6 +49,44 @@ export const CODEX_EFFORT_OPTIONS: TabOption<CodexEffort>[] = CODEX_EFFORTS.map(
   value: e,
   label: CODEX_EFFORT_LABELS[e],
 }));
+
+/** Orchestrator picker options; the Codex orchestrator is disabled (with a hint) when its CLI is absent. */
+export function orchestratorTabOptions(codexAvailable: boolean): TabOption<Orchestrator>[] {
+  return ORCHESTRATORS.map((o) => {
+    if (o === "codex") {
+      return {
+        value: o,
+        label: codexAvailable ? ORCHESTRATOR_LABELS[o] : `${ORCHESTRATOR_LABELS[o]} — Codex non détecté`,
+        disabled: !codexAvailable,
+      };
+    }
+    return { value: o, label: ORCHESTRATOR_LABELS[o] };
+  });
+}
+
+/**
+ * Implementer picker options for a given orchestrator. A Codex orchestrator pilots only itself, so
+ * every non-codex implementer is disabled; under a Claude orchestrator, composer needs Cursor and
+ * the cross-provider codex delegation isn't wired yet (PR2).
+ */
+export function implementerTabOptions(orchestrator: Orchestrator, composerAvailable: boolean): TabOption<Implementer>[] {
+  return IMPLEMENTERS.map((i) => {
+    if (orchestrator === "codex") {
+      return { value: i, label: IMPLEMENTER_LABELS[i], disabled: i !== "codex" };
+    }
+    if (i === "composer") {
+      return {
+        value: i,
+        label: composerAvailable ? IMPLEMENTER_LABELS[i] : `${IMPLEMENTER_LABELS[i]} — Cursor non détecté`,
+        disabled: !composerAvailable,
+      };
+    }
+    if (i === "codex") {
+      return { value: i, label: `${IMPLEMENTER_LABELS[i]} — via délégation (à venir)`, disabled: true };
+    }
+    return { value: i, label: IMPLEMENTER_LABELS[i] };
+  });
+}
 
 const TRIAGE_VERDICT_VARIANTS: Record<TriageVerdict, BadgeVariant> = {
   implementable: "success",

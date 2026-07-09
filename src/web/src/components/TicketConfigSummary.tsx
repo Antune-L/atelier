@@ -6,6 +6,7 @@ import {
   CODEX_EFFORT_LABELS,
   CODEX_MODEL_LABELS,
   IMPLEMENTER_LABELS,
+  ORCHESTRATOR_LABELS,
   REVIEW_DEPTH_LABELS,
 } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
@@ -51,7 +52,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
     defaultCodexModel,
     defaultCodexEffort,
   } = useCapabilities();
-  const isCodex = ticket.implementer === "codex";
+  const isCodex = ticket.orchestrator === "codex";
 
   // A null per-ticket knob falls back to the configured default: show it explicitly.
   const modelValue = labelWithDefault(
@@ -97,7 +98,8 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
         Options de création
       </summary>
       <dl className="mt-3 space-y-2">
-        {/* A Codex ticket ignores the Claude orchestrator knobs: its own model/effort pair drives the session. */}
+        <Row label="Orchestrateur" value={ORCHESTRATOR_LABELS[ticket.orchestrator]} />
+        {/* A Codex-orchestrated ticket ignores the Claude orchestrator knobs: its own model/effort pair drives the session. */}
         {isCodex ? (
           <>
             <Row label="Modèle (Codex)" value={codexModelValue} />

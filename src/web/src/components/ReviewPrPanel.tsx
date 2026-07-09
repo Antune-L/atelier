@@ -6,9 +6,10 @@ import {
   REVIEW_DEPTH_LABELS,
   type CodexEffort,
   type CodexModel,
+  type Orchestrator,
   type ReviewDepth,
 } from "@shared/constants";
-import type { ProjectInfo, SessionDriver } from "@shared/schemas";
+import type { ProjectInfo } from "@shared/schemas";
 import { reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
@@ -33,7 +34,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
-  const [driver, setDriver] = useState<SessionDriver>("claude");
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
   // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
@@ -71,7 +72,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         fixComments,
         // Auto → null override (each PR keeps its own detected target branch).
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
-        implementer: driver,
+        orchestrator,
         codexModel,
         codexEffort,
         prs: chosen,
@@ -133,10 +134,10 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
       </div>
 
       <SessionDriverFields
-        driver={driver}
+        orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
-        onDriverChange={setDriver}
+        onOrchestratorChange={setOrchestrator}
         onCodexModelChange={setCodexModel}
         onCodexEffortChange={setCodexEffort}
       />

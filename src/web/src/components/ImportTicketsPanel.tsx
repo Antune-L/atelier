@@ -112,6 +112,7 @@ export function ImportTicketsPanel({
         argusMultiLoop: false,
         // No base-branch control in the import panel: always fall back to the project default.
         baseBranch: null,
+        orchestrator: agent.orchestrator,
         model: agent.model,
         effort: agent.effort,
         implementerModel: agent.implementerModel,
@@ -247,6 +248,7 @@ export function ImportTicketsPanel({
           Agent d'implémentation (tout le lot)
         </h3>
         <AgentProfileConfig
+          orchestrator={agent.orchestrator}
           model={agent.model}
           effort={agent.effort}
           implementerModel={agent.implementerModel}
@@ -254,6 +256,7 @@ export function ImportTicketsPanel({
           implementer={agent.implementer}
           codexModel={agent.codexModel}
           codexEffort={agent.codexEffort}
+          onOrchestratorChange={agent.setOrchestrator}
           onModelChange={agent.setModel}
           onEffortChange={agent.setEffort}
           onImplementerModelChange={agent.setImplementerModel}

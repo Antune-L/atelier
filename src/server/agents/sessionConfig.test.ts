@@ -87,16 +87,28 @@ describe("read-only triage/split sessions", () => {
   });
 
   test("claude driver → claude provider with read-only tools", () => {
+    const readOnlyTools = [
+      "Read",
+      "Glob",
+      "Grep",
+      "ToolSearch",
+      "mcp__plugin_figma_figma__get_design_context",
+      "mcp__plugin_figma_figma__get_screenshot",
+      "mcp__plugin_figma_figma__get_metadata",
+      "mcp__plugin_figma_figma__get_variable_defs",
+      "mcp__plugin_figma_figma__get_figjam",
+    ];
+
     const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "sonnet", effort: "low", deep: false, driver: "claude" });
     expect(triage.provider).toBe("claude");
-    expect(triage.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(triage.allowedTools).toEqual(readOnlyTools);
     expect(triage.disallowedTools ?? []).toContain("Bash");
     expect(triage.disallowedTools ?? []).toContain("Edit");
     expect(triage.disallowedTools ?? []).toContain("Write");
 
     const split = buildSplitSessionConfig({ ticketId: "t1", cwd: CWD, model: "sonnet", effort: "low", driver: "claude" });
     expect(split.provider).toBe("claude");
-    expect(split.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    expect(split.allowedTools).toEqual(readOnlyTools);
     expect(split.disallowedTools ?? []).toContain("Bash");
   });
 });

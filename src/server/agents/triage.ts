@@ -32,12 +32,12 @@ function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { 
   }
   return en
     ? [
-        `You are a READ-ONLY ${sessionKind.en} session (only Read, Glob, Grep are available;`,
-        "Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
+        `You are a READ-ONLY ${sessionKind.en} session (only Read, Glob, Grep and the read-only Figma`,
+        "MCP tools are available; Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
       ]
     : [
-        `Tu es une session de ${sessionKind.fr} en LECTURE SEULE (seuls Read, Glob, Grep sont disponibles ;`,
-        "Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
+        `Tu es une session de ${sessionKind.fr} en LECTURE SEULE (seuls Read, Glob, Grep et les outils`,
+        "MCP Figma de lecture sont disponibles ; Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
       ];
 }
 
@@ -61,7 +61,9 @@ function buildTicketLines(ticket: Ticket, en: boolean): string[] {
         ticket.description || "(empty)",
         "",
         "The description may reference absolute local image paths (e.g. /Users/.../uploads/xxx.png)",
-        "that you can read with the Read tool, and figma.com links.",
+        "that you can read with the Read tool, and figma.com links that you MUST consult through the",
+        "read-only Figma MCP tools (get_screenshot, get_design_context — `mcp__plugin_figma_figma`",
+        "namespace; load them via your tool search if they are deferred).",
         ...figmaLines,
       ]
     : [
@@ -72,7 +74,9 @@ function buildTicketLines(ticket: Ticket, en: boolean): string[] {
         ticket.description || "(vide)",
         "",
         "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png)",
-        "que tu peux lire avec l'outil Read, et des liens figma.com.",
+        "que tu peux lire avec l'outil Read, et des liens figma.com que tu DOIS consulter via les outils",
+        "MCP Figma de lecture (get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`,",
+        "à charger via ta recherche de tools s'ils sont différés).",
         ...figmaLines,
       ];
 }
@@ -243,13 +247,13 @@ export function buildTriagePlusChannelPrompt(
       : en
         ? [
             "You are a READ-ONLY deep-analysis session on the real repository (no worktree).",
-            "Only Read, Glob, Grep and Task (sub-agents) are available; Edit/Write/Bash are uncallable.",
-            "Do not attempt to modify the repository.",
+            "Only Read, Glob, Grep, the read-only Figma MCP tools and Task (sub-agents) are available;",
+            "Edit/Write/Bash are uncallable. Do not attempt to modify the repository.",
           ]
         : [
             "Tu es une session d'analyse approfondie en LECTURE SEULE sur le dépôt réel (pas de worktree).",
-            "Seuls Read, Glob, Grep et Task (sous-agents) sont disponibles ; Edit/Write/Bash sont inappelables.",
-            "N'essaie pas de modifier le dépôt.",
+            "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;",
+            "Edit/Write/Bash sont inappelables. N'essaie pas de modifier le dépôt.",
           ]),
   ];
 

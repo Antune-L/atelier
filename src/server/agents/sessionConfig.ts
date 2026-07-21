@@ -51,8 +51,23 @@ const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-re
 /** Read-only triage/feasibility/split sessions invoke no skill; scope context to none. */
 const NO_SKILLS: string[] = [];
 
+/**
+ * Read-only Figma MCP tools (remote server of the `figma@claude-plugins-official` plugin, merged into
+ * the session via the provider's `user` settingSource). Allow-listed so read-only analysis sessions
+ * can consult figma.com links referenced in tickets; the write-capable figma tools (use_figma,
+ * create_new_file…) stay denied under `dontAsk`. These tools load deferred — `ToolSearch` is granted
+ * alongside so sessions can fetch their schemas.
+ */
+const FIGMA_READONLY_TOOLS = [
+  "mcp__plugin_figma_figma__get_design_context",
+  "mcp__plugin_figma_figma__get_screenshot",
+  "mcp__plugin_figma_figma__get_metadata",
+  "mcp__plugin_figma_figma__get_variable_defs",
+  "mcp__plugin_figma_figma__get_figjam",
+];
+
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */
-const READONLY_TOOLS = ["Read", "Glob", "Grep"];
+const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS];
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
 const READONLY_PLAIN_DISALLOWED = ["Edit", "Write", "Bash", "Task", "Agent"];
 /** Tools removed from a fan-out read-only session: no writes, no built-in `Task` (scouts go via `Agent`). */
@@ -65,17 +80,24 @@ const READONLY_FANOUT_DISALLOWED = ["Edit", "Write", "Bash", "Task"];
 const DENIED_BUILTIN_AGENTS = ["general-purpose", "Explore", "Plan"];
 
 /** Read-only scout tool bounds: the inline sub-agents cannot write, run bash, or recurse. */
-const SCOUT_TOOLS = ["Read", "Glob", "Grep"];
+const SCOUT_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS];
 const SCOUT_DISALLOWED = ["Task", "Agent", "Bash", "Edit", "Write"];
 
+const FIGMA_TOOLS_HINT =
+  "Si le ticket référence un lien figma.com, consulte la maquette via les outils MCP Figma de " +
+  "lecture (get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`, à charger " +
+  "via ta recherche de tools s'ils sont différés).";
+
 const FEASIBILITY_SCOUT_PROMPT =
-  "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
-  "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
+  "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
+  "MCP Figma de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
+  `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Évalue le ticket ` +
   "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.";
 
 const SOLUTIONS_SCOUT_PROMPT =
-  "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob et Grep : tu ne peux " +
-  "ni modifier le dépôt, ni exécuter de commande, ni lancer d'autre sous-agent. Pour le ticket " +
+  "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
+  "MCP Figma de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
+  `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Pour le ticket ` +
   "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
   "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).";
 

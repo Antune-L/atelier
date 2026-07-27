@@ -80,6 +80,7 @@
   "78": "useTerminalShortcuts.ts",
   "79": "WorktreeSession",
   "80": "Community 80",
+  "81": "DoneGateResult",
   "82": "Community 82",
   "83": "Community 83",
   "84": "Community 84",
@@ -89,5 +90,15 @@
   "88": "Community 88",
   "89": "Community 89",
   "90": "Community 90",
-  "91": "reformulate.ts"
+  "91": "reformulate.ts",
+  "92": "ProjectConfig",
+  "93": "logger.ts",
+  "94": "Board.tsx",
+  "95": "Sidebar.tsx",
+  "96": "useTickTimer.ts",
+  "97": "useProjects.ts",
+  "98": "withCost",
+  "99": "split.ts",
+  "100": "api",
+  "101": "extractFigmaUrls"
 }

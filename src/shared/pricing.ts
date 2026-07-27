@@ -48,9 +48,9 @@ function familyPricing(input: number, output: number): FamilyPricing {
 
 /** USD per MTok base rates (input / output) per family. */
 export const PRICING: Record<ModelFamily, FamilyPricing> = {
-  opus: familyPricing(15, 75),
+  opus: familyPricing(5, 25),
   sonnet: familyPricing(3, 15),
-  haiku: familyPricing(0.8, 4),
+  haiku: familyPricing(1, 5),
   fable: familyPricing(10, 50),
 };
 

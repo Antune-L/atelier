@@ -506,6 +506,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   const claudeReviewSteps = [
     `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
     reviewDepthDirective(depth),
+    `   Scratch dir : la sandbox du slot refuse les assignations composées type \`VAR=$(mktemp -d)\` — utilise directement \`mkdir -p /tmp/argus-pr${ticket.prNumber}\` comme ARGUS_TMP, sans tenter mktemp.`,
     "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais,",
     ticket.postComments
       ? "   puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`)."
@@ -569,6 +570,7 @@ function buildReviewFixLines(
   const claudeSteps = [
     `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
     reviewDepthDirective(depth),
+    `   Scratch dir : la sandbox du slot refuse les assignations composées type \`VAR=$(mktemp -d)\` — utilise directement \`mkdir -p /tmp/argus-pr${ticket.prNumber}\` comme ARGUS_TMP, sans tenter mktemp.`,
     "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais, puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`).",
     `3. \`update_stage("fixing")\` : délègue les corrections au sous-agent \`pr-fixer\` (outil Agent, \`subagent_type: pr-fixer\`). Dans son prompt, transmets-lui : le worktree courant comme répertoire de travail, le numéro de la PR (#${ticket.prNumber}), les findings d'argus issus de ton contexte, et la consigne de lire au besoin les commentaires de review postés via \`gh\` et de n'appliquer que les corrections PERTINENTES. Il ne commit JAMAIS. Quand il rend la main, relis son diff (\`git diff\`) et complète toi-même ce qui est partiel.`,
   ];

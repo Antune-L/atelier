@@ -55,13 +55,13 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1784624586.340248,
-    "ast_hash": "97a3fc8494be5cf5660a65a2c0dff806",
+    "mtime": 1785162237.1814954,
+    "ast_hash": "1d5706f121f0a14cfb2be4784ff2d695",
     "semantic_hash": ""
   },
   "src/server/agents/coordinator.ts": {
-    "mtime": 1783627728.9920466,
-    "ast_hash": "7e7ace38bae36559360e28a89ac770be",
+    "mtime": 1785162203.0394301,
+    "ast_hash": "1d9c8b0bb5e740180ec016ddf785e008",
     "semantic_hash": ""
   },
   "src/server/agents/feasibilityManager.ts": {
@@ -745,8 +745,8 @@
     "semantic_hash": "950c44aa9b25072bf628a5fab08ce4e1"
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1783627728.9928286,
-    "ast_hash": "c63e85cad552b57f27a8d3b22e332b5a",
+    "mtime": 1785162188.3691993,
+    "ast_hash": "9f30361850b25f66fa441b9242605364",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
@@ -947,11 +947,6 @@
   "docs/development.md": {
     "mtime": 1783782823.4126024,
     "ast_hash": "02b16953f1d5880a78d7041e7113753f",
-    "semantic_hash": ""
-  },
-  "plans/synthese-apres-implementation.prd.md": {
-    "mtime": 1783955488.4713767,
-    "ast_hash": "8b19c4ec06481679014320975988d78a",
     "semantic_hash": ""
   }
 }

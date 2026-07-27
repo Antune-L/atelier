@@ -70,12 +70,21 @@ export interface SessionHubHandlers {
    * the turn's per-model usage (keyed by sessionId, summed across auto-reclaim relaunches).
    */
   onStop(ticketId: string, sessionId: string | null, usageByModel: Record<string, AgentTurnUsage>): void;
+  /**
+   * Live stream activity (tool calls, prose, thinking) from the session, throttled. Heartbeats
+   * lastProgressAt so reclaim/watchdog treat a busy session as alive: a parent legitimately waiting
+   * on background sub-agents (argus reviewers) emits no protocol call for 10+ min and was otherwise
+   * killed mid-review and relaunched from scratch (observed: PR review ran twice, ~11 min wasted).
+   */
+  onActivity(ticketId: string): void;
 }
 
 interface LiveSession {
   handle: AgentSessionHandle;
   slotId: number;
   sessionId: string | null;
+  /** Last time this session's stream activity heartbeated the ticket (throttle state). */
+  lastActivityAt: number;
 }
 
 /** Render a backend channel event as the user-turn text injected into the live session. */
@@ -97,6 +106,9 @@ export function renderChannelEvent(event: ChannelEvent): string {
       return `Commentaire de l'utilisateur (à prendre en compte dans le travail en cours) : ${event.body}`;
   }
 }
+
+/** Min interval between two lastProgressAt heartbeats driven by session stream activity (mirrors the delegation child heartbeat). */
+const ACTIVITY_HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
 /** Cap on the per-session live transcript (oldest lines trimmed past this so memory stays bounded). */
 const TRANSCRIPT_MAX_CHARS = 200_000;
@@ -192,7 +204,7 @@ export class SessionHub {
       onToolCall: (name, args) => this.routeToolCall(config.ticketId, config.slotId, name, args),
       onEvent: (event) => this.handleEvent(config.ticketId, config.slotId, event),
     });
-    this.sessions.set(config.ticketId, { handle, slotId: config.slotId, sessionId: null });
+    this.sessions.set(config.ticketId, { handle, slotId: config.slotId, sessionId: null, lastActivityAt: 0 });
   }
 
   /** Inject a backend channel event as a user turn. False when no live session exists for the ticket. */
@@ -242,6 +254,13 @@ export class SessionHub {
     }
     const line = renderSessionEvent(event);
     if (line !== null) this.appendTranscript(ticketId, line);
+    if (live && (event.type === "tool_use" || event.type === "assistant_text" || event.type === "thinking")) {
+      const now = Date.now();
+      if (now - live.lastActivityAt >= ACTIVITY_HEARTBEAT_MIN_INTERVAL_MS) {
+        live.lastActivityAt = now;
+        this.handlers?.onActivity(ticketId);
+      }
+    }
     if (event.type === "turn_end") {
       // The turn_end carries its own sessionId (from the SDK result), so a turn that flushes AFTER
       // disconnect (graceful close on done/fail) still persists its usage even though the session

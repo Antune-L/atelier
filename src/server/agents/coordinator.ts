@@ -63,6 +63,7 @@ export class AgentCoordinator {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
       onStop: (ticketId, sessionId, usageByModel) => void this.onStop(ticketId, sessionId, usageByModel),
+      onActivity: (ticketId) => this.onActivity(ticketId),
     });
   }
 
@@ -364,6 +365,17 @@ export class AgentCoordinator {
   forwardComment(ticketId: string, body: string): void {
     const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body });
     if (delivered) this.store.logEvent(ticketId, "user_comment_forwarded", {});
+  }
+
+  /**
+   * Throttled session stream activity (tool calls / prose / thinking, via SessionHub). Refreshes only
+   * lastProgressAt — NOT nudgeCount/watchdogFlagged, which stay reserved for protocol events — so the
+   * reclaim path (onStop) sees a busy session as alive but the nudge escalation still fires on a bare
+   * Stop. Guarded: triage/feasibility sessions identify with ids that are not pipeline tickets.
+   */
+  private onActivity(ticketId: string): void {
+    if (!this.store.getTicket(ticketId)) return;
+    this.store.updateTicket(ticketId, { lastProgressAt: Date.now() });
   }
 
   private markProgress(ticketId: string): void {

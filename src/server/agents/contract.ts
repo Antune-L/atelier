@@ -1,4 +1,4 @@
-import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
@@ -519,6 +519,9 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     `Projet : ${project.label} (branche de base : ${reviewBase})`,
     `PR : ${ticket.prUrl}`,
     `Branche de la PR : ${branch}`,
+    ticket.prHeadBranch !== null
+      ? `Le worktree est déjà checkout sur le commit de la PR (branche locale \`${branch}${REVIEWER_BRANCH_SUFFIX}\`, jamais pushée) : lire/grepper les fichiers du worktree reflète l'état de la PR, pas de la base.`
+      : "",
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
     `Poster les commentaires sur GitHub : ${ticket.postComments ? "OUI" : "NON"}`,
     "",

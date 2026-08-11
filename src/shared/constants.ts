@@ -233,6 +233,9 @@ export type Kind = (typeof KINDS)[number];
 /** Local branch suffix for a clean (PR cleaner) worktree: keeps it distinct from the PR head branch (which may already be checked out in another worktree) while still pushing back to the PR head. */
 export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 
+/** Local branch suffix for a read-only review worktree: the slot checks out the PR head commit so reviewers read/grep the PR state (not the base), without colliding with a worktree already on the PR head branch. Never pushed. */
+export const REVIEWER_BRANCH_SUFFIX = "-reviewer";
+
 /** The PR cleaner runs Opus at low effort: triaging reviewer feedback is light work that doesn't warrant a heavier reasoning budget. */
 export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";

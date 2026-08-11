@@ -9,6 +9,7 @@ import {
   CLEANER_BRANCH_SUFFIX,
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
+  REVIEWER_BRANCH_SUFFIX,
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -501,6 +502,10 @@ export class SlotManager {
     // A clean ticket reuses the EXISTING PR head branch (its commits) so fixes can be committed and
     // pushed straight to the PR — no new PR (same as a fixComments review).
     const cleanFix = ticket.kind === "clean" && ticket.prHeadBranch !== null;
+    // A read-only review checks out the PR head commit too (suffixed local branch, never pushed):
+    // reviewers grep/read the worktree to verify findings, so it must reflect the PR state, not the
+    // base — a fresh branch off base made argus reconstruct the PR via `git show origin/<branch>:...`.
+    const reviewRead = ticket.kind === "review" && !ticket.fixComments && ticket.prHeadBranch !== null;
     // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
     let branch = `feat/${ticket.id}-${slug}`;
     // For an existing-branch checkout (resolving/reviewFix/cleanFix), the origin ref to start from.
@@ -515,6 +520,9 @@ export class SlotManager {
       startBranch = ticket.prHeadBranch;
     } else if (cleanFix && ticket.prHeadBranch !== null) {
       branch = `${ticket.prHeadBranch}${CLEANER_BRANCH_SUFFIX}`;
+      startBranch = ticket.prHeadBranch;
+    } else if (reviewRead && ticket.prHeadBranch !== null) {
+      branch = `${ticket.prHeadBranch}${REVIEWER_BRANCH_SUFFIX}`;
       startBranch = ticket.prHeadBranch;
     }
     // The agent runs in-process via the SDK (no tmux pane), so the slot carries no tmux session name.
@@ -546,7 +554,7 @@ export class SlotManager {
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
         await this.system.fetch(project.repoPath, baseBranch);
-        if (resolving || reviewFix || cleanFix) {
+        if (resolving || reviewFix || cleanFix || reviewRead) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.

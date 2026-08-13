@@ -35,14 +35,264 @@
   },
   "nodes": [
     {
+      "label": "sessionConfig.ts",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig",
+      "community": 32,
+      "norm_label": "sessionconfig.ts"
+    },
+    {
+      "label": "IMPLEMENTER_SAFE_TOOLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L28",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_implementer_safe_tools",
+      "community": 32,
+      "norm_label": "implementer_safe_tools"
+    },
+    {
+      "label": "CONTRACT_SKILLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L49",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_contract_skills",
+      "community": 32,
+      "norm_label": "contract_skills"
+    },
+    {
+      "label": "NO_SKILLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L52",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_no_skills",
+      "community": 32,
+      "norm_label": "no_skills"
+    },
+    {
+      "label": "FIGMA_READONLY_TOOLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L61",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_figma_readonly_tools",
+      "community": 32,
+      "norm_label": "figma_readonly_tools"
+    },
+    {
+      "label": "READONLY_TOOLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L70",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_readonly_tools",
+      "community": 32,
+      "norm_label": "readonly_tools"
+    },
+    {
+      "label": "READONLY_PLAIN_DISALLOWED",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L72",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_readonly_plain_disallowed",
+      "community": 32,
+      "norm_label": "readonly_plain_disallowed"
+    },
+    {
+      "label": "READONLY_FANOUT_DISALLOWED",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L74",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_readonly_fanout_disallowed",
+      "community": 32,
+      "norm_label": "readonly_fanout_disallowed"
+    },
+    {
+      "label": "DENIED_BUILTIN_AGENTS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L80",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_denied_builtin_agents",
+      "community": 32,
+      "norm_label": "denied_builtin_agents"
+    },
+    {
+      "label": "SCOUT_TOOLS",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L83",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_scout_tools",
+      "community": 32,
+      "norm_label": "scout_tools"
+    },
+    {
+      "label": "SCOUT_DISALLOWED",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L84",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_scout_disallowed",
+      "community": 32,
+      "norm_label": "scout_disallowed"
+    },
+    {
+      "label": "feasibilityScoutAgent()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L104",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_feasibilityscoutagent",
+      "community": 32,
+      "norm_label": "feasibilityscoutagent()"
+    },
+    {
+      "label": "solutionsScoutAgent()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L113",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_solutionsscoutagent",
+      "community": 32,
+      "norm_label": "solutionsscoutagent()"
+    },
+    {
+      "label": "TriageSessionInput",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L122",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_triagesessioninput",
+      "community": 32,
+      "norm_label": "triagesessioninput"
+    },
+    {
+      "label": "buildTriageSessionConfig()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L134",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_buildtriagesessionconfig",
+      "community": 32,
+      "norm_label": "buildtriagesessionconfig()"
+    },
+    {
+      "label": "SplitSessionInput",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L171",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_splitsessioninput",
+      "community": 32,
+      "norm_label": "splitsessioninput"
+    },
+    {
+      "label": "buildSplitSessionConfig()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L181",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_buildsplitsessionconfig",
+      "community": 32,
+      "norm_label": "buildsplitsessionconfig()"
+    },
+    {
+      "label": "FeasibilitySessionInput",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L209",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_feasibilitysessioninput",
+      "community": 32,
+      "norm_label": "feasibilitysessioninput"
+    },
+    {
+      "label": "buildFeasibilitySessionConfig()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L217",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig",
+      "community": 32,
+      "norm_label": "buildfeasibilitysessionconfig()"
+    },
+    {
+      "label": "BASH_ALLOWLIST",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L236",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_bash_allowlist",
+      "community": 32,
+      "norm_label": "bash_allowlist"
+    },
+    {
+      "label": "implementerAgent()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L302",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_implementeragent",
+      "community": 32,
+      "norm_label": "implementeragent()"
+    },
+    {
+      "label": "prFixerAgent()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L312",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_prfixeragent",
+      "community": 32,
+      "norm_label": "prfixeragent()"
+    },
+    {
+      "label": "ImplementSessionInput",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L322",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_implementsessioninput",
+      "community": 32,
+      "norm_label": "implementsessioninput"
+    },
+    {
+      "label": "codexKnobs()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L333",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_codexknobs",
+      "community": 32,
+      "norm_label": "codexknobs()"
+    },
+    {
+      "label": "buildImplementSessionConfig()",
+      "file_type": "code",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L341",
+      "_origin": "ast",
+      "id": "src_server_agents_sessionconfig_buildimplementsessionconfig",
+      "community": 32,
+      "norm_label": "buildimplementsessionconfig()"
+    },
+    {
       "label": "contract.ts",
       "file_type": "code",
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_server_agents_contract",
       "community": 52,
-      "norm_label": "contract.ts"
+      "norm_label": "contract.ts",
+      "id": "src_server_agents_contract"
     },
     {
       "label": "commitLanguageLabel()",
@@ -50,9 +300,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L16",
       "_origin": "ast",
-      "id": "src_server_agents_contract_commitlanguagelabel",
       "community": 49,
-      "norm_label": "commitlanguagelabel()"
+      "norm_label": "commitlanguagelabel()",
+      "id": "src_server_agents_contract_commitlanguagelabel"
     },
     {
       "label": "commitLanguageDirective()",
@@ -60,9 +310,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L21",
       "_origin": "ast",
-      "id": "src_server_agents_contract_commitlanguagedirective",
       "community": 49,
-      "norm_label": "commitlanguagedirective()"
+      "norm_label": "commitlanguagedirective()",
+      "id": "src_server_agents_contract_commitlanguagedirective"
     },
     {
       "label": "buildImplementingSteps()",
@@ -70,9 +320,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L34",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildimplementingsteps",
       "community": 52,
-      "norm_label": "buildimplementingsteps()"
+      "norm_label": "buildimplementingsteps()",
+      "id": "src_server_agents_contract_buildimplementingsteps"
     },
     {
       "label": "buildPlanningStep()",
@@ -80,9 +330,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L99",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildplanningstep",
       "community": 52,
-      "norm_label": "buildplanningstep()"
+      "norm_label": "buildplanningstep()",
+      "id": "src_server_agents_contract_buildplanningstep"
     },
     {
       "label": "buildReviewSteps()",
@@ -90,9 +340,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L109",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildreviewsteps",
       "community": 52,
-      "norm_label": "buildreviewsteps()"
+      "norm_label": "buildreviewsteps()",
+      "id": "src_server_agents_contract_buildreviewsteps"
     },
     {
       "label": "buildMockupReviewStep()",
@@ -100,9 +350,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L134",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildmockupreviewstep",
       "community": 52,
-      "norm_label": "buildmockupreviewstep()"
+      "norm_label": "buildmockupreviewstep()",
+      "id": "src_server_agents_contract_buildmockupreviewstep"
     },
     {
       "label": "buildSpecializedFraming()",
@@ -110,9 +360,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L154",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildspecializedframing",
       "community": 49,
-      "norm_label": "buildspecializedframing()"
+      "norm_label": "buildspecializedframing()",
+      "id": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "label": "buildSessionFramingLine()",
@@ -120,9 +370,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L161",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildsessionframingline",
       "community": 52,
-      "norm_label": "buildsessionframingline()"
+      "norm_label": "buildsessionframingline()",
+      "id": "src_server_agents_contract_buildsessionframingline"
     },
     {
       "label": "buildPrdBullet()",
@@ -130,9 +380,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L166",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildprdbullet",
       "community": 52,
-      "norm_label": "buildprdbullet()"
+      "norm_label": "buildprdbullet()",
+      "id": "src_server_agents_contract_buildprdbullet"
     },
     {
       "label": "buildFeasibilityContextSection()",
@@ -140,9 +390,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L181",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildfeasibilitycontextsection",
       "community": 52,
-      "norm_label": "buildfeasibilitycontextsection()"
+      "norm_label": "buildfeasibilitycontextsection()",
+      "id": "src_server_agents_contract_buildfeasibilitycontextsection"
     },
     {
       "label": "buildTicketContract()",
@@ -150,9 +400,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L211",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildticketcontract",
       "community": 52,
-      "norm_label": "buildticketcontract()"
+      "norm_label": "buildticketcontract()",
+      "id": "src_server_agents_contract_buildticketcontract"
     },
     {
       "label": "buildConflictResolutionContract()",
@@ -160,9 +410,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L337",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildconflictresolutioncontract",
       "community": 49,
-      "norm_label": "buildconflictresolutioncontract()"
+      "norm_label": "buildconflictresolutioncontract()",
+      "id": "src_server_agents_contract_buildconflictresolutioncontract"
     },
     {
       "label": "truncateDescription()",
@@ -170,9 +420,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L386",
       "_origin": "ast",
-      "id": "src_server_agents_contract_truncatedescription",
       "community": 52,
-      "norm_label": "truncatedescription()"
+      "norm_label": "truncatedescription()",
+      "id": "src_server_agents_contract_truncatedescription"
     },
     {
       "label": "buildFeasibilityBatchContract()",
@@ -180,9 +430,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L398",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildfeasibilitybatchcontract",
       "community": 52,
-      "norm_label": "buildfeasibilitybatchcontract()"
+      "norm_label": "buildfeasibilitybatchcontract()",
+      "id": "src_server_agents_contract_buildfeasibilitybatchcontract"
     },
     {
       "label": "reviewDepthDirective()",
@@ -190,9 +440,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L461",
       "_origin": "ast",
-      "id": "src_server_agents_contract_reviewdepthdirective",
       "community": 49,
-      "norm_label": "reviewdepthdirective()"
+      "norm_label": "reviewdepthdirective()",
+      "id": "src_server_agents_contract_reviewdepthdirective"
     },
     {
       "label": "buildReviewContract()",
@@ -200,9 +450,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L471",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildreviewcontract",
       "community": 49,
-      "norm_label": "buildreviewcontract()"
+      "norm_label": "buildreviewcontract()",
+      "id": "src_server_agents_contract_buildreviewcontract"
     },
     {
       "label": "buildReviewFixLines()",
@@ -210,9 +460,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L560",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildreviewfixlines",
       "community": 49,
-      "norm_label": "buildreviewfixlines()"
+      "norm_label": "buildreviewfixlines()",
+      "id": "src_server_agents_contract_buildreviewfixlines"
     },
     {
       "label": "buildCleanContract()",
@@ -220,9 +470,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L627",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildcleancontract",
       "community": 49,
-      "norm_label": "buildcleancontract()"
+      "norm_label": "buildcleancontract()",
+      "id": "src_server_agents_contract_buildcleancontract"
     },
     {
       "label": "buildAskContract()",
@@ -230,9 +480,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L687",
       "_origin": "ast",
-      "id": "src_server_agents_contract_buildaskcontract",
       "community": 49,
-      "norm_label": "buildaskcontract()"
+      "norm_label": "buildaskcontract()",
+      "id": "src_server_agents_contract_buildaskcontract"
     },
     {
       "label": "slotManager.ts",
@@ -240,9 +490,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager",
       "community": 49,
-      "norm_label": "slotmanager.ts"
+      "norm_label": "slotmanager.ts",
+      "id": "src_server_agents_slotmanager"
     },
     {
       "label": "ReclaimOutcome",
@@ -250,9 +500,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L56",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_reclaimoutcome",
       "community": 49,
-      "norm_label": "reclaimoutcome"
+      "norm_label": "reclaimoutcome",
+      "id": "src_server_agents_slotmanager_reclaimoutcome"
     },
     {
       "label": "log",
@@ -260,9 +510,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L58",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_log",
       "community": 49,
-      "norm_label": "log"
+      "norm_label": "log",
+      "id": "src_server_agents_slotmanager_log"
     },
     {
       "label": "SETUP_PHASES",
@@ -270,9 +520,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L61",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_setup_phases",
       "community": 49,
-      "norm_label": "setup_phases"
+      "norm_label": "setup_phases",
+      "id": "src_server_agents_slotmanager_setup_phases"
     },
     {
       "label": "SlotManagerConfig",
@@ -280,9 +530,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L70",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanagerconfig",
       "community": 49,
-      "norm_label": "slotmanagerconfig"
+      "norm_label": "slotmanagerconfig",
+      "id": "src_server_agents_slotmanager_slotmanagerconfig"
     },
     {
       "label": "slugify()",
@@ -290,9 +540,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L75",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slugify",
       "community": 41,
-      "norm_label": "slugify()"
+      "norm_label": "slugify()",
+      "id": "src_server_agents_slotmanager_slugify"
     },
     {
       "label": "slotPath()",
@@ -300,9 +550,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L88",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotpath",
       "community": 41,
-      "norm_label": "slotpath()"
+      "norm_label": "slotpath()",
+      "id": "src_server_agents_slotmanager_slotpath"
     },
     {
       "label": "SlotManager",
@@ -310,9 +560,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L96",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager",
       "community": 41,
-      "norm_label": "slotmanager"
+      "norm_label": "slotmanager",
+      "id": "src_server_agents_slotmanager_slotmanager"
     },
     {
       "label": ".getSetupPhase()",
@@ -320,9 +570,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L107",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_getsetupphase",
       "community": 41,
-      "norm_label": ".getsetupphase()"
+      "norm_label": ".getsetupphase()",
+      "id": "src_server_agents_slotmanager_slotmanager_getsetupphase"
     },
     {
       "label": ".setPhase()",
@@ -330,9 +580,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L111",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_setphase",
       "community": 41,
-      "norm_label": ".setphase()"
+      "norm_label": ".setphase()",
+      "id": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "label": ".clearPhase()",
@@ -340,9 +590,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L116",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_clearphase",
       "community": 41,
-      "norm_label": ".clearphase()"
+      "norm_label": ".clearphase()",
+      "id": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "label": ".constructor()",
@@ -350,9 +600,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L120",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_constructor",
       "community": 41,
-      "norm_label": ".constructor()"
+      "norm_label": ".constructor()",
+      "id": "src_server_agents_slotmanager_slotmanager_constructor"
     },
     {
       "label": ".startTicket()",
@@ -360,9 +610,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L131",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_startticket",
       "community": 41,
-      "norm_label": ".startticket()"
+      "norm_label": ".startticket()",
+      "id": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "label": ".pumpQueue()",
@@ -370,9 +620,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L144",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_pumpqueue",
       "community": 41,
-      "norm_label": ".pumpqueue()"
+      "norm_label": ".pumpqueue()",
+      "id": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "label": ".startDependents()",
@@ -380,9 +630,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L153",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_startdependents",
       "community": 41,
-      "norm_label": ".startdependents()"
+      "norm_label": ".startdependents()",
+      "id": "src_server_agents_slotmanager_slotmanager_startdependents"
     },
     {
       "label": ".resolveMergeConflicts()",
@@ -390,9 +640,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L167",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts",
       "community": 41,
-      "norm_label": ".resolvemergeconflicts()"
+      "norm_label": ".resolvemergeconflicts()",
+      "id": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts"
     },
     {
       "label": ".startTestSession()",
@@ -400,9 +650,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L205",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_starttestsession",
       "community": 41,
-      "norm_label": ".starttestsession()"
+      "norm_label": ".starttestsession()",
+      "id": "src_server_agents_slotmanager_slotmanager_starttestsession"
     },
     {
       "label": ".stopTestSession()",
@@ -410,9 +660,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L293",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_stoptestsession",
       "community": 41,
-      "norm_label": ".stoptestsession()"
+      "norm_label": ".stoptestsession()",
+      "id": "src_server_agents_slotmanager_slotmanager_stoptestsession"
     },
     {
       "label": ".listWorktreeSessions()",
@@ -420,9 +670,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L305",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_listworktreesessions",
       "community": 41,
-      "norm_label": ".listworktreesessions()"
+      "norm_label": ".listworktreesessions()",
+      "id": "src_server_agents_slotmanager_slotmanager_listworktreesessions"
     },
     {
       "label": ".startWorktreeSession()",
@@ -430,9 +680,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L317",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_startworktreesession",
       "community": 41,
-      "norm_label": ".startworktreesession()"
+      "norm_label": ".startworktreesession()",
+      "id": "src_server_agents_slotmanager_slotmanager_startworktreesession"
     },
     {
       "label": ".stopWorktreeSession()",
@@ -440,9 +690,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L400",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_stopworktreesession",
       "community": 41,
-      "norm_label": ".stopworktreesession()"
+      "norm_label": ".stopworktreesession()",
+      "id": "src_server_agents_slotmanager_slotmanager_stopworktreesession"
     },
     {
       "label": ".relaunchWorktreeSession()",
@@ -450,9 +700,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L414",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession",
       "community": 41,
-      "norm_label": ".relaunchworktreesession()"
+      "norm_label": ".relaunchworktreesession()",
+      "id": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession"
     },
     {
       "label": ".runWorktreeTeardown()",
@@ -460,9 +710,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L436",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
       "community": 41,
-      "norm_label": ".runworktreeteardown()"
+      "norm_label": ".runworktreeteardown()",
+      "id": "src_server_agents_slotmanager_slotmanager_runworktreeteardown"
     },
     {
       "label": ".cleanupWorktreeSession()",
@@ -470,9 +720,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L456",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
       "community": 41,
-      "norm_label": ".cleanupworktreesession()"
+      "norm_label": ".cleanupworktreesession()",
+      "id": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession"
     },
     {
       "label": ".launchInSlot()",
@@ -480,9 +730,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L485",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_launchinslot",
       "community": 41,
-      "norm_label": ".launchinslot()"
+      "norm_label": ".launchinslot()",
+      "id": "src_server_agents_slotmanager_slotmanager_launchinslot"
     },
     {
       "label": ".startAgentSession()",
@@ -490,9 +740,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L608",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_startagentsession",
       "community": 41,
-      "norm_label": ".startagentsession()"
+      "norm_label": ".startagentsession()",
+      "id": "src_server_agents_slotmanager_slotmanager_startagentsession"
     },
     {
       "label": ".deliverContract()",
@@ -500,9 +750,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L622",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_delivercontract",
       "community": 41,
-      "norm_label": ".delivercontract()"
+      "norm_label": ".delivercontract()",
+      "id": "src_server_agents_slotmanager_slotmanager_delivercontract"
     },
     {
       "label": ".buildContractPayload()",
@@ -510,9 +760,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L630",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_buildcontractpayload",
       "community": 49,
-      "norm_label": ".buildcontractpayload()"
+      "norm_label": ".buildcontractpayload()",
+      "id": "src_server_agents_slotmanager_slotmanager_buildcontractpayload"
     },
     {
       "label": ".doneGate()",
@@ -520,9 +770,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L655",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_donegate",
       "community": 41,
-      "norm_label": ".donegate()"
+      "norm_label": ".donegate()",
+      "id": "src_server_agents_slotmanager_slotmanager_donegate"
     },
     {
       "label": ".finishTicket()",
@@ -530,9 +780,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L672",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_finishticket",
       "community": 41,
-      "norm_label": ".finishticket()"
+      "norm_label": ".finishticket()",
+      "id": "src_server_agents_slotmanager_slotmanager_finishticket"
     },
     {
       "label": ".tryAutoResolveMerge()",
@@ -540,9 +790,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L768",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
       "community": 41,
-      "norm_label": ".tryautoresolvemerge()"
+      "norm_label": ".tryautoresolvemerge()",
+      "id": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge"
     },
     {
       "label": ".markReadyForReview()",
@@ -550,9 +800,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L796",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_markreadyforreview",
       "community": 41,
-      "norm_label": ".markreadyforreview()"
+      "norm_label": ".markreadyforreview()",
+      "id": "src_server_agents_slotmanager_slotmanager_markreadyforreview"
     },
     {
       "label": ".markDirectPushDone()",
@@ -560,9 +810,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L846",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
       "community": 41,
-      "norm_label": ".markdirectpushdone()"
+      "norm_label": ".markdirectpushdone()",
+      "id": "src_server_agents_slotmanager_slotmanager_markdirectpushdone"
     },
     {
       "label": ".createStealthPr()",
@@ -570,9 +820,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L897",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_createstealthpr",
       "community": 41,
-      "norm_label": ".createstealthpr()"
+      "norm_label": ".createstealthpr()",
+      "id": "src_server_agents_slotmanager_slotmanager_createstealthpr"
     },
     {
       "label": ".completeAsk()",
@@ -580,9 +830,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L952",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_completeask",
       "community": 41,
-      "norm_label": ".completeask()"
+      "norm_label": ".completeask()",
+      "id": "src_server_agents_slotmanager_slotmanager_completeask"
     },
     {
       "label": ".doneNotifyBody()",
@@ -590,9 +840,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L977",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_donenotifybody",
       "community": 41,
-      "norm_label": ".donenotifybody()"
+      "norm_label": ".donenotifybody()",
+      "id": "src_server_agents_slotmanager_slotmanager_donenotifybody"
     },
     {
       "label": ".releaseSlot()",
@@ -600,9 +850,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L990",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_releaseslot",
       "community": 41,
-      "norm_label": ".releaseslot()"
+      "norm_label": ".releaseslot()",
+      "id": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "label": ".abandonTicket()",
@@ -610,9 +860,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1011",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_abandonticket",
       "community": 41,
-      "norm_label": ".abandonticket()"
+      "norm_label": ".abandonticket()",
+      "id": "src_server_agents_slotmanager_slotmanager_abandonticket"
     },
     {
       "label": ".markFailed()",
@@ -620,9 +870,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1031",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_markfailed",
       "community": 41,
-      "norm_label": ".markfailed()"
+      "norm_label": ".markfailed()",
+      "id": "src_server_agents_slotmanager_slotmanager_markfailed"
     },
     {
       "label": ".touch()",
@@ -630,9 +880,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1037",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_touch",
       "community": 41,
-      "norm_label": ".touch()"
+      "norm_label": ".touch()",
+      "id": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "label": ".teardownSessions()",
@@ -640,9 +890,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1046",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_teardownsessions",
       "community": 41,
-      "norm_label": ".teardownsessions()"
+      "norm_label": ".teardownsessions()",
+      "id": "src_server_agents_slotmanager_slotmanager_teardownsessions"
     },
     {
       "label": ".recover()",
@@ -650,9 +900,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1056",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_recover",
       "community": 41,
-      "norm_label": ".recover()"
+      "norm_label": ".recover()",
+      "id": "src_server_agents_slotmanager_slotmanager_recover"
     },
     {
       "label": ".retry()",
@@ -660,9 +910,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1112",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_retry",
       "community": 41,
-      "norm_label": ".retry()"
+      "norm_label": ".retry()",
+      "id": "src_server_agents_slotmanager_slotmanager_retry"
     },
     {
       "label": ".isLaunching()",
@@ -670,9 +920,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1126",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_islaunching",
       "community": 41,
-      "norm_label": ".islaunching()"
+      "norm_label": ".islaunching()",
+      "id": "src_server_agents_slotmanager_slotmanager_islaunching"
     },
     {
       "label": ".relaunch()",
@@ -680,9 +930,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1142",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_relaunch",
       "community": 41,
-      "norm_label": ".relaunch()"
+      "norm_label": ".relaunch()",
+      "id": "src_server_agents_slotmanager_slotmanager_relaunch"
     },
     {
       "label": ".tryAutoReclaim()",
@@ -690,9 +940,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1167",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
       "community": 41,
-      "norm_label": ".tryautoreclaim()"
+      "norm_label": ".tryautoreclaim()",
+      "id": "src_server_agents_slotmanager_slotmanager_tryautoreclaim"
     },
     {
       "label": ".relaunchInPlace()",
@@ -700,9 +950,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1192",
       "_origin": "ast",
-      "id": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
       "community": 41,
-      "norm_label": ".relaunchinplace()"
+      "norm_label": ".relaunchinplace()",
+      "id": "src_server_agents_slotmanager_slotmanager_relaunchinplace"
     },
     {
       "label": "constants.ts",
@@ -710,9 +960,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_shared_constants",
       "community": 18,
-      "norm_label": "constants.ts"
+      "norm_label": "constants.ts",
+      "id": "src_shared_constants"
     },
     {
       "label": "COLUMNS",
@@ -720,9 +970,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "src_shared_constants_columns",
       "community": 18,
-      "norm_label": "columns"
+      "norm_label": "columns",
+      "id": "src_shared_constants_columns"
     },
     {
       "label": "Column",
@@ -730,9 +980,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L13",
       "_origin": "ast",
-      "id": "src_shared_constants_column",
       "community": 49,
-      "norm_label": "column"
+      "norm_label": "column",
+      "id": "src_shared_constants_column"
     },
     {
       "label": "COLUMN_LABELS",
@@ -740,9 +990,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L15",
       "_origin": "ast",
-      "id": "src_shared_constants_column_labels",
       "community": 18,
-      "norm_label": "column_labels"
+      "norm_label": "column_labels",
+      "id": "src_shared_constants_column_labels"
     },
     {
       "label": "COLUMN_ORDER",
@@ -750,9 +1000,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L28",
       "_origin": "ast",
-      "id": "src_shared_constants_column_order",
       "community": 18,
-      "norm_label": "column_order"
+      "norm_label": "column_order",
+      "id": "src_shared_constants_column_order"
     },
     {
       "label": "COLUMN_SORT_FIELD",
@@ -760,9 +1010,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L42",
       "_origin": "ast",
-      "id": "src_shared_constants_column_sort_field",
       "community": 18,
-      "norm_label": "column_sort_field"
+      "norm_label": "column_sort_field",
+      "id": "src_shared_constants_column_sort_field"
     },
     {
       "label": "AGENT_MODELS",
@@ -770,9 +1020,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L58",
       "_origin": "ast",
-      "id": "src_shared_constants_agent_models",
       "community": 18,
-      "norm_label": "agent_models"
+      "norm_label": "agent_models",
+      "id": "src_shared_constants_agent_models"
     },
     {
       "label": "AgentModel",
@@ -780,9 +1030,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L59",
       "_origin": "ast",
-      "id": "src_shared_constants_agentmodel",
       "community": 18,
-      "norm_label": "agentmodel"
+      "norm_label": "agentmodel",
+      "id": "src_shared_constants_agentmodel"
     },
     {
       "label": "AGENT_EFFORTS",
@@ -790,9 +1040,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L61",
       "_origin": "ast",
-      "id": "src_shared_constants_agent_efforts",
       "community": 18,
-      "norm_label": "agent_efforts"
+      "norm_label": "agent_efforts",
+      "id": "src_shared_constants_agent_efforts"
     },
     {
       "label": "AgentEffort",
@@ -800,9 +1050,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L62",
       "_origin": "ast",
-      "id": "src_shared_constants_agenteffort",
       "community": 18,
-      "norm_label": "agenteffort"
+      "norm_label": "agenteffort",
+      "id": "src_shared_constants_agenteffort"
     },
     {
       "label": "AGENT_MODEL_LABELS",
@@ -810,9 +1060,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L64",
       "_origin": "ast",
-      "id": "src_shared_constants_agent_model_labels",
       "community": 18,
-      "norm_label": "agent_model_labels"
+      "norm_label": "agent_model_labels",
+      "id": "src_shared_constants_agent_model_labels"
     },
     {
       "label": "AGENT_EFFORT_LABELS",
@@ -820,9 +1070,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L71",
       "_origin": "ast",
-      "id": "src_shared_constants_agent_effort_labels",
       "community": 18,
-      "norm_label": "agent_effort_labels"
+      "norm_label": "agent_effort_labels",
+      "id": "src_shared_constants_agent_effort_labels"
     },
     {
       "label": "IMPLEMENTERS",
@@ -830,9 +1080,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L80",
       "_origin": "ast",
-      "id": "src_shared_constants_implementers",
       "community": 18,
-      "norm_label": "implementers"
+      "norm_label": "implementers",
+      "id": "src_shared_constants_implementers"
     },
     {
       "label": "Implementer",
@@ -840,9 +1090,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L81",
       "_origin": "ast",
-      "id": "src_shared_constants_implementer",
       "community": 18,
-      "norm_label": "implementer"
+      "norm_label": "implementer",
+      "id": "src_shared_constants_implementer"
     },
     {
       "label": "IMPLEMENTER_LABELS",
@@ -850,9 +1100,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L83",
       "_origin": "ast",
-      "id": "src_shared_constants_implementer_labels",
       "community": 18,
-      "norm_label": "implementer_labels"
+      "norm_label": "implementer_labels",
+      "id": "src_shared_constants_implementer_labels"
     },
     {
       "label": "ORCHESTRATORS",
@@ -860,9 +1110,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L90",
       "_origin": "ast",
-      "id": "src_shared_constants_orchestrators",
       "community": 18,
-      "norm_label": "orchestrators"
+      "norm_label": "orchestrators",
+      "id": "src_shared_constants_orchestrators"
     },
     {
       "label": "Orchestrator",
@@ -870,9 +1120,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L91",
       "_origin": "ast",
-      "id": "src_shared_constants_orchestrator",
       "community": 18,
-      "norm_label": "orchestrator"
+      "norm_label": "orchestrator",
+      "id": "src_shared_constants_orchestrator"
     },
     {
       "label": "ORCHESTRATOR_LABELS",
@@ -880,9 +1130,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L93",
       "_origin": "ast",
-      "id": "src_shared_constants_orchestrator_labels",
       "community": 18,
-      "norm_label": "orchestrator_labels"
+      "norm_label": "orchestrator_labels",
+      "id": "src_shared_constants_orchestrator_labels"
     },
     {
       "label": "isAllowedAgentPair()",
@@ -890,9 +1140,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L103",
       "_origin": "ast",
-      "id": "src_shared_constants_isallowedagentpair",
       "community": 18,
-      "norm_label": "isallowedagentpair()"
+      "norm_label": "isallowedagentpair()",
+      "id": "src_shared_constants_isallowedagentpair"
     },
     {
       "label": "COMMIT_LANGUAGES",
@@ -900,9 +1150,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L108",
       "_origin": "ast",
-      "id": "src_shared_constants_commit_languages",
       "community": 18,
-      "norm_label": "commit_languages"
+      "norm_label": "commit_languages",
+      "id": "src_shared_constants_commit_languages"
     },
     {
       "label": "CommitLanguage",
@@ -910,9 +1160,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L109",
       "_origin": "ast",
-      "id": "src_shared_constants_commitlanguage",
       "community": 52,
-      "norm_label": "commitlanguage"
+      "norm_label": "commitlanguage",
+      "id": "src_shared_constants_commitlanguage"
     },
     {
       "label": "COMMIT_LANGUAGE_LABELS",
@@ -920,9 +1170,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L111",
       "_origin": "ast",
-      "id": "src_shared_constants_commit_language_labels",
       "community": 18,
-      "norm_label": "commit_language_labels"
+      "norm_label": "commit_language_labels",
+      "id": "src_shared_constants_commit_language_labels"
     },
     {
       "label": "ProfileConfig",
@@ -930,9 +1180,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L143",
       "_origin": "ast",
-      "id": "src_shared_constants_profileconfig",
       "community": 18,
-      "norm_label": "profileconfig"
+      "norm_label": "profileconfig",
+      "id": "src_shared_constants_profileconfig"
     },
     {
       "label": "CODEX_SEED_PROFILE",
@@ -940,9 +1190,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L160",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_seed_profile",
       "community": 18,
-      "norm_label": "codex_seed_profile"
+      "norm_label": "codex_seed_profile",
+      "id": "src_shared_constants_codex_seed_profile"
     },
     {
       "label": "DEFAULT_PROFILES",
@@ -950,9 +1200,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L173",
       "_origin": "ast",
-      "id": "src_shared_constants_default_profiles",
       "community": 18,
-      "norm_label": "default_profiles"
+      "norm_label": "default_profiles",
+      "id": "src_shared_constants_default_profiles"
     },
     {
       "label": "KINDS",
@@ -960,9 +1210,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L230",
       "_origin": "ast",
-      "id": "src_shared_constants_kinds",
       "community": 18,
-      "norm_label": "kinds"
+      "norm_label": "kinds",
+      "id": "src_shared_constants_kinds"
     },
     {
       "label": "Kind",
@@ -970,9 +1220,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L231",
       "_origin": "ast",
-      "id": "src_shared_constants_kind",
       "community": 18,
-      "norm_label": "kind"
+      "norm_label": "kind",
+      "id": "src_shared_constants_kind"
     },
     {
       "label": "CODEX_MODELS",
@@ -980,9 +1230,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L248",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_models",
       "community": 18,
-      "norm_label": "codex_models"
+      "norm_label": "codex_models",
+      "id": "src_shared_constants_codex_models"
     },
     {
       "label": "CodexModel",
@@ -990,9 +1240,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L249",
       "_origin": "ast",
-      "id": "src_shared_constants_codexmodel",
       "community": 18,
-      "norm_label": "codexmodel"
+      "norm_label": "codexmodel",
+      "id": "src_shared_constants_codexmodel"
     },
     {
       "label": "CODEX_MODEL_LABELS",
@@ -1000,9 +1250,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L251",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_model_labels",
       "community": 18,
-      "norm_label": "codex_model_labels"
+      "norm_label": "codex_model_labels",
+      "id": "src_shared_constants_codex_model_labels"
     },
     {
       "label": "CODEX_EFFORTS",
@@ -1010,9 +1260,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L264",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_efforts",
       "community": 18,
-      "norm_label": "codex_efforts"
+      "norm_label": "codex_efforts",
+      "id": "src_shared_constants_codex_efforts"
     },
     {
       "label": "CodexEffort",
@@ -1020,9 +1270,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L265",
       "_origin": "ast",
-      "id": "src_shared_constants_codexeffort",
       "community": 18,
-      "norm_label": "codexeffort"
+      "norm_label": "codexeffort",
+      "id": "src_shared_constants_codexeffort"
     },
     {
       "label": "CODEX_EFFORT_LABELS",
@@ -1030,9 +1280,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L267",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_effort_labels",
       "community": 18,
-      "norm_label": "codex_effort_labels"
+      "norm_label": "codex_effort_labels",
+      "id": "src_shared_constants_codex_effort_labels"
     },
     {
       "label": "CODEX_MODEL_EFFORTS",
@@ -1040,9 +1290,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L280",
       "_origin": "ast",
-      "id": "src_shared_constants_codex_model_efforts",
       "community": 18,
-      "norm_label": "codex_model_efforts"
+      "norm_label": "codex_model_efforts",
+      "id": "src_shared_constants_codex_model_efforts"
     },
     {
       "label": "pairedCodexEffort()",
@@ -1050,9 +1300,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L292",
       "_origin": "ast",
-      "id": "src_shared_constants_pairedcodexeffort",
       "community": 18,
-      "norm_label": "pairedcodexeffort()"
+      "norm_label": "pairedcodexeffort()",
+      "id": "src_shared_constants_pairedcodexeffort"
     },
     {
       "label": "REVIEW_DEPTHS",
@@ -1060,9 +1310,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L316",
       "_origin": "ast",
-      "id": "src_shared_constants_review_depths",
       "community": 18,
-      "norm_label": "review_depths"
+      "norm_label": "review_depths",
+      "id": "src_shared_constants_review_depths"
     },
     {
       "label": "ReviewDepth",
@@ -1070,9 +1320,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L317",
       "_origin": "ast",
-      "id": "src_shared_constants_reviewdepth",
       "community": 52,
-      "norm_label": "reviewdepth"
+      "norm_label": "reviewdepth",
+      "id": "src_shared_constants_reviewdepth"
     },
     {
       "label": "REVIEW_DEPTH_LABELS",
@@ -1080,9 +1330,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L319",
       "_origin": "ast",
-      "id": "src_shared_constants_review_depth_labels",
       "community": 18,
-      "norm_label": "review_depth_labels"
+      "norm_label": "review_depth_labels",
+      "id": "src_shared_constants_review_depth_labels"
     },
     {
       "label": "STAGES",
@@ -1090,9 +1340,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L324",
       "_origin": "ast",
-      "id": "src_shared_constants_stages",
       "community": 18,
-      "norm_label": "stages"
+      "norm_label": "stages",
+      "id": "src_shared_constants_stages"
     },
     {
       "label": "Stage",
@@ -1100,9 +1350,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L338",
       "_origin": "ast",
-      "id": "src_shared_constants_stage",
       "community": 18,
-      "norm_label": "stage"
+      "norm_label": "stage",
+      "id": "src_shared_constants_stage"
     },
     {
       "label": "STAGE_LABELS",
@@ -1110,9 +1360,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L340",
       "_origin": "ast",
-      "id": "src_shared_constants_stage_labels",
       "community": 18,
-      "norm_label": "stage_labels"
+      "norm_label": "stage_labels",
+      "id": "src_shared_constants_stage_labels"
     },
     {
       "label": "TERMINAL_STAGES",
@@ -1120,9 +1370,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L356",
       "_origin": "ast",
-      "id": "src_shared_constants_terminal_stages",
       "community": 18,
-      "norm_label": "terminal_stages"
+      "norm_label": "terminal_stages",
+      "id": "src_shared_constants_terminal_stages"
     },
     {
       "label": "ACTIVE_STAGES",
@@ -1130,9 +1380,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L364",
       "_origin": "ast",
-      "id": "src_shared_constants_active_stages",
       "community": 49,
-      "norm_label": "active_stages"
+      "norm_label": "active_stages",
+      "id": "src_shared_constants_active_stages"
     },
     {
       "label": "TRIAGE_VERDICTS",
@@ -1140,9 +1390,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L375",
       "_origin": "ast",
-      "id": "src_shared_constants_triage_verdicts",
       "community": 18,
-      "norm_label": "triage_verdicts"
+      "norm_label": "triage_verdicts",
+      "id": "src_shared_constants_triage_verdicts"
     },
     {
       "label": "SUCCESS_COLUMNS",
@@ -1150,9 +1400,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L382",
       "_origin": "ast",
-      "id": "src_shared_constants_success_columns",
       "community": 18,
-      "norm_label": "success_columns"
+      "norm_label": "success_columns",
+      "id": "src_shared_constants_success_columns"
     },
     {
       "label": "FAILURE_COLUMNS",
@@ -1160,9 +1410,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L389",
       "_origin": "ast",
-      "id": "src_shared_constants_failure_columns",
       "community": 18,
-      "norm_label": "failure_columns"
+      "norm_label": "failure_columns",
+      "id": "src_shared_constants_failure_columns"
     },
     {
       "label": "COMMENT_AUTHORS",
@@ -1170,9 +1420,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L391",
       "_origin": "ast",
-      "id": "src_shared_constants_comment_authors",
       "community": 18,
-      "norm_label": "comment_authors"
+      "norm_label": "comment_authors",
+      "id": "src_shared_constants_comment_authors"
     },
     {
       "label": "CommentAuthor",
@@ -1180,9 +1430,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L392",
       "_origin": "ast",
-      "id": "src_shared_constants_commentauthor",
       "community": 18,
-      "norm_label": "commentauthor"
+      "norm_label": "commentauthor",
+      "id": "src_shared_constants_commentauthor"
     },
     {
       "label": "resolveSlotCount()",
@@ -1190,9 +1440,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L396",
       "_origin": "ast",
-      "id": "src_shared_constants_resolveslotcount",
       "community": 18,
-      "norm_label": "resolveslotcount()"
+      "norm_label": "resolveslotcount()",
+      "id": "src_shared_constants_resolveslotcount"
     },
     {
       "label": "SLOT_COUNT",
@@ -1200,9 +1450,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L404",
       "_origin": "ast",
-      "id": "src_shared_constants_slot_count",
       "community": 18,
-      "norm_label": "slot_count"
+      "norm_label": "slot_count",
+      "id": "src_shared_constants_slot_count"
     },
     {
       "label": "AUTOMATION_TRIGGERS",
@@ -1210,9 +1460,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L507",
       "_origin": "ast",
-      "id": "src_shared_constants_automation_triggers",
       "community": 18,
-      "norm_label": "automation_triggers"
+      "norm_label": "automation_triggers",
+      "id": "src_shared_constants_automation_triggers"
     },
     {
       "label": "AutomationTrigger",
@@ -1220,9 +1470,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L508",
       "_origin": "ast",
-      "id": "src_shared_constants_automationtrigger",
       "community": 18,
-      "norm_label": "automationtrigger"
+      "norm_label": "automationtrigger",
+      "id": "src_shared_constants_automationtrigger"
     },
     {
       "label": "AUTOMATION_TRIGGER_LABELS",
@@ -1230,9 +1480,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L510",
       "_origin": "ast",
-      "id": "src_shared_constants_automation_trigger_labels",
       "community": 18,
-      "norm_label": "automation_trigger_labels"
+      "norm_label": "automation_trigger_labels",
+      "id": "src_shared_constants_automation_trigger_labels"
     },
     {
       "label": "AUTOMATION_RUN_STATUSES",
@@ -1240,9 +1490,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L515",
       "_origin": "ast",
-      "id": "src_shared_constants_automation_run_statuses",
       "community": 18,
-      "norm_label": "automation_run_statuses"
+      "norm_label": "automation_run_statuses",
+      "id": "src_shared_constants_automation_run_statuses"
     },
     {
       "label": "AutomationRunStatus",
@@ -1250,9 +1500,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L516",
       "_origin": "ast",
-      "id": "src_shared_constants_automationrunstatus",
       "community": 18,
-      "norm_label": "automationrunstatus"
+      "norm_label": "automationrunstatus",
+      "id": "src_shared_constants_automationrunstatus"
     },
     {
       "label": "package.json",
@@ -2653,256 +2903,6 @@
       "community": 32,
       "norm_label": "implementconfig()",
       "id": "src_server_agents_sessionconfig_test_implementconfig"
-    },
-    {
-      "label": "sessionConfig.ts",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "sessionconfig.ts",
-      "id": "src_server_agents_sessionconfig"
-    },
-    {
-      "label": "IMPLEMENTER_SAFE_TOOLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L28",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "implementer_safe_tools",
-      "id": "src_server_agents_sessionconfig_implementer_safe_tools"
-    },
-    {
-      "label": "CONTRACT_SKILLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L49",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "contract_skills",
-      "id": "src_server_agents_sessionconfig_contract_skills"
-    },
-    {
-      "label": "NO_SKILLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L52",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "no_skills",
-      "id": "src_server_agents_sessionconfig_no_skills"
-    },
-    {
-      "label": "FIGMA_READONLY_TOOLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L61",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "figma_readonly_tools",
-      "id": "src_server_agents_sessionconfig_figma_readonly_tools"
-    },
-    {
-      "label": "READONLY_TOOLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L70",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "readonly_tools",
-      "id": "src_server_agents_sessionconfig_readonly_tools"
-    },
-    {
-      "label": "READONLY_PLAIN_DISALLOWED",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L72",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "readonly_plain_disallowed",
-      "id": "src_server_agents_sessionconfig_readonly_plain_disallowed"
-    },
-    {
-      "label": "READONLY_FANOUT_DISALLOWED",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L74",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "readonly_fanout_disallowed",
-      "id": "src_server_agents_sessionconfig_readonly_fanout_disallowed"
-    },
-    {
-      "label": "DENIED_BUILTIN_AGENTS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L80",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "denied_builtin_agents",
-      "id": "src_server_agents_sessionconfig_denied_builtin_agents"
-    },
-    {
-      "label": "SCOUT_TOOLS",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L83",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "scout_tools",
-      "id": "src_server_agents_sessionconfig_scout_tools"
-    },
-    {
-      "label": "SCOUT_DISALLOWED",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L84",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "scout_disallowed",
-      "id": "src_server_agents_sessionconfig_scout_disallowed"
-    },
-    {
-      "label": "feasibilityScoutAgent()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L104",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "feasibilityscoutagent()",
-      "id": "src_server_agents_sessionconfig_feasibilityscoutagent"
-    },
-    {
-      "label": "solutionsScoutAgent()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L113",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "solutionsscoutagent()",
-      "id": "src_server_agents_sessionconfig_solutionsscoutagent"
-    },
-    {
-      "label": "TriageSessionInput",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L122",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "triagesessioninput",
-      "id": "src_server_agents_sessionconfig_triagesessioninput"
-    },
-    {
-      "label": "buildTriageSessionConfig()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L134",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "buildtriagesessionconfig()",
-      "id": "src_server_agents_sessionconfig_buildtriagesessionconfig"
-    },
-    {
-      "label": "SplitSessionInput",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L171",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "splitsessioninput",
-      "id": "src_server_agents_sessionconfig_splitsessioninput"
-    },
-    {
-      "label": "buildSplitSessionConfig()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L181",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "buildsplitsessionconfig()",
-      "id": "src_server_agents_sessionconfig_buildsplitsessionconfig"
-    },
-    {
-      "label": "FeasibilitySessionInput",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L209",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "feasibilitysessioninput",
-      "id": "src_server_agents_sessionconfig_feasibilitysessioninput"
-    },
-    {
-      "label": "buildFeasibilitySessionConfig()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L217",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "buildfeasibilitysessionconfig()",
-      "id": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig"
-    },
-    {
-      "label": "BASH_ALLOWLIST",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L236",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "bash_allowlist",
-      "id": "src_server_agents_sessionconfig_bash_allowlist"
-    },
-    {
-      "label": "implementerAgent()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L301",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "implementeragent()",
-      "id": "src_server_agents_sessionconfig_implementeragent"
-    },
-    {
-      "label": "prFixerAgent()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L311",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "prfixeragent()",
-      "id": "src_server_agents_sessionconfig_prfixeragent"
-    },
-    {
-      "label": "ImplementSessionInput",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L321",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "implementsessioninput",
-      "id": "src_server_agents_sessionconfig_implementsessioninput"
-    },
-    {
-      "label": "codexKnobs()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L332",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "codexknobs()",
-      "id": "src_server_agents_sessionconfig_codexknobs"
-    },
-    {
-      "label": "buildImplementSessionConfig()",
-      "file_type": "code",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L340",
-      "_origin": "ast",
-      "community": 32,
-      "norm_label": "buildimplementsessionconfig()",
-      "id": "src_server_agents_sessionconfig_buildimplementsessionconfig"
     },
     {
       "label": "triage.ts",
@@ -17398,12 +17398,373 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L236",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_bash_allowlist",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L217",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L341",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L181",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_buildsplitsessionconfig",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L134",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_buildtriagesessionconfig",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L333",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_codexknobs",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L49",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_contract_skills",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L80",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_denied_builtin_agents",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L104",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_feasibilityscoutagent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L209",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_feasibilitysessioninput",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L61",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_figma_readonly_tools",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L28",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_implementer_safe_tools",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L302",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_implementeragent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L322",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_implementsessioninput",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L52",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_no_skills",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L312",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_prfixeragent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L74",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_readonly_fanout_disallowed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L72",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_readonly_plain_disallowed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L70",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_readonly_tools",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L84",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_scout_disallowed",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L83",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_scout_tools",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L113",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_solutionsscoutagent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L171",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_splitsessioninput",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L122",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig",
+      "target": "src_server_agents_sessionconfig_triagesessioninput",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.test.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_server_agents_sessionconfig_test",
+      "target": "src_server_agents_sessionconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L230",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig",
+      "target": "src_server_agents_sessionconfig_feasibilityscoutagent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L165",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildtriagesessionconfig",
+      "target": "src_server_agents_sessionconfig_feasibilityscoutagent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L166",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildtriagesessionconfig",
+      "target": "src_server_agents_sessionconfig_solutionsscoutagent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.test.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_server_agents_sessionconfig_test",
+      "target": "src_server_agents_sessionconfig_buildtriagesessionconfig"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.test.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_server_agents_sessionconfig_test",
+      "target": "src_server_agents_sessionconfig_buildsplitsessionconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L374",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
+      "target": "src_server_agents_sessionconfig_implementeragent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L375",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
+      "target": "src_server_agents_sessionconfig_prfixeragent",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.ts",
+      "source_location": "L346",
+      "weight": 1.0,
+      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
+      "target": "src_server_agents_sessionconfig_codexknobs",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.test.ts",
+      "source_location": "L6",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_server_agents_sessionconfig_test",
+      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "src/server/agents/sessionConfig.test.ts",
+      "source_location": "L16",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "src_server_agents_sessionconfig_test_implementconfig",
+      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L687",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildaskcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildaskcontract"
     },
     {
       "relation": "contains",
@@ -17411,9 +17772,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L627",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildcleancontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildcleancontract"
     },
     {
       "relation": "contains",
@@ -17421,9 +17782,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L337",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildconflictresolutioncontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildconflictresolutioncontract"
     },
     {
       "relation": "contains",
@@ -17431,9 +17792,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L398",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildfeasibilitybatchcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildfeasibilitybatchcontract"
     },
     {
       "relation": "contains",
@@ -17441,9 +17802,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L181",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildfeasibilitycontextsection",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildfeasibilitycontextsection"
     },
     {
       "relation": "contains",
@@ -17451,9 +17812,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L34",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildimplementingsteps",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildimplementingsteps"
     },
     {
       "relation": "contains",
@@ -17461,9 +17822,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L134",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildmockupreviewstep",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildmockupreviewstep"
     },
     {
       "relation": "contains",
@@ -17471,9 +17832,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L99",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildplanningstep",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildplanningstep"
     },
     {
       "relation": "contains",
@@ -17481,9 +17842,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L166",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildprdbullet",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildprdbullet"
     },
     {
       "relation": "contains",
@@ -17491,9 +17852,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L471",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildreviewcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewcontract"
     },
     {
       "relation": "contains",
@@ -17501,9 +17862,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L560",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildreviewfixlines",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewfixlines"
     },
     {
       "relation": "contains",
@@ -17511,9 +17872,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L109",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildreviewsteps",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewsteps"
     },
     {
       "relation": "contains",
@@ -17521,9 +17882,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L161",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildsessionframingline",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildsessionframingline"
     },
     {
       "relation": "contains",
@@ -17531,9 +17892,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L154",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "contains",
@@ -17541,9 +17902,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L211",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_buildticketcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildticketcontract"
     },
     {
       "relation": "contains",
@@ -17551,9 +17912,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L21",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_commitlanguagedirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagedirective"
     },
     {
       "relation": "contains",
@@ -17561,9 +17922,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L16",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_commitlanguagelabel",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagelabel"
     },
     {
       "relation": "contains",
@@ -17571,9 +17932,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L461",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_reviewdepthdirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_reviewdepthdirective"
     },
     {
       "relation": "contains",
@@ -17581,9 +17942,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L386",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_server_agents_contract_truncatedescription",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_truncatedescription"
     },
     {
       "relation": "imports_from",
@@ -17592,9 +17953,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L2",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_shared_constants",
-      "confidence_score": 1.0
+      "target": "src_shared_constants"
     },
     {
       "relation": "imports",
@@ -17603,9 +17964,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L2",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_shared_constants_commitlanguage",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_commitlanguage"
     },
     {
       "relation": "imports",
@@ -17614,9 +17975,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L2",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract",
-      "target": "src_shared_constants_reviewdepth",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_reviewdepth"
     },
     {
       "relation": "imports_from",
@@ -17625,9 +17986,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract"
     },
     {
       "relation": "calls",
@@ -17636,9 +17997,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L534",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewcontract",
-      "target": "src_server_agents_contract_commitlanguagelabel",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagelabel"
     },
     {
       "relation": "calls",
@@ -17647,9 +18008,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L598",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewfixlines",
-      "target": "src_server_agents_contract_commitlanguagelabel",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagelabel"
     },
     {
       "relation": "calls",
@@ -17658,9 +18019,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L22",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_commitlanguagedirective",
-      "target": "src_server_agents_contract_commitlanguagelabel",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagelabel"
     },
     {
       "relation": "calls",
@@ -17669,9 +18030,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L659",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildcleancontract",
-      "target": "src_server_agents_contract_commitlanguagedirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagedirective"
     },
     {
       "relation": "calls",
@@ -17680,9 +18041,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L363",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildconflictresolutioncontract",
-      "target": "src_server_agents_contract_commitlanguagedirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagedirective"
     },
     {
       "relation": "calls",
@@ -17691,9 +18052,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L290",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_commitlanguagedirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_commitlanguagedirective"
     },
     {
       "relation": "calls",
@@ -17702,9 +18063,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L241",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildimplementingsteps",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildimplementingsteps"
     },
     {
       "relation": "calls",
@@ -17713,9 +18074,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L299",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildplanningstep",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildplanningstep"
     },
     {
       "relation": "calls",
@@ -17724,9 +18085,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L301",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildreviewsteps",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewsteps"
     },
     {
       "relation": "calls",
@@ -17735,9 +18096,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L309",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildmockupreviewstep",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildmockupreviewstep"
     },
     {
       "relation": "calls",
@@ -17746,9 +18107,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L704",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildaskcontract",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "calls",
@@ -17757,9 +18118,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L358",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildconflictresolutioncontract",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "calls",
@@ -17768,9 +18129,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L529",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewcontract",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "calls",
@@ -17779,9 +18140,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L593",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewfixlines",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "calls",
@@ -17790,9 +18151,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L162",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildsessionframingline",
-      "target": "src_server_agents_contract_buildspecializedframing",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildspecializedframing"
     },
     {
       "relation": "calls",
@@ -17801,9 +18162,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L284",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildsessionframingline",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildsessionframingline"
     },
     {
       "relation": "calls",
@@ -17812,9 +18173,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L287",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildprdbullet",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildprdbullet"
     },
     {
       "relation": "calls",
@@ -17823,9 +18184,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L282",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildticketcontract",
-      "target": "src_server_agents_contract_buildfeasibilitycontextsection",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildfeasibilitycontextsection"
     },
     {
       "relation": "imports",
@@ -17834,9 +18195,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract_buildticketcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildticketcontract"
     },
     {
       "relation": "calls",
@@ -17856,9 +18217,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract_buildconflictresolutioncontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildconflictresolutioncontract"
     },
     {
       "relation": "calls",
@@ -17878,9 +18239,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L403",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildfeasibilitybatchcontract",
-      "target": "src_server_agents_contract_truncatedescription",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_truncatedescription"
     },
     {
       "relation": "calls",
@@ -17889,9 +18250,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L508",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewcontract",
-      "target": "src_server_agents_contract_reviewdepthdirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_reviewdepthdirective"
     },
     {
       "relation": "calls",
@@ -17900,9 +18261,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L575",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewfixlines",
-      "target": "src_server_agents_contract_reviewdepthdirective",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_reviewdepthdirective"
     },
     {
       "relation": "calls",
@@ -17911,9 +18272,9 @@
       "source_file": "src/server/agents/contract.ts",
       "source_location": "L488",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_contract_buildreviewcontract",
-      "target": "src_server_agents_contract_buildreviewfixlines",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewfixlines"
     },
     {
       "relation": "imports",
@@ -17922,9 +18283,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract_buildreviewcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildreviewcontract"
     },
     {
       "relation": "calls",
@@ -17944,9 +18305,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract_buildcleancontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildcleancontract"
     },
     {
       "relation": "calls",
@@ -17966,9 +18327,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L30",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_contract_buildaskcontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_contract_buildaskcontract"
     },
     {
       "relation": "calls",
@@ -17987,9 +18348,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L58",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_log",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_log"
     },
     {
       "relation": "contains",
@@ -17997,9 +18358,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L56",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_reclaimoutcome",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_reclaimoutcome"
     },
     {
       "relation": "contains",
@@ -18007,9 +18368,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L61",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_setup_phases",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_setup_phases"
     },
     {
       "relation": "contains",
@@ -18017,9 +18378,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L96",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager"
     },
     {
       "relation": "contains",
@@ -18027,9 +18388,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L70",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanagerconfig",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanagerconfig"
     },
     {
       "relation": "contains",
@@ -18037,9 +18398,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L88",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "contains",
@@ -18047,9 +18408,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L75",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_server_agents_slotmanager_slugify",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slugify"
     },
     {
       "relation": "imports_from",
@@ -18058,9 +18419,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L3",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_shared_constants",
-      "confidence_score": 1.0
+      "target": "src_shared_constants"
     },
     {
       "relation": "imports",
@@ -18069,9 +18430,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L3",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_shared_constants_active_stages",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_active_stages"
     },
     {
       "relation": "imports",
@@ -18080,9 +18441,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L3",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager",
-      "target": "src_shared_constants_column",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_column"
     },
     {
       "relation": "calls",
@@ -18091,9 +18452,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L495",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slugify",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slugify"
     },
     {
       "relation": "calls",
@@ -18102,9 +18463,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L330",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_startworktreesession",
-      "target": "src_server_agents_slotmanager_slugify",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slugify"
     },
     {
       "relation": "calls",
@@ -18113,9 +18474,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L472",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18124,9 +18485,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L917",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18135,9 +18496,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L675",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18146,9 +18507,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L494",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18157,9 +18518,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L851",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18168,9 +18529,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L799",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markreadyforreview",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18179,9 +18540,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1197",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18190,9 +18551,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L429",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18201,9 +18562,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1004",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18212,9 +18573,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L444",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18223,9 +18584,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L232",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "calls",
@@ -18234,9 +18595,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L332",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_startworktreesession",
-      "target": "src_server_agents_slotmanager_slotpath",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotpath"
     },
     {
       "relation": "method",
@@ -18244,9 +18605,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1011",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_abandonticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_abandonticket"
     },
     {
       "relation": "method",
@@ -18254,9 +18615,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L630",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_buildcontractpayload",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_buildcontractpayload"
     },
     {
       "relation": "method",
@@ -18264,9 +18625,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L456",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession"
     },
     {
       "relation": "method",
@@ -18274,9 +18635,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L116",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "method",
@@ -18284,9 +18645,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L952",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_completeask",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_completeask"
     },
     {
       "relation": "method",
@@ -18294,9 +18655,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L120",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_constructor",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_constructor"
     },
     {
       "relation": "method",
@@ -18304,9 +18665,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L897",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_createstealthpr"
     },
     {
       "relation": "method",
@@ -18314,9 +18675,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L622",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_delivercontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_delivercontract"
     },
     {
       "relation": "method",
@@ -18324,9 +18685,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L655",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_donegate",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_donegate"
     },
     {
       "relation": "method",
@@ -18334,9 +18695,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L977",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_donenotifybody",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_donenotifybody"
     },
     {
       "relation": "method",
@@ -18344,9 +18705,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L672",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_finishticket"
     },
     {
       "relation": "method",
@@ -18354,9 +18715,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L107",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_getsetupphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_getsetupphase"
     },
     {
       "relation": "method",
@@ -18364,9 +18725,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1126",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_islaunching",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_islaunching"
     },
     {
       "relation": "method",
@@ -18374,9 +18735,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L485",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_launchinslot"
     },
     {
       "relation": "method",
@@ -18384,9 +18745,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L305",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_listworktreesessions",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_listworktreesessions"
     },
     {
       "relation": "method",
@@ -18394,9 +18755,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L846",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_markdirectpushdone"
     },
     {
       "relation": "method",
@@ -18404,9 +18765,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1031",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_markfailed",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_markfailed"
     },
     {
       "relation": "method",
@@ -18414,9 +18775,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L796",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_markreadyforreview",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_markreadyforreview"
     },
     {
       "relation": "method",
@@ -18424,9 +18785,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L144",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "method",
@@ -18434,9 +18795,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1056",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_recover",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_recover"
     },
     {
       "relation": "method",
@@ -18444,9 +18805,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1142",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunch"
     },
     {
       "relation": "method",
@@ -18454,9 +18815,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1192",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace"
     },
     {
       "relation": "method",
@@ -18464,9 +18825,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L414",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession"
     },
     {
       "relation": "method",
@@ -18474,9 +18835,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L990",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "method",
@@ -18484,9 +18845,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L167",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts"
     },
     {
       "relation": "method",
@@ -18494,9 +18855,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1112",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_retry",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_retry"
     },
     {
       "relation": "method",
@@ -18504,9 +18865,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L436",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown"
     },
     {
       "relation": "method",
@@ -18514,9 +18875,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L111",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_setphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "relation": "method",
@@ -18524,9 +18885,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L608",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_startagentsession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startagentsession"
     },
     {
       "relation": "method",
@@ -18534,9 +18895,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L153",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_startdependents",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startdependents"
     },
     {
       "relation": "method",
@@ -18544,9 +18905,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L205",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_starttestsession"
     },
     {
       "relation": "method",
@@ -18554,9 +18915,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L131",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_startticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "relation": "method",
@@ -18564,9 +18925,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L317",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_startworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startworktreesession"
     },
     {
       "relation": "method",
@@ -18574,9 +18935,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L293",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_stoptestsession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_stoptestsession"
     },
     {
       "relation": "method",
@@ -18584,9 +18945,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L400",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_stopworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_stopworktreesession"
     },
     {
       "relation": "method",
@@ -18594,9 +18955,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1046",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_teardownsessions",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_teardownsessions"
     },
     {
       "relation": "method",
@@ -18604,9 +18965,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1037",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "method",
@@ -18614,9 +18975,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1167",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_tryautoreclaim"
     },
     {
       "relation": "method",
@@ -18624,9 +18985,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L768",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager",
-      "target": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge"
     },
     {
       "relation": "calls",
@@ -18635,9 +18996,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L548",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_setphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "relation": "calls",
@@ -18646,9 +19007,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1202",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "target": "src_server_agents_slotmanager_slotmanager_setphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "relation": "calls",
@@ -18657,9 +19018,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L246",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_setphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "relation": "calls",
@@ -18668,9 +19029,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1179",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "target": "src_server_agents_slotmanager_slotmanager_setphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_setphase"
     },
     {
       "relation": "calls",
@@ -18679,9 +19040,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L626",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_delivercontract",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18690,9 +19051,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L602",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18701,9 +19062,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1032",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markfailed",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18712,9 +19073,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L991",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18723,9 +19084,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L279",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18734,9 +19095,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1185",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "target": "src_server_agents_slotmanager_slotmanager_clearphase",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_clearphase"
     },
     {
       "relation": "calls",
@@ -18745,9 +19106,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L146",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "target": "src_server_agents_slotmanager_slotmanager_startticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "relation": "calls",
@@ -18756,9 +19117,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1153",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunch",
-      "target": "src_server_agents_slotmanager_slotmanager_startticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "relation": "calls",
@@ -18767,9 +19128,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1122",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_retry",
-      "target": "src_server_agents_slotmanager_slotmanager_startticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "relation": "calls",
@@ -18778,9 +19139,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L157",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_startdependents",
-      "target": "src_server_agents_slotmanager_slotmanager_startticket",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startticket"
     },
     {
       "relation": "calls",
@@ -18789,9 +19150,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L141",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_startticket",
-      "target": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_launchinslot"
     },
     {
       "relation": "calls",
@@ -18800,9 +19161,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1028",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_abandonticket",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18811,9 +19172,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L973",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_completeask",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18822,9 +19183,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L943",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18833,9 +19194,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L754",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18844,9 +19205,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L888",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18855,9 +19216,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L300",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_stoptestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18866,9 +19227,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L405",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_stopworktreesession",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18877,9 +19238,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L787",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
-      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_pumpqueue"
     },
     {
       "relation": "calls",
@@ -18888,9 +19249,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L942",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "target": "src_server_agents_slotmanager_slotmanager_startdependents",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startdependents"
     },
     {
       "relation": "calls",
@@ -18899,9 +19260,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L753",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_startdependents",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startdependents"
     },
     {
       "relation": "calls",
@@ -18910,9 +19271,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L887",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "target": "src_server_agents_slotmanager_slotmanager_startdependents",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startdependents"
     },
     {
       "relation": "calls",
@@ -18921,9 +19282,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L192",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts",
-      "target": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_launchinslot"
     },
     {
       "relation": "calls",
@@ -18932,9 +19293,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L172",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -18943,9 +19304,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L775",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
-      "target": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_resolvemergeconflicts"
     },
     {
       "relation": "calls",
@@ -18954,9 +19315,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L286",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -18965,9 +19326,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L220",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_starttestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -18976,9 +19337,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L296",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_stoptestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -18987,9 +19348,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L297",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_stoptestsession",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -18998,9 +19359,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L394",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_startworktreesession",
-      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession"
     },
     {
       "relation": "calls",
@@ -19009,9 +19370,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L403",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_stopworktreesession",
-      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession"
     },
     {
       "relation": "calls",
@@ -19020,9 +19381,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L425",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchworktreesession",
-      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown"
     },
     {
       "relation": "calls",
@@ -19031,9 +19392,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L470",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown"
     },
     {
       "relation": "calls",
@@ -19042,9 +19403,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1001",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_runworktreeteardown"
     },
     {
       "relation": "calls",
@@ -19053,9 +19414,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1062",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_recover",
-      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_cleanupworktreesession"
     },
     {
       "relation": "calls",
@@ -19064,9 +19425,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L600",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_delivercontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_delivercontract"
     },
     {
       "relation": "calls",
@@ -19075,9 +19436,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L489",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_markfailed",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_markfailed"
     },
     {
       "relation": "calls",
@@ -19086,9 +19447,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L594",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_startagentsession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startagentsession"
     },
     {
       "relation": "calls",
@@ -19097,9 +19458,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L535",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_launchinslot",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19108,9 +19469,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1203",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "target": "src_server_agents_slotmanager_slotmanager_startagentsession",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_startagentsession"
     },
     {
       "relation": "calls",
@@ -19119,9 +19480,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L623",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_delivercontract",
-      "target": "src_server_agents_slotmanager_slotmanager_buildcontractpayload",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_buildcontractpayload"
     },
     {
       "relation": "calls",
@@ -19130,9 +19491,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1217",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "target": "src_server_agents_slotmanager_slotmanager_delivercontract",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_delivercontract"
     },
     {
       "relation": "calls",
@@ -19141,9 +19502,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L678",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_donegate",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_donegate"
     },
     {
       "relation": "calls",
@@ -19152,9 +19513,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L751",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_donenotifybody",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_donenotifybody"
     },
     {
       "relation": "calls",
@@ -19163,9 +19524,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L736",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19174,9 +19535,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L691",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19185,9 +19546,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L724",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_finishticket",
-      "target": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge"
     },
     {
       "relation": "calls",
@@ -19196,9 +19557,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L774",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoresolvemerge",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19207,9 +19568,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L809",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markreadyforreview",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19218,9 +19579,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L873",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19229,9 +19590,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L861",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_markdirectpushdone",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19240,9 +19601,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L926",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19251,9 +19612,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L915",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_createstealthpr",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19262,9 +19623,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L961",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_completeask",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19273,9 +19634,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L962",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_completeask",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19284,9 +19645,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1015",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_abandonticket",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19295,9 +19656,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1077",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_recover",
-      "target": "src_server_agents_slotmanager_slotmanager_releaseslot",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_releaseslot"
     },
     {
       "relation": "calls",
@@ -19306,9 +19667,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1017",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_abandonticket",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19317,9 +19678,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1078",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_recover",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19328,9 +19689,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1207",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "target": "src_server_agents_slotmanager_slotmanager_touch",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_touch"
     },
     {
       "relation": "calls",
@@ -19339,9 +19700,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1091",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_recover",
-      "target": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_tryautoreclaim"
     },
     {
       "relation": "references",
@@ -19361,9 +19722,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1118",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_retry",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace"
     },
     {
       "relation": "calls",
@@ -19372,9 +19733,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1145",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunch",
-      "target": "src_server_agents_slotmanager_slotmanager_islaunching",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_islaunching"
     },
     {
       "relation": "calls",
@@ -19383,9 +19744,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1172",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "target": "src_server_agents_slotmanager_slotmanager_islaunching",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_islaunching"
     },
     {
       "relation": "calls",
@@ -19394,9 +19755,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1150",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_relaunch",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace"
     },
     {
       "relation": "calls",
@@ -19405,9 +19766,9 @@
       "source_file": "src/server/agents/slotManager.ts",
       "source_location": "L1183",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_server_agents_slotmanager_slotmanager_tryautoreclaim",
-      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace",
-      "confidence_score": 1.0
+      "target": "src_server_agents_slotmanager_slotmanager_relaunchinplace"
     },
     {
       "relation": "contains",
@@ -19415,9 +19776,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L364",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_active_stages",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_active_stages"
     },
     {
       "relation": "contains",
@@ -19425,9 +19786,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L71",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agent_effort_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agent_effort_labels"
     },
     {
       "relation": "contains",
@@ -19435,9 +19796,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L61",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agent_efforts",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agent_efforts"
     },
     {
       "relation": "contains",
@@ -19445,9 +19806,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L64",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agent_model_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agent_model_labels"
     },
     {
       "relation": "contains",
@@ -19455,9 +19816,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L58",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agent_models",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agent_models"
     },
     {
       "relation": "contains",
@@ -19465,9 +19826,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L62",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agenteffort",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agenteffort"
     },
     {
       "relation": "contains",
@@ -19475,9 +19836,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L59",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_agentmodel",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_agentmodel"
     },
     {
       "relation": "contains",
@@ -19485,9 +19846,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L515",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_automation_run_statuses",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_automation_run_statuses"
     },
     {
       "relation": "contains",
@@ -19495,9 +19856,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L510",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_automation_trigger_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_automation_trigger_labels"
     },
     {
       "relation": "contains",
@@ -19505,9 +19866,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L507",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_automation_triggers",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_automation_triggers"
     },
     {
       "relation": "contains",
@@ -19515,9 +19876,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L516",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_automationrunstatus",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_automationrunstatus"
     },
     {
       "relation": "contains",
@@ -19525,9 +19886,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L508",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_automationtrigger",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_automationtrigger"
     },
     {
       "relation": "contains",
@@ -19535,9 +19896,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L267",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_effort_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_effort_labels"
     },
     {
       "relation": "contains",
@@ -19545,9 +19906,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L264",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_efforts",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_efforts"
     },
     {
       "relation": "contains",
@@ -19555,9 +19916,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L280",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_model_efforts",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_model_efforts"
     },
     {
       "relation": "contains",
@@ -19565,9 +19926,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L251",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_model_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_model_labels"
     },
     {
       "relation": "contains",
@@ -19575,9 +19936,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L248",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_models",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_models"
     },
     {
       "relation": "contains",
@@ -19585,9 +19946,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L160",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codex_seed_profile",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codex_seed_profile"
     },
     {
       "relation": "contains",
@@ -19595,9 +19956,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L265",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codexeffort",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codexeffort"
     },
     {
       "relation": "contains",
@@ -19605,9 +19966,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L249",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_codexmodel",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_codexmodel"
     },
     {
       "relation": "contains",
@@ -19615,9 +19976,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L13",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_column",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_column"
     },
     {
       "relation": "contains",
@@ -19625,9 +19986,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L15",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_column_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_column_labels"
     },
     {
       "relation": "contains",
@@ -19635,9 +19996,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L28",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_column_order",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_column_order"
     },
     {
       "relation": "contains",
@@ -19645,9 +20006,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L42",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_column_sort_field",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_column_sort_field"
     },
     {
       "relation": "contains",
@@ -19655,9 +20016,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L1",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_columns",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_columns"
     },
     {
       "relation": "contains",
@@ -19665,9 +20026,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L391",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_comment_authors",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_comment_authors"
     },
     {
       "relation": "contains",
@@ -19675,9 +20036,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L392",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_commentauthor",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_commentauthor"
     },
     {
       "relation": "contains",
@@ -19685,9 +20046,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L111",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_commit_language_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_commit_language_labels"
     },
     {
       "relation": "contains",
@@ -19695,9 +20056,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L108",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_commit_languages",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_commit_languages"
     },
     {
       "relation": "contains",
@@ -19705,9 +20066,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L109",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_commitlanguage",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_commitlanguage"
     },
     {
       "relation": "contains",
@@ -19715,9 +20076,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L173",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_default_profiles",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_default_profiles"
     },
     {
       "relation": "contains",
@@ -19725,9 +20086,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L389",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_failure_columns",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_failure_columns"
     },
     {
       "relation": "contains",
@@ -19735,9 +20096,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L81",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_implementer",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_implementer"
     },
     {
       "relation": "contains",
@@ -19745,9 +20106,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L83",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_implementer_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_implementer_labels"
     },
     {
       "relation": "contains",
@@ -19755,9 +20116,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L80",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_implementers",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_implementers"
     },
     {
       "relation": "contains",
@@ -19765,9 +20126,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L103",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_isallowedagentpair",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_isallowedagentpair"
     },
     {
       "relation": "contains",
@@ -19775,9 +20136,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L231",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_kind",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_kind"
     },
     {
       "relation": "contains",
@@ -19785,9 +20146,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L230",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_kinds",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_kinds"
     },
     {
       "relation": "contains",
@@ -19795,9 +20156,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L91",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_orchestrator",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_orchestrator"
     },
     {
       "relation": "contains",
@@ -19805,9 +20166,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L93",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_orchestrator_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_orchestrator_labels"
     },
     {
       "relation": "contains",
@@ -19815,9 +20176,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L90",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_orchestrators",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_orchestrators"
     },
     {
       "relation": "contains",
@@ -19825,9 +20186,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L292",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_pairedcodexeffort",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_pairedcodexeffort"
     },
     {
       "relation": "contains",
@@ -19835,9 +20196,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L143",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_profileconfig",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_profileconfig"
     },
     {
       "relation": "contains",
@@ -19845,9 +20206,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L396",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_resolveslotcount",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_resolveslotcount"
     },
     {
       "relation": "contains",
@@ -19855,9 +20216,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L319",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_review_depth_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_review_depth_labels"
     },
     {
       "relation": "contains",
@@ -19865,9 +20226,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L316",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_review_depths",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_review_depths"
     },
     {
       "relation": "contains",
@@ -19875,9 +20236,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L317",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_reviewdepth",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_reviewdepth"
     },
     {
       "relation": "contains",
@@ -19885,9 +20246,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L404",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_slot_count",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_slot_count"
     },
     {
       "relation": "contains",
@@ -19895,9 +20256,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L338",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_stage",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_stage"
     },
     {
       "relation": "contains",
@@ -19905,9 +20266,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L340",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_stage_labels",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_stage_labels"
     },
     {
       "relation": "contains",
@@ -19915,9 +20276,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L324",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_stages",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_stages"
     },
     {
       "relation": "contains",
@@ -19925,9 +20286,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L382",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_success_columns",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_success_columns"
     },
     {
       "relation": "contains",
@@ -19935,9 +20296,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L356",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_terminal_stages",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_terminal_stages"
     },
     {
       "relation": "contains",
@@ -19945,9 +20306,9 @@
       "source_file": "src/shared/constants.ts",
       "source_location": "L375",
       "weight": 1.0,
+      "confidence_score": 1.0,
       "source": "src_shared_constants",
-      "target": "src_shared_constants_triage_verdicts",
-      "confidence_score": 1.0
+      "target": "src_shared_constants_triage_verdicts"
     },
     {
       "relation": "contains",
@@ -21829,50 +22190,6 @@
       "target": "src_server_agents_sessionhub_sessionhub_appendtranscript"
     },
     {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.test.ts",
-      "source_location": "L6",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_test",
-      "target": "src_server_agents_sessionconfig"
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.test.ts",
-      "source_location": "L6",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_test",
-      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig"
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.test.ts",
-      "source_location": "L6",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_test",
-      "target": "src_server_agents_sessionconfig_buildsplitsessionconfig"
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.test.ts",
-      "source_location": "L6",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_test",
-      "target": "src_server_agents_sessionconfig_buildtriagesessionconfig"
-    },
-    {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "src/server/agents/sessionConfig.test.ts",
@@ -21881,323 +22198,6 @@
       "confidence_score": 1.0,
       "source": "src_server_agents_sessionconfig_test",
       "target": "src_server_agents_sessionconfig_test_implementconfig"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.test.ts",
-      "source_location": "L16",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_test_implementconfig",
-      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L236",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_bash_allowlist"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L217",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L340",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_buildimplementsessionconfig"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L181",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_buildsplitsessionconfig"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L134",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_buildtriagesessionconfig"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L332",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_codexknobs"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L49",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_contract_skills"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L80",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_denied_builtin_agents"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L104",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_feasibilityscoutagent"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L209",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_feasibilitysessioninput"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L61",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_figma_readonly_tools"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L28",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_implementer_safe_tools"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L301",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_implementeragent"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L321",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_implementsessioninput"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L52",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_no_skills"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L311",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_prfixeragent"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L74",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_readonly_fanout_disallowed"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L72",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_readonly_plain_disallowed"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L70",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_readonly_tools"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L84",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_scout_disallowed"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L83",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_scout_tools"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L113",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_solutionsscoutagent"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L171",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_splitsessioninput"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L122",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig",
-      "target": "src_server_agents_sessionconfig_triagesessioninput"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L230",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildfeasibilitysessionconfig",
-      "target": "src_server_agents_sessionconfig_feasibilityscoutagent"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L165",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildtriagesessionconfig",
-      "target": "src_server_agents_sessionconfig_feasibilityscoutagent"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L166",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildtriagesessionconfig",
-      "target": "src_server_agents_sessionconfig_solutionsscoutagent"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L373",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
-      "target": "src_server_agents_sessionconfig_implementeragent"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L374",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
-      "target": "src_server_agents_sessionconfig_prfixeragent"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "src/server/agents/sessionConfig.ts",
-      "source_location": "L345",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "src_server_agents_sessionconfig_buildimplementsessionconfig",
-      "target": "src_server_agents_sessionconfig_codexknobs"
     },
     {
       "relation": "contains",
@@ -56271,5 +56271,5 @@
       "source_file": "AGENTS.md"
     }
   ],
-  "built_at_commit": "19410d034f8a5481d67d731f8a160ecbae691f2b"
+  "built_at_commit": "443ed217b638b4f2eaed73d6211fe7470fea918b"
 }

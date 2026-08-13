@@ -276,6 +276,7 @@ const BASH_ALLOWLIST = [
   "Bash(head:*)",
   "Bash(wc:*)",
   "Bash(mktemp:*)",
+  "Bash(mkdir:*)",
   "Bash(echo:*)",
 ];
 

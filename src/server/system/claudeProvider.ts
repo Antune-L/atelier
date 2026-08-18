@@ -25,6 +25,7 @@ import type {
   AgentTurnUsage,
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
+import { envWithProjectNode } from "./nvmNode.ts";
 
 const MCP_SERVER_NAME = "kanban";
 /** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
@@ -155,7 +156,8 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     mcpServers: { [MCP_SERVER_NAME]: mcpServer, ...extraMcpServers },
     allowedTools: [...workerToolNames(), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
-    env: { ...process.env },
+    // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
+    env: envWithProjectNode(opts.cwd),
     stderr: () => {},
     hooks: { PreToolUse: [{ matcher: "Bash", hooks: [denyNoVerifyHook] }] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),

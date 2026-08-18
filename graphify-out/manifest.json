@@ -765,8 +765,8 @@
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
-    "mtime": 1787052544.0118663,
-    "ast_hash": "4dabd5684d1190786a6723b8ea78c023",
+    "mtime": 1787055593.4728684,
+    "ast_hash": "8ff168680a4f089300b77b709c498f9e",
     "semantic_hash": ""
   },
   "src/server/agents/split.ts": {
@@ -947,6 +947,11 @@
   "docs/development.md": {
     "mtime": 1783782823.4126024,
     "ast_hash": "02b16953f1d5880a78d7041e7113753f",
+    "semantic_hash": ""
+  },
+  "src/server/system/nvmNode.ts": {
+    "mtime": 1787055626.8010926,
+    "ast_hash": "ad09fb696ed67580bfb90a3ac68bf560",
     "semantic_hash": ""
   }
 }

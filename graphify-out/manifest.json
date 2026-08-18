@@ -55,8 +55,8 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1786463275.1323721,
-    "ast_hash": "49b7457819e0714454e8d3e44a41e256",
+    "mtime": 1787052610.2663035,
+    "ast_hash": "54c9409961131a6c00fdc17f23422586",
     "semantic_hash": ""
   },
   "src/server/agents/coordinator.ts": {
@@ -745,13 +745,13 @@
     "semantic_hash": "950c44aa9b25072bf628a5fab08ce4e1"
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1785162188.3691993,
-    "ast_hash": "9f30361850b25f66fa441b9242605364",
+    "mtime": 1787052534.1728377,
+    "ast_hash": "4ac8b8d6e9282765252825fbf229f16e",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
-    "mtime": 1783627728.9952247,
-    "ast_hash": "6ff65093be2b84f36e2e7f3e8f3ab62b",
+    "mtime": 1787052515.3491502,
+    "ast_hash": "54f7278da1283339899b27a8ef962a31",
     "semantic_hash": ""
   },
   "src/server/system/claudeBinary.ts": {
@@ -760,13 +760,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.ts": {
-    "mtime": 1786623461.6658509,
-    "ast_hash": "d64aa948c9403bee2bd0c47c534d91d2",
+    "mtime": 1787052627.0577288,
+    "ast_hash": "437449de97d0acc70ba3eccab8ed9bb4",
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
-    "mtime": 1783629365.1498826,
-    "ast_hash": "5034a94c9b6fa86ab5ee6730b4d0a78a",
+    "mtime": 1787052544.0118663,
+    "ast_hash": "4dabd5684d1190786a6723b8ea78c023",
     "semantic_hash": ""
   },
   "src/server/agents/split.ts": {
@@ -875,8 +875,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.test.ts": {
-    "mtime": 1784624681.8326142,
-    "ast_hash": "5524719f439bcaa0efe37bec22bb46d1",
+    "mtime": 1787052665.4482446,
+    "ast_hash": "4737b272423128292f013df08bde853d",
     "semantic_hash": ""
   },
   "src/server/agents/usage.ts": {

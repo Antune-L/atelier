@@ -130,6 +130,15 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   ];
 }
 
+/** Step 5b (optional): mandatory end-to-end functional verification of the feature, before the PR. */
+function buildVerifyStep(ticket: Ticket): string {
+  const browserHint =
+    ticket.orchestrator === "codex"
+      ? "via un navigateur si tu en as un, ou en exerçant le code/CLI/endpoint concerné sinon"
+      : "pour un changement frontend, utilise le navigateur headless des outils MCP Playwright de la session (namespace `mcp__playwright` : browser_navigate, browser_snapshot, browser_click…) contre un serveur de dev lancé sur un port libre ; sinon exerce le code/CLI/endpoint concerné";
+  return `5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (${browserHint}). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie.`;
+}
+
 /** Step 5c (optional): mandatory visual diff against referenced mockups, before opening the PR. */
 function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): string {
   if (!verifyWithMockups) return "";
@@ -278,6 +287,7 @@ export function buildTicketContract(
     "## Description",
     ticket.description || "(vide)",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
+    "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé.",
     "",
     buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
@@ -303,9 +313,7 @@ export function buildTicketContract(
       "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
       `   Note serveur/DB : si tu dois lancer un serveur pour les tests, utilise un port libre (pas le port par défaut de l'app — trouve-en un avec \`lsof\`/\`ss\` ou laisse l'OS en assigner un) et une base de données isolée et vierge (ex. \`/tmp/test-${ticket.id}.db\` — jamais \`kanban.db\` ni \`kanban-real.db\`). Si le schéma DB a changé, initialise/migre la DB de test avant de lancer les tests.`,
     ].join("\n"),
-    wantsVerify
-      ? "5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (via Playwright/navigateur pour un changement frontend, ou en exerçant le code/CLI/endpoint concerné sinon). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie."
-      : "",
+    wantsVerify ? buildVerifyStep(ticket) : "",
     buildMockupReviewStep(ticket, verifyWithMockups),
     finalizationStep,
     noPr

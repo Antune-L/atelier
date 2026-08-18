@@ -15,7 +15,7 @@ import {
 import type { Orchestrator } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
-import type { AgentSubagentDefinition } from "../system/agentSession.ts";
+import type { AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
 import type { SessionStartConfig } from "./sessionHub.ts";
 
@@ -66,8 +66,39 @@ const FIGMA_READONLY_TOOLS = [
   "mcp__plugin_figma_figma__get_figjam",
 ];
 
+/**
+ * Read-only Slack MCP tools (claude.ai connector, merged via the provider's `user` settingSource when
+ * the host account has the Slack connector active). Lets sessions consult Slack threads/canvases
+ * referenced in tickets; every write-capable tool (send_message, create_canvas, add_reaction…) stays
+ * denied under `dontAsk`. Like the Figma tools these load deferred, behind `ToolSearch`.
+ */
+const SLACK_READONLY_TOOLS = [
+  "mcp__claude_ai_Slack__slack_read_channel",
+  "mcp__claude_ai_Slack__slack_read_thread",
+  "mcp__claude_ai_Slack__slack_read_canvas",
+  "mcp__claude_ai_Slack__slack_read_file",
+  "mcp__claude_ai_Slack__slack_read_user_profile",
+  "mcp__claude_ai_Slack__slack_search_channels",
+  "mcp__claude_ai_Slack__slack_search_public",
+  "mcp__claude_ai_Slack__slack_search_public_and_private",
+  "mcp__claude_ai_Slack__slack_search_users",
+  "mcp__claude_ai_Slack__slack_list_channel_members",
+  "mcp__claude_ai_Slack__slack_get_reactions",
+];
+
+/**
+ * Headless isolated browser for the mandatory functional-verification step (5b) of verifyFeature
+ * tickets. `--isolated` keeps profile state per session so parallel slots never share a browser;
+ * Chromium must be pre-installed once (`npx playwright install chromium`) or the first session pays
+ * the download.
+ */
+const PLAYWRIGHT_MCP_SERVER: StdioMcpServerDefinition = {
+  command: "npx",
+  args: ["-y", "@playwright/mcp", "--isolated", "--headless"],
+};
+
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */
-const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS];
+const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS, ...SLACK_READONLY_TOOLS];
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
 const READONLY_PLAIN_DISALLOWED = ["Edit", "Write", "Bash", "Task", "Agent"];
 /** Tools removed from a fan-out read-only session: no writes, no built-in `Task` (scouts go via `Agent`). */
@@ -80,23 +111,24 @@ const READONLY_FANOUT_DISALLOWED = ["Edit", "Write", "Bash", "Task"];
 const DENIED_BUILTIN_AGENTS = ["general-purpose", "Explore", "Plan"];
 
 /** Read-only scout tool bounds: the inline sub-agents cannot write, run bash, or recurse. */
-const SCOUT_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS];
+const SCOUT_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS, ...SLACK_READONLY_TOOLS];
 const SCOUT_DISALLOWED = ["Task", "Agent", "Bash", "Edit", "Write"];
 
 const FIGMA_TOOLS_HINT =
   "Si le ticket référence un lien figma.com, consulte la maquette via les outils MCP Figma de " +
   "lecture (get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`, à charger " +
-  "via ta recherche de tools s'ils sont différés).";
+  "via ta recherche de tools s'ils sont différés). De même, un lien slack.com se consulte via les " +
+  "outils MCP Slack de lecture (slack_read_thread, slack_read_channel — namespace `mcp__claude_ai_Slack`).";
 
 const FEASIBILITY_SCOUT_PROMPT =
   "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
-  "MCP Figma de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
+  "MCP Figma/Slack de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
   `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Évalue le ticket ` +
   "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.";
 
 const SOLUTIONS_SCOUT_PROMPT =
   "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
-  "MCP Figma de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
+  "MCP Figma/Slack de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
   `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Pour le ticket ` +
   "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
   "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).";
@@ -368,11 +400,18 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     effort: ticket.effort ?? MODELS.implementEffort,
     permissionMode: "dontAsk",
     permissionAllow: [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`],
-    allowedTools: IMPLEMENTER_SAFE_TOOLS,
+    allowedTools: [
+      ...IMPLEMENTER_SAFE_TOOLS,
+      "ToolSearch",
+      ...SLACK_READONLY_TOOLS,
+      // "mcp__playwright" (server-level rule) allows every tool of the attached Playwright server.
+      ...(ticket.verifyFeature ? ["mcp__playwright"] : []),
+    ],
     skills: CONTRACT_SKILLS,
     agents: {
       implementer: implementerAgent(implementerModel, implementerEffort),
       "pr-fixer": prFixerAgent(implementerModel, implementerEffort),
     },
+    ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),
   };
 }

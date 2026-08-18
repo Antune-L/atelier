@@ -21,6 +21,7 @@ import type {
   AgentSessionHandle,
   AgentSubagentDefinition,
   AgentTurnUsage,
+  StdioMcpServerDefinition,
 } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
@@ -52,6 +53,8 @@ export interface SessionStartConfig {
   agents?: Record<string, AgentSubagentDefinition>;
   /** Skills enabled for the session (SDK `skills` filter): `[]` loads none, a list scopes context to those. */
   skills?: string[];
+  /** Additional stdio MCP servers for the session (e.g. Playwright for verify tickets). Claude only. */
+  extraMcpServers?: Record<string, StdioMcpServerDefinition>;
 }
 
 export interface SessionToolCall {
@@ -201,6 +204,7 @@ export class SessionHub {
       ...(config.disallowedTools ? { disallowedTools: config.disallowedTools } : {}),
       ...(config.skills ? { skills: config.skills } : {}),
       ...(config.agents ? { agents: config.agents } : {}),
+      ...(config.extraMcpServers ? { extraMcpServers: config.extraMcpServers } : {}),
       onToolCall: (name, args) => this.routeToolCall(config.ticketId, config.slotId, name, args),
       onEvent: (event) => this.handleEvent(config.ticketId, config.slotId, event),
     });

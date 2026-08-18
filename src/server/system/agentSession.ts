@@ -53,6 +53,13 @@ export interface AgentSubagentDefinition {
   effort?: string;
 }
 
+/** Stdio-spawned MCP server attached to one session (e.g. the Playwright browser for verify tickets). */
+export interface StdioMcpServerDefinition {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+}
+
 export interface AgentSessionOptions {
   ticketId: string;
   slotId: number;
@@ -103,6 +110,11 @@ export interface AgentSessionOptions {
   disallowedTools?: string[];
   /** Programmatic subagents forwarded to the SDK `agents` option. */
   agents?: Record<string, AgentSubagentDefinition>;
+  /**
+   * Additional stdio MCP servers merged into the session alongside the in-process worker server
+   * (e.g. Playwright for verify tickets). Honored by claudeProvider; codexProvider ignores it.
+   */
+  extraMcpServers?: Record<string, StdioMcpServerDefinition>;
   /**
    * Skills to enable for the session (SDK `skills` filter). Restricts which discovered skills load into
    * context — `[]` loads none, omitted loads every discovered skill. Discovery itself is driven by the

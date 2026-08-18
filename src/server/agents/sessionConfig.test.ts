@@ -97,6 +97,17 @@ describe("read-only triage/split sessions", () => {
       "mcp__plugin_figma_figma__get_metadata",
       "mcp__plugin_figma_figma__get_variable_defs",
       "mcp__plugin_figma_figma__get_figjam",
+      "mcp__claude_ai_Slack__slack_read_channel",
+      "mcp__claude_ai_Slack__slack_read_thread",
+      "mcp__claude_ai_Slack__slack_read_canvas",
+      "mcp__claude_ai_Slack__slack_read_file",
+      "mcp__claude_ai_Slack__slack_read_user_profile",
+      "mcp__claude_ai_Slack__slack_search_channels",
+      "mcp__claude_ai_Slack__slack_search_public",
+      "mcp__claude_ai_Slack__slack_search_public_and_private",
+      "mcp__claude_ai_Slack__slack_search_users",
+      "mcp__claude_ai_Slack__slack_list_channel_members",
+      "mcp__claude_ai_Slack__slack_get_reactions",
     ];
 
     const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "sonnet", effort: "low", deep: false, driver: "claude" });

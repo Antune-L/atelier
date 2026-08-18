@@ -132,6 +132,16 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   );
   const mcpServer = createSdkMcpServer({ name: MCP_SERVER_NAME, version: "0.0.0", tools });
 
+  const extraMcpServers: NonNullable<Options["mcpServers"]> = {};
+  for (const [name, def] of Object.entries(opts.extraMcpServers ?? {})) {
+    extraMcpServers[name] = {
+      type: "stdio",
+      command: def.command,
+      ...(def.args ? { args: def.args } : {}),
+      ...(def.env ? { env: def.env } : {}),
+    };
+  }
+
   const sdkEffort = toSdkEffort(opts.effort);
   const queryOptions: Options = {
     cwd: opts.cwd,
@@ -142,7 +152,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) into the session.
     settingSources: ["user", "project"],
     permissionMode: opts.permissionMode,
-    mcpServers: { [MCP_SERVER_NAME]: mcpServer },
+    mcpServers: { [MCP_SERVER_NAME]: mcpServer, ...extraMcpServers },
     allowedTools: [...workerToolNames(), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
     env: { ...process.env },

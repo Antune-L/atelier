@@ -5,6 +5,7 @@ import {
   AGENT_MODEL_LABELS,
   CODEX_EFFORT_LABELS,
   CODEX_MODEL_LABELS,
+  FEASIBILITY_ENGINE_LABELS,
   IMPLEMENTER_LABELS,
   ORCHESTRATOR_LABELS,
   REVIEW_DEPTH_LABELS,
@@ -27,6 +28,19 @@ function labelWithDefault<T extends string>(
   if (value) return labels[value];
   const parsed = schema.safeParse(rawDefault);
   return parsed.success ? `Défaut (${labels[parsed.data]})` : "Défaut";
+}
+
+function inheritedLabel<T extends string>(
+  value: T | null,
+  inheritedValue: T | null,
+  rawDefault: string,
+  schema: z.ZodType<T>,
+  labels: Record<T, string>,
+): string {
+  if (value) return labels[value];
+  if (inheritedValue) return `Hérité (${labels[inheritedValue]})`;
+  const parsed = schema.safeParse(rawDefault);
+  return parsed.success ? `Hérité (${labels[parsed.data]})` : "Hérité";
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -91,6 +105,23 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
     codexEffortSchema,
     CODEX_EFFORT_LABELS,
   );
+  const codexImplementerModelValue = inheritedLabel(
+    ticket.codexImplementerModel,
+    ticket.codexModel,
+    defaultCodexModel,
+    codexModelSchema,
+    CODEX_MODEL_LABELS,
+  );
+  const codexImplementerEffortValue = inheritedLabel(
+    ticket.codexImplementerEffort,
+    ticket.codexEffort,
+    defaultCodexEffort,
+    codexEffortSchema,
+    CODEX_EFFORT_LABELS,
+  );
+  const codexImplementerFastValue = ticket.codexImplementerFast === null
+    ? `Hérité (${ticket.codexFast ? YES : NO})`
+    : ticket.codexImplementerFast ? YES : NO;
 
   return (
     <details className="rounded-md border bg-muted/30 p-3">
@@ -99,11 +130,18 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
       </summary>
       <dl className="mt-3 space-y-2">
         <Row label="Orchestrateur" value={ORCHESTRATOR_LABELS[ticket.orchestrator]} />
+        {ticket.feasibilityEngine !== null && (
+          <Row
+            label="Modèle d'analyse"
+            value={FEASIBILITY_ENGINE_LABELS[ticket.feasibilityEngine]}
+          />
+        )}
         {/* A Codex-orchestrated ticket ignores the Claude orchestrator knobs: its own model/effort pair drives the session. */}
         {isCodex ? (
           <>
             <Row label="Modèle (Codex)" value={codexModelValue} />
             <Row label="Effort (Codex)" value={codexEffortValue} />
+            <Row label="Mode FAST" value={ticket.codexFast ? YES : NO} />
           </>
         ) : (
           <>
@@ -163,8 +201,16 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             {/* Claude orchestrator + Codex implementer: the codex knobs drive the delegated child session. */}
             {!isCodex && ticket.implementer === "codex" && (
               <>
-                <Row label="Modèle (Codex délégué)" value={codexModelValue} />
-                <Row label="Effort (Codex délégué)" value={codexEffortValue} />
+                <Row label="Modèle (Codex délégué)" value={codexImplementerModelValue} />
+                <Row label="Effort (Codex délégué)" value={codexImplementerEffortValue} />
+                <Row label="Mode FAST (Codex délégué)" value={codexImplementerFastValue} />
+              </>
+            )}
+            {isCodex && ticket.implementer === "codex" && (
+              <>
+                <Row label="Modèle (implémenteur Codex)" value={codexImplementerModelValue} />
+                <Row label="Effort (implémenteur Codex)" value={codexImplementerEffortValue} />
+                <Row label="Mode FAST (implémenteur Codex)" value={codexImplementerFastValue} />
               </>
             )}
             <Row label="PRD" value={ticket.prdEnabled ? YES : NO} />

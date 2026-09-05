@@ -8,6 +8,7 @@ import { createLogger } from "../logger.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
 import { buildSplitSessionConfig } from "./sessionConfig.ts";
+import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { buildSplitChannelPrompt } from "./split.ts";
 
@@ -68,7 +69,12 @@ export class SplitManager {
 
     const splitLanguage = this.store.getAppSettings().triageLanguage;
     // A codex-orchestrated ticket splits on Codex too (its knobs), so Claude never enters its pipeline.
-    const driver = ticket.orchestrator;
+    const execution = resolveTicketExecution(ticket, "split", {
+      model: MODELS.triage,
+      effort: MODELS.triageEffort,
+    });
+    await assertExecutionAvailable(this.system, execution);
+    const driver = execution.provider;
     const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
 
     return new Promise<SplitResult>((resolve, reject) => {
@@ -77,10 +83,12 @@ export class SplitManager {
           buildSplitSessionConfig({
             ticketId,
             cwd: project.repoPath,
-            model: driver === "codex" ? ticket.codexModel ?? MODELS.codexModel : MODELS.triage,
-            effort: driver === "codex" ? ticket.codexEffort ?? MODELS.codexEffort : MODELS.triageEffort,
+            model: execution.model,
+            effort: execution.effort,
+            serviceTier: execution.serviceTier,
             driver,
           }),
+          { onFailure: (reason) => this.failPending(ticketId, reason) },
         );
         this.sessionHub.sendEvent(ticketId, { type: "ticket", payload: prompt });
         const timer = setTimeout(() => {
@@ -98,16 +106,22 @@ export class SplitManager {
   /** Worker submitted its decomposition: tear the session down and resolve the pending promise. */
   async complete(ticketId: string, result: SplitResult): Promise<void> {
     const entry = this.pending.get(ticketId);
-    this.cleanup(ticketId);
+    this.cleanup(ticketId, "completed");
     if (entry) entry.resolve(result);
     log.info("split terminé", { ticketId, children: result.children.length });
   }
 
   /** Stop the SDK session and clear the pending entry/timeout. Idempotent. */
-  private cleanup(ticketId: string): void {
+  private failPending(ticketId: string, reason: string): void {
+    const entry = this.pending.get(ticketId);
+    this.cleanup(ticketId, "failed");
+    entry?.reject(new Error(reason));
+  }
+
+  private cleanup(ticketId: string, status: "completed" | "failed" | "cancelled" = "cancelled"): void {
     const entry = this.pending.get(ticketId);
     if (entry) clearTimeout(entry.timer);
     this.pending.delete(ticketId);
-    this.sessionHub.disconnect(ticketId);
+    this.sessionHub.disconnect(ticketId, status);
   }
 }

@@ -24,18 +24,49 @@ export interface AgentTurnUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  costUsd: number;
+  /** Provider-reported cost, or null when the provider does not expose one. */
+  costUsd: number | null;
+}
+
+export type AgentSessionRole =
+  | "orchestrator"
+  | "implementer"
+  | "triage"
+  | "feasibility"
+  | "split"
+  | "scout"
+  | "reviewer"
+  | "one-shot";
+
+export interface AgentStreamBlock {
+  itemId: string;
+  mode: "delta" | "snapshot";
 }
 
 /** Parsed events surfaced from the SDK message stream to the backend (UI streaming + lifecycle). */
-export type AgentSessionEvent =
-  | { type: "init"; sessionId: string }
-  | { type: "assistant_text"; text: string }
-  | { type: "thinking"; text: string }
+export type AgentSessionEvent = (
+  | { type: "init"; sessionId: string; configuredServiceTier?: string | null }
+  | { type: "assistant_text"; text: string; stream?: AgentStreamBlock }
+  | { type: "thinking"; text: string; stream?: AgentStreamBlock }
   | { type: "tool_use"; name: string; input: unknown }
-  | { type: "turn_end"; ok: boolean; subtype: string; sessionId: string; usageByModel: Record<string, AgentTurnUsage> }
+  | { type: "progress"; kind: "command" | "file_change" | "mcp" | "plan" | "subagent"; message: string; stream?: AgentStreamBlock }
+  | {
+      type: "message_status";
+      messageId: string;
+      status: "received" | "accepted" | "rejected";
+      turnId: string | null;
+    }
+  | {
+      type: "turn_end";
+      ok: boolean;
+      subtype: string;
+      sessionId: string;
+      usageByModel: Record<string, AgentTurnUsage>;
+      turnId?: string | null;
+    }
   | { type: "rate_limit"; status: string; resetsAt: number | null }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+) & { sourceId?: string };
 
 /**
  * SDK permission modes the backend uses (subset of the SDK's full set). `dontAsk` mirrors the old
@@ -51,14 +82,32 @@ export interface AgentSubagentDefinition {
   disallowedTools?: string[];
   model?: string;
   effort?: string;
+  serviceTier?: "default" | "fast";
+  readOnly?: boolean;
+  role?: AgentSessionRole;
 }
 
 /** Stdio-spawned MCP server attached to one session (e.g. the Playwright browser for verify tickets). */
 export interface StdioMcpServerDefinition {
+  type?: "stdio";
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  enabledTools?: string[];
+  disabledTools?: string[];
 }
+
+/** Streamable-HTTP MCP server attached to one session. Secret values come from the process env. */
+export interface HttpMcpServerDefinition {
+  type: "http";
+  url: string;
+  bearerTokenEnvVar?: string;
+  envHttpHeaders?: Record<string, string>;
+  enabledTools?: string[];
+  disabledTools?: string[];
+}
+
+export type AgentMcpServerDefinition = StdioMcpServerDefinition | HttpMcpServerDefinition;
 
 export interface AgentSessionOptions {
   ticketId: string;
@@ -66,10 +115,16 @@ export interface AgentSessionOptions {
   cwd: string;
   /** Which provider drives this session. Triage/split/feasibility sessions are always "claude". */
   provider: Extract<Implementer, "claude" | "codex">;
+  /** Runtime role used to scope tools and credentials. */
+  role?: AgentSessionRole;
+  /** Monotonic owner generation. SessionHub ignores callbacks from stale generations. */
+  generation?: number;
   /** Model alias for the session (SDK `model`). */
   model: string;
   /** Reasoning effort, or null for the model default. */
   effort: string | null;
+  /** Explicit Codex processing tier; `default` prevents inherited machine FAST settings. */
+  serviceTier?: "default" | "fast";
   permissionMode: AgentPermissionMode;
   /**
    * Structurally read-only session. Codex maps it to its `read-only` sandbox (any write is blocked
@@ -111,10 +166,9 @@ export interface AgentSessionOptions {
   /** Programmatic subagents forwarded to the SDK `agents` option. */
   agents?: Record<string, AgentSubagentDefinition>;
   /**
-   * Additional stdio MCP servers merged into the session alongside the in-process worker server
-   * (e.g. Playwright for verify tickets). Honored by claudeProvider; codexProvider ignores it.
+   * Additional MCP servers merged into the session alongside the worker server.
    */
-  extraMcpServers?: Record<string, StdioMcpServerDefinition>;
+  extraMcpServers?: Record<string, AgentMcpServerDefinition>;
   /**
    * Skills to enable for the session (SDK `skills` filter). Restricts which discovered skills load into
    * context — `[]` loads none, omitted loads every discovered skill. Discovery itself is driven by the
@@ -131,11 +185,14 @@ export interface AgentSessionOptions {
 export interface AgentSessionHandle {
   readonly ticketId: string;
   /** Inject a user turn into the live session (contract / answer / nudge / user_comment). */
-  send(content: string): void;
+  /** Queue one identified user message and return its client id. */
+  send(content: string, messageId?: string): string;
   /** Preempt the current turn (best-effort; surfaces as a non-success turn_end). */
   interrupt(): Promise<void>;
   /** Stop the session and release the subprocess. Idempotent. */
   close(): Promise<void>;
+  /** Immediately revoke tools and terminate the provider when graceful cleanup exceeds its deadline. */
+  dispose?(): void;
 }
 
 /**

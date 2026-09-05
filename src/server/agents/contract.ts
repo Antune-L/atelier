@@ -24,8 +24,7 @@ function commitLanguageDirective(language: CommitLanguage): string {
 
 /**
  * Builds the `implementing` step(s) of the contract. Five modes:
- * a Codex orchestrator implements inline in the SAME session (no sub-agent — Codex has no Agent
- * tool); a Codex implementer under Claude goes through the backend-delegated child session
+ * Codex implementation goes through a backend-owned fresh-context child session;
  * (`delegate_implementation` tool, resumed by the `implementation_done` event); Composer delegates
  * code-writing to Cursor headless; a PRD-enabled Claude ticket delegates it to a fresh-context
  * sub-agent (kept separate from the planning session, with the validated PRD as its contract);
@@ -36,22 +35,12 @@ function buildImplementingSteps(
   opts: { composerScriptPath: string },
   prdPath: string,
 ): string[] {
-  if (ticket.orchestrator === "codex") {
-    if (ticket.prdEnabled) {
-      return [
-        "2. implementing :",
-        `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est ta source de vérité pour l'implémentation.`,
-        "   b. Implémente intégralement la fonctionnalité décrite, dans le worktree courant.",
-      ];
-    }
-    return ["2. implementing : implémente intégralement la fonctionnalité décrite dans la description du ticket, dans le worktree courant."];
-  }
   if (ticket.implementer === "codex") {
     const planSource = ticket.prdEnabled
       ? "le PRD validé tel quel"
       : "un plan concis et complet rédigé depuis la description du ticket";
     return [
-      "2. implementing (délégué à une session Codex en arrière-plan) :",
+      "2. implementing (délégué à une session Codex indépendante en arrière-plan) :",
       ...(ticket.prdEnabled
         ? [`   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation.`]
         : []),
@@ -101,10 +90,20 @@ function buildPlanningStep(ticket: Ticket): string {
   return "1. implementing";
 }
 
+const LIGHT_REVIEW_KINDS = ["quality", "conventions", "regression", "logic"];
+const FULL_REVIEW_KINDS = [...LIGHT_REVIEW_KINDS, "architecture", "security"];
+
+function reviewKinds(depth: ReviewDepth): string[] {
+  return depth === "full" ? FULL_REVIEW_KINDS : LIGHT_REVIEW_KINDS;
+}
+
+function reviewCalls(depth: ReviewDepth): string {
+  return reviewKinds(depth).map((kind) => `\`delegate_review(kind="${kind}", context=...)\``).join(", ");
+}
+
 /**
- * Builds the reviewing/anti-régression/fixing steps (3, 3b, 4). Claude delegates each pass to a
- * fresh-context sub-agent via the named skill (Agent tool); Codex has neither skills nor the Agent
- * tool, so its session re-reviews its own diff inline instead.
+ * Builds the reviewing/anti-regression/fixing steps. Both providers delegate to two backend-owned,
+ * read-only sessions with fresh and mutually independent contexts.
  */
 function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: string[] }): string[] {
   const figmaLines = opts.isUi
@@ -114,19 +113,13 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
       ]
     : [];
   const loopBudget = ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction";
-  if (ticket.orchestrator === "codex") {
-    return [
-      "3. reviewing : relis ton propre diff (git diff) comme le ferait un reviewer indépendant et corrige ce que tu trouves.",
-      ...figmaLines,
-      "3b. anti-régression : grep les autres appelants des symboles que tu as modifiés (fonctions, types, routes, composants) et vérifie qu'aucun n'est cassé par ton changement.",
-      `4. fixing : corrige les findings (review + anti-régression), puis relis à nouveau ton diff pour confirmer. ${loopBudget}, sinon fail().`,
-    ];
-  }
+  const depth = ticket.reviewDepth ?? "light";
+  const kinds = reviewKinds(depth);
   return [
-    "3. reviewing : lance un subagent à contexte frais (outil Agent) avec le skill `argus` sur ton diff.",
+    `3. reviewing : récupère le diff complet et appelle EN PARALLÈLE les ${kinds.length} reviewers indépendants : ${reviewCalls(depth)}. Passe à chacun la description/PRD et le diff utile, sans leur transmettre le raisonnement privé ni le résultat d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
     ...figmaLines,
-    "3b. anti-régression : lance un AUTRE subagent à contexte frais (outil Agent) avec le skill `regression-check` sur ton diff, en modèle sonnet et effort low. Il cartographie les consommateurs des symboles modifiés et signale les régressions potentielles. C'est un subagent distinct de la review argus.",
-    `4. fixing : corrige les findings (argus + anti-régression), puis relance les DEUX subagents (review argus ET anti-régression) pour confirmer. ${loopBudget}, sinon fail().`,
+    `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`done()\` avant les ${kinds.length} verdicts \`approve\` sur le code courant ; un échec bloque la validation.`,
+    `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}, sinon fail().`,
   ];
 }
 
@@ -134,7 +127,7 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
 function buildVerifyStep(ticket: Ticket): string {
   const browserHint =
     ticket.orchestrator === "codex"
-      ? "via un navigateur si tu en as un, ou en exerçant le code/CLI/endpoint concerné sinon"
+      ? "avec les outils MCP Playwright attachés à la session contre un serveur de dev lancé sur un port libre"
       : "pour un changement frontend, utilise le navigateur headless des outils MCP Playwright de la session (namespace `mcp__playwright` : browser_navigate, browser_snapshot, browser_click…) contre un serveur de dev lancé sur un port libre ; sinon exerce le code/CLI/endpoint concerné";
   return `5b. vérification fonctionnelle OBLIGATOIRE avant la PR : lance réellement l'app et vérifie de bout en bout que la fonctionnalité décrite marche (${browserHint}). Si elle ne marche pas, corrige puis re-vérifie ; si tu ne parviens pas à la faire marcher, appelle fail(). Ne passe JAMAIS à l'ouverture de la PR sans cette vérification réussie.`;
 }
@@ -142,10 +135,7 @@ function buildVerifyStep(ticket: Ticket): string {
 /** Step 5c (optional): mandatory visual diff against referenced mockups, before opening the PR. */
 function buildMockupReviewStep(ticket: Ticket, verifyWithMockups: boolean): string {
   if (!verifyWithMockups) return "";
-  if (ticket.orchestrator === "codex") {
-    return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images) ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de l'étape 3.";
-  }
-  return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS de la review argus.";
+  return "5c. comparaison visuelle OBLIGATOIRE aux maquettes : compare le rendu réel aux maquettes fournies dans la description (liens Figma et/ou images). Utilise le skill `mockup-fidelity-review` (ou un subagent à contexte frais) pour juger la fidélité ; corrige les écarts visuels significatifs avant d'ouvrir la PR. C'est EN PLUS des reviews indépendantes.";
 }
 
 /**
@@ -171,11 +161,11 @@ function buildSessionFramingLine(ticket: Ticket): string {
   return buildSpecializedFraming(ticket.orchestrator === "codex");
 }
 
-/** The `submit_prd` bullet: Claude hands the validated PRD to its implementer's delegation path; Codex implements inline (no Agent tool). */
+/** The `submit_prd` bullet keeps planning separate from the implementation child. */
 function buildPrdBullet(ticket: Ticket): string {
   if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
   if (ticket.orchestrator === "codex") {
-    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant d'implémenter (ne l'implémente pas dans cette phase de planification).";
+    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via `delegate_implementation` (ne l'implémente pas dans cette phase de planification).";
   }
   if (ticket.implementer === "codex") {
     return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via le tool `delegate_implementation` (ne l'implémente pas dans cette session de planification).";
@@ -287,7 +277,9 @@ export function buildTicketContract(
     "## Description",
     ticket.description || "(vide)",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
-    "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé.",
+    ticket.orchestrator === "claude"
+      ? "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé."
+      : "Pour un lien Slack ou Figma, utilise uniquement un outil de lecture réellement exposé à cette session Codex. Si une source obligatoire est inaccessible, appelle ask_user au lieu d'inventer son contenu.",
     "",
     buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
@@ -331,6 +323,7 @@ export function buildTicketContract(
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne touche à aucun fichier hors du worktree.",
+    "- Lis les fichiers `AGENTS.md` applicables avant d'agir. Si une règle nécessaire n'y figure pas, consulte aussi le `CLAUDE.md` applicable comme compatibilité, sans importer ses permissions ni secrets.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];
 
@@ -377,9 +370,10 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     '1. `update_stage("implementing")`.',
     `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
     "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
-    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
-    `4. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
-    `5. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
+    `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`.`,
+    '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
+    `5. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
+    `6. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
     "",
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
@@ -403,7 +397,12 @@ function truncateDescription(description: string): string {
  * aggregates the verdicts, and submits them all at once via the `submit_feasibility` worker tool.
  * Non-readable attachments (e.g. Trello links) are flagged in `questions` with an explicit prefix.
  */
-export function buildFeasibilityBatchContract(tickets: Ticket[], project: ProjectConfig, store: Store): string {
+export function buildFeasibilityBatchContract(
+  tickets: Ticket[],
+  project: ProjectConfig,
+  store: Store,
+  driver: "claude" | "codex" = "claude",
+): string {
   const ticketList = tickets.map((ticket) => {
     const resolvedBase = resolveBaseBranch(ticket, project, store);
     const baseAnnotation =
@@ -417,19 +416,27 @@ export function buildFeasibilityBatchContract(tickets: Ticket[], project: Projec
     `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
     "",
     "Tu es une session orchestratrice de faisabilité en LECTURE SEULE sur le dépôt réel (pas de worktree).",
-    "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;",
+    driver === "claude"
+      ? "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;"
+      : "Seuls les outils de lecture exposés à Codex et les sous-agents bornés sont disponibles ;",
     "Edit/Write/Bash sont inappelables.",
     "Ne modifie JAMAIS le dépôt.",
     "",
     "## Tickets à évaluer",
     ...ticketList,
     "Les descriptions peuvent référencer des chemins d'images locaux absolus (Read possible) et des liens externes.",
-    "Les liens figma.com SONT consultables : chaque sous-agent dispose des outils MCP Figma de lecture",
-    "(get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`, à charger via la recherche",
-    "de tools s'ils sont différés) et DOIT s'en servir pour évaluer un ticket qui référence une maquette.",
+    ...(driver === "claude"
+      ? [
+          "Les liens figma.com sont consultables via les outils MCP Figma de lecture",
+          "(get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`).",
+        ]
+      : [
+          "Sous Codex, ne prétends consulter un lien figma.com que si un outil Figma de lecture est réellement exposé.",
+          "Sinon, ajoute ce lien aux questions avec le préfixe `Lien non consultable:`.",
+        ]),
     "",
     "## Ta mission",
-    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent à contexte frais via l'outil Task avec`,
+    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent natif à contexte frais avec`,
     `\`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (sous-agent en lecture seule, sans Task ni Bash : il ne`,
     "peut pas relancer d'autre sous-agent). Chaque sous-agent décide si SON ticket est implémentable EXACTEMENT",
     "tel qu'il est écrit contre CE dépôt, sans le reformuler. Lance-les EN PARALLÈLE (fan-out, un seul par ticket).",
@@ -442,21 +449,23 @@ export function buildFeasibilityBatchContract(tickets: Ticket[], project: Projec
     "- `questions` : questions (obligatoire si `needs_info`)",
     "- `files` : chemins réellement lus qui fondent l'analyse",
     "- `suggestedModel` / `suggestedEffort` : UNIQUEMENT si `implementable`, sinon `null`",
+    "- `suggestedOrchestrator` et, pour GPT, `suggestedCodexModel` / `suggestedCodexEffort` : configuration réellement recommandée ; champs de l'autre moteur à `null`",
     "",
     "## Liens / pièces jointes non consultables",
     "Si une description référence une pièce jointe ou un lien que tu ne peux pas consulter (ex. lien Trello,",
     "image absente), ajoute-le dans `questions` du ticket concerné avec le préfixe exact `Lien non consultable: <url>`.",
-    "Un lien figma.com ne va dans `questions` que si l'appel aux outils Figma a réellement échoué.",
+    "Un lien figma.com va dans `questions` si aucun outil Figma de lecture n'est exposé ou si son appel échoue.",
     "",
     "## Règles strictes (reprises du triage)",
     "- N'invente rien.",
     "- Ne suppose rien : si une information manque, c'est une question, pas une hypothèse.",
     "- Ne propose pas de réécrire le ticket.",
     "- Fonde chaque affirmation sur du code réellement lu (cite les chemins de fichiers).",
+    "- Lis les AGENTS.md applicables ; si une règle nécessaire manque, consulte le CLAUDE.md applicable comme compatibilité, sans importer ses permissions ni secrets.",
     "",
     "## Format de réponse",
     "Une fois TOUS les sous-agents terminés, agrège leurs verdicts et appelle UNE SEULE FOIS le tool",
-    "`submit_feasibility` (serveur MCP `kanban`) avec `{ results: [{ ticketId, verdict, summary, reasons, questions, files, suggestedModel, suggestedEffort }] }`,",
+    "`submit_feasibility` (serveur MCP `kanban`) avec `{ results: [{ ticketId, verdict, summary, reasons, questions, files, suggestedOrchestrator, suggestedModel, suggestedEffort, suggestedCodexModel, suggestedCodexEffort }] }`,",
     "un objet par ticket (reprends le `ticketId` exact entre crochets ci-dessus). Ne termine pas ton tour avant",
     "d'avoir appelé `submit_feasibility` ou `fail`. N'écris pas les verdicts en texte : seul l'appel au tool compte.",
   ];
@@ -464,17 +473,9 @@ export function buildFeasibilityBatchContract(tickets: Ticket[], project: Projec
   return lines.filter((line) => line !== "").join("\n");
 }
 
-/** Explicit, non-droppable depth directive injected next to the argus invocation so the
- * autonomous agent never silently falls back to argus' documented light default. */
-function reviewDepthDirective(depth: ReviewDepth): string {
-  return depth === "full"
-    ? "   Profondeur EXIGÉE : **full** — le flag `--full` ci-dessus est OBLIGATOIRE, ne le retire jamais. Argus DOIT dispatcher les 6 reviewers (quality, architecture, regression, security, conventions, logic). Le défaut light (4 reviewers) est INTERDIT pour cette revue."
-    : "   Profondeur EXIGÉE : **light** — 4 reviewers (quality, conventions, regression, logic). N'ajoute PAS `--full`.";
-}
-
 /**
- * Builds the `ticket` channel payload for a review ticket: drive the argus skill
- * over an open PR, optionally posting findings inline via gh, then done().
+ * Builds the `ticket` channel payload for an independent review of an open PR, optionally posting
+ * findings inline via gh, then done().
  */
 export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
   if (!isProjectKey(ticket.project)) {
@@ -482,43 +483,30 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   }
   const project = getProject(ticket.project);
   const depth = ticket.reviewDepth ?? "light";
-  const fullFlag = depth === "full" ? " --full" : "";
-  const postFlag = ticket.postComments && ticket.prNumber !== null ? ` --post=${ticket.prNumber}` : "";
   const branch = ticket.prHeadBranch ?? "";
   // Review against the PR's own detected target branch (or the user's override), not the project default.
   const reviewBase = ticket.baseBranch ?? project.baseBranch;
-  const argusCmd = `argus ${branch} --base ${reviewBase}${fullFlag}${postFlag}`;
 
   // Guard on prHeadBranch too: slotManager only checks out the PR head branch (worktreeAddExisting)
   // and the done gate only requires a push when prHeadBranch is non-null. Branching the contract on
   // the same condition keeps contract/worktree/gate from diverging if prHeadBranch is ever absent.
   if (ticket.fixComments && ticket.prHeadBranch !== null) {
-    return buildReviewFixLines(ticket, opts, { project, depth, branch, argusCmd, reviewBase });
+    return buildReviewFixLines(ticket, opts, { project, depth, branch, reviewBase });
   }
 
   const isCodex = ticket.orchestrator === "codex";
-  // Codex has no argus skill: it reviews the diff itself, one dimension at a time, then posts inline
-  // via `gh api` (the done gate checks a posted review by the current gh user, so posting is mandatory
-  // when postComments is on).
   const reviewDimensions =
     depth === "full"
       ? "qualité, architecture, régressions, sécurité, conventions du dépôt, logique/correctness"
       : "qualité, conventions du dépôt, régressions, logique/correctness";
-  const codexReviewSteps = [
+  const kinds = reviewKinds(depth);
+  const independentReviewSteps = [
     `2. Récupère le diff complet de la PR : \`gh pr diff ${ticket.prNumber}\` (et \`git fetch origin ${branch}\` si tu dois lire les fichiers au commit de la PR).`,
-    `   Passe le diff en revue comme le ferait un panel de reviewers indépendants, dimension par dimension : ${reviewDimensions}. Fonde chaque finding sur le code réellement lu et classe-le par sévérité.`,
+    `   Lance EN PARALLÈLE les ${kinds.length} dimensions indépendantes : ${reviewCalls(depth)}. Donne à chacun la PR, la profondeur, les dimensions (${reviewDimensions}) et le diff, sans le résultat ni le raisonnement d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
+    `   Un reviewer ou sa contre-vérification échoués bloquent done(). Un verdict revise est une conclusion valide de cette revue en lecture seule : conserve les corrections recommandées dans le rapport puis termine normalement. Les ${kinds.length} dimensions doivent rendre un résultat vérifié sur le même passId et le code courant.`,
     ticket.postComments
-      ? `3. Poste UNE SEULE review inline sur la PR via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/reviews\` avec \`event: COMMENT\`, un résumé en \`body\` et un commentaire inline (\`path\`/\`line\`) par finding significatif. N'approuve pas, ne demande pas de changements.`
+      ? `3. Synthétise leurs résultats et poste UNE SEULE review inline sur la PR via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/reviews\` avec \`event: COMMENT\`, un résumé en \`body\` et un commentaire inline (\`path\`/\`line\`) par finding significatif. Ajoute au body le marqueur exact \`<!-- kanban-review-pass:<passId> -->\` avec le passId commun reçu dans les événements. Avant tout POST ou après un accusé incertain, recherche ce marqueur sur cette PR et ce head : s'il existe déjà avec l'événement COMMENT, ne republie pas. N'approuve pas, ne demande pas de changements.`
       : "3. N'en poste RIEN sur GitHub : synthétise le verdict (findings par sévérité) dans ta réponse.",
-  ];
-  const claudeReviewSteps = [
-    `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
-    reviewDepthDirective(depth),
-    `   Scratch dir : la sandbox du slot refuse les assignations composées type \`VAR=$(mktemp -d)\` — utilise directement \`mkdir -p /tmp/argus-pr${ticket.prNumber}\` comme ARGUS_TMP, sans tenter mktemp.`,
-    "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais,",
-    ticket.postComments
-      ? "   puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`)."
-      : "   et te renvoie le verdict (aucun postage : `--post` est volontairement absent).",
   ];
 
   const lines: string[] = [
@@ -546,14 +534,17 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "",
     "## Étapes",
     '1. `update_stage("reviewing")`.',
-    ...(isCodex ? codexReviewSteps : claudeReviewSteps),
-    `${isCodex ? "4" : "3"}. \`done(${ticket.prUrl})\` une fois la revue (et le postage le cas échéant) terminée.`,
+    "   Préparation bornée : lis une seule fois les sections utiles des skills/instructions. Dès que le diff, le head et le contexte sont collectés, lance les reviewers ; laisse chaque reviewer approfondir sa dimension au lieu de relire toutes les références dans l'orchestrateur.",
+    "   Pour les commandes complexes, évite les couches de quoting imbriquées : préfère plusieurs commandes courtes sans écrire de fichier.",
+    ...independentReviewSteps,
+    `4. \`done(${ticket.prUrl})\` une fois la revue (et le postage le cas échéant) terminée.`,
     "",
     "## Interdits",
-    `- Ne modifie AUCUN fichier : ${isCodex ? "la revue" : "argus"} est en lecture seule, cette session ne produit pas de diff.`,
+    "- Ne modifie AUCUN fichier : la revue est en lecture seule, cette session ne produit pas de diff.",
     "- N'approuve JAMAIS, ne demande pas de changements via l'API, ne merge pas la PR (`event: COMMENT` uniquement).",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne touche à aucun fichier hors du worktree.",
+    "- Lis les fichiers `AGENTS.md` applicables avant d'agir. Si une règle projet nécessaire n'y figure pas, consulte aussi le `CLAUDE.md` applicable comme source de compatibilité ; n'importe aucune permission ni secret depuis les réglages Claude.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];
 
@@ -561,29 +552,26 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
 }
 
 /**
- * fix-mode review contract: the worktree is ALREADY checked out on the PR's head branch. The session
- * runs argus (posting its findings), delegates the corrections to the `pr-fixer` sub-agent, then
- * tests, commits and pushes the fixes onto the SAME branch — no new PR.
+ * Fix-mode review contract: the worktree is already checked out on the PR head branch. The session
+ * runs the independent reviews required by the selected depth, applies relevant corrections, then tests, commits and pushes the
+ * fixes onto the same branch without opening a new PR.
  */
 function buildReviewFixLines(
   ticket: Ticket,
   opts: { commitLanguage: CommitLanguage },
-  ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; argusCmd: string; reviewBase: string },
+  ctx: { project: ReturnType<typeof getProject>; depth: ReviewDepth; branch: string; reviewBase: string },
 ): string {
-  const { project, depth, branch, argusCmd, reviewBase } = ctx;
+  const { project, depth, branch, reviewBase } = ctx;
   const isCodex = ticket.orchestrator === "codex";
+  const reviewDimensions =
+    depth === "full"
+      ? "qualité, architecture, régressions, sécurité, conventions du dépôt, logique/correctness"
+      : "qualité, conventions du dépôt, régressions, logique/correctness";
+  const kinds = reviewKinds(depth);
 
-  // Codex: no argus skill, no pr-fixer sub-agent — review the diff inline, post via gh api, fix inline.
-  const codexSteps = [
-    `2. Récupère le diff complet de la PR : \`gh pr diff ${ticket.prNumber}\`. Passe-le en revue comme un panel de reviewers indépendants (qualité, régressions, conventions, logique) puis poste UNE SEULE review inline via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/reviews\` (\`event: COMMENT\`, un résumé en \`body\`, un commentaire inline par finding significatif).`,
-    `3. \`update_stage("fixing")\` : applique toi-même les corrections PERTINENTES de tes findings dans le worktree courant (ignore les nits et le hors-périmètre).`,
-  ];
-  const claudeSteps = [
-    `2. Lance le skill **argus** sur la PR via cette invocation : \`${argusCmd}\``,
-    reviewDepthDirective(depth),
-    `   Scratch dir : la sandbox du slot refuse les assignations composées type \`VAR=$(mktemp -d)\` — utilise directement \`mkdir -p /tmp/argus-pr${ticket.prNumber}\` comme ARGUS_TMP, sans tenter mktemp.`,
-    "   Argus exécute lui-même `git fetch origin <branche>`, calcule le diff `<base>...<branche>`, fanne en reviewers parallèles à contexte frais, puis poste UNE review inline sur la PR via `gh` (`event: COMMENT`).",
-    `3. \`update_stage("fixing")\` : délègue les corrections au sous-agent \`pr-fixer\` (outil Agent, \`subagent_type: pr-fixer\`). Dans son prompt, transmets-lui : le worktree courant comme répertoire de travail, le numéro de la PR (#${ticket.prNumber}), les findings d'argus issus de ton contexte, et la consigne de lire au besoin les commentaires de review postés via \`gh\` et de n'appliquer que les corrections PERTINENTES. Il ne commit JAMAIS. Quand il rend la main, relis son diff (\`git diff\`) et complète toi-même ce qui est partiel.`,
+  const reviewAndFixSteps = [
+    `2. Récupère le diff complet de la PR (\`gh pr diff ${ticket.prNumber}\`) puis lance EN PARALLÈLE les ${kinds.length} sessions indépendantes : ${reviewCalls(depth)}. Transmets la profondeur ${depth}, les dimensions (${reviewDimensions}) et le diff à chacune, sans résultat ni raisonnement d'une autre. Termine ton tour et attends leurs événements \`review_done\`.`,
+    `3. \`update_stage("fixing")\` : si un reviewer demande revise, applique uniquement les corrections pertinentes, puis relance les ${kinds.length} reviewers sur le nouveau diff jusqu'à ${kinds.length} verdicts approve. Un échec de reviewer bloque done().`,
   ];
 
   const lines: string[] = [
@@ -601,7 +589,7 @@ function buildReviewFixLines(
     buildSpecializedFraming(isCodex, "à la REVUE puis la CORRECTION d'une PR"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (ex. retour ambigu, arbitrage de périmètre).",
-    "- `done(pr_url)` UNIQUEMENT après qu'argus a posté la revue, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    `- \`done(pr_url)\` UNIQUEMENT après les ${kinds.length} reviews indépendantes approuvées sur le code courant, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).`,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     `- Rédige les messages de commit et les commentaires de revue en ${commitLanguageLabel(opts.commitLanguage)}.`,
     "",
@@ -610,7 +598,7 @@ function buildReviewFixLines(
     "",
     "## Étapes",
     '1. `update_stage("reviewing")`.',
-    ...(isCodex ? codexSteps : claudeSteps),
+    ...reviewAndFixSteps,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
     '5. `update_stage("opening_pr")` : commit (conventions du projet), puis `git push` la branche head de la PR (jamais `--no-verify`, aucune nouvelle PR).',
     `6. \`done(${ticket.prUrl})\`.`,
@@ -672,10 +660,11 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     "## Étapes",
     '1. `update_stage("implementing")`.',
     isCodex ? codexTriageStep : claudeTriageStep,
-    '3. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
-    `4. \`update_stage("opening_pr")\` : commit (conventions du projet), puis pousse vers la head de la PR avec \`git push origin HEAD:${branch}\` (jamais \`--no-verify\`, aucune nouvelle PR ; le nom de branche locale diffère volontairement de la head de la PR). Si aucune correction n'a été appliquée, saute le commit/push.`,
-    `5. Replie (minimise) chaque commentaire de reviewer RÉELLEMENT traité (l'ensemble \`apply\` : retours pertinents que tu as adressés), PAS les nits écartés ni les retours hors-périmètre. Cela vaut que du code ait été poussé ou non — un retour peut être adressé par une correction appliquée. Récupère le \`node_id\` de chaque commentaire traité : les commentaires inline via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/comments\` (champ \`node_id\`), les commentaires de conversation top-level via \`gh api /repos/{owner}/{repo}/issues/${ticket.prNumber}/comments\` (champ \`node_id\`). Pour chacun, replie-le avec la mutation GraphQL \`minimizeComment\` (\`classifier: RESOLVED\`, \`subjectId\` = le \`node_id\`), ex. : \`gh api graphql -f query='mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:RESOLVED}){minimizedComment{isMinimized}}}' -f id=<node_id>\`. Si aucun commentaire n'a été traité, ne replie rien.`,
-    `6. \`done(${ticket.prUrl})\`.`,
+    `3. \`update_stage("reviewing")\` : récupère le diff courant puis lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 événements \`review_done\` avec verdict approve sur le code courant ; corrige et relance les 4 si nécessaire. Un échec bloque \`done()\`.`,
+    '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
+    `5. \`update_stage("opening_pr")\` : commit (conventions du projet), puis pousse vers la head de la PR avec \`git push origin HEAD:${branch}\` (jamais \`--no-verify\`, aucune nouvelle PR ; le nom de branche locale diffère volontairement de la head de la PR). Si aucune correction n'a été appliquée, saute le commit/push.`,
+    `6. Replie (minimise) chaque commentaire de reviewer RÉELLEMENT traité (l'ensemble \`apply\` : retours pertinents que tu as adressés), PAS les nits écartés ni les retours hors-périmètre. Cela vaut que du code ait été poussé ou non — un retour peut être adressé par une correction appliquée. Récupère le \`node_id\` de chaque commentaire traité : les commentaires inline via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/comments\` (champ \`node_id\`), les commentaires de conversation top-level via \`gh api /repos/{owner}/{repo}/issues/${ticket.prNumber}/comments\` (champ \`node_id\`). Pour chacun, replie-le avec la mutation GraphQL \`minimizeComment\` (\`classifier: RESOLVED\`, \`subjectId\` = le \`node_id\`), ex. : \`gh api graphql -f query='mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:RESOLVED}){minimizedComment{isMinimized}}}' -f id=<node_id>\`. Si aucun commentaire n'a été traité, ne replie rien.`,
+    `7. \`done(${ticket.prUrl})\`.`,
     "",
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",

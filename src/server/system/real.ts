@@ -1,22 +1,28 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
-import { Codex } from "@openai/codex-sdk";
 import { $ } from "bun";
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
+import { lstat, readFile, readlink, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
+import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
-import type { AgentProvider, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
-import { claudeProvider, toSdkEffort } from "./claudeProvider.ts";
-import { resolveCodexBinaryOverride } from "./codexBinary.ts";
+import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
+import { probeCodexRuntime } from "./codexRuntime.ts";
+import { CapabilityCache } from "./capabilityCache.ts";
+import { envWithProjectNode } from "./nvmNode.ts";
+import { runOneShotSession } from "./oneShotSession.ts";
+import { prepareProjectShell } from "./projectShell.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -44,7 +50,8 @@ const NOTION_IMPORT_TIMEOUT_MS = 240_000;
 const NOTION_MCP_SERVER_NAME = "notion";
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 /** Read-only allowlist for the Notion import query: only Read and the hosted Notion MCP tools. */
-const NOTION_IMPORT_ALLOWED_TOOLS = ["Read", `mcp__${NOTION_MCP_SERVER_NAME}`] as const;
+const NOTION_READ_TOOLS = ["notion-fetch", "notion-search"];
+const NOTION_IMPORT_ALLOWED_TOOLS = ["Read", ...NOTION_READ_TOOLS.map((name) => `mcp__${NOTION_MCP_SERVER_NAME}__${name}`)];
 /** Bound a background automation SDK query (30 min): not tied to an HTTP request. */
 const AUTOMATION_TIMEOUT_MS = 30 * 60 * 1000;
 /** Keep only the tail of a failed install's output in the surfaced error. */
@@ -87,6 +94,8 @@ const PR_LIST_LIMIT = "50";
 /** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
 const ghReviewSchema = z.object({
   author: z.object({ login: z.string() }).nullable(),
+  body: z.string(),
+  state: z.string(),
   submittedAt: z.string().nullable(),
 });
 const ghReviewsSchema = z.object({ reviews: z.array(ghReviewSchema) });
@@ -124,6 +133,8 @@ export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
+  private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
+  private readonly shellStartupDirectories = new Map<string, string>();
 
   constructor(workerMcpManager: WorkerMcpManager) {
     this.providers = { claude: claudeProvider, codex: createCodexProvider(workerMcpManager) };
@@ -319,7 +330,7 @@ export class RealSystemAdapter implements SystemAdapter {
   ): Promise<ShellRunResult> {
     const proc = Bun.spawn(["sh", "-c", command], {
       cwd,
-      env: { ...process.env, ...NON_INTERACTIVE_ENV, ...extraEnv },
+      env: { ...envWithProjectNode(cwd), ...NON_INTERACTIVE_ENV, ...extraEnv },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -340,6 +351,12 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
+    if (opts.provider === "codex") {
+      return runOneShotSession(this.providers.codex, {
+        provider: "codex", cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default",
+        permissionMode: "dontAsk", allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
+      }, opts.prompt, REFORMULATE_TIMEOUT_MS, opts.onEvent);
+    }
     // `dontAsk` never prompts and denies anything not pre-approved; the read-only toolset keeps it
     // safe while still letting it open local image paths referenced by the description.
     const sdkEffort = toSdkEffort(opts.effort);
@@ -350,14 +367,23 @@ export class RealSystemAdapter implements SystemAdapter {
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "dontAsk",
       allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
-      env: { ...process.env },
+      env: envWithProjectNode(opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
-    return this.runOneShotQuery(opts.prompt, queryOptions, REFORMULATE_TIMEOUT_MS, "reformulation échouée");
+    return this.runOneShotQuery(opts.prompt, queryOptions, REFORMULATE_TIMEOUT_MS, "reformulation échouée", opts.onEvent);
   }
 
   async importNotion(opts: ImportNotionOptions): Promise<string> {
+    if (opts.provider === "codex") {
+      return runOneShotSession(this.providers.codex, {
+        provider: "codex", cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default",
+        permissionMode: "dontAsk", allowedTools: NOTION_IMPORT_ALLOWED_TOOLS,
+        extraMcpServers: { [NOTION_MCP_SERVER_NAME]: {
+          type: "http", url: NOTION_MCP_URL, enabledTools: NOTION_READ_TOOLS,
+        } },
+      }, opts.prompt, NOTION_IMPORT_TIMEOUT_MS, opts.onEvent);
+    }
     // `dontAsk` + an allowlist keeps the run read-only: only Read and the hosted Notion MCP tools are
     // pre-approved, everything else is denied without prompting (mirrors reformulate's safe posture).
     const sdkEffort = toSdkEffort(opts.effort);
@@ -369,11 +395,11 @@ export class RealSystemAdapter implements SystemAdapter {
       permissionMode: "dontAsk",
       mcpServers: { [NOTION_MCP_SERVER_NAME]: { type: "http", url: NOTION_MCP_URL } },
       allowedTools: [...NOTION_IMPORT_ALLOWED_TOOLS],
-      env: { ...process.env },
+      env: envWithProjectNode(opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
-    return this.runOneShotQuery(opts.prompt, queryOptions, NOTION_IMPORT_TIMEOUT_MS, "import Notion échoué");
+    return this.runOneShotQuery(opts.prompt, queryOptions, NOTION_IMPORT_TIMEOUT_MS, "import Notion échoué", opts.onEvent);
   }
 
   async runAutomation(opts: RunAutomationOptions): Promise<string> {
@@ -404,6 +430,7 @@ export class RealSystemAdapter implements SystemAdapter {
     queryOptions: Options,
     timeoutMs: number,
     label: string,
+    onEvent?: (event: AgentSessionEvent) => void,
   ): Promise<string> {
     const session = query({ prompt, options: queryOptions });
 
@@ -418,6 +445,7 @@ export class RealSystemAdapter implements SystemAdapter {
     let resultError = "";
     try {
       for await (const message of session) {
+        if (onEvent) dispatchClaudeMessage(message, onEvent);
         if (message.type === "assistant") {
           for (const block of message.message.content) {
             if (block.type === "text") assistantText.push(block.text);
@@ -446,21 +474,32 @@ export class RealSystemAdapter implements SystemAdapter {
     // Reclaim a zombie of this name first: user-terminal sessions survive a backend restart (PRD §7),
     // but `nextId` resets to 1 each process, so the derived name can collide with an orphan — without
     // this `new-session` would fail and the POST would throw. Killing it (nothrow) is a no-op when absent.
-    await $`tmux kill-session -t ${opts.sessionName}`.nothrow().quiet();
-    if (opts.initialCommand !== undefined) {
-      // Auto-run the launch command, then `exec zsh -l` so the user keeps an interactive worktree
-      // shell once it exits/stops. `wrapped` is passed as a single `zsh -lc` argument.
-      const wrapped = `${opts.initialCommand}; exec zsh -l`;
-      await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -lc ${wrapped}`.quiet();
-      return;
+    const startupDirectory = await prepareProjectShell(opts.cwd);
+    await this.killSession(opts.sessionName);
+    if (startupDirectory) this.shellStartupDirectories.set(opts.sessionName, startupDirectory);
+    const environmentArgs = startupDirectory ? ["-e", `ZDOTDIR=${startupDirectory}`] : [];
+    try {
+      if (opts.initialCommand !== undefined) {
+        // Auto-run the launch command, then `exec zsh -l` so the user keeps an interactive worktree
+        // shell once it exits/stops. `wrapped` is passed as a single `zsh -lc` argument.
+        const wrapped = `${opts.initialCommand}; exec zsh -l`;
+        await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -lc ${wrapped}`.quiet();
+        return;
+      }
+      // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
+      // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
+      await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -l`.quiet();
+    } catch (error) {
+      await this.killSession(opts.sessionName);
+      throw error;
     }
-    // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
-    // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
-    await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} zsh -l`.quiet();
   }
 
   async killSession(sessionName: string): Promise<void> {
     await $`tmux kill-session -t ${sessionName}`.nothrow().quiet();
+    const directory = this.shellStartupDirectories.get(sessionName);
+    this.shellStartupDirectories.delete(sessionName);
+    if (directory) await rm(directory, { recursive: true, force: true });
   }
 
   async hasSession(sessionName: string): Promise<boolean> {
@@ -590,8 +629,16 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
-    const pr = await $`gh pr view ${prUrl} --json url`.cwd(slotPath).nothrow().quiet();
+    const pr = await $`gh pr view ${prUrl} --json url,headRefOid`.cwd(slotPath).nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
+    const parsedPr = z.object({ url: z.string(), headRefOid: z.string().min(1) }).safeParse(safeJsonParse(pr.stdout.toString()));
+    if (!parsedPr.success || parsedPr.data.url !== prUrl) {
+      return { ok: false, reason: "impossible de confirmer la PR et son head courant" };
+    }
+    const localHead = await $`git -C ${slotPath} rev-parse HEAD`.nothrow().quiet();
+    if (localHead.exitCode !== 0 || localHead.stdout.toString().trim() !== parsedPr.data.headRefOid) {
+      return { ok: false, reason: "le head de la PR a changé depuis la passe de review" };
+    }
 
     // fixComments review: the fixes must be committed and pushed onto the PR's head branch.
     if (opts.requirePushedBranch !== null) {
@@ -600,7 +647,10 @@ export class RealSystemAdapter implements SystemAdapter {
     }
 
     if (opts.requirePostedSince === null) return { ok: true, reason: "" };
-    return this.verifyReviewPosted(slotPath, prUrl, opts.requirePostedSince);
+    if (opts.publicationMarker === null) {
+      return { ok: false, reason: "postage demandé mais identité de passe introuvable" };
+    }
+    return this.verifyReviewPosted(slotPath, prUrl, opts.requirePostedSince, opts.publicationMarker);
   }
 
   /** Clean working tree and the branch has no commits ahead of origin/<branch> (mirrors verifyDone). */
@@ -626,7 +676,7 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   /** Confirm the current gh user posted a review on the PR at or after `since` (epoch ms). */
-  private async verifyReviewPosted(slotPath: string, prUrl: string, since: number): Promise<DoneGateResult> {
+  private async verifyReviewPosted(slotPath: string, prUrl: string, since: number, marker: string): Promise<DoneGateResult> {
     const me = await $`gh api user -q .login`.cwd(slotPath).nothrow().quiet();
     const login = me.stdout.toString().trim();
     if (me.exitCode !== 0 || !login) {
@@ -637,7 +687,12 @@ export class RealSystemAdapter implements SystemAdapter {
     const parsed = ghReviewsSchema.safeParse(safeJsonParse(res.stdout.toString()));
     if (!parsed.success) return { ok: false, reason: "postage demandé mais sortie gh inattendue" };
     const posted = parsed.data.reviews.some(
-      (review) => review.author?.login === login && review.submittedAt !== null && Date.parse(review.submittedAt) >= since,
+      (review) =>
+        review.author?.login === login &&
+        review.state === "COMMENTED" &&
+        review.body.includes(marker) &&
+        review.submittedAt !== null &&
+        Date.parse(review.submittedAt) >= since,
     );
     if (!posted) return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
     return { ok: true, reason: "" };
@@ -757,6 +812,44 @@ export class RealSystemAdapter implements SystemAdapter {
     return res.exitCode === 0 && res.stdout.toString().trim().length === 0;
   }
 
+  async codeFingerprint(slotPath: string): Promise<string> {
+    const files = await $`git -C ${slotPath} ls-files --cached --others --exclude-standard -z`.nothrow().quiet();
+    if (files.exitCode !== 0) {
+      const detail = files.stderr.toString().trim() || files.stdout.toString().trim();
+      throw new Error(`empreinte du code impossible : git ls-files a échoué (${detail})`);
+    }
+    const hash = createHash("sha256");
+    const paths = files.stdout
+      .toString()
+      .split("\0")
+      .filter((path) => path.length > 0)
+      .sort();
+    for (const relativePath of paths) {
+      const absolutePath = join(slotPath, relativePath);
+      hash.update(`${relativePath.length}:${relativePath}`);
+      try {
+        const stats = await lstat(absolutePath);
+        if (stats.isSymbolicLink()) {
+          const target = await readlink(absolutePath);
+          hash.update(`:symlink:${target.length}:${target}`);
+        } else if (stats.isFile()) {
+          hash.update(stats.mode & 0o111 ? ":file:executable:" : ":file:regular:");
+          hash.update(await readFile(absolutePath));
+        } else {
+          hash.update(":other:");
+        }
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+          hash.update(":missing:");
+          continue;
+        }
+        throw error;
+      }
+      hash.update("\0");
+    }
+    return hash.digest("hex");
+  }
+
   async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
     const res = await $`git -C ${repoPath} pull --ff-only origin ${baseBranch}`.nothrow().quiet();
     if (res.exitCode !== 0) {
@@ -782,17 +875,8 @@ export class RealSystemAdapter implements SystemAdapter {
     return false;
   }
 
-  async checkCodexAvailable(): Promise<boolean> {
-    // The SDK's own binary resolution (no Bun.which/spawn probe needed): CodexExec's constructor
-    // synchronously throws when the platform binary package isn't resolvable.
-    try {
-      new Codex({ codexPathOverride: resolveCodexBinaryOverride() });
-    } catch {
-      return false;
-    }
-    if (process.env.CODEX_API_KEY) return true;
-    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
-    return existsSync(join(codexHome, "auth.json"));
+  checkCodexRuntime(refresh = false): Promise<CodexRuntimeStatus> {
+    return this.codexCapabilities.read(refresh);
   }
 }
 
@@ -944,4 +1028,3 @@ function safeJsonParse(text: string): unknown {
     return null;
   }
 }
-

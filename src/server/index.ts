@@ -80,7 +80,7 @@ export interface RunningServer {
   /** Kill detached tmux sessions backing occupied slots (desktop shutdown only). */
   teardownSessions(): Promise<void>;
   /** Stop the HTTP/WS server, the watchdog timer, and close the database. */
-  stop(): void;
+  stop(): Promise<void>;
 }
 
 type SocketData =
@@ -179,6 +179,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const db = createDatabase(dbPath);
   const store = new Store(db);
+  const staleExecutionGenerations = store.listExecutionRuns()
+    .filter((run) => run.status === "running")
+    .map((run) => run.generationId);
   await migrateConfigJsonIfPresent(store, process.env.KANBAN_CONFIG ?? join(dataRoot, "config.json"));
   initProjectRegistry(store);
   const workerMcpManager = new WorkerMcpManager();
@@ -232,8 +235,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
-  const codexAvailable = await system.checkCodexAvailable();
-  createLogger("boot").info("Codex CLI détecté", { codexAvailable });
 
   const api = createApiRoutes({
     store,
@@ -251,7 +252,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     userTerminals,
     projectRoot: dataRoot,
     composerAvailable,
-    codexAvailable,
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
     onRequestQuit: opts.onRequestQuit,
@@ -344,6 +344,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     },
   });
 
+  store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
@@ -353,13 +354,19 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     port: server.port ?? port,
     async teardownSessions() {
       await slotManager.teardownSessions();
+      await delegationManager.drainClosingSessions();
       await triageManager.teardownAll();
       await feasibilityManager.teardownAll();
     },
-    stop() {
+    async stop() {
       watchdog.stop();
       automationManager.stop();
-      server.stop(true);
+      await server.stop(true);
+      await triageManager.teardownAll();
+      await feasibilityManager.teardownAll();
+      sessionHub.disconnectAll();
+      await sessionHub.drainClosingSessions();
+      await delegationManager.drainClosingSessions();
       db.close();
     },
   };

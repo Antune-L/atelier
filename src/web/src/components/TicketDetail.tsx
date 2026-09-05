@@ -20,7 +20,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 import {
@@ -41,6 +41,7 @@ import {
   type CodexEffort,
   type CodexModel,
   type Column,
+  type FeasibilityEngine,
   type Implementer,
   type Orchestrator,
 } from "@shared/constants";
@@ -55,6 +56,7 @@ import { Modal, ModalHeader, ModalTitle } from "@/components/ui/modal";
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs } from "@/components/ui/tabs";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
@@ -62,7 +64,9 @@ import { TicketCost } from "@/components/TicketCost";
 import { LiveTerminal } from "@/components/LiveTerminal";
 import { TerminalView } from "@/components/TerminalView";
 import {
+  DEFAULT_FEASIBILITY_ENGINE,
   dependencyCandidates,
+  feasibilityEngineTabOptions,
   finishedKindLabel,
   formatDateTime,
   isStageAnimated,
@@ -71,6 +75,7 @@ import {
   triageVerdictVariant,
 } from "@/lib/display";
 import { useBoard } from "@/hooks/useBoard";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { pairedImplementer } from "@/lib/agentPairing";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
@@ -353,12 +358,32 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
       .catch(() => undefined);
   };
 
+  const setFeasibilityEngine = (feasibilityEngine: FeasibilityEngine): void => {
+    void api.updateTicket(current.id, { feasibilityEngine }).catch(() => undefined);
+  };
+
   const setCodexModel = (codexModel: CodexModel | null): void => {
     void api.updateTicket(current.id, { codexModel }).catch(() => undefined);
   };
 
   const setCodexEffort = (codexEffort: CodexEffort | null): void => {
     void api.updateTicket(current.id, { codexEffort }).catch(() => undefined);
+  };
+
+  const setCodexFast = (codexFast: boolean): void => {
+    void api.updateTicket(current.id, { codexFast }).catch(() => undefined);
+  };
+
+  const setCodexImplementerModel = (codexImplementerModel: CodexModel | null): void => {
+    void api.updateTicket(current.id, { codexImplementerModel }).catch(() => undefined);
+  };
+
+  const setCodexImplementerEffort = (codexImplementerEffort: CodexEffort | null): void => {
+    void api.updateTicket(current.id, { codexImplementerEffort }).catch(() => undefined);
+  };
+
+  const setCodexImplementerFast = (codexImplementerFast: boolean | null): void => {
+    void api.updateTicket(current.id, { codexImplementerFast }).catch(() => undefined);
   };
 
   // Apply a whole profile in a single PATCH so the knobs never land in an intermediate state.
@@ -371,6 +396,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
     implementer: Implementer;
     codexModel: CodexModel;
     codexEffort: CodexEffort;
+    codexFast: boolean;
+    codexImplementerModel: CodexModel | null;
+    codexImplementerEffort: CodexEffort | null;
+    codexImplementerFast: boolean | null;
   }): void => {
     void api.updateTicket(current.id, config).catch(() => undefined);
   };
@@ -821,6 +850,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                       .catch(() => undefined);
                   }}
                   onToggleContext={setFeasibilityContext}
+                  onFeasibilityEngineChange={setFeasibilityEngine}
                   onReformulate={() => api.reformulate(ticket.id)}
                   onApplyReformulation={(text) =>
                     api
@@ -1121,6 +1151,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     implementer={current.implementer}
                     codexModel={current.codexModel}
                     codexEffort={current.codexEffort}
+                    codexFast={current.codexFast}
+                    codexImplementerModel={current.codexImplementerModel}
+                    codexImplementerEffort={current.codexImplementerEffort}
+                    codexImplementerFast={current.codexImplementerFast}
                     onOrchestratorChange={setOrchestrator}
                     onModelChange={setAgentModel}
                     onEffortChange={setAgentEffort}
@@ -1129,6 +1163,10 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
                     onImplementerChange={setImplementer}
                     onCodexModelChange={setCodexModel}
                     onCodexEffortChange={setCodexEffort}
+                    onCodexFastChange={setCodexFast}
+                    onCodexImplementerModelChange={setCodexImplementerModel}
+                    onCodexImplementerEffortChange={setCodexImplementerEffort}
+                    onCodexImplementerFastChange={setCodexImplementerFast}
                     onApplyProfile={applyProfile}
                   />
                   <div className="mt-3">
@@ -1274,6 +1312,7 @@ interface TriageSectionProps {
   onTriagePlus: () => Promise<void>;
   onApplySuggestion: (model: AgentModel, effort: AgentEffort) => void;
   onToggleContext: (checked: boolean) => void;
+  onFeasibilityEngineChange: (engine: FeasibilityEngine) => void;
   onReformulate: () => Promise<{ started: boolean }>;
   onApplyReformulation: (text: string) => Promise<void>;
 }
@@ -1289,9 +1328,12 @@ function TriageSection({
   onTriagePlus,
   onApplySuggestion,
   onToggleContext,
+  onFeasibilityEngineChange,
   onReformulate,
   onApplyReformulation,
 }: TriageSectionProps) {
+  const { codex } = useCapabilities();
+  const engineLabelId = useId();
   const running = ticket.triageStatus === "running";
   const result = parseTriageReport(ticket.triageReport);
   // Reformulation runs async server-side: status + result live on the ticket and arrive over WS.
@@ -1466,6 +1508,16 @@ function TriageSection({
           <TerminalView ticketId={ticket.id} />
         </div>
       )}
+
+      <div className="mt-2 flex flex-col items-start gap-1.5">
+        <Label id={engineLabelId}>Modèle d'analyse</Label>
+        <Tabs
+          options={feasibilityEngineTabOptions(codex)}
+          value={ticket.feasibilityEngine ?? DEFAULT_FEASIBILITY_ENGINE}
+          onChange={onFeasibilityEngineChange}
+          aria-labelledby={engineLabelId}
+        />
+      </div>
 
       <div className="mt-2 flex gap-2">
         <Button

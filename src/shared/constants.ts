@@ -154,6 +154,11 @@ export interface ProfileConfig {
   codexModel: CodexModel;
   /** Codex session reasoning effort (codex orchestrator/implementer only). */
   codexEffort: CodexEffort;
+  /** Use Codex FAST processing when the selected model/account supports it. */
+  codexFast: boolean;
+  codexImplementerModel: CodexModel | null;
+  codexImplementerEffort: CodexEffort | null;
+  codexImplementerFast: boolean | null;
 }
 
 /** The built-in Codex preset, also seeded once into pre-existing DBs (see schema.ts). */
@@ -165,8 +170,12 @@ export const CODEX_SEED_PROFILE: ProfileConfig = {
   implementerModel: "opus",
   implementerEffort: "low",
   implementer: "codex",
-  codexModel: "gpt-5.5",
+  codexModel: "gpt-5.6-terra",
   codexEffort: "high",
+  codexFast: false,
+  codexImplementerModel: null,
+  codexImplementerEffort: null,
+  codexImplementerFast: null,
 };
 
 /** Seeded into the DB on first boot; editable afterwards via the settings modal. */
@@ -179,8 +188,12 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.5",
+    codexModel: "gpt-5.6-terra",
     codexEffort: "medium",
+    codexFast: false,
+    codexImplementerModel: null,
+    codexImplementerEffort: null,
+    codexImplementerFast: null,
   },
   {
     name: "Debug -",
@@ -190,8 +203,12 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.5",
+    codexModel: "gpt-5.6-terra",
     codexEffort: "medium",
+    codexFast: false,
+    codexImplementerModel: null,
+    codexImplementerEffort: null,
+    codexImplementerFast: null,
   },
   {
     name: "Debug +",
@@ -201,8 +218,12 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.5",
+    codexModel: "gpt-5.6-terra",
     codexEffort: "medium",
+    codexFast: false,
+    codexImplementerModel: null,
+    codexImplementerEffort: null,
+    codexImplementerFast: null,
   },
   {
     name: "Délégation",
@@ -212,8 +233,12 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "composer",
-    codexModel: "gpt-5.5",
+    codexModel: "gpt-5.6-terra",
     codexEffort: "medium",
+    codexFast: false,
+    codexImplementerModel: null,
+    codexImplementerEffort: null,
+    codexImplementerFast: null,
   },
   CODEX_SEED_PROFILE,
 ];
@@ -241,19 +266,28 @@ export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
 
 /**
- * Codex models pickable per ticket (kept in sync with the live Codex model catalog; GPT-5.6 Sol is
- * excluded because the catalog does not expose it to this account). Requires codex CLI ≥ 0.144 for
- * the gpt-5.6-* models (older CLIs reject them with "requires a newer version of Codex").
+ * Which model runs a ticket's feasibility analysis ("Analyse" / "Analyse +" and the import batch),
+ * independently of the orchestrator that implements it. null on a ticket = follow the orchestrator.
  */
-export const CODEX_MODELS = ["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"] as const;
+export const FEASIBILITY_ENGINES = ["sonnet", "luna"] as const;
+export type FeasibilityEngine = (typeof FEASIBILITY_ENGINES)[number];
+
+export const FEASIBILITY_ENGINE_LABELS: Record<FeasibilityEngine, string> = {
+  sonnet: "Sonnet",
+  luna: "Luna",
+};
+
+/**
+ * Product allow-list for Codex. Runtime capabilities narrow availability without adding models.
+ */
+export const CODEX_MODELS = ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"] as const;
 export type CodexModel = (typeof CODEX_MODELS)[number];
 
 export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
-  "gpt-5.6-terra": "5.6 Terra",
+  "gpt-6-astra": "6 Astra",
+  "gpt-5.6-sol": "5.6 Sol",
   "gpt-5.6-luna": "5.6 Luna",
-  "gpt-5.5": "5.5",
-  "gpt-5.4": "5.4",
-  "gpt-5.4-mini": "5.4 mini",
+  "gpt-5.6-terra": "5.6 Terra",
 };
 
 /**
@@ -274,15 +308,14 @@ export const CODEX_EFFORT_LABELS: Record<CodexEffort, string> = {
 };
 
 /**
- * Efforts each Codex model accepts (from the live model catalog). Every entry is a prefix of
- * CODEX_EFFORTS: "max" needs a 5.6 model, "ultra" (multi-agent reasoning) is Terra-only.
+ * Product-supported efforts. Runtime capabilities remain authoritative for the authenticated account.
+ * Every entry is a PREFIX of CODEX_EFFORTS: Luna tops out at "max" ("ultra" is multi-agent only).
  */
 export const CODEX_MODEL_EFFORTS: Record<CodexModel, readonly CodexEffort[]> = {
-  "gpt-5.6-terra": CODEX_EFFORTS,
+  "gpt-6-astra": CODEX_EFFORTS,
+  "gpt-5.6-sol": CODEX_EFFORTS,
   "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.5": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4": ["low", "medium", "high", "xhigh"],
-  "gpt-5.4-mini": ["low", "medium", "high", "xhigh"],
+  "gpt-5.6-terra": CODEX_EFFORTS,
 };
 
 /**
@@ -303,6 +336,8 @@ export const DEFAULT_CODEX_EFFORT: CodexEffort = "medium";
 export const CODEX_MODEL_META_KEY = "codex_model";
 /** `meta` table key holding the persisted default Codex reasoning effort. */
 export const CODEX_EFFORT_META_KEY = "codex_effort";
+/** `meta` table key holding the persisted default Codex fast-mode preference. */
+export const CODEX_FAST_META_KEY = "codex_fast";
 /** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
 export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
 /**

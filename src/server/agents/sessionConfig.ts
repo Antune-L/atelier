@@ -42,9 +42,8 @@ const IMPLEMENTER_SAFE_TOOLS = [
 ];
 
 /**
- * Claude Code skills the pipeline contract drives (argus review, regression map, mockup fidelity, PR
- * feedback triage). Passed as the SDK `skills` filter so only these load into the session context
- * instead of every host-installed skill; discovery is enabled by the provider's `user` settingSource.
+ * Skills referenced by the pipeline contract (review, regression map, mockup fidelity, PR feedback
+ * triage). The provider adapts these project instructions to its own session format.
  */
 const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-review", "minos-pr-feedback"];
 
@@ -99,6 +98,7 @@ const PLAYWRIGHT_MCP_SERVER: StdioMcpServerDefinition = {
 
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */
 const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS, ...SLACK_READONLY_TOOLS];
+const CODEX_READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch"];
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
 const READONLY_PLAIN_DISALLOWED = ["Edit", "Write", "Bash", "Task", "Agent"];
 /** Tools removed from a fan-out read-only session: no writes, no built-in `Task` (scouts go via `Agent`). */
@@ -120,33 +120,37 @@ const FIGMA_TOOLS_HINT =
   "via ta recherche de tools s'ils sont différés). De même, un lien slack.com se consulte via les " +
   "outils MCP Slack de lecture (slack_read_thread, slack_read_channel — namespace `mcp__claude_ai_Slack`).";
 
+const CODEX_EXTERNAL_TOOLS_HINT =
+  "N'affirme avoir consulté un lien Figma ou Slack que si un outil de lecture correspondant est " +
+  "réellement présent dans cette session Codex. Sinon, signale explicitement le lien non consultable.";
+
 const FEASIBILITY_SCOUT_PROMPT =
-  "Tu es un scout de faisabilité en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
-  "MCP Figma/Slack de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
-  `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Évalue le ticket ` +
+  "Tu es un scout de faisabilité en LECTURE SEULE. Tu ne peux ni modifier le dépôt, ni exécuter " +
+  "de commande, ni lancer d'autre sous-agent. Évalue le ticket " +
   "fourni EXACTEMENT tel qu'il est écrit, fonde chaque affirmation sur du code réellement lu.";
 
 const SOLUTIONS_SCOUT_PROMPT =
-  "Tu es un scout de solutions en LECTURE SEULE. Tu n'as que Read, Glob, Grep et les outils " +
-  "MCP Figma/Slack de lecture : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
-  `d'autre sous-agent. ${FIGMA_TOOLS_HINT} Pour le ticket ` +
+  "Tu es un scout de solutions en LECTURE SEULE. Tu ne peux ni modifier le dépôt, ni exécuter de " +
+  "commande, ni lancer d'autre sous-agent. Pour le ticket " +
   "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
   "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).";
 
-function feasibilityScoutAgent(): AgentSubagentDefinition {
+function feasibilityScoutAgent(driver: Orchestrator): AgentSubagentDefinition {
   return {
     description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
-    prompt: FEASIBILITY_SCOUT_PROMPT,
-    tools: SCOUT_TOOLS,
+    prompt: `${FEASIBILITY_SCOUT_PROMPT} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    role: "scout",
+    tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
     disallowedTools: SCOUT_DISALLOWED,
   };
 }
 
-function solutionsScoutAgent(): AgentSubagentDefinition {
+function solutionsScoutAgent(driver: Orchestrator): AgentSubagentDefinition {
   return {
     description: "Identifie en lecture seule des approches de solution concrètes pour UN ticket.",
-    prompt: SOLUTIONS_SCOUT_PROMPT,
-    tools: SCOUT_TOOLS,
+    prompt: `${SOLUTIONS_SCOUT_PROMPT} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    role: "scout",
+    tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
     disallowedTools: SCOUT_DISALLOWED,
   };
 }
@@ -156,15 +160,16 @@ export interface TriageSessionInput {
   cwd: string;
   model: string;
   effort: string | null;
+  serviceTier?: "default" | "fast";
   /** "Analyse +" deep variant: fan out the feasibility + solutions scouts via the `Agent` tool. */
   deep: boolean;
-  /** Which agent drives the triage (codex = read-only sandbox, no scouts — deep runs inline). */
+  /** Which agent drives the triage; both providers use independent scouts for Analyse +. */
   driver: Orchestrator;
 }
 
 /** Config for a read-only feasibility-triage session (no worktree/slot; only `submit_triage` is gated in). */
 export function buildTriageSessionConfig(input: TriageSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort, deep, driver } = input;
+  const { ticketId, cwd, model, effort, serviceTier = "default", deep, driver } = input;
   if (driver === "codex") {
     return {
       ticketId,
@@ -173,8 +178,21 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
       provider: "codex",
       model,
       effort,
+      serviceTier,
+      role: "triage",
       permissionMode: "dontAsk",
       readOnly: true,
+      allowedTools: deep ? [...CODEX_READONLY_TOOLS, "Agent"] : [...CODEX_READONLY_TOOLS],
+      disallowedTools: deep ? READONLY_FANOUT_DISALLOWED : READONLY_PLAIN_DISALLOWED,
+      skills: NO_SKILLS,
+      ...(deep
+        ? {
+            agents: {
+              [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver),
+              [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(driver),
+            },
+          }
+        : {}),
     };
   }
   const base: SessionStartConfig = {
@@ -184,6 +202,7 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     provider: "claude",
     model,
     effort,
+    role: "triage",
     permissionMode: "dontAsk",
     allowedTools: deep ? [...READONLY_TOOLS, "Agent"] : [...READONLY_TOOLS],
     disallowedTools: deep ? READONLY_FANOUT_DISALLOWED : READONLY_PLAIN_DISALLOWED,
@@ -194,8 +213,8 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     ...base,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
     agents: {
-      [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(),
-      [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(),
+      [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver),
+      [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(driver),
     },
   };
 }
@@ -205,13 +224,14 @@ export interface SplitSessionInput {
   cwd: string;
   model: string;
   effort: string | null;
+  serviceTier?: "default" | "fast";
   /** Which agent drives the split (codex = read-only sandbox). */
   driver: Orchestrator;
 }
 
 /** Config for a read-only ticket-split session (no worktree/slot; only `submit_split` is gated in). */
 export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort, driver } = input;
+  const { ticketId, cwd, model, effort, serviceTier = "default", driver } = input;
   if (driver === "codex") {
     return {
       ticketId,
@@ -220,6 +240,8 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
       provider: "codex",
       model,
       effort,
+      serviceTier,
+      role: "split",
       permissionMode: "dontAsk",
       readOnly: true,
     };
@@ -231,6 +253,7 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
     provider: "claude",
     model,
     effort,
+    role: "split",
     permissionMode: "dontAsk",
     allowedTools: [...READONLY_TOOLS],
     disallowedTools: READONLY_PLAIN_DISALLOWED,
@@ -243,23 +266,29 @@ export interface FeasibilitySessionInput {
   cwd: string;
   model: string;
   effort: string | null;
+  serviceTier?: "default" | "fast";
+  driver: Orchestrator;
 }
 
 /** Config for a read-only batch feasibility session (fans out one scout per ticket via the `Agent` tool). */
 export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): SessionStartConfig {
-  const { batchId, cwd, model, effort } = input;
+  const { batchId, cwd, model, effort, serviceTier = "default", driver } = input;
   return {
     ticketId: batchId,
     slotId: FEASIBILITY_SLOT_ID,
     cwd,
-    provider: "claude",
+    provider: driver,
     model,
     effort,
+    serviceTier,
+    role: "feasibility",
+    ownerType: "batch",
+    ownerId: batchId,
     permissionMode: "dontAsk",
-    allowedTools: [...READONLY_TOOLS, "Agent"],
+    allowedTools: [...(driver === "codex" ? CODEX_READONLY_TOOLS : READONLY_TOOLS), "Agent"],
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent() },
+    agents: { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver) },
     skills: NO_SKILLS,
   };
 }
@@ -289,7 +318,7 @@ const BASH_ALLOWLIST = [
   "Bash(tail:*)",
   "Bash(gh pr create:*)",
   "Bash(gh pr view:*)",
-  // Review pipeline (argus): list/diff PRs, post one inline review via the API.
+  // Review pipeline: list/diff PRs, post one inline review via the API.
   "Bash(gh pr list:*)",
   "Bash(gh pr diff:*)",
   "Bash(gh pr comment:*)",
@@ -300,7 +329,7 @@ const BASH_ALLOWLIST = [
   "Bash(grep:*)",
   "Bash(rg:*)",
   "Bash(find:*)",
-  // Shell helpers argus uses to build the commentable-line set for inline posting.
+  // Shell helpers used to build the commentable-line set for inline posting.
   "Bash(awk:*)",
   "Bash(sed:*)",
   "Bash(cut:*)",
@@ -324,30 +353,34 @@ Consignes :
 const PR_FIXER_PROMPT = `Tu es le sous-agent pr-fixer. Ton unique rôle est d'appliquer les corrections pertinentes des retours de review d'une PR, intégralement, dans le worktree courant (déjà positionné sur la branche head de la PR).
 
 Consignes :
-- Tu reçois dans ton prompt les findings d'argus et/ou le numéro de la PR. Tu peux aussi lire les commentaires de review postés via \`gh pr view <url> --json reviews\` et \`gh api\`.
+- Tu reçois dans ton prompt les findings de review et/ou le numéro de la PR. Tu peux aussi lire les commentaires de review postés via \`gh pr view <url> --json reviews\` et \`gh api\`.
 - N'applique que les corrections PERTINENTES (ignore les nits et les points hors périmètre).
 - Respecte les conventions de code du projet.
 - Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, les tests et la PR.
 - Quand tu as terminé, rends la main en résumant ce que tu as corrigé et les fichiers touchés.`;
 
-function implementerAgent(model: string, effort: string): AgentSubagentDefinition {
+function implementerAgent(model: string, effort: string, serviceTier?: "default" | "fast"): AgentSubagentDefinition {
   return {
     description:
       "Implémente intégralement la fonctionnalité demandée dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.",
     prompt: IMPLEMENTER_PROMPT,
     model,
     effort,
+    ...(serviceTier ? { serviceTier } : {}),
+    role: "implementer",
   };
 }
 
-function prFixerAgent(model: string, effort: string): AgentSubagentDefinition {
+function prFixerAgent(model: string, effort: string, serviceTier?: "default" | "fast"): AgentSubagentDefinition {
   return {
     description:
       "Applique les corrections demandées par les retours de review d'une PR dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.",
     prompt: PR_FIXER_PROMPT,
     model,
     effort,
+    ...(serviceTier ? { serviceTier } : {}),
+    role: "implementer",
   };
 }
 
@@ -362,10 +395,20 @@ export interface ImplementSessionInput {
 }
 
 /** Resolved Codex knobs for a ticket: per-ticket override, else the persisted app-settings default. */
-export function codexKnobs(ticket: Ticket): { model: string; effort: string } {
+export function codexKnobs(ticket: Ticket): { model: string; effort: string; serviceTier: "default" | "fast" } {
   return {
     model: ticket.codexModel ?? MODELS.codexModel,
     effort: ticket.codexEffort ?? MODELS.codexEffort,
+    serviceTier: ticket.codexFast ? "fast" : "default",
+  };
+}
+
+/** Resolve the independent Codex writer, preserving an explicit FAST=false override. */
+export function codexImplementerKnobs(ticket: Ticket): { model: string; effort: string; serviceTier: "default" | "fast" } {
+  return {
+    model: ticket.codexImplementerModel ?? ticket.codexModel ?? MODELS.codexModel,
+    effort: ticket.codexImplementerEffort ?? ticket.codexEffort ?? MODELS.codexEffort,
+    serviceTier: (ticket.codexImplementerFast ?? ticket.codexFast) ? "fast" : "default",
   };
 }
 
@@ -376,6 +419,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
   // conflict-resolution one (buildConflictResolutionContract carries a codex-flavored framing).
   if (ticket.orchestrator === "codex") {
     const knobs = codexKnobs(ticket);
+    const delegateKnobs = codexImplementerKnobs(ticket);
     return {
       ticketId: ticket.id,
       slotId,
@@ -383,14 +427,30 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       provider: "codex",
       model: knobs.model,
       effort: knobs.effort,
+      serviceTier: knobs.serviceTier,
+      delegateProvider: "codex",
+      delegateModel: delegateKnobs.model,
+      delegateEffort: delegateKnobs.effort,
+      delegateServiceTier: delegateKnobs.serviceTier,
+      role: "orchestrator",
       permissionMode: "dontAsk",
       // An ask ticket never writes: pin the Codex sandbox to read-only instead of tool-gating.
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
+      allowedTools: [...IMPLEMENTER_SAFE_TOOLS, "ToolSearch", ...(ticket.verifyFeature ? ["mcp__playwright"] : [])],
+      skills: CONTRACT_SKILLS,
+      agents: {
+        implementer: implementerAgent(delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
+        "pr-fixer": prFixerAgent(delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
+      },
+      ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),
     };
   }
   const implementerModel = ticket.implementerModel ?? MODELS.implementerModel;
   const implementerEffort = ticket.implementerEffort ?? MODELS.implementerEffort;
+  const delegateKnobs = ticket.implementer === "codex" ? codexImplementerKnobs(ticket) : null;
+  const delegateModel = delegateKnobs?.model ?? (ticket.implementer === "claude" ? implementerModel : null);
+  const delegateEffort = delegateKnobs?.effort ?? (ticket.implementer === "claude" ? implementerEffort : null);
   return {
     ticketId: ticket.id,
     slotId,
@@ -398,6 +458,11 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     provider: "claude",
     model: ticket.model ?? MODELS.implement,
     effort: ticket.effort ?? MODELS.implementEffort,
+    role: "orchestrator",
+    delegateProvider: ticket.implementer,
+    delegateModel,
+    delegateEffort,
+    delegateServiceTier: delegateKnobs?.serviceTier,
     permissionMode: "dontAsk",
     permissionAllow: [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`],
     allowedTools: [

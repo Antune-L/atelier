@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 
-import { tokenBreakdownOf, totalTokensOfSessions } from "@shared/pricing";
+import { summarizeSessionCosts, tokenBreakdownOf, totalTokensOfSessions } from "@shared/pricing";
 import type { Ticket } from "@shared/schemas";
 
 import { Badge } from "@/components/ui/badge";
-import { formatTokens } from "@/lib/display";
+import { formatTokens, formatUsd } from "@/lib/display";
 
 interface TicketCostProps {
   ticket: Pick<Ticket, "sessionUsage" | "implementer">;
@@ -17,6 +17,7 @@ export function TicketCost({ ticket }: TicketCostProps): ReactNode {
 
   const totalTokens = totalTokensOfSessions(ticket.sessionUsage);
   const breakdown = tokenBreakdownOf(ticket.sessionUsage);
+  const costs = summarizeSessionCosts(ticket.sessionUsage);
 
   return (
     <section className="space-y-2 rounded-md border bg-muted/30 p-3">
@@ -24,6 +25,9 @@ export function TicketCost({ ticket }: TicketCostProps): ReactNode {
         <h3 className="text-sm font-semibold">Tokens</h3>
         <Badge variant="secondary" className="tabular-nums">
           {formatTokens(totalTokens)}
+        </Badge>
+        <Badge variant="outline" className="tabular-nums">
+          {costs.costUsd === null ? "Coût indisponible" : formatUsd(costs.costUsd)}
         </Badge>
       </div>
 
@@ -45,6 +49,10 @@ export function TicketCost({ ticket }: TicketCostProps): ReactNode {
           <dd className="tabular-nums">{formatTokens(breakdown.cacheCreate)}</dd>
         </div>
       </dl>
+
+      {costs.partial && (
+        <p className="text-xs text-muted-foreground">Sous-total connu : {formatUsd(costs.knownCostUsd)}</p>
+      )}
 
       {ticket.implementer === "composer" && (
         <p className="text-xs text-muted-foreground">Tokens Cursor non inclus (code écrit par Composer).</p>

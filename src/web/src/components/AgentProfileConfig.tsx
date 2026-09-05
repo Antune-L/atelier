@@ -17,6 +17,7 @@ import { Select } from "@/components/ui/select";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProfiles } from "@/hooks/useProfiles";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
+import { matchesCodexImplementer } from "@/lib/profileMatching";
 
 interface AgentProfileConfigProps {
   orchestrator: Orchestrator;
@@ -27,6 +28,10 @@ interface AgentProfileConfigProps {
   implementer: Implementer;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast: boolean;
+  codexImplementerModel: CodexModel | null;
+  codexImplementerEffort: CodexEffort | null;
+  codexImplementerFast: boolean | null;
   onOrchestratorChange: (orchestrator: Orchestrator) => void;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
@@ -35,6 +40,10 @@ interface AgentProfileConfigProps {
   onImplementerChange: (implementer: Implementer) => void;
   onCodexModelChange: (model: CodexModel | null) => void;
   onCodexEffortChange: (effort: CodexEffort | null) => void;
+  onCodexFastChange: (fast: boolean) => void;
+  onCodexImplementerModelChange: (model: CodexModel | null) => void;
+  onCodexImplementerEffortChange: (effort: CodexEffort | null) => void;
+  onCodexImplementerFastChange: (fast: boolean | null) => void;
   /** Apply a whole profile at once (lets a single call site batch all knobs). */
   onApplyProfile: (config: {
     orchestrator: Orchestrator;
@@ -45,6 +54,10 @@ interface AgentProfileConfigProps {
     implementer: Implementer;
     codexModel: CodexModel;
     codexEffort: CodexEffort;
+    codexFast: boolean;
+    codexImplementerModel: CodexModel | null;
+    codexImplementerEffort: CodexEffort | null;
+    codexImplementerFast: boolean | null;
   }) => void;
 }
 
@@ -62,6 +75,10 @@ export function AgentProfileConfig({
   implementer,
   codexModel,
   codexEffort,
+  codexFast,
+  codexImplementerModel,
+  codexImplementerEffort,
+  codexImplementerFast,
   onOrchestratorChange,
   onModelChange,
   onEffortChange,
@@ -70,6 +87,10 @@ export function AgentProfileConfig({
   onImplementerChange,
   onCodexModelChange,
   onCodexEffortChange,
+  onCodexFastChange,
+  onCodexImplementerModelChange,
+  onCodexImplementerEffortChange,
+  onCodexImplementerFastChange,
   onApplyProfile,
 }: AgentProfileConfigProps) {
   const profiles = useProfiles();
@@ -90,15 +111,19 @@ export function AgentProfileConfig({
     if (p.orchestrator !== orchestrator) return false;
     // Codex orchestrator: the Claude orchestrator/implementer knobs are ignored, only the Codex pair counts.
     if (orchestrator === "codex") {
-      return p.codexModel === effectiveCodexModel && p.codexEffort === effectiveCodexEffort;
+      return p.codexModel === effectiveCodexModel && p.codexEffort === effectiveCodexEffort && p.codexFast === codexFast
+        && matchesCodexImplementer(p, { codexImplementerModel, codexImplementerEffort, codexImplementerFast });
     }
     if (p.implementer !== implementer) return false;
     if (p.model !== effectiveModel || p.effort !== effectiveEffort) return false;
-    // Implementer knobs only differentiate profiles in claude mode (ignored under composer).
-    return (
-      implementer !== "claude" ||
-      (p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort)
-    );
+    if (implementer === "claude") {
+      return p.implementerModel === effectiveImplementerModel && p.implementerEffort === effectiveImplementerEffort;
+    }
+    if (implementer === "codex") {
+      return p.codexModel === effectiveCodexModel && p.codexEffort === effectiveCodexEffort && p.codexFast === codexFast
+        && matchesCodexImplementer(p, { codexImplementerModel, codexImplementerEffort, codexImplementerFast });
+    }
+    return true;
   });
   const selectedId = selectedProfile?.id ?? CUSTOM_PROFILE_ID;
 
@@ -114,6 +139,10 @@ export function AgentProfileConfig({
       implementer: profile.implementer,
       codexModel: profile.codexModel,
       codexEffort: profile.codexEffort,
+      codexFast: profile.codexFast,
+      codexImplementerModel: profile.codexImplementerModel,
+      codexImplementerEffort: profile.codexImplementerEffort,
+      codexImplementerFast: profile.codexImplementerFast,
     });
   };
 
@@ -147,6 +176,10 @@ export function AgentProfileConfig({
             implementer={implementer}
             codexModel={codexModel}
             codexEffort={codexEffort}
+            codexFast={codexFast}
+            codexImplementerModel={codexImplementerModel}
+            codexImplementerEffort={codexImplementerEffort}
+            codexImplementerFast={codexImplementerFast}
             onOrchestratorChange={onOrchestratorChange}
             onModelChange={onModelChange}
             onEffortChange={onEffortChange}
@@ -155,6 +188,10 @@ export function AgentProfileConfig({
             onImplementerChange={onImplementerChange}
             onCodexModelChange={onCodexModelChange}
             onCodexEffortChange={onCodexEffortChange}
+            onCodexFastChange={onCodexFastChange}
+            onCodexImplementerModelChange={onCodexImplementerModelChange}
+            onCodexImplementerEffortChange={onCodexImplementerEffortChange}
+            onCodexImplementerFastChange={onCodexImplementerFastChange}
           />
         </div>
       </details>

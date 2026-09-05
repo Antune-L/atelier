@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { AgentEffort, AgentModel, CodexEffort, CodexModel, Implementer, Orchestrator } from "@shared/constants";
 
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { pairedImplementer } from "@/lib/agentPairing";
 
 /** A complete profile applied to the agent knobs in one batch. */
@@ -14,6 +15,10 @@ export interface AgentProfileConfigValues {
   implementer: Implementer;
   codexModel: CodexModel;
   codexEffort: CodexEffort;
+  codexFast: boolean;
+  codexImplementerModel: CodexModel | null;
+  codexImplementerEffort: CodexEffort | null;
+  codexImplementerFast: boolean | null;
 }
 
 export interface AgentKnobs {
@@ -25,6 +30,10 @@ export interface AgentKnobs {
   implementer: Implementer;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast: boolean;
+  codexImplementerModel: CodexModel | null;
+  codexImplementerEffort: CodexEffort | null;
+  codexImplementerFast: boolean | null;
   setOrchestrator: (orchestrator: Orchestrator) => void;
   setModel: (model: AgentModel | null) => void;
   setEffort: (effort: AgentEffort | null) => void;
@@ -33,6 +42,10 @@ export interface AgentKnobs {
   setImplementer: (implementer: Implementer) => void;
   setCodexModel: (model: CodexModel | null) => void;
   setCodexEffort: (effort: CodexEffort | null) => void;
+  setCodexFast: (fast: boolean) => void;
+  setCodexImplementerModel: (model: CodexModel | null) => void;
+  setCodexImplementerEffort: (effort: CodexEffort | null) => void;
+  setCodexImplementerFast: (fast: boolean | null) => void;
   applyProfile: (config: AgentProfileConfigValues) => void;
   reset: () => void;
 }
@@ -43,6 +56,7 @@ export interface AgentKnobs {
  * back to server config". Shared by the new ticket and CSV import panels.
  */
 export function useAgentKnobs(): AgentKnobs {
+  const capabilities = useCapabilities();
   const [orchestrator, setOrchestratorState] = useState<Orchestrator>("claude");
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -51,6 +65,11 @@ export function useAgentKnobs(): AgentKnobs {
   const [implementer, setImplementer] = useState<Implementer>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
+  const [codexFastOverride, setCodexFast] = useState<boolean | null>(null);
+  const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
+  const [codexImplementerModel, setCodexImplementerModel] = useState<CodexModel | null>(null);
+  const [codexImplementerEffort, setCodexImplementerEffort] = useState<CodexEffort | null>(null);
+  const [codexImplementerFast, setCodexImplementerFast] = useState<boolean | null>(null);
 
   // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex,
   // claude accepts any implementer, so the choice is preserved.
@@ -68,6 +87,10 @@ export function useAgentKnobs(): AgentKnobs {
     setImplementer(config.implementer);
     setCodexModel(config.codexModel);
     setCodexEffort(config.codexEffort);
+    setCodexFast(config.codexFast);
+    setCodexImplementerModel(config.codexImplementerModel);
+    setCodexImplementerEffort(config.codexImplementerEffort);
+    setCodexImplementerFast(config.codexImplementerFast);
   };
 
   const reset = (): void => {
@@ -79,6 +102,10 @@ export function useAgentKnobs(): AgentKnobs {
     setImplementer("claude");
     setCodexModel(null);
     setCodexEffort(null);
+    setCodexFast(null);
+    setCodexImplementerModel(null);
+    setCodexImplementerEffort(null);
+    setCodexImplementerFast(null);
   };
 
   return {
@@ -90,6 +117,10 @@ export function useAgentKnobs(): AgentKnobs {
     implementer,
     codexModel,
     codexEffort,
+    codexFast,
+    codexImplementerModel,
+    codexImplementerEffort,
+    codexImplementerFast,
     setOrchestrator,
     setModel,
     setEffort,
@@ -98,6 +129,10 @@ export function useAgentKnobs(): AgentKnobs {
     setImplementer,
     setCodexModel,
     setCodexEffort,
+    setCodexFast,
+    setCodexImplementerModel,
+    setCodexImplementerEffort,
+    setCodexImplementerFast,
     applyProfile,
     reset,
   };

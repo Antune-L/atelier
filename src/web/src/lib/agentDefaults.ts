@@ -34,6 +34,7 @@ export interface ResolvedAgentDefaults {
   implementerEffort: AgentEffort | null;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast: boolean;
 }
 
 /** Parse the agent-config defaults from backend capabilities into typed values. */
@@ -45,5 +46,6 @@ export function resolveAgentDefaults(capabilities: Capabilities): ResolvedAgentD
     implementerEffort: resolveEffort(capabilities.defaultImplementerEffort),
     codexModel: resolveCodexModel(capabilities.defaultCodexModel),
     codexEffort: resolveCodexEffort(capabilities.defaultCodexEffort),
+    codexFast: capabilities.defaultCodexFast,
   };
 }

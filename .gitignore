@@ -25,3 +25,4 @@ graphify-out/.graphify_*.json
 !graphify-out/.graphify_labels.json
 
 .codex/
+/plans/

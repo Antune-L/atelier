@@ -10,6 +10,7 @@ import {
 } from "@shared/constants";
 
 import { CodexAgentFields } from "@/components/CodexAgentFields";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -39,6 +40,10 @@ interface ImplementationAgentFieldsProps {
   implementer: Implementer;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast: boolean;
+  codexImplementerModel: CodexModel | null;
+  codexImplementerEffort: CodexEffort | null;
+  codexImplementerFast: boolean | null;
   onOrchestratorChange: (orchestrator: Orchestrator) => void;
   onModelChange: (model: AgentModel | null) => void;
   onEffortChange: (effort: AgentEffort | null) => void;
@@ -47,6 +52,10 @@ interface ImplementationAgentFieldsProps {
   onImplementerChange: (implementer: Implementer) => void;
   onCodexModelChange: (model: CodexModel | null) => void;
   onCodexEffortChange: (effort: CodexEffort | null) => void;
+  onCodexFastChange: (fast: boolean) => void;
+  onCodexImplementerModelChange: (model: CodexModel | null) => void;
+  onCodexImplementerEffortChange: (effort: CodexEffort | null) => void;
+  onCodexImplementerFastChange: (fast: boolean | null) => void;
 }
 
 /** Per-ticket implementation-agent knobs (orchestrator + implementer sub-agent) as segmented controls. */
@@ -59,6 +68,10 @@ export function ImplementationAgentFields({
   implementer,
   codexModel,
   codexEffort,
+  codexFast,
+  codexImplementerModel,
+  codexImplementerEffort,
+  codexImplementerFast,
   onOrchestratorChange,
   onModelChange,
   onEffortChange,
@@ -67,6 +80,10 @@ export function ImplementationAgentFields({
   onImplementerChange,
   onCodexModelChange,
   onCodexEffortChange,
+  onCodexFastChange,
+  onCodexImplementerModelChange,
+  onCodexImplementerEffortChange,
+  onCodexImplementerFastChange,
 }: ImplementationAgentFieldsProps) {
   const capabilities = useCapabilities();
   const { composerAvailable, codexAvailable } = capabilities;
@@ -84,10 +101,23 @@ export function ImplementationAgentFields({
     effort: resolvedDefaultEffort,
     implementerModel: resolvedDefaultImplementerModel,
     implementerEffort: resolvedDefaultImplementerEffort,
+    codexModel: resolvedDefaultCodexModel,
+    codexEffort: resolvedDefaultCodexEffort,
   } = resolveAgentDefaults(capabilities);
 
   const orchestratorOptions = orchestratorTabOptions(codexAvailable);
   const implementerOptions = implementerTabOptions(orchestrator, composerAvailable, codexAvailable);
+  const effectiveCodexModel = codexModel ?? resolvedDefaultCodexModel;
+  const effectiveCodexEffort = codexEffort ?? resolvedDefaultCodexEffort;
+  const inheritsCodexSettings = codexImplementerModel === null && codexImplementerEffort === null && codexImplementerFast === null;
+  const inheritedCodexFields = [
+    codexImplementerModel === null ? "modèle" : null,
+    codexImplementerEffort === null ? "effort" : null,
+    codexImplementerFast === null ? "FAST" : null,
+  ].filter((field) => field !== null);
+  const codexImplementerHint = inheritedCodexFields.length > 0
+    ? `Héritage des réglages Codex du ticket : ${inheritedCodexFields.join(", ")}.`
+    : "Modèle, effort et FAST indépendants de l’orchestrateur.";
 
   return (
     <div className="flex flex-col gap-3">
@@ -120,19 +150,22 @@ export function ImplementationAgentFields({
         </>
       )}
       {orchestrator === "codex" && (
-        <>
+        <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
+          <p className="text-xs font-medium text-muted-foreground">Orchestrateur Codex</p>
           <CodexAgentFields
             codexModel={codexModel}
             codexEffort={codexEffort}
+            codexFast={codexFast}
             onCodexModelChange={onCodexModelChange}
             onCodexEffortChange={onCodexEffortChange}
+            onCodexFastChange={onCodexFastChange}
           />
           <p className="text-xs text-muted-foreground">
             {codexAvailable
               ? "Codex pilote la session de bout en bout (planification, implémentation, review, tests, PR) — Claude n'intervient pas."
               : "Codex non détecté : installe le CLI puis authentifie-toi (CODEX_API_KEY ou `codex login`) (sinon le lancement échouera)."}
           </p>
-        </>
+        </div>
       )}
       <Field labelId={implementerLabelId} label="Implémenté par">
         <Tabs
@@ -170,17 +203,45 @@ export function ImplementationAgentFields({
             : "Cursor non détecté : installe-le puis `agent login` (sinon le lancement échouera)."}
         </p>
       )}
-      {implementer === "codex" && orchestrator === "claude" && (
+      {implementer === "codex" && (
         <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
-          <p className="text-xs font-medium text-muted-foreground">Session Codex déléguée</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              {orchestrator === "codex" ? "Sous-agent implémenteur Codex" : "Session Codex déléguée"}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (inheritsCodexSettings) {
+                  if (effectiveCodexModel) onCodexImplementerModelChange(effectiveCodexModel);
+                  if (effectiveCodexEffort) onCodexImplementerEffortChange(effectiveCodexEffort);
+                  onCodexImplementerFastChange(codexFast);
+                } else {
+                  onCodexImplementerModelChange(null);
+                  onCodexImplementerEffortChange(null);
+                  onCodexImplementerFastChange(null);
+                }
+              }}
+            >
+              {inheritsCodexSettings ? "Personnaliser" : "Hériter des réglages Codex"}
+            </Button>
+          </div>
           <CodexAgentFields
-            codexModel={codexModel}
-            codexEffort={codexEffort}
-            onCodexModelChange={onCodexModelChange}
-            onCodexEffortChange={onCodexEffortChange}
+            codexModel={codexImplementerModel}
+            codexEffort={codexImplementerEffort}
+            codexFast={codexImplementerFast ?? codexFast}
+            fallbackModel={codexModel ?? resolvedDefaultCodexModel}
+            fallbackEffort={codexEffort ?? resolvedDefaultCodexEffort}
+            preserveExplicit
+            showConnectionStatus={orchestrator !== "codex"}
+            onCodexModelChange={onCodexImplementerModelChange}
+            onCodexEffortChange={onCodexImplementerEffortChange}
+            onCodexFastChange={onCodexImplementerFastChange}
           />
           <p className="text-xs text-muted-foreground">
-            Codex écrit le code dans une session déléguée en arrière-plan ; l'orchestrateur Claude planifie, relit, teste et ouvre la PR.
+            {codexImplementerHint}
           </p>
         </div>
       )}

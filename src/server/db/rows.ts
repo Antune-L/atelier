@@ -1,8 +1,10 @@
 import { z } from "zod";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL } from "../../shared/constants.ts";
-import type { Automation, AutomationRun, Comment, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentMessage, Automation, AutomationRun, Comment, ExecutionRun, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
+  agentMessageChannelSchema,
+  agentMessageStatusSchema,
   agentEffortSchema,
   agentModelSchema,
   automationRunStatusSchema,
@@ -10,6 +12,10 @@ import {
   codexEffortSchema,
   codexModelSchema,
   columnSchema,
+  executionOwnerTypeSchema,
+  executionStatusSchema,
+  executionUsageByModelSchema,
+  feasibilityEngineSchema,
   implementerSchema,
   kindSchema,
   orchestratorSchema,
@@ -36,6 +42,7 @@ const ticketRowSchema = z.object({
   project: z.string(),
   kind: z.string(),
   review_depth: z.string().nullable(),
+  feasibility_engine: z.string().nullable(),
   pr_number: z.number().nullable(),
   pr_head_branch: z.string().nullable(),
   post_comments: z.number(),
@@ -62,6 +69,10 @@ const ticketRowSchema = z.object({
   implementer_effort: z.string().nullable(),
   codex_model: z.string().nullable(),
   codex_effort: z.string().nullable(),
+  codex_fast: z.number(),
+  codex_implementer_model: z.string().nullable(),
+  codex_implementer_effort: z.string().nullable(),
+  codex_implementer_fast: z.number().nullable(),
   implementer: z.string(),
   orchestrator: z.string(),
   review_rounds: z.number(),
@@ -113,6 +124,10 @@ const profileRowSchema = z.object({
   orchestrator: z.string(),
   codex_model: z.string(),
   codex_effort: z.string(),
+  codex_fast: z.number(),
+  codex_implementer_model: z.string().nullable(),
+  codex_implementer_effort: z.string().nullable(),
+  codex_implementer_fast: z.number().nullable(),
   sort_order: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
@@ -163,6 +178,72 @@ const worktreeSessionRowSchema = z.object({
 });
 export type WorktreeSessionRow = z.infer<typeof worktreeSessionRowSchema>;
 
+const executionRunRowSchema = z.object({
+  id: z.string(),
+  owner_type: z.string(),
+  owner_id: z.string(),
+  generation_id: z.string(),
+  session_id: z.string().nullable(),
+  role: z.string(),
+  orchestrator: z.string(),
+  effective_model: z.string().nullable(),
+  effective_effort: z.string().nullable(),
+  delegate_provider: z.string().nullable(),
+  delegate_effective_model: z.string().nullable(),
+  delegate_effective_effort: z.string().nullable(),
+  delegate_codex_fast: z.number().nullable(),
+  codex_fast: z.number(),
+  configured_service_tier: z.string().nullable(),
+  usage_by_model: z.string().nullable(),
+  status: z.string(),
+  error: z.string().nullable(),
+  started_at: z.number(),
+  finished_at: z.number().nullable(),
+});
+
+const agentMessageRowSchema = z.object({
+  id: z.string(),
+  owner_type: z.string(),
+  owner_id: z.string(),
+  generation_id: z.string(),
+  session_id: z.string().nullable(),
+  channel: z.string(),
+  content: z.string(),
+  status: z.string(),
+  turn_id: z.string().nullable(),
+  created_at: z.number(),
+  received_at: z.number().nullable(),
+  accepted_at: z.number().nullable(),
+  rejected_at: z.number().nullable(),
+  error: z.string().nullable(),
+});
+
+const reviewPassRowSchema = z.object({
+  ticket_id: z.string(),
+  pass_id: z.string(),
+  code_fingerprint: z.string(),
+  review_depth: z.string(),
+  requires_approval: z.number(),
+  created_at: z.number(),
+});
+
+const reviewApprovalRowSchema = z.object({
+  ticket_id: z.string(),
+  pass_id: z.string(),
+  kind: z.string(),
+  approved: z.number(),
+  verdict: z.string().nullable(),
+  summary: z.string(),
+  findings_json: z.string(),
+  status: z.string(),
+  verification_status: z.string(),
+  error: z.string().nullable(),
+  created_at: z.number(),
+});
+
+export type ReviewPassRow = z.infer<typeof reviewPassRowSchema>;
+export type ReviewApprovalRow = z.infer<typeof reviewApprovalRowSchema>;
+
 const ticketColumnSchema = columnSchema;
 const ticketStageSchema = stageSchema.nullable();
 const projectSchema = z.string().refine(isProjectKey, { message: "projet inconnu" });
@@ -191,6 +272,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     project: projectSchema.parse(row.project),
     kind: kindSchema.parse(row.kind),
     reviewDepth: row.review_depth === null ? null : reviewDepthSchema.parse(row.review_depth),
+    feasibilityEngine: feasibilityEngineSchema.nullable().catch(null).parse(row.feasibility_engine),
     prNumber: row.pr_number,
     prHeadBranch: row.pr_head_branch,
     postComments: row.post_comments === 1,
@@ -219,6 +301,10 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     // to "unset" (the current default applies) instead of throwing on the enum parse.
     codexModel: codexModelSchema.nullable().catch(null).parse(row.codex_model),
     codexEffort: codexEffortSchema.nullable().catch(null).parse(row.codex_effort),
+    codexFast: row.codex_fast === 1,
+    codexImplementerModel: codexModelSchema.nullable().catch(null).parse(row.codex_implementer_model),
+    codexImplementerEffort: codexEffortSchema.nullable().catch(null).parse(row.codex_implementer_effort),
+    codexImplementerFast: row.codex_implementer_fast === null ? null : row.codex_implementer_fast === 1,
     implementer: implementerSchema.parse(row.implementer),
     orchestrator: orchestratorSchema.parse(row.orchestrator),
     reviewRounds: row.review_rounds,
@@ -275,6 +361,10 @@ export function mapProfileRow(raw: unknown): Profile {
     // Same resilience as tickets: a retired Codex model id falls back to the current default.
     codexModel: codexModelSchema.catch(DEFAULT_CODEX_MODEL).parse(row.codex_model),
     codexEffort: codexEffortSchema.catch(DEFAULT_CODEX_EFFORT).parse(row.codex_effort),
+    codexFast: row.codex_fast === 1,
+    codexImplementerModel: codexModelSchema.nullable().catch(null).parse(row.codex_implementer_model),
+    codexImplementerEffort: codexEffortSchema.nullable().catch(null).parse(row.codex_implementer_effort),
+    codexImplementerFast: row.codex_implementer_fast === null ? null : row.codex_implementer_fast === 1,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -335,6 +425,69 @@ export function mapSlotRow(raw: unknown): Slot {
     tmuxSession: row.tmux_session,
     status: slotStatusSchema.parse(row.status),
   };
+}
+
+/** Validate a persisted execution and preserve unknown model ids as historical strings. */
+export function mapExecutionRunRow(raw: unknown): ExecutionRun {
+  const row = executionRunRowSchema.parse(raw);
+  let usage: unknown = {};
+  if (row.usage_by_model !== null) {
+    try {
+      usage = JSON.parse(row.usage_by_model);
+    } catch {
+      usage = {};
+    }
+  }
+  return {
+    id: row.id,
+    ownerType: executionOwnerTypeSchema.parse(row.owner_type),
+    ownerId: row.owner_id,
+    generationId: row.generation_id,
+    sessionId: row.session_id,
+    role: row.role,
+    orchestrator: orchestratorSchema.parse(row.orchestrator),
+    effectiveModel: row.effective_model,
+    effectiveEffort: row.effective_effort,
+    delegateProvider: row.delegate_provider === null ? null : implementerSchema.parse(row.delegate_provider),
+    delegateEffectiveModel: row.delegate_effective_model,
+    delegateEffectiveEffort: row.delegate_effective_effort,
+    delegateCodexFast: row.delegate_codex_fast === null ? null : row.delegate_codex_fast === 1,
+    codexFast: row.codex_fast === 1,
+    configuredServiceTier: row.configured_service_tier,
+    usageByModel: executionUsageByModelSchema.catch({}).parse(usage),
+    status: executionStatusSchema.parse(row.status),
+    error: row.error,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+export function mapAgentMessageRow(raw: unknown): AgentMessage {
+  const row = agentMessageRowSchema.parse(raw);
+  return {
+    id: row.id,
+    ownerType: executionOwnerTypeSchema.parse(row.owner_type),
+    ownerId: row.owner_id,
+    generationId: row.generation_id,
+    sessionId: row.session_id,
+    channel: agentMessageChannelSchema.parse(row.channel),
+    content: row.content,
+    status: agentMessageStatusSchema.parse(row.status),
+    turnId: row.turn_id,
+    createdAt: row.created_at,
+    receivedAt: row.received_at,
+    acceptedAt: row.accepted_at,
+    rejectedAt: row.rejected_at,
+    error: row.error,
+  };
+}
+
+export function mapReviewPassRow(raw: unknown): ReviewPassRow {
+  return reviewPassRowSchema.parse(raw);
+}
+
+export function mapReviewApprovalRow(raw: unknown): ReviewApprovalRow {
+  return reviewApprovalRowSchema.parse(raw);
 }
 
 const automationRowSchema = z.object({

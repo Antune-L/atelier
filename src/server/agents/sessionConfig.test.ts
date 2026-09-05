@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
+import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
 import { MODELS } from "../config.ts";
 import { makeTicket } from "../testing/fixtures.ts";
 
 import {
+  buildFeasibilitySessionConfig,
   buildImplementSessionConfig,
   buildSplitSessionConfig,
   buildTriageSessionConfig,
@@ -24,11 +26,43 @@ function implementConfig(ticket: ReturnType<typeof makeTicket>, resumeSessionId?
 
 describe("buildImplementSessionConfig — codex orchestrator", () => {
   test("runs on the codex provider with the ticket's codex knobs", () => {
-    const ticket = makeTicket({ orchestrator: "codex", implementer: "codex", codexModel: "gpt-5.4", codexEffort: "high" });
+    const ticket = makeTicket({
+      orchestrator: "codex",
+      implementer: "codex",
+      codexModel: "gpt-5.6-sol",
+      codexEffort: "high",
+      codexFast: true,
+      codexImplementerModel: "gpt-5.6-terra",
+      codexImplementerEffort: "low",
+      codexImplementerFast: false,
+    });
     const cfg = implementConfig(ticket);
     expect(cfg.provider).toBe("codex");
-    expect(cfg.model).toBe("gpt-5.4");
+    expect(cfg.model).toBe("gpt-5.6-sol");
     expect(cfg.effort).toBe("high");
+    expect(cfg.serviceTier).toBe("fast");
+    expect(cfg.delegateModel).toBe("gpt-5.6-terra");
+    expect(cfg.delegateEffort).toBe("low");
+    expect(cfg.delegateServiceTier).toBe("default");
+    expect(cfg.agents?.implementer).toMatchObject({ model: "gpt-5.6-terra", effort: "low", serviceTier: "default" });
+    expect(cfg.agents?.["pr-fixer"]).toMatchObject({ model: "gpt-5.6-terra", effort: "low", serviceTier: "default" });
+  });
+
+  test("null implementer knobs inherit the resolved Codex orchestrator knobs", () => {
+    const ticket = makeTicket({
+      orchestrator: "codex",
+      implementer: "codex",
+      codexModel: "gpt-5.6-sol",
+      codexEffort: "high",
+      codexFast: true,
+      codexImplementerModel: null,
+      codexImplementerEffort: null,
+      codexImplementerFast: null,
+    });
+    const cfg = implementConfig(ticket);
+    expect(cfg.delegateModel).toBe("gpt-5.6-sol");
+    expect(cfg.delegateEffort).toBe("high");
+    expect(cfg.delegateServiceTier).toBe("fast");
   });
 
   test("falls back to the MODELS registry when the ticket's codex knobs are null", () => {
@@ -36,6 +70,14 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
     const cfg = implementConfig(ticket);
     expect(cfg.model).toBe(MODELS.codexModel);
     expect(cfg.effort).toBe(MODELS.codexEffort);
+  });
+
+  test("attaches contract skills, native agents and Playwright MCP for feature verification", () => {
+    const ticket = makeTicket({ orchestrator: "codex", implementer: "codex", verifyFeature: true });
+    const cfg = implementConfig(ticket);
+    expect(cfg.skills).toContain("regression-check");
+    expect(cfg.agents?.implementer?.role).toBe("implementer");
+    expect(cfg.extraMcpServers?.playwright?.command).toBe("npx");
   });
 
   test("pins the sandbox read-only for an ask ticket and forwards resumeSessionId", () => {
@@ -64,6 +106,9 @@ describe("buildImplementSessionConfig — claude orchestrator", () => {
     expect(cfg.permissionAllow ?? []).toContain(`Bash(${COMPOSER_SCRIPT}:*)`);
     // Orchestrator knobs unset on the ticket → fall back to the MODELS registry.
     expect(cfg.model).toBe(MODELS.implement);
+    expect(cfg.delegateProvider).toBe("claude");
+    expect(cfg.delegateModel).toBe(MODELS.implementerModel);
+    expect(cfg.delegateEffort).toBe(MODELS.implementerEffort);
   });
 
   test("claude×composer: still the claude provider config (composer only writes code)", () => {
@@ -72,18 +117,47 @@ describe("buildImplementSessionConfig — claude orchestrator", () => {
     expect(cfg.provider).toBe("claude");
     expect(Object.keys(cfg.agents ?? {})).toContain("implementer");
     expect(cfg.permissionAllow ?? []).toContain(`Bash(${COMPOSER_SCRIPT}:*)`);
+    expect(cfg.delegateProvider).toBe("composer");
+    expect(cfg.delegateModel).toBeNull();
   });
 });
 
 describe("read-only triage/split sessions", () => {
   test("codex driver → codex provider, read-only sandbox", () => {
-    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.5", effort: "high", deep: false, driver: "codex" });
+    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.6-terra", effort: "high", deep: false, driver: "codex" });
     expect(triage.provider).toBe("codex");
     expect(triage.readOnly).toBe(true);
 
-    const split = buildSplitSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.5", effort: "high", driver: "codex" });
+    const split = buildSplitSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.6-terra", effort: "high", driver: "codex" });
     expect(split.provider).toBe("codex");
     expect(split.readOnly).toBe(true);
+  });
+
+  test("Analyse + and feasibility expose bounded native scouts to Codex", () => {
+    const triage = buildTriageSessionConfig({
+      ticketId: "t1",
+      cwd: CWD,
+      model: "gpt-6-astra",
+      effort: "high",
+      deep: true,
+      driver: "codex",
+    });
+    expect(Object.keys(triage.agents ?? {})).toHaveLength(2);
+    expect(triage.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.role).toBe("scout");
+    expect(triage.allowedTools).not.toContain("mcp__plugin_figma_figma__get_screenshot");
+    expect(triage.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.prompt).toContain("réellement présent");
+
+    const feasibility = buildFeasibilitySessionConfig({
+      batchId: "feasibility-batch-1",
+      cwd: CWD,
+      model: "gpt-6-astra",
+      effort: "high",
+      driver: "codex",
+    });
+    expect(feasibility.ownerType).toBe("batch");
+    expect(feasibility.provider).toBe("codex");
+    expect(Object.values(feasibility.agents ?? {})[0]?.role).toBe("scout");
+    expect(feasibility.allowedTools).not.toContain("mcp__claude_ai_Slack__slack_read_thread");
   });
 
   test("claude driver → claude provider with read-only tools", () => {

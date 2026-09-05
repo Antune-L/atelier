@@ -48,10 +48,12 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
+  const [codexFastOverride, setCodexFast] = useState<boolean | null>(null);
   // "" (BASE_BRANCH_AUTO) = no override → argus uses each PR's own detected target branch.
   const [baseBranch, setBaseBranch] = useState<string>(BASE_BRANCH_AUTO);
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branchesKey, setBranchesKey] = useState<string | null>(null);
+  const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
 
@@ -88,6 +90,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         orchestrator,
         codexModel,
         codexEffort,
+        codexFast,
         prs: chosen,
       });
       onClose();
@@ -140,9 +143,11 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
+        codexFast={codexFast}
         onOrchestratorChange={setOrchestrator}
         onCodexModelChange={setCodexModel}
         onCodexEffortChange={setCodexEffort}
+        onCodexFastChange={setCodexFast}
       />
 
       {orchestrator === "claude" && (

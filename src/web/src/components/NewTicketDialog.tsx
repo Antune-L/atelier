@@ -53,6 +53,7 @@ export function NewTicketDialog({
   initialTab = "ticket",
 }: NewTicketDialogProps) {
   const [tab, setTab] = useState<Tab>("ticket");
+  const notionRequest = useRef(0);
   // Select the requested tab on each closed→open transition (no-useEffect idiom).
   const wasOpen = useRef(false);
   if (open && !wasOpen.current) {
@@ -60,15 +61,24 @@ export function NewTicketDialog({
     setTab(initialTab);
   } else if (!open && wasOpen.current) {
     wasOpen.current = false;
+    notionRequest.current += 1;
   }
   const [title, setTitle] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
   const [importingNotion, setImportingNotion] = useState(false);
+  if (!open && importingNotion) setImportingNotion(false);
   const [description, setDescription] = useState("");
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = projectChoice ?? projects[0]?.key ?? "";
   const selectedProject = projects.find((p) => p.key === project);
+  const notionScope = `${project}\n${externalUrl}`;
+  const currentNotionScope = useRef(notionScope);
+  if (currentNotionScope.current !== notionScope) {
+    currentNotionScope.current = notionScope;
+    notionRequest.current += 1;
+    if (importingNotion) setImportingNotion(false);
+  }
   // null = untouched → fall back to the selected project's default branch.
   const [baseBranchChoice, setBaseBranchChoice] = useState<string | null>(null);
   const baseBranch = baseBranchChoice ?? selectedProject?.baseBranch ?? "";
@@ -131,6 +141,7 @@ export function NewTicketDialog({
   })();
 
   const reset = (): void => {
+    notionRequest.current += 1;
     setTitle("");
     setExternalUrl("");
     setImportingNotion(false);
@@ -159,15 +170,28 @@ export function NewTicketDialog({
   };
 
   const importFromNotion = async (): Promise<void> => {
+    if (importingNotion) return;
+    const requestId = ++notionRequest.current;
     setError(null);
     setImportingNotion(true);
     try {
-      const { markdown } = await api.importNotion(externalUrl);
-      appendToDescription(markdown);
+      const { markdown } = await api.importNotion({
+        url: externalUrl,
+        orchestrator: agent.orchestrator,
+        ...(agent.orchestrator === "codex" ? {
+          codexModel: agent.codexModel ?? undefined,
+          codexEffort: agent.codexEffort ?? undefined,
+          codexFast: agent.codexFast,
+        } : {
+          model: agent.model ?? undefined,
+          effort: agent.effort ?? undefined,
+        }),
+      });
+      if (requestId === notionRequest.current) appendToDescription(markdown);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Échec de l'import Notion");
+      if (requestId === notionRequest.current) setError(e instanceof Error ? e.message : "Échec de l'import Notion");
     } finally {
-      setImportingNotion(false);
+      if (requestId === notionRequest.current) setImportingNotion(false);
     }
   };
 
@@ -213,6 +237,11 @@ export function NewTicketDialog({
         implementer: agent.implementer,
         codexModel: agent.codexModel,
         codexEffort: agent.codexEffort,
+        codexFast: agent.codexFast,
+        codexImplementerModel: agent.codexImplementerModel,
+        codexImplementerEffort: agent.codexImplementerEffort,
+        codexImplementerFast: agent.codexImplementerFast,
+        feasibilityEngine: null,
         start,
       });
       reset();
@@ -377,6 +406,10 @@ export function NewTicketDialog({
                     implementer={agent.implementer}
                     codexModel={agent.codexModel}
                     codexEffort={agent.codexEffort}
+                    codexFast={agent.codexFast}
+                    codexImplementerModel={agent.codexImplementerModel}
+                    codexImplementerEffort={agent.codexImplementerEffort}
+                    codexImplementerFast={agent.codexImplementerFast}
                     onOrchestratorChange={agent.setOrchestrator}
                     onModelChange={agent.setModel}
                     onEffortChange={agent.setEffort}
@@ -385,6 +418,10 @@ export function NewTicketDialog({
                     onImplementerChange={agent.setImplementer}
                     onCodexModelChange={agent.setCodexModel}
                     onCodexEffortChange={agent.setCodexEffort}
+                    onCodexFastChange={agent.setCodexFast}
+                    onCodexImplementerModelChange={agent.setCodexImplementerModel}
+                    onCodexImplementerEffortChange={agent.setCodexImplementerEffort}
+                    onCodexImplementerFastChange={agent.setCodexImplementerFast}
                     onApplyProfile={agent.applyProfile}
                   />
                 </div>

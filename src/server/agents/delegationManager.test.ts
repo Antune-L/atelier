@@ -3,7 +3,9 @@ import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { DELEGATION_SLOT_ID } from "../../shared/constants.ts";
+import type { ReviewKind } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
+import { ticketSchema } from "../../shared/schemas.ts";
 import { initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
@@ -21,34 +23,69 @@ interface RecordedSession {
   sent: string[];
   closed: boolean;
   interrupted: boolean;
+  disposed: boolean;
 }
 
 /** Fake adapter that records every spawned session and exposes its onEvent for test-driven streams. */
 class RecordingSystemAdapter extends FakeSystemAdapter {
   readonly sessions: RecordedSession[] = [];
+  fingerprint = "code-v1";
+  hangOnClose = false;
+  throwOnClose = false;
+  runtimeGate: Promise<void> | null = null;
+
+  override async codeFingerprint(): Promise<string> {
+    return this.fingerprint;
+  }
+
+  override async checkCodexRuntime() {
+    await this.runtimeGate;
+    return super.checkCodexRuntime();
+  }
 
   override startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
-    const record: RecordedSession = { opts, sent: [], closed: false, interrupted: false };
+    const record: RecordedSession = { opts, sent: [], closed: false, interrupted: false, disposed: false };
     this.sessions.push(record);
     return {
       ticketId: opts.ticketId,
-      send: (content) => record.sent.push(content),
+      send: (content) => {
+        record.sent.push(content);
+        return "fixture-message";
+      },
       interrupt: async () => {
         record.interrupted = true;
       },
-      close: async () => {
+      close: () => {
         record.closed = true;
+        if (this.throwOnClose) throw new Error("close sync failure");
+        if (this.hangOnClose) return new Promise<void>(() => undefined);
+        return Promise.resolve();
       },
+      dispose: () => { record.disposed = true; },
     };
   }
 }
 
 const CHILD_USAGE: Record<string, AgentTurnUsage> = {
-  "gpt-5.4": { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheCreationTokens: 0, costUsd: 0 },
+  "gpt-5.6-sol": { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheCreationTokens: 0, costUsd: 0 },
 };
 
 /** The settle path defers one tick to capture trailing error details; wait past it. */
 const SETTLE_WAIT_MS = 120;
+const LIGHT_REVIEW_KINDS: readonly ReviewKind[] = ["quality", "conventions", "regression", "logic"];
+const FULL_REVIEW_KINDS: readonly ReviewKind[] = [...LIGHT_REVIEW_KINDS, "architecture", "security"];
+
+function reviewFinding(severity: "critical" | "major" | "minor", id = "finding-1") {
+  return {
+    id,
+    severity,
+    summary: "Finding vérifiable",
+    evidence: "src/example.ts:12 démontre le problème",
+    ruleSource: null,
+    path: "src/example.ts",
+    line: 12,
+  };
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,10 +115,10 @@ afterAll(() => {
   removeDbFiles(dbPath);
 });
 
-function setup(): { system: RecordingSystemAdapter; sessionHub: SessionHub; delegation: DelegationManager } {
+function setup(closeTimeoutMs?: number): { system: RecordingSystemAdapter; sessionHub: SessionHub; delegation: DelegationManager } {
   const system = new RecordingSystemAdapter();
   const sessionHub = new SessionHub(system);
-  const delegation = new DelegationManager(store, system, sessionHub, new ClientHub(store));
+  const delegation = new DelegationManager(store, system, sessionHub, new ClientHub(store), closeTimeoutMs);
   // Mirrors the index.ts wiring: any parent-session teardown kills its delegated child.
   sessionHub.onDisconnect((ticketId) => delegation.stop(ticketId));
   return { system, sessionHub, delegation };
@@ -109,8 +146,11 @@ function newDelegatedTicket(): Ticket {
     implementerEffort: null,
     implementer: "codex",
     orchestrator: "claude",
-    codexModel: "gpt-5.4",
+    codexModel: "gpt-5.6-sol",
     codexEffort: "high",
+    codexImplementerModel: "gpt-5.6-terra",
+    codexImplementerEffort: "low",
+    codexImplementerFast: false,
   });
 }
 
@@ -123,16 +163,48 @@ function startParentSession(sessionHub: SessionHub, ticketId: string): void {
     provider: "claude",
     model: "opus",
     effort: null,
+    role: "orchestrator",
     permissionMode: "dontAsk",
   });
 }
 
+async function startAndApproveReviews(
+  delegation: DelegationManager,
+  system: RecordingSystemAdapter,
+  ticket: Ticket,
+  kinds: readonly ReviewKind[],
+): Promise<void> {
+  const starts = await Promise.all(
+    kinds.map((kind) => delegation.startReview(ticket, 3, kind, `diff ${kind}`)),
+  );
+  expect(starts.every((outcome) => outcome.ok)).toBe(true);
+  const reviews = system.sessions.slice(-kinds.length);
+  expect(reviews).toHaveLength(kinds.length);
+  for (const [index, review] of reviews.entries()) {
+    const kind = kinds[index];
+    if (!review || !kind) throw new Error("review session missing");
+    await review.opts.onToolCall("submit_review", {
+      verdict: "approve",
+      summary: `${kind} validé`,
+      findings: [],
+    });
+    review.opts.onEvent({
+      type: "turn_end",
+      ok: true,
+      subtype: "success",
+      sessionId: `review-${kind}`,
+      usageByModel: {},
+    });
+  }
+  await sleep(SETTLE_WAIT_MS);
+}
+
 describe("DelegationManager.start", () => {
-  test("spawns a bare Codex child in the slot worktree with the ticket's codex knobs and the plan", () => {
+  test("spawns a bare Codex child in the slot worktree with the ticket's codex knobs and the plan", async () => {
     const { system, delegation } = setup();
     const ticket = newDelegatedTicket();
 
-    const outcome = delegation.start(ticket, 3, "PLAN: implémenter la feature X");
+    const outcome = await delegation.start(ticket, 3, "PLAN: implémenter la feature X");
 
     expect(outcome.ok).toBe(true);
     expect(delegation.isActive(ticket.id)).toBe(true);
@@ -143,21 +215,63 @@ describe("DelegationManager.start", () => {
     expect(child.opts.slotId).toBe(DELEGATION_SLOT_ID);
     expect(child.opts.disableWorkerTools).toBe(true);
     expect(child.opts.cwd.endsWith("slot-3")).toBe(true);
-    expect(child.opts.model).toBe("gpt-5.4");
-    expect(child.opts.effort).toBe("high");
+    expect(child.opts.model).toBe("gpt-5.6-terra");
+    expect(child.opts.effort).toBe("low");
+    expect(child.opts.serviceTier).toBe("default");
     expect(child.sent).toHaveLength(1);
     expect(child.sent[0]).toContain("PLAN: implémenter la feature X");
     expect(child.sent[0]).toContain("Ne commit JAMAIS");
   });
 
-  test("refuses a second delegation while one is active", () => {
+  test("uses the parent generation's captured delegate config after the ticket is edited", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newDelegatedTicket();
+    sessionHub.start({
+      ticketId: ticket.id,
+      slotId: 3,
+      cwd: "/tmp/slot-3",
+      provider: "claude",
+      model: "opus",
+      effort: "medium",
+      role: "orchestrator",
+      permissionMode: "dontAsk",
+      delegateProvider: "codex",
+      delegateModel: "gpt-5.6-sol",
+      delegateEffort: "high",
+      delegateServiceTier: "fast",
+    });
+    const edited = store.updateTicket(ticket.id, {
+      codexImplementerModel: "gpt-5.6-terra",
+      codexImplementerEffort: "low",
+      codexImplementerFast: false,
+    });
+
+    expect((await delegation.start(edited, 3, "plan capturé")).ok).toBe(true);
+    expect(system.sessions[1]?.opts).toMatchObject({ model: "gpt-5.6-sol", effort: "high", serviceTier: "fast" });
+  });
+
+  test("refuses a second delegation while one is active", async () => {
     const { delegation } = setup();
     const ticket = newDelegatedTicket();
 
-    expect(delegation.start(ticket, 3, "plan").ok).toBe(true);
-    const second = delegation.start(ticket, 3, "plan bis");
+    expect((await delegation.start(ticket, 3, "plan")).ok).toBe(true);
+    const second = await delegation.start(ticket, 3, "plan bis");
     expect(second.ok).toBe(false);
     expect(second.result).toContain("déjà en cours");
+  });
+
+  test("does not spawn a child when the parent stops during capability validation", async () => {
+    const { system, delegation } = setup();
+    const ticket = newDelegatedTicket();
+    let release = (): void => undefined;
+    system.runtimeGate = new Promise<void>((resolve) => { release = resolve; });
+
+    const starting = delegation.start(ticket, 3, "plan");
+    delegation.stop(ticket.id);
+    release();
+
+    expect((await starting).ok).toBe(false);
+    expect(system.sessions).toHaveLength(0);
   });
 });
 
@@ -166,7 +280,7 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan");
     const [parent, child] = system.sessions;
     if (!parent || !child) throw new Error("sessions missing");
 
@@ -180,7 +294,7 @@ describe("DelegationManager — settlement", () => {
     const doneEvent = parent.sent.find((m) => m.includes("Implémentation déléguée terminée"));
     expect(doneEvent).toBeDefined();
     expect(doneEvent).toContain("Résumé final : feature X implémentée.");
-    const usage = store.getTicket(ticket.id)?.sessionUsage["codex-thread-1"]?.["gpt-5.4"];
+    const usage = store.getTicket(ticket.id)?.sessionUsage["codex-thread-1"]?.["gpt-5.6-sol"];
     expect(usage?.input_tokens).toBe(100);
     expect(usage?.output_tokens).toBe(50);
     expect(usage?.cache_read_input_tokens).toBe(10);
@@ -190,7 +304,7 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan");
     const [parent, child] = system.sessions;
     if (!parent || !child) throw new Error("sessions missing");
 
@@ -206,12 +320,12 @@ describe("DelegationManager — settlement", () => {
   });
 });
 
-describe("DelegationManager — cascade kill", () => {
-  test("parent disconnect kills the child and drops its stale events", async () => {
+  describe("DelegationManager — cascade kill", () => {
+    test("parent disconnect kills the child and drops its stale events", async () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan");
     const child = system.sessions[1];
     if (!child) throw new Error("child session missing");
 
@@ -224,5 +338,213 @@ describe("DelegationManager — cascade kill", () => {
     child.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "s", usageByModel: {} });
     await sleep(SETTLE_WAIT_MS);
     expect(delegation.isActive(ticket.id)).toBe(false);
+    });
+
+    test("a child that ignores close is disposed before shutdown drain returns", async () => {
+      const { system, delegation } = setup(5);
+      const ticket = newDelegatedTicket();
+      await delegation.start(ticket, 3, "plan");
+      system.hangOnClose = true;
+
+      delegation.stop(ticket.id);
+      await delegation.drainClosingSessions();
+
+      expect(system.sessions[0]?.disposed).toBe(true);
+    });
+
+    test("a synchronous close failure still disposes and finalizes the child", async () => {
+      const { system, delegation } = setup(5);
+      const ticket = newDelegatedTicket();
+      await delegation.start(ticket, 3, "plan");
+      system.throwOnClose = true;
+
+      delegation.stop(ticket.id);
+      await delegation.drainClosingSessions();
+
+      expect(system.sessions[0]?.disposed).toBe(true);
+      expect(store.listExecutionRuns("ticket", ticket.id)[0]?.status).toBe("cancelled");
+    });
+  });
+
+describe("DelegationManager — independent reviews", () => {
+  test("light runs four independent reviewer sessions and requires every approval", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+    expect(delegation.hasActiveReviews(ticket.id)).toBe(false);
+    expect(await delegation.reviewsApproved(ticket.id, 3)).toBe(true);
+    expect(delegation.reviewRequiresApproval(ticket.id)).toBe(true);
+    const reviewerTicketIds = new Set(system.sessions.slice(1).map((session) => session.opts.ticketId));
+    expect(reviewerTicketIds.size).toBe(4);
+    expect(system.sessions.slice(1).every((session) => session.opts.readOnly && session.opts.role === "reviewer")).toBe(true);
+  });
+
+  test("full adds architecture and security for six independent sessions", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "full" });
+    startParentSession(sessionHub, ticket.id);
+
+    await startAndApproveReviews(delegation, system, ticket, FULL_REVIEW_KINDS);
+
+    expect(system.sessions).toHaveLength(7);
+    expect(system.sessions[5]?.sent[0]).toContain("architecturales");
+    expect(system.sessions[6]?.sent[0]).toContain("failles de sécurité");
+    expect(await delegation.reviewsApproved(ticket.id, 3)).toBe(true);
+  });
+
+  test("approvals survive a manager restart but a code change invalidates the gate", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+
+    const restarted = new DelegationManager(store, system, sessionHub, new ClientHub(store));
+    expect(await restarted.reviewsApproved(ticket.id, 3)).toBe(true);
+
+    system.fingerprint = "code-v2";
+    expect(await restarted.reviewsApproved(ticket.id, 3)).toBe(false);
+  });
+
+  test("a missing submit_review never becomes an approval", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = store.updateTicket(created.id, { orchestrator: "codex" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+
+    review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-empty", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(await delegation.reviewsApproved(ticket.id, 3)).toBe(false);
+    const parent = system.sessions[0];
+    expect(parent?.sent.some((message) => message.includes("review quality ÉCHOUÉE"))).toBe(true);
+  });
+
+  test("a revise result completes a read-only review pass without becoming an approval", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({
+      ...created,
+      kind: "review",
+      orchestrator: "codex",
+      reviewDepth: "light",
+      fixComments: false,
+      prHeadBranch: "feat/review",
+    });
+    startParentSession(sessionHub, ticket.id);
+
+    for (const kind of LIGHT_REVIEW_KINDS) {
+      expect((await delegation.startReview(ticket, 3, kind, `diff ${kind}`)).ok).toBe(true);
+    }
+    const reviews = system.sessions.slice(-LIGHT_REVIEW_KINDS.length);
+    for (const [index, review] of reviews.entries()) {
+      const kind = LIGHT_REVIEW_KINDS[index];
+      if (!review || !kind) throw new Error("review session missing");
+      await review.opts.onToolCall("submit_review", {
+        verdict: kind === "conventions" ? "revise" : "approve",
+        summary: `${kind} terminé`,
+        findings: kind === "conventions" ? [reviewFinding("minor")] : [],
+      });
+      review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: `review-${kind}`, usageByModel: {} });
+    }
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(await delegation.reviewsCompleted(ticket.id, 3)).toBe(true);
+    expect(await delegation.reviewsApproved(ticket.id, 3)).toBe(false);
+    expect(delegation.reviewRequiresApproval(ticket.id)).toBe(false);
+    const restarted = new DelegationManager(store, system, sessionHub, new ClientHub(store));
+    expect(await restarted.reviewsCompleted(ticket.id, 3)).toBe(true);
+    expect(store.getReviewPass(ticket.id)?.results.conventions?.findings[0]?.summary).toBe("Finding vérifiable");
+  });
+
+  test("important findings wait for an independent verification and persist its calibrated result", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+    await review.opts.onToolCall("submit_review", {
+      verdict: "revise",
+      summary: "impact important proposé",
+      findings: [reviewFinding("critical")],
+    });
+    review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-quality", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const passDuringVerification = store.getReviewPass(ticket.id);
+    expect(passDuringVerification?.results.quality?.status).toBe("pending");
+    expect(passDuringVerification?.results.quality?.verificationStatus).toBe("pending");
+    expect((await delegation.startReview(ticket, 3, "logic", "diff concurrent")).ok).toBe(true);
+    expect(store.getReviewPass(ticket.id)?.passId).toBe(passDuringVerification?.passId);
+    expect(store.getReviewPass(ticket.id)?.results.quality?.verificationStatus).toBe("pending");
+    const verifier = system.sessions[2];
+    if (!verifier) throw new Error("verification session missing");
+    expect(verifier.sent[0]).toContain("contre-vérifies indépendamment");
+    await verifier.opts.onToolCall("submit_review", {
+      verdict: "revise",
+      summary: "impact confirmé mais local",
+      findings: [reviewFinding("minor")],
+    });
+    verifier.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "verify-quality", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const result = store.getReviewPass(ticket.id)?.results.quality;
+    expect(result?.status).toBe("completed");
+    expect(result?.verificationStatus).toBe("verified");
+    expect(result?.findings[0]?.severity).toBe("minor");
+    expect(result?.findings[0]?.verificationStatus).toBe("demoted");
+    expect(result?.findings[0]?.originalSeverity).toBe("critical");
+  });
+
+  test("a verifier without a result retries once then keeps the dimension incomplete", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "logic", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+    await review.opts.onToolCall("submit_review", {
+      verdict: "revise",
+      summary: "régression proposée",
+      findings: [reviewFinding("major")],
+    });
+    review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-logic", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const firstVerifier = system.sessions[2];
+    if (!firstVerifier) throw new Error("first verification missing");
+    firstVerifier.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "verify-logic-1", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+    const secondVerifier = system.sessions[3];
+    if (!secondVerifier) throw new Error("second verification missing");
+    secondVerifier.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "verify-logic-2", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const result = store.getReviewPass(ticket.id)?.results.logic;
+    expect(result?.status).toBe("failed");
+    expect(result?.verificationStatus).toBe("failed");
+    expect(system.sessions).toHaveLength(4);
+  });
+
+  test("stopping a parent cancels reviewer starts that are still queued", async () => {
+    const { system, delegation } = setup();
+    const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
+    const first = delegation.startReview(ticket, 3, "quality", "diff");
+    const second = delegation.startReview(ticket, 3, "logic", "diff");
+    delegation.stop(ticket.id);
+
+    expect((await first).ok).toBe(false);
+    expect((await second).ok).toBe(false);
+    expect(system.sessions).toHaveLength(0);
   });
 });

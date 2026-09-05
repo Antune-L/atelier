@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Prepend the `.nvmrc`-pinned Node's bin dir (if resolvable) to a copy of `process.env`. */
+/** Prepend the pinned Node, or report an actionable error before running under a different version. */
 export function envWithProjectNode(cwd: string): Record<string, string | undefined> {
   const binDir = nvmNodeBinDir(cwd);
   if (binDir === null) return { ...process.env };
@@ -18,28 +18,33 @@ export function envWithProjectNode(cwd: string): Record<string, string | undefin
 
 /**
  * The `<nvm>/versions/node/vX.Y.Z/bin` dir best matching `<cwd>/.nvmrc`, or null when there is no
- * `.nvmrc`, the spec is not a plain version (e.g. `lts/*`, `node`), or no installed version matches.
+ * `.nvmrc`. Unsupported aliases and missing installations are explicit setup errors.
  */
 export function nvmNodeBinDir(cwd: string): string | null {
   const spec = readNvmrc(cwd);
   if (spec === null) return null;
   const versionsDir = join(process.env.NVM_DIR ?? join(homedir(), ".nvm"), "versions", "node");
   const best = bestInstalledMatch(versionsDir, spec);
-  if (best === null) return null;
+  if (best === null) throw new Error(`Node ${spec} requis par ${join(cwd, ".nvmrc")} : installer cette version avec nvm avant de relancer.`);
   const binDir = join(versionsDir, best, "bin");
-  return existsSync(binDir) ? binDir : null;
+  if (!existsSync(join(binDir, "node"))) throw new Error(`Installation Node ${best} incomplète : exécutable node absent.`);
+  return binDir;
 }
 
 const PLAIN_VERSION_PATTERN = /^v?(\d+(?:\.\d+){0,2})$/;
 
 function readNvmrc(cwd: string): string | null {
+  const path = join(cwd, ".nvmrc");
+  if (!existsSync(path)) return null;
+  let raw: string;
   try {
-    const raw = readFileSync(join(cwd, ".nvmrc"), "utf8").trim();
-    const version = PLAIN_VERSION_PATTERN.exec(raw)?.[1];
-    return version ?? null;
+    raw = readFileSync(path, "utf8").trim();
   } catch {
-    return null;
+    throw new Error(`Impossible de lire ${path}.`);
   }
+  const version = PLAIN_VERSION_PATTERN.exec(raw)?.[1];
+  if (!version) throw new Error(`Alias .nvmrc non pris en charge dans ${path} : épingler une version Node numérique installée.`);
+  return version;
 }
 
 function bestInstalledMatch(versionsDir: string, spec: string): string | null {

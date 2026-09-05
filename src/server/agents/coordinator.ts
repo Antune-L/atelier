@@ -5,6 +5,7 @@ import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   delegateImplementationArgsSchema,
+  delegateReviewArgsSchema,
   doneArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
@@ -25,7 +26,14 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 
 import type { DelegationManager } from "./delegationManager.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
-import type { SessionHub, SessionToolCall } from "./sessionHub.ts";
+import type {
+  PendingSessionMessage,
+  SessionExecutionContext,
+  SessionHub,
+  SessionMessageContext,
+  SessionMessageStatus,
+  SessionToolCall,
+} from "./sessionHub.ts";
 import type { SlotManager } from "./slotManager.ts";
 import type { SplitManager } from "./splitManager.ts";
 import type { TriageManager } from "./triageManager.ts";
@@ -64,7 +72,149 @@ export class AgentCoordinator {
       onToolCall: (ctx) => this.onToolCall(ctx),
       onStop: (ticketId, sessionId, usageByModel) => void this.onStop(ticketId, sessionId, usageByModel),
       onActivity: (ticketId) => this.onActivity(ticketId),
+      onExecutionStart: (context) => {
+        this.store.startExecution({
+          id: context.generationId,
+          ownerType: context.ownerType,
+          ownerId: context.ownerId,
+          generationId: context.generationId,
+          sessionId: context.sessionId,
+          role: context.role,
+          orchestrator: context.provider,
+          effectiveModel: context.model,
+          effectiveEffort: context.effort,
+          codexFast: context.serviceTier === "fast",
+          delegateProvider: context.delegateProvider,
+          delegateEffectiveModel: context.delegateModel,
+          delegateEffectiveEffort: context.delegateEffort,
+          delegateCodexFast: context.delegateServiceTier === null ? null : context.delegateServiceTier === "fast",
+        });
+      },
+      onExecutionInit: (context) => {
+        if (context.sessionId) {
+          this.store.attachExecutionSession({
+            generationId: context.generationId,
+            sessionId: context.sessionId,
+            configuredServiceTier: context.configuredServiceTier,
+          });
+        }
+      },
+      onExecutionFailure: (message, context) => void this.onExecutionFailure(context.ticketId, message),
+      onExecutionFinish: (context) => {
+        this.store.finalizeExecution({
+          generationId: context.generationId,
+          status: context.status,
+          usageByModel: context.usageByModel,
+          error: context.error,
+        });
+      },
+      onExecutionUsage: (context) => {
+        this.store.updateExecutionUsage(context.generationId, context.usageByModel);
+      },
+      onMessageQueued: (context) => this.onMessageQueued(context),
+      onMessageStatus: (context) => this.onMessageStatus(context),
+      getPendingMessages: (context) => this.getPendingMessages(context),
     });
+  }
+
+  private onMessageQueued(context: SessionMessageContext): void {
+    this.store.enqueueAgentMessage({
+      id: context.messageId,
+      ownerType: context.ownerType,
+      ownerId: context.ownerId,
+      generationId: context.generationId,
+      sessionId: context.sessionId,
+      channel: context.channel,
+      content: context.content,
+    });
+    this.logMessageEvent(context, "queued", null, null);
+  }
+
+  private onMessageStatus(context: SessionMessageStatus): void {
+    let updated;
+    if (context.status === "received") {
+      updated = this.store.markAgentMessageReceived({
+        id: context.messageId,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+      });
+    } else if (context.status === "accepted") {
+      updated = this.store.markAgentMessageAccepted({
+        id: context.messageId,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+      });
+    } else {
+      updated = this.store.markAgentMessageRejected({ id: context.messageId, error: context.error });
+    }
+    if (!updated) {
+      log.warn("statut reçu pour un message agent inconnu", {
+        messageId: context.messageId,
+        generationId: context.messageGenerationId,
+        status: context.status,
+      });
+      return;
+    }
+    this.logMessageEvent(context, context.status, context.turnId, context.error);
+    if (context.status === "rejected" && context.ownerType === "ticket") {
+      const ticket = this.store.getTicket(context.ownerId);
+      if (ticket) {
+        void this.notifier.notify(
+          "Message non remis à l'agent",
+          `${ticket.title}: ${context.channel} rejeté avant acceptation`,
+          ticket.id,
+        );
+      }
+    }
+  }
+
+  private getPendingMessages(context: SessionExecutionContext): PendingSessionMessage[] {
+    const matchingGenerations = new Set(
+      this.store
+        .listExecutionRuns(context.ownerType, context.ownerId)
+        .filter((run) => run.role === context.role)
+        .map((run) => run.generationId),
+    );
+    return this.store
+      .listPendingAgentMessages(context.ownerType, context.ownerId)
+      .filter((message) => matchingGenerations.has(message.generationId))
+      .map((message) => ({
+        messageId: message.id,
+        generationId: message.generationId,
+        channel: message.channel,
+        content: message.content,
+      }));
+  }
+
+  private logMessageEvent(
+    context: SessionMessageContext | SessionMessageStatus,
+    status: "queued" | "received" | "accepted" | "rejected",
+    turnId: string | null,
+    error: string | null,
+  ): void {
+    const ticketId = context.ownerType === "ticket" && this.store.getTicket(context.ownerId) ? context.ownerId : null;
+    this.store.logEvent(ticketId, "agent_message_status", {
+      messageId: context.messageId,
+      generationId:
+        "messageGenerationId" in context ? context.messageGenerationId : context.generationId,
+      ownerType: context.ownerType,
+      ownerId: context.ownerId,
+      channel: context.channel,
+      status,
+      turnId,
+      error,
+    });
+  }
+
+  private async onExecutionFailure(ticketId: string, reason: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.stage === null || !ACTIVE_STAGES.includes(ticket.stage)) return;
+    this.sessionHub.disconnect(ticketId, "failed");
+    await this.lifecycle.stall(
+      ticketId,
+      { title: "Session agent interrompue", body: `${ticket.title}: ${reason}` },
+      { logEvent: true },
+    );
   }
 
   private async onToolCall(ctx: SessionToolCall): Promise<ToolResult> {
@@ -118,6 +268,8 @@ export class AgentCoordinator {
     ready_for_review: (ctx) => this.handleReadyForReview(ctx),
     fail: (ctx) => this.handleFail(ctx),
     delegate_implementation: (ctx) => this.handleDelegateImplementation(ctx),
+    delegate_review: (ctx) => this.handleDelegateReview(ctx),
+    submit_review: () => ({ ok: false, result: "submit_review réservé aux sessions reviewer." }),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
@@ -194,10 +346,28 @@ export class AgentCoordinator {
   private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const requiresApproval = this.delegation.reviewRequiresApproval(ctx.ticketId);
+    const readOnlyReview = requiresApproval === false;
+    const reviewsPassed = readOnlyReview
+      ? await this.delegation.reviewsCompleted(ctx.ticketId, ctx.slotId)
+      : await this.delegation.reviewsApproved(ctx.ticketId, ctx.slotId);
+    if (!reviewsPassed) {
+      return {
+        ok: false,
+        result: readOnlyReview
+          ? "Gate échouée: toutes les dimensions doivent rendre un résultat vérifié sur le code courant."
+          : "Gate échouée: tous les reviewers indépendants requis doivent approuver le code courant.",
+      };
+    }
+    const reviewReport = readOnlyReview ? this.delegation.reviewReport(ctx.ticketId) : null;
     this.lifecycle.beginOpeningPr(ctx.ticketId);
     const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, parsed.data.pr_url);
     if (!outcome.ok) {
       return { ok: false, result: `Gate échouée: ${outcome.reason}. Corrige et rappelle done().` };
+    }
+    if (reviewReport) {
+      const comment = this.store.addComment(ctx.ticketId, "agent", reviewReport, null);
+      this.hub.pushComment(comment);
     }
     return { ok: true, result: "Ticket clôturé, slot libéré." };
   }
@@ -208,6 +378,9 @@ export class AgentCoordinator {
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!ticket || ticket.kind !== "feature" || (!ticket.stealth && !ticket.directPush)) {
       return { ok: false, result: "ready_for_review réservé aux tickets stealth ou push direct." };
+    }
+    if (!(await this.delegation.reviewsApproved(ctx.ticketId, ctx.slotId))) {
+      return { ok: false, result: "Gate échouée: tous les reviewers indépendants requis doivent approuver le code courant." };
     }
     this.lifecycle.beginOpeningPr(ctx.ticketId);
     const outcome = ticket.directPush
@@ -224,14 +397,15 @@ export class AgentCoordinator {
     };
   }
 
-  private handleDelegateImplementation(ctx: SessionToolCall): ToolResult {
+  private async handleDelegateImplementation(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = delegateImplementationArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
-    if (!ticket || ticket.orchestrator !== "claude" || ticket.implementer !== "codex") {
+    const execution = this.sessionHub.getExecutionConfig(ctx.ticketId);
+    if (!ticket || execution?.delegateProvider !== "codex") {
       return {
         ok: false,
-        result: "delegate_implementation réservé aux tickets avec implémenteur Codex sous orchestrateur Claude.",
+        result: "delegate_implementation réservé aux tickets avec implémenteur Codex.",
       };
     }
     // A conflict-resolution session fixes merge conflicts inline; delegating a fresh implementation
@@ -242,10 +416,21 @@ export class AgentCoordinator {
     return this.delegation.start(ticket, ctx.slotId, parsed.data.plan);
   }
 
+  private async handleDelegateReview(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = delegateReviewArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.kind === "ask") {
+      return { ok: false, result: "delegate_review indisponible pour cette session." };
+    }
+    return this.delegation.startReview(ticket, ctx.slotId, parsed.data.kind, parsed.data.context);
+  }
+
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     await this.lifecycle.fail(ctx.ticketId, parsed.data.reason, parsed.data.findings);
+    setTimeout(() => this.sessionHub.disconnect(ctx.ticketId, "failed"), 0);
     return { ok: true, result: "Échec enregistré. Slot conservé." };
   }
 
@@ -351,7 +536,7 @@ export class AgentCoordinator {
 
   /** Default prd_validated note steering the Claude orchestrator toward its implementer's delegation path. */
   private defaultPrdNote(ticket: ReturnType<Store["getTicket"]>): string {
-    if (!ticket || ticket.orchestrator !== "claude") return "";
+    if (!ticket) return "";
     if (ticket.implementer === "codex") {
       return "Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan), puis termine ton tour et attends l'événement implementation_done ; ne poursuis pas l'implémentation dans cette session de planification.";
     }
@@ -364,7 +549,7 @@ export class AgentCoordinator {
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */
   forwardComment(ticketId: string, body: string): void {
     const delivered = this.sessionHub.sendEvent(ticketId, { type: "user_comment", body });
-    if (delivered) this.store.logEvent(ticketId, "user_comment_forwarded", {});
+    if (delivered) this.store.logEvent(ticketId, "user_comment_queued", {});
   }
 
   /**

@@ -1,6 +1,5 @@
 import { TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import type { AgentEffort, AgentModel } from "../../shared/constants.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
 import { TRIAGE_VERDICT_LABELS } from "../../shared/schemas.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
@@ -12,15 +11,12 @@ import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
+import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { buildTriageChannelPrompt, buildTriagePlusChannelPrompt } from "./triage.ts";
 
 const log = createLogger("triage");
-
-/** Deep "Analyse +" model/effort: a stronger model at low effort fans out the parallel sub-agents. */
-const TRIAGE_PLUS_MODEL = "opus" satisfies AgentModel;
-const TRIAGE_PLUS_EFFORT = "low" satisfies AgentEffort;
 
 /** Stub verdict persisted in dry-run so the board stays exercisable without spawning claude. */
 const DRY_RUN_VERDICT: TriageResult = {
@@ -89,22 +85,28 @@ export class TriageManager {
 
       const triageLanguage = this.store.getAppSettings().triageLanguage;
       const baseBranch = resolveBaseBranch(ticket, project, this.store);
-      // A codex-orchestrated ticket triages on Codex too (its knobs), so Claude never enters its pipeline.
-      const driver = ticket.orchestrator;
+      // The ticket's feasibility engine wins when pinned; otherwise a codex-orchestrated ticket triages
+      // on Codex too (its knobs), so Claude never enters its pipeline.
+      const execution = resolveFeasibilityExecution(ticket, "triage", {
+        model: MODELS.triage,
+        effort: MODELS.triageEffort,
+      });
+      await assertExecutionAvailable(this.system, execution);
+      const driver = execution.provider;
       const prompt = deep
         ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver)
         : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver);
-      const claudeModel = deep ? TRIAGE_PLUS_MODEL : MODELS.triage;
-      const claudeEffort = deep ? TRIAGE_PLUS_EFFORT : MODELS.triageEffort;
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,
           cwd: project.repoPath,
-          model: driver === "codex" ? ticket.codexModel ?? MODELS.codexModel : claudeModel,
-          effort: driver === "codex" ? ticket.codexEffort ?? MODELS.codexEffort : claudeEffort,
+          model: execution.model,
+          effort: execution.effort,
+          serviceTier: execution.serviceTier,
           deep,
           driver,
         }),
+        { onFailure: (reason) => void this.failTriage(ticketId, reason) },
       );
       // The contract is the session's first user turn — no connect poll, no drop race.
       this.sessionHub.sendEvent(ticketId, { type: "ticket", payload: prompt });
@@ -120,7 +122,7 @@ export class TriageManager {
 
   /** Worker submitted its verdict: persist it and tear the session down. */
   async complete(ticketId: string, result: TriageResult): Promise<void> {
-    this.cleanup(ticketId);
+    this.cleanup(ticketId, "completed");
     this.persistVerdict(ticketId, result);
     const ticket = this.store.getTicket(ticketId);
     if (ticket) {
@@ -177,7 +179,7 @@ export class TriageManager {
   }
 
   private async failTriage(ticketId: string, reason: string): Promise<void> {
-    this.cleanup(ticketId);
+    this.cleanup(ticketId, "failed");
     if (!this.store.getTicket(ticketId)) return;
     const updated = this.store.updateTicket(ticketId, {
       triageStatus: "failed",
@@ -190,10 +192,10 @@ export class TriageManager {
   }
 
   /** Stop the SDK session and clear the timeout. Idempotent. */
-  private cleanup(ticketId: string): void {
+  private cleanup(ticketId: string, status: "completed" | "failed" | "cancelled" = "cancelled"): void {
     const entry = this.sessions.get(ticketId);
     if (entry) clearTimeout(entry.timer);
     this.sessions.delete(ticketId);
-    this.sessionHub.disconnect(ticketId);
+    this.sessionHub.disconnect(ticketId, status);
   }
 }

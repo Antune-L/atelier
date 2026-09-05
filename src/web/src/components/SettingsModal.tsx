@@ -24,7 +24,6 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_COMMIT_LANGUAGE,
   DEFAULT_TRIAGE_LANGUAGE,
-  pairedCodexEffort,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
@@ -33,9 +32,12 @@ import {
   type Implementer,
   type Orchestrator,
 } from "@shared/constants";
+import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import type { Profile } from "@shared/schemas";
 
 import { ProjectsSettings } from "@/components/ProjectsSettings";
+import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
+import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import {
@@ -46,15 +48,17 @@ import {
   ModalTitle,
 } from "@/components/ui/modal";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import { pairedImplementer } from "@/lib/agentPairing";
 import {
   AGENT_EFFORT_OPTIONS,
   AGENT_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
   codexEffortTabOptions,
+  codexModelTabOptions,
   implementerTabOptions,
+  isCodexFastAvailable,
   orchestratorTabOptions,
 } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
@@ -122,6 +126,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
 /** General options tab: the UI theme and the global commit/PR language. */
 function GeneralSettings() {
+  const { codex } = useCapabilities();
   const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useState<CommitLanguage | null>(null);
   const [triageLanguage, setTriageLanguage] = useState<CommitLanguage | null>(
@@ -135,7 +140,9 @@ function GeneralSettings() {
   const [triageEffort, setTriageEffort] = useState<AgentEffort | null>(null);
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
+  const [codexFast, setCodexFast] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fastAvailable = isCodexFastAvailable(codex, codexModel ?? DEFAULT_CODEX_MODEL);
 
   useEffect(() => {
     let active = true;
@@ -153,6 +160,7 @@ function GeneralSettings() {
           setTriageEffort((current) => current ?? settings.triageEffort);
           setCodexModel((current) => current ?? settings.codexModel);
           setCodexEffort((current) => current ?? settings.codexEffort);
+          setCodexFast((current) => current ?? settings.codexFast);
         }
       })
       .catch((e) => {
@@ -243,7 +251,7 @@ function GeneralSettings() {
     const previous = codexModel;
     const previousEffort = codexEffort;
     // Re-pair the effort with the picked model (e.g. ultra clamps to max outside Terra).
-    const nextEffort = pairedCodexEffort(next, codexEffort ?? DEFAULT_CODEX_EFFORT);
+    const nextEffort = pairedRuntimeCodexEffort(codex, next, codexEffort ?? DEFAULT_CODEX_EFFORT);
     setCodexModel(next);
     setCodexEffort(nextEffort);
     setError(null);
@@ -264,6 +272,18 @@ function GeneralSettings() {
       await api.updateSettings({ codexEffort: next });
     } catch (e) {
       setCodexEffort(previous);
+      setError(e instanceof Error ? e.message : "Erreur");
+    }
+  };
+
+  const changeCodexFast = async (next: boolean): Promise<void> => {
+    const previous = codexFast;
+    setCodexFast(next);
+    setError(null);
+    try {
+      await api.updateSettings({ codexFast: next });
+    } catch (e) {
+      setCodexFast(previous);
       setError(e instanceof Error ? e.message : "Erreur");
     }
   };
@@ -372,11 +392,12 @@ function GeneralSettings() {
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex flex-col items-start gap-1.5">
           <Label>Modèle Codex</Label>
+          <CodexConnectionStatus />
           <p className="text-sm text-muted-foreground">
             Modèle par défaut des sessions pilotées par Codex.
           </p>
           <Tabs
-            options={CODEX_MODEL_OPTIONS}
+            options={codexModelTabOptions(codex)}
             value={codexModel}
             onChange={(v) => void changeCodexModel(v)}
             aria-label="Modèle Codex"
@@ -390,11 +411,24 @@ function GeneralSettings() {
             Effort de raisonnement par défaut des sessions pilotées par Codex.
           </p>
           <Tabs
-            options={codexEffortTabOptions(codexModel ?? DEFAULT_CODEX_MODEL)}
+            options={codexEffortTabOptions(codexModel ?? DEFAULT_CODEX_MODEL, codex)}
             value={codexEffort}
             onChange={(v) => void changeCodexEffort(v)}
             aria-label="Effort Codex"
           />
+          <div className="flex items-center gap-2 pt-1">
+            <Switch
+              checked={codexFast ?? false}
+              onCheckedChange={(value) => void changeCodexFast(value)}
+              disabled={!fastAvailable && !(codexFast ?? false)}
+            />
+            <span className="text-sm">Mode FAST</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {fastAvailable
+              ? "Réponses plus rapides, consommation accrue."
+              : "Mode FAST indisponible pour ce modèle et ce compte."}
+          </p>
         </div>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -404,6 +438,7 @@ function GeneralSettings() {
 
 /** Implementation-agent profiles tab: create/edit/delete/reorder the presets stored in the DB. */
 function ProfilesSettings() {
+  const capabilities = useCapabilities();
   const remoteProfiles = useProfiles();
   const [localProfiles, setLocalProfiles] = useState<Profile[]>(remoteProfiles);
   const [busy, setBusy] = useState(false);
@@ -436,8 +471,12 @@ function ProfilesSettings() {
         implementerModel: "opus",
         implementerEffort: "low",
         implementer: "claude",
-        codexModel: "gpt-5.5",
+        codexModel: "gpt-5.6-terra",
         codexEffort: "medium",
+        codexFast: capabilities.defaultCodexFast,
+        codexImplementerModel: null,
+        codexImplementerEffort: null,
+        codexImplementerFast: null,
       });
       await refreshProfiles();
     } catch (e) {
@@ -589,7 +628,7 @@ function ProfileRow({
   dragHandleAttributes,
   setActivatorNodeRef,
 }: ProfileRowProps) {
-  const { composerAvailable, codexAvailable } = useCapabilities();
+  const { composerAvailable, codexAvailable, codex } = useCapabilities();
   const [name, setName] = useState(profile.name);
   const [orchestrator, setOrchestrator] = useState<Orchestrator>(
     profile.orchestrator,
@@ -609,7 +648,18 @@ function ProfileRow({
   const [codexEffort, setCodexEffort] = useState<CodexEffort>(
     profile.codexEffort,
   );
+  const [codexFast, setCodexFast] = useState(profile.codexFast);
+  const [codexImplementerModel, setCodexImplementerModel] = useState<CodexModel | null>(profile.codexImplementerModel);
+  const [codexImplementerEffort, setCodexImplementerEffort] = useState<CodexEffort | null>(profile.codexImplementerEffort);
+  const [codexImplementerFast, setCodexImplementerFast] = useState<boolean | null>(profile.codexImplementerFast);
   const [busy, setBusy] = useState(false);
+  const fastAvailable = isCodexFastAvailable(codex, codexModel);
+  const inheritsCodexImplementer = codexImplementerModel === null && codexImplementerEffort === null && codexImplementerFast === null;
+  const inheritedCodexImplementerFields = [
+    codexImplementerModel === null ? "modèle" : null,
+    codexImplementerEffort === null ? "effort" : null,
+    codexImplementerFast === null ? "FAST" : null,
+  ].filter((field) => field !== null);
 
   // Picking an orchestrator re-pairs the implementer (isAllowedAgentPair): codex pilots only codex.
   const changeOrchestrator = (next: Orchestrator): void => {
@@ -629,7 +679,11 @@ function ProfileRow({
     implementerEffort !== profile.implementerEffort ||
     implementer !== profile.implementer ||
     codexModel !== profile.codexModel ||
-    codexEffort !== profile.codexEffort;
+    codexEffort !== profile.codexEffort ||
+    codexFast !== profile.codexFast ||
+    codexImplementerModel !== profile.codexImplementerModel ||
+    codexImplementerEffort !== profile.codexImplementerEffort ||
+    codexImplementerFast !== profile.codexImplementerFast;
 
   const save = async (): Promise<void> => {
     onError(null);
@@ -645,6 +699,10 @@ function ProfileRow({
         implementer,
         codexModel,
         codexEffort,
+        codexFast,
+        codexImplementerModel,
+        codexImplementerEffort,
+        codexImplementerFast,
       });
       await refreshProfiles();
     } catch (e) {
@@ -738,23 +796,32 @@ function ProfileRow({
             <>
               <Field label="Modèle (Codex)">
                 <Tabs
-                  options={CODEX_MODEL_OPTIONS}
+                  options={codexModelTabOptions(codex)}
                   value={codexModel}
                   onChange={(next) => {
                     setCodexModel(next);
-                    setCodexEffort((current) => pairedCodexEffort(next, current));
+                    setCodexEffort((current) => pairedRuntimeCodexEffort(codex, next, current));
                   }}
                   aria-label="Modèle Codex"
                 />
               </Field>
               <Field label="Effort (Codex)">
                 <Tabs
-                  options={codexEffortTabOptions(codexModel)}
+                  options={codexEffortTabOptions(codexModel, codex)}
                   value={codexEffort}
                   onChange={setCodexEffort}
                   aria-label="Effort Codex"
                 />
               </Field>
+              <div className="flex items-center gap-2">
+                <Switch checked={codexFast} onCheckedChange={setCodexFast} disabled={!fastAvailable && !codexFast} />
+                <span className="text-sm">Mode FAST</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {fastAvailable
+                  ? "Réponses plus rapides, consommation accrue."
+                  : "Mode FAST indisponible pour ce modèle et ce compte."}
+              </p>
             </>
           )}
           <Field label="Implémenté par">
@@ -786,6 +853,48 @@ function ProfileRow({
                   aria-label="Effort implémenteur"
                 />
               </Field>
+            </div>
+          )}
+          {implementer === "codex" && (
+            <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur Codex</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (inheritsCodexImplementer) {
+                      setCodexImplementerModel(codexModel);
+                      setCodexImplementerEffort(codexEffort);
+                      setCodexImplementerFast(codexFast);
+                    } else {
+                      setCodexImplementerModel(null);
+                      setCodexImplementerEffort(null);
+                      setCodexImplementerFast(null);
+                    }
+                  }}
+                >
+                  {inheritsCodexImplementer ? "Personnaliser" : "Hériter des réglages Codex"}
+                </Button>
+              </div>
+              <CodexAgentFields
+                codexModel={codexImplementerModel}
+                codexEffort={codexImplementerEffort}
+                codexFast={codexImplementerFast ?? codexFast}
+                fallbackModel={codexModel}
+                fallbackEffort={codexEffort}
+                preserveExplicit
+                showConnectionStatus={orchestrator !== "codex"}
+                onCodexModelChange={setCodexImplementerModel}
+                onCodexEffortChange={setCodexImplementerEffort}
+                onCodexFastChange={setCodexImplementerFast}
+              />
+              <p className="text-xs text-muted-foreground">
+                {inheritedCodexImplementerFields.length > 0
+                  ? `Héritage des réglages Codex : ${inheritedCodexImplementerFields.join(", ")}.`
+                  : "Modèle, effort et FAST indépendants de l’orchestrateur."}
+              </p>
             </div>
           )}
         </div>

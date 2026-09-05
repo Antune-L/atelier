@@ -7,6 +7,8 @@ import {
   CODEX_MODELS,
   CODEX_MODEL_EFFORTS,
   CODEX_MODEL_LABELS,
+  FEASIBILITY_ENGINES,
+  FEASIBILITY_ENGINE_LABELS,
   IMPLEMENTERS,
   IMPLEMENTER_LABELS,
   ORCHESTRATORS,
@@ -16,11 +18,13 @@ import {
   type AgentModel,
   type CodexEffort,
   type CodexModel,
+  type FeasibilityEngine,
   type Implementer,
   type Orchestrator,
   type Stage,
 } from "@shared/constants";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
+import { isCodexFastServiceTier, type CodexRuntimeStatus } from "@shared/codexCapabilities";
 
 import type { TabOption } from "@/components/ui/tabs";
 
@@ -31,6 +35,23 @@ export const AGENT_MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m)
   value: m,
   label: AGENT_MODEL_LABELS[m],
 }));
+
+/** Engine backing the feasibility analysis when the ticket carries no explicit choice. */
+export const DEFAULT_FEASIBILITY_ENGINE: FeasibilityEngine = "sonnet";
+
+/** Feasibility engines annotated with availability: Luna runs on Codex, so it needs a ready runtime. */
+export function feasibilityEngineTabOptions(runtime: CodexRuntimeStatus): TabOption<FeasibilityEngine>[] {
+  const codexReady = runtime.status === "ready";
+  return FEASIBILITY_ENGINES.map((engine) => {
+    const label = FEASIBILITY_ENGINE_LABELS[engine];
+    const enabled = engine !== "luna" || codexReady;
+    return {
+      value: engine,
+      label: enabled ? label : `${label} — indisponible`,
+      disabled: !enabled,
+    };
+  });
+}
 
 /** Ready-made segmented-control options for the agent reasoning-effort picker. */
 export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
@@ -44,12 +65,49 @@ export const CODEX_MODEL_OPTIONS: TabOption<CodexModel>[] = CODEX_MODELS.map((m)
   label: CODEX_MODEL_LABELS[m],
 }));
 
+/** Product models annotated with the current account/runtime availability. */
+export function codexModelTabOptions(runtime: CodexRuntimeStatus): TabOption<CodexModel>[] {
+  const available = new Set(runtime.models.map(({ model }) => model));
+  return CODEX_MODELS.map((model) => {
+    const enabled = runtime.status === "ready" && available.has(model);
+    return {
+      value: model,
+      label: enabled ? CODEX_MODEL_LABELS[model] : `${CODEX_MODEL_LABELS[model]} — indisponible`,
+      disabled: !enabled,
+    };
+  });
+}
+
 /** Codex reasoning-effort options for a given model: only the efforts that model accepts. */
-export function codexEffortTabOptions(model: CodexModel): TabOption<CodexEffort>[] {
-  return CODEX_MODEL_EFFORTS[model].map((e) => ({
-    value: e,
-    label: CODEX_EFFORT_LABELS[e],
-  }));
+export function codexEffortTabOptions(
+  model: CodexModel,
+  runtime?: CodexRuntimeStatus,
+): TabOption<CodexEffort>[] {
+  const runtimeModel = runtime?.models.find((entry) => entry.model === model);
+  const available = new Set(runtimeModel?.efforts ?? []);
+  return CODEX_MODEL_EFFORTS[model].map((effort) => {
+    const disabled = runtime !== undefined && (runtime.status !== "ready" || !available.has(effort));
+    return { value: effort, label: CODEX_EFFORT_LABELS[effort], disabled };
+  });
+}
+
+/** Whether the authenticated runtime advertises the paid fast service tier for this model. */
+export function isCodexFastAvailable(runtime: CodexRuntimeStatus, model: CodexModel): boolean {
+  if (runtime.status !== "ready") return false;
+  return runtime.models
+    .find((entry) => entry.model === model)
+    ?.serviceTiers.some((tier) => isCodexFastServiceTier(tier.id)) ?? false;
+}
+
+const USD_FORMATTER = new Intl.NumberFormat("fr-FR", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+
+export function formatUsd(value: number): string {
+  return USD_FORMATTER.format(value);
 }
 
 /** Orchestrator picker options; the Codex orchestrator is disabled (with a hint) when its CLI is absent. */

@@ -35,10 +35,12 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
   const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
+  const [codexFastOverride, setCodexFast] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { model: resolvedDefaultModel, effort: resolvedDefaultEffort } = resolveAgentDefaults(capabilities);
+  const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
 
   const appendToQuestion = (markdown: string): void => {
     setQuestion((prev) => (prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`));
@@ -68,6 +70,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
         orchestrator,
         codexModel,
         codexEffort,
+        codexFast,
       });
       onClose();
     } catch (e) {
@@ -97,9 +100,11 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
         orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
+        codexFast={codexFast}
         onOrchestratorChange={setOrchestrator}
         onCodexModelChange={setCodexModel}
         onCodexEffortChange={setCodexEffort}
+        onCodexFastChange={setCodexFast}
       />
 
       {orchestrator === "claude" && (

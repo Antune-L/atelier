@@ -5,8 +5,10 @@
  */
 
 import type { OpenPr } from "../../shared/schemas.ts";
+import type { Orchestrator } from "../../shared/constants.ts";
+import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
-import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 
 export interface GitWorktreeAddOptions {
   repoPath: string;
@@ -16,17 +18,23 @@ export interface GitWorktreeAddOptions {
 }
 
 export interface ReformulateOptions {
+  provider?: Orchestrator;
+  onEvent?: (event: AgentSessionEvent) => void;
   cwd: string;
   prompt: string;
   model: string;
   effort: string | null;
+  serviceTier?: "default" | "fast";
 }
 
 export interface ImportNotionOptions {
+  provider?: Orchestrator;
+  onEvent?: (event: AgentSessionEvent) => void;
   cwd: string;
   prompt: string;
   model: string;
   effort: string | null;
+  serviceTier?: "default" | "fast";
 }
 
 export interface RunAutomationOptions {
@@ -76,6 +84,8 @@ export interface ReviewDoneOptions {
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
+  /** Stable marker tying the GitHub COMMENT review to the current persisted review pass. */
+  publicationMarker: string | null;
   /**
    * When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully
    * pushed. The gate compares `origin/<branch>..HEAD` (the worktree's checked-out tip), so a clean
@@ -186,6 +196,8 @@ export interface SystemAdapter {
    * origin/<baseBranch> (HEAD is an ancestor of, or equal to, the remote target branch tip). No PR.
    */
   verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult>;
+  /** Hash current tracked and untracked worktree contents, independent from commit identity. */
+  codeFingerprint(slotPath: string): Promise<string>;
   /**
    * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists
    * on origin first, then runs `gh pr create [--draft] --base <baseBranch> --fill`. Returns the PR URL
@@ -217,8 +229,8 @@ export interface SystemAdapter {
   // ---- capability probe ----
   /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
   checkComposerAvailable(): Promise<boolean>;
-  /** Whether the Codex CLI binary is resolvable AND authenticated (CODEX_API_KEY or ~/.codex/auth.json). */
-  checkCodexAvailable(): Promise<boolean>;
+  /** Fresh runtime/account/catalog status, sharing an in-flight probe when callers refresh together. */
+  checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
 
   // ---- desktop self-update guards (dev desktop only) ----
   /** Current checked-out branch (`git rev-parse --abbrev-ref HEAD`); "" when it can't be read. */

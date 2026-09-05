@@ -33,11 +33,11 @@ const BINARY_PATH_ENV = "KANBAN_CLAUDE_BINARY";
  * compiled desktop app cannot resolve this at runtime (no node_modules in $bunfs), hence the
  * constant; scripts/release-desktop.ts fails the build when it drifts from bun.lock.
  */
-export const CLAUDE_SDK_VERSION = "0.3.205";
+export const CLAUDE_SDK_VERSION = "0.3.261";
 
 const CLAUDE_BIN_NAME = process.platform === "win32" ? "claude.exe" : "claude";
 const NPM_REGISTRY_URL = "https://registry.npmjs.org";
-/** SDK 0.3.205 ships CLI 2.1.205; older 2.1.x CLIs still speak the SDK's stream protocol. */
+/** Claude Code 2.1.x CLIs speak the SDK's stream protocol. */
 const MIN_DETECTED_CLI_VERSION: readonly [number, number, number] = [2, 1, 0];
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 const REGISTRY_METADATA_TIMEOUT_MS = 30_000;

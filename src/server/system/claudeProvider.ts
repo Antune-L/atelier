@@ -11,7 +11,16 @@
  */
 
 import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
-import type { HookCallback, Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  HookCallback,
+  McpHttpServerConfig,
+  McpServerToolPolicy,
+  Options,
+  Query,
+  SDKMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
+import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
@@ -26,6 +35,7 @@ import type {
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
+import { workerToolsForRole } from "./sessionRolePolicy.ts";
 
 const MCP_SERVER_NAME = "kanban";
 /** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
@@ -88,14 +98,14 @@ function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents
   return out;
 }
 
-/** The fully-qualified MCP tool names the in-process worker server advertises. */
-function workerToolNames(): string[] {
-  return WORKER_TOOLS.map((t) => `mcp__${MCP_SERVER_NAME}__${t.name}`);
+/** The fully-qualified MCP tool names this role may invoke. */
+function workerToolNames(names: readonly string[]): string[] {
+  return names.map((name) => `mcp__${MCP_SERVER_NAME}__${name}`);
 }
 
 export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
   // ---- streaming input: a queue feeding a never-returning generator keeps the session alive ----
-  const inbox: SDKUserMessage[] = [];
+  const inbox: Array<{ id: string; prompt: SDKUserMessage }> = [];
   let notify: (() => void) | null = null;
   let closed = false;
 
@@ -105,16 +115,26 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     resume?.();
   }
 
-  function enqueue(content: string): void {
-    inbox.push({ type: "user", parent_tool_use_id: null, message: { role: "user", content } });
+  function enqueue(content: string, messageId?: string): string {
+    const id = messageId ?? nanoid(16);
+    if (closed) {
+      opts.onEvent({ type: "message_status", messageId: id, status: "rejected", turnId: null });
+      return id;
+    }
+    inbox.push({ id, prompt: { type: "user", parent_tool_use_id: null, message: { role: "user", content } } });
+    opts.onEvent({ type: "message_status", messageId: id, status: "received", turnId: null });
     wake();
+    return id;
   }
 
   async function* prompts(): AsyncGenerator<SDKUserMessage> {
     for (;;) {
       while (inbox.length > 0) {
         const next = inbox.shift();
-        if (next) yield next;
+        if (next) {
+          opts.onEvent({ type: "message_status", messageId: next.id, status: "accepted", turnId: null });
+          yield next.prompt;
+        }
       }
       if (closed) return;
       await new Promise<void>((resolve) => (notify = resolve));
@@ -122,7 +142,9 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   }
 
   // ---- in-process MCP tools from the worker registry; each call routes back to the backend ----
-  const tools = WORKER_TOOLS.map((entry) =>
+  const workerTools = opts.disableWorkerTools ? [] : workerToolsForRole(opts.role);
+  const allowedWorkerTools = new Set(workerTools);
+  const tools = WORKER_TOOLS.filter((entry) => allowedWorkerTools.has(entry.name)).map((entry) =>
     tool(entry.name, entry.description, entry.argsSchema.shape, async (args) => {
       const outcome = await opts.onToolCall(entry.name, args);
       return {
@@ -135,16 +157,45 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
 
   const extraMcpServers: NonNullable<Options["mcpServers"]> = {};
   for (const [name, def] of Object.entries(opts.extraMcpServers ?? {})) {
-    extraMcpServers[name] = {
-      type: "stdio",
-      command: def.command,
-      ...(def.args ? { args: def.args } : {}),
-      ...(def.env ? { env: def.env } : {}),
-    };
+    if (def.type === "http") {
+      const headers: Record<string, string> = {};
+      if (def.bearerTokenEnvVar) {
+        const token = process.env[def.bearerTokenEnvVar];
+        if (token) headers.Authorization = `Bearer ${token}`;
+      }
+      for (const [header, envName] of Object.entries(def.envHttpHeaders ?? {})) {
+        const value = process.env[envName];
+        if (value) headers[header] = value;
+      }
+      const tools: NonNullable<McpHttpServerConfig["tools"]> = [
+        ...(def.enabledTools ?? []).map(
+          (toolName): McpServerToolPolicy => ({ name: toolName, permission_policy: "always_allow" }),
+        ),
+        ...(def.disabledTools ?? []).map(
+          (toolName): McpServerToolPolicy => ({ name: toolName, permission_policy: "always_deny" }),
+        ),
+      ];
+      extraMcpServers[name] = {
+        type: "http",
+        url: def.url,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        ...(tools.length > 0 ? { tools } : {}),
+      };
+    } else {
+      extraMcpServers[name] = {
+        type: "stdio",
+        command: def.command,
+        ...(def.args ? { args: def.args } : {}),
+        ...(def.env ? { env: def.env } : {}),
+      };
+    }
   }
 
+  let disposed = false;
+  const abortController = new AbortController();
   const sdkEffort = toSdkEffort(opts.effort);
   const queryOptions: Options = {
+    abortController,
     cwd: opts.cwd,
     model: opts.model,
     systemPrompt: { type: "preset", preset: "claude_code" },
@@ -153,8 +204,8 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) into the session.
     settingSources: ["user", "project"],
     permissionMode: opts.permissionMode,
-    mcpServers: { [MCP_SERVER_NAME]: mcpServer, ...extraMcpServers },
-    allowedTools: [...workerToolNames(), ...(opts.allowedTools ?? [])],
+    mcpServers: { ...(workerTools.length > 0 ? { [MCP_SERVER_NAME]: mcpServer } : {}), ...extraMcpServers },
+    allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
     env: envWithProjectNode(opts.cwd),
@@ -173,16 +224,17 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   // generator above already buffers any turns sent in the meantime, so callers stay synchronous.
   const sessionPromise: Promise<Query> = ensureClaudeBinary((message) =>
     opts.onEvent({ type: "assistant_text", text: message }),
-  ).then((binary) =>
-    query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } }),
-  );
+  ).then((binary) => {
+    if (disposed) throw new Error("Session fermée avant démarrage");
+    return query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } });
+  });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
-  void pumpStream(sessionPromise, opts.onEvent);
+  const pumping = pumpStream(sessionPromise, opts.onEvent);
 
   return {
     ticketId: opts.ticketId,
-    send: (content) => enqueue(content),
+    send: enqueue,
     interrupt: async () => {
       try {
         const session = await sessionPromise;
@@ -190,6 +242,13 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
       } catch {
         // interrupt() can reject if the turn already ended; the turn_end event is the source of truth.
       }
+    },
+    dispose: () => {
+      disposed = true;
+      closed = true;
+      wake();
+      abortController.abort();
+      void sessionPromise.then((session) => session.close()).catch(() => undefined);
     },
     close: async () => {
       // Graceful teardown: flag EOF and wake the parked generator so it returns (no bogus user turn).
@@ -207,6 +266,11 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
           });
       }, GRACEFUL_CLOSE_TIMEOUT_MS);
       timer.unref();
+      try {
+        await pumping;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }
@@ -215,14 +279,14 @@ async function pumpStream(sessionPromise: Promise<Query>, onEvent: (event: Agent
   try {
     const session = await sessionPromise;
     for await (const message of session) {
-      dispatch(message, onEvent);
+      dispatchClaudeMessage(message, onEvent);
     }
   } catch (error) {
     onEvent({ type: "error", message: error instanceof Error ? error.message : String(error) });
   }
 }
 
-function dispatch(message: SDKMessage, onEvent: (event: AgentSessionEvent) => void): void {
+export function dispatchClaudeMessage(message: SDKMessage, onEvent: (event: AgentSessionEvent) => void): void {
   switch (message.type) {
     case "system":
       if (message.subtype === "init") onEvent({ type: "init", sessionId: message.session_id });

@@ -242,7 +242,7 @@ async function boot(): Promise<void> {
     tornDown = true;
     // Kill detached tmux sessions first (they outlive the process otherwise), then stop the server.
     await server.teardownSessions();
-    server.stop();
+    await server.stop();
   };
 
   quitHandler.run = (): void => {
@@ -260,8 +260,7 @@ async function boot(): Promise<void> {
       if (tornDown) return;
       tornDown = true;
       spawnRelauncher(repoRoot);
-      server.stop();
-      process.exit(0);
+      void server.stop().finally(() => process.exit(0));
     };
   }
 

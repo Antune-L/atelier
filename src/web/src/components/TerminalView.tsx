@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { applyTranscriptUpdate, transcriptText, type TranscriptState } from "@shared/transcript";
+
 import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
 import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
 import { api } from "@/lib/api";
@@ -18,7 +20,7 @@ interface TerminalData {
   phase: string | null;
 }
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 250;
 /** Compact previews are glanceable thumbnails, and several render at once — poll them less often. */
 const COMPACT_POLL_INTERVAL_MS = 4000;
 
@@ -48,26 +50,49 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
     // A fresh stream starts pinned so its first output scrolls into view.
     pinnedToBottom.current = true;
     let active = true;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let transcript: TranscriptState | null = null;
+    const abort = new AbortController();
+    setData({ output: "", phase: null });
     const poll = async (): Promise<void> => {
-      if (document.hidden) return;
+      if (!active || document.hidden || inFlight) return;
+      if (timer) clearTimeout(timer);
+      inFlight = true;
       try {
-        const next = await api.terminal(ticketId);
+        const cursor = transcript ? `${transcript.generation}:${transcript.version}` : undefined;
+        const next = await api.terminal(ticketId, cursor, true, abort.signal);
         if (!active) return;
+        let output = next.output;
+        if (next.transcript) {
+          const updated = applyTranscriptUpdate(transcript, next.transcript);
+          if (updated !== transcript) output = transcriptText(updated);
+          transcript = updated;
+        } else {
+          transcript = null;
+        }
         setError(null);
-        setData(next);
+        setData((previous) => {
+          const resolvedOutput = next.transcript && !next.transcript.reset && next.transcript.blocks.length === 0 ? previous.output : output;
+          return previous.output === resolvedOutput && previous.phase === next.phase ? previous : { output: resolvedOutput, phase: next.phase };
+        });
       } catch (e) {
         if (active) setError(e instanceof Error ? e.message : "Terminal indisponible");
+      } finally {
+        inFlight = false;
+        if (active && !document.hidden) timer = setTimeout(() => void poll(), compact ? COMPACT_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
       }
     };
     void poll();
-    const timer = setInterval(() => void poll(), compact ? COMPACT_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     const onVisible = (): void => {
+      if (timer) clearTimeout(timer);
       if (!document.hidden) void poll();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
-      clearInterval(timer);
+      abort.abort();
+      if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [ticketId, compact]);

@@ -13,6 +13,7 @@ import type {
   CreateReviewInput,
   CreateTicketInput,
   GeneratePrdInput,
+  ImportNotionInput,
   ImportTicketsInput,
   ManagedProject,
   OpenPr,
@@ -85,7 +86,7 @@ export const api = {
     if (body && typeof body === "object" && "path" in body && typeof body.path === "string") return body.path;
     return null;
   },
-  capabilities: (): Promise<Capabilities> => request("/api/capabilities"),
+  capabilities: (refresh = false): Promise<Capabilities> => request(`/api/capabilities${refresh ? "?refresh=1" : ""}`),
   settings: (): Promise<AppSettings> => request("/api/settings"),
   updateSettings: (input: UpdateAppSettingsInput): Promise<AppSettings> =>
     request("/api/settings", { method: "PATCH", body: JSON.stringify(input) }),
@@ -153,13 +154,18 @@ export const api = {
     request(`/api/tickets/${id}/split`, { method: "POST" }),
   reformulate: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/reformulate`, { method: "POST" }),
-  importNotion: (url: string): Promise<{ markdown: string }> =>
-    request(`/api/notion/import`, { method: "POST", body: JSON.stringify({ url }) }),
+  importNotion: (input: ImportNotionInput): Promise<{ markdown: string }> =>
+    request(`/api/notion/import`, { method: "POST", body: JSON.stringify(input) }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
   generatePrd: (input: GeneratePrdInput): Promise<{ markdown: string }> =>
     request("/api/prd/generate", { method: "POST", body: JSON.stringify(input) }),
-  terminal: (id: string): Promise<TerminalOutput> => request(`/api/tickets/${id}/terminal`),
+  terminal: (id: string, cursor?: string, incremental = false, signal?: AbortSignal): Promise<TerminalOutput> => {
+    const query = new URLSearchParams();
+    if (incremental) query.set("incremental", "1");
+    if (cursor) query.set("cursor", cursor);
+    return request(`/api/tickets/${id}/terminal?${query}`, { signal });
+  },
   listTerminals: (projectKey?: string): Promise<TerminalDescriptor[]> =>
     request(`/api/terminals${projectKey ? `?projectKey=${encodeURIComponent(projectKey)}` : ""}`),
   createTerminal: (projectKey: string): Promise<TerminalDescriptor> =>

@@ -6,6 +6,8 @@ import type { ProjectInfo } from "@shared/schemas";
 import { StatCard } from "@/components/stats/StatCard";
 import {
   DurationChart,
+  CostSummary,
+  CodexTierSummary,
   KindChart,
   OutcomeChart,
   ProjectChart,
@@ -104,6 +106,24 @@ export function StatsView({ projects }: StatsViewProps): ReactNode {
           records={records}
         >
           {(filtered) => <TokensByProjectChart records={filtered} projects={projects} />}
+        </StatCard>
+
+        <StatCard
+          title="Coût des exécutions"
+          description="Total disponible ou sous-total explicitement partiel"
+          projects={projects}
+          records={records}
+        >
+          {(filtered) => <CostSummary records={filtered} />}
+        </StatCard>
+
+        <StatCard
+          title="Mode FAST Codex"
+          description="Tier demandé et configuration confirmée"
+          projects={projects}
+          records={records}
+        >
+          {(filtered) => <CodexTierSummary records={filtered} />}
         </StatCard>
       </div>
     </div>

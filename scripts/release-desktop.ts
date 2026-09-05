@@ -3,9 +3,8 @@
  *
  *   bun scripts/release-desktop.ts 0.1.0
  *
- * Validates the version (from the git tag, `v` already stripped), gates on CLAUDE_SDK_VERSION drift
- * (the packaged app downloads that exact binary at runtime — a stale constant would ship an app that
- * fetches the wrong version), builds the web UI + the Electrobun stable bundle with the version and
+ * Validates the version (from the git tag, `v` already stripped), gates on Claude/Codex SDK constant
+ * drift, builds the web UI + the Electrobun stable bundle with the version and
  * DMG enabled (the postBuild hook — scripts/verifyDesktopBundle.ts — asserts the embedded codex
  * binaries kept their +x bit), then normalizes the artifacts into release/: Atelier-vX.Y.Z-arm64.dmg
  * + its .sha256. `build:desktop` stays untouched for dev.
@@ -15,6 +14,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { CLAUDE_SDK_VERSION } from "../src/server/system/claudeBinary.ts";
+import { CODEX_SDK_VERSION } from "../src/server/system/codexBinary.ts";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const REPO_ROOT = resolve(import.meta.dir, "..");
@@ -39,17 +39,41 @@ async function run(cmd: string[], env: Record<string, string> = {}): Promise<voi
   if ((await proc.exited) !== 0) fail(`command failed: ${cmd.join(" ")}`);
 }
 
-function assertClaudeSdkVersionInSync(): void {
-  const pkgPath = join(REPO_ROOT, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json");
+function installedPackageVersion(pkgPath: string): unknown {
   const installed: unknown = JSON.parse(readFileSync(pkgPath, "utf8"));
-  const version =
-    typeof installed === "object" && installed !== null && "version" in installed ? installed.version : null;
-  if (version !== CLAUDE_SDK_VERSION) {
+  return typeof installed === "object" && installed !== null && "version" in installed
+    ? installed.version
+    : null;
+}
+
+function assertPackageVersionInSync(
+  label: string,
+  expected: string,
+  packagePath: string,
+  constantPath: string,
+): void {
+  const version = installedPackageVersion(packagePath);
+  if (version !== expected) {
     fail(
-      `CLAUDE_SDK_VERSION (${CLAUDE_SDK_VERSION}) ne correspond pas au SDK installé (${String(version)}) — ` +
-        "mettre à jour la constante dans src/server/system/claudeBinary.ts",
+      `${label} (${expected}) ne correspond pas au SDK installé (${String(version)}) — ` +
+        `mettre à jour la constante dans ${constantPath}`,
     );
   }
+}
+
+function assertSdkVersionsInSync(): void {
+  assertPackageVersionInSync(
+    "CLAUDE_SDK_VERSION",
+    CLAUDE_SDK_VERSION,
+    join(REPO_ROOT, "node_modules", "@anthropic-ai", "claude-agent-sdk", "package.json"),
+    "src/server/system/claudeBinary.ts",
+  );
+  assertPackageVersionInSync(
+    "CODEX_SDK_VERSION",
+    CODEX_SDK_VERSION,
+    join(REPO_ROOT, "node_modules", "@openai", "codex-sdk", "package.json"),
+    "src/server/system/codexBinary.ts",
+  );
 }
 
 async function writeSha256(filePath: string, fileName: string): Promise<void> {
@@ -63,7 +87,7 @@ if (!VERSION_PATTERN.test(version)) {
   fail(`version invalide "${version}" — attendu X.Y.Z ou X.Y.Z-suffixe (tag sans le "v")`);
 }
 
-assertClaudeSdkVersionInSync();
+assertSdkVersionsInSync();
 
 await run(["bun", "run", "build:web"]);
 await run([ELECTROBUN_BIN, "build", "--env=stable"], { ATELIER_VERSION: version, ATELIER_RELEASE: "1" });

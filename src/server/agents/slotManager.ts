@@ -13,8 +13,8 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import type { Ticket, WorktreeSession } from "../../shared/schemas.ts";
-import { SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
+import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -27,6 +27,7 @@ import type { SystemAdapter } from "../system/index.ts";
 import type { DoneGateResult } from "../system/types.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
+import { assertExecutionAvailable, resolveTicketExecution, type ResolvedExecution } from "./executionConfig.ts";
 import {
   buildAskContract,
   buildCleanContract,
@@ -34,10 +35,31 @@ import {
   buildReviewContract,
   buildTicketContract,
 } from "./contract.ts";
-import { buildImplementSessionConfig } from "./sessionConfig.ts";
+import { buildImplementSessionConfig, codexImplementerKnobs } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { resolveTemplatePaths } from "./slotTemplates.ts";
 import { WorktreeAddressWatcher } from "./worktreeAddressWatcher.ts";
+
+async function assertCodexImplementerAvailable(
+  system: SystemAdapter,
+  ticket: Ticket,
+  parent: ResolvedExecution,
+): Promise<void> {
+  if (ticket.kind !== "feature" || ticket.implementer !== "codex" || ticket.resolvingConflicts) return;
+  const delegate = codexImplementerKnobs(ticket);
+  if (
+    parent.provider === "codex"
+    && parent.model === delegate.model
+    && parent.effort === delegate.effort
+    && parent.serviceTier === delegate.serviceTier
+  ) return;
+  await assertExecutionAvailable(system, {
+    provider: "codex",
+    model: delegate.model,
+    effort: delegate.effort,
+    serviceTier: delegate.serviceTier,
+  });
+}
 
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
@@ -98,6 +120,7 @@ export class SlotManager {
   private readonly queue: string[] = [];
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
+  private readonly phaseStartedAt = new Map<string, number>();
   /** Watches each active worktree session's `.wt-offset` to re-push addresses once the dev server writes it. */
   private readonly watcher = new WorktreeAddressWatcher(() =>
     this.hub.pushWorktreeSessions(this.store.listWorktreeSessions()),
@@ -109,12 +132,25 @@ export class SlotManager {
   }
 
   private setPhase(ticketId: string, phase: string): void {
+    this.recordPhaseEnd(ticketId);
     this.setupPhase.set(ticketId, phase);
+    this.phaseStartedAt.set(ticketId, Date.now());
+    if (this.store.getTicket(ticketId)) this.store.logEvent(ticketId, "setup_phase_started", { phase });
     log.info(phase, { ticketId });
   }
 
   private clearPhase(ticketId: string): void {
+    this.recordPhaseEnd(ticketId);
     this.setupPhase.delete(ticketId);
+    this.phaseStartedAt.delete(ticketId);
+  }
+
+  private recordPhaseEnd(ticketId: string): void {
+    const phase = this.setupPhase.get(ticketId);
+    const startedAt = this.phaseStartedAt.get(ticketId);
+    if (phase && startedAt !== undefined && this.store.getTicket(ticketId)) {
+      this.store.logEvent(ticketId, "setup_phase_finished", { phase, durationMs: Date.now() - startedAt });
+    }
   }
 
   constructor(
@@ -545,6 +581,12 @@ export class SlotManager {
     log.info("lancement du ticket", { ticketId, slotId, project: ticket.project, branch });
 
     try {
+      const execution = resolveTicketExecution(ticket, "orchestrator", {
+        model: MODELS.implement,
+        effort: MODELS.implementEffort,
+      });
+      await assertExecutionAvailable(this.system, execution);
+      await assertCodexImplementerAvailable(this.system, ticket, execution);
       this.setPhase(ticketId, SETUP_PHASES.worktree);
       await this.repoMutex.run(project.repoPath, async () => {
         const previous = this.store.getSlot(slotId);
@@ -654,14 +696,17 @@ export class SlotManager {
    */
   private doneGate(ticket: Ticket, path: string, branch: string, prUrl: string): Promise<DoneGateResult> {
     if (ticket.kind === "review") {
+      const reviewPass = this.store.getReviewPass(ticket.id);
       return this.system.verifyReviewDone(path, prUrl, {
         requirePostedSince: ticket.postComments ? ticket.createdAt : null,
-        requirePushedBranch: ticket.fixComments ? ticket.prHeadBranch : null,
+        publicationMarker: ticket.postComments && reviewPass ? `<!-- kanban-review-pass:${reviewPass.passId} -->` : null,
+        requirePushedBranch: reviewPass?.requiresApproval ? ticket.prHeadBranch : null,
       });
     }
     if (ticket.kind === "clean") {
       return this.system.verifyReviewDone(path, prUrl, {
         requirePostedSince: null,
+        publicationMarker: null,
         requirePushedBranch: ticket.prHeadBranch,
       });
     }
@@ -733,7 +778,7 @@ export class SlotManager {
     // still present for gh's cwd.
     const agentSummary = ticket.kind === "feature" && !mergeError ? await this.system.fetchPrSummary(path, prUrl) : null;
 
-    await this.releaseSlot(slotId, ticket);
+    await this.releaseSlot(slotId, ticket, mergeError ? "failed" : "completed");
     this.touch(
       this.store.updateTicket(ticketId, {
         column,
@@ -821,7 +866,7 @@ export class SlotManager {
 
     // Stop the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
     // still owns its slot so the user can test locally and queued tickets won't grab it.
-    this.sessionHub.disconnect(ticketId);
+    this.sessionHub.disconnect(ticketId, "completed");
     this.store.updateSlot(slotId, { tmuxSession: null, status: "busy" });
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -870,7 +915,7 @@ export class SlotManager {
       );
       return { ok: false, reason: gate.reason };
     }
-    await this.releaseSlot(slotId, ticket);
+    await this.releaseSlot(slotId, ticket, "completed");
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "done",
@@ -958,7 +1003,7 @@ export class SlotManager {
     // a slot we still own. This also makes the close idempotent (a second call finds slot.ticketId null).
     const slot = this.store.getSlot(slotId);
     if (slot?.ticketId !== ticketId) return;
-    await this.releaseSlot(slotId, ticket);
+    await this.releaseSlot(slotId, ticket, "completed");
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "answered",
@@ -987,10 +1032,14 @@ export class SlotManager {
   }
 
   /** Cleanup agent session + tmux shell + worktree + local branch. Called on done and on abandon. */
-  async releaseSlot(slotId: number, ticket: Ticket): Promise<void> {
+  async releaseSlot(
+    slotId: number,
+    ticket: Ticket,
+    executionStatus: "completed" | "failed" | "cancelled" = "cancelled",
+  ): Promise<void> {
     this.clearPhase(ticket.id);
     // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
-    this.sessionHub.disconnect(ticket.id);
+    this.sessionHub.disconnect(ticket.id, executionStatus);
     const slot = this.store.getSlot(slotId);
     if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
     if (!isProjectKey(ticket.project)) return;
@@ -1046,6 +1095,7 @@ export class SlotManager {
   async teardownSessions(): Promise<void> {
     this.watcher.stopAll();
     this.sessionHub.disconnectAll();
+    await this.sessionHub.drainClosingSessions();
     for (const slot of this.store.listSlots()) {
       if (slot.tmuxSession) await this.system.killSession(slot.tmuxSession);
     }
@@ -1190,12 +1240,53 @@ export class SlotManager {
   }
 
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
-    const ticket = this.store.getTicket(ticketId);
-    if (!ticket || !isProjectKey(ticket.project)) return;
+    const storedTicket = this.store.getTicket(ticketId);
+    if (!storedTicket || !isProjectKey(storedTicket.project)) return;
     // A test session must never be relaunched with a pipeline contract; the user stops it manually.
-    if (ticket.testing) return;
+    if (storedTicket.testing) return;
+    const previous = this.store.listExecutionRuns("ticket", ticketId)
+      .findLast((run) => run.role === "orchestrator");
+    const previousModel = codexModelSchema.safeParse(previous?.effectiveModel);
+    const previousEffort = codexEffortSchema.safeParse(previous?.effectiveEffort);
+    const previousClaudeModel = agentModelSchema.safeParse(previous?.effectiveModel);
+    const previousClaudeEffort = agentEffortSchema.safeParse(previous?.effectiveEffort);
+    const previousDelegateModel = codexModelSchema.safeParse(previous?.delegateEffectiveModel);
+    const previousDelegateEffort = codexEffortSchema.safeParse(previous?.delegateEffectiveEffort);
+    const providerTicket = previous
+      ? {
+          ...storedTicket,
+          orchestrator: previous.orchestrator,
+          ...(previous.delegateProvider ? { implementer: previous.delegateProvider } : {}),
+        }
+      : storedTicket;
+    const resumedTicket = previous?.delegateProvider === "codex" && previousDelegateModel.success && previousDelegateEffort.success
+      ? {
+          ...providerTicket,
+          codexImplementerModel: previousDelegateModel.data,
+          codexImplementerEffort: previousDelegateEffort.data,
+          codexImplementerFast: previous.delegateCodexFast,
+        }
+      : providerTicket;
+    const parentTicket = resumedTicket.orchestrator === "codex" && previous && previousModel.success && previousEffort.success
+      ? {
+          ...resumedTicket,
+          codexModel: previousModel.data,
+          codexEffort: previousEffort.data,
+          codexFast: previous.codexFast,
+        }
+      : resumedTicket;
+    const ticket = parentTicket.orchestrator === "claude" && previousClaudeModel.success && previousClaudeEffort.success
+      ? { ...parentTicket, model: previousClaudeModel.data, effort: previousClaudeEffort.data }
+      : parentTicket;
     const path = slotPath(slotId);
     log.info("relance en place", { ticketId, slotId });
+
+    const execution = resolveTicketExecution(ticket, "orchestrator", {
+      model: MODELS.implement,
+      effort: MODELS.implementEffort,
+    });
+    await assertExecutionAvailable(this.system, execution);
+    await assertCodexImplementerAvailable(this.system, ticket, execution);
 
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
     this.sessionHub.disconnect(ticketId);

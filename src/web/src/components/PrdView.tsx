@@ -2,9 +2,13 @@ import { ClipboardCheck, Copy, RefreshCw, Sparkles } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { PrdAnnotator } from "@/components/PrdAnnotator";
+import { SessionDriverFields } from "@/components/SessionDriverFields";
+import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
+import { Tabs } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { cn } from "@/lib/utils";
 
 /** How long the "Copié !" confirmation stays visible. */
@@ -18,6 +22,7 @@ export function PrdView(): ReactNode {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const agent = useAgentKnobs();
 
   const generate = async (revise: boolean): Promise<void> => {
     if (loading) return;
@@ -25,7 +30,16 @@ export function PrdView(): ReactNode {
     setError("");
     try {
       const result = await api.generatePrd(
-        revise ? { description, previousPrd: markdown, feedback } : { description },
+        {
+          description,
+          ...(revise ? { previousPrd: markdown, feedback } : {}),
+          orchestrator: agent.orchestrator,
+          ...(agent.orchestrator === "codex" ? {
+            codexModel: agent.codexModel ?? undefined,
+            codexEffort: agent.codexEffort ?? undefined,
+            codexFast: agent.codexFast,
+          } : { model: agent.model ?? undefined, effort: agent.effort ?? undefined }),
+        },
       );
       // A new PRD invalidates prior annotations; the remounted PrdAnnotator (key) starts clean.
       setFeedback("");
@@ -58,10 +72,36 @@ export function PrdView(): ReactNode {
   return (
     <div className="flex h-full flex-col gap-4">
       <div className="shrink-0 space-y-2">
+        <fieldset disabled={loading} className="space-y-3">
+          <SessionDriverFields
+            orchestrator={agent.orchestrator}
+            codexModel={agent.codexModel}
+            codexEffort={agent.codexEffort}
+            codexFast={agent.codexFast}
+            onOrchestratorChange={agent.setOrchestrator}
+            onCodexModelChange={agent.setCodexModel}
+            onCodexEffortChange={agent.setCodexEffort}
+            onCodexFastChange={agent.setCodexFast}
+          />
+          {agent.orchestrator === "claude" && (
+            <>
+              <div className="space-y-1.5">
+                <Label id="prd-claude-model">Modèle Claude</Label>
+                <Tabs options={AGENT_MODEL_OPTIONS} value={agent.model} onChange={agent.setModel} aria-labelledby="prd-claude-model" />
+              </div>
+              <div className="space-y-1.5">
+                <Label id="prd-claude-effort">Effort Claude</Label>
+                <Tabs options={AGENT_EFFORT_OPTIONS} value={agent.effort} onChange={agent.setEffort} aria-labelledby="prd-claude-effort" />
+              </div>
+              <p className="text-xs text-muted-foreground">Sans sélection, les réglages par défaut du serveur sont utilisés.</p>
+            </>
+          )}
+        </fieldset>
         <Label htmlFor="prd-description">Décris ce que tu veux</Label>
         <Textarea
           id="prd-description"
           value={description}
+          disabled={loading}
           onChange={(e) => setDescription(e.target.value)}
           className="min-h-[120px]"
           placeholder="Décris la fonctionnalité ou le besoin. Tu peux référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png)…"
@@ -103,7 +143,7 @@ export function PrdView(): ReactNode {
           <PrdAnnotator
             key={markdown}
             markdown={markdown}
-            actionable
+            actionable={!loading}
             onFeedbackChange={onFeedbackChange}
           />
         </div>

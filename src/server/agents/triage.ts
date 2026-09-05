@@ -2,6 +2,8 @@ import type { Ticket } from "../../shared/schemas.ts";
 import {
   AGENT_EFFORTS,
   AGENT_MODELS,
+  CODEX_EFFORTS,
+  CODEX_MODELS,
   FEASIBILITY_SCOUT_AGENT_NAME,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
@@ -45,7 +47,7 @@ function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { 
  * The `## Ticket` block plus the image/Figma note: title, description and referenced Figma links.
  * Shared verbatim by the normal and the deep ("Analyse +") triage prompts.
  */
-function buildTicketLines(ticket: Ticket, en: boolean): string[] {
+function buildTicketLines(ticket: Ticket, en: boolean, driver: Orchestrator): string[] {
   const figmaUrls = extractFigmaUrls(ticket.description);
   const figmaLines =
     figmaUrls.length > 0
@@ -61,9 +63,10 @@ function buildTicketLines(ticket: Ticket, en: boolean): string[] {
         ticket.description || "(empty)",
         "",
         "The description may reference absolute local image paths (e.g. /Users/.../uploads/xxx.png)",
-        "that you can read with the Read tool, and figma.com links that you MUST consult through the",
-        "read-only Figma MCP tools (get_screenshot, get_design_context — `mcp__plugin_figma_figma`",
-        "namespace; load them via your tool search if they are deferred).",
+        "that you can read with the Read tool. Consult figma.com links only through a read-only Figma",
+        ...(driver === "claude"
+          ? ["MCP tool (get_screenshot/get_design_context in `mcp__plugin_figma_figma`)."]
+          : ["tool actually exposed to this Codex session; otherwise report the link as unavailable."]),
         ...figmaLines,
       ]
     : [
@@ -74,9 +77,10 @@ function buildTicketLines(ticket: Ticket, en: boolean): string[] {
         ticket.description || "(vide)",
         "",
         "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png)",
-        "que tu peux lire avec l'outil Read, et des liens figma.com que tu DOIS consulter via les outils",
-        "MCP Figma de lecture (get_screenshot, get_design_context — namespace `mcp__plugin_figma_figma`,",
-        "à charger via ta recherche de tools s'ils sont différés).",
+        "que tu peux lire avec l'outil Read. Consulte les liens figma.com uniquement avec un outil Figma",
+        ...(driver === "claude"
+          ? ["MCP de lecture (get_screenshot/get_design_context dans `mcp__plugin_figma_figma`)."]
+          : ["de lecture réellement exposé à cette session Codex ; sinon signale le lien non consultable."]),
         ...figmaLines,
       ];
 }
@@ -90,6 +94,7 @@ function buildStrictRulesLines(en: boolean): string[] {
         "- Don't assume anything: if information is missing, it is a question, not an assumption.",
         "- Don't propose rewriting the ticket.",
         "- Ground every claim in code you have actually read (cite file paths).",
+        "- Read the applicable AGENTS.md files first. If needed project guidance is absent, consult the applicable CLAUDE.md for compatibility, without importing its permissions or secrets.",
       ]
     : [
         "## Règles strictes",
@@ -97,6 +102,7 @@ function buildStrictRulesLines(en: boolean): string[] {
         "- Ne suppose rien : si une information manque, c'est une question, pas une hypothèse.",
         "- Ne propose pas de réécrire le ticket.",
         "- Fonde chaque affirmation sur du code que tu as réellement lu (cite les chemins de fichiers).",
+        "- Lis d'abord les fichiers AGENTS.md applicables. Si une règle projet nécessaire manque, consulte le CLAUDE.md applicable comme compatibilité, sans importer ses permissions ni secrets.",
       ];
 }
 
@@ -115,6 +121,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `questions`: list of questions (mandatory for `needs_info`)",
         "- `files`: paths actually read that ground the analysis",
         "- `suggestedModel` / `suggestedEffort`: see below, otherwise `null`",
+        "- `suggestedOrchestrator` / `suggestedCodexModel` / `suggestedCodexEffort`: see below",
         ...extraFields,
         "Do not write the verdict as text: only the `submit_triage` call is taken into account.",
         "If the tool is not in your static tool list, it is exposed lazily: find it via your tool search (`mcp__kanban` namespace) before concluding it is unavailable.",
@@ -128,6 +135,7 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
         "- `questions` : liste de questions (obligatoire pour `needs_info`)",
         "- `files` : chemins réellement lus qui fondent l'analyse",
         "- `suggestedModel` / `suggestedEffort` : voir ci-dessous, sinon `null`",
+        "- `suggestedOrchestrator` / `suggestedCodexModel` / `suggestedCodexEffort` : voir ci-dessous",
         ...extraFields,
         "N'écris pas le verdict en texte : seul l'appel à `submit_triage` est pris en compte.",
         "Si le tool n'apparaît pas dans ta liste statique de tools, il est exposé en différé : retrouve-le via ta recherche de tools (namespace `mcp__kanban`) avant de conclure qu'il est indisponible.",
@@ -135,7 +143,21 @@ function buildResponseFormatLines(en: boolean, extraFields: string[] = []): stri
 }
 
 /** The `Contract constraints` block (verdict semantics + model/effort guidance), shared by both prompts. */
-function buildContractConstraintsLines(en: boolean): string[] {
+function buildContractConstraintsLines(en: boolean, driver: Orchestrator): string[] {
+  const providerSuggestion =
+    driver === "codex"
+      ? en
+        ? [
+            "- Set `suggestedOrchestrator` to `codex`; choose `suggestedCodexModel` / `suggestedCodexEffort`",
+            `  from (${CODEX_MODELS.join(", ")}) / (${CODEX_EFFORTS.join(", ")}). Keep legacy suggestedModel/suggestedEffort null.`,
+          ]
+        : [
+            "- Mets `suggestedOrchestrator` à `codex` ; choisis `suggestedCodexModel` / `suggestedCodexEffort`",
+            `  parmi (${CODEX_MODELS.join(", ")}) / (${CODEX_EFFORTS.join(", ")}). Laisse les anciens suggestedModel/suggestedEffort à null.`,
+          ]
+      : en
+        ? ["- Set `suggestedOrchestrator` to `claude` and leave suggestedCodexModel/suggestedCodexEffort null."]
+        : ["- Mets `suggestedOrchestrator` à `claude` et laisse suggestedCodexModel/suggestedCodexEffort à null."];
   return en
     ? [
         "Contract constraints:",
@@ -149,6 +171,7 @@ function buildContractConstraintsLines(en: boolean): string[] {
         "  should use, based on the real complexity of the ticket (diff size, logic subtlety, touched",
         "  surface). The simpler/more mechanical it is, the lower the model and effort can be.",
         "  Otherwise (non-implementable verdict, or no reliable suggestion), set both to `null`.",
+        ...providerSuggestion,
       ]
     : [
         "Contraintes du contrat :",
@@ -162,6 +185,7 @@ function buildContractConstraintsLines(en: boolean): string[] {
         "  devrait utiliser, en fonction de la complexité réelle du ticket (ampleur du diff, subtilité de la",
         "  logique, surface touchée). Plus c'est simple/mécanique, plus le modèle et l'effort peuvent être bas.",
         "  Sinon (verdict non implementable, ou aucune suggestion fiable), mets les deux à `null`.",
+        ...providerSuggestion,
       ];
 }
 
@@ -204,7 +228,7 @@ export function buildTriageChannelPrompt(
   const lines: string[] = [
     ...header,
     "",
-    ...buildTicketLines(ticket, en),
+    ...buildTicketLines(ticket, en, driver),
     "",
     ...mission,
     "",
@@ -212,7 +236,7 @@ export function buildTriageChannelPrompt(
     "",
     ...buildResponseFormatLines(en),
     "",
-    ...buildContractConstraintsLines(en),
+    ...buildContractConstraintsLines(en, driver),
   ];
 
   return lines.filter((line) => line !== "").join("\n");
@@ -257,40 +281,11 @@ export function buildTriagePlusChannelPrompt(
           ]),
   ];
 
-  // Codex has no sub-agents: the deep variant runs the three angles itself, sequentially, in-session.
-  const codexMission = en
-    ? [
-        "## Your mission",
-        "Run a deep analysis of THIS ticket against THIS repository, covering SUCCESSIVELY these three",
-        "angles yourself (no sub-agents available):",
-        "",
-        "1. Feasibility: is the ticket implementable EXACTLY as written? Contradictions, missing",
-        "   dependencies, gray areas. Conclude on a verdict (`implementable` | `needs_info` | `needs_rework`).",
-        "2. Conventional solution: the documented / mainstream approach for this repository.",
-        "3. Alternative solution: a distinct angle (simplicity, performance, or a contrarian take).",
-        "",
-        "Then JUDGE: compare feasibility and solutions, decide on the final verdict and the retained",
-        "options, then synthesize.",
-      ]
-    : [
-        "## Ta mission",
-        "Mène une analyse approfondie de CE ticket contre CE dépôt, en couvrant SUCCESSIVEMENT ces trois",
-        "angles toi-même (aucun sous-agent disponible) :",
-        "",
-        "1. Faisabilité : le ticket est-il implémentable EXACTEMENT tel qu'il est écrit ? Contradictions,",
-        "   dépendances manquantes, zones d'ombre. Conclus sur un verdict (`implementable` | `needs_info` | `needs_rework`).",
-        "2. Solution conventionnelle : l'approche documentée / mainstream pour ce dépôt.",
-        "3. Solution alternative : un angle distinct (simplicité, performance, ou parti pris contrarian).",
-        "",
-        "Ensuite JUGE : compare faisabilité et solutions, tranche sur le verdict final et les options",
-        "retenues, puis synthétise.",
-      ];
-
   const claudeMission = en
     ? [
         "## Your mission",
         "Run a deep analysis of THIS ticket against THIS repository. Launch IN PARALLEL (fan-out, a single",
-        "message, several Task calls) EXACTLY these fresh-context sub-agents:",
+        "message, several native sub-agent calls) EXACTLY these fresh-context sub-agents:",
         "",
         `1. ONE \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` sub-agent (feasibility): is the ticket`,
         "   implementable EXACTLY as written? Contradictions, missing dependencies, gray areas.",
@@ -310,7 +305,7 @@ export function buildTriagePlusChannelPrompt(
     : [
         "## Ta mission",
         "Mène une analyse approfondie de CE ticket contre CE dépôt. Lance EN PARALLÈLE (fan-out, un seul",
-        "message, plusieurs Task) EXACTEMENT ces sous-agents à contexte frais :",
+        "message, plusieurs appels de sous-agents natifs) EXACTEMENT ces sous-agents à contexte frais :",
         "",
         `1. UN sous-agent \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (faisabilité) : le ticket est-il`,
         "   implémentable EXACTEMENT tel qu'il est écrit ? Contradictions, dépendances manquantes, zones",
@@ -341,15 +336,15 @@ export function buildTriagePlusChannelPrompt(
   const lines: string[] = [
     ...header,
     "",
-    ...buildTicketLines(ticket, en),
+    ...buildTicketLines(ticket, en, driver),
     "",
-    ...(driver === "codex" ? codexMission : claudeMission),
+    ...claudeMission,
     "",
     ...buildStrictRulesLines(en),
     "",
     ...buildResponseFormatLines(en, solutionsField),
     "",
-    ...buildContractConstraintsLines(en),
+    ...buildContractConstraintsLines(en, driver),
   ];
 
   return lines.filter((line) => line !== "").join("\n");

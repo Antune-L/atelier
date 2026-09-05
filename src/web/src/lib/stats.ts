@@ -1,8 +1,9 @@
+import { isCodexFastServiceTier } from "@shared/codexCapabilities";
 import {
-  AGENT_EFFORTS,
   AGENT_EFFORT_LABELS,
-  AGENT_MODELS,
   AGENT_MODEL_LABELS,
+  CODEX_EFFORT_LABELS,
+  CODEX_MODEL_LABELS,
   FAILURE_COLUMNS,
   KINDS,
   SUCCESS_COLUMNS,
@@ -11,6 +12,7 @@ import {
   type Kind,
 } from "@shared/constants";
 import type { ProjectInfo, StatRecord } from "@shared/schemas";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema } from "@shared/schemas";
 
 import { effectiveWorkDurationMs } from "./display";
 
@@ -64,54 +66,103 @@ interface DurationGroup {
   count: number;
 }
 
-function meanDurationByKey<K extends string>(
+const NULL_KEY = "__default__";
+
+function effectiveModelLabel(model: string | null): string {
+  if (model === null) return "Non attribué";
+  const agent = agentModelSchema.safeParse(model);
+  if (agent.success) return AGENT_MODEL_LABELS[agent.data];
+  const codex = codexModelSchema.safeParse(model);
+  return codex.success ? CODEX_MODEL_LABELS[codex.data] : model;
+}
+
+function effectiveEffortLabel(effort: string | null): string {
+  if (effort === null) return "Non attribué";
+  const agent = agentEffortSchema.safeParse(effort);
+  if (agent.success) return AGENT_EFFORT_LABELS[agent.data];
+  const codex = codexEffortSchema.safeParse(effort);
+  return codex.success ? CODEX_EFFORT_LABELS[codex.data] : effort;
+}
+
+function meanExecutionDuration(
   records: StatRecord[],
-  order: readonly (K | null)[],
-  keyOf: (r: StatRecord) => K | null,
-  serialize: (k: K | null) => string,
-  labelOf: (k: K | null) => string,
+  keyOf: (execution: StatRecord["executions"][number]) => string | null,
+  labelOf: (key: string | null) => string,
 ): DurationGroup[] {
   const totals = new Map<string, { sum: number; count: number; label: string }>();
-  for (const record of records) {
-    const duration = successDurationMs(record);
-    if (duration === null) continue;
-    const raw = keyOf(record);
-    const key = serialize(raw);
+  const add = (raw: string | null, duration: number): void => {
+    const key = raw ?? NULL_KEY;
     const entry = totals.get(key) ?? { sum: 0, count: 0, label: labelOf(raw) };
     entry.sum += duration;
     entry.count += 1;
     totals.set(key, entry);
+  };
+  for (const record of records) {
+    if (record.executions.length === 0) {
+      const legacyDuration = successDurationMs(record);
+      if (legacyDuration !== null) add(null, legacyDuration);
+      continue;
+    }
+    for (const execution of record.executions) {
+      if (execution.status !== "completed" || execution.finishedAt === null) continue;
+      add(keyOf(execution), Math.max(0, execution.finishedAt - execution.startedAt));
+    }
   }
-  const groups: DurationGroup[] = [];
-  for (const raw of order) {
-    const key = serialize(raw);
-    const entry = totals.get(key);
-    if (!entry) continue;
-    groups.push({ key, label: entry.label, meanMs: Math.round(entry.sum / entry.count), count: entry.count });
-  }
-  return groups;
+  return [...totals.entries()]
+    .map(([key, entry]) => ({
+      key,
+      label: entry.label,
+      meanMs: Math.round(entry.sum / entry.count),
+      count: entry.count,
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label, "fr"));
 }
 
-const NULL_KEY = "__default__";
-
 export function meanDurationByModel(records: StatRecord[]): DurationGroup[] {
-  return meanDurationByKey<AgentModel>(
-    records,
-    [...AGENT_MODELS, null],
-    (r) => r.model,
-    (k) => k ?? NULL_KEY,
-    modelLabel,
-  );
+  return meanExecutionDuration(records, (execution) => execution.effectiveModel, effectiveModelLabel);
 }
 
 export function meanDurationByEffort(records: StatRecord[]): DurationGroup[] {
-  return meanDurationByKey<AgentEffort>(
-    records,
-    [...AGENT_EFFORTS, null],
-    (r) => r.effort,
-    (k) => k ?? NULL_KEY,
-    effortLabel,
-  );
+  return meanExecutionDuration(records, (execution) => execution.effectiveEffort, effectiveEffortLabel);
+}
+
+export interface CodexTierSummary {
+  total: number;
+  requestedFast: number;
+  requestedDefault: number;
+  confirmedFast: number;
+  confirmedDefault: number;
+  confirmedUnknown: number;
+  confirmedOther: Array<{ tier: string; count: number }>;
+}
+
+/** Count persisted Codex generations by requested and provider-confirmed service tier. */
+export function summarizeCodexTiers(records: StatRecord[]): CodexTierSummary {
+  const summary: CodexTierSummary = {
+    total: 0,
+    requestedFast: 0,
+    requestedDefault: 0,
+    confirmedFast: 0,
+    confirmedDefault: 0,
+    confirmedUnknown: 0,
+    confirmedOther: [],
+  };
+  const otherTiers = new Map<string, number>();
+  for (const record of records) {
+    for (const execution of record.executions) {
+      if (execution.orchestrator !== "codex") continue;
+      summary.total += 1;
+      summary[execution.codexFast ? "requestedFast" : "requestedDefault"] += 1;
+      if (execution.configuredServiceTier === null) summary.confirmedUnknown += 1;
+      else if (isCodexFastServiceTier(execution.configuredServiceTier)) summary.confirmedFast += 1;
+      else if (execution.configuredServiceTier === "default") summary.confirmedDefault += 1;
+      else otherTiers.set(execution.configuredServiceTier, (otherTiers.get(execution.configuredServiceTier) ?? 0) + 1);
+    }
+  }
+  summary.confirmedOther = [...otherTiers.entries()]
+    .map(([tier, count]) => ({ tier, count }))
+    .sort((left, right) => left.tier.localeCompare(right.tier));
+  return summary;
 }
 
 export interface OutcomeCount {

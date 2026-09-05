@@ -80,6 +80,7 @@ export const DEFAULT_MODELS = {
   implementerEffort: "low",
   codexModel: DEFAULT_CODEX_MODEL,
   codexEffort: DEFAULT_CODEX_EFFORT,
+  codexFast: false,
 } as const;
 
 export const MODELS: {
@@ -91,6 +92,7 @@ export const MODELS: {
   implementerEffort: AgentEffort;
   codexModel: CodexModel;
   codexEffort: CodexEffort;
+  codexFast: boolean;
 } = { ...DEFAULT_MODELS };
 
 /**
@@ -105,6 +107,7 @@ export function applyAppSettingsToModels(settings: AppSettings): void {
   MODELS.triageEffort = settings.triageEffort;
   MODELS.codexModel = settings.codexModel;
   MODELS.codexEffort = settings.codexEffort;
+  MODELS.codexFast = settings.codexFast;
 }
 
 let _store: Store | undefined;

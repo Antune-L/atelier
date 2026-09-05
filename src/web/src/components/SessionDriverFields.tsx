@@ -11,9 +11,11 @@ interface SessionDriverFieldsProps {
   orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast: boolean;
   onOrchestratorChange: (orchestrator: Orchestrator) => void;
   onCodexModelChange: (model: CodexModel | null) => void;
   onCodexEffortChange: (effort: CodexEffort | null) => void;
+  onCodexFastChange: (fast: boolean) => void;
 }
 
 /**
@@ -24,9 +26,11 @@ export function SessionDriverFields({
   orchestrator,
   codexModel,
   codexEffort,
+  codexFast,
   onOrchestratorChange,
   onCodexModelChange,
   onCodexEffortChange,
+  onCodexFastChange,
 }: SessionDriverFieldsProps) {
   const { codexAvailable } = useCapabilities();
   const id = useId();
@@ -56,8 +60,10 @@ export function SessionDriverFields({
         <CodexAgentFields
           codexModel={codexModel}
           codexEffort={codexEffort}
+          codexFast={codexFast}
           onCodexModelChange={onCodexModelChange}
           onCodexEffortChange={onCodexEffortChange}
+          onCodexFastChange={onCodexFastChange}
         />
       )}
     </div>

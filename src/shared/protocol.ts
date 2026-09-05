@@ -75,6 +75,51 @@ export const failArgsSchema = z.object({
  */
 export const delegateImplementationArgsSchema = z.object({ plan: z.string().min(1) });
 
+export const reviewKindSchema = z.enum([
+  "quality",
+  "conventions",
+  "regression",
+  "logic",
+  "architecture",
+  "security",
+]);
+export type ReviewKind = z.infer<typeof reviewKindSchema>;
+
+export const delegateReviewArgsSchema = z.object({
+  kind: reviewKindSchema,
+  context: z.string().min(1),
+});
+
+export const reviewFindingSeveritySchema = z.enum(["critical", "major", "minor"]);
+export const reviewFindingVerificationSchema = z.enum(["not_needed", "pending", "confirmed", "demoted", "rejected"]);
+export const reviewFindingSchema = z.object({
+  id: z.string().min(1),
+  severity: reviewFindingSeveritySchema,
+  summary: z.string().min(1),
+  evidence: z.string().min(1),
+  ruleSource: z.string().min(1).nullable().default(null),
+  path: z.string().min(1).nullable().default(null),
+  line: z.number().int().positive().nullable().default(null),
+  verificationStatus: reviewFindingVerificationSchema.default("not_needed"),
+  originalSeverity: reviewFindingSeveritySchema.nullable().default(null),
+});
+export type ReviewFinding = z.infer<typeof reviewFindingSchema>;
+
+export const submitReviewArgsSchema = z
+  .object({
+    verdict: z.enum(["approve", "revise"]),
+    summary: z.string().min(1),
+    findings: z.array(reviewFindingSchema).default([]),
+  })
+  .superRefine((value, context) => {
+    if (value.verdict === "approve" && value.findings.length > 0) {
+      context.addIssue({ code: "custom", message: "approve exige une liste de findings vide", path: ["findings"] });
+    }
+    if (value.verdict === "revise" && value.findings.length === 0) {
+      context.addIssue({ code: "custom", message: "revise exige au moins un finding", path: ["findings"] });
+    }
+  });
+
 const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 
 /**
@@ -92,6 +137,9 @@ const submitTriageMcpArgsSchema = z.object({
   files: z.array(z.string()).default([]),
   suggestedModel: z.string().nullable().default(null),
   suggestedEffort: z.string().nullable().default(null),
+  suggestedOrchestrator: z.enum(["claude", "codex"]).nullable().default(null),
+  suggestedCodexModel: z.string().nullable().default(null),
+  suggestedCodexEffort: z.string().nullable().default(null),
   solutions: z.array(z.string()).default([]),
 });
 
@@ -178,6 +226,18 @@ export const WORKER_TOOLS = [
     argsSchema: delegateImplementationArgsSchema,
   },
   {
+    name: "delegate_review",
+    description:
+      "Lance un reviewer indépendant en lecture seule pour une dimension de review. Retourne immédiatement : termine le tour et attends review_done.",
+    argsSchema: delegateReviewArgsSchema,
+  },
+  {
+    name: "submit_review",
+    description:
+      "Réservé à une session reviewer : soumet son verdict, sa synthèse et ses findings au parent.",
+    argsSchema: submitReviewArgsSchema,
+  },
+  {
     name: "submit_triage",
     description:
       "Soumet le verdict de faisabilité (triage en lecture seule). Le backend le persiste puis détruit la session.",
@@ -215,6 +275,8 @@ const WORKER_TOOL_NAMES = [
   "ready_for_review",
   "fail",
   "delegate_implementation",
+  "delegate_review",
+  "submit_review",
   "submit_triage",
   "submit_feasibility",
   "submit_split",
@@ -240,6 +302,15 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
   z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
   z.object({ type: z.literal("implementation_done"), ok: z.boolean(), summary: z.string().default("") }),
+  z.object({
+    type: z.literal("review_done"),
+    kind: reviewKindSchema,
+    passId: z.string().min(1),
+    ok: z.boolean(),
+    verdict: z.enum(["approve", "revise"]).nullable(),
+    summary: z.string().default(""),
+    findings: z.array(reviewFindingSchema).default([]),
+  }),
   z.object({ type: z.literal("nudge"), message: z.string() }),
   z.object({ type: z.literal("user_comment"), body: z.string() }),
 ]);

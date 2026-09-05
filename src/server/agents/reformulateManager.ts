@@ -6,9 +6,11 @@ import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
+import { runRecordedAction } from "../recordedAction.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
 import { buildReformulatePrompt } from "./reformulate.ts";
+import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 
 const log = createLogger("reformulate");
 
@@ -20,6 +22,7 @@ const log = createLogger("reformulate");
 export class ReformulateManager {
   /** Tickets with a query in flight: guards against concurrent duplicate runs. */
   private readonly running = new Set<string>();
+  private readonly generations = new Map<string, number>();
 
   constructor(
     private readonly store: Store,
@@ -34,24 +37,36 @@ export class ReformulateManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) return;
     this.running.add(ticketId);
+    const generation = (this.generations.get(ticketId) ?? 0) + 1;
+    this.generations.set(ticketId, generation);
     const started = this.store.updateTicket(ticketId, { reformulateStatus: "running", reformulation: null });
     this.hub.pushTicket(started);
     this.store.logEvent(ticketId, "reformulate_started", {});
     log.info("reformulation démarrée", { ticketId });
-    void this.run(ticket).finally(() => this.running.delete(ticketId));
+    void this.run(ticket, generation).finally(() => {
+      if (this.generations.get(ticketId) === generation) this.running.delete(ticketId);
+    });
   }
 
-  private async run(ticket: Ticket): Promise<void> {
+  private async run(ticket: Ticket, generation: number): Promise<void> {
     const project = getProject(ticket.project);
+    const execution = resolveTicketExecution(ticket, "one-shot", {
+      model: MODELS.triage,
+      effort: MODELS.triageEffort,
+    });
     try {
-      const markdown = await this.system.reformulate({
+      await assertExecutionAvailable(this.system, execution);
+      const markdown = await runRecordedAction(this.store, ticket.id, execution, (onEvent) => this.system.reformulate({
         cwd: project.repoPath,
         prompt: buildReformulatePrompt(ticket),
-        model: MODELS.triage,
-        effort: MODELS.triageEffort,
-      });
+        provider: execution.provider,
+        model: execution.model,
+        effort: execution.effort,
+        serviceTier: execution.serviceTier,
+        onEvent,
+      }), "ticket");
       // The ticket may have been deleted while the query ran: skip persistence if it is gone.
-      if (!this.store.getTicket(ticket.id)) return;
+      if (!this.store.getTicket(ticket.id) || this.generations.get(ticket.id) !== generation) return;
       const done = this.store.updateTicket(ticket.id, { reformulateStatus: "done", reformulation: markdown });
       this.hub.pushTicket(done);
       this.store.logEvent(ticket.id, "reformulate_done", {});
@@ -59,7 +74,7 @@ export class ReformulateManager {
       log.info("reformulation terminée", { ticketId: ticket.id });
     } catch (error) {
       const reason = getErrorMessage(error);
-      if (!this.store.getTicket(ticket.id)) return;
+      if (!this.store.getTicket(ticket.id) || this.generations.get(ticket.id) !== generation) return;
       const failed = this.store.updateTicket(ticket.id, { reformulateStatus: "failed", reformulation: reason });
       this.hub.pushTicket(failed);
       this.store.logEvent(ticket.id, "reformulate_failed", { reason });

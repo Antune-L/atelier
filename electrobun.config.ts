@@ -9,8 +9,8 @@ import type { ElectrobunConfig } from "electrobun";
  * PATHS.RESOURCES_FOLDER + "/app"):
  *  - dist/web        → built SPA served statically
  *  - codex-bin       → the Codex SDK's native `codex` binary (Apache-2.0, redistributable), pointed
- *                      at via KANBAN_CODEX_BINARY (codexBinary.ts's override — the SDK resolves the
- *                      binary itself otherwise, see codexBinary.ts's doc comment)
+ *                      at via KANBAN_CODEX_BINARY; codexBinary.ts resolves this executable and the
+ *                      provider starts its stable App Server protocol
  *  - codex-code-mode-host → codex's companion binary for MCP tool execution ("code mode"); codex
  *                      resolves it as a sibling of its own executable, so it must land next to
  *                      codex-bin or every MCP tool call dies with "codex-code-mode-host not found"

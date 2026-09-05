@@ -1,11 +1,14 @@
 import { z } from "zod";
 
-import { WORKER_TOOLS } from "../shared/protocol.ts";
+import { isWorkerToolName, WORKER_TOOLS } from "../shared/protocol.ts";
+import type { WorkerToolName } from "../shared/protocol.ts";
 
 import { createLogger } from "./logger.ts";
 
 export interface WorkerMcpHandlers {
-  onToolCall(name: string, args: unknown): Promise<{ ok: boolean; result: string }>;
+  allowedTools?: readonly WorkerToolName[];
+  isActive?(): boolean;
+  onToolCall(name: WorkerToolName, args: unknown): Promise<{ ok: boolean; result: string }>;
 }
 
 const log = createLogger("worker-mcp");
@@ -61,6 +64,7 @@ export class WorkerMcpManager {
 
   /** Register a session's onToolCall before spawning its Codex session. */
   register(token: string, handlers: WorkerMcpHandlers): void {
+    if (this.registry.has(token)) throw new Error("collision de jeton MCP");
     this.registry.set(token, handlers);
   }
 
@@ -76,6 +80,9 @@ export class WorkerMcpManager {
     if (!handlers) {
       log.warn("token MCP inconnu, requête refusée");
       return new Response("token inconnu", { status: HTTP_UNAUTHORIZED });
+    }
+    if (handlers.isActive && !handlers.isActive()) {
+      return new Response("session MCP révoquée", { status: HTTP_UNAUTHORIZED });
     }
     if (request.method !== "POST") return new Response(null, { status: HTTP_METHOD_NOT_ALLOWED });
 
@@ -101,19 +108,31 @@ export class WorkerMcpManager {
       });
     }
     if (method === "tools/list") {
+      const allowed = handlers.allowedTools ? new Set(handlers.allowedTools) : null;
       return rpcResult(id, {
-        tools: WORKER_TOOLS.map((entry) => ({
-          name: entry.name,
-          description: entry.description,
-          // io: "input" keeps defaulted fields optional (output mode would mark them required).
-          inputSchema: z.toJSONSchema(entry.argsSchema, { io: "input" }),
-        })),
+        tools: WORKER_TOOLS.filter((entry) => allowed === null || allowed.has(entry.name)).map(
+          (entry) => ({
+            name: entry.name,
+            description: entry.description,
+            // io: "input" keeps defaulted fields optional (output mode would mark them required).
+            inputSchema: z.toJSONSchema(entry.argsSchema, { io: "input" }),
+          }),
+        ),
       });
     }
     if (method === "tools/call") {
       const call = toolCallParamsSchema.safeParse(params);
       if (!call.success) return rpcError(id, JSONRPC_INVALID_REQUEST, "paramètres tools/call invalides");
+      if (!isWorkerToolName(call.data.name)) {
+        return rpcError(id, JSONRPC_METHOD_NOT_FOUND, `outil inconnu : ${call.data.name}`);
+      }
+      if (handlers.allowedTools && !handlers.allowedTools.includes(call.data.name)) {
+        return rpcError(id, JSONRPC_METHOD_NOT_FOUND, `outil interdit pour cette session : ${call.data.name}`);
+      }
       const outcome = await handlers.onToolCall(call.data.name, call.data.arguments ?? {});
+      if (this.registry.get(token) !== handlers || (handlers.isActive && !handlers.isActive())) {
+        return new Response("session MCP révoquée", { status: HTTP_UNAUTHORIZED });
+      }
       return rpcResult(id, {
         content: [{ type: "text", text: outcome.result || (outcome.ok ? "ok" : "échec") }],
         isError: !outcome.ok,

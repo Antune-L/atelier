@@ -47,37 +47,42 @@ afterAll(() => {
 });
 
 describe("buildTicketContract — orchestrator/implementer framing", () => {
-  test("Claude×Claude delegates implementing to the `implementer` sub-agent and reviews with argus", () => {
+  test("Claude×Claude delegates implementation and both independent reviews", () => {
     const contract = buildTicketContract(makeTicket({ orchestrator: "claude", implementer: "claude" }), TICKET_OPTS);
     expect(contract).toContain("session Claude Code");
     expect(contract).toContain("subagent_type: implementer");
-    expect(contract).toContain("argus");
+    expect(contract).toContain('delegate_review(kind="quality"');
+    expect(contract).toContain('delegate_review(kind="conventions"');
+    expect(contract).toContain('delegate_review(kind="regression"');
+    expect(contract).toContain('delegate_review(kind="logic"');
+    expect(contract).not.toContain('delegate_review(kind="architecture"');
   });
 
-  test("Claude×Composer implements via the Composer script + plan file, review stays argus", () => {
+  test("Claude×Composer implements via Composer and keeps independent reviews", () => {
     const ticket = makeTicket({ id: "tc-composer", orchestrator: "claude", implementer: "composer" });
     const contract = buildTicketContract(ticket, TICKET_OPTS);
     expect(contract).toContain(TICKET_OPTS.composerScriptPath);
     expect(contract).toContain(`/tmp/composer-plan-${ticket.id}.md`);
-    expect(contract).toContain("argus");
+    expect(contract).toContain("delegate_review");
   });
 
-  test("Codex×Codex implements + reviews inline (no implementer sub-agent, no composer, no argus)", () => {
+  test("Codex×Codex delegates implementation and reviews to fresh contexts", () => {
     const contract = buildTicketContract(makeTicket({ orchestrator: "codex", implementer: "codex" }), TICKET_OPTS);
     expect(contract).toContain("session Codex");
-    expect(contract).not.toContain("subagent_type: implementer");
+    expect(contract).toContain("delegate_implementation");
+    expect(contract).toContain("delegate_review");
     expect(contract).not.toContain(TICKET_OPTS.composerScriptPath);
     expect(contract).not.toContain("argus");
   });
 
-  test("Claude×Codex delegates implementing via delegate_implementation, Claude keeps review/PR (argus)", () => {
+  test("Claude×Codex delegates implementation and independent reviews", () => {
     const contract = buildTicketContract(makeTicket({ id: "tc-delegate", orchestrator: "claude", implementer: "codex" }), TICKET_OPTS);
     expect(contract).toContain("session Claude Code");
     expect(contract).toContain("delegate_implementation");
     expect(contract).toContain("implementation_done");
     expect(contract).not.toContain("subagent_type: implementer");
     expect(contract).not.toContain(TICKET_OPTS.composerScriptPath);
-    expect(contract).toContain("argus");
+    expect(contract).toContain("delegate_review");
   });
 });
 
@@ -89,11 +94,11 @@ describe("buildTicketContract — PRD variants", () => {
     expect(contract).toContain("subagent_type: implementer");
   });
 
-  test("Codex×Codex with PRD writes the PRD then implements inline", () => {
+  test("Codex×Codex with PRD writes the PRD then delegates it", () => {
     const ticket = makeTicket({ id: "tp-codex", orchestrator: "codex", implementer: "codex", prdEnabled: true });
     const contract = buildTicketContract(ticket, TICKET_OPTS);
     expect(contract).toContain(`/tmp/prd-${ticket.id}.md`);
-    expect(contract).not.toContain("subagent_type: implementer");
+    expect(contract).toContain("delegate_implementation");
   });
 
   test("Claude×Codex with PRD writes the PRD then passes it as the delegation plan", () => {
@@ -144,17 +149,46 @@ describe("buildReviewContract", () => {
     });
   }
 
-  test("claude → argus skill framing", () => {
+  test("claude → independent read-only reviewers", () => {
     const contract = buildReviewContract(reviewTicket("claude", "claude"), REVIEW_OPTS);
     expect(contract).toContain("session Claude Code");
-    expect(contract).toContain("argus");
+    expect(contract).toContain("delegate_review");
   });
 
-  test("codex → inline review via gh api, no argus", () => {
+  test("codex → independent read-only reviewers then gh publication", () => {
     const contract = buildReviewContract(reviewTicket("codex", "codex"), REVIEW_OPTS);
     expect(contract).toContain("session Codex");
     expect(contract).toContain("gh api");
-    expect(contract).not.toContain("argus");
+    expect(contract).toContain("delegate_review");
+    expect(contract).toContain("kanban-review-pass:<passId>");
+    expect(contract).toContain("Un verdict revise est une conclusion valide");
+  });
+
+  test("legacy correction ticket without a PR branch keeps the read-only completion policy", () => {
+    const contract = buildReviewContract(
+      makeTicket({
+        kind: "review",
+        orchestrator: "codex",
+        implementer: "codex",
+        reviewDepth: "light",
+        prNumber: 42,
+        prHeadBranch: null,
+        prUrl: "https://github.com/o/r/pull/42",
+        postComments: false,
+        fixComments: true,
+      }),
+      REVIEW_OPTS,
+    );
+    expect(contract).toContain("Un verdict revise est une conclusion valide");
+    expect(contract).toContain("Ne modifie AUCUN fichier");
+  });
+
+  test("full requests the four light dimensions plus architecture and security", () => {
+    const contract = buildReviewContract(reviewTicket("codex", "codex"), REVIEW_OPTS);
+    for (const kind of ["quality", "conventions", "regression", "logic", "architecture", "security"]) {
+      expect(contract).toContain(`delegate_review(kind="${kind}"`);
+    }
+    expect(contract).toContain("6 dimensions indépendantes");
   });
 });
 
@@ -181,6 +215,7 @@ describe("buildCleanContract", () => {
     expect(contract).toContain("session Codex");
     expect(contract).toContain("gh api");
     expect(contract).not.toContain("minos-pr-feedback");
+    expect(contract).toContain("delegate_review");
   });
 });
 
@@ -211,11 +246,13 @@ describe("buildConflictResolutionContract", () => {
   test("claude framing", () => {
     const contract = buildConflictResolutionContract(conflictTicket("claude", "claude"), REVIEW_OPTS);
     expect(contract).toContain("session Claude Code");
+    expect(contract).toContain("delegate_review");
   });
 
   test("codex framing", () => {
     const contract = buildConflictResolutionContract(conflictTicket("codex", "codex"), REVIEW_OPTS);
     expect(contract).toContain("session Codex");
+    expect(contract).toContain("delegate_review");
   });
 });
 

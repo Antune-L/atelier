@@ -1,4 +1,6 @@
 import type { OpenPr } from "../../shared/schemas.ts";
+import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import { CODEX_MODELS, CODEX_EFFORTS } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -152,7 +154,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
-    this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model });
+    this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model, provider: opts.provider });
     // Synthetic: no real claude is spawned. Emit `init` then a couple of display-only events on the
     // next ticks so the caller can wire its handle and the live transcript viewer has something to
     // show in dry-run. No `turn_end` is emitted — that would drive the real nudge/stall lifecycle.
@@ -161,25 +163,30 @@ export class FakeSystemAdapter implements SystemAdapter {
       () =>
         opts.onEvent({
           type: "assistant_text",
-          text: "Session simulée (dry-run) : aucune session claude réelle n'est lancée dans le bac à sable.",
+          text: "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.",
         }),
       0,
     );
     return {
       ticketId: opts.ticketId,
-      send: (content) => this.log("agentSession.send", { ticketId: opts.ticketId, bytes: content.length }),
+      send: (content, messageId = crypto.randomUUID()) => {
+        this.log("agentSession.send", { ticketId: opts.ticketId, bytes: content.length });
+        opts.onEvent({ type: "message_status", messageId, status: "received", turnId: null });
+        opts.onEvent({ type: "message_status", messageId, status: "accepted", turnId: null });
+        return messageId;
+      },
       interrupt: async () => this.log("agentSession.interrupt", { ticketId: opts.ticketId }),
       close: async () => this.log("agentSession.close", { ticketId: opts.ticketId }),
     };
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
-    this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
+    this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length });
     return "# Besoin reformulé (simulé)\n\nReformulation simulée (dry-run).";
   }
 
   async importNotion(opts: ImportNotionOptions): Promise<string> {
-    this.log("importNotion", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
+    this.log("importNotion", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length });
     return "## Synthèse Notion (simulée)\n\nImport Notion simulé (dry-run).";
   }
 
@@ -284,6 +291,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
+  async codeFingerprint(slotPath: string): Promise<string> {
+    this.log("codeFingerprint", { slotPath });
+    return "dry-run-code-fingerprint";
+  }
+
   async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
     this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
     // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).
@@ -301,6 +313,7 @@ export class FakeSystemAdapter implements SystemAdapter {
       slotPath,
       prUrl,
       requirePostedSince: opts.requirePostedSince,
+      publicationMarker: opts.publicationMarker,
       requirePushedBranch: opts.requirePushedBranch,
     });
     return { ok: true, reason: "" };
@@ -336,9 +349,17 @@ export class FakeSystemAdapter implements SystemAdapter {
     return true;
   }
 
-  async checkCodexAvailable(): Promise<boolean> {
-    // Mirrors the "pipeline exerciseable end-to-end in dry-run" stance (like verifyDone): report available.
-    return true;
+  async checkCodexRuntime(): Promise<CodexRuntimeStatus> {
+    return {
+      status: "ready", checkedAt: Date.now(), message: "Mode simulation",
+      models: CODEX_MODELS.map((model) => ({
+        model,
+        efforts: [...CODEX_EFFORTS],
+        defaultEffort: "medium",
+        serviceTiers: [{ id: "priority", name: "Fast", description: "Mode rapide" }],
+        defaultServiceTier: null,
+      })),
+    };
   }
 
   async gitCurrentBranch(): Promise<string> {

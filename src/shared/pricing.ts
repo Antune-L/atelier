@@ -67,19 +67,10 @@ export function normalizeModel(modelId: string): ModelFamily | null {
   return null;
 }
 
-/** Unknown model ids already warned about, so the hot `/stats` path logs each at most once. */
-const warnedUnknownModels = new Set<string>();
-
-/** Cost in USD of one model's usage; unknown model → 0 (warned once per process per model id). */
-function costOfModel(modelId: string, usage: ModelUsage): number {
+/** Cost in USD of one model's usage; null means no explicit price is known. */
+function costOfModel(modelId: string, usage: ModelUsage): number | null {
   const family = normalizeModel(modelId);
-  if (family === null) {
-    if (!warnedUnknownModels.has(modelId)) {
-      warnedUnknownModels.add(modelId);
-      console.warn(`pricing: unknown model "${modelId}", cost counted as 0`);
-    }
-    return 0;
-  }
+  if (family === null) return null;
   const p = PRICING[family];
   return (
     (usage.input_tokens * p.input +
@@ -91,21 +82,54 @@ function costOfModel(modelId: string, usage: ModelUsage): number {
 }
 
 /** Total cost in USD across every model in a single session's usage. */
-export function costOf(usageByModel: UsageByModel): number {
+export function costOf(usageByModel: UsageByModel): number | null {
   let total = 0;
   for (const [modelId, usage] of Object.entries(usageByModel)) {
-    total += costOfModel(modelId, usage);
+    const cost = costOfModel(modelId, usage);
+    if (cost === null) return null;
+    total += cost;
   }
   return total;
 }
 
 /** Total cost in USD across every session of a ticket. */
-export function costOfSessions(sessionUsage: SessionUsage): number {
+export function costOfSessions(sessionUsage: SessionUsage): number | null {
   let total = 0;
   for (const usage of Object.values(sessionUsage)) {
-    total += costOf(usage);
+    const cost = costOf(usage);
+    if (cost === null) return null;
+    total += cost;
   }
   return total;
+}
+
+export interface CostSummary {
+  costUsd: number | null;
+  knownCostUsd: number;
+  partial: boolean;
+}
+
+/** Preserve the known subtotal while marking a mixed known/unknown total as partial. */
+export function summarizeSessionCosts(sessionUsage: SessionUsage): CostSummary {
+  let knownCostUsd = 0;
+  let hasKnown = false;
+  let hasUnknown = false;
+  for (const usage of Object.values(sessionUsage)) {
+    for (const [modelId, modelUsage] of Object.entries(usage)) {
+      const cost = costOfModel(modelId, modelUsage);
+      if (cost === null) {
+        hasUnknown = true;
+      } else {
+        hasKnown = true;
+        knownCostUsd += cost;
+      }
+    }
+  }
+  return {
+    costUsd: hasUnknown || (!hasKnown && Object.keys(sessionUsage).length === 0) ? null : knownCostUsd,
+    knownCostUsd,
+    partial: hasKnown && hasUnknown,
+  };
 }
 
 /** Sum of the four token buckets across every model in a single session's usage. */
@@ -154,7 +178,8 @@ export function costByFamily(sessionUsage: SessionUsage): Partial<Record<ModelFa
     for (const [modelId, model] of Object.entries(usage)) {
       const family = normalizeModel(modelId);
       if (family === null) continue;
-      byFamily[family] = (byFamily[family] ?? 0) + costOf({ [modelId]: model });
+      const cost = costOfModel(modelId, model);
+      if (cost !== null) byFamily[family] = (byFamily[family] ?? 0) + cost;
     }
   }
   return byFamily;

@@ -1,7 +1,10 @@
+import { transcriptUpdateSchema } from "./transcript.ts";
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { isNotionUrl } from "./notion.ts";
+import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -24,6 +27,7 @@ export const implementerSchema = z.enum(IMPLEMENTERS);
 export const orchestratorSchema = z.enum(ORCHESTRATORS);
 export const kindSchema = z.enum(KINDS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
+export const feasibilityEngineSchema = z.enum(FEASIBILITY_ENGINES);
 export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
 
 // ---- Token usage (cost tracking) ----
@@ -49,6 +53,82 @@ export type UsageByModel = z.infer<typeof usageByModelSchema>;
 export const sessionUsageSchema = z.record(z.string(), usageByModelSchema);
 export type SessionUsage = z.infer<typeof sessionUsageSchema>;
 
+// ---- Effective execution history ----
+
+export const executionOwnerTypeSchema = z.enum(["ticket", "action", "batch"]);
+export const executionStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
+
+export const executionModelUsageSchema = z.object({
+  inputTokens: z.number().nonnegative(),
+  outputTokens: z.number().nonnegative(),
+  cacheReadTokens: z.number().nonnegative(),
+  cacheCreationTokens: z.number().nonnegative(),
+  costUsd: z.number().nonnegative().nullable(),
+});
+export type ExecutionModelUsage = z.infer<typeof executionModelUsageSchema>;
+
+export const executionUsageByModelSchema = z.record(z.string().min(1), executionModelUsageSchema);
+export type ExecutionUsageByModel = z.infer<typeof executionUsageByModelSchema>;
+
+export const executionRunSchema = z.object({
+  id: z.string().min(1),
+  ownerType: executionOwnerTypeSchema,
+  ownerId: z.string().min(1),
+  generationId: z.string().min(1),
+  sessionId: z.string().nullable(),
+  role: z.string().min(1),
+  orchestrator: orchestratorSchema,
+  effectiveModel: z.string().nullable(),
+  effectiveEffort: z.string().nullable(),
+  delegateProvider: implementerSchema.nullable(),
+  delegateEffectiveModel: z.string().nullable(),
+  delegateEffectiveEffort: z.string().nullable(),
+  delegateCodexFast: z.boolean().nullable(),
+  /** Requested Codex speed for this generation; false for Claude and legacy runs. */
+  codexFast: z.boolean(),
+  /** Service tier confirmed by the provider, when App Server reports it. */
+  configuredServiceTier: z.string().nullable(),
+  usageByModel: executionUsageByModelSchema,
+  status: executionStatusSchema,
+  error: z.string().nullable(),
+  startedAt: z.number().int(),
+  finishedAt: z.number().int().nullable(),
+});
+export type ExecutionRun = z.infer<typeof executionRunSchema>;
+export type ExecutionOwnerType = ExecutionRun["ownerType"];
+export type ExecutionStatus = ExecutionRun["status"];
+
+export const agentMessageChannelSchema = z.enum([
+  "ticket",
+  "answer",
+  "prd_validated",
+  "implementation_done",
+  "review_done",
+  "nudge",
+  "user_comment",
+]);
+export const agentMessageStatusSchema = z.enum(["queued", "received", "accepted", "rejected"]);
+
+/** Durable identified message sent from the backend to one agent conversation. */
+export const agentMessageSchema = z.object({
+  id: z.string().min(1),
+  ownerType: executionOwnerTypeSchema,
+  ownerId: z.string().min(1),
+  generationId: z.string().min(1),
+  sessionId: z.string().nullable(),
+  channel: agentMessageChannelSchema,
+  content: z.string(),
+  status: agentMessageStatusSchema,
+  turnId: z.string().nullable(),
+  createdAt: z.number().int(),
+  receivedAt: z.number().int().nullable(),
+  acceptedAt: z.number().int().nullable(),
+  rejectedAt: z.number().int().nullable(),
+  error: z.string().nullable(),
+});
+export type AgentMessage = z.infer<typeof agentMessageSchema>;
+export type AgentMessageChannel = ProtocolChannelEvent["type"];
+
 // ---- App settings (global, persisted in the `meta` table) ----
 
 /** Global, non-project settings editable from the settings modal's "general" tab. */
@@ -69,6 +149,8 @@ export const appSettingsSchema = z.object({
   codexModel: codexModelSchema,
   /** Default reasoning effort of a Codex-driven session. */
   codexEffort: codexEffortSchema,
+  /** Whether new Codex sessions request the fast service tier by default. */
+  codexFast: z.boolean(),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -81,6 +163,7 @@ export const updateAppSettingsSchema = z.object({
   triageEffort: agentEffortSchema.optional(),
   codexModel: codexModelSchema.optional(),
   codexEffort: codexEffortSchema.optional(),
+  codexFast: z.boolean().optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 
@@ -113,6 +196,10 @@ export const triageResultSchema = z.object({
   suggestedModel: agentModelSchema.nullable().default(null).catch(null),
   /** Suggested implementation-agent effort (verdict=implementable only; null = no suggestion). */
   suggestedEffort: agentEffortSchema.nullable().default(null).catch(null),
+  /** Suggested engine and Codex knobs; defaults preserve reports written before provider parity. */
+  suggestedOrchestrator: orchestratorSchema.nullable().optional().catch(null),
+  suggestedCodexModel: codexModelSchema.nullable().optional().catch(null),
+  suggestedCodexEffort: codexEffortSchema.nullable().optional().catch(null),
   /** Deployable approaches/solutions identified by a deep "Analyse +" run (empty for normal triage). */
   solutions: z.array(z.string()).default([]).catch([]),
 });
@@ -150,6 +237,8 @@ export const ticketSchema = z.object({
   kind: kindSchema,
   /** Argus depth for review tickets (null for feature tickets). */
   reviewDepth: reviewDepthSchema.nullable(),
+  /** Model running the feasibility analysis (null = follow the ticket's own orchestrator knobs). */
+  feasibilityEngine: feasibilityEngineSchema.nullable(),
   /** Number of the reviewed PR (review tickets only). */
   prNumber: z.number().int().nullable(),
   /** Head branch of the reviewed PR, passed to argus (review tickets only). */
@@ -195,6 +284,12 @@ export const ticketSchema = z.object({
   /** Codex session overrides (codex orchestrator/implementer only; null = fall back to the app-settings defaults). */
   codexModel: codexModelSchema.nullable(),
   codexEffort: codexEffortSchema.nullable(),
+  /** Use the account/model FAST service tier for Codex sessions. */
+  codexFast: z.boolean(),
+  /** Codex implementer overrides; null inherits the corresponding Codex session setting. */
+  codexImplementerModel: codexModelSchema.nullable(),
+  codexImplementerEffort: codexEffortSchema.nullable(),
+  codexImplementerFast: z.boolean().nullable(),
   /** Who pilots the session end-to-end; constrained by isAllowedAgentPair against `implementer`. */
   orchestrator: orchestratorSchema,
   implementer: implementerSchema,
@@ -244,12 +339,20 @@ export const statRecordSchema = z.object({
   effort: agentEffortSchema.nullable(),
   orchestrator: orchestratorSchema,
   implementer: implementerSchema,
+  /** Primary model and effort captured from the latest effective ticket execution. */
+  effectiveModel: z.string().nullable(),
+  effectiveEffort: z.string().nullable(),
+  /** Generation-level history; durations here are never copied from the ticket duration. */
+  executions: z.array(executionRunSchema),
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
   implementationStartedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),
   /** Derived total cost in USD across all sessions; null when no usage recorded. */
   costUsd: z.number().nullable(),
+  /** Known subtotal when costUsd is null because at least one usage cost is unavailable. */
+  knownCostUsd: z.number().nonnegative(),
+  costPartial: z.boolean(),
   /** Derived total token count across all sessions; null when no usage recorded. */
   totalTokens: z.number().nullable(),
 });
@@ -266,6 +369,10 @@ export const profileSchema = z.object({
   implementer: implementerSchema,
   codexModel: codexModelSchema,
   codexEffort: codexEffortSchema,
+  codexFast: z.boolean(),
+  codexImplementerModel: codexModelSchema.nullable(),
+  codexImplementerEffort: codexEffortSchema.nullable(),
+  codexImplementerFast: z.boolean().nullable(),
   /** Display order in the picker (ascending). */
   sortOrder: z.number().int(),
   createdAt: z.number().int(),
@@ -281,8 +388,12 @@ export const createProfileSchema = z.object({
   implementerModel: agentModelSchema.default("opus"),
   implementerEffort: agentEffortSchema.default("low"),
   implementer: implementerSchema.default("claude"),
-  codexModel: codexModelSchema.default("gpt-5.5"),
+  codexModel: codexModelSchema.default("gpt-5.6-terra"),
   codexEffort: codexEffortSchema.default("medium"),
+  codexFast: z.boolean().default(false),
+  codexImplementerModel: codexModelSchema.nullable().default(null),
+  codexImplementerEffort: codexEffortSchema.nullable().default(null),
+  codexImplementerFast: z.boolean().nullable().default(null),
 });
 export type CreateProfileInput = z.infer<typeof createProfileSchema>;
 
@@ -296,6 +407,10 @@ export const updateProfileSchema = z.object({
   implementer: implementerSchema.optional(),
   codexModel: codexModelSchema.optional(),
   codexEffort: codexEffortSchema.optional(),
+  codexFast: z.boolean().optional(),
+  codexImplementerModel: codexModelSchema.nullable().optional(),
+  codexImplementerEffort: codexEffortSchema.nullable().optional(),
+  codexImplementerFast: z.boolean().nullable().optional(),
   sortOrder: z.number().int().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
@@ -460,6 +575,11 @@ const ticketBatchOptionsSchema = z.object({
   implementer: implementerSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
+  codexFast: z.boolean().default(false),
+  codexImplementerModel: codexModelSchema.nullable().default(null),
+  codexImplementerEffort: codexEffortSchema.nullable().default(null),
+  codexImplementerFast: z.boolean().nullable().default(null),
+  feasibilityEngine: feasibilityEngineSchema.nullable().default(null),
 });
 
 export const createTicketSchema = ticketBatchOptionsSchema
@@ -523,6 +643,11 @@ export const updateTicketSchema = z.object({
   implementer: implementerSchema.optional(),
   codexModel: codexModelSchema.nullable().optional(),
   codexEffort: codexEffortSchema.nullable().optional(),
+  codexFast: z.boolean().optional(),
+  codexImplementerModel: codexModelSchema.nullable().optional(),
+  codexImplementerEffort: codexEffortSchema.nullable().optional(),
+  codexImplementerFast: z.boolean().nullable().optional(),
+  feasibilityEngine: feasibilityEngineSchema.nullable().optional(),
   feasibilityContext: z.boolean().optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
@@ -572,6 +697,7 @@ export const createReviewSchema = z.object({
   orchestrator: orchestratorSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
+  codexFast: z.boolean().default(false),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
@@ -585,6 +711,7 @@ export const createCleanSchema = z.object({
   orchestrator: orchestratorSchema.default("claude"),
   codexModel: codexModelSchema.nullable().default(null),
   codexEffort: codexEffortSchema.nullable().default(null),
+  codexFast: z.boolean().default(false),
   prs: z.array(openPrSchema).min(1),
 });
 export type CreateCleanInput = z.infer<typeof createCleanSchema>;
@@ -602,6 +729,7 @@ export const createAskSchema = z
     orchestrator: orchestratorSchema.default("claude"),
     codexModel: codexModelSchema.nullable().default(null),
     codexEffort: codexEffortSchema.nullable().default(null),
+    codexFast: z.boolean().default(false),
   })
   .refine((data) => data.description.trim().length > 0, {
     message: "Question requise",
@@ -621,22 +749,46 @@ export const validatePrdSchema = z.object({
 });
 export type ValidatePrdInput = z.infer<typeof validatePrdSchema>;
 
+/** Optional engine configuration shared by ticket-less one-shot actions. */
+export const actionExecutionOptionsSchema = z
+  .object({
+    orchestrator: orchestratorSchema.optional(),
+    model: agentModelSchema.optional(),
+    effort: agentEffortSchema.optional(),
+    codexModel: codexModelSchema.optional(),
+    codexEffort: codexEffortSchema.optional(),
+    codexFast: z.boolean().optional(),
+  })
+  .superRefine((value, context) => {
+    const hasClaudeOptions = value.model !== undefined || value.effort !== undefined;
+    const hasCodexOptions = value.codexModel !== undefined || value.codexEffort !== undefined || value.codexFast !== undefined;
+    if (hasClaudeOptions && hasCodexOptions) {
+      context.addIssue({ code: "custom", message: "options Claude et Codex incompatibles", path: ["orchestrator"] });
+    } else if (value.orchestrator === "claude" && hasCodexOptions) {
+      context.addIssue({ code: "custom", message: "options Codex incompatibles avec Claude", path: ["orchestrator"] });
+    } else if (value.orchestrator === "codex" && hasClaudeOptions) {
+      context.addIssue({ code: "custom", message: "options Claude incompatibles avec Codex", path: ["orchestrator"] });
+    }
+  });
+export type ActionExecutionOptions = z.infer<typeof actionExecutionOptionsSchema>;
+
 /** Generate (or revise) a standalone PRD from a free-form description; nothing is persisted. */
 export const generatePrdSchema = z.object({
   description: z.string().min(1),
   previousPrd: z.string().optional(),
   feedback: z.string().optional(),
-});
+}).and(actionExecutionOptionsSchema);
 export type GeneratePrdInput = z.infer<typeof generatePrdSchema>;
 
 /** Read a linked Notion card and synthesize its problem as markdown to append to a ticket description. */
 export const importNotionSchema = z.object({
   url: z.url().refine(isNotionUrl, { message: "URL Notion invalide" }),
-});
+}).and(actionExecutionOptionsSchema);
 export type ImportNotionInput = z.infer<typeof importNotionSchema>;
 
 export const terminalOutputSchema = z.object({
   output: z.string(),
+  transcript: transcriptUpdateSchema.optional(),
   /** Pre-output setup phase (worktree/install/spawn/waiting), or null once the agent streams. */
   phase: z.string().nullable(),
 });
@@ -651,6 +803,8 @@ export const capabilitiesSchema = z.object({
   composerAvailable: z.boolean(),
   /** The Codex CLI binary is resolvable and authenticated. */
   codexAvailable: z.boolean(),
+  /** Refreshable authentication and model catalog returned by the Codex runtime. */
+  codex: codexRuntimeStatusSchema,
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
@@ -659,10 +813,11 @@ export const capabilitiesSchema = z.object({
   defaultImplementerModel: z.string(),
   /** Implementer sub-agent reasoning effort used when a ticket leaves it unset (e.g. "low"). */
   defaultImplementerEffort: z.string(),
-  /** Codex session model used when a ticket leaves it unset (e.g. "gpt-5.5"). */
+  /** Codex session model used when a ticket leaves it unset (e.g. "gpt-5.6-terra"). */
   defaultCodexModel: z.string(),
   /** Codex session reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultCodexEffort: z.string(),
+  defaultCodexFast: z.boolean(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
   /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
@@ -775,6 +930,8 @@ export {
   readyForReviewArgsSchema,
   failArgsSchema,
   delegateImplementationArgsSchema,
+  delegateReviewArgsSchema,
+  submitReviewArgsSchema,
   channelEventSchema,
 } from "./protocol.ts";
 export type { WorkerToolName, ChannelEvent } from "./protocol.ts";

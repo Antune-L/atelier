@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { nanoid } from "nanoid";
+import { z } from "zod";
 
 import {
   AUTO_MERGE_RESOLVE_EVENT,
@@ -7,6 +8,7 @@ import {
   CLEANER_EFFORT,
   CLEANER_MODEL,
   CODEX_EFFORT_META_KEY,
+  CODEX_FAST_META_KEY,
   CODEX_MODEL_META_KEY,
   COMMIT_LANGUAGE_META_KEY,
   CREATED_EVENT,
@@ -21,16 +23,55 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, Implementer, Orchestrator, ReviewDepth, Stage } from "../../shared/constants.ts";
-import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema } from "../../shared/schemas.ts";
-import type { AppSettings, Automation, AutomationRun, Comment, Profile, ReformulateStatus, SessionUsage, Slot, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage } from "../../shared/constants.ts";
+import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
+import { executionUsageByModelSchema } from "../../shared/schemas.ts";
+import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, Profile, ReformulateStatus, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import { projectStatRecord } from "../../shared/statistics.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapProfileRow, mapProjectRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapExecutionRunRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
+
+const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
+const reviewVerdictSchema = z.enum(["approve", "revise"]);
+const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
+const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
+
+function parsePersistedReviewFindings(value: string): ReviewFinding[] {
+  try {
+    const parsed = persistedReviewFindingsSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export interface PersistedReviewResult {
+  kind: ReviewKind;
+  status: "pending" | "completed" | "failed";
+  verdict: "approve" | "revise" | null;
+  summary: string;
+  findings: ReviewFinding[];
+  verificationStatus: "not_needed" | "pending" | "verified" | "failed";
+  error: string | null;
+  createdAt: number;
+}
+
+export interface ReviewPass {
+  ticketId: string;
+  passId: string;
+  codeFingerprint: string;
+  reviewDepth: ReviewDepth;
+  requiresApproval: boolean;
+  createdAt: number;
+  approvals: Partial<Record<ReviewKind, boolean>>;
+  results: Partial<Record<ReviewKind, PersistedReviewResult>>;
+}
 
 /** Attach the runtime-derived clickable addresses to a persisted worktree session row. */
 function enrichWorktreeSession(session: WorktreeSession): WorktreeSession {
@@ -63,6 +104,11 @@ export interface NewTicket {
   orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast?: boolean;
+  codexImplementerModel?: CodexModel | null;
+  codexImplementerEffort?: CodexEffort | null;
+  codexImplementerFast?: boolean | null;
+  feasibilityEngine?: FeasibilityEngine | null;
 }
 
 export interface NewProfile {
@@ -75,6 +121,10 @@ export interface NewProfile {
   implementer: Implementer;
   codexModel: CodexModel;
   codexEffort: CodexEffort;
+  codexFast?: boolean;
+  codexImplementerModel?: CodexModel | null;
+  codexImplementerEffort?: CodexEffort | null;
+  codexImplementerFast?: boolean | null;
 }
 
 export interface ProfilePatch {
@@ -87,6 +137,10 @@ export interface ProfilePatch {
   implementer?: Implementer;
   codexModel?: CodexModel;
   codexEffort?: CodexEffort;
+  codexFast?: boolean;
+  codexImplementerModel?: CodexModel | null;
+  codexImplementerEffort?: CodexEffort | null;
+  codexImplementerFast?: boolean | null;
   sortOrder?: number;
 }
 
@@ -159,6 +213,7 @@ export interface NewReview {
   orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast?: boolean;
 }
 
 export interface NewClean {
@@ -171,6 +226,11 @@ export interface NewClean {
   orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast?: boolean;
+  delegateProvider?: Implementer | null;
+  delegateEffectiveModel?: string | null;
+  delegateEffectiveEffort?: string | null;
+  delegateCodexFast?: boolean | null;
 }
 
 export interface NewAsk {
@@ -182,6 +242,7 @@ export interface NewAsk {
   orchestrator: Orchestrator;
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
+  codexFast?: boolean;
 }
 
 export interface TicketPatch {
@@ -213,6 +274,11 @@ export interface TicketPatch {
   orchestrator?: Orchestrator;
   codexModel?: CodexModel | null;
   codexEffort?: CodexEffort | null;
+  codexFast?: boolean;
+  codexImplementerModel?: CodexModel | null;
+  codexImplementerEffort?: CodexEffort | null;
+  codexImplementerFast?: boolean | null;
+  feasibilityEngine?: FeasibilityEngine | null;
   reviewRounds?: number;
   nudgeCount?: number;
   sessionId?: string | null;
@@ -235,10 +301,79 @@ export interface TicketPatch {
   finishedAt?: number | null;
 }
 
+export interface StartExecutionInput {
+  id: string;
+  ownerType: ExecutionOwnerType;
+  ownerId: string;
+  generationId: string;
+  sessionId: string | null;
+  role: string;
+  orchestrator: Orchestrator;
+  effectiveModel: string | null;
+  effectiveEffort: string | null;
+  delegateProvider?: Implementer | null;
+  delegateEffectiveModel?: string | null;
+  delegateEffectiveEffort?: string | null;
+  delegateCodexFast?: boolean | null;
+  codexFast?: boolean;
+  startedAt?: number;
+}
+
+export interface AttachExecutionSessionInput {
+  generationId: string;
+  sessionId: string;
+  configuredServiceTier?: string | null;
+}
+
+export interface FinalizeExecutionInput {
+  generationId: string;
+  sessionId?: string | null;
+  status: Exclude<ExecutionStatus, "running">;
+  usageByModel: ExecutionUsageByModel;
+  error?: string | null;
+  finishedAt?: number;
+}
+
+export interface EnqueueAgentMessageInput {
+  id: string;
+  ownerType: ExecutionOwnerType;
+  ownerId: string;
+  generationId: string;
+  sessionId: string | null;
+  channel: AgentMessageChannel;
+  content: string;
+  createdAt?: number;
+}
+
+export interface MarkAgentMessageReceivedInput {
+  id: string;
+  sessionId?: string | null;
+  turnId?: string | null;
+  receivedAt?: number;
+}
+
+export interface MarkAgentMessageAcceptedInput {
+  id: string;
+  sessionId?: string | null;
+  turnId?: string | null;
+  acceptedAt?: number;
+}
+
+export interface MarkAgentMessageRejectedInput {
+  id: string;
+  error: string | null;
+  rejectedAt?: number;
+}
+
 const COLUMN_TO_DB = "column_name";
 
 /** Values SQLite accepts as positional bindings in our UPDATE statements. */
 type SqlBindValue = string | number | null;
+
+function nullableBooleanValue(value: boolean | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  return value ? 1 : 0;
+}
 
 /**
  * Accumulates `column = ?` assignments for a dynamic UPDATE so each builder method only declares
@@ -295,6 +430,339 @@ export class Store {
     );
   }
 
+  private executionByGeneration(generationId: string): ExecutionRun | null {
+    const raw = this.db.query("SELECT * FROM execution_runs WHERE generation_id = ?").get(generationId);
+    return raw ? mapExecutionRunRow(raw) : null;
+  }
+
+  /** Persist the effective execution identity before the provider starts. Idempotent by generation. */
+  startExecution(input: StartExecutionInput): ExecutionRun {
+    const existing = this.executionByGeneration(input.generationId);
+    if (existing) {
+      if (existing.id !== input.id || existing.ownerType !== input.ownerType || existing.ownerId !== input.ownerId) {
+        throw new Error(`startExecution: generation ${input.generationId} appartient à une autre exécution`);
+      }
+      return existing;
+    }
+    this.db.query(
+      `INSERT INTO execution_runs
+        (id, owner_type, owner_id, generation_id, session_id, role, orchestrator, effective_model, effective_effort, delegate_provider, delegate_effective_model, delegate_effective_effort, delegate_codex_fast, codex_fast, configured_service_tier, usage_by_model, status, error, started_at, finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'running', NULL, ?, NULL)`,
+    ).run(
+      input.id,
+      input.ownerType,
+      input.ownerId,
+      input.generationId,
+      input.sessionId,
+      input.role,
+      input.orchestrator,
+      input.effectiveModel,
+      input.effectiveEffort,
+      input.delegateProvider ?? null,
+      input.delegateEffectiveModel ?? null,
+      input.delegateEffectiveEffort ?? null,
+      nullableBooleanValue(input.delegateCodexFast),
+      (input.codexFast ?? false) ? 1 : 0,
+      input.startedAt ?? Date.now(),
+    );
+    const created = this.executionByGeneration(input.generationId);
+    if (!created) throw new Error("startExecution: exécution introuvable après insertion");
+    return created;
+  }
+
+  /** Attach the provider conversation id once initialization reports it. */
+  attachExecutionSession(input: AttachExecutionSessionInput): ExecutionRun {
+    const existing = this.executionByGeneration(input.generationId);
+    if (!existing) throw new Error(`attachExecutionSession: génération ${input.generationId} introuvable`);
+    if (existing.status !== "running") return existing;
+    if (existing.sessionId !== null && existing.sessionId !== input.sessionId) {
+      throw new Error(`attachExecutionSession: session déjà attachée à ${input.generationId}`);
+    }
+    this.db.query("UPDATE execution_runs SET session_id = ?, configured_service_tier = COALESCE(?, configured_service_tier) WHERE generation_id = ? AND status = 'running'").run(
+      input.sessionId,
+      input.configuredServiceTier ?? null,
+      input.generationId,
+    );
+    return this.executionByGeneration(input.generationId) ?? existing;
+  }
+
+  /** Finalize usage exactly once; late callbacks stay attributed to their original generation. */
+  finalizeExecution(input: FinalizeExecutionInput): ExecutionRun {
+    const existing = this.executionByGeneration(input.generationId);
+    if (!existing) throw new Error(`finalizeExecution: génération ${input.generationId} introuvable`);
+    if (existing.status !== "running") return existing;
+    const usage = executionUsageByModelSchema.parse(input.usageByModel);
+    const serializedUsage = Object.keys(usage).length > 0 ? JSON.stringify(usage) : null;
+    this.db.query(
+      `UPDATE execution_runs
+       SET session_id = COALESCE(?, session_id), usage_by_model = COALESCE(?, usage_by_model),
+           status = ?, error = ?, finished_at = ?
+       WHERE generation_id = ? AND status = 'running'`,
+    ).run(
+      input.sessionId ?? null,
+      serializedUsage,
+      input.status,
+      input.error ?? null,
+      input.finishedAt ?? Date.now(),
+      input.generationId,
+    );
+    return this.executionByGeneration(input.generationId) ?? existing;
+  }
+
+  /** Checkpoint cumulative turn usage without changing the execution lifecycle. */
+  updateExecutionUsage(generationId: string, usageByModel: ExecutionUsageByModel): ExecutionRun | null {
+    const usage = executionUsageByModelSchema.parse(usageByModel);
+    this.db.query(
+      "UPDATE execution_runs SET usage_by_model = ? WHERE generation_id = ? AND status = 'running'",
+    ).run(JSON.stringify(usage), generationId);
+    return this.executionByGeneration(generationId);
+  }
+
+  listExecutionRuns(ownerType?: ExecutionOwnerType, ownerId?: string): ExecutionRun[] {
+    if (ownerType !== undefined && ownerId !== undefined) {
+      return this.db
+        .query("SELECT * FROM execution_runs WHERE owner_type = ? AND owner_id = ? ORDER BY started_at ASC")
+        .all(ownerType, ownerId)
+        .map(mapExecutionRunRow);
+    }
+    if (ownerType !== undefined) {
+      return this.db.query("SELECT * FROM execution_runs WHERE owner_type = ? ORDER BY started_at ASC")
+        .all(ownerType).map(mapExecutionRunRow);
+    }
+    return this.db.query("SELECT * FROM execution_runs ORDER BY started_at ASC").all().map(mapExecutionRunRow);
+  }
+
+  /** Replace the ticket's current review pass and invalidate every verdict from older code. */
+  beginReviewPass(input: {
+    ticketId: string;
+    passId: string;
+    codeFingerprint: string;
+    reviewDepth: ReviewDepth;
+    requiresApproval: boolean;
+    createdAt?: number;
+  }): ReviewPass {
+    this.transaction(() => {
+      this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(input.ticketId);
+      this.db.query(
+        `INSERT OR REPLACE INTO review_passes
+          (ticket_id, pass_id, code_fingerprint, review_depth, requires_approval, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        input.ticketId,
+        input.passId,
+        input.codeFingerprint,
+        input.reviewDepth,
+        input.requiresApproval ? 1 : 0,
+        input.createdAt ?? Date.now(),
+      );
+    });
+    const reviewPass = this.getReviewPass(input.ticketId);
+    if (!reviewPass) throw new Error("beginReviewPass: passe introuvable après insertion");
+    return reviewPass;
+  }
+
+  /** Persist one reviewer outcome only when its pass is still current. */
+  recordReviewResult(input: {
+    ticketId: string;
+    passId: string;
+    kind: ReviewKind;
+    status: "pending" | "completed" | "failed";
+    verdict: "approve" | "revise" | null;
+    summary: string;
+    findings: ReviewFinding[];
+    verificationStatus: "not_needed" | "pending" | "verified" | "failed";
+    error: string | null;
+    createdAt?: number;
+  }): boolean {
+    const result = this.db.query(
+      `INSERT OR REPLACE INTO review_approvals
+        (ticket_id, pass_id, kind, approved, verdict, summary, findings_json, status, verification_status, error, created_at)
+       SELECT ticket_id, pass_id, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM review_passes
+       WHERE ticket_id = ? AND pass_id = ?`,
+    ).run(
+      input.kind,
+      input.verdict === "approve" ? 1 : 0,
+      input.verdict,
+      input.summary,
+      JSON.stringify(input.findings),
+      input.status,
+      input.verificationStatus,
+      input.error,
+      input.createdAt ?? Date.now(),
+      input.ticketId,
+      input.passId,
+    );
+    return result.changes === 1;
+  }
+
+  getReviewPass(ticketId: string): ReviewPass | null {
+    const rawPass = this.db.query("SELECT * FROM review_passes WHERE ticket_id = ?").get(ticketId);
+    if (!rawPass) return null;
+    const row = mapReviewPassRow(rawPass);
+    const approvals: Partial<Record<ReviewKind, boolean>> = {};
+    const results: Partial<Record<ReviewKind, PersistedReviewResult>> = {};
+    const rawApprovals = this.db
+      .query("SELECT * FROM review_approvals WHERE ticket_id = ? AND pass_id = ? ORDER BY created_at ASC")
+      .all(ticketId, row.pass_id);
+    for (const rawApproval of rawApprovals) {
+      const approval = mapReviewApprovalRow(rawApproval);
+      const kind = reviewKindSchema.parse(approval.kind);
+      approvals[kind] = approval.approved === 1;
+      const legacyVerdict = approval.approved === 1 ? "approve" : "revise";
+      const verdict = approval.verdict === null ? legacyVerdict : reviewVerdictSchema.parse(approval.verdict);
+      results[kind] = {
+        kind,
+        status: persistedReviewStatusSchema.parse(approval.status),
+        verdict,
+        summary: approval.summary,
+        findings: parsePersistedReviewFindings(approval.findings_json),
+        verificationStatus: reviewVerificationStatusSchema.parse(approval.verification_status),
+        error: approval.error,
+        createdAt: approval.created_at,
+      };
+    }
+    return {
+      ticketId: row.ticket_id,
+      passId: row.pass_id,
+      codeFingerprint: row.code_fingerprint,
+      reviewDepth: reviewDepthSchema.parse(row.review_depth),
+      requiresApproval: row.requires_approval === 1,
+      createdAt: row.created_at,
+      approvals,
+      results,
+    };
+  }
+
+  /** Close runs orphaned by a process restart while preserving any usage already recorded. */
+  failStaleExecutionRuns(reason: string, generationIds?: readonly string[]): number {
+    if (generationIds?.length === 0) return 0;
+    let sql = `UPDATE execution_runs
+      SET status = CASE
+        WHEN role = 'orchestrator' AND owner_type = 'ticket' AND EXISTS (
+          SELECT 1 FROM tickets WHERE id = execution_runs.owner_id AND column_name IN ('done', 'reviewed', 'merged')
+        ) THEN 'completed'
+        WHEN role = 'orchestrator' AND owner_type = 'ticket' AND EXISTS (
+          SELECT 1 FROM tickets WHERE id = execution_runs.owner_id AND column_name = 'abandoned'
+        ) THEN 'cancelled'
+        ELSE 'failed' END,
+        error = CASE
+          WHEN role = 'orchestrator' AND owner_type = 'ticket' AND EXISTS (
+            SELECT 1 FROM tickets WHERE id = execution_runs.owner_id AND column_name IN ('done', 'reviewed', 'merged', 'abandoned')
+          ) THEN error
+          ELSE COALESCE(error, (SELECT error FROM tickets WHERE id = execution_runs.owner_id AND execution_runs.owner_type = 'ticket'), ?) END,
+        finished_at = COALESCE(finished_at, CASE WHEN role = 'orchestrator' AND owner_type = 'ticket' THEN (
+          SELECT finished_at FROM tickets WHERE id = execution_runs.owner_id
+        ) END, ?)
+      WHERE status = 'running'`;
+    if (generationIds === undefined) return this.db.query(sql).run(reason, Date.now()).changes;
+    const placeholders = generationIds.map(() => "?").join(", ");
+    sql += ` AND generation_id IN (${placeholders})`;
+    return this.db.query(sql).run(reason, Date.now(), ...generationIds).changes;
+  }
+
+  private getAgentMessage(id: string): AgentMessage | null {
+    const raw = this.db.query("SELECT * FROM agent_messages WHERE id = ?").get(id);
+    return raw ? mapAgentMessageRow(raw) : null;
+  }
+
+  /** Persist an identified channel message before handing it to the provider. */
+  enqueueAgentMessage(input: EnqueueAgentMessageInput): AgentMessage {
+    const existing = this.getAgentMessage(input.id);
+    if (existing) {
+      const sameMessage =
+        existing.ownerType === input.ownerType &&
+        existing.ownerId === input.ownerId &&
+        existing.generationId === input.generationId &&
+        existing.channel === input.channel &&
+        existing.content === input.content;
+      if (!sameMessage) throw new Error(`enqueueAgentMessage: id ${input.id} déjà utilisé`);
+      return existing;
+    }
+    this.db.query(
+      `INSERT INTO agent_messages
+        (id, owner_type, owner_id, generation_id, session_id, channel, content, status, turn_id, created_at, received_at, accepted_at, rejected_at, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL)`,
+    ).run(
+      input.id,
+      input.ownerType,
+      input.ownerId,
+      input.generationId,
+      input.sessionId,
+      input.channel,
+      input.content,
+      input.createdAt ?? Date.now(),
+    );
+    const created = this.getAgentMessage(input.id);
+    if (!created) throw new Error("enqueueAgentMessage: message introuvable après insertion");
+    return created;
+  }
+
+  /** Record provider receipt without overriding a terminal acknowledgement. */
+  markAgentMessageReceived(input: MarkAgentMessageReceivedInput): AgentMessage | null {
+    this.db.query(
+      `UPDATE agent_messages
+       SET status = 'received', session_id = COALESCE(?, session_id), turn_id = COALESCE(?, turn_id),
+           received_at = COALESCE(received_at, ?)
+       WHERE id = ? AND status IN ('queued', 'received')`,
+    ).run(input.sessionId ?? null, input.turnId ?? null, input.receivedAt ?? Date.now(), input.id);
+    return this.getAgentMessage(input.id);
+  }
+
+  /** Mark semantic delivery accepted. Accepted messages are never replayed. */
+  markAgentMessageAccepted(input: MarkAgentMessageAcceptedInput): AgentMessage | null {
+    const acceptedAt = input.acceptedAt ?? Date.now();
+    this.db.query(
+      `UPDATE agent_messages
+       SET status = 'accepted', session_id = COALESCE(?, session_id), turn_id = COALESCE(?, turn_id),
+           received_at = COALESCE(received_at, ?), accepted_at = COALESCE(accepted_at, ?), error = NULL
+       WHERE id = ? AND status IN ('queued', 'received')`,
+    ).run(input.sessionId ?? null, input.turnId ?? null, acceptedAt, acceptedAt, input.id);
+    return this.getAgentMessage(input.id);
+  }
+
+  /** Mark a definitive provider rejection. Rejected messages require an explicit new user action. */
+  markAgentMessageRejected(input: MarkAgentMessageRejectedInput): AgentMessage | null {
+    this.db.query(
+      `UPDATE agent_messages
+       SET status = 'rejected', rejected_at = COALESCE(rejected_at, ?), error = ?
+       WHERE id = ? AND status IN ('queued', 'received')`,
+    ).run(input.rejectedAt ?? Date.now(), input.error, input.id);
+    return this.getAgentMessage(input.id);
+  }
+
+  /** Replay candidates in stable order, including receipt without confirmed semantic acceptance. */
+  listPendingAgentMessages(ownerType: ExecutionOwnerType, ownerId: string): AgentMessage[] {
+    return this.db
+      .query(
+        `SELECT * FROM agent_messages
+         WHERE owner_type = ? AND owner_id = ? AND status IN ('queued', 'received')
+         ORDER BY created_at ASC, id ASC`,
+      )
+      .all(ownerType, ownerId)
+      .map(mapAgentMessageRow);
+  }
+
+  listAgentMessages(ownerType: ExecutionOwnerType, ownerId: string): AgentMessage[] {
+    return this.db
+      .query("SELECT * FROM agent_messages WHERE owner_type = ? AND owner_id = ? ORDER BY created_at ASC, id ASC")
+      .all(ownerType, ownerId)
+      .map(mapAgentMessageRow);
+  }
+
+  /** Stats projection based on actual execution captures, with legacy usage kept unattributed. */
+  listStatRecords(): StatRecord[] {
+    const byTicket = new Map<string, ExecutionRun[]>();
+    for (const execution of this.listExecutionRuns("ticket")) {
+      const runs = byTicket.get(execution.ownerId) ?? [];
+      runs.push(execution);
+      byTicket.set(execution.ownerId, runs);
+    }
+    return this.db.query("SELECT * FROM tickets ORDER BY created_at ASC").all().map((row) => {
+      const ticket = mapTicketRow(row, 0);
+      return projectStatRecord(ticket, byTicket.get(ticket.id) ?? []);
+    });
+  }
+
   getTicket(id: string): Ticket | null {
     const raw = this.db.query("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!raw) return null;
@@ -338,8 +806,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -367,6 +835,11 @@ export class Store {
         input.orchestrator,
         input.codexModel,
         input.codexEffort,
+        (input.codexFast ?? false) ? 1 : 0,
+        input.codexImplementerModel ?? null,
+        input.codexImplementerEffort ?? null,
+        nullableBooleanValue(input.codexImplementerFast),
+        input.feasibilityEngine ?? null,
         now,
         now,
         now,
@@ -380,8 +853,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, orchestrator, implementer, codex_model, codex_effort, codex_fast, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -403,6 +876,7 @@ export class Store {
         input.orchestrator,
         input.codexModel,
         input.codexEffort,
+        (input.codexFast ?? false) ? 1 : 0,
         now,
         now,
         now,
@@ -417,8 +891,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, pr_number, pr_head_branch, pr_url, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'clean', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, pr_number, pr_head_branch, pr_url, orchestrator, implementer, codex_model, codex_effort, codex_fast, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'clean', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -435,6 +909,7 @@ export class Store {
         input.orchestrator,
         input.codexModel,
         input.codexEffort,
+        (input.codexFast ?? false) ? 1 : 0,
         now,
         now,
         now,
@@ -449,11 +924,11 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, orchestrator, implementer, codex_model, codex_effort, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'ask', ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, orchestrator, implementer, codex_model, codex_effort, codex_fast, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'ask', ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       // No implementing stage on an ask: mirror orchestrator into implementer for column coherence.
-      .run(id, input.title, input.description, input.project, input.model, input.effort, input.orchestrator, input.orchestrator, input.codexModel, input.codexEffort, now, now, now, now);
+      .run(id, input.title, input.description, input.project, input.model, input.effort, input.orchestrator, input.orchestrator, input.codexModel, input.codexEffort, (input.codexFast ?? false) ? 1 : 0, now, now, now, now);
     return this.finalizeCreate(id, "createAsk", { title: input.title, kind: "ask" });
   }
 
@@ -504,6 +979,11 @@ export class Store {
     if (patch.orchestrator !== undefined) set("orchestrator", patch.orchestrator);
     if (patch.codexModel !== undefined) set("codex_model", patch.codexModel);
     if (patch.codexEffort !== undefined) set("codex_effort", patch.codexEffort);
+    if (patch.codexFast !== undefined) set("codex_fast", patch.codexFast ? 1 : 0);
+    if (patch.codexImplementerModel !== undefined) set("codex_implementer_model", patch.codexImplementerModel);
+    if (patch.codexImplementerEffort !== undefined) set("codex_implementer_effort", patch.codexImplementerEffort);
+    if (patch.codexImplementerFast !== undefined) set("codex_implementer_fast", nullableBooleanValue(patch.codexImplementerFast));
+    if (patch.feasibilityEngine !== undefined) set("feasibility_engine", patch.feasibilityEngine);
     if (patch.reviewRounds !== undefined) set("review_rounds", patch.reviewRounds);
     if (patch.nudgeCount !== undefined) set("nudge_count", patch.nudgeCount);
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
@@ -583,6 +1063,8 @@ export class Store {
   /** Hard-delete a ticket and its dependent rows (comments + events). */
   deleteTicket(ticketId: string): void {
     const tx = this.db.transaction(() => {
+      this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
+      this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM comments WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM events WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM tickets WHERE id = ?").run(ticketId);
@@ -608,7 +1090,7 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM profiles");
     this.db
       .query(
-        "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO profiles (id, name, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         id,
@@ -621,6 +1103,10 @@ export class Store {
         input.orchestrator,
         input.codexModel,
         input.codexEffort,
+        (input.codexFast ?? false) ? 1 : 0,
+        input.codexImplementerModel ?? null,
+        input.codexImplementerEffort ?? null,
+        nullableBooleanValue(input.codexImplementerFast),
         nextOrder,
         now,
         now,
@@ -641,6 +1127,10 @@ export class Store {
     if (patch.orchestrator !== undefined) builder.set("orchestrator", patch.orchestrator);
     if (patch.codexModel !== undefined) builder.set("codex_model", patch.codexModel);
     if (patch.codexEffort !== undefined) builder.set("codex_effort", patch.codexEffort);
+    if (patch.codexFast !== undefined) builder.set("codex_fast", patch.codexFast ? 1 : 0);
+    if (patch.codexImplementerModel !== undefined) builder.set("codex_implementer_model", patch.codexImplementerModel);
+    if (patch.codexImplementerEffort !== undefined) builder.set("codex_implementer_effort", patch.codexImplementerEffort);
+    if (patch.codexImplementerFast !== undefined) builder.set("codex_implementer_fast", nullableBooleanValue(patch.codexImplementerFast));
     if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
     builder.set("updated_at", Date.now());
     builder.run(this.db, "profiles", id);
@@ -965,6 +1455,7 @@ export class Store {
       triageEffort: parsedTriageEffort.success ? parsedTriageEffort.data : DEFAULT_MODELS.triageEffort,
       codexModel: parsedCodexModel.success ? parsedCodexModel.data : DEFAULT_CODEX_MODEL,
       codexEffort: parsedCodexEffort.success ? parsedCodexEffort.data : DEFAULT_CODEX_EFFORT,
+      codexFast: this.getMeta(CODEX_FAST_META_KEY) === "1",
     };
   }
 
@@ -977,6 +1468,7 @@ export class Store {
     if (patch.triageEffort !== undefined) this.setMeta(TRIAGE_EFFORT_META_KEY, patch.triageEffort);
     if (patch.codexModel !== undefined) this.setMeta(CODEX_MODEL_META_KEY, patch.codexModel);
     if (patch.codexEffort !== undefined) this.setMeta(CODEX_EFFORT_META_KEY, patch.codexEffort);
+    if (patch.codexFast !== undefined) this.setMeta(CODEX_FAST_META_KEY, patch.codexFast ? "1" : "0");
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;

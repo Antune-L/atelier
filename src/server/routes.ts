@@ -3,6 +3,9 @@ import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import type { Implementer, Orchestrator, Stage } from "../shared/constants.ts";
+import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
+import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
+import { runRecordedAction } from "./recordedAction.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import {
   analyzeTicketsSchema,
@@ -28,8 +31,7 @@ import {
   updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { ManagedProject, OpenPr, SplitChildInput, StatRecord, Ticket, UpdateMode } from "../shared/schemas.ts";
-import { costOfSessions, totalTokensOfSessions } from "../shared/pricing.ts";
+import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode } from "../shared/schemas.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
 
@@ -72,6 +74,7 @@ interface PaneReader {
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
   reformulate(opts: ReformulateOptions): Promise<string>;
   importNotion(opts: ImportNotionOptions): Promise<string>;
+  checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
 }
 
 interface RouteDeps {
@@ -91,8 +94,6 @@ interface RouteDeps {
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
-  /** Probed once at boot: is the Codex CLI usable? */
-  codexAvailable: boolean;
   /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
@@ -281,6 +282,10 @@ function splitChildDefaults(ticket: Ticket): Pick<
   | "orchestrator"
   | "codexModel"
   | "codexEffort"
+  | "codexFast"
+  | "codexImplementerModel"
+  | "codexImplementerEffort"
+  | "codexImplementerFast"
 > {
   return {
     externalUrl: null,
@@ -302,6 +307,10 @@ function splitChildDefaults(ticket: Ticket): Pick<
     orchestrator: ticket.orchestrator,
     codexModel: ticket.codexModel,
     codexEffort: ticket.codexEffort,
+    codexFast: ticket.codexFast,
+    codexImplementerModel: ticket.codexImplementerModel,
+    codexImplementerEffort: ticket.codexImplementerEffort,
+    codexImplementerFast: ticket.codexImplementerFast,
   };
 }
 
@@ -511,19 +520,24 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec listing branches"));
       }
     })
-    .get("/capabilities", () => ({
-      composerAvailable: deps.composerAvailable,
-      codexAvailable: deps.codexAvailable,
-      defaultModel: MODELS.implement,
-      defaultEffort: MODELS.implementEffort,
-      defaultImplementerModel: MODELS.implementerModel,
-      defaultImplementerEffort: MODELS.implementerEffort,
-      defaultCodexModel: MODELS.codexModel,
-      defaultCodexEffort: MODELS.codexEffort,
-      canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
-      canQuit: deps.onRequestQuit != null,
-      canPickFolder: deps.pickFolder != null,
-    }))
+    .get("/capabilities", async ({ query }) => {
+      const codex = await deps.system.checkCodexRuntime(query.refresh === "1");
+      return {
+        composerAvailable: deps.composerAvailable,
+        codexAvailable: codex.status === "ready",
+        codex,
+        defaultModel: MODELS.implement,
+        defaultEffort: MODELS.implementEffort,
+        defaultImplementerModel: MODELS.implementerModel,
+        defaultImplementerEffort: MODELS.implementerEffort,
+        defaultCodexModel: MODELS.codexModel,
+        defaultCodexEffort: MODELS.codexEffort,
+        defaultCodexFast: MODELS.codexFast,
+        canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
+        canQuit: deps.onRequestQuit != null,
+        canPickFolder: deps.pickFolder != null,
+      };
+    })
     .get("/settings", () => store.getAppSettings())
     .patch("/settings", ({ body, set }) => {
       const parsed = updateAppSettingsSchema.safeParse(body);
@@ -597,28 +611,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { started: true };
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
-    .get("/stats", () =>
-      store.listTickets(true).map((t): StatRecord => {
-        const hasUsage = Object.keys(t.sessionUsage).length > 0;
-        return {
-          id: t.id,
-          project: t.project,
-          kind: t.kind,
-          column: t.column,
-          stage: t.stage,
-          model: t.model,
-          effort: t.effort,
-          orchestrator: t.orchestrator,
-          implementer: t.implementer,
-          createdAt: t.createdAt,
-          implementingStartedAt: t.implementingStartedAt,
-          implementationStartedAt: t.implementationStartedAt,
-          finishedAt: t.finishedAt,
-          costUsd: hasUsage ? costOfSessions(t.sessionUsage) : null,
-          totalTokens: hasUsage ? totalTokensOfSessions(t.sessionUsage) : null,
-        };
-      }),
-    )
+    .get("/stats", () => store.listStatRecords())
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
@@ -664,6 +657,11 @@ export function createApiRoutes(deps: RouteDeps) {
         orchestrator: parsed.data.orchestrator,
         codexModel: parsed.data.codexModel,
         codexEffort: parsed.data.codexEffort,
+        codexFast: parsed.data.codexFast,
+        codexImplementerModel: parsed.data.codexImplementerModel,
+        codexImplementerEffort: parsed.data.codexImplementerEffort,
+        codexImplementerFast: parsed.data.codexImplementerFast,
+        feasibilityEngine: parsed.data.feasibilityEngine,
       });
       // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
       if (!parsed.data.start || isBlocked(ticket, store)) {
@@ -725,6 +723,11 @@ export function createApiRoutes(deps: RouteDeps) {
           orchestrator: input.orchestrator,
           codexModel: input.codexModel,
           codexEffort: input.codexEffort,
+          codexFast: input.codexFast,
+          codexImplementerModel: input.codexImplementerModel,
+          codexImplementerEffort: input.codexImplementerEffort,
+          codexImplementerFast: input.codexImplementerFast,
+          feasibilityEngine: input.feasibilityEngine,
         });
         hub.pushTicket(ticket);
         created.push(ticket);
@@ -793,6 +796,7 @@ export function createApiRoutes(deps: RouteDeps) {
           orchestrator: parsed.data.orchestrator,
           codexModel: parsed.data.codexModel,
           codexEffort: parsed.data.codexEffort,
+          codexFast: parsed.data.codexFast,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it
@@ -823,6 +827,7 @@ export function createApiRoutes(deps: RouteDeps) {
           orchestrator: parsed.data.orchestrator,
           codexModel: parsed.data.codexModel,
           codexEffort: parsed.data.codexEffort,
+          codexFast: parsed.data.codexFast,
         });
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
@@ -851,6 +856,7 @@ export function createApiRoutes(deps: RouteDeps) {
         orchestrator: parsed.data.orchestrator,
         codexModel: parsed.data.codexModel,
         codexEffort: parsed.data.codexEffort,
+        codexFast: parsed.data.codexFast,
       });
       hub.pushTicket(ticket);
       // Slot launch does slow git worktree setup; don't block the HTTP response on it (mirrors reviews).
@@ -1191,12 +1197,14 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = generatePrdSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "requête invalide");
       try {
-        const markdown = await deps.system.reformulate({
+        const execution = resolveExecution("one-shot", parsed.data, { model: MODELS.triage, effort: MODELS.triageEffort });
+        await assertExecutionAvailable(deps.system, execution);
+        const markdown = await runRecordedAction(store, "prd-generate", execution, (onEvent) => deps.system.reformulate({
           cwd: deps.projectRoot,
           prompt: buildPrdPrompt(parsed.data),
-          model: MODELS.triage,
-          effort: MODELS.triageEffort,
-        });
+          ...execution,
+          onEvent,
+        }));
         return { markdown };
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de génération du PRD"));
@@ -1206,12 +1214,14 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = importNotionSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "URL Notion invalide");
       try {
-        const markdown = await deps.system.importNotion({
+        const execution = resolveExecution("one-shot", parsed.data, { model: MODELS.triage, effort: MODELS.triageEffort });
+        await assertExecutionAvailable(deps.system, execution);
+        const markdown = await runRecordedAction(store, "notion-import", execution, (onEvent) => deps.system.importNotion({
           cwd: deps.projectRoot,
           prompt: buildNotionImportPrompt(parsed.data.url),
-          model: MODELS.triage,
-          effort: MODELS.triageEffort,
-        });
+          ...execution,
+          onEvent,
+        }));
         return { markdown };
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de l'import Notion"));
@@ -1227,7 +1237,7 @@ export function createApiRoutes(deps: RouteDeps) {
       hub.pushTicketRemoved(params.id);
       return { ok: true };
     })
-    .get("/tickets/:id/terminal", async ({ params, set }) => {
+    .get("/tickets/:id/terminal", async ({ params, query, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       const phase = slots.getSetupPhase(params.id);
@@ -1239,6 +1249,9 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       // A feasibility-evaluated ticket's transcript lives under its batch id; everything else under its own id.
       const transcriptId = deps.feasibility.batchKeyForTicket(params.id) ?? params.id;
+      if (query.incremental === "1") {
+        return { output: "", phase, transcript: deps.sessionHub.getTranscriptUpdate(transcriptId, typeof query.cursor === "string" ? query.cursor : undefined) };
+      }
       return { output: deps.sessionHub.getTranscript(transcriptId), phase };
     })
     .get("/terminals", async ({ query }) => {

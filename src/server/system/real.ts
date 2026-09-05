@@ -15,7 +15,7 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { ensureClaudeBinary } from "./claudeBinary.ts";
+import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
@@ -83,6 +83,7 @@ const WORKTREE_TEARDOWN_CANDIDATES = ["scripts/teardown-worktree.sh", "teardown-
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
 /** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
+const CLAUDE_BINARY_NAME = "claude";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
@@ -873,6 +874,16 @@ export class RealSystemAdapter implements SystemAdapter {
       }
     }
     return false;
+  }
+
+  // Read-only probe: never provisions (no download), so the settings screen stays instant.
+  async checkClaudeAvailable(): Promise<boolean> {
+    try {
+      if (existsSync(resolveClaudeBinary())) return true;
+    } catch {
+      // The SDK platform package is absent (packaged app before provisioning): fall through to PATH.
+    }
+    return Bun.which(CLAUDE_BINARY_NAME) !== null;
   }
 
   checkCodexRuntime(refresh = false): Promise<CodexRuntimeStatus> {

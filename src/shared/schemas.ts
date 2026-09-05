@@ -803,6 +803,8 @@ export const capabilitiesSchema = z.object({
   composerAvailable: z.boolean(),
   /** The Codex CLI binary is resolvable and authenticated. */
   codexAvailable: z.boolean(),
+  /** A runnable `claude` binary is resolvable (SDK platform package or a user install). */
+  claudeAvailable: z.boolean(),
   /** Refreshable authentication and model catalog returned by the Codex runtime. */
   codex: codexRuntimeStatusSchema,
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */

@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 const UNKNOWN_CAPABILITIES: Capabilities = {
   composerAvailable: false,
   codexAvailable: false,
+  claudeAvailable: false,
   codex: UNKNOWN_CODEX_RUNTIME_STATUS,
   defaultModel: "",
   defaultEffort: "",

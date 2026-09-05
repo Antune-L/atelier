@@ -75,6 +75,7 @@ interface PaneReader {
   reformulate(opts: ReformulateOptions): Promise<string>;
   importNotion(opts: ImportNotionOptions): Promise<string>;
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
+  checkClaudeAvailable(): Promise<boolean>;
 }
 
 interface RouteDeps {
@@ -522,8 +523,10 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/capabilities", async ({ query }) => {
       const codex = await deps.system.checkCodexRuntime(query.refresh === "1");
+      const claudeAvailable = await deps.system.checkClaudeAvailable();
       return {
         composerAvailable: deps.composerAvailable,
+        claudeAvailable,
         codexAvailable: codex.status === "ready",
         codex,
         defaultModel: MODELS.implement,

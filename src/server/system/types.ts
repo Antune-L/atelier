@@ -229,6 +229,8 @@ export interface SystemAdapter {
   // ---- capability probe ----
   /** Whether the Cursor headless CLI (the Composer driver) is installed AND authenticated. */
   checkComposerAvailable(): Promise<boolean>;
+  /** Whether a runnable `claude` binary is resolvable (SDK platform package or a user install). */
+  checkClaudeAvailable(): Promise<boolean>;
   /** Fresh runtime/account/catalog status, sharing an in-flight probe when callers refresh together. */
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
 

@@ -38,7 +38,7 @@ export function Tabs<T extends string>({ options, value, onChange, className, ..
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              "rounded px-2.5 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              "whitespace-nowrap rounded px-2.5 py-1 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               active
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",

@@ -10,7 +10,12 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
-import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } from "@/lib/display";
+import {
+  codexEffortTabOptions,
+  codexModelTabOptions,
+  isCodexFastAvailable,
+  type KnobLabelStyle,
+} from "@/lib/display";
 
 interface CodexAgentFieldsProps {
   codexModel: CodexModel | null;
@@ -20,6 +25,7 @@ interface CodexAgentFieldsProps {
   fallbackEffort?: CodexEffort | null;
   preserveExplicit?: boolean;
   showConnectionStatus?: boolean;
+  labelStyle?: KnobLabelStyle;
   onCodexModelChange: (model: CodexModel | null) => void;
   onCodexEffortChange: (effort: CodexEffort | null) => void;
   onCodexFastChange: (fast: boolean) => void;
@@ -34,6 +40,7 @@ export function CodexAgentFields({
   fallbackEffort,
   preserveExplicit = false,
   showConnectionStatus = true,
+  labelStyle = "short",
   onCodexModelChange,
   onCodexEffortChange,
   onCodexFastChange,
@@ -74,7 +81,7 @@ export function CodexAgentFields({
       <div className="flex flex-col items-start gap-1.5">
         <Label id={effortLabelId}>Effort (Codex)</Label>
         <Tabs
-          options={codexEffortTabOptions(resolvedModel, runtime)}
+          options={codexEffortTabOptions(resolvedModel, runtime, labelStyle)}
           value={codexEffort ?? resolvedDefaultEffort}
           onChange={(value) => onCodexEffortChange(!preserveExplicit && value === resolvedDefaultEffort ? null : value)}
           aria-labelledby={effortLabelId}

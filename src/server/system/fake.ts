@@ -349,6 +349,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return true;
   }
 
+  async checkClaudeAvailable(): Promise<boolean> {
+    // Same dry-run stance as checkComposerAvailable: the pipeline stays exerciseable end-to-end.
+    return true;
+  }
+
   async checkCodexRuntime(): Promise<CodexRuntimeStatus> {
     return {
       status: "ready", checkedAt: Date.now(), message: "Mode simulation",

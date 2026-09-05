@@ -16,10 +16,13 @@ import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import {
+  AGENT_EFFORT_FULL_OPTIONS,
   AGENT_EFFORT_OPTIONS,
+  AGENT_MODEL_FULL_OPTIONS,
   AGENT_MODEL_OPTIONS,
   implementerTabOptions,
   orchestratorTabOptions,
+  type KnobLabelStyle,
 } from "@/lib/display";
 
 function Field({ labelId, label, children }: { labelId: string; label: string; children: React.ReactNode }) {
@@ -56,6 +59,7 @@ interface ImplementationAgentFieldsProps {
   onCodexImplementerModelChange: (model: CodexModel | null) => void;
   onCodexImplementerEffortChange: (effort: CodexEffort | null) => void;
   onCodexImplementerFastChange: (fast: boolean | null) => void;
+  labelStyle?: KnobLabelStyle;
 }
 
 /** Per-ticket implementation-agent knobs (orchestrator + implementer sub-agent) as segmented controls. */
@@ -84,6 +88,7 @@ export function ImplementationAgentFields({
   onCodexImplementerModelChange,
   onCodexImplementerEffortChange,
   onCodexImplementerFastChange,
+  labelStyle = "short",
 }: ImplementationAgentFieldsProps) {
   const capabilities = useCapabilities();
   const { composerAvailable, codexAvailable } = capabilities;
@@ -105,6 +110,9 @@ export function ImplementationAgentFields({
     codexEffort: resolvedDefaultCodexEffort,
   } = resolveAgentDefaults(capabilities);
 
+  const isFullLabels = labelStyle === "full";
+  const modelOptions = isFullLabels ? AGENT_MODEL_FULL_OPTIONS : AGENT_MODEL_OPTIONS;
+  const effortOptions = isFullLabels ? AGENT_EFFORT_FULL_OPTIONS : AGENT_EFFORT_OPTIONS;
   const orchestratorOptions = orchestratorTabOptions(codexAvailable);
   const implementerOptions = implementerTabOptions(orchestrator, composerAvailable, codexAvailable);
   const effectiveCodexModel = codexModel ?? resolvedDefaultCodexModel;
@@ -133,7 +141,7 @@ export function ImplementationAgentFields({
         <>
           <Field labelId={modelLabelId} label="Modèle (orchestrateur)">
             <Tabs
-              options={AGENT_MODEL_OPTIONS}
+              options={modelOptions}
               value={model ?? resolvedDefaultModel}
               onChange={(value) => onModelChange(value === resolvedDefaultModel ? null : value)}
               aria-labelledby={modelLabelId}
@@ -141,7 +149,7 @@ export function ImplementationAgentFields({
           </Field>
           <Field labelId={effortLabelId} label="Effort (orchestrateur)">
             <Tabs
-              options={AGENT_EFFORT_OPTIONS}
+              options={effortOptions}
               value={effort ?? resolvedDefaultEffort}
               onChange={(value) => onEffortChange(value === resolvedDefaultEffort ? null : value)}
               aria-labelledby={effortLabelId}
@@ -156,6 +164,7 @@ export function ImplementationAgentFields({
             codexModel={codexModel}
             codexEffort={codexEffort}
             codexFast={codexFast}
+            labelStyle={labelStyle}
             onCodexModelChange={onCodexModelChange}
             onCodexEffortChange={onCodexEffortChange}
             onCodexFastChange={onCodexFastChange}
@@ -180,7 +189,7 @@ export function ImplementationAgentFields({
           <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
           <Field labelId={implementerModelLabelId} label="Modèle">
             <Tabs
-              options={AGENT_MODEL_OPTIONS}
+              options={modelOptions}
               value={implementerModel ?? resolvedDefaultImplementerModel}
               onChange={(value) => onImplementerModelChange(value === resolvedDefaultImplementerModel ? null : value)}
               aria-labelledby={implementerModelLabelId}
@@ -188,7 +197,7 @@ export function ImplementationAgentFields({
           </Field>
           <Field labelId={implementerEffortLabelId} label="Effort">
             <Tabs
-              options={AGENT_EFFORT_OPTIONS}
+              options={effortOptions}
               value={implementerEffort ?? resolvedDefaultImplementerEffort}
               onChange={(value) => onImplementerEffortChange(value === resolvedDefaultImplementerEffort ? null : value)}
               aria-labelledby={implementerEffortLabelId}
@@ -236,6 +245,7 @@ export function ImplementationAgentFields({
             fallbackEffort={codexEffort ?? resolvedDefaultCodexEffort}
             preserveExplicit
             showConnectionStatus={orchestrator !== "codex"}
+            labelStyle={labelStyle}
             onCodexModelChange={onCodexImplementerModelChange}
             onCodexEffortChange={onCodexImplementerEffortChange}
             onCodexFastChange={onCodexImplementerFastChange}

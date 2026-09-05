@@ -76,6 +76,23 @@ export const AGENT_EFFORT_LABELS: Record<AgentEffort, string> = {
   max: "MAX",
 };
 
+/** Long-form model names for the settings surfaces; the short labels above stay on the ticket cards. */
+export const AGENT_MODEL_FULL_LABELS: Record<AgentModel, string> = {
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  fable: "Fable",
+};
+
+/** Long-form reasoning-effort names for the settings surfaces. */
+export const AGENT_EFFORT_FULL_LABELS: Record<AgentEffort, string> = {
+  low: "Faible",
+  medium: "Moyen",
+  high: "Élevé",
+  xhigh: "Très élevé",
+  max: "Max",
+};
+
 /** Who writes the implementation code (the CLI driver for the implementing stage). */
 export const IMPLEMENTERS = ["claude", "composer", "codex"] as const;
 export type Implementer = (typeof IMPLEMENTERS)[number];
@@ -303,6 +320,16 @@ export const CODEX_EFFORT_LABELS: Record<CodexEffort, string> = {
   medium: "M",
   high: "H",
   xhigh: "XH",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+/** Long-form Codex reasoning-effort names for the settings surfaces. */
+export const CODEX_EFFORT_FULL_LABELS: Record<CodexEffort, string> = {
+  low: "Faible",
+  medium: "Moyen",
+  high: "Élevé",
+  xhigh: "Très élevé",
   max: "Max",
   ultra: "Ultra",
 };

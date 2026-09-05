@@ -1,8 +1,11 @@
 import {
   AGENT_EFFORTS,
+  AGENT_EFFORT_FULL_LABELS,
   AGENT_EFFORT_LABELS,
   AGENT_MODELS,
+  AGENT_MODEL_FULL_LABELS,
   AGENT_MODEL_LABELS,
+  CODEX_EFFORT_FULL_LABELS,
   CODEX_EFFORT_LABELS,
   CODEX_MODELS,
   CODEX_MODEL_EFFORTS,
@@ -30,10 +33,19 @@ import type { TabOption } from "@/components/ui/tabs";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "warning" | "success" | "info";
 
+/** Whether a knob picker shows the compact card labels or the long settings names. */
+export type KnobLabelStyle = "short" | "full";
+
 /** Ready-made segmented-control options for the agent model picker. */
 export const AGENT_MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({
   value: m,
   label: AGENT_MODEL_LABELS[m],
+}));
+
+/** Same picker as `AGENT_MODEL_OPTIONS`, with the long-form model names. */
+export const AGENT_MODEL_FULL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({
+  value: m,
+  label: AGENT_MODEL_FULL_LABELS[m],
 }));
 
 /** Engine backing the feasibility analysis when the ticket carries no explicit choice. */
@@ -59,10 +71,10 @@ export const AGENT_EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map(
   label: AGENT_EFFORT_LABELS[e],
 }));
 
-/** Ready-made segmented-control options for the Codex model picker. */
-export const CODEX_MODEL_OPTIONS: TabOption<CodexModel>[] = CODEX_MODELS.map((m) => ({
-  value: m,
-  label: CODEX_MODEL_LABELS[m],
+/** Same picker as `AGENT_EFFORT_OPTIONS`, with the long-form effort names. */
+export const AGENT_EFFORT_FULL_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
+  value: e,
+  label: AGENT_EFFORT_FULL_LABELS[e],
 }));
 
 /** Product models annotated with the current account/runtime availability. */
@@ -82,12 +94,14 @@ export function codexModelTabOptions(runtime: CodexRuntimeStatus): TabOption<Cod
 export function codexEffortTabOptions(
   model: CodexModel,
   runtime?: CodexRuntimeStatus,
+  labelStyle: KnobLabelStyle = "short",
 ): TabOption<CodexEffort>[] {
   const runtimeModel = runtime?.models.find((entry) => entry.model === model);
   const available = new Set(runtimeModel?.efforts ?? []);
+  const labels = labelStyle === "full" ? CODEX_EFFORT_FULL_LABELS : CODEX_EFFORT_LABELS;
   return CODEX_MODEL_EFFORTS[model].map((effort) => {
     const disabled = runtime !== undefined && (runtime.status !== "ready" || !available.has(effort));
-    return { value: effort, label: CODEX_EFFORT_LABELS[effort], disabled };
+    return { value: effort, label: labels[effort], disabled };
   });
 }
 
@@ -254,8 +268,8 @@ export function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DATETIME_FORMAT);
 }
 
-const SECOND_MS = 1_000;
-const MINUTE_MS = 60_000;
+export const SECOND_MS = 1_000;
+export const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const LABEL_INSTANT = "à l'instant";

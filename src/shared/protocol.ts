@@ -17,7 +17,7 @@
 
 import { z } from "zod";
 
-import { TRIAGE_VERDICTS } from "./constants.ts";
+import { DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 
 // ---- Stage subset (agent-settable vs full) ----
@@ -70,10 +70,14 @@ export const failArgsSchema = z.object({
 });
 
 /**
- * Plan handed to the delegated Codex implementation child (the validated PRD verbatim, or a concise
- * plan written from the ticket description). The child receives it as its single user turn.
+ * Plan handed to one delegated Codex implementation child (the validated PRD verbatim, or a concise
+ * plan written from the ticket description). The child receives it as its single user turn. `label`
+ * names the lot so several children can run in parallel on disjoint file scopes.
  */
-export const delegateImplementationArgsSchema = z.object({ plan: z.string().min(1) });
+export const delegateImplementationArgsSchema = z.object({
+  plan: z.string().min(1),
+  label: z.string().trim().min(1).max(LOT_LABEL_MAX_LENGTH).default(DEFAULT_IMPLEMENTATION_LOT),
+});
 
 export const reviewKindSchema = z.enum([
   "quality",
@@ -222,7 +226,7 @@ export const WORKER_TOOLS = [
   {
     name: "delegate_implementation",
     description:
-      "Délègue l'implémentation à une session Codex lancée en arrière-plan par le backend dans le worktree courant (elle écrit le code, ne commit jamais). Retourne immédiatement : termine ton tour et attends l'événement implementation_done.",
+      `Réservé aux tickets dont l'implémenteur est Codex. Délègue l'implémentation à une session Codex lancée en arrière-plan par le backend dans le worktree courant (elle écrit le code, ne commit jamais). Retourne immédiatement : termine ton tour et attends l'événement implementation_done. Appelable une fois par lot indépendant dans le même tour (max ${MAX_PARALLEL_IMPLEMENTERS} lots, un \`label\` distinct par lot, périmètres de fichiers disjoints) : tu recevras un événement implementation_done par lot.`,
     argsSchema: delegateImplementationArgsSchema,
   },
   {
@@ -301,7 +305,13 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ticket"), payload: z.string() }),
   z.object({ type: z.literal("answer"), questionId: z.string(), answer: z.string() }),
   z.object({ type: z.literal("prd_validated"), note: z.string().default("") }),
-  z.object({ type: z.literal("implementation_done"), ok: z.boolean(), summary: z.string().default("") }),
+  z.object({
+    type: z.literal("implementation_done"),
+    ok: z.boolean(),
+    summary: z.string().default(""),
+    label: z.string().default(DEFAULT_IMPLEMENTATION_LOT),
+    remaining: z.number().int().nonnegative().default(0),
+  }),
   z.object({
     type: z.literal("review_done"),
     kind: reviewKindSchema,

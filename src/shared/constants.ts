@@ -517,6 +517,14 @@ export const FEASIBILITY_SLOT_ID = -2;
  * coordinator, this id bars every pipeline tool.
  */
 export const DELEGATION_SLOT_ID = -4;
+/** Max implementation lots an orchestrator may run in parallel on the same ticket worktree. */
+export const MAX_PARALLEL_IMPLEMENTERS = 4;
+/** Max chars of a lot `label` accepted by delegate_implementation. */
+export const LOT_LABEL_MAX_LENGTH = 60;
+/** Native Codex sub-agent thread cap for orchestrator sessions (unrelated to the implementation lots). */
+export const CODEX_MAX_CONCURRENT_SUBAGENT_THREADS = 4;
+/** Label of the single implementation lot when the orchestrator does not split the work. */
+export const DEFAULT_IMPLEMENTATION_LOT = "principal";
 /** Prefix of the synthetic batch id a feasibility session identifies with (no real ticket). */
 export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
 /**

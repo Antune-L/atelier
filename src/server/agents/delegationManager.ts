@@ -1,9 +1,11 @@
 /**
  * DelegationManager — runs the delegated Codex implementation child sessions.
  *
- * When a ticket has a Codex implementer, the parent calls `delegate_implementation` and ends its
- * turn. This manager spawns a bare Codex session in the same slot worktree, feeds it the plan, then
- * pushes `implementation_done` back into the parent. It also owns the separate read-only sessions
+ * When a ticket has a Codex implementer, the parent calls `delegate_implementation` — once per
+ * independent lot, up to MAX_PARALLEL_IMPLEMENTERS — and ends its turn. This manager spawns one bare
+ * Codex session per lot in the same slot worktree, feeds it the plan, then pushes one
+ * `implementation_done` (carrying the lot label and how many lots are still running) per lot back
+ * into the parent. It also owns the separate read-only sessions
  * used for the independent review dimensions required by each review depth.
  *
  * The child is attached to the parent ticket: its stream events heartbeat the ticket's
@@ -15,7 +17,7 @@
 
 import { nanoid } from "nanoid";
 
-import { DELEGATION_SLOT_ID } from "../../shared/constants.ts";
+import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
 import type { ReviewFinding, ReviewKind, WorkerToolName } from "../../shared/protocol.ts";
@@ -39,13 +41,16 @@ const log = createLogger("delegation");
 /** Min interval between two lastProgressAt refreshes driven by child stream events. */
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
 
-/** Transcript prefix marking lines produced by the delegated child (vs the parent session). */
-const CHILD_TRANSCRIPT_PREFIX = "⟨codex⟩ ";
+/** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
+function childTranscriptPrefix(label: string): string {
+  return `⟨codex:${label}⟩ `;
+}
 
 const CHILD_FRAMING = `Tu es la session d'implémentation déléguée (Codex). Ton unique rôle est d'écrire le code décrit dans le plan ci-dessous, intégralement, dans le répertoire de travail courant (le worktree).
 
 Consignes :
 - Travaille uniquement dans le worktree courant. Ne touche à aucun fichier en dehors.
+- Si le plan précise un périmètre de fichiers, reste strictement dedans : d'autres lots d'implémentation tournent peut-être en parallèle dans le même worktree, ne touche jamais à leurs fichiers.
 - Respecte les conventions de code du projet.
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
 - Termine en résumant ce que tu as implémenté et les fichiers touchés (ce résumé est transmis à l'orchestrateur).
@@ -61,6 +66,7 @@ Consignes :
 const SETTLE_DELAY_MS = 50;
 
 interface ActiveDelegation {
+  label: string;
   handle: AgentSessionHandle | null;
   generationId: string;
   usageByModel: Record<string, AgentTurnUsage>;
@@ -195,7 +201,9 @@ function verifiedFindings(source: ReviewResult, verification: ReviewResult): Rev
 }
 
 export class DelegationManager {
-  private readonly active = new Map<string, ActiveDelegation>();
+  /** ticketId → label → child. One entry per running implementation lot of that ticket. */
+  private readonly active = new Map<string, Map<string, ActiveDelegation>>();
+  /** `${ticketId}:${label}` pairs whose child is being prepared (not yet in `active`). */
   private readonly startingImplementations = new Set<string>();
   private readonly activeReviews = new Map<string, ActiveReview>();
   private readonly activeReviewPasses = new Map<string, ActiveReviewPass>();
@@ -214,7 +222,13 @@ export class DelegationManager {
 
   /** True while a child implementation session runs for this ticket (parent is parked, not stalled). */
   isActive(ticketId: string): boolean {
-    return this.active.has(ticketId) || [...this.activeReviews.values()].some((review) => review.ticketId === ticketId);
+    if (this.lotCount(ticketId) > 0) return true;
+    return [...this.activeReviews.values()].some((review) => review.ticketId === ticketId);
+  }
+
+  /** True while at least one implementation lot of this ticket runs or is being prepared. */
+  hasActiveImplementations(ticketId: string): boolean {
+    return this.lotCount(ticketId) > 0;
   }
 
   hasActiveReviews(ticketId: string): boolean {
@@ -273,13 +287,35 @@ export class DelegationManager {
     return `**Revue terminée — ${verdict}**\n\n${summaries}${details}`;
   }
 
-  /** Spawn the bare Codex child in the ticket's slot worktree and hand it the plan. Non-blocking. */
-  async start(ticket: Ticket, slotId: number, plan: string): Promise<{ ok: boolean; result: string }> {
-    if (this.active.has(ticket.id) || this.startingImplementations.has(ticket.id)) {
-      return { ok: false, result: "Une délégation est déjà en cours pour ce ticket : attends l'événement implementation_done." };
+  /** Number of implementation lots running or being prepared for this ticket. */
+  private lotCount(ticketId: string): number {
+    const running = this.active.get(ticketId)?.size ?? 0;
+    const prefix = `${ticketId}:`;
+    let starting = 0;
+    for (const key of this.startingImplementations) {
+      if (key.startsWith(prefix)) starting += 1;
+    }
+    return running + starting;
+  }
+
+  private hasLot(ticketId: string, label: string): boolean {
+    return this.active.get(ticketId)?.has(label) === true || this.startingImplementations.has(`${ticketId}:${label}`);
+  }
+
+  /** Spawn one bare Codex child lot in the ticket's slot worktree and hand it the plan. Non-blocking. */
+  async start(ticket: Ticket, slotId: number, plan: string, label: string): Promise<{ ok: boolean; result: string }> {
+    if (this.hasLot(ticket.id, label)) {
+      return { ok: false, result: `Le lot «${label}» est déjà en cours : attends son événement implementation_done.` };
+    }
+    if (this.lotCount(ticket.id) >= MAX_PARALLEL_IMPLEMENTERS) {
+      return {
+        ok: false,
+        result: `Limite de ${MAX_PARALLEL_IMPLEMENTERS} lots d'implémentation en parallèle atteinte pour ce ticket : attends les événements implementation_done en cours avant d'en lancer un autre.`,
+      };
     }
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
-    this.startingImplementations.add(ticket.id);
+    const startingKey = `${ticket.id}:${label}`;
+    this.startingImplementations.add(startingKey);
     const parentExecution = this.sessionHub.getExecutionConfig(ticket.id);
     const fallbackKnobs = codexImplementerKnobs(ticket);
     const knobs = parentExecution?.delegateProvider === "codex" && parentExecution.delegateModel && parentExecution.delegateEffort
@@ -297,11 +333,11 @@ export class DelegationManager {
         serviceTier: knobs.serviceTier,
       });
     } catch (error) {
-      this.startingImplementations.delete(ticket.id);
+      this.startingImplementations.delete(startingKey);
       const message = error instanceof Error ? error.message : String(error);
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
-    this.startingImplementations.delete(ticket.id);
+    this.startingImplementations.delete(startingKey);
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
       return { ok: false, result: "Délégation annulée pendant sa préparation." };
     }
@@ -310,6 +346,7 @@ export class DelegationManager {
     this.generations.set(generationKey, generation);
     const generationId = nanoid(16);
     const state: ActiveDelegation = {
+      label,
       handle: null,
       generationId,
       usageByModel: {},
@@ -319,7 +356,9 @@ export class DelegationManager {
       lastHeartbeatAt: Date.now(),
       settled: false,
     };
-    this.active.set(ticket.id, state);
+    const lots = this.active.get(ticket.id) ?? new Map<string, ActiveDelegation>();
+    lots.set(label, state);
+    this.active.set(ticket.id, lots);
     let executionStarted = false;
     try {
       this.store.startExecution({
@@ -353,19 +392,29 @@ export class DelegationManager {
       state.handle = handle;
       handle.send(`${CHILD_FRAMING}${plan}`);
     } catch (error) {
-      this.active.delete(ticket.id);
+      this.removeLot(ticket.id, label, state);
       const message = error instanceof Error ? error.message : String(error);
       if (executionStarted) this.closeAndFinalize(state, "failed", message);
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
-    this.store.logEvent(ticket.id, "delegation_started", { model: knobs.model, effort: knobs.effort });
-    this.sessionHub.appendExternalLine(ticket.id, `${CHILD_TRANSCRIPT_PREFIX}—— délégation Codex lancée (${knobs.model}) ——`);
-    log.info("délégation lancée", { ticketId: ticket.id, slotId, model: knobs.model });
+    this.store.logEvent(ticket.id, "delegation_started", { model: knobs.model, effort: knobs.effort, label });
+    this.sessionHub.appendExternalLine(
+      ticket.id,
+      `${childTranscriptPrefix(label)}—— délégation Codex lancée (${knobs.model}) ——`,
+    );
+    log.info("délégation lancée", { ticketId: ticket.id, slotId, model: knobs.model, label });
     return {
       ok: true,
-      result:
-        "Délégation lancée : une session Codex implémente le plan en arrière-plan dans le worktree courant. Termine ton tour MAINTENANT ; tu recevras l'événement implementation_done quand elle aura fini.",
+      result: `Délégation du lot «${label}» lancée : une session Codex implémente ce plan en arrière-plan dans le worktree courant. Termine ton tour MAINTENANT ; tu recevras un événement implementation_done par lot lancé.`,
     };
+  }
+
+  /** Drop one lot entry (and the ticket map once empty) if it is still the current one. */
+  private removeLot(ticketId: string, label: string, state: ActiveDelegation): void {
+    const lots = this.active.get(ticketId);
+    if (!lots || lots.get(label) !== state) return;
+    lots.delete(label);
+    if (lots.size === 0) this.active.delete(ticketId);
   }
 
   /** Serialize starts per ticket so concurrent tool calls join one persisted review pass. */
@@ -398,6 +447,12 @@ export class DelegationManager {
   ): Promise<{ ok: boolean; result: string }> {
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
       return { ok: false, result: "Passe de review annulée avant son lancement." };
+    }
+    if (this.hasActiveImplementations(ticket.id)) {
+      return {
+        ok: false,
+        result: "Des lots d'implémentation sont encore en cours : attends tous les événements implementation_done avant de lancer la review.",
+      };
     }
     const key = reviewKey(ticket.id, kind);
     if (this.activeReviews.has(key)) {
@@ -533,15 +588,23 @@ export class DelegationManager {
   /** Kill an active child (parent released/relaunched/shutdown). Idempotent; stale events are dropped. */
   stop(ticketId: string): void {
     this.reviewEpochs.set(ticketId, (this.reviewEpochs.get(ticketId) ?? 0) + 1);
-    const state = this.active.get(ticketId);
-    if (state) {
+    // NOTE(ali): drop the lots still being prepared too, otherwise a relaunched session is refused
+    // with "déjà en cours"; the in-flight start bails on its epoch check and its delete is a no-op.
+    const startingPrefix = `${ticketId}:`;
+    for (const key of this.startingImplementations) {
+      if (key.startsWith(startingPrefix)) this.startingImplementations.delete(key);
+    }
+    const lots = this.active.get(ticketId);
+    if (lots) {
       this.active.delete(ticketId);
-      void state.handle?.interrupt().catch((error: unknown) => {
-        log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
-      });
-      this.closeAndFinalize(state, "cancelled", null);
-      this.store.logEvent(ticketId, "delegation_killed", {});
-      log.info("délégation tuée (cascade parent)", { ticketId });
+      for (const state of lots.values()) {
+        void state.handle?.interrupt().catch((error: unknown) => {
+          log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
+        });
+        this.closeAndFinalize(state, "cancelled", null);
+        this.store.logEvent(ticketId, "delegation_killed", { label: state.label });
+        log.info("délégation tuée (cascade parent)", { ticketId, label: state.label });
+      }
     }
     for (const [key, review] of this.activeReviews) {
       if (review.ticketId !== ticketId) continue;
@@ -836,7 +899,7 @@ export class DelegationManager {
   }
 
   private handleEvent(ticketId: string, state: ActiveDelegation, event: AgentSessionEvent): void {
-    const current = this.active.get(ticketId) === state;
+    const current = this.active.get(ticketId)?.get(state.label) === state;
     if (event.type === "init") {
       state.sessionId = event.sessionId;
       this.store.attachExecutionSession({
@@ -851,7 +914,7 @@ export class DelegationManager {
     if (!current) return;
     if (event.type === "assistant_text" && event.text.trim()) state.lastAssistantText = event.text.trim();
     if (event.type === "error") state.lastError = event.message;
-    this.sessionHub.appendExternalEvent(ticketId, state.generationId, event, CHILD_TRANSCRIPT_PREFIX);
+    this.sessionHub.appendExternalEvent(ticketId, state.generationId, event, childTranscriptPrefix(state.label));
     this.heartbeat(ticketId, state);
     if (event.type === "turn_end" && !state.settled) {
       state.settled = true;
@@ -861,17 +924,26 @@ export class DelegationManager {
     }
   }
 
-  /** The child's single turn ended: tear it down and resume the parent via implementation_done. */
+  /** One lot's single turn ended: tear it down and resume the parent via implementation_done. */
   private settle(ticketId: string, state: ActiveDelegation, ok: boolean): void {
-    if (this.active.get(ticketId) !== state) return;
-    this.active.delete(ticketId);
+    if (this.active.get(ticketId)?.get(state.label) !== state) return;
+    // NOTE(ali): the lot stays registered until sendEvent returns so the coordinator's onStop gate
+    // still sees the ticket as active while the parent ends the turn woken by a previous lot.
+    const remaining = this.lotCount(ticketId) - 1;
     const summary = ok
       ? state.lastAssistantText
       : state.lastError || state.lastAssistantText || "la session Codex s'est terminée en erreur sans détail";
-    const delivered = this.sessionHub.sendEvent(ticketId, { type: "implementation_done", ok, summary });
-    this.store.logEvent(ticketId, "delegation_done", { ok, delivered });
+    const delivered = this.sessionHub.sendEvent(ticketId, {
+      type: "implementation_done",
+      ok,
+      summary,
+      label: state.label,
+      remaining,
+    });
+    this.removeLot(ticketId, state.label, state);
+    this.store.logEvent(ticketId, "delegation_done", { ok, delivered, label: state.label, remaining });
     this.closeAndFinalize(state, ok ? "completed" : "failed", ok ? null : summary);
-    log.info("délégation terminée", { ticketId, ok, delivered });
+    log.info("délégation terminée", { ticketId, ok, delivered, label: state.label, remaining });
     if (!delivered) log.warn("implementation_done non délivré : session parente absente", { ticketId });
   }
 
@@ -930,7 +1002,7 @@ export class DelegationManager {
     if (Object.keys(usageByModel).length === 0) return;
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
-    const key = turnSessionId || state.sessionId || `delegation-${ticketId}`;
+    const key = turnSessionId || state.sessionId || `delegation-${ticketId}-${state.label}`;
     const sessionUsage = {
       ...ticket.sessionUsage,
       [key]: addUsageByModel(ticket.sessionUsage[key], toUsageByModel(usageByModel)),

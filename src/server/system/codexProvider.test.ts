@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 
+import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS } from "../../shared/constants.ts";
 import { TranscriptBuffer } from "../agents/transcriptBuffer.ts";
 import { WorkerMcpManager } from "../workerMcp.ts";
 import type { AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
@@ -686,6 +687,33 @@ test("Codex feasibility fan-out is bounded to four shallow native agents", async
     .parse(started?.params).config.agents;
   expect(agents).toEqual({ max_concurrent_threads_per_session: 4, max_depth: 1 });
   await session.close();
+});
+
+test("only orchestrator sessions cap their native subagent threads", async () => {
+  const agentsSchema = z.object({
+    config: z.object({
+      agents: z.object({ max_concurrent_threads_per_session: z.number().optional() }),
+    }),
+  });
+  const startWithRole = async (role: AgentSessionOptions["role"]): Promise<number | undefined> => {
+    const fixture = appServerFixture();
+    const provider = createCodexProvider(new WorkerMcpManager(), {
+      connect: fixture.connect,
+      resolveBinary: () => "/fixture/codex",
+      projectEnvironment: () => ({}),
+    });
+    const config = options([]);
+    config.role = role;
+    config.agents = { helper: { description: "helps", prompt: "Help." } };
+    const session = provider.createSession(config);
+    await waitFor(() => fixture.requests.some((request) => request.method === "thread/start"));
+    const started = fixture.requests.find((request) => request.method === "thread/start");
+    await session.close();
+    return agentsSchema.parse(started?.params).config.agents.max_concurrent_threads_per_session;
+  };
+
+  expect(await startWithRole("orchestrator")).toBe(CODEX_MAX_CONCURRENT_SUBAGENT_THREADS);
+  expect(await startWithRole("triage")).toBeUndefined();
 });
 
 test("read-only sessions retain local commands and explicitly scoped HTTP MCP tools", async () => {

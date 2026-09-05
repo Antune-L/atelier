@@ -185,6 +185,22 @@ interface LiveSession {
   lastActivityAt: number;
 }
 
+/** Render the end of one implementation lot: keep the parent parked while other lots still run. */
+function renderImplementationDone(event: Extract<ChannelEvent, { type: "implementation_done" }>): string {
+  const summary = event.summary || "(aucun résumé)";
+  const remainingLots = `${event.remaining} ${event.remaining > 1 ? "lots" : "lot"}`;
+  if (!event.ok) {
+    const nextStep = event.remaining > 0
+      ? `Il reste ${remainingLots} en cours : TERMINE ton tour et attends leurs événements implementation_done avant de décider si tu relances ce lot UNE seule fois (delegate_implementation avec le même label «${event.label}») ; sinon implémente-le toi-même ou appelle fail().`
+      : `Relance delegate_implementation UNE seule fois avec le même label «${event.label}» si l'échec semble transitoire ; sinon implémente toi-même ou appelle fail().`;
+    return `Implémentation déléguée ÉCHOUÉE (lot «${event.label}») : ${summary}\n${nextStep}`;
+  }
+  if (event.remaining > 0) {
+    return `Lot «${event.label}» terminé : la session Codex a rendu la main. Résumé : ${summary}\nIl reste ${remainingLots} en cours : TERMINE ton tour et attends leurs événements implementation_done avant de relire le diff.`;
+  }
+  return `Lot «${event.label}» terminé : la session Codex a rendu la main. Résumé : ${summary}\nTous les lots sont terminés. Implémentation déléguée terminée : reprends la main — relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis poursuis le contrat (review).`;
+}
+
 /** Render a backend channel event as the user-turn text injected into the live session. */
 export function renderChannelEvent(event: ChannelEvent): string {
   switch (event.type) {
@@ -195,9 +211,7 @@ export function renderChannelEvent(event: ChannelEvent): string {
     case "prd_validated":
       return `PRD validé par l'utilisateur. ${event.note}`;
     case "implementation_done":
-      return event.ok
-        ? `Implémentation déléguée terminée : la session Codex a rendu la main. Résumé : ${event.summary || "(aucun résumé)"}\nReprends la main : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis poursuis le contrat (review).`
-        : `Implémentation déléguée ÉCHOUÉE : ${event.summary || "(raison inconnue)"}\nRelance delegate_implementation UNE seule fois si l'échec semble transitoire ; sinon implémente toi-même ou appelle fail().`;
+      return renderImplementationDone(event);
     case "review_done": {
       const label = `review ${event.kind}`;
       if (!event.ok) return `${label} ÉCHOUÉE : ${event.summary}`;

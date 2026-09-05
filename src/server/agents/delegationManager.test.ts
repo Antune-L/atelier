@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
-import { DELEGATION_SLOT_ID } from "../../shared/constants.ts";
+import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
 import type { ReviewKind } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { ticketSchema } from "../../shared/schemas.ts";
@@ -204,7 +204,7 @@ describe("DelegationManager.start", () => {
     const { system, delegation } = setup();
     const ticket = newDelegatedTicket();
 
-    const outcome = await delegation.start(ticket, 3, "PLAN: implémenter la feature X");
+    const outcome = await delegation.start(ticket, 3, "PLAN: implémenter la feature X", "principal");
 
     expect(outcome.ok).toBe(true);
     expect(delegation.isActive(ticket.id)).toBe(true);
@@ -246,18 +246,43 @@ describe("DelegationManager.start", () => {
       codexImplementerFast: false,
     });
 
-    expect((await delegation.start(edited, 3, "plan capturé")).ok).toBe(true);
+    expect((await delegation.start(edited, 3, "plan capturé", "principal")).ok).toBe(true);
     expect(system.sessions[1]?.opts).toMatchObject({ model: "gpt-5.6-sol", effort: "high", serviceTier: "fast" });
   });
 
-  test("refuses a second delegation while one is active", async () => {
+  test("refuses a second delegation with the same label", async () => {
     const { delegation } = setup();
     const ticket = newDelegatedTicket();
 
-    expect((await delegation.start(ticket, 3, "plan")).ok).toBe(true);
-    const second = await delegation.start(ticket, 3, "plan bis");
+    expect((await delegation.start(ticket, 3, "plan", "principal")).ok).toBe(true);
+    const second = await delegation.start(ticket, 3, "plan bis", "principal");
     expect(second.ok).toBe(false);
     expect(second.result).toContain("déjà en cours");
+  });
+
+  test(`refuses one lot beyond MAX_PARALLEL_IMPLEMENTERS (${MAX_PARALLEL_IMPLEMENTERS})`, async () => {
+    const { delegation } = setup();
+    const ticket = newDelegatedTicket();
+
+    for (let index = 0; index < MAX_PARALLEL_IMPLEMENTERS; index += 1) {
+      expect((await delegation.start(ticket, 3, `plan ${index}`, `lot-${index}`)).ok).toBe(true);
+    }
+    const refused = await delegation.start(ticket, 3, "plan de trop", "lot-en-trop");
+    expect(refused.ok).toBe(false);
+    expect(refused.result).toContain(String(MAX_PARALLEL_IMPLEMENTERS));
+  });
+
+  test("stop closes every child lot of the ticket", async () => {
+    const { system, delegation } = setup();
+    const ticket = newDelegatedTicket();
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan B", "lot-b")).ok).toBe(true);
+
+    delegation.stop(ticket.id);
+
+    expect(delegation.isActive(ticket.id)).toBe(false);
+    expect(system.sessions).toHaveLength(2);
+    expect(system.sessions.every((session) => session.interrupted && session.closed)).toBe(true);
   });
 
   test("does not spawn a child when the parent stops during capability validation", async () => {
@@ -266,7 +291,7 @@ describe("DelegationManager.start", () => {
     let release = (): void => undefined;
     system.runtimeGate = new Promise<void>((resolve) => { release = resolve; });
 
-    const starting = delegation.start(ticket, 3, "plan");
+    const starting = delegation.start(ticket, 3, "plan", "principal");
     delegation.stop(ticket.id);
     release();
 
@@ -280,7 +305,7 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    await delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan", "principal");
     const [parent, child] = system.sessions;
     if (!parent || !child) throw new Error("sessions missing");
 
@@ -300,11 +325,69 @@ describe("DelegationManager — settlement", () => {
     expect(usage?.cache_read_input_tokens).toBe(10);
   });
 
+  test("two lots settle independently, each implementation_done carrying its label and remaining count", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newDelegatedTicket();
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan B", "lot-b")).ok).toBe(true);
+    const [parent, childA, childB] = system.sessions;
+    if (!parent || !childA || !childB) throw new Error("sessions missing");
+
+    childA.opts.onEvent({ type: "assistant_text", text: "Lot A implémenté." });
+    childA.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "codex-a", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(delegation.isActive(ticket.id)).toBe(true);
+    const firstDone = parent.sent.at(-1);
+    expect(firstDone).toContain("«lot-a»");
+    expect(firstDone).toContain("Il reste 1 lot en cours");
+
+    childB.opts.onEvent({ type: "assistant_text", text: "Lot B implémenté." });
+    childB.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "codex-b", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(delegation.isActive(ticket.id)).toBe(false);
+    const secondDone = parent.sent.at(-1);
+    expect(secondDone).toContain("«lot-b»");
+    expect(secondDone).toContain("Tous les lots sont terminés.");
+  });
+
+  test("a lot still inside its capability check counts in the remaining lots of a settling lot", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newDelegatedTicket();
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
+    let release = (): void => undefined;
+    system.runtimeGate = new Promise<void>((resolve) => { release = resolve; });
+    const startingB = delegation.start(ticket, 3, "plan B", "lot-b");
+    const [parent, childA] = system.sessions;
+    if (!parent || !childA) throw new Error("sessions missing");
+
+    childA.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "codex-a", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(parent.sent.at(-1)).toContain("Il reste 1 lot en cours");
+    release();
+    expect((await startingB).ok).toBe(true);
+  });
+
+  test("delegate_review is refused while an implementation lot still runs", async () => {
+    const { delegation } = setup();
+    const ticket = newDelegatedTicket();
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
+
+    const review = await delegation.startReview(ticket, 3, "quality", "diff");
+
+    expect(review.ok).toBe(false);
+    expect(review.result).toContain("Des lots d'implémentation sont encore en cours");
+  });
+
   test("child turn_end error → failure event carrying the trailing error detail", async () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    await delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan", "principal");
     const [parent, child] = system.sessions;
     if (!parent || !child) throw new Error("sessions missing");
 
@@ -325,7 +408,7 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    await delegation.start(ticket, 3, "plan");
+    await delegation.start(ticket, 3, "plan", "principal");
     const child = system.sessions[1];
     if (!child) throw new Error("child session missing");
 
@@ -343,7 +426,7 @@ describe("DelegationManager — settlement", () => {
     test("a child that ignores close is disposed before shutdown drain returns", async () => {
       const { system, delegation } = setup(5);
       const ticket = newDelegatedTicket();
-      await delegation.start(ticket, 3, "plan");
+      await delegation.start(ticket, 3, "plan", "principal");
       system.hangOnClose = true;
 
       delegation.stop(ticket.id);
@@ -355,7 +438,7 @@ describe("DelegationManager — settlement", () => {
     test("a synchronous close failure still disposes and finalizes the child", async () => {
       const { system, delegation } = setup(5);
       const ticket = newDelegatedTicket();
-      await delegation.start(ticket, 3, "plan");
+      await delegation.start(ticket, 3, "plan", "principal");
       system.throwOnClose = true;
 
       delegation.stop(ticket.id);

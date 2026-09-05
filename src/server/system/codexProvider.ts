@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { DEFAULT_PORT, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
+import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, DEFAULT_PORT, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
@@ -36,6 +36,8 @@ import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { workerToolsForRole } from "./sessionRolePolicy.ts";
 
+/** Concurrency the feasibility scout runs its per-ticket threads at (independent of implementer lots). */
+const FEASIBILITY_MAX_CONCURRENT_THREADS = 4;
 const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const FORCE_CLOSE_GRACE_MS = 2_000;
 const WORKER_TOKEN_ENV = "KANBAN_WORKER_MCP_TOKEN";
@@ -287,9 +289,12 @@ function prepareAgents(
 ): PreparedAgents {
   if (!agents || Object.keys(agents).length === 0) return { config: null, cleanup: () => {} };
   const directory = mkdtempSync(join(tmpdir(), "kanban-codex-agents-"));
-  const declarations: ConfigObject = role === "feasibility"
-    ? { enabled: true, max_concurrent_threads_per_session: 4, max_depth: 1 }
-    : { enabled: true };
+  let declarations: ConfigObject = { enabled: true };
+  if (role === "feasibility") {
+    declarations = { enabled: true, max_concurrent_threads_per_session: FEASIBILITY_MAX_CONCURRENT_THREADS, max_depth: 1 };
+  } else if (role === "orchestrator") {
+    declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS };
+  }
   for (const [name, definition] of Object.entries(agents)) {
     const fileName = `${name.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}.toml`;
     const path = join(directory, fileName);

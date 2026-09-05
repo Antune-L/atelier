@@ -55,13 +55,13 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1788626164.592226,
-    "ast_hash": "11d6dd59d0eec89d5c7ffd2dce37d4e1",
+    "mtime": 1788631765.9310799,
+    "ast_hash": "df233a86df59440d379cce990cca8f12",
     "semantic_hash": ""
   },
   "src/server/agents/coordinator.ts": {
-    "mtime": 1788627770.067251,
-    "ast_hash": "d7379ecd9d780bbbcc0ab58df1ad0126",
+    "mtime": 1788631722.3271298,
+    "ast_hash": "7807271841aff3bc50b5ef26c83fcc39",
     "semantic_hash": ""
   },
   "src/server/agents/feasibilityManager.ts": {
@@ -190,8 +190,8 @@
     "semantic_hash": "66fd6855da641dd15421939bb5500795"
   },
   "src/shared/constants.ts": {
-    "mtime": 1788629565.1816218,
-    "ast_hash": "93952901c691599aa819eca70c4bf352",
+    "mtime": 1788631820.701863,
+    "ast_hash": "bb058a0fb2474be8f7c01ecfb3042411",
     "semantic_hash": ""
   },
   "src/shared/errors.ts": {
@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "src/shared/protocol.ts": {
-    "mtime": 1788626241.234651,
-    "ast_hash": "35518ee58508ac6c3fa6f1df4a50c21b",
+    "mtime": 1788631831.8918023,
+    "ast_hash": "83e9816e80dc7812698bfed057e6541d",
     "semantic_hash": ""
   },
   "src/shared/schemas.ts": {
@@ -630,8 +630,8 @@
     "semantic_hash": "9e6f26df737799cccc53c1f0af56bfac"
   },
   "AGENTS.md": {
-    "mtime": 1788615669.0423648,
-    "ast_hash": "c2c1f9bfb9df66901e2ec49c5910d8c6",
+    "mtime": 1788631836.9247913,
+    "ast_hash": "308f11bc9db63f486f4cb631a042ba3d",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -745,8 +745,8 @@
     "semantic_hash": "950c44aa9b25072bf628a5fab08ce4e1"
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1788627934.8608117,
-    "ast_hash": "aebe1d7ecea6ef2c3be7e90d51acb8f4",
+    "mtime": 1788631791.8122544,
+    "ast_hash": "7ef1826fca49bf8125ffe4da8174c4ed",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
@@ -760,8 +760,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.ts": {
-    "mtime": 1788627907.7933836,
-    "ast_hash": "a2f22cba58923dfcde174f4fe1a8fabc",
+    "mtime": 1788630832.686555,
+    "ast_hash": "57a46b10b98e30e832abdb59f745e6bf",
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
@@ -865,13 +865,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.test.ts": {
-    "mtime": 1788628033.142535,
-    "ast_hash": "e88cbf947990d364ac6c23cc6082af24",
+    "mtime": 1788631852.2681627,
+    "ast_hash": "2b3fddb6331bea955e4041edc644ad14",
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1788628024.3598318,
-    "ast_hash": "5743dfcfb57562c597efee5a0c6c270a",
+    "mtime": 1788631708.9570873,
+    "ast_hash": "3c5bc0fd1649b10a32d1ac24fa03c8f8",
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.test.ts": {
@@ -895,8 +895,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexProvider.ts": {
-    "mtime": 1788628147.5773535,
-    "ast_hash": "890d53182e0d6df9e6a50e4f4f65377f",
+    "mtime": 1788631816.6922238,
+    "ast_hash": "7110cde76191a283f6a08d7209d2eae2",
     "semantic_hash": ""
   },
   "src/server/testing/fixtures.ts": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexProvider.test.ts": {
-    "mtime": 1788628156.228125,
-    "ast_hash": "0e29f6670c0e702358ae5c6f65da6add",
+    "mtime": 1788631900.5664563,
+    "ast_hash": "7ba9571c09cfbba83098f298a5c0bf2f",
     "semantic_hash": ""
   },
   "src/server/system/codexRuntime.test.ts": {

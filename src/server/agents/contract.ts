@@ -1,4 +1,4 @@
-import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
@@ -24,11 +24,14 @@ function commitLanguageDirective(language: CommitLanguage): string {
 
 /**
  * Builds the `implementing` step(s) of the contract. Five modes:
- * Codex implementation goes through a backend-owned fresh-context child session;
- * (`delegate_implementation` tool, resumed by the `implementation_done` event); Composer delegates
- * code-writing to Cursor headless; a PRD-enabled Claude ticket delegates it to a fresh-context
- * sub-agent (kept separate from the planning session, with the validated PRD as its contract);
- * otherwise Claude implements inline via that same sub-agent.
+ * Codex implementation goes through backend-owned fresh-context child sessions
+ * (`delegate_implementation` tool, resumed by one `implementation_done` event per lot); Composer
+ * delegates code-writing to Cursor headless; a PRD-enabled Claude ticket delegates it to
+ * fresh-context sub-agents (kept separate from the planning session, with the validated PRD as
+ * their contract); otherwise Claude implements inline via those same sub-agents.
+ *
+ * Both delegated modes may split the work into up to MAX_PARALLEL_IMPLEMENTERS independent lots with
+ * disjoint file scopes, launched in parallel in the same turn.
  */
 function buildImplementingSteps(
   ticket: Ticket,
@@ -41,12 +44,13 @@ function buildImplementingSteps(
       : "un plan concis et complet rédigé depuis la description du ticket";
     return [
       "2. implementing (délégué à une session Codex indépendante en arrière-plan) :",
+      "   N'utilise JAMAIS le sous-agent natif `implementer` pour ce ticket : l'implémentation passe EXCLUSIVEMENT par le tool delegate_implementation.",
       ...(ticket.prdEnabled
         ? [`   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation.`]
         : []),
-      `   ${ticket.prdEnabled ? "b" : "a"}. Appelle le tool delegate_implementation en passant ${planSource} dans \`plan\`. Le backend lance une session Codex dans le worktree courant : elle écrit le code et ne commit JAMAIS.`,
-      `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après l'appel (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras l'événement implementation_done quand Codex aura fini.`,
-      `   ${ticket.prdEnabled ? "d" : "c"}. À réception d'implementation_done : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review. Si l'événement signale un échec, relance delegate_implementation UNE seule fois ; sinon implémente toi-même ou appelle fail().`,
+      `   ${ticket.prdEnabled ? "b" : "a"}. Décide d'ABORD du découpage. Si la fonctionnalité se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, appelle delegate_implementation une fois par lot DANS LE MÊME TOUR (${MAX_PARALLEL_IMPLEMENTERS} lots maximum, un \`label\` distinct par lot ; chaque \`plan\` énonce son périmètre de fichiers exact et les fichiers auxquels il ne doit PAS toucher). SINON, fais UN SEUL appel avec ${planSource} entier dans \`plan\`. Dans les deux cas le backend lance une session Codex par appel dans le worktree courant : elle écrit le code et ne commit JAMAIS.`,
+      `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après ces appels (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras un événement implementation_done par lot.`,
+      `   ${ticket.prdEnabled ? "d" : "c"}. À chaque implementation_done reçu : si \`remaining\` > 0, TERMINE de nouveau ton tour et attends les suivants (ne boucle pas, ne surveille rien). Quand tu reçois l'événement dont \`remaining\` vaut 0, tous les lots sont terminés : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review. Si un lot signale un échec, relance delegate_implementation UNE seule fois pour CE lot (même label) ; sinon implémente-le toi-même ou appelle fail().`,
     ];
   }
   if (ticket.implementer === "composer") {
@@ -72,15 +76,16 @@ function buildImplementingSteps(
     return [
       "2. implementing (délégué au sous-agent `implementer`) :",
       `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
-      "   b. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR.",
-      `      Dans son prompt, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et la consigne d'implémenter intégralement la fonctionnalité décrite.`,
-      "   c. Quand le sous-agent rend la main, relis son diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+      `   b. Décide d'ABORD du découpage, puis délègue l'implémentation au sous-agent \`implementer\` (outil Agent, \`subagent_type: implementer\`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Si le PRD se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, lance jusqu'à ${MAX_PARALLEL_IMPLEMENTERS} sous-agents \`implementer\` EN PARALLÈLE (plusieurs appels Agent dans le MÊME message), un par lot ; SINON fais UN SEUL appel couvrant toute la fonctionnalité.`,
+      `      Dans le prompt de chaque sous-agent, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et son périmètre de fichiers exact ainsi que les fichiers auxquels il ne doit PAS toucher.`,
+      "   c. Attends que TOUS les sous-agents aient rendu la main, puis relis leur diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
     ];
   }
   return [
     "2. implementing (délégué au sous-agent `implementer`) :",
-    "   a. Délègue l'implémentation au sous-agent `implementer` (outil Agent, `subagent_type: implementer`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Dans son prompt, transmets-lui le worktree courant comme répertoire de travail et la consigne d'implémenter intégralement la fonctionnalité décrite dans la description du ticket.",
-    "   b. Quand le sous-agent rend la main, relis son diff (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+    `   a. Décide d'ABORD du découpage, puis délègue l'implémentation au sous-agent \`implementer\` (outil Agent, \`subagent_type: implementer\`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Si la fonctionnalité se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, lance jusqu'à ${MAX_PARALLEL_IMPLEMENTERS} sous-agents \`implementer\` EN PARALLÈLE (plusieurs appels Agent dans le MÊME message), un par lot ; SINON fais UN SEUL appel couvrant toute la fonctionnalité.`,
+    "      Dans le prompt de chaque sous-agent, transmets-lui : le worktree courant comme répertoire de travail, son périmètre de fichiers exact et les fichiers auxquels il ne doit PAS toucher, et la consigne d'implémenter intégralement la part de la fonctionnalité décrite dans la description du ticket qui lui revient.",
+    "   b. Attends que TOUS les sous-agents aient rendu la main, puis relis leur diff (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
   ];
 }
 

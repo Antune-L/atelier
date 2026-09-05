@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -346,6 +346,12 @@ export class AgentCoordinator {
   private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (this.delegation.hasActiveImplementations(ctx.ticketId)) {
+      return {
+        ok: false,
+        result: "Des lots d'implémentation sont encore en cours : attends tous les événements implementation_done avant d'appeler done().",
+      };
+    }
     const requiresApproval = this.delegation.reviewRequiresApproval(ctx.ticketId);
     const readOnlyReview = requiresApproval === false;
     const reviewsPassed = readOnlyReview
@@ -413,7 +419,7 @@ export class AgentCoordinator {
     if (ticket.resolvingConflicts) {
       return { ok: false, result: "delegate_implementation indisponible en résolution de conflits : résous les conflits inline." };
     }
-    return this.delegation.start(ticket, ctx.slotId, parsed.data.plan);
+    return this.delegation.start(ticket, ctx.slotId, parsed.data.plan, parsed.data.label);
   }
 
   private async handleDelegateReview(ctx: SessionToolCall): Promise<ToolResult> {
@@ -538,10 +544,10 @@ export class AgentCoordinator {
   private defaultPrdNote(ticket: ReturnType<Store["getTicket"]>): string {
     if (!ticket) return "";
     if (ticket.implementer === "codex") {
-      return "Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan), puis termine ton tour et attends l'événement implementation_done ; ne poursuis pas l'implémentation dans cette session de planification.";
+      return `Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan) — un appel par lot indépendant à périmètre de fichiers disjoint, ${MAX_PARALLEL_IMPLEMENTERS} lots maximum et un label distinct par lot — puis termine ton tour et attends un événement implementation_done par lot ; ne poursuis pas l'implémentation dans cette session de planification.`;
     }
     if (ticket.implementer === "claude") {
-      return "Délègue l'implémentation à un sous-agent à contexte frais (outil Agent) qui garde le PRD validé en tête comme contrat ; ne poursuis pas l'implémentation dans cette session de planification.";
+      return `Délègue l'implémentation à des sous-agents à contexte frais (outil Agent) qui gardent le PRD validé en tête comme contrat — un sous-agent par lot indépendant à périmètre de fichiers disjoint, ${MAX_PARALLEL_IMPLEMENTERS} maximum, lancés en parallèle dans le même message ; ne poursuis pas l'implémentation dans cette session de planification.`;
     }
     return "";
   }

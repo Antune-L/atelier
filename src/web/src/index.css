@@ -1,134 +1,100 @@
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  /* NOTE: light is the secondary theme; the dark block below is the default (see index.html). */
   :root {
-    /* Light theme built on the brand palette (#001219 … #9b2226). */
-    --background: 45 50% 97%;
-    --foreground: 197 100% 5%;
-    --card: 45 33% 99%;
-    --card-foreground: 197 100% 5%;
-    --popover: 45 33% 99%;
-    --popover-foreground: 197 100% 5%;
+    --background: 48 18.5% 94.7%;
+    --foreground: 220 10% 11.8%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 10% 11.8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 10% 11.8%;
 
-    /* Primary actions / in-progress: teal range. */
-    --primary: 190 100% 23%;
-    --primary-foreground: 45 50% 97%;
-    --secondary: 45 44% 89%;
-    --secondary-foreground: 197 60% 12%;
-    --muted: 45 35% 92%;
-    --muted-foreground: 197 22% 33%;
-    --accent: 160 41% 88%;
-    --accent-foreground: 190 100% 18%;
+    --primary: 220 10% 11.8%;
+    --primary-foreground: 48 18.5% 94.7%;
+    --secondary: 45 17.4% 91%;
+    --secondary-foreground: 220 10% 11.8%;
+    --muted: 45 17.4% 91%;
+    --muted-foreground: 218.6 6.1% 44.7%;
+    --accent: 43.6 16.4% 86.9%;
+    --accent-foreground: 220 10% 11.8%;
 
-    /* Danger / failed: red range. */
-    --destructive: 5 81% 38%;
-    --destructive-foreground: 45 50% 97%;
+    --brand: 174 82.5% 33.5%;
+    --brand-foreground: 0 0% 100%;
 
-    --border: 45 28% 84%;
-    --input: 45 28% 84%;
-    --ring: 181 88% 31%;
-    --radius: 0.5rem;
+    --destructive: 5.6 63.4% 46.1%;
+    --destructive-foreground: 0 0% 100%;
 
-    /* Semantic status tokens (used by badges / stage colors). */
-    --success: 160 50% 36%; /* done */
-    --success-foreground: 45 50% 97%;
-    --info: 181 88% 31%; /* active / in-progress */
-    --info-foreground: 45 50% 97%;
-    --warning: 30 98% 40%; /* waiting on user */
-    --warning-foreground: 45 50% 97%;
-    --danger: 358 64% 37%; /* failed / interrupted */
-    --danger-foreground: 45 50% 97%;
+    --border: 43.6 12.9% 83.3%;
+    --input: 43.6 12.9% 83.3%;
+    --ring: 174 82.5% 33.5%;
+    --radius: 0.375rem;
 
-    /* Chart palette (teal/brand range) for the stats dashboard. */
-    --chart-1: 190 100% 23%;
-    --chart-2: 160 50% 36%;
-    --chart-3: 30 98% 40%;
-    --chart-4: 262 45% 45%;
-    --chart-5: 5 81% 38%;
+    --success: 154.2 46.2% 33.5%;
+    --success-foreground: 0 0% 100%;
+    --info: 174 82.5% 33.5%;
+    --info-foreground: 0 0% 100%;
+    --warning: 35.9 100% 36.1%;
+    --warning-foreground: 0 0% 100%;
+    --danger: 5.6 63.4% 46.1%;
+    --danger-foreground: 0 0% 100%;
+
+    --chart-1: 174 82.5% 33.5%;
+    --chart-2: 154.2 46.2% 33.5%;
+    --chart-3: 35.9 100% 36.1%;
+    --chart-4: 249.2 55.5% 58.6%;
+    --chart-5: 5.6 63.4% 46.1%;
   }
 
-  /* Deep Ocean — dark teal-to-purple palette (coolors #006466 … #4d194d). */
-  .theme-deep-ocean {
-    --background: 199 47% 11%;
-    --foreground: 180 28% 90%;
-    --card: 200 42% 15%;
-    --card-foreground: 180 28% 90%;
-    --popover: 200 42% 15%;
-    --popover-foreground: 180 28% 90%;
-
-    --primary: 181 80% 30%; /* teal #006466, brightened for dark surfaces */
-    --primary-foreground: 180 30% 95%;
-    --secondary: 242 25% 24%; /* indigo #272640 */
-    --secondary-foreground: 180 28% 90%;
-    --muted: 205 30% 20%;
-    --muted-foreground: 195 18% 66%;
-    --accent: 262 33% 28%; /* violet #312244 */
-    --accent-foreground: 180 28% 90%;
-
-    --destructive: 358 64% 48%;
-    --destructive-foreground: 180 30% 95%;
-
-    --border: 200 28% 24%;
-    --input: 200 28% 24%;
-    --ring: 181 70% 45%;
-
-    --success: 160 50% 45%;
-    --success-foreground: 199 47% 11%;
-    --info: 181 72% 46%;
-    --info-foreground: 199 47% 11%;
-    --warning: 36 90% 56%;
-    --warning-foreground: 199 47% 11%;
-    --danger: 350 65% 55%;
-    --danger-foreground: 180 30% 95%;
-
-    --chart-1: 181 72% 46%;
-    --chart-2: 160 50% 45%;
-    --chart-3: 36 90% 56%;
-    --chart-4: 262 50% 62%;
-    --chart-5: 350 65% 55%;
-  }
-
-  /* Dark — neutral dark built on the brand teal (#001219). */
   .dark {
-    --background: 197 55% 6%;
-    --foreground: 45 35% 91%;
-    --card: 197 42% 9%;
-    --card-foreground: 45 35% 91%;
-    --popover: 197 42% 9%;
-    --popover-foreground: 45 35% 91%;
+    --background: 210 11.8% 6.7%;
+    --foreground: 42 16.7% 88.2%;
+    --card: 210 12.5% 9.4%;
+    --card-foreground: 42 16.7% 88.2%;
+    --popover: 210 12.5% 9.4%;
+    --popover-foreground: 42 16.7% 88.2%;
 
-    --primary: 181 72% 42%;
-    --primary-foreground: 197 100% 6%;
-    --secondary: 197 28% 17%;
-    --secondary-foreground: 45 35% 91%;
-    --muted: 197 24% 15%;
-    --muted-foreground: 197 14% 63%;
-    --accent: 190 38% 21%;
-    --accent-foreground: 45 35% 91%;
+    --primary: 42 16.7% 88.2%;
+    --primary-foreground: 210 11.8% 6.7%;
+    --secondary: 210 12.9% 12.2%;
+    --secondary-foreground: 42 16.7% 88.2%;
+    --muted: 210 12.9% 12.2%;
+    --muted-foreground: 215 5.4% 56.5%;
+    --accent: 210 12.8% 15.3%;
+    --accent-foreground: 42 16.7% 88.2%;
 
-    --destructive: 5 70% 46%;
-    --destructive-foreground: 45 40% 95%;
+    --brand: 172.5 66% 50.4%;
+    --brand-foreground: 210 11.8% 6.7%;
 
-    --border: 197 24% 18%;
-    --input: 197 24% 18%;
-    --ring: 181 78% 42%;
+    --destructive: 0 83.6% 68.8%;
+    --destructive-foreground: 210 11.8% 6.7%;
 
-    --success: 160 50% 44%;
-    --success-foreground: 197 55% 6%;
-    --info: 181 74% 46%;
-    --info-foreground: 197 55% 6%;
-    --warning: 36 92% 55%;
-    --warning-foreground: 197 55% 6%;
-    --danger: 358 64% 52%;
-    --danger-foreground: 45 40% 95%;
+    --border: 210 11.6% 16.9%;
+    --input: 210 11.6% 16.9%;
+    --ring: 172.5 66% 50.4%;
 
-    --chart-1: 181 74% 46%;
-    --chart-2: 160 50% 44%;
-    --chart-3: 36 92% 55%;
-    --chart-4: 262 50% 60%;
-    --chart-5: 358 64% 52%;
+    --success: 112 45.5% 61.2%;
+    --success-foreground: 210 11.8% 6.7%;
+    --info: 172.5 66% 50.4%;
+    --info-foreground: 210 11.8% 6.7%;
+    --warning: 37 91.3% 55.1%;
+    --warning-foreground: 210 11.8% 6.7%;
+    --danger: 0 83.6% 68.8%;
+    --danger-foreground: 210 11.8% 6.7%;
+
+    --chart-1: 172.5 66% 50.4%;
+    --chart-2: 112 45.5% 61.2%;
+    --chart-3: 37 91.3% 55.1%;
+    --chart-4: 255.1 91.7% 76.3%;
+    --chart-5: 0 83.6% 68.8%;
   }
 }
 
@@ -137,8 +103,7 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    @apply bg-background font-sans text-sm text-foreground;
   }
 }
 
@@ -175,7 +140,7 @@
     @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.8em];
   }
   .markdown pre {
-    @apply my-2 overflow-x-auto rounded-md bg-foreground/90 p-3 text-xs text-background;
+    @apply my-2 overflow-x-auto rounded-md border border-border bg-muted p-3 text-xs text-foreground;
   }
   .markdown pre code {
     @apply bg-transparent p-0 text-inherit;

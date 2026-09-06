@@ -7,11 +7,11 @@
     <title>Atelier</title>
     <script>
       // Apply the stored theme before first paint to avoid a flash of the default palette.
+      // Dark is the default: anything but an explicit "light" falls back to it.
       (function () {
-        var classes = { "deep-ocean": "theme-deep-ocean", dark: "dark" };
-        var theme = localStorage.getItem("theme");
-        var className = classes[theme];
-        if (className) document.documentElement.classList.add(className);
+        if (localStorage.getItem("theme") !== "light") {
+          document.documentElement.classList.add("dark");
+        }
       })();
     </script>
   </head>

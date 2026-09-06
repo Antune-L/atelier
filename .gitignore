@@ -10,6 +10,7 @@ uploads/
 .DS_Store
 kanban-real.db
 kanban-real.db-*
+*.sqlite
 slots/
 config.json
 .env

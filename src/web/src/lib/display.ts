@@ -1,4 +1,5 @@
 import {
+  ACTIVE_STAGES,
   AGENT_EFFORTS,
   AGENT_EFFORT_FULL_LABELS,
   AGENT_EFFORT_LABELS,
@@ -237,22 +238,40 @@ const PROGRESS_STAGES: Stage[] = [
   "done",
 ];
 
-export type ProgressColor = "info" | "success" | "destructive" | "warning";
+/** Stages where the run is dead: no progress to show, the card reads as failed. */
+const DEAD_STAGES: Stage[] = ["failed", "interrupted", "stalled"];
 
-export type StageProgress = { percent: number; color: ProgressColor };
+/** Position of a stage in the pipeline, as a 1-based step out of `total` (0 when the run is dead). */
+export type StageSteps = { index: number; total: number };
 
-export function stageProgress(stage: Stage): StageProgress {
-  if (stage === "failed" || stage === "interrupted" || stage === "stalled") {
-    return { percent: 0, color: "destructive" };
-  }
-  if (stage === "awaiting_answers") {
-    const planningIdx = PROGRESS_STAGES.indexOf("planning");
-    return { percent: (planningIdx / (PROGRESS_STAGES.length - 1)) * 100, color: "warning" };
-  }
-  const idx = PROGRESS_STAGES.indexOf(stage);
-  const percent = idx < 0 ? 0 : (idx / (PROGRESS_STAGES.length - 1)) * 100;
-  const color: ProgressColor = stage === "done" ? "success" : "info";
-  return { percent, color };
+export function stageSteps(stage: Stage): StageSteps {
+  const total = PROGRESS_STAGES.length;
+  if (DEAD_STAGES.includes(stage)) return { index: 0, total };
+  const lookup = stage === "awaiting_answers" ? "planning" : stage;
+  const idx = PROGRESS_STAGES.indexOf(lookup);
+  return { index: idx < 0 ? 0 : idx + 1, total };
+}
+
+/** What a ticket card signals at a glance: its stripe colour and its progress-glyph colour. */
+export type CardState = "running" | "attention" | "failed" | "done" | "idle";
+
+/** The card state a stage alone implies, before the ticket's own attention flags are applied. */
+export function stageCardState(stage: Stage | null): CardState {
+  if (stage === null) return "idle";
+  if (DEAD_STAGES.includes(stage)) return "failed";
+  if (stage === "awaiting_answers") return "attention";
+  if (stage === "done") return "done";
+  // NOTE: `queued` belongs to ACTIVE_STAGES but nothing runs yet, so the card stays neutral.
+  if (stage === "queued") return "idle";
+  return ACTIVE_STAGES.includes(stage) ? "running" : "idle";
+}
+
+/** Card state of a ticket: a dead run wins, then anything waiting on the user. */
+export function ticketCardState(ticket: Pick<Ticket, "stage" | "pendingQuestions" | "watchdogFlagged">): CardState {
+  const state = stageCardState(ticket.stage);
+  if (state === "failed") return "failed";
+  if (ticket.pendingQuestions > 0 || ticket.watchdogFlagged) return "attention";
+  return state;
 }
 
 const TOKEN_FORMATTER = new Intl.NumberFormat("fr-FR");

@@ -265,7 +265,7 @@ function SettingsSectionPanel({
 /** Theme picker; the only row here, hidden when the search query doesn't match it. */
 function AppearanceSettings({ query }: { query: string }) {
   const { theme, setTheme } = useTheme();
-  const themeVisible = matchesQuery(query, "Thème", "Apparence de l'interface", "clair sombre deep ocean");
+  const themeVisible = matchesQuery(query, "Thème", "Apparence de l'interface", "clair sombre");
 
   return (
     <div className="space-y-4">

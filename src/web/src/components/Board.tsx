@@ -11,6 +11,11 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, type Column } from "@shared/constants";
 
 import { BoardColumn } from "@/components/BoardColumn";
+import {
+  TerminalColumnsPanel,
+  readTerminalColumnOpen,
+  writeTerminalColumnOpen,
+} from "@/components/TerminalColumnsPanel";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { api } from "@/lib/api";
 import { useBoard } from "@/hooks/useBoard";
@@ -25,6 +30,11 @@ interface BoardProps {
 }
 
 const DRAG_ACTIVATION_DISTANCE = 6;
+
+/** Lanes whose tickets are done with: folded into the right-edge panel until the user opens one. */
+const TERMINAL_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
+
+const ACTIVE_COLUMNS: Column[] = COLUMN_ORDER.filter((column) => !TERMINAL_COLUMNS.includes(column));
 
 /** Case- and diacritics-insensitive normalization for client-side search. */
 function normalize(value: string): string {
@@ -55,6 +65,18 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const checkingAllRef = useRef(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const analyzingAllRef = useRef(false);
+  const [openTerminalColumns, setOpenTerminalColumns] = useState<Set<Column>>(
+    () => new Set(TERMINAL_COLUMNS.filter(readTerminalColumnOpen)),
+  );
+
+  const toggleTerminalColumn = (column: Column): void => {
+    const willOpen = !openTerminalColumns.has(column);
+    const next = new Set(openTerminalColumns);
+    if (willOpen) next.add(column);
+    else next.delete(column);
+    writeTerminalColumnOpen(column, willOpen);
+    setOpenTerminalColumns(next);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE } }),
@@ -201,30 +223,42 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     }
   };
 
+  const renderLane = (column: Column): React.ReactElement => (
+    <BoardColumn
+      key={column}
+      column={column}
+      collapsible={!TERMINAL_COLUMNS.includes(column)}
+      tickets={ticketsByColumn(column)}
+      projects={projects}
+      ticketsById={ticketsById}
+      onOpenTicket={onOpenTicket}
+      onAddTicket={onAddTicket}
+      onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
+      moveAllCount={moveAllCount}
+      moveAllBusy={movingAll}
+      onAnalyzeAll={column === "todo" ? handleAnalyzeAll : undefined}
+      analyzeAllCount={analyzeAllCount}
+      analyzeAllBusy={analyzingAll}
+      onCheckMerge={column === "done" ? handleCheckMerge : undefined}
+      onCheckAllMerges={column === "done" ? handleCheckAllMerges : undefined}
+      checkAllCount={checkAllCount}
+      checkAllBusy={checkingAll}
+    />
+  );
+
+  const terminalCounts = new Map(TERMINAL_COLUMNS.map((column) => [column, ticketsByColumn(column).length]));
+
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-3 overflow-x-auto pb-4">
-        {COLUMN_ORDER.map((column) => (
-          <BoardColumn
-            key={column}
-            column={column}
-            tickets={ticketsByColumn(column)}
-            projects={projects}
-            ticketsById={ticketsById}
-            onOpenTicket={onOpenTicket}
-            onAddTicket={onAddTicket}
-            onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
-            moveAllCount={moveAllCount}
-            moveAllBusy={movingAll}
-            onAnalyzeAll={column === "todo" ? handleAnalyzeAll : undefined}
-            analyzeAllCount={analyzeAllCount}
-            analyzeAllBusy={analyzingAll}
-            onCheckMerge={column === "done" ? handleCheckMerge : undefined}
-            onCheckAllMerges={column === "done" ? handleCheckAllMerges : undefined}
-            checkAllCount={checkAllCount}
-            checkAllBusy={checkingAll}
-          />
-        ))}
+      <div className="flex h-full overflow-x-auto">
+        {ACTIVE_COLUMNS.map(renderLane)}
+        {TERMINAL_COLUMNS.filter((column) => openTerminalColumns.has(column)).map(renderLane)}
+        <TerminalColumnsPanel
+          columns={TERMINAL_COLUMNS}
+          countByColumn={terminalCounts}
+          expanded={openTerminalColumns}
+          onToggle={toggleTerminalColumn}
+        />
       </div>
 
       <ConfirmDialog

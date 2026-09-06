@@ -1,4 +1,5 @@
-import { AlertTriangle, Brush, Eye, EyeOff, HelpCircle, MessageCircleQuestion, Upload } from "lucide-react";
+import { AlertTriangle, Brush, Eye, HelpCircle, MessageCircleQuestion } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 import type { Ticket } from "@shared/schemas";
 
@@ -8,42 +9,31 @@ interface TicketBadgesProps {
   ticket: Ticket;
 }
 
-/** The ticket badges shared by the board card and the agent card: kind, watchdog, pending questions. */
+const BADGE_CLASS = "gap-1 text-2xs";
+
+const KIND_BADGES: Partial<Record<Ticket["kind"], { Icon: LucideIcon; label: string }>> = {
+  review: { Icon: Eye, label: "Review" },
+  clean: { Icon: Brush, label: "Clean" },
+  ask: { Icon: HelpCircle, label: "Ask" },
+};
+
+/** Ticket kind and attention badges (watchdog, pending questions), used by the agent card. */
 export function TicketBadges({ ticket }: TicketBadgesProps) {
+  const kindBadge = KIND_BADGES[ticket.kind];
   return (
     <>
-      {ticket.kind === "review" && (
-        <Badge variant="secondary" className="gap-1 text-[10px]">
-          <Eye className="h-3 w-3" /> Review
-        </Badge>
-      )}
-      {ticket.kind === "clean" && (
-        <Badge variant="secondary" className="gap-1 text-[10px]">
-          <Brush className="h-3 w-3" /> Clean
-        </Badge>
-      )}
-      {ticket.kind === "ask" && (
-        <Badge variant="secondary" className="gap-1 text-[10px]">
-          <HelpCircle className="h-3 w-3" /> Ask
-        </Badge>
-      )}
-      {ticket.kind === "feature" && ticket.stealth && (
-        <Badge variant="secondary" className="gap-1 text-[10px]">
-          <EyeOff className="h-3 w-3" /> Stealth
-        </Badge>
-      )}
-      {ticket.kind === "feature" && ticket.directPush && (
-        <Badge variant="secondary" className="gap-1 text-[10px]">
-          <Upload className="h-3 w-3" /> Push direct
+      {kindBadge && (
+        <Badge variant="secondary" className={BADGE_CLASS}>
+          <kindBadge.Icon className="h-3 w-3" /> {kindBadge.label}
         </Badge>
       )}
       {ticket.watchdogFlagged && (
-        <Badge variant="warning" className="gap-1">
+        <Badge variant="warning" className={BADGE_CLASS}>
           <AlertTriangle className="h-3 w-3" /> Inactif
         </Badge>
       )}
       {ticket.pendingQuestions > 0 && (
-        <Badge variant="warning" className="gap-1">
+        <Badge variant="warning" className={BADGE_CLASS}>
           <MessageCircleQuestion className="h-3 w-3" /> {ticket.pendingQuestions}
         </Badge>
       )}

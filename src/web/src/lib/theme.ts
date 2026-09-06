@@ -1,19 +1,18 @@
-export type Theme = "light" | "deep-ocean" | "dark";
+export type Theme = "light" | "dark";
 
 interface ThemeOption {
   value: Theme;
   label: string;
-  /** Class applied to <html>; empty for the default light theme. */
+  /** Class applied to <html>; empty for the light theme. */
   className: string;
 }
 
 export const THEMES: ThemeOption[] = [
-  { value: "light", label: "Clair", className: "" },
-  { value: "deep-ocean", label: "Deep Ocean", className: "theme-deep-ocean" },
   { value: "dark", label: "Sombre", className: "dark" },
+  { value: "light", label: "Clair", className: "" },
 ];
 
-const DEFAULT_THEME: Theme = "light";
+const DEFAULT_THEME: Theme = "dark";
 const STORAGE_KEY = "theme";
 
 function isTheme(value: string | null): value is Theme {
@@ -30,7 +29,7 @@ export function applyTheme(theme: Theme): void {
   for (const { className } of THEMES) {
     if (className) classList.remove(className);
   }
-  const next = THEMES.find((t) => t.value === theme) ?? THEMES[0];
+  const next = THEMES.find((t) => t.value === theme);
   if (next?.className) classList.add(next.className);
   localStorage.setItem(STORAGE_KEY, theme);
 }

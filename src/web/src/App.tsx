@@ -11,7 +11,7 @@ import { PrdView } from "@/components/PrdView";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
-import { SlotsBar } from "@/components/SlotsBar";
+import { SlotPips } from "@/components/SlotPips";
 import { StatsView } from "@/components/StatsView";
 import { TerminalsView } from "@/components/TerminalsView";
 import { TicketDetail } from "@/components/TicketDetail";
@@ -141,44 +141,49 @@ export function App() {
         canUpdate={canUpdate}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col p-6">
-        <header className="mb-4 flex shrink-0 flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            {view === "home" && (
-              <div className="inline-flex items-center rounded-md border bg-card p-0.5">
-                {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setHomeView(value)}
-                    aria-pressed={homeView === value}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
-                      homeView === value
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex h-9 shrink-0 items-center gap-4 border-b px-3">
+          <span className="font-mono text-xs font-medium tracking-wider text-brand">
+            ATELIER
+          </span>
+
           {view === "home" && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center">
+              {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setHomeView(value)}
+                  aria-pressed={homeView === value}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors",
+                    homeView === value
+                      ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--info))]"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <SlotPips slots={slots} />
+
+          {view === "home" && (
+            <div className="ml-auto flex items-center gap-2">
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Rechercher…"
-                className="w-48 bg-card"
+                className="h-7 w-44 text-xs"
                 aria-label="Rechercher un ticket"
               />
               <Select
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="bg-card"
+                className="h-7 text-xs"
               >
                 <option value="all">Tous les projets</option>
                 {projects.map((p) => (
@@ -187,25 +192,26 @@ export function App() {
                   </option>
                 ))}
               </Select>
-              <Button onClick={() => setCreating(true)}>
+              <Button size="sm" onClick={() => setCreating(true)}>
                 <Plus className="h-4 w-4" />
               </Button>
             </div>
           )}
-        </header>
+        </div>
 
-        {view !== "terminals" && (
-          <div className="mb-4 shrink-0">
-            <SlotsBar slots={slots} />
-          </div>
-        )}
-
-        <main className={cn("min-h-0 flex-1", view === "prd" ? "overflow-hidden" : "overflow-auto")}>
-          <div className={view === "prd" ? "flex flex-col min-h-0 h-full" : "hidden"}>
-            <PrdView />
-          </div>
-          {view !== "prd" && renderView()}
-        </main>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+          <main
+            className={cn(
+              "min-h-0 flex-1",
+              view === "prd" ? "overflow-hidden" : "overflow-auto",
+            )}
+          >
+            <div className={view === "prd" ? "flex min-h-0 h-full flex-col" : "hidden"}>
+              <PrdView />
+            </div>
+            {view !== "prd" && renderView()}
+          </main>
+        </div>
       </div>
 
       <NewTicketDialog

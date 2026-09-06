@@ -1,7 +1,5 @@
 import {
   BarChart3,
-  ChevronLeft,
-  ChevronRight,
   FileText,
   LayoutGrid,
   RefreshCw,
@@ -9,7 +7,7 @@ import {
   SquareTerminal,
   Zap,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -23,8 +21,6 @@ interface SidebarProps {
   updating?: boolean;
   canUpdate?: boolean;
 }
-
-const STORAGE_KEY = "atelier.sidebar.collapsed";
 
 interface NavEntry {
   value: SidebarView;
@@ -40,15 +36,14 @@ const NAV_ENTRIES: NavEntry[] = [
   { value: "automation", label: "Automation", Icon: Zap },
 ];
 
-function loadCollapsed(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
+const ITEM_BASE =
+  "flex h-7 w-7 items-center justify-center rounded-md transition-colors";
+const ITEM_INACTIVE =
+  "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
+const ITEM_ACTIVE =
+  "bg-accent text-foreground shadow-[inset_2px_0_0_hsl(var(--info))]";
 
-/** Primary navigation: Home / Terminal / Stats, with Settings pinned at the bottom. Collapsible. */
+/** Permanent icon rail: Home / Terminal / Stats / PRD / Automation, Settings pinned at the bottom. */
 export function Sidebar({
   view,
   onSelect,
@@ -57,121 +52,45 @@ export function Sidebar({
   updating = false,
   canUpdate = false,
 }: SidebarProps): ReactNode {
-  const [collapsed, setCollapsed] = useState<boolean>(loadCollapsed);
-
-  const toggleCollapsed = (): void => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STORAGE_KEY, String(next));
-      } catch {
-        // Storage unavailable; collapse state is best-effort persistence.
-      }
-      return next;
-    });
-  };
-
-  const renderItem = (
-    active: boolean,
-    label: string,
-    Icon: typeof LayoutGrid,
-    onClick: () => void,
-    key?: string,
-  ): ReactNode => (
-    <button
-      key={key}
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      title={collapsed ? label : undefined}
-      className={cn(
-        "flex items-center gap-2 rounded px-2.5 py-2 text-sm font-medium transition-colors",
-        collapsed && "justify-center",
-        active
-          ? "bg-primary text-primary-foreground"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      <Icon className="h-4 w-4 shrink-0" />
-      {!collapsed && <span className="truncate">{label}</span>}
-    </button>
-  );
-
   return (
-    <nav
-      className={cn(
-        "flex shrink-0 flex-col gap-1 border-r bg-card p-2 transition-[width]",
-        collapsed ? "w-14" : "w-44",
-      )}
-    >
-      {collapsed ? (
-        <div className="mb-1 flex flex-col items-center gap-1">
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label="Étendre la barre latérale"
-            className="flex items-center justify-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          {canUpdate && onUpdate && (
-            <button
-              type="button"
-              onClick={onUpdate}
-              disabled={updating}
-              aria-label="Mettre à jour l'app"
-              title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", updating && "animate-spin")}
-              />
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="relative mb-1 flex items-center">
-          {canUpdate && onUpdate && (
-            <button
-              type="button"
-              onClick={onUpdate}
-              disabled={updating}
-              aria-label="Mettre à jour l'app"
-              title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-              className="relative z-10 flex items-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-            >
-              <RefreshCw
-                className={cn("h-4 w-4", updating && "animate-spin")}
-              />
-            </button>
-          )}
-          <span className="pointer-events-none absolute inset-x-0 text-center text-sm font-semibold">
-            Atelier
-          </span>
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label="Réduire la barre latérale"
-            className="relative z-10 ml-auto flex items-center rounded px-2.5 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {NAV_ENTRIES.map((entry) =>
-        renderItem(
-          view === entry.value,
-          entry.label,
-          entry.Icon,
-          () => onSelect(entry.value),
-          entry.value,
-        ),
-      )}
+    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
+      {NAV_ENTRIES.map(({ value, label, Icon }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onSelect(value)}
+          aria-pressed={view === value}
+          title={label}
+          className={cn(ITEM_BASE, view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      ))}
 
       <div className="flex-1" />
 
-      {renderItem(false, "Settings", Settings, onOpenSettings)}
+      {canUpdate && onUpdate && (
+        <button
+          type="button"
+          onClick={onUpdate}
+          disabled={updating}
+          aria-label="Mettre à jour l'app"
+          title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
+          className={cn(ITEM_BASE, ITEM_INACTIVE, "disabled:opacity-50")}
+        >
+          <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+        </button>
+      )}
+
+      <button
+        type="button"
+        onClick={onOpenSettings}
+        aria-pressed={false}
+        title="Settings"
+        className={cn(ITEM_BASE, ITEM_INACTIVE)}
+      >
+        <Settings className="h-4 w-4" />
+      </button>
     </nav>
   );
 }

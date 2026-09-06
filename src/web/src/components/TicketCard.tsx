@@ -1,23 +1,22 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Bot, Clock, CornerDownRight, ExternalLink, FlaskConical, GitMerge, Loader2, Palette, Sparkles } from "lucide-react";
+import { ExternalLink, GitMerge, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
-import { extractFigmaUrls } from "@shared/figma";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
-import { TicketBadges } from "@/components/TicketBadges";
-import { Badge } from "@/components/ui/badge";
 import {
   formatDuration,
   formatRelativeDuration,
   isStageAnimated,
+  ticketCardState,
   ticketElapsedStart,
   ticketImplementationDuration,
   ticketPrNumber,
   triageVerdictDot,
+  type CardState,
 } from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
@@ -25,7 +24,7 @@ import { cn } from "@/lib/utils";
 interface TicketCardProps {
   ticket: Ticket;
   projectLabel: string;
-  /** Optional CSS color value applied as the background of the project badge. */
+  /** Optional CSS color value applied as the text colour of the project token. */
   projectColor?: string;
   /** The dependency parent (resolved by the caller, which holds the full board), or null/undefined. */
   parent?: Ticket | null;
@@ -34,12 +33,35 @@ interface TicketCardProps {
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
 }
 
+/** Left-edge stripe: the single glanceable signal of what the ticket is doing. */
+const STATE_STRIPE_COLORS: Record<CardState, string> = {
+  running: "bg-info",
+  attention: "bg-warning",
+  failed: "bg-danger",
+  done: "bg-success",
+  idle: "bg-border",
+};
+
+const PARENT_TITLE_MAX_CHARS = 24;
+
+function truncateParentTitle(title: string): string {
+  if (title.length <= PARENT_TITLE_MAX_CHARS) return title;
+  return `${title.slice(0, PARENT_TITLE_MAX_CHARS - 1)}…`;
+}
+
 export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
   const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null : false;
   const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
+  const state = ticketCardState(ticket);
+  const parentTitle = parent?.title ?? "?";
+  const dependencyLabel = `${parentBlocked ? "en attente de" : "basé sur"} ${parentTitle}`;
+  const elapsedLabel =
+    implementationDuration !== null
+      ? `Implémentée en ${formatDuration(implementationDuration)}`
+      : formatRelativeDuration(ticketElapsedStart(ticket), now);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
   });
@@ -58,58 +80,33 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
       {...listeners}
       onClick={() => onOpen(ticket)}
       className={cn(
-        "cursor-grab rounded-lg border bg-card p-3 shadow-sm transition-colors hover:border-ring active:cursor-grabbing",
-        ticket.stage === "failed" && "border-destructive/60",
-        ticket.watchdogFlagged && "border-warning/60",
+        "relative cursor-grab rounded-md py-2 pl-3 pr-2.5 transition-colors hover:bg-accent/60 active:cursor-grabbing",
+        state === "attention" ? "bg-warning/10" : "bg-card",
       )}
     >
+      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-0.5 rounded-l-md", STATE_STRIPE_COLORS[state])} />
+
       <div className="flex items-start justify-between gap-2">
         <h3 className="min-w-0 break-words text-sm font-medium leading-snug">{ticket.title}</h3>
-        <div className="flex shrink-0 items-center gap-1">
-          {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
-          <Badge
-            variant="outline"
-            className="text-[10px]"
-            style={projectBadgeStyle(projectColor)}
-          >
-            {projectLabel}
-          </Badge>
-        </div>
+        {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {ticket.triageStatus === "running" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
-          </Badge>
-        )}
-        <TicketBadges ticket={ticket} />
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
+        <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
+        {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
+        <span>{elapsedLabel}</span>
+        {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}
+        {ticket.watchdogFlagged && <span className="text-warning">inactif</span>}
+        {ticket.testing && <span>test</span>}
         {ticket.dependsOn && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <CornerDownRight className="h-3 w-3" />
-            {parentBlocked ? "en attente de " : "basé sur "}
-            <span className="max-w-[120px] truncate">{parent?.title ?? "?"}</span>
-          </Badge>
+          <span className="max-w-full truncate" title={dependencyLabel}>
+            ↳ {truncateParentTitle(parentTitle)}
+          </span>
         )}
-        {extractFigmaUrls(ticket.description).length > 0 && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Palette className="h-3 w-3" /> UI
-          </Badge>
-        )}
-        {ticket.testing && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <FlaskConical className="h-3 w-3" /> Test en cours
-          </Badge>
-        )}
-        {ticket.implementer === "composer" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Sparkles className="h-3 w-3" /> Composer
-          </Badge>
-        )}
-        {ticket.orchestrator === "codex" && (
-          <Badge variant="secondary" className="gap-1 text-[10px]">
-            <Bot className="h-3 w-3" /> Codex
-          </Badge>
+        {ticket.triageStatus === "running" && (
+          <span className="inline-flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
+          </span>
         )}
         {ticket.prUrl && (
           <a
@@ -117,7 +114,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            className="inline-flex items-center gap-1 text-foreground hover:underline"
           >
             <ExternalLink className="h-3 w-3" />
             {prNumber !== null ? `PR #${prNumber}` : "PR"}
@@ -132,7 +129,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
               setCheckingMerge(true);
               void onCheckMerge(ticket).finally(() => setCheckingMerge(false));
             }}
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+            className="inline-flex items-center gap-1 font-mono text-2xs hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
           >
             {checkingMerge ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
             Vérifier le merge
@@ -141,15 +138,6 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
       </div>
 
       {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
-
-      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
-        <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
-        {implementationDuration !== null ? (
-          <span>Implémentée en {formatDuration(implementationDuration)}</span>
-        ) : (
-          <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
-        )}
-      </div>
     </div>
   );
 }
@@ -157,7 +145,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
 function TriageDot({ verdict }: { verdict: NonNullable<Ticket["triageVerdict"]> }) {
   const { glyph, className, title } = triageVerdictDot(verdict);
   return (
-    <span className={cn("text-xs font-bold leading-none", className)} title={title} aria-label={title}>
+    <span className={cn("shrink-0 text-xs font-bold leading-none", className)} title={title} aria-label={title}>
       {glyph}
     </span>
   );

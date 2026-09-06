@@ -27,6 +27,8 @@ interface BoardColumnProps {
   /** Full-board lookup for resolving a card's dependency parent (which may live in another column). */
   ticketsById: Map<string, Ticket>;
   onOpenTicket: (ticket: Ticket) => void;
+  /** False for a terminal lane opened from the "Terminé" panel: it is always expanded and closes from the panel. */
+  collapsible?: boolean;
   /** When set on the TODO column, renders a "+" beside the count to create a ticket. */
   onAddTicket?: () => void;
   /** When set on the TODO column, renders a button to send the first eligible tickets to "À implémenter". */
@@ -117,13 +119,8 @@ function useWindowedTickets(tickets: Ticket[]): {
   return { visibleTickets, sentinelRef, scrollRef, hasMore };
 }
 
-/** "PR mergée"/"PR reviewed"/"Répondu" pile up over time, so they start folded; others start open. */
-const DEFAULT_COLLAPSED: Partial<Record<Column, boolean>> = { merged: true, reviewed: true, answered: true };
-
 function readCollapsed(column: Column): boolean {
-  const stored = localStorage.getItem(`${COLLAPSE_KEY_PREFIX}${column}`);
-  if (stored === null) return DEFAULT_COLLAPSED[column] ?? false;
-  return stored === "1";
+  return localStorage.getItem(`${COLLAPSE_KEY_PREFIX}${column}`) === "1";
 }
 
 function writeCollapsed(column: Column, collapsed: boolean): void {
@@ -232,6 +229,7 @@ export function BoardColumn({
   projects,
   ticketsById,
   onOpenTicket,
+  collapsible = true,
   onAddTicket,
   onMoveAllToImplementing,
   moveAllCount = 0,
@@ -287,9 +285,7 @@ export function BoardColumn({
   };
 
   const countBadge = (
-    <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
-      {tickets.length}
-    </span>
+    <span className="font-mono text-2xs tabular-nums text-muted-foreground">{tickets.length}</span>
   );
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
@@ -335,7 +331,7 @@ export function BoardColumn({
             type="button"
             onClick={onCheckAllMerges}
             disabled={checkAllCount === 0 || checkAllBusy}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+            className="flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
             title={checkAllButtonTitle}
             aria-label="Vérifier le merge de toutes les cartes"
           >
@@ -346,7 +342,7 @@ export function BoardColumn({
           <button
             type="button"
             onClick={onAddTicket}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+            className="flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
             title="Nouveau ticket"
             aria-label="Nouveau ticket"
           >
@@ -359,56 +355,60 @@ export function BoardColumn({
       countBadge
     );
 
-  if (collapsed) {
+  if (collapsible && collapsed) {
     return (
       <div
         ref={setNodeRef}
         className={cn(
-          "flex h-full w-12 shrink-0 flex-col items-center rounded-xl border border-border bg-secondary/70 shadow-sm transition-colors",
-          isOver && "bg-accent/70",
+          "flex h-full w-10 shrink-0 flex-col items-center border-r border-border transition-colors",
+          isOver && "bg-accent/40",
         )}
       >
         <button
           type="button"
           onClick={toggle}
-          className="flex h-full w-full flex-col items-center gap-3 py-3 text-muted-foreground hover:text-foreground"
+          className="flex h-full w-full flex-col items-center gap-2 py-1 text-muted-foreground hover:text-foreground"
           title={`Déplier « ${label} »`}
           aria-label={`Déplier « ${label} »`}
         >
-          <PanelLeftOpen className="h-4 w-4" />
+          <PanelLeftOpen className="h-3.5 w-3.5" />
           {countBadge}
-          <span className="text-sm font-semibold text-foreground [writing-mode:vertical-rl]">{label}</span>
+          <span className="text-2xs uppercase tracking-wider text-muted-foreground [writing-mode:vertical-rl]">
+            {label}
+          </span>
         </button>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full w-72 shrink-0 flex-col rounded-xl border border-border bg-secondary/70 shadow-sm">
-      <div className="flex items-center justify-between border-b border-border/70 px-3 py-2">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggle}
-            className="text-muted-foreground hover:text-foreground"
-            title={`Replier « ${label} »`}
-            aria-label={`Replier « ${label} »`}
-          >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
-          <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+    <div className="flex h-full w-64 shrink-0 flex-col border-r border-border">
+      <div className="flex items-center justify-between px-2.5 pb-2 pt-1">
+        <div className="flex items-center gap-1.5">
+          {collapsible && (
+            <button
+              type="button"
+              onClick={toggle}
+              className="text-muted-foreground transition-colors hover:text-foreground"
+              title={`Replier « ${label} »`}
+              aria-label={`Replier « ${label} »`}
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <h2 className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">{label}</h2>
           {sortField !== undefined && (
             <button
               type="button"
               onClick={toggleSort}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground transition-colors hover:text-foreground"
               title={sortDir === "desc" ? "Tri : plus récents d'abord" : "Tri : plus anciens d'abord"}
               aria-label={sortDir === "desc" ? "Tri : plus récents d'abord, cliquer pour inverser" : "Tri : plus anciens d'abord, cliquer pour inverser"}
             >
               {sortDir === "desc" ? (
-                <ArrowDownWideNarrow className="h-4 w-4" />
+                <ArrowDownWideNarrow className="h-3.5 w-3.5" />
               ) : (
-                <ArrowUpNarrowWide className="h-4 w-4" />
+                <ArrowUpNarrowWide className="h-3.5 w-3.5" />
               )}
             </button>
           )}
@@ -418,8 +418,8 @@ export function BoardColumn({
       <div
         ref={setCardContainerRef}
         className={cn(
-          "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-b-xl p-2 transition-colors",
-          isOver && "bg-accent/70",
+          "flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2 pt-0 transition-colors",
+          isOver && "bg-accent/40",
         )}
       >
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
@@ -444,10 +444,10 @@ export function BoardColumn({
             return (
               <div
                 key={group.familyKey}
-                className="flex flex-col gap-2 rounded-lg border border-dashed border-border/80 bg-background/30 p-2"
+                className="flex flex-col gap-1.5 rounded-md border border-dashed border-border bg-transparent p-1.5"
               >
                 {headerTitle !== null && (
-                  <div className="flex items-center gap-1.5 px-0.5 text-xs font-medium text-muted-foreground">
+                  <div className="flex items-center gap-1.5 px-0.5 text-2xs font-medium text-muted-foreground">
                     <GitBranch className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate" title={headerTitle}>
                       {headerTitle}
@@ -456,7 +456,7 @@ export function BoardColumn({
                 )}
                 {group.members.map((member, index) => (
                   <div key={member.id} className="flex items-start gap-1.5">
-                    <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-muted-foreground">
+                    <span className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted font-mono text-2xs text-muted-foreground">
                       {member.childOrder !== null ? member.childOrder + 1 : index + 1}
                     </span>
                     <div className="min-w-0 flex-1">{renderCard(member)}</div>

@@ -6,7 +6,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { TerminalView } from "@/components/TerminalView";
 import { TicketBadges } from "@/components/TicketBadges";
-import { projectBadgeStyle, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
+import { resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { useBoard } from "@/hooks/useBoard";
 import { useTickTimer } from "@/hooks/useTickTimer";
@@ -96,17 +96,13 @@ function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProp
         <h3 className="line-clamp-2 text-sm font-medium leading-snug">{ticket.title}</h3>
         <div className="flex shrink-0 items-center gap-1">
           {ticket.slotId !== null && (
-            <Badge variant="info" className="gap-1 text-[10px]">
+            <Badge variant="info" className="gap-1 text-2xs">
               <Cpu className="h-3 w-3" /> slot-{ticket.slotId}
             </Badge>
           )}
-          <Badge
-            variant="outline"
-            className="text-[10px]"
-            style={projectBadgeStyle(projectColor)}
-          >
+          <span className="font-mono text-2xs" style={projectColor ? { color: projectColor } : undefined}>
             {projectLabel}
-          </Badge>
+          </span>
         </div>
       </div>
 
@@ -116,7 +112,7 @@ function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProp
 
       {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
 
-      <div className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+      <div className="mt-1.5 flex items-center gap-1 text-2xs text-muted-foreground">
         <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
         <span>{formatRelativeDuration(ticketElapsedStart(ticket), now)}</span>
       </div>

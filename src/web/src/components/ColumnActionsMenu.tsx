@@ -46,7 +46,7 @@ export function ColumnActionsMenu({ items, ariaLabel }: ColumnActionsMenuProps) 
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+        className="flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}

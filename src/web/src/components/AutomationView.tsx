@@ -14,7 +14,7 @@ import type { Automation, AutomationRun, CreateAutomationInput } from "@shared/s
 
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm";
+import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/ui/markdown";
 import { Select } from "@/components/ui/select";
@@ -226,7 +226,6 @@ function AutomationCard({ automation }: AutomationCardProps): ReactNode {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<FormState>(() => formFromAutomation(automation));
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -277,7 +276,6 @@ function AutomationCard({ automation }: AutomationCardProps): ReactNode {
   };
 
   const remove = async (): Promise<void> => {
-    setConfirmDelete(false);
     setError("");
     try {
       await api.deleteAutomation(automation.id);
@@ -327,14 +325,17 @@ function AutomationCard({ automation }: AutomationCardProps): ReactNode {
               <Button size="icon" variant="ghost" onClick={startEdit} title="Modifier">
                 <Pencil className="h-4 w-4" />
               </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => setConfirmDelete(true)}
-                title="Supprimer"
+              <ConfirmPopover
+                title="Supprimer l'automatisation"
+                description={`« ${automation.name} » et son historique seront supprimés.`}
+                confirmLabel="Supprimer"
+                destructive
+                onConfirm={remove}
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+                <Button size="icon" variant="ghost" title="Supprimer" aria-label="Supprimer">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </ConfirmPopover>
             </div>
           </div>
 
@@ -355,16 +356,6 @@ function AutomationCard({ automation }: AutomationCardProps): ReactNode {
           )}
         </>
       )}
-
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Supprimer l'automatisation"
-        description={`« ${automation.name} » et son historique seront supprimés.`}
-        confirmLabel="Supprimer"
-        destructive
-        onConfirm={() => void remove()}
-        onCancel={() => setConfirmDelete(false)}
-      />
     </div>
   );
 }

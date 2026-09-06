@@ -11,6 +11,7 @@ import {
 import { useRef } from "react";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
 const TICKET_OPTION = {
@@ -138,7 +139,7 @@ export function TicketOptionsToggleGroup({
 
   return (
     <div className={cn("space-y-3 rounded-md border p-3", className)}>
-      <h3 id={headingId} className="text-sm font-semibold">
+      <h3 id={headingId} className={FIELD_LABEL_CLASSES}>
         {title}
       </h3>
       <ToggleGroup

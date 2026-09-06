@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export interface PrdAnnotation {
   id: string;
   quote: string;
@@ -99,4 +101,25 @@ export function compileFeedback(annotations: PrdAnnotation[], generalNote: strin
   const note = generalNote.trim();
   if (note) parts.push(`Retour général :\n${note}`);
   return parts.join("\n\n");
+}
+
+export const PRD_ANNOTATIONS_SCHEMA = z.array(
+  z.object({ id: z.string(), quote: z.string(), comment: z.string() }),
+) satisfies z.ZodType<PrdAnnotation[]>;
+
+const HASH_SEED = 5381;
+const HASH_SHIFT = 5;
+const HASH_RADIX = 36;
+
+function hashText(text: string): string {
+  let hash = HASH_SEED;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << HASH_SHIFT) + hash + text.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(HASH_RADIX);
+}
+
+/** Annotations anchor to the PRD text, so a re-submitted PRD gets a fresh draft key. */
+export function prdAnnotationsDraftKey(ticketId: string, markdown: string): string {
+  return `prd-annotations:${ticketId}:${hashText(markdown)}`;
 }

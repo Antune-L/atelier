@@ -95,12 +95,15 @@ export function renderMarkdownToSafeHtml(content: string, options?: { interactiv
 function ImageLightbox({ image, onClose }: ImageLightboxProps) {
   const [closeButton, setCloseButton] = useState<HTMLButtonElement | null>(null);
 
-  // Capture-phase Escape: runs before the underlying Modal's bubble-phase window
-  // listener, so stopPropagation prevents Escape from also closing the detail modal.
+  // NOTE: Radix's dismissable layer listens for Escape on `document` in the capture phase
+  // (@radix-ui/react-dismissable-layer). The capture path runs window before document, so this
+  // window-capture listener fires first and stopPropagation keeps Escape from also closing the
+  // sheet behind the lightbox.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
+      event.preventDefault();
       onClose();
     };
     window.addEventListener("keydown", onKeyDown, true);
@@ -118,14 +121,14 @@ function ImageLightbox({ image, onClose }: ImageLightboxProps) {
 
   const closeFromBackdrop = (event: MouseEvent): void => {
     // Synthetic events bubble through the React tree across the portal; stop the
-    // event so it never reaches the Modal's onMouseDown (which closes the detail).
+    // event so it never reaches the sheet behind the lightbox (which would close it).
     event.stopPropagation();
     onClose();
   };
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-fullscreen flex items-center justify-center bg-black/80 p-4"
       onMouseDown={closeFromBackdrop}
       role="dialog"
       aria-modal="true"

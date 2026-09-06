@@ -7,24 +7,24 @@ import { renderMarkdownToSafeHtml } from "@/components/ui/markdown";
 import { usePrdSearch } from "@/hooks/usePrdSearch";
 import {
   SELECTION_BUTTON_GAP_PX,
-  compileFeedback,
   injectAnnotations,
   type PrdAnnotation,
   type SelectionState,
 } from "@/lib/prdAnnotations";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
 interface PrdAnnotatorProps {
   markdown: string;
   /** When false the content is read-only (no selection capture, no annotations sidebar). */
   actionable: boolean;
-  /** Reports the compiled feedback whenever annotations or the general note change. */
-  onFeedbackChange?: (feedback: string, hasFeedback: boolean) => void;
-  /** Reports whether the annotation composer is open (e.g. to guard escape-to-close). */
-  onComposingChange?: (composing: boolean) => void;
-  /** Reports whether the in-app search bar is open (e.g. to guard escape-to-close). */
-  onSearchingChange?: (searching: boolean) => void;
+  annotations: PrdAnnotation[];
+  onAnnotationsChange: (annotations: PrdAnnotation[]) => void;
+  generalNote: string;
+  onGeneralNoteChange: (note: string) => void;
 }
+
+const GENERAL_NOTE_ID = "prd-general-note";
 
 /**
  * Renders a PRD markdown with text-selection → floating "Commenter" button and an annotations
@@ -34,12 +34,11 @@ interface PrdAnnotatorProps {
 export function PrdAnnotator({
   markdown,
   actionable,
-  onFeedbackChange,
-  onComposingChange,
-  onSearchingChange,
+  annotations,
+  onAnnotationsChange,
+  generalNote,
+  onGeneralNoteChange,
 }: PrdAnnotatorProps) {
-  const [annotations, setAnnotations] = useState<PrdAnnotation[]>([]);
-  const [generalNote, setGeneralNote] = useState("");
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [composing, setComposing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -48,23 +47,13 @@ export function PrdAnnotator({
   const contentRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(0);
 
-  const setComposingState = (quote: string | null): void => {
-    setComposing(quote);
-    onComposingChange?.(quote !== null);
-  };
-
   const baseHtml = useMemo(() => renderMarkdownToSafeHtml(markdown), [markdown]);
   const { html, anchoredIds } = useMemo(
     () => injectAnnotations(baseHtml, annotations, activeId),
     [baseHtml, annotations, activeId],
   );
 
-  const search = usePrdSearch({ contentRef, htmlVersion: html, onSearchingChange });
-
-  const reportFeedback = (nextAnnotations: PrdAnnotation[], nextNote: string): void => {
-    const hasFeedback = nextAnnotations.length > 0 || nextNote.trim().length > 0;
-    onFeedbackChange?.(compileFeedback(nextAnnotations, nextNote), hasFeedback);
-  };
+  const search = usePrdSearch({ contentRef, htmlVersion: html });
 
   const captureSelection = (): void => {
     if (!actionable) return;
@@ -94,7 +83,7 @@ export function PrdAnnotator({
   };
 
   const openComposer = (quote: string): void => {
-    setComposingState(quote);
+    setComposing(quote);
     setDraft("");
     setSelection(null);
     window.getSelection()?.removeAllRanges();
@@ -104,17 +93,13 @@ export function PrdAnnotator({
     const comment = draft.trim();
     if (composing === null || !comment) return;
     nextId.current += 1;
-    const next = [...annotations, { id: `ann-${nextId.current}`, quote: composing, comment }];
-    setAnnotations(next);
-    reportFeedback(next, generalNote);
-    setComposingState(null);
+    onAnnotationsChange([...annotations, { id: `ann-${nextId.current}`, quote: composing, comment }]);
+    setComposing(null);
     setDraft("");
   };
 
   const removeAnnotation = (id: string): void => {
-    const next = annotations.filter((a) => a.id !== id);
-    setAnnotations(next);
-    reportFeedback(next, generalNote);
+    onAnnotationsChange(annotations.filter((a) => a.id !== id));
     if (activeId === id) setActiveId(null);
   };
 
@@ -122,11 +107,6 @@ export function PrdAnnotator({
     setActiveId(id);
     const mark = contentRef.current?.querySelector(`[data-ann-id="${id}"]`);
     if (mark instanceof HTMLElement) mark.scrollIntoView({ block: "center", behavior: "smooth" });
-  };
-
-  const changeGeneralNote = (value: string): void => {
-    setGeneralNote(value);
-    reportFeedback(annotations, value);
   };
 
   const onContentClick = (event: React.MouseEvent<HTMLDivElement>): void => {
@@ -139,16 +119,16 @@ export function PrdAnnotator({
   };
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex min-h-0 flex-1 overflow-hidden">
       <div
         ref={contentRef}
         onMouseUp={captureSelection}
         onScroll={() => setSelection(null)}
         onClick={onContentClick}
-        className="relative min-w-0 flex-1 overflow-y-auto px-6 py-4"
+        className="relative min-w-0 flex-1 overflow-y-auto px-4 py-3"
       >
         {search.open && (
-          <div className="sticky top-0 z-20 -mx-6 -mt-4 mb-2 flex justify-end px-6 pt-4">
+          <div className="sticky top-0 z-20 -mx-4 -mt-3 mb-2 flex justify-end px-4 pt-3">
             <div className="flex items-center gap-1 rounded-md border bg-card p-1 shadow-md">
               <Search className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" />
               <input
@@ -160,9 +140,7 @@ export function PrdAnnotator({
                 className="h-7 w-44 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground"
               />
               <span className="w-14 shrink-0 text-center text-xs tabular-nums text-muted-foreground">
-                {search.query && search.total === 0
-                  ? "Aucun"
-                  : `${search.current}/${search.total}`}
+                {search.query && search.total === 0 ? "Aucun" : `${search.current}/${search.total}`}
               </span>
               <Button
                 size="icon"
@@ -197,7 +175,7 @@ export function PrdAnnotator({
           </div>
         )}
         {actionable && (
-          <p className="mb-3 text-xs text-muted-foreground">
+          <p className={cn("mb-3", FIELD_LABEL_CLASSES)}>
             Sélectionne un passage pour y attacher un retour.
           </p>
         )}
@@ -221,8 +199,8 @@ export function PrdAnnotator({
       </div>
 
       {actionable && (
-        <aside className="flex w-80 shrink-0 flex-col overflow-hidden border-l">
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-l border-border">
+          <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
             {composing !== null && (
               <div className="space-y-2 rounded-md border border-warning/50 bg-warning/10 p-3">
                 <p className="text-xs italic text-muted-foreground">« {composing} »</p>
@@ -237,7 +215,7 @@ export function PrdAnnotator({
                   <Button size="sm" onClick={saveAnnotation} disabled={!draft.trim()}>
                     Ajouter
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setComposingState(null)}>
+                  <Button size="sm" variant="outline" onClick={() => setComposing(null)}>
                     Annuler
                   </Button>
                 </div>
@@ -245,7 +223,7 @@ export function PrdAnnotator({
             )}
 
             <div>
-              <h4 className="mb-2 text-sm font-semibold">
+              <h4 className={cn("mb-2", FIELD_LABEL_CLASSES)}>
                 Annotations {annotations.length > 0 && `(${annotations.length})`}
               </h4>
               {annotations.length === 0 ? (
@@ -266,7 +244,7 @@ export function PrdAnnotator({
                           onClick={() => focusAnnotation(a.id)}
                           className="min-w-0 flex-1 text-left"
                         >
-                          <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning text-[10px] font-semibold text-warning-foreground">
+                          <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning font-mono text-2xs font-semibold text-warning-foreground">
                             {i + 1}
                           </span>
                           <span className="text-xs italic text-muted-foreground">« {a.quote} »</span>
@@ -275,14 +253,14 @@ export function PrdAnnotator({
                           type="button"
                           onClick={() => removeAnnotation(a.id)}
                           aria-label="Supprimer l'annotation"
-                          className="text-muted-foreground transition-colors hover:text-destructive"
+                          className="text-muted-foreground transition-colors hover:text-danger"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
                       <p className="mt-1 whitespace-pre-wrap">{a.comment}</p>
                       {!anchoredIds.has(a.id) && (
-                        <p className="mt-1 text-[11px] text-muted-foreground">
+                        <p className="mt-1 text-2xs text-muted-foreground">
                           Non surligné dans le texte (passage à cheval sur plusieurs éléments) — envoyé quand même.
                         </p>
                       )}
@@ -293,11 +271,11 @@ export function PrdAnnotator({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="prd-general-note">Retour général (optionnel)</Label>
+              <Label htmlFor={GENERAL_NOTE_ID}>Retour général (optionnel)</Label>
               <Textarea
-                id="prd-general-note"
+                id={GENERAL_NOTE_ID}
                 value={generalNote}
-                onChange={(e) => changeGeneralNote(e.target.value)}
+                onChange={(e) => onGeneralNoteChange(e.target.value)}
                 className="min-h-[60px]"
                 placeholder="Remarque globale sur le PRD…"
               />

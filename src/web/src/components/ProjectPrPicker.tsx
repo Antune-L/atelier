@@ -6,6 +6,7 @@ import type { ProjectInfo } from "@shared/schemas";
 import { PrSelectRow } from "@/components/PrSelectRow";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { Select } from "@/components/ui/select";
 import type { ProjectPanelState } from "@/hooks/useProjectPanel";
 import { cn } from "@/lib/utils";
@@ -41,7 +42,7 @@ export function ProjectPrPicker({ projects, panel, idPrefix }: ProjectPrPickerPr
     <>
       <div className="flex items-end gap-2">
         <div className="flex-1 space-y-1.5">
-          <Label htmlFor={selectId}>Projet</Label>
+          <Label htmlFor={selectId} className={FIELD_LABEL_CLASSES}>Projet</Label>
           <Select
             id={selectId}
             value={project}

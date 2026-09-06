@@ -7,7 +7,7 @@ import { useBoard } from "@/hooks/useBoard";
 export function Toaster() {
   const { toasts } = useBoard();
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-toast flex w-80 flex-col gap-2">
       {toasts.map((toast) => {
         const ticketId = toast.ticketId;
         const openTicket = ticketId
@@ -33,22 +33,24 @@ export function Toaster() {
                 : undefined
             }
             className={cn(
-              "pointer-events-auto flex items-start gap-2 rounded-lg border bg-card p-3 shadow-lg",
+              "pointer-events-auto flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm shadow-md",
               openTicket && "cursor-pointer",
             )}
           >
-            <div className="flex-1">
-              <p className="text-sm font-semibold">{toast.title}</p>
-              <p className="text-xs text-muted-foreground">{toast.body}</p>
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{toast.title}</p>
+              <p className="font-mono text-2xs text-muted-foreground">{toast.body}</p>
             </div>
             <button
-              className="text-muted-foreground hover:text-foreground"
+              type="button"
+              aria-label="Fermer"
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation();
                 boardStore.dismissToast(toast.id);
               }}
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
         );

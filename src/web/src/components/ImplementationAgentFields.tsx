@@ -12,6 +12,7 @@ import {
 import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
@@ -28,7 +29,7 @@ import {
 function Field({ labelId, label, children }: { labelId: string; label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-start gap-1.5">
-      <Label id={labelId}>{label}</Label>
+      <Label id={labelId} className={FIELD_LABEL_CLASSES}>{label}</Label>
       {children}
     </div>
   );
@@ -159,7 +160,7 @@ export function ImplementationAgentFields({
       )}
       {orchestrator === "codex" && (
         <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
-          <p className="text-xs font-medium text-muted-foreground">Orchestrateur Codex</p>
+          <p className={FIELD_LABEL_CLASSES}>Orchestrateur Codex</p>
           <CodexAgentFields
             codexModel={codexModel}
             codexEffort={codexEffort}
@@ -186,7 +187,7 @@ export function ImplementationAgentFields({
       </Field>
       {implementer === "claude" && (
         <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
-          <p className="text-xs font-medium text-muted-foreground">Sous-agent implémenteur</p>
+          <p className={FIELD_LABEL_CLASSES}>Sous-agent implémenteur</p>
           <Field labelId={implementerModelLabelId} label="Modèle">
             <Tabs
               options={modelOptions}
@@ -215,7 +216,7 @@ export function ImplementationAgentFields({
       {implementer === "codex" && (
         <div className="flex flex-col gap-3 rounded-md border border-border/60 p-3">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-muted-foreground">
+            <p className={FIELD_LABEL_CLASSES}>
               {orchestrator === "codex" ? "Sous-agent implémenteur Codex" : "Session Codex déléguée"}
             </p>
             <Button

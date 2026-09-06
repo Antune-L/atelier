@@ -7,6 +7,7 @@ import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
 import { BranchCombobox, Label } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 
 interface WorktreePanelProps {
   projects: ProjectInfo[];
@@ -67,7 +68,9 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
   };
 
   return (
-    <div className="space-y-4">
+    // NOTE: the dialog body scrolls (overflow-y-auto), which clips BranchCombobox's absolute
+    // listbox (max-h-48); this panel is short, so reserve the room the list needs below it.
+    <div className="min-h-[20rem] space-y-4">
       <ProjectSelect
         id="worktree-project"
         projects={projects}
@@ -75,7 +78,7 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
         onChange={setProjectChoice}
       />
       <div className="space-y-1.5">
-        <Label htmlFor="worktree-base-branch">Branche de base du worktree</Label>
+        <Label htmlFor="worktree-base-branch" className={FIELD_LABEL_CLASSES}>Branche de base du worktree</Label>
         <BranchCombobox
           id="worktree-base-branch"
           value={baseBranch}
@@ -87,11 +90,11 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={onClose}>
+      <div className={PANEL_FOOTER_CLASSES}>
+        <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={() => void launch()} disabled={busy || !project || !baseBranch}>
+        <Button size="sm" onClick={() => void launch()} disabled={busy || !project || !baseBranch}>
           <GitBranch className="h-4 w-4" />
           Lancer le worktree
         </Button>

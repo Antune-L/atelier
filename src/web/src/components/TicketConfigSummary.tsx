@@ -13,6 +13,7 @@ import {
 import type { Ticket } from "@shared/schemas";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema } from "@shared/schemas";
 
+import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { useCapabilities } from "@/hooks/useCapabilities";
 
 const YES = "Oui";
@@ -45,9 +46,9 @@ function inheritedLabel<T extends string>(
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-right text-sm font-medium">{value}</dd>
+    <div className="flex items-baseline justify-between gap-3 text-xs">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-right font-mono text-2xs">{value}</dd>
     </div>
   );
 }
@@ -124,11 +125,9 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
     : ticket.codexImplementerFast ? YES : NO;
 
   return (
-    <details className="rounded-md border bg-muted/30 p-3">
-      <summary className="cursor-pointer text-sm font-semibold">
-        Options de création
-      </summary>
-      <dl className="mt-3 space-y-2">
+    <section className="space-y-2">
+      <SectionHeader>Options de création</SectionHeader>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-1 lg:grid-cols-2">
         <Row label="Orchestrateur" value={ORCHESTRATOR_LABELS[ticket.orchestrator]} />
         {ticket.feasibilityEngine !== null && (
           <Row
@@ -235,6 +234,6 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
           </>
         )}
       </dl>
-    </details>
+    </section>
   );
 }

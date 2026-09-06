@@ -6,6 +6,7 @@ import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { Label } from "@/components/ui/input";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { Switch } from "@/components/ui/switch";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -70,7 +71,7 @@ export function CodexAgentFields({
   return (
     <>
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={modelLabelId}>Modèle (Codex)</Label>
+        <Label id={modelLabelId} className={FIELD_LABEL_CLASSES}>Modèle (Codex)</Label>
         <Tabs
           options={codexModelTabOptions(runtime)}
           value={resolvedModel}
@@ -79,7 +80,7 @@ export function CodexAgentFields({
         />
       </div>
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={effortLabelId}>Effort (Codex)</Label>
+        <Label id={effortLabelId} className={FIELD_LABEL_CLASSES}>Effort (Codex)</Label>
         <Tabs
           options={codexEffortTabOptions(resolvedModel, runtime, labelStyle)}
           value={codexEffort ?? resolvedDefaultEffort}

@@ -22,16 +22,8 @@ import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import {
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
-} from "@/components/ui/modal";
 import { SectionHeader } from "@/components/ui/settings";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
@@ -42,6 +34,7 @@ import { useProjects } from "@/hooks/useProjects";
 import { useTheme } from "@/hooks/useTheme";
 import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
@@ -159,40 +152,28 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} className="max-w-4xl">
-      <ModalHeader>
-        <div className="flex flex-col gap-3 min-[720px]:flex-row min-[720px]:items-center min-[720px]:justify-between">
-          <ModalTitle>Réglages</ModalTitle>
-          <div className="relative min-[720px]:w-72">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={search}
-              onChange={(e) => changeSearch(e.target.value)}
-              placeholder="Rechercher un réglage…"
-              aria-label="Rechercher un réglage"
-              className="pl-8"
-            />
-          </div>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      size="lg"
+      title="Réglages"
+    >
+      <div className="flex gap-5">
+        <SettingsNav
+          sectionId={sectionId}
+          onSelect={setSectionId}
+          query={query}
+          counts={counts}
+          search={search}
+          onSearchChange={changeSearch}
+        />
+        <div className="min-w-0 flex-1">
+          <SettingsSectionPanel sectionId={sectionId} query={query} />
         </div>
-      </ModalHeader>
-      <ModalBody>
-        <div className="flex flex-col gap-5 min-[720px]:flex-row">
-          <SettingsNav
-            sectionId={sectionId}
-            onSelect={setSectionId}
-            query={query}
-            counts={counts}
-          />
-          <div className="min-w-0 flex-1">
-            <SettingsSectionPanel sectionId={sectionId} query={query} />
-          </div>
-        </div>
-      </ModalBody>
-      <ModalFooter>
-        <Button onClick={onClose}>Fermer</Button>
-      </ModalFooter>
-    </Modal>
+      </div>
+    </Dialog>
   );
 }
 
@@ -201,20 +182,34 @@ interface SettingsNavProps {
   onSelect: (id: SettingsSectionId) => void;
   query: string;
   counts: Partial<Record<SettingsSectionId, number>>;
+  search: string;
+  onSearchChange: (value: string) => void;
 }
 
-function SettingsNav({ sectionId, onSelect, query, counts }: SettingsNavProps) {
+function SettingsNav({
+  sectionId,
+  onSelect,
+  query,
+  counts,
+  search,
+  onSearchChange,
+}: SettingsNavProps) {
   return (
-    <nav
-      aria-label="Sections des réglages"
-      className="flex shrink-0 gap-4 overflow-x-auto pb-1 min-[720px]:w-56 min-[720px]:flex-col min-[720px]:gap-3 min-[720px]:overflow-x-visible min-[720px]:pb-0"
-    >
+    <nav aria-label="Sections des réglages" className="flex w-48 shrink-0 flex-col gap-3">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Rechercher un réglage…"
+          aria-label="Rechercher un réglage"
+          className="h-7 w-full pl-7 text-xs"
+        />
+      </div>
       {SETTINGS_GROUPS.map((group) => (
-        <div
-          key={group}
-          className="flex shrink-0 items-center gap-1 min-[720px]:flex-col min-[720px]:items-stretch"
-        >
-          <p className="shrink-0 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground min-[720px]:pb-1">
+        <div key={group} className="flex flex-col items-stretch">
+          <p className={cn("px-1 pb-1", FIELD_LABEL_CLASSES)}>
             {group}
           </p>
           {SETTINGS_SECTIONS.filter((section) => section.group === group).map((section) => {
@@ -228,7 +223,7 @@ function SettingsNav({ sectionId, onSelect, query, counts }: SettingsNavProps) {
                 aria-current={active ? "page" : undefined}
                 onClick={() => onSelect(section.id)}
                 className={cn(
-                  "flex shrink-0 items-center justify-between gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors",
+                  "flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors",
                   active
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -237,7 +232,14 @@ function SettingsNav({ sectionId, onSelect, query, counts }: SettingsNavProps) {
               >
                 <span>{section.label}</span>
                 {count !== undefined && (
-                  <Badge variant={active ? "outline" : "secondary"}>{count}</Badge>
+                  <span
+                    className={cn(
+                      "font-mono text-2xs",
+                      active ? "opacity-70" : "text-muted-foreground",
+                    )}
+                  >
+                    {count}
+                  </span>
                 )}
               </button>
             );
@@ -411,7 +413,7 @@ interface KnobGroupProps<T extends string> {
 function KnobGroup<T extends string>({ title, options, value, onChange, label }: KnobGroupProps<T>) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{title}</span>
+      <span className={FIELD_LABEL_CLASSES}>{title}</span>
       <Tabs
         options={options}
         value={value}

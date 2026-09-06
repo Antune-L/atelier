@@ -9,6 +9,7 @@ import { Label, Textarea } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
+import { compileFeedback, type PrdAnnotation } from "@/lib/prdAnnotations";
 import { cn } from "@/lib/utils";
 
 /** How long the "Copié !" confirmation stays visible. */
@@ -17,12 +18,14 @@ const COPIED_FEEDBACK_MS = 2_000;
 export function PrdView(): ReactNode {
   const [description, setDescription] = useState("");
   const [markdown, setMarkdown] = useState("");
-  const [feedback, setFeedback] = useState("");
-  const [hasFeedback, setHasFeedback] = useState(false);
+  const [annotations, setAnnotations] = useState<PrdAnnotation[]>([]);
+  const [generalNote, setGeneralNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const agent = useAgentKnobs();
+  const feedback = compileFeedback(annotations, generalNote);
+  const hasFeedback = annotations.length > 0 || generalNote.trim().length > 0;
 
   const generate = async (revise: boolean): Promise<void> => {
     if (loading) return;
@@ -42,19 +45,14 @@ export function PrdView(): ReactNode {
         },
       );
       // A new PRD invalidates prior annotations; the remounted PrdAnnotator (key) starts clean.
-      setFeedback("");
-      setHasFeedback(false);
+      setAnnotations([]);
+      setGeneralNote("");
       setMarkdown(result.markdown);
     } catch (err) {
       setError(err instanceof Error ? err.message : "échec de génération du PRD");
     } finally {
       setLoading(false);
     }
-  };
-
-  const onFeedbackChange = (next: string, present: boolean): void => {
-    setFeedback(next);
-    setHasFeedback(present);
   };
 
   const copyMarkdown = async (): Promise<void> => {
@@ -144,7 +142,10 @@ export function PrdView(): ReactNode {
             key={markdown}
             markdown={markdown}
             actionable={!loading}
-            onFeedbackChange={onFeedbackChange}
+            annotations={annotations}
+            onAnnotationsChange={setAnnotations}
+            generalNote={generalNote}
+            onGeneralNoteChange={setGeneralNote}
           />
         </div>
       )}

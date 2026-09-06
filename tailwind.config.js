@@ -77,6 +77,13 @@ export default {
         xs: ["11.5px", { lineHeight: "16px" }],
         sm: ["13px", { lineHeight: "18px" }],
       },
+      zIndex: {
+        popover: "75",
+        sheet: "50",
+        dialog: "60",
+        fullscreen: "70",
+        toast: "80",
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",

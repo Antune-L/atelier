@@ -4,6 +4,7 @@ import { ORCHESTRATOR_LABELS, type CodexEffort, type CodexModel, type Orchestrat
 
 import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Label } from "@/components/ui/input";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 
@@ -48,7 +49,7 @@ export function SessionDriverFields({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={orchestratorLabelId}>Agent</Label>
+        <Label id={orchestratorLabelId} className={FIELD_LABEL_CLASSES}>Agent</Label>
         <Tabs
           options={options}
           value={orchestrator}

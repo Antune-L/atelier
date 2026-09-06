@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { api } from "@/lib/api";
+import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { parseTicketsCsv, type ParsedTicketsCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 
@@ -144,7 +145,7 @@ export function ImportTicketsPanel({
         onChange={setProjectChoice}
       />
 
-      <div className="rounded-md border">
+      <div className="rounded-md border border-border">
         <div className="flex items-center justify-between px-3 py-2 text-sm font-medium">
           <button
             type="button"
@@ -175,7 +176,7 @@ export function ImportTicketsPanel({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="import-file">Fichier CSV</Label>
+        <Label htmlFor="import-file" className={FIELD_LABEL_CLASSES}>Fichier CSV</Label>
         <input
           ref={fileInputRef}
           id="import-file"
@@ -185,6 +186,7 @@ export function ImportTicketsPanel({
           className="hidden"
         />
         <Button
+          size="sm"
           variant="outline"
           onClick={() => fileInputRef.current?.click()}
           className="w-full justify-start"
@@ -248,10 +250,8 @@ export function ImportTicketsPanel({
         </div>
       )}
 
-      <div className="space-y-2 rounded-md border p-3">
-        <h3 className="text-sm font-semibold">
-          Agent d'implémentation (tout le lot)
-        </h3>
+      <div className="space-y-2 rounded-md border border-border p-3">
+        <h3 className={FIELD_LABEL_CLASSES}>Agent d'implémentation (tout le lot)</h3>
         <AgentProfileConfig
           orchestrator={agent.orchestrator}
           model={agent.model}
@@ -308,11 +308,12 @@ export function ImportTicketsPanel({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={onClose}>
+      <div className={PANEL_FOOTER_CLASSES}>
+        <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
         <Button
+          size="sm"
           onClick={() => void submit()}
           disabled={!canImport}
           className={cn(!canImport && "opacity-60")}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
+import { useCaptureEscape } from "@/hooks/useCaptureEscape";
 import { ATELIER_SHORTCUT_EVENT } from "@/hooks/useTerminalShortcuts";
 
 const HIGHLIGHT_MATCH = "prd-search-match";
@@ -49,8 +50,6 @@ interface UsePrdSearchOptions {
   contentRef: RefObject<HTMLDivElement>;
   /** Changing this re-runs the match computation (rendered html changed). */
   htmlVersion: unknown;
-  /** Bubble open/closed state up so the dialog can keep Escape from closing it. */
-  onSearchingChange?: (searching: boolean) => void;
 }
 
 interface UsePrdSearchResult {
@@ -64,14 +63,13 @@ interface UsePrdSearchResult {
   next: () => void;
   prev: () => void;
   close: () => void;
-  /** Handles Enter / Shift+Enter / Escape inside the input. */
+  /** Handles Enter / Shift+Enter inside the input (Escape is captured by useCaptureEscape). */
   onInputKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 export function usePrdSearch({
   contentRef,
   htmlVersion,
-  onSearchingChange,
 }: UsePrdSearchOptions): UsePrdSearchResult {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -80,8 +78,6 @@ export function usePrdSearch({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const rangesRef = useRef<Range[]>([]);
-  const onSearchingChangeRef = useRef(onSearchingChange);
-  onSearchingChangeRef.current = onSearchingChange;
 
   const clearHighlights = useCallback((): void => {
     if (!supportsHighlightApi()) return;
@@ -161,12 +157,10 @@ export function usePrdSearch({
     setActiveIndex(0);
     rangesRef.current = [];
     clearHighlights();
-    onSearchingChangeRef.current?.(false);
   }, [clearHighlights]);
 
   const activate = useCallback((): void => {
     setOpen(true);
-    onSearchingChangeRef.current?.(true);
     requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
@@ -175,20 +169,16 @@ export function usePrdSearch({
 
   const onInputKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        close();
-        return;
-      }
       if (event.key === "Enter") {
         event.preventDefault();
         if (event.shiftKey) prev();
         else next();
       }
     },
-    [close, prev, next],
+    [prev, next],
   );
+
+  useCaptureEscape(open, close);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

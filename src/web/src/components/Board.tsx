@@ -16,6 +16,7 @@ import {
   readTerminalColumnOpen,
   writeTerminalColumnOpen,
 } from "@/components/TerminalColumnsPanel";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { api } from "@/lib/api";
 import { useBoard } from "@/hooks/useBoard";
@@ -275,13 +276,12 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
         }}
       />
 
-      <ConfirmDialog
+      <AlertDialog
         open={error !== null}
         title="Déplacement refusé"
-        description={error ?? ""}
-        confirmLabel="Compris"
-        onCancel={() => setError(null)}
-        onConfirm={() => setError(null)}
+        description={error ?? undefined}
+        closeLabel="Compris"
+        onClose={() => setError(null)}
       />
     </DndContext>
   );

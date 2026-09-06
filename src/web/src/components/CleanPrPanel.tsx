@@ -11,6 +11,7 @@ import { Label, Textarea } from "@/components/ui/input";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { api } from "@/lib/api";
+import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 
 interface CleanPrPanelProps {
   projects: ProjectInfo[];
@@ -48,7 +49,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
       <ProjectPrPicker projects={projects} panel={panel} idPrefix="clean" />
 
       <div className="space-y-1">
-        <Label htmlFor="clean-context">Contexte de la PR (optionnel)</Label>
+        <Label htmlFor="clean-context" className={FIELD_LABEL_CLASSES}>Contexte de la PR (optionnel)</Label>
         <Textarea
           id="clean-context"
           value={context}
@@ -75,11 +76,11 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={onClose}>
+      <div className={PANEL_FOOTER_CLASSES}>
+        <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={launch} disabled={busy || selected.size === 0}>
+        <Button size="sm" onClick={launch} disabled={busy || selected.size === 0}>
           <GitPullRequest className="h-4 w-4" />
           Lancer le nettoyage{selected.size > 0 ? ` (${selected.size})` : ""}
         </Button>

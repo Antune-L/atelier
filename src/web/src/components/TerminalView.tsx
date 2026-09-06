@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { applyTranscriptUpdate, transcriptText, type TranscriptState } from "@shared/transcript";
 
 import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
-import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
+import { useCaptureEscape } from "@/hooks/useCaptureEscape";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -103,7 +103,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [data.output]);
 
-  useFullscreenEscape(fullscreen, () => setFullscreen(false));
+  useCaptureEscape(fullscreen, () => setFullscreen(false));
 
   // While a setup phase shows, the phase line already explains the empty pane.
   const placeholder = data.phase ? "" : EMPTY_HINT;
@@ -124,8 +124,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
     <section
       className={cn(
         fill && "flex h-full min-h-0 flex-col",
-        fullscreen &&
-          "fixed inset-0 z-[60] flex flex-col bg-background p-4 duration-300 animate-in fade-in zoom-in-95",
+        fullscreen && "fixed inset-0 z-fullscreen flex flex-col bg-background p-4",
       )}
     >
       <div className="mb-1 flex items-center justify-between">

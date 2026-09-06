@@ -1,62 +1,32 @@
 import type { ReactNode } from "react";
 
-import { summarizeSessionCosts, tokenBreakdownOf, totalTokensOfSessions } from "@shared/pricing";
+import { summarizeSessionCosts, totalTokensOfSessions } from "@shared/pricing";
 import type { Ticket } from "@shared/schemas";
 
-import { Badge } from "@/components/ui/badge";
+import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { formatTokens, formatUsd } from "@/lib/display";
 
 interface TicketCostProps {
   ticket: Pick<Ticket, "sessionUsage" | "implementer">;
 }
 
-/** Token breakdown for a ticket, derived from its per-session usage. */
+const UNKNOWN_COST = "—";
+
+/** Token/cost meta rows for a ticket, derived from its per-session usage. */
 export function TicketCost({ ticket }: TicketCostProps): ReactNode {
   const hasUsage = Object.keys(ticket.sessionUsage).length > 0;
   if (!hasUsage) return null;
 
   const totalTokens = totalTokensOfSessions(ticket.sessionUsage);
-  const breakdown = tokenBreakdownOf(ticket.sessionUsage);
   const costs = summarizeSessionCosts(ticket.sessionUsage);
+  const costLabel = costs.costUsd === null ? UNKNOWN_COST : formatUsd(costs.costUsd);
 
   return (
-    <section className="space-y-2 rounded-md border bg-muted/30 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold">Tokens</h3>
-        <Badge variant="secondary" className="tabular-nums">
-          {formatTokens(totalTokens)}
-        </Badge>
-        <Badge variant="outline" className="tabular-nums">
-          {costs.costUsd === null ? "Coût indisponible" : formatUsd(costs.costUsd)}
-        </Badge>
-      </div>
-
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        <div className="flex justify-between gap-2">
-          <dt>Entrée</dt>
-          <dd className="tabular-nums">{formatTokens(breakdown.input)}</dd>
-        </div>
-        <div className="flex justify-between gap-2">
-          <dt>Sortie</dt>
-          <dd className="tabular-nums">{formatTokens(breakdown.output)}</dd>
-        </div>
-        <div className="flex justify-between gap-2">
-          <dt>Cache (lecture)</dt>
-          <dd className="tabular-nums">{formatTokens(breakdown.cacheRead)}</dd>
-        </div>
-        <div className="flex justify-between gap-2">
-          <dt>Cache (création)</dt>
-          <dd className="tabular-nums">{formatTokens(breakdown.cacheCreate)}</dd>
-        </div>
-      </dl>
-
-      {costs.partial && (
-        <p className="text-xs text-muted-foreground">Sous-total connu : {formatUsd(costs.knownCostUsd)}</p>
-      )}
-
-      {ticket.implementer === "composer" && (
-        <p className="text-xs text-muted-foreground">Tokens Cursor non inclus (code écrit par Composer).</p>
-      )}
-    </section>
+    <>
+      <MetaRow label="Tokens">{formatTokens(totalTokens)}</MetaRow>
+      <MetaRow label="Coût">
+        {costs.partial ? `${formatUsd(costs.knownCostUsd)} (partiel)` : costLabel}
+      </MetaRow>
+    </>
   );
 }

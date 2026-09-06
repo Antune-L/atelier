@@ -2,6 +2,7 @@ import type { ProjectInfo } from "@shared/schemas";
 
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 
 interface ProjectSelectProps {
   id: string;
@@ -14,7 +15,7 @@ interface ProjectSelectProps {
 export function ProjectSelect({ id, projects, value, onChange }: ProjectSelectProps) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>Projet</Label>
+      <Label htmlFor={id} className={FIELD_LABEL_CLASSES}>Projet</Label>
       <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
         {projects.map((p) => (
           <option key={p.key} value={p.key}>

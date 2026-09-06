@@ -31,7 +31,7 @@ import type { Profile } from "@shared/schemas";
 
 import { ImplementationAgentFields } from "@/components/ImplementationAgentFields";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm";
+import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input, Label } from "@/components/ui/input";
 import { DashedAddButton, SectionHeader, SettingsFooter } from "@/components/ui/settings";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -41,6 +41,7 @@ import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { pairedImplementer } from "@/lib/agentPairing";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { buildProfilePipeline, describeProfile } from "@/lib/profileSummary";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +108,6 @@ export function ProfilesSettings() {
   const remoteProfiles = useProfiles();
   const [localProfiles, setLocalProfiles] = useState<Profile[]>(remoteProfiles);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -153,7 +153,6 @@ export function ProfilesSettings() {
     createProfile({ ...config, name: `${config.name}${COPY_SUFFIX}` });
 
   const deleteProfile = async (profile: Profile): Promise<void> => {
-    setPendingDelete(null);
     setError(null);
     setBusy(true);
     try {
@@ -233,7 +232,7 @@ export function ProfilesSettings() {
                 onError={setError}
                 onSaved={flashSaved}
                 onDuplicate={duplicateProfile}
-                onRequestDelete={setPendingDelete}
+                onDelete={deleteProfile}
               />
             ))}
           </div>
@@ -247,21 +246,6 @@ export function ProfilesSettings() {
         label="Nouveau profil"
         onClick={() => void addProfile()}
         disabled={busy}
-      />
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        title="Supprimer ce profil ?"
-        description={
-          pendingDelete === null
-            ? ""
-            : `Le profil « ${pendingDelete.name} » sera définitivement supprimé.`
-        }
-        confirmLabel="Supprimer"
-        destructive
-        onConfirm={() => {
-          if (pendingDelete !== null) void deleteProfile(pendingDelete);
-        }}
-        onCancel={() => setPendingDelete(null)}
       />
     </div>
   );
@@ -278,7 +262,7 @@ interface ProfileRowProps {
   onError: (message: string | null) => void;
   onSaved: (id: string) => void;
   onDuplicate: (config: ProfileConfig) => Promise<void>;
-  onRequestDelete: (profile: Profile) => void;
+  onDelete: (profile: Profile) => Promise<void>;
   dragHandleListeners?: DragHandleListeners;
   dragHandleAttributes?: DragHandleAttributes;
   setActivatorNodeRef?: (element: HTMLElement | null) => void;
@@ -409,7 +393,7 @@ function ProfileRow({
   onError,
   onSaved,
   onDuplicate,
-  onRequestDelete,
+  onDelete,
   dragHandleListeners,
   dragHandleAttributes,
   setActivatorNodeRef,
@@ -482,7 +466,7 @@ function ProfileRow({
         <div className="space-y-3 border-t p-3">
           <ProfilePipeline config={draft} />
           <div className="flex flex-col items-start gap-1.5">
-            <Label htmlFor={`profile-name-${profile.id}`}>Nom</Label>
+            <Label htmlFor={`profile-name-${profile.id}`} className={FIELD_LABEL_CLASSES}>Nom</Label>
             <Input
               id={`profile-name-${profile.id}`}
               value={draft.name}
@@ -537,14 +521,17 @@ function ProfileRow({
             <Button variant="ghost" size="sm" onClick={() => void duplicate()} disabled={busy}>
               Dupliquer
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onRequestDelete(profile)}
-              disabled={busy}
+            <ConfirmPopover
+              title="Supprimer ce profil ?"
+              description={`Le profil « ${profile.name} » sera définitivement supprimé.`}
+              confirmLabel="Supprimer"
+              destructive
+              onConfirm={() => onDelete(profile)}
             >
-              Supprimer
-            </Button>
+              <Button variant="ghost" size="sm" disabled={busy}>
+                Supprimer
+              </Button>
+            </ConfirmPopover>
             {dirty && (
               <Button size="sm" onClick={() => void save()} disabled={busy || !nameValid}>
                 Enregistrer

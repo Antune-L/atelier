@@ -1,4 +1,4 @@
-import { GitBranch, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, GitBranch, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -6,7 +6,7 @@ import type { Ticket } from "@shared/schemas";
 import { AgentsView } from "@/components/AgentsView";
 import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
-import { NewTicketDialog } from "@/components/NewTicketDialog";
+import { NewTicketSheet } from "@/components/NewTicketSheet";
 import { PrdView } from "@/components/PrdView";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -15,12 +15,19 @@ import { SlotPips } from "@/components/SlotPips";
 import { StatsView } from "@/components/StatsView";
 import { TerminalsView } from "@/components/TerminalsView";
 import { TicketDetail } from "@/components/TicketDetail";
+import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
 import { WorkflowView } from "@/components/WorkflowView";
 import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Modal, ModalBody, ModalHeader, ModalTitle } from "@/components/ui/modal";
+import {
+  Popover,
+  PopoverContent,
+  PopoverMenuItem,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -37,6 +44,9 @@ type HomeView = "kanban" | "agents" | "workflow" | "worktree";
 const UPDATE_WATCHDOG_MS = 60_000;
 /** If location.reload() is suppressed (e.g. Electrobun quirk), release the spinner. */
 const RELOAD_WATCHDOG_MS = 5_000;
+
+/** The onboarding dialog is blocking: it closes only once a project exists. */
+const NOOP_OPEN_CHANGE = (): void => {};
 
 const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
@@ -56,6 +66,8 @@ export function App() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [openTool, setOpenTool] = useState<ToolKind | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const { canUpdate } = useCapabilities();
@@ -192,9 +204,49 @@ export function App() {
                   </option>
                 ))}
               </Select>
-              <Button size="sm" onClick={() => setCreating(true)}>
-                <Plus className="h-4 w-4" />
-              </Button>
+              <div className="flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  title="Nouveau ticket"
+                  aria-label="Nouveau ticket"
+                  onClick={() => setCreating(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+                <Popover open={toolsMenuOpen} onOpenChange={setToolsMenuOpen}>
+                  <PopoverTrigger>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      title="Autres outils"
+                      aria-label="Autres outils"
+                      aria-haspopup="menu"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-52">
+                    {TOOL_KINDS.map((kind) => {
+                      const { label, Icon } = TOOLS[kind];
+                      return (
+                        <PopoverMenuItem
+                          key={kind}
+                          onClick={() => {
+                            setToolsMenuOpen(false);
+                            setOpenTool(kind);
+                          }}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                        </PopoverMenuItem>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
           )}
         </div>
@@ -214,11 +266,15 @@ export function App() {
         </div>
       </div>
 
-      <NewTicketDialog
+      <NewTicketSheet
         open={creating}
         projects={projects}
-        initialTab={homeView === "worktree" ? "worktree" : "ticket"}
         onClose={() => setCreating(false)}
+      />
+      <ToolDialogs
+        openTool={openTool}
+        projects={projects}
+        onClose={() => setOpenTool(null)}
       />
       <SettingsModal
         open={settingsOpen}
@@ -231,23 +287,22 @@ export function App() {
       />
       <Toaster />
 
-      <Modal open={showOnboarding} onClose={() => {}} disableEscape>
-        <ModalHeader>
-          <ModalTitle>Bienvenue — configurez votre premier projet</ModalTitle>
-        </ModalHeader>
-        <ModalBody>
-          <p className="text-sm text-muted-foreground">
-            Ajoutez au moins un projet pour commencer à créer des tickets.
-          </p>
-          <ProjectsSettings />
-        </ModalBody>
-      </Modal>
+      <Dialog
+        open={showOnboarding}
+        onOpenChange={NOOP_OPEN_CHANGE}
+        size="md"
+        blocking
+        title="Bienvenue"
+        description="Ajoutez au moins un projet pour commencer à créer des tickets."
+      >
+        <ProjectsSettings />
+      </Dialog>
 
       {updating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
-          <div className="flex items-center gap-3 rounded-lg border bg-card px-6 py-4 shadow-lg">
+        <div className="fixed inset-0 z-dialog flex items-center justify-center bg-background/60">
+          <div className="flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 text-sm shadow-lg">
             <RefreshCw className="h-5 w-5 animate-spin" />
-            <span className="text-sm font-medium">Mise à jour en cours…</span>
+            <span className="font-medium">Mise à jour en cours…</span>
           </div>
         </div>
       )}

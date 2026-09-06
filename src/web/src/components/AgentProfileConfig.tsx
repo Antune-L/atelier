@@ -17,7 +17,9 @@ import { Select } from "@/components/ui/select";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProfiles } from "@/hooks/useProfiles";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { matchesCodexImplementer } from "@/lib/profileMatching";
+import { cn } from "@/lib/utils";
 
 interface AgentProfileConfigProps {
   orchestrator: Orchestrator;
@@ -149,7 +151,7 @@ export function AgentProfileConfig({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={profileLabelId}>Profil</Label>
+        <Label id={profileLabelId} className={FIELD_LABEL_CLASSES}>Profil</Label>
         <Select
           aria-labelledby={profileLabelId}
           className="w-full"
@@ -165,7 +167,7 @@ export function AgentProfileConfig({
         </Select>
       </div>
       <details className="rounded-md border bg-muted/30 px-3 py-2">
-        <summary className="cursor-pointer text-sm font-medium text-muted-foreground">Configuration avancée</summary>
+        <summary className={cn("cursor-pointer", FIELD_LABEL_CLASSES)}>Configuration avancée</summary>
         <div className="mt-3">
           <ImplementationAgentFields
             orchestrator={orchestrator}

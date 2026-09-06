@@ -12,6 +12,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
+import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { handleMediaPaste } from "@/lib/paste";
 
@@ -85,7 +86,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
       <ProjectSelect id="ask-project" projects={projects} value={project} onChange={setProjectChoice} />
 
       <div className="space-y-1.5">
-        <Label htmlFor="ask-question">Question (markdown)</Label>
+        <Label htmlFor="ask-question" className={FIELD_LABEL_CLASSES}>Question (markdown)</Label>
         <Textarea
           id="ask-question"
           value={question}
@@ -110,7 +111,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
       {orchestrator === "claude" && (
         <>
           <div className="flex flex-col items-start gap-1.5">
-            <Label id="ask-model">Modèle</Label>
+            <Label id="ask-model" className={FIELD_LABEL_CLASSES}>Modèle</Label>
             <Tabs
               options={AGENT_MODEL_OPTIONS}
               value={model ?? resolvedDefaultModel}
@@ -120,7 +121,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
           </div>
 
           <div className="flex flex-col items-start gap-1.5">
-            <Label id="ask-effort">Réflexion (effort)</Label>
+            <Label id="ask-effort" className={FIELD_LABEL_CLASSES}>Réflexion (effort)</Label>
             <Tabs
               options={AGENT_EFFORT_OPTIONS}
               value={effort ?? resolvedDefaultEffort}
@@ -133,11 +134,11 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={onClose}>
+      <div className={PANEL_FOOTER_CLASSES}>
+        <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={() => void launch()} disabled={busy || !question.trim() || !project}>
+        <Button size="sm" onClick={() => void launch()} disabled={busy || !question.trim() || !project}>
           <MessageCircleQuestion className="h-4 w-4" />
           Poser la question
         </Button>

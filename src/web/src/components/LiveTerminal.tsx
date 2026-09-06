@@ -2,7 +2,7 @@ import { Keyboard } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
-import { useFullscreenEscape } from "@/hooks/useFullscreenEscape";
+import { useCaptureEscape } from "@/hooks/useCaptureEscape";
 import { TERMINAL_BG, terminalWsUrl, useXtermSocket } from "@/hooks/useXtermSocket";
 import { cn } from "@/lib/utils";
 
@@ -83,7 +83,7 @@ export function LiveTerminal(props: LiveTerminalProps) {
     if (inputEnabled && !exited) termRef.current?.focus();
   }, [inputEnabled, exited, termRef]);
 
-  useFullscreenEscape(fullscreen, () => setFullscreen(false));
+  useCaptureEscape(fullscreen, () => setFullscreen(false));
 
   const inputActive = inputEnabled && !exited;
   const badgeLabel = badgeLabelFor(exited, inputActive);
@@ -92,7 +92,7 @@ export function LiveTerminal(props: LiveTerminalProps) {
     <section
       className={cn(
         fill && "flex h-full min-h-0 flex-col",
-        fullscreen && "fixed inset-0 z-[60] flex flex-col bg-background p-4",
+        fullscreen && "fixed inset-0 z-fullscreen flex flex-col bg-background p-4",
       )}
     >
       <div className="mb-1 flex items-center justify-between">

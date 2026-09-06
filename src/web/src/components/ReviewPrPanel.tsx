@@ -25,6 +25,7 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
+import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 
 interface ReviewPrPanelProps {
@@ -106,7 +107,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
       <ProjectPrPicker projects={projects} panel={panel} idPrefix="review" />
 
       <div className="space-y-1.5">
-        <Label htmlFor="review-depth">Niveau de review</Label>
+        <Label htmlFor="review-depth" className={FIELD_LABEL_CLASSES}>Niveau de review</Label>
         <Select
           className="ml-2"
           id="review-depth"
@@ -122,7 +123,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="review-base-branch">Branche de review (cible)</Label>
+        <Label htmlFor="review-base-branch" className={FIELD_LABEL_CLASSES}>Branche de review (cible)</Label>
         <Select
           className="ml-2"
           id="review-base-branch"
@@ -153,7 +154,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
       {orchestrator === "claude" && (
         <>
           <div className="flex flex-col items-start gap-1.5">
-            <Label id="review-model">Modèle</Label>
+            <Label id="review-model" className={FIELD_LABEL_CLASSES}>Modèle</Label>
             <Tabs
               options={AGENT_MODEL_OPTIONS}
               value={model ?? resolvedDefaultModel}
@@ -163,7 +164,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
           </div>
 
           <div className="flex flex-col items-start gap-1.5">
-            <Label id="review-effort">Réflexion (effort)</Label>
+            <Label id="review-effort" className={FIELD_LABEL_CLASSES}>Réflexion (effort)</Label>
             <Tabs
               options={AGENT_EFFORT_OPTIONS}
               value={effort ?? resolvedDefaultEffort}
@@ -186,11 +187,11 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex justify-end gap-2 border-t pt-4">
-        <Button variant="outline" onClick={onClose}>
+      <div className={PANEL_FOOTER_CLASSES}>
+        <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
-        <Button onClick={launch} disabled={busy || selected.size === 0}>
+        <Button size="sm" onClick={launch} disabled={busy || selected.size === 0}>
           <GitPullRequest className="h-4 w-4" />
           Lancer la revue{selected.size > 0 ? ` (${selected.size})` : ""}
         </Button>

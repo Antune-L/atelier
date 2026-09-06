@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import type { CreateProjectInput, ManagedProject, UpdateProjectInput } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm";
+import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { DashedAddButton, SettingsFooter } from "@/components/ui/settings";
@@ -13,6 +13,7 @@ import { refreshProjects } from "@/hooks/useProjects";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import {
   formatCommitTimeout,
   mostCommonValue,
@@ -221,7 +222,6 @@ function ProjectPanel({
   const [color, setColor] = useState(project?.color ?? DEFAULT_PROJECT_COLOR);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const { saved: savedVisible, flashSaved } = useSavedFlag();
 
   const commitTimeoutMs = String(Number(timeoutValue) * timeoutUnitMs(unit));
@@ -296,7 +296,6 @@ function ProjectPanel({
   };
 
   const remove = async (current: ManagedProject): Promise<void> => {
-    setConfirmOpen(false);
     onError(null);
     setBusy(true);
     try {
@@ -376,9 +375,17 @@ function ProjectPanel({
 
       <SettingsFooter dirty={dirty && project !== null} justSaved={savedVisible}>
         {project !== null && (
-          <Button variant="outline" size="sm" onClick={() => setConfirmOpen(true)} disabled={busy}>
-            Supprimer
-          </Button>
+          <ConfirmPopover
+            title="Supprimer le projet"
+            description={`Supprimer le projet « ${project.label} » ?`}
+            confirmLabel="Supprimer"
+            destructive
+            onConfirm={() => remove(project)}
+          >
+            <Button variant="outline" size="sm" disabled={busy}>
+              Supprimer
+            </Button>
+          </ConfirmPopover>
         )}
         {project === null && cancellable && (
           <Button variant="ghost" size="sm" onClick={onCancelCreate} disabled={busy}>
@@ -392,17 +399,6 @@ function ProjectPanel({
         )}
       </SettingsFooter>
 
-      {project !== null && (
-        <ConfirmDialog
-          open={confirmOpen}
-          title="Supprimer le projet"
-          description={`Supprimer le projet « ${project.label} » ?`}
-          confirmLabel="Supprimer"
-          destructive
-          onConfirm={() => void remove(project)}
-          onCancel={() => setConfirmOpen(false)}
-        />
-      )}
     </div>
   );
 }
@@ -410,7 +406,7 @@ function ProjectPanel({
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col items-start gap-1.5">
-      <Label>{label}</Label>
+      <Label className={FIELD_LABEL_CLASSES}>{label}</Label>
       {children}
     </div>
   );

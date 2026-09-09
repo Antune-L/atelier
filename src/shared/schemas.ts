@@ -933,6 +933,8 @@ export {
   failArgsSchema,
   delegateImplementationArgsSchema,
   delegateReviewArgsSchema,
+  readReviewResultsArgsSchema,
+  publishReviewArgsSchema,
   submitReviewArgsSchema,
   channelEventSchema,
 } from "./protocol.ts";

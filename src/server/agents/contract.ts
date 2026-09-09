@@ -102,6 +102,10 @@ function reviewKinds(depth: ReviewDepth): string[] {
   return depth === "full" ? FULL_REVIEW_KINDS : LIGHT_REVIEW_KINDS;
 }
 
+/** Recovery hint: the verdicts are persisted, so a lost `review_done` never justifies a re-run. */
+const READ_REVIEW_RESULTS_HINT =
+  "Les verdicts arrivent en événements `review_done`. Si l'un d'eux n'arrive pas (ou après un redémarrage de session), appelle `read_review_results()` pour relire les verdicts déjà persistés au lieu de relancer les reviewers.";
+
 function reviewCalls(depth: ReviewDepth): string {
   return reviewKinds(depth).map((kind) => `\`delegate_review(kind="${kind}", context=...)\``).join(", ");
 }
@@ -123,6 +127,7 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   return [
     `3. reviewing : récupère le diff complet et appelle EN PARALLÈLE les ${kinds.length} reviewers indépendants : ${reviewCalls(depth)}. Passe à chacun la description/PRD et le diff utile, sans leur transmettre le raisonnement privé ni le résultat d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
     ...figmaLines,
+    `3a. ${READ_REVIEW_RESULTS_HINT}`,
     `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`done()\` avant les ${kinds.length} verdicts \`approve\` sur le code courant ; un échec bloque la validation.`,
     `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}, sinon fail().`,
   ];
@@ -376,6 +381,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
     "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
     `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`.`,
+    `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
     `5. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,
     `6. \`done(${ticket.prUrl})\` — le système re-tentera automatiquement le merge dans \`${baseBranch}\`.`,
@@ -479,6 +485,16 @@ export function buildFeasibilityBatchContract(
 }
 
 /**
+ * A review ticket that also fixes the reviewer comments: it implements code on the PR head branch,
+ * so it is NOT the read-only argus review. Guarded on prHeadBranch too because slotManager only
+ * checks out the PR head branch (worktreeAddExisting) and the done gate only requires a push when
+ * prHeadBranch is non-null — keeping contract, worktree, gate and session guards from diverging.
+ */
+export function isReviewFixSession(ticket: Ticket): boolean {
+  return ticket.kind === "review" && ticket.fixComments && ticket.prHeadBranch !== null;
+}
+
+/**
  * Builds the `ticket` channel payload for an independent review of an open PR, optionally posting
  * findings inline via gh, then done().
  */
@@ -492,10 +508,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   // Review against the PR's own detected target branch (or the user's override), not the project default.
   const reviewBase = ticket.baseBranch ?? project.baseBranch;
 
-  // Guard on prHeadBranch too: slotManager only checks out the PR head branch (worktreeAddExisting)
-  // and the done gate only requires a push when prHeadBranch is non-null. Branching the contract on
-  // the same condition keeps contract/worktree/gate from diverging if prHeadBranch is ever absent.
-  if (ticket.fixComments && ticket.prHeadBranch !== null) {
+  if (isReviewFixSession(ticket)) {
     return buildReviewFixLines(ticket, opts, { project, depth, branch, reviewBase });
   }
 
@@ -506,11 +519,12 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
       : "qualité, conventions du dépôt, régressions, logique/correctness";
   const kinds = reviewKinds(depth);
   const independentReviewSteps = [
-    `2. Récupère le diff complet de la PR : \`gh pr diff ${ticket.prNumber}\` (et \`git fetch origin ${branch}\` si tu dois lire les fichiers au commit de la PR).`,
+    `2. Récupère le diff complet de la PR : \`gh pr diff ${ticket.prNumber}\`. Le backend positionne le worktree sur le head GitHub exact avant la nouvelle passe ; ne lance aucun fetch toi-même.`,
     `   Lance EN PARALLÈLE les ${kinds.length} dimensions indépendantes : ${reviewCalls(depth)}. Donne à chacun la PR, la profondeur, les dimensions (${reviewDimensions}) et le diff, sans le résultat ni le raisonnement d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
+    `   ${READ_REVIEW_RESULTS_HINT}`,
     `   Un reviewer ou sa contre-vérification échoués bloquent done(). Un verdict revise est une conclusion valide de cette revue en lecture seule : conserve les corrections recommandées dans le rapport puis termine normalement. Les ${kinds.length} dimensions doivent rendre un résultat vérifié sur le même passId et le code courant.`,
     ticket.postComments
-      ? `3. Synthétise leurs résultats et poste UNE SEULE review inline sur la PR via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/reviews\` avec \`event: COMMENT\`, un résumé en \`body\` et un commentaire inline (\`path\`/\`line\`) par finding significatif. Ajoute au body le marqueur exact \`<!-- kanban-review-pass:<passId> -->\` avec le passId commun reçu dans les événements. Avant tout POST ou après un accusé incertain, recherche ce marqueur sur cette PR et ce head : s'il existe déjà avec l'événement COMMENT, ne republie pas. N'approuve pas, ne demande pas de changements.`
+      ? "3. Appelle `publish_review({ passId })` avec le passId commun reçu dans les événements. Le backend compose et publie une seule review GitHub liée au commit revu : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des findings minor, APPROVE si tous les findings ont été rejetés (ou auto-réfutés) ou si tous les reviewers approuvent. Ne poste aucun commentaire GitHub directement. Si la PR a avancé, lance une nouvelle passe complète avec tous les reviewers avant de rappeler publish_review."
       : "3. N'en poste RIEN sur GitHub : synthétise le verdict (findings par sévérité) dans ta réponse.",
   ];
 
@@ -530,6 +544,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     buildSpecializedFraming(isCodex, "à la REVUE d'une PR (lecture seule)"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (ex. PR introuvable ou ambiguë).",
+    ticket.postComments ? "- `publish_review({ passId })` UNIQUEMENT après réception de tous les résultats requis de la passe courante." : "",
     "- `done(pr_url)` UNIQUEMENT une fois la revue terminée (et postée si demandé).",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     `- Rédige les commentaires de revue postés sur la PR en ${commitLanguageLabel(opts.commitLanguage)}.`,
@@ -546,7 +561,8 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     "",
     "## Interdits",
     "- Ne modifie AUCUN fichier : la revue est en lecture seule, cette session ne produit pas de diff.",
-    "- N'approuve JAMAIS, ne demande pas de changements via l'API, ne merge pas la PR (`event: COMMENT` uniquement).",
+    "- Ne lance aucun typecheck (`tsc`, script typecheck ou équivalent) : une review analyse le diff et les types sans payer ce coût d'exécution.",
+    "- N'appelle aucune commande GitHub qui modifie la PR ; la publication COMMENT appartient exclusivement au backend via publish_review.",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne touche à aucun fichier hors du worktree.",
     "- Lis les fichiers `AGENTS.md` applicables avant d'agir. Si une règle projet nécessaire n'y figure pas, consulte aussi le `CLAUDE.md` applicable comme source de compatibilité ; n'importe aucune permission ni secret depuis les réglages Claude.",
@@ -576,7 +592,8 @@ function buildReviewFixLines(
 
   const reviewAndFixSteps = [
     `2. Récupère le diff complet de la PR (\`gh pr diff ${ticket.prNumber}\`) puis lance EN PARALLÈLE les ${kinds.length} sessions indépendantes : ${reviewCalls(depth)}. Transmets la profondeur ${depth}, les dimensions (${reviewDimensions}) et le diff à chacune, sans résultat ni raisonnement d'une autre. Termine ton tour et attends leurs événements \`review_done\`.`,
-    `3. \`update_stage("fixing")\` : si un reviewer demande revise, applique uniquement les corrections pertinentes, puis relance les ${kinds.length} reviewers sur le nouveau diff jusqu'à ${kinds.length} verdicts approve. Un échec de reviewer bloque done().`,
+    `   ${READ_REVIEW_RESULTS_HINT}`,
+    `3. \`update_stage("fixing")\` : si un reviewer demande revise, applique uniquement les corrections pertinentes. Ne relance pas les reviewers avant d'avoir testé, commité et poussé ces corrections.`,
   ];
 
   const lines: string[] = [
@@ -595,6 +612,7 @@ function buildReviewFixLines(
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (ex. retour ambigu, arbitrage de périmètre).",
     `- \`done(pr_url)\` UNIQUEMENT après les ${kinds.length} reviews indépendantes approuvées sur le code courant, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).`,
+    ticket.postComments ? "- `publish_review({ passId })` après le commit et le push, avec le passId approuvé courant." : "",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     `- Rédige les messages de commit et les commentaires de revue en ${commitLanguageLabel(opts.commitLanguage)}.`,
     "",
@@ -606,7 +624,11 @@ function buildReviewFixLines(
     ...reviewAndFixSteps,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
     '5. `update_stage("opening_pr")` : commit (conventions du projet), puis `git push` la branche head de la PR (jamais `--no-verify`, aucune nouvelle PR).',
-    `6. \`done(${ticket.prUrl})\`.`,
+    `6. Si la passe précédente n'était pas approuvée ou si le code a changé, relance les ${kinds.length} reviewers sur le commit propre et poussé jusqu'à ${kinds.length} verdicts approve. Un échec bloque done().`,
+    ticket.postComments
+      ? "7. Appelle `publish_review({ passId })`. Si le head GitHub a changé, lance une nouvelle passe complète avant toute publication."
+      : "",
+    `${ticket.postComments ? "8" : "7"}. \`done(${ticket.prUrl})\`.`,
     "",
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
@@ -666,6 +688,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     '1. `update_stage("implementing")`.',
     isCodex ? codexTriageStep : claudeTriageStep,
     `3. \`update_stage("reviewing")\` : récupère le diff courant puis lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 événements \`review_done\` avec verdict approve sur le code courant ; corrige et relance les 4 si nécessaire. Un échec bloque \`done()\`.`,
+    `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',
     `5. \`update_stage("opening_pr")\` : commit (conventions du projet), puis pousse vers la head de la PR avec \`git push origin HEAD:${branch}\` (jamais \`--no-verify\`, aucune nouvelle PR ; le nom de branche locale diffère volontairement de la head de la PR). Si aucune correction n'a été appliquée, saute le commit/push.`,
     `6. Replie (minimise) chaque commentaire de reviewer RÉELLEMENT traité (l'ensemble \`apply\` : retours pertinents que tu as adressés), PAS les nits écartés ni les retours hors-périmètre. Cela vaut que du code ait été poussé ou non — un retour peut être adressé par une correction appliquée. Récupère le \`node_id\` de chaque commentaire traité : les commentaires inline via \`gh api /repos/{owner}/{repo}/pulls/${ticket.prNumber}/comments\` (champ \`node_id\`), les commentaires de conversation top-level via \`gh api /repos/{owner}/{repo}/issues/${ticket.prNumber}/comments\` (champ \`node_id\`). Pour chacun, replie-le avec la mutation GraphQL \`minimizeComment\` (\`classifier: RESOLVED\`, \`subjectId\` = le \`node_id\`), ex. : \`gh api graphql -f query='mutation($id:ID!){minimizeComment(input:{subjectId:$id,classifier:RESOLVED}){minimizedComment{isMinimized}}}' -f id=<node_id>\`. Si aucun commentaire n'a été traité, ne replie rien.`,

@@ -1,9 +1,9 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { $ } from "bun";
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { lstat, readFile, readlink, rm } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -18,19 +18,27 @@ import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSession
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
+import { computeCodeFingerprint } from "./codeFingerprint.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
+import { renderCollapsedDetails } from "./reviewMarkdown.ts";
+import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "./types.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   ImportNotionOptions,
   PaneSize,
   PaneStream,
+  PrepareReviewWorktreeOptions,
+  PublishReviewOptions,
+  PublishReviewResult,
   ReformulateOptions,
   ReviewDoneOptions,
+  ReviewHeadResult,
+  ReviewPublicationEvent,
   RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
@@ -91,15 +99,24 @@ const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 const PR_LIST_FIELDS = "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
+const REVIEW_COMMAND_TIMEOUT_MS = 30_000;
 
-/** Shape of one `gh pr view --json reviews` entry (only the fields the posted-review gate needs). */
-const ghReviewSchema = z.object({
-  author: z.object({ login: z.string() }).nullable(),
+const ghPrHeadSchema = z.object({ url: z.string(), headRefOid: z.string().min(1) });
+const ghRestPullSchema = z.object({
+  base: z.object({ sha: z.string().min(1) }),
+  head: z.object({ sha: z.string().min(1) }),
+  user: z.object({ login: z.string() }).nullable(),
+});
+const ghRestReviewSchema = z.object({
+  id: z.number().int(),
   body: z.string(),
   state: z.string(),
-  submittedAt: z.string().nullable(),
+  commit_id: z.string(),
+  submitted_at: z.string().nullable(),
+  user: z.object({ login: z.string() }).nullable(),
 });
-const ghReviewsSchema = z.object({ reviews: z.array(ghReviewSchema) });
+const ghRestReviewsSchema = z.array(ghRestReviewSchema);
+const ghRestReviewPagesSchema = z.array(ghRestReviewsSchema);
 
 /** Shape of one `gh pr list --json` entry (mapped to the shared OpenPr). */
 const ghPrSchema = z.object({
@@ -124,6 +141,58 @@ const PR_STATE_MERGED = "MERGED";
 /** A synchronous merge is occasionally not yet visible on the immediate read; poll a few times. */
 const PR_MERGE_CONFIRM_ATTEMPTS = 3;
 const PR_MERGE_CONFIRM_DELAY_MS = 1000;
+
+interface BoundedCommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+async function runBoundedReviewCommand(args: string[], cwd: string): Promise<BoundedCommandResult> {
+  const proc = Bun.spawn(args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill(9);
+  }, REVIEW_COMMAND_TIMEOUT_MS);
+  try {
+    const [exitCode, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    return { exitCode, stdout, stderr, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function rightSideDiffLines(diff: string): Set<number> {
+  const lines = new Set<number>();
+  let currentLine: number | null = null;
+  for (const content of diff.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(content);
+    if (hunk) {
+      const start = hunk[1];
+      currentLine = start === undefined ? null : Number(start);
+      continue;
+    }
+    if (currentLine === null || content.startsWith("-")) continue;
+    if (content.startsWith("+") || content.startsWith(" ")) {
+      lines.add(currentLine);
+      currentLine += 1;
+      continue;
+    }
+    currentLine = null;
+  }
+  return lines;
+}
+
+function renderOutsideDiffComment(comment: PublishReviewOptions["comments"][number]): string {
+  const title = comment.body.split("\n", 1)[0] ?? "Finding outside the diff";
+  return renderCollapsedDetails(`${comment.path}:${comment.line} — ${title}`, comment.body);
+}
 
 /**
  * Real adapter: performs actual git/tmux/gh/osascript/filesystem side effects.
@@ -630,15 +699,18 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
-    const pr = await $`gh pr view ${prUrl} --json url,headRefOid`.cwd(slotPath).nothrow().quiet();
+    const pr = await runBoundedReviewCommand(["gh", "pr", "view", prUrl, "--json", "url,headRefOid"], slotPath);
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
-    const parsedPr = z.object({ url: z.string(), headRefOid: z.string().min(1) }).safeParse(safeJsonParse(pr.stdout.toString()));
+    const parsedPr = ghPrHeadSchema.safeParse(safeJsonParse(pr.stdout));
     if (!parsedPr.success || parsedPr.data.url !== prUrl) {
       return { ok: false, reason: "impossible de confirmer la PR et son head courant" };
     }
-    const localHead = await $`git -C ${slotPath} rev-parse HEAD`.nothrow().quiet();
-    if (localHead.exitCode !== 0 || localHead.stdout.toString().trim() !== parsedPr.data.headRefOid) {
+    const localHead = await runBoundedReviewCommand(["git", "rev-parse", "HEAD"], slotPath);
+    if (localHead.exitCode !== 0 || localHead.stdout.trim() !== parsedPr.data.headRefOid) {
       return { ok: false, reason: "le head de la PR a changé depuis la passe de review" };
+    }
+    if (opts.expectedCommitSha !== null && parsedPr.data.headRefOid !== opts.expectedCommitSha) {
+      return { ok: false, reason: "la PR a avancé depuis la passe publiée : lance une nouvelle passe de review complète" };
     }
 
     // fixComments review: the fixes must be committed and pushed onto the PR's head branch.
@@ -651,14 +723,271 @@ export class RealSystemAdapter implements SystemAdapter {
     if (opts.publicationMarker === null) {
       return { ok: false, reason: "postage demandé mais identité de passe introuvable" };
     }
-    return this.verifyReviewPosted(slotPath, prUrl, opts.requirePostedSince, opts.publicationMarker);
+    if (opts.expectedCommitSha === null || opts.publishedReviewId === null || opts.expectedReviewState === null) {
+      return { ok: false, reason: "postage demandé mais publication backend absente : appelle publish_review" };
+    }
+    const endpoint = reviewApiEndpoint(prUrl);
+    if (endpoint === null) return { ok: false, reason: "URL de PR GitHub invalide" };
+    const expectedState = await this.effectiveReviewState(slotPath, endpoint, opts.expectedReviewState);
+    if (!expectedState.ok) return { ok: false, reason: expectedState.reason };
+    return this.verifyReviewPosted(
+      slotPath,
+      prUrl,
+      opts.requirePostedSince,
+      opts.publicationMarker,
+      opts.expectedCommitSha,
+      opts.publishedReviewId,
+      expectedState.state,
+    );
+  }
+
+  /**
+   * NOTE(ali): GitHub rejects APPROVE and REQUEST_CHANGES on one's own pull request with HTTP 422,
+   * so a review published on our own PR is downgraded to COMMENT (and expected as COMMENTED).
+   */
+  private async isOwnPullRequest(
+    slotPath: string,
+    endpoint: string,
+  ): Promise<{ ok: true; own: boolean } | { ok: false; reason: string }> {
+    const login = await this.currentGitHubLogin(slotPath);
+    if (login === null) return { ok: false, reason: "utilisateur gh courant indéterminé" };
+    const pull = await runBoundedReviewCommand(["gh", "api", endpoint.replace(/\/reviews$/, "")], slotPath);
+    if (pull.exitCode !== 0) {
+      const detail = pull.timedOut ? "délai de 30 s dépassé" : (pull.stderr.trim() || pull.stdout.trim());
+      return { ok: false, reason: `lecture de la PR GitHub impossible : ${detail}` };
+    }
+    const parsed = ghRestPullSchema.safeParse(safeJsonParse(pull.stdout));
+    if (!parsed.success) return { ok: false, reason: "réponse GitHub inattendue pour la PR" };
+    return { ok: true, own: parsed.data.user?.login === login };
+  }
+
+  private async effectiveReviewState(
+    slotPath: string,
+    endpoint: string,
+    state: NonNullable<ReviewDoneOptions["expectedReviewState"]>,
+  ): Promise<
+    | { ok: true; state: NonNullable<ReviewDoneOptions["expectedReviewState"]> }
+    | { ok: false; reason: string }
+  > {
+    const own = await this.isOwnPullRequest(slotPath, endpoint);
+    if (!own.ok) return own;
+    return { ok: true, state: own.own ? REVIEW_PUBLICATION_STATE_BY_EVENT.COMMENT : state };
+  }
+
+  async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {
+    const clean = await this.reviewWorktreeClean(opts.slotPath);
+    if (!clean.ok) return { ...clean, commitSha: null };
+    const remote = await this.readPrHeadSha(opts.repoPath, opts.prUrl);
+    if (!remote.ok || remote.commitSha === null) return remote;
+    const local = await this.localHeadSha(opts.slotPath);
+    if (local === remote.commitSha) return remote;
+    const temporaryRef = `refs/kanban/reviews/${randomUUID()}`;
+    const pullRef = `refs/pull/${opts.prNumber}/head`;
+    try {
+      const fetch = await runBoundedReviewCommand(
+        ["git", "fetch", "--no-write-fetch-head", "origin", `${pullRef}:${temporaryRef}`],
+        opts.repoPath,
+      );
+      if (fetch.exitCode !== 0) {
+        const detail = fetch.timedOut ? "délai de 30 s dépassé" : (fetch.stderr.trim() || fetch.stdout.trim());
+        return { ok: false, reason: `rafraîchissement du head de PR impossible : ${detail}`, commitSha: null };
+      }
+      const fetched = await runBoundedReviewCommand(["git", "rev-parse", temporaryRef], opts.repoPath);
+      if (fetched.exitCode !== 0 || fetched.stdout.trim() !== remote.commitSha) {
+        return { ok: false, reason: "le SHA récupéré ne correspond pas au head courant de la PR", commitSha: null };
+      }
+      const checkout = await runBoundedReviewCommand(["git", "switch", "--detach", remote.commitSha], opts.slotPath);
+      if (checkout.exitCode !== 0) {
+        const detail = checkout.timedOut ? "délai de 30 s dépassé" : (checkout.stderr.trim() || checkout.stdout.trim());
+        return { ok: false, reason: `positionnement du worktree sur le head de PR impossible : ${detail}`, commitSha: null };
+      }
+    } finally {
+      await runBoundedReviewCommand(["git", "update-ref", "-d", temporaryRef], opts.repoPath);
+    }
+    const refreshed = await this.readReviewHead(opts.slotPath, opts.prUrl);
+    if (!refreshed.ok) return refreshed;
+    if (refreshed.commitSha !== remote.commitSha) {
+      return { ok: false, reason: "la PR a avancé pendant la préparation : relance la passe de review", commitSha: null };
+    }
+    return refreshed;
+  }
+
+  async readReviewHead(slotPath: string, prUrl: string): Promise<ReviewHeadResult> {
+    const clean = await this.reviewWorktreeClean(slotPath);
+    if (!clean.ok) return { ...clean, commitSha: null };
+    const remote = await this.readPrHeadSha(slotPath, prUrl);
+    if (!remote.ok || remote.commitSha === null) return remote;
+    const local = await this.localHeadSha(slotPath);
+    if (local === null) return { ok: false, reason: "SHA local du worktree introuvable", commitSha: null };
+    if (local !== remote.commitSha) {
+      return {
+        ok: false,
+        reason: "la PR a avancé depuis cette passe : lance une nouvelle passe de review complète, sans republier celle-ci",
+        commitSha: null,
+      };
+    }
+    return { ok: true, reason: "", commitSha: local };
+  }
+
+  async publishReview(
+    slotPath: string,
+    prUrl: string,
+    opts: PublishReviewOptions,
+  ): Promise<PublishReviewResult> {
+    const current = await this.readReviewHead(slotPath, prUrl);
+    if (!current.ok || current.commitSha === null) return { ok: false, reason: current.reason, reviewId: null };
+    if (current.commitSha !== opts.expectedCommitSha) {
+      return {
+        ok: false,
+        reason: "la PR a avancé depuis cette passe : lance une nouvelle passe de review complète, sans republier celle-ci",
+        reviewId: null,
+      };
+    }
+    const endpoint = reviewApiEndpoint(prUrl);
+    if (endpoint === null) return { ok: false, reason: "URL de PR GitHub invalide", reviewId: null };
+    const own = await this.isOwnPullRequest(slotPath, endpoint);
+    if (!own.ok) return { ok: false, reason: own.reason, reviewId: null };
+    const event: ReviewPublicationEvent = own.own ? "COMMENT" : opts.event;
+    const expectedState = REVIEW_PUBLICATION_STATE_BY_EVENT[event];
+    const existing = await this.findPublishedReview(slotPath, endpoint, opts.marker, opts.expectedCommitSha, expectedState);
+    if (!existing.ok || existing.reviewId !== null) return existing;
+    const validated = await this.validateReviewComments(slotPath, endpoint, opts.expectedCommitSha, opts.comments);
+    if (!validated.ok) return { ok: false, reason: validated.reason, reviewId: null };
+    const outsideDiff = validated.outsideDiff.map(renderOutsideDiffComment).join("\n\n");
+    const outsideDiffSection = outsideDiff.length > 0
+      ? `\n\n## Findings outside the diff\n\n${outsideDiff}`
+      : "";
+    const body = `${opts.body}${outsideDiffSection}\n\n${opts.marker}`;
+    return this.createPublishedReview(slotPath, endpoint, {
+      body,
+      commit_id: opts.expectedCommitSha,
+      event,
+      comments: validated.inline.map((comment) => ({ ...comment, side: "RIGHT" })),
+    }, expectedState);
+  }
+
+  private async validateReviewComments(
+    slotPath: string,
+    endpoint: string,
+    expectedCommitSha: string,
+    comments: PublishReviewOptions["comments"],
+  ): Promise<
+    | { ok: true; inline: PublishReviewOptions["comments"]; outsideDiff: PublishReviewOptions["comments"] }
+    | { ok: false; reason: string }
+  > {
+    if (comments.length === 0) return { ok: true, inline: [], outsideDiff: [] };
+    const pull = await runBoundedReviewCommand(["gh", "api", endpoint.replace(/\/reviews$/, "")], slotPath);
+    if (pull.exitCode !== 0) {
+      const detail = pull.timedOut ? "délai de 30 s dépassé" : (pull.stderr.trim() || pull.stdout.trim());
+      return { ok: false, reason: `lecture du diff GitHub impossible : ${detail}` };
+    }
+    const parsed = ghRestPullSchema.safeParse(safeJsonParse(pull.stdout));
+    if (!parsed.success || parsed.data.head.sha !== expectedCommitSha) {
+      return { ok: false, reason: "GitHub n'a pas confirmé les commits base et head du diff attendu" };
+    }
+    const linesByPath = new Map<string, Set<number>>();
+    for (const path of new Set(comments.map((comment) => comment.path))) {
+      const diff = await runBoundedReviewCommand(
+        ["git", "diff", "--unified=3", "--no-renames", "--no-color", `${parsed.data.base.sha}...${expectedCommitSha}`, "--", path],
+        slotPath,
+      );
+      if (diff.exitCode !== 0) {
+        const detail = diff.timedOut ? "délai de 30 s dépassé" : (diff.stderr.trim() || diff.stdout.trim());
+        return { ok: false, reason: `validation des ancres du diff impossible pour ${path} : ${detail}` };
+      }
+      linesByPath.set(path, rightSideDiffLines(diff.stdout));
+    }
+    const inline = comments.filter((comment) => linesByPath.get(comment.path)?.has(comment.line) === true);
+    const outsideDiff = comments.filter((comment) => linesByPath.get(comment.path)?.has(comment.line) !== true);
+    return { ok: true, inline, outsideDiff };
+  }
+
+  private async reviewWorktreeClean(slotPath: string): Promise<DoneGateResult> {
+    const status = await runBoundedReviewCommand(["git", "status", "--porcelain"], slotPath);
+    if (status.exitCode !== 0) return { ok: false, reason: "git status a échoué pendant la préparation de review" };
+    if (status.stdout.trim().length > 0) {
+      return { ok: false, reason: "le worktree contient des changements locaux ; aucune mise à jour de PR ne sera appliquée" };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  private async readPrHeadSha(cwd: string, prUrl: string): Promise<ReviewHeadResult> {
+    const pr = await runBoundedReviewCommand(["gh", "pr", "view", prUrl, "--json", "url,headRefOid"], cwd);
+    if (pr.exitCode !== 0) return { ok: false, reason: "lecture du head GitHub de la PR échouée", commitSha: null };
+    const parsed = ghPrHeadSchema.safeParse(safeJsonParse(pr.stdout));
+    if (!parsed.success || parsed.data.url !== prUrl) {
+      return { ok: false, reason: "réponse GitHub inattendue pour le head de la PR", commitSha: null };
+    }
+    return { ok: true, reason: "", commitSha: parsed.data.headRefOid };
+  }
+
+  private async localHeadSha(slotPath: string): Promise<string | null> {
+    const head = await runBoundedReviewCommand(["git", "rev-parse", "HEAD"], slotPath);
+    if (head.exitCode !== 0) return null;
+    const value = head.stdout.trim();
+    return value.length > 0 ? value : null;
+  }
+
+  private async findPublishedReview(
+    slotPath: string,
+    endpoint: string,
+    marker: string,
+    commitSha: string,
+    expectedState: NonNullable<ReviewDoneOptions["expectedReviewState"]>,
+  ): Promise<PublishReviewResult> {
+    const login = await this.currentGitHubLogin(slotPath);
+    if (login === null) {
+      return { ok: false, reason: "utilisateur gh courant indéterminé pendant la recherche de review", reviewId: null };
+    }
+    const reviews = await runBoundedReviewCommand(
+      ["gh", "api", `${endpoint}?per_page=100`, "--paginate", "--slurp"],
+      slotPath,
+    );
+    if (reviews.exitCode !== 0) return { ok: false, reason: "lecture des reviews GitHub échouée", reviewId: null };
+    const parsed = ghRestReviewPagesSchema.safeParse(safeJsonParse(reviews.stdout));
+    if (!parsed.success) return { ok: false, reason: "réponse GitHub inattendue pour les reviews", reviewId: null };
+    const existing = parsed.data.flat().find(
+      (review) =>
+        review.user?.login === login
+        && review.state === expectedState
+        && review.commit_id === commitSha
+        && review.body.includes(marker),
+    );
+    return { ok: true, reason: "", reviewId: existing?.id ?? null };
+  }
+
+  private async createPublishedReview(
+    slotPath: string,
+    endpoint: string,
+    payload: Record<string, unknown>,
+    expectedState: NonNullable<ReviewDoneOptions["expectedReviewState"]>,
+  ): Promise<PublishReviewResult> {
+    const inputPath = join(tmpdir(), `kanban-review-${randomUUID()}.json`);
+    try {
+      await Bun.write(inputPath, JSON.stringify(payload));
+      const posted = await runBoundedReviewCommand(
+        ["gh", "api", "--method", "POST", endpoint, "--input", inputPath],
+        slotPath,
+      );
+      if (posted.exitCode !== 0) {
+        const detail = posted.timedOut ? "délai de 30 s dépassé" : (posted.stderr.trim() || posted.stdout.trim());
+        return { ok: false, reason: `publication de la review GitHub échouée : ${detail}`, reviewId: null };
+      }
+      const parsed = ghRestReviewSchema.safeParse(safeJsonParse(posted.stdout));
+      if (!parsed.success || parsed.data.commit_id !== payload.commit_id || parsed.data.state !== expectedState) {
+        return { ok: false, reason: "GitHub n'a pas confirmé la review sur le commit attendu", reviewId: null };
+      }
+      return { ok: true, reason: "", reviewId: parsed.data.id };
+    } finally {
+      await rm(inputPath, { force: true });
+    }
   }
 
   /** Clean working tree and the branch has no commits ahead of origin/<branch> (mirrors verifyDone). */
   private async verifyBranchPushed(slotPath: string, branch: string): Promise<DoneGateResult> {
-    const status = await $`git -C ${slotPath} status --porcelain`.nothrow().quiet();
+    const status = await runBoundedReviewCommand(["git", "status", "--porcelain"], slotPath);
     if (status.exitCode !== 0) return { ok: false, reason: "git status a échoué" };
-    if (status.stdout.toString().trim().length > 0) {
+    if (status.stdout.trim().length > 0) {
       return { ok: false, reason: "arbre de travail non propre (corrections non commitées)" };
     }
     // A non-zero exit means origin/<branch> couldn't be resolved (branch never pushed): fail the gate
@@ -666,37 +995,57 @@ export class RealSystemAdapter implements SystemAdapter {
     // so a failure is a real signal, not the absent-ref case verifyDone tolerates for fresh branches.
     // Compare against HEAD (the worktree's checked-out tip), not the local branch name: a clean
     // ticket's local branch is suffixed (-cleaner) and differs from the PR head origin ref `branch`.
-    const ahead = await $`git -C ${slotPath} rev-list --count origin/${branch}..HEAD`.nothrow().quiet();
+    const ahead = await runBoundedReviewCommand(["git", "rev-list", "--count", `origin/${branch}..HEAD`], slotPath);
     if (ahead.exitCode !== 0) {
       return { ok: false, reason: "impossible de vérifier l'avance de la branche de la PR (ref origin absente ?)" };
     }
-    if (ahead.stdout.toString().trim() !== "0") {
+    if (ahead.stdout.trim() !== "0") {
       return { ok: false, reason: "la branche de la PR n'est pas poussée (commits en avance)" };
     }
     return { ok: true, reason: "" };
   }
 
   /** Confirm the current gh user posted a review on the PR at or after `since` (epoch ms). */
-  private async verifyReviewPosted(slotPath: string, prUrl: string, since: number, marker: string): Promise<DoneGateResult> {
-    const me = await $`gh api user -q .login`.cwd(slotPath).nothrow().quiet();
-    const login = me.stdout.toString().trim();
-    if (me.exitCode !== 0 || !login) {
+  private async verifyReviewPosted(
+    slotPath: string,
+    prUrl: string,
+    since: number,
+    marker: string,
+    commitSha: string,
+    reviewId: number,
+    expectedState: NonNullable<ReviewDoneOptions["expectedReviewState"]>,
+  ): Promise<DoneGateResult> {
+    const login = await this.currentGitHubLogin(slotPath);
+    if (login === null) {
       return { ok: false, reason: "postage demandé mais utilisateur gh courant indéterminé" };
     }
-    const res = await $`gh pr view ${prUrl} --json reviews`.cwd(slotPath).nothrow().quiet();
+    const endpoint = reviewApiEndpoint(prUrl);
+    if (endpoint === null) return { ok: false, reason: "URL de PR GitHub invalide" };
+    const res = await runBoundedReviewCommand(
+      ["gh", "api", `${endpoint}?per_page=100`, "--paginate", "--slurp"],
+      slotPath,
+    );
     if (res.exitCode !== 0) return { ok: false, reason: "postage demandé mais lecture des reviews échouée" };
-    const parsed = ghReviewsSchema.safeParse(safeJsonParse(res.stdout.toString()));
+    const parsed = ghRestReviewPagesSchema.safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return { ok: false, reason: "postage demandé mais sortie gh inattendue" };
-    const posted = parsed.data.reviews.some(
+    const posted = parsed.data.flat().some(
       (review) =>
-        review.author?.login === login &&
-        review.state === "COMMENTED" &&
+        review.id === reviewId &&
+        review.user?.login === login &&
+        review.state === expectedState &&
         review.body.includes(marker) &&
-        review.submittedAt !== null &&
-        Date.parse(review.submittedAt) >= since,
+        review.commit_id === commitSha &&
+        review.submitted_at !== null &&
+        Date.parse(review.submitted_at) >= since,
     );
     if (!posted) return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
     return { ok: true, reason: "" };
+  }
+
+  private async currentGitHubLogin(slotPath: string): Promise<string | null> {
+    const result = await runBoundedReviewCommand(["gh", "api", "user", "-q", ".login"], slotPath);
+    const login = result.stdout.trim();
+    return result.exitCode === 0 && login.length > 0 ? login : null;
   }
 
   async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
@@ -814,41 +1163,7 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async codeFingerprint(slotPath: string): Promise<string> {
-    const files = await $`git -C ${slotPath} ls-files --cached --others --exclude-standard -z`.nothrow().quiet();
-    if (files.exitCode !== 0) {
-      const detail = files.stderr.toString().trim() || files.stdout.toString().trim();
-      throw new Error(`empreinte du code impossible : git ls-files a échoué (${detail})`);
-    }
-    const hash = createHash("sha256");
-    const paths = files.stdout
-      .toString()
-      .split("\0")
-      .filter((path) => path.length > 0)
-      .sort();
-    for (const relativePath of paths) {
-      const absolutePath = join(slotPath, relativePath);
-      hash.update(`${relativePath.length}:${relativePath}`);
-      try {
-        const stats = await lstat(absolutePath);
-        if (stats.isSymbolicLink()) {
-          const target = await readlink(absolutePath);
-          hash.update(`:symlink:${target.length}:${target}`);
-        } else if (stats.isFile()) {
-          hash.update(stats.mode & 0o111 ? ":file:executable:" : ":file:regular:");
-          hash.update(await readFile(absolutePath));
-        } else {
-          hash.update(":other:");
-        }
-      } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-          hash.update(":missing:");
-          continue;
-        }
-        throw error;
-      }
-      hash.update("\0");
-    }
-    return hash.digest("hex");
+    return computeCodeFingerprint(slotPath);
   }
 
   async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
@@ -1029,6 +1344,20 @@ function extractPrUrl(stdout: string): string {
     .filter((line) => line.length > 0);
   const ghLine = lines.findLast((line) => line.includes("github.com"));
   return ghLine ?? lines.at(-1) ?? "";
+}
+
+function reviewApiEndpoint(prUrl: string): string | null {
+  try {
+    const segments = new URL(prUrl).pathname.split("/").filter((segment) => segment.length > 0);
+    const pullIndex = segments.lastIndexOf("pull");
+    const owner = pullIndex >= 2 ? segments[pullIndex - 2] : undefined;
+    const repo = pullIndex >= 2 ? segments[pullIndex - 1] : undefined;
+    const number = pullIndex >= 0 ? segments[pullIndex + 1] : undefined;
+    if (!owner || !repo || !number || !/^\d+$/.test(number)) return null;
+    return `repos/${owner}/${repo}/pulls/${number}/reviews`;
+  } catch {
+    return null;
+  }
 }
 
 /** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */

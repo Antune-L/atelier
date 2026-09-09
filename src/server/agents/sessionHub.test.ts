@@ -6,6 +6,7 @@ import { FakeSystemAdapter } from "../system/fake.ts";
 
 import type {
   SessionExecutionFinish,
+  SessionHandlerError,
   SessionExecutionUsage,
   SessionMessageContext,
   SessionMessageStatus,
@@ -19,6 +20,7 @@ interface RecordedSession {
   messageIds: string[];
   resolveClose(): void;
   disposed: boolean;
+  failSend: boolean;
 }
 
 class RecordingSystem extends FakeSystemAdapter {
@@ -29,11 +31,12 @@ class RecordingSystem extends FakeSystemAdapter {
     const closePromise = new Promise<void>((resolve) => {
       resolveClose = resolve;
     });
-    const record: RecordedSession = { opts, sent: [], messageIds: [], resolveClose, disposed: false };
+    const record: RecordedSession = { opts, sent: [], messageIds: [], resolveClose, disposed: false, failSend: false };
     this.sessions.push(record);
     return {
       ticketId: opts.ticketId,
       send: (content, messageId) => {
+        if (record.failSend) throw new Error("transport fermé");
         const resolvedMessageId = messageId ?? "fixture-message";
         record.sent.push(content);
         record.messageIds.push(resolvedMessageId);
@@ -241,6 +244,57 @@ test("terminal session closure is bounded and records rejected close without an 
   expect(system.sessions[0]?.disposed).toBe(true);
   await Bun.sleep(1);
   expect(finished).toHaveLength(1);
+});
+
+test("a throwing stream handler never reaches the provider and is traced", () => {
+  const system = new RecordingSystem();
+  const hub = new SessionHub(system);
+  const handlerErrors: SessionHandlerError[] = [];
+  hub.setHandlers({
+    onToolCall: async () => ({ ok: true, result: "ok" }),
+    onStop: () => { throw new Error("database is locked"); },
+    onActivity: () => undefined,
+    onExecutionUsage: () => { throw new Error("usage write failed"); },
+    onHandlerError: (context) => handlerErrors.push(context),
+  });
+  hub.start(sessionConfig());
+  const session = system.sessions[0];
+  if (!session) throw new Error("session missing");
+
+  expect(() =>
+    session.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "thread-1", usageByModel: USAGE }),
+  ).not.toThrow();
+  expect(handlerErrors.map(({ handler }) => handler)).toEqual(["onExecutionUsage", "onStop"]);
+  expect(handlerErrors[1]).toMatchObject({ ticketId: "ticket-1", eventType: "turn_end", error: "database is locked" });
+
+  hub.disconnect("ticket-1");
+  session.resolveClose();
+});
+
+test("a rejected delivery neither stalls the session nor escalates a failure", () => {
+  const system = new RecordingSystem();
+  const hub = new SessionHub(system);
+  const statuses: SessionMessageStatus[] = [];
+  const failures: string[] = [];
+  hub.setHandlers({
+    onToolCall: async () => ({ ok: true, result: "ok" }),
+    onStop: () => undefined,
+    onActivity: () => undefined,
+    onMessageStatus: (context) => statuses.push(context),
+    onExecutionFailure: (message) => failures.push(message),
+  });
+  hub.start(sessionConfig(), { onFailure: (message) => failures.push(message) });
+  const session = system.sessions[0];
+  if (!session) throw new Error("session missing");
+  session.failSend = true;
+
+  expect(hub.sendEvent("ticket-1", { type: "nudge", message: "reprends" })).toBe(false);
+  expect(statuses.map(({ status }) => status)).toEqual(["rejected"]);
+  expect(failures).toEqual([]);
+  expect(hub.isConnected("ticket-1")).toBe(true);
+
+  hub.disconnect("ticket-1");
+  session.resolveClose();
 });
 
 test("startup replay failure joins bounded cleanup before execution finalization", async () => {

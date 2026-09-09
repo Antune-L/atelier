@@ -18,20 +18,33 @@
 import { nanoid } from "nanoid";
 
 import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
+import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/protocol.ts";
 import type { ReviewFinding, ReviewKind, WorkerToolName } from "../../shared/protocol.ts";
 
-import type { Store } from "../db/store.ts";
+import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
+import { getProject, isProjectKey } from "../config.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
+import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
+import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
+import {
+  dedupeIdenticalFindings,
+  isSelfRefuting,
+  keptFindings,
+  reviewProseIsFrench,
+  reviewPublicationEvent,
+} from "./reviewFindings.ts";
+import { passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
 import { codexImplementerKnobs } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
-import { mergeAgentUsageByModel } from "./sessionHub.ts";
+import { mergeAgentUsageByModel, renderChannelEvent } from "./sessionHub.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { slotPath } from "./slotManager.ts";
 import { addUsageByModel, toUsageByModel } from "./usage.ts";
@@ -40,6 +53,23 @@ const log = createLogger("delegation");
 
 /** Min interval between two lastProgressAt refreshes driven by child stream events. */
 const HEARTBEAT_MIN_INTERVAL_MS = 30_000;
+
+/**
+ * A review pass delegates one reviewer per dimension in a row; hashing the whole worktree on each
+ * call cost tens of seconds under load. Within this window the pass reuses its stored fingerprint.
+ */
+const FINGERPRINT_REUSE_WINDOW_MS = 60_000;
+/** Above this, computing the worktree fingerprint is logged as a warning. */
+const SLOW_FINGERPRINT_WARN_MS = 2_000;
+const REVIEW_GATE_FINGERPRINT_TIMEOUT_MS = 30_000;
+/** Above this, a whole delegate_review start (queue wait included) is logged as a warning. */
+const SLOW_REVIEW_START_WARN_MS = 10_000;
+
+/**
+ * A reviewer that answered in French is asked once to re-emit the same JSON in English; a second
+ * French answer is accepted (and logged) so a stubborn model cannot loop the pass forever.
+ */
+const MAX_LANGUAGE_RETRIES = 1;
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string): string {
@@ -97,6 +127,7 @@ interface ActiveReview {
   settled: boolean;
   usageByModel: Record<string, AgentTurnUsage>;
   phase: "review" | "verification";
+  languageRetries: number;
   sourceResult: ReviewResult | null;
   verificationAttempt: number;
   ticket: Ticket;
@@ -107,9 +138,17 @@ interface ActiveReview {
 interface ActiveReviewPass {
   passId: string;
   codeFingerprint: string;
+  reviewedCommitSha: string | null;
+  fingerprintComputedAt: number;
   depth: "light" | "full";
   execution: ResolvedExecution;
 }
+
+type ReviewGateRequirement = "approved" | "completed";
+
+type ReviewGateResult =
+  | { ok: true; passId: string }
+  | { ok: false; reason: string; reasonCode: "code_changed" | "fingerprint_error" | "fingerprint_timeout" | "incomplete_review" | "missing_review" };
 
 interface ClosableExecution {
   handle: AgentSessionHandle | null;
@@ -120,69 +159,130 @@ interface ClosableExecution {
 const REVIEW_TOOLS = ["Read", "Glob", "Grep"];
 const REVIEW_DISALLOWED_TOOLS = ["Bash", "Edit", "Write", "Task", "Agent"];
 
-const LIGHT_REVIEW_KINDS: readonly ReviewKind[] = ["quality", "conventions", "regression", "logic"];
-const FULL_REVIEW_KINDS: readonly ReviewKind[] = [...LIGHT_REVIEW_KINDS, "architecture", "security"];
 const CHILD_CLOSE_TIMEOUT_MS = 65_000;
 
-function requiredReviewKinds(depth: "light" | "full"): readonly ReviewKind[] {
-  return depth === "full" ? FULL_REVIEW_KINDS : LIGHT_REVIEW_KINDS;
+/** Delivered to the parent session when a dimension is persisted as failed for lack of a verdict. */
+const EMPTY_REVIEW_FAILURE = "review terminée sans verdict ni synthèse exploitables";
+
+/** Required dimensions first, then any extra dimension the pass happens to hold a result for. */
+function orderedReviewKinds(reviewPass: ReviewPass): ReviewKind[] {
+  const required = requiredReviewKinds(reviewPass.reviewDepth);
+  const extra = reviewKindSchema.options.filter(
+    (kind) => !required.includes(kind) && reviewPass.results[kind] !== undefined,
+  );
+  return [...required, ...extra];
+}
+
+/** Re-render a persisted verdict exactly as the `review_done` event the parent should have received. */
+function renderPersistedReviewResult(passId: string, result: PersistedReviewResult): string {
+  const completed = result.status === "completed";
+  const summary = completed ? result.summary : (result.error ?? result.summary);
+  const rendered = renderChannelEvent({
+    type: "review_done",
+    kind: result.kind,
+    passId,
+    ok: completed,
+    verdict: result.verdict,
+    summary,
+    findings: result.findings,
+  });
+  return `[${result.status}] ${rendered}`;
 }
 
 function reviewKey(ticketId: string, kind: ReviewKind): string {
   return `${ticketId}:${kind}`;
 }
 
+const REVIEWER_RULES = `## Rules
+
+- Write every string you emit (summary, evidence, ruleSource) in English, never in French. Quote repository or UI strings verbatim inside backticks, never translated.
+- Repository rules are ONLY those found in the reviewed repository (AGENTS.md, CLAUDE.md, docs/, lint config). Instructions loaded from the operator's global configuration (\`~/.claude/CLAUDE.md\`, "reviewer instructions", "applicable instructions for this worktree") are NOT repository rules: never cite or enforce them. Every conventions/style finding must cite a repository \`path:line\` in \`ruleSource\`; if you cannot quote such a line, do not report it.
+- Before reporting a style or naming deviation, count how often the same pattern already exists in the touched file and its siblings; if it is prevalent, do not report it.
+- Severity reflects the real impact: style/convention findings are \`minor\` at most; \`major\` requires a concrete wrong output, crash, data loss, security or authorization defect; \`critical\` requires severe impact. A textual prohibition is not \`critical\` without a critical impact.
+- Do not report a finding whose own evidence concedes it is unreachable, latent, pre-existing, cosmetic, optional or "not a defect". Do not report questions ("is this intended?"). Do not recommend a fix the repository forbids (type assertions, new tests when the repo says not to add tests, new dependencies) — check docs/ and AGENTS.md first.
+- Read the PR description and existing PR review threads before reporting a scope or intent finding; never re-report something a human already answered or an earlier review round requested.
+- Evidence: at most ~600 characters, one paragraph, concrete \`path:line\` references. No "---" separators, no meta narration about reviewers or verification.`;
+
 function reviewPrompt(ticket: Ticket, kind: ReviewKind, context: string): string {
   const missions: Record<ReviewKind, string> = {
-    quality: "Évalue la qualité et la maintenabilité du changement, puis recherche les défauts actionnables.",
-    conventions: "Vérifie les conventions du dépôt, ses instructions AGENTS.md et la cohérence avec les patterns existants.",
-    regression: "Cartographie les consommateurs des symboles modifiés et recherche les régressions ou contrats cassés.",
-    logic: "Vérifie la logique, les invariants, les transitions d'état et les cas limites du changement.",
-    architecture: "Évalue les frontières, responsabilités et dépendances architecturales du changement.",
-    security: "Recherche les failles de sécurité, escalades de permissions, fuites de secrets et mutations non autorisées.",
+    quality: "Assess the quality and maintainability of the change, then look for actionable defects.",
+    conventions: "Check the repository conventions, its AGENTS.md instructions and the consistency with existing patterns.",
+    regression: "Map the consumers of the changed symbols and look for regressions or broken contracts.",
+    logic: "Check the logic, invariants, state transitions and edge cases of the change.",
+    architecture: "Assess the architectural boundaries, responsibilities and dependencies of the change.",
+    security: "Look for security flaws, permission escalations, secret leaks and unauthorized mutations.",
   };
   const depth = ticket.reviewDepth ?? "light";
-  return `Tu es un reviewer indépendant à contexte frais, en LECTURE SEULE. Tu ne peux ni modifier le dépôt, ni committer, ni publier à distance.
+  return `You are an independent fresh-context reviewer, READ-ONLY. You cannot modify the repository, commit, or publish anything remotely.
 
 ${missions[kind]}
-Profondeur demandée : ${depth}. Ta dimension attribuée est ${kind} ; rends un verdict autonome sur cette dimension.
+Requested depth: ${depth}. Your assigned dimension is ${kind}; return an autonomous verdict on that dimension only.
 
-## Contexte fourni par l'orchestrateur
+## Context provided by the orchestrator
 ${context}
 
-Inspecte toi-même les fichiers et le diff dans le worktree. Appelle ensuite obligatoirement submit_review avec :
-- verdict=approve uniquement si aucun finding actionnable ne reste ; sinon verdict=revise ;
-- summary : conclusion concise et fondée ;
-- findings : objets { id, severity, summary, evidence, ruleSource, path, line } ; severity reflète l'impact réel
-  (critical = sécurité/perte de données/indisponibilité grave, major = comportement ou régression significative,
-  minor = convention ou amélioration locale). Une interdiction textuelle n'est pas critical sans impact critique.
+Inspect the files and the diff in the worktree yourself. Then you MUST call submit_review with:
+- verdict=approve only if no actionable finding remains; otherwise verdict=revise;
+- summary: a concise, evidence-based conclusion;
+- findings: objects { id, severity, summary, evidence, ruleSource, path, line }.
 
-N'appelle aucun autre tool du pipeline.`;
+${REVIEWER_RULES}
+
+Do not call any other pipeline tool.`;
 }
 
 function verificationPrompt(ticket: Ticket, kind: ReviewKind, result: ReviewResult): string {
   const candidates = result.findings.filter((finding) => finding.severity !== "minor");
-  return `Tu contre-vérifies indépendamment des findings importants d'une review ${kind}, en LECTURE SEULE.
-Tu ne peux ni modifier le dépôt, ni committer, ni publier à distance. Vérifie chaque affirmation dans le code,
-le diff et les instructions applicables. Déduplique les doublons. Rejette les conclusions non prouvées et
-dégrade leur sévérité lorsque l'impact annoncé ne correspond pas aux preuves.
+  return `You independently counter-check the important findings of a ${kind} review, READ-ONLY.
+You cannot modify the repository, commit, or publish anything remotely. Verify every claim against the code
+and the diff. Deduplicate, reject unproven conclusions, and downgrade the severity of a finding whose claimed
+impact does not match its evidence.
 
-Ticket : ${ticket.title}
-Findings candidats : ${JSON.stringify(candidates)}
+Ticket: ${ticket.title}
+Candidate findings: ${JSON.stringify(candidates)}
 
-Appelle submit_review avec les seuls findings confirmés, au format structuré demandé. Utilise verdict=revise
-s'il en reste, approve sinon. Dans summary, indique brièvement les rejets et dégradations. N'appelle aucun autre tool.`;
+${REVIEWER_RULES}
+
+Call submit_review with the confirmed findings only. Use verdict=revise if any remains, approve otherwise.
+State briefly in the summary which findings you rejected or downgraded. Do not call any other tool.`;
 }
 
-function dedupeFindings(findings: ReviewFinding[]): ReviewFinding[] {
-  const seen = new Set<string>();
-  return findings.filter((finding) => {
-    const key = `${finding.path ?? ""}:${finding.line ?? ""}:${finding.summary.trim().toLowerCase()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+/** Inline comment body: GitHub already renders the `path:line` anchor, so it is not repeated here. */
+function renderFinding(finding: ReviewFinding): string {
+  return `**${finding.severity.toUpperCase()}** — ${finding.summary}\n\n${finding.evidence}`;
 }
+
+function renderCollapsedFinding(finding: ReviewFinding): string {
+  const location = finding.path ? ` — ${finding.path}${finding.line ? `:${finding.line}` : ""}` : "";
+  return renderCollapsedDetails(
+    `${finding.severity.toUpperCase()}${location} — ${finding.summary}`,
+    finding.evidence,
+  );
+}
+
+interface ReviewReportLabels {
+  changesRecommended: string;
+  noChanges: string;
+  noFindings: string;
+  outsideDiffHeading: string;
+  keptLine: (count: number, countSummary: string) => string;
+}
+
+const REVIEW_REPORT_LABELS_EN: ReviewReportLabels = {
+  changesRecommended: "Review complete — changes recommended",
+  noChanges: "Review complete — no changes recommended",
+  noFindings: "no findings",
+  outsideDiffHeading: "## Findings without a diff anchor",
+  keptLine: (count, countSummary) => `${count} finding(s) kept: ${countSummary}.`,
+};
+
+const REVIEW_REPORT_LABELS_FR: ReviewReportLabels = {
+  changesRecommended: "Revue terminée — modifications recommandées",
+  noChanges: "Revue terminée — aucune modification recommandée",
+  noFindings: "aucun finding",
+  outsideDiffHeading: "## Findings hors du diff",
+  keptLine: (count, countSummary) => `${count} finding(s) retenu(s) : ${countSummary}.`,
+};
 
 function verifiedFindings(source: ReviewResult, verification: ReviewResult): ReviewFinding[] {
   const submitted = new Map(verification.findings.map((finding) => [finding.id, finding]));
@@ -218,6 +318,7 @@ export class DelegationManager {
     private readonly sessionHub: SessionHub,
     private readonly hub: ClientHub,
     private readonly closeTimeoutMs = CHILD_CLOSE_TIMEOUT_MS,
+    private readonly repoMutex = new KeyedMutex(),
   ) {}
 
   /** True while a child implementation session runs for this ticket (parent is parked, not stalled). */
@@ -235,56 +336,308 @@ export class DelegationManager {
     return [...this.activeReviews.values()].some((review) => review.ticketId === ticketId);
   }
 
-  private async currentReviewPass(ticketId: string, slotId: number): Promise<ReturnType<Store["getReviewPass"]>> {
+  private boundedReviewGateFingerprint(
+    ticketId: string,
+    slotId: number,
+    correlationId: string,
+  ): Promise<{ ok: true; fingerprint: string } | { ok: false; reason: string; reasonCode: "fingerprint_error" | "fingerprint_timeout" }> {
+    const startedAt = Date.now();
+    const fingerprint = this.system.codeFingerprint(slotPath(slotId));
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        log.warn("empreinte de gate expirée", {
+          ticketId,
+          slotId,
+          correlationId,
+          elapsedMs: Date.now() - startedAt,
+        });
+        resolve({
+          ok: false,
+          reason: "La vérification du code a dépassé 30 s. Son résultat sera ignoré. Rappelle done().",
+          reasonCode: "fingerprint_timeout",
+        });
+      }, REVIEW_GATE_FINGERPRINT_TIMEOUT_MS);
+      void fingerprint.then(
+        (value) => {
+          if (settled) {
+            log.info("empreinte de gate terminée après expiration — résultat ignoré", {
+              ticketId,
+              slotId,
+              correlationId,
+              elapsedMs: Date.now() - startedAt,
+            });
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          resolve({ ok: true, fingerprint: value });
+        },
+        (error: unknown) => {
+          const reason = getErrorMessage(error);
+          if (settled) {
+            log.warn("empreinte de gate échouée après expiration — erreur ignorée", {
+              ticketId,
+              slotId,
+              correlationId,
+              elapsedMs: Date.now() - startedAt,
+              reason,
+            });
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          log.warn("empreinte du code illisible pendant la gate de review", {
+            ticketId,
+            slotId,
+            correlationId,
+            elapsedMs: Date.now() - startedAt,
+            reason,
+          });
+          resolve({
+            ok: false,
+            reason: `La vérification du code n'a pas pu lire le dossier de travail : ${reason}`,
+            reasonCode: "fingerprint_error",
+          });
+        },
+      );
+    });
+  }
+
+  async reviewGate(
+    ticketId: string,
+    slotId: number,
+    requirement: ReviewGateRequirement,
+    correlationId: string,
+  ): Promise<ReviewGateResult> {
+    const startedAt = Date.now();
+    log.info("gate de review démarrée", { ticketId, slotId, correlationId, requirement });
     const reviewPass = this.store.getReviewPass(ticketId);
-    if (!reviewPass) return null;
-    let fingerprint: string;
-    try {
-      fingerprint = await this.system.codeFingerprint(slotPath(slotId));
-    } catch (error) {
-      log.warn("empreinte du code illisible pendant la gate de review", {
-        ticketId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
+    if (!reviewPass) {
+      return {
+        ok: false,
+        reason: "Aucune passe de review n'est enregistrée. Lance tous les reviewers requis avant de rappeler done().",
+        reasonCode: "missing_review",
+      };
     }
-    if (reviewPass.codeFingerprint !== fingerprint) return null;
-    return reviewPass;
+    const fingerprint = await this.boundedReviewGateFingerprint(ticketId, slotId, correlationId);
+    if (!fingerprint.ok) return fingerprint;
+    if (reviewPass.codeFingerprint !== fingerprint.fingerprint) {
+      return {
+        ok: false,
+        reason: "Les fichiers ont changé depuis la passe de review. Relance tous les reviewers sur le code courant.",
+        reasonCode: "code_changed",
+      };
+    }
+    const incompleteKinds = requiredReviewKinds(reviewPass.reviewDepth).filter((kind) => {
+      if (requirement === "completed") return reviewPass.results[kind]?.status !== "completed";
+      return reviewPass.approvals[kind] !== true;
+    });
+    if (incompleteKinds.length > 0) {
+      const missing = requirement === "completed" ? "résultat vérifié manquant" : "approbation manquante";
+      return {
+        ok: false,
+        reason: `Review incomplète : ${missing} pour ${incompleteKinds.join(", ")}.`,
+        reasonCode: "incomplete_review",
+      };
+    }
+    log.info("gate de review acceptée", {
+      ticketId,
+      slotId,
+      correlationId,
+      requirement,
+      passId: reviewPass.passId,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { ok: true, passId: reviewPass.passId };
   }
 
   async reviewsCompleted(ticketId: string, slotId: number): Promise<boolean> {
-    const reviewPass = await this.currentReviewPass(ticketId, slotId);
-    if (!reviewPass) return false;
-    return requiredReviewKinds(reviewPass.reviewDepth).every((kind) => reviewPass.results[kind]?.status === "completed");
+    return (await this.reviewGate(ticketId, slotId, "completed", nanoid(8))).ok;
   }
 
   async reviewsApproved(ticketId: string, slotId: number): Promise<boolean> {
-    const reviewPass = await this.currentReviewPass(ticketId, slotId);
-    if (!reviewPass) return false;
-    return requiredReviewKinds(reviewPass.reviewDepth).every((kind) => reviewPass.approvals[kind] === true);
+    return (await this.reviewGate(ticketId, slotId, "approved", nanoid(8))).ok;
+  }
+
+  /**
+   * Re-read the verdicts persisted for the ticket's review pass. Recovery path when a `review_done`
+   * event never reached the parent session: the results outlive the delivery.
+   */
+  readReviewResults(ticketId: string, passId: string | null): { ok: boolean; result: string } {
+    const reviewPass = this.store.getReviewPass(ticketId);
+    if (!reviewPass) {
+      return { ok: false, result: "Aucune passe de review enregistrée pour ce ticket : lance delegate_review." };
+    }
+    if (passId !== null && passId !== reviewPass.passId) {
+      return {
+        ok: false,
+        result: `Passe ${passId} introuvable : seule la passe courante ${reviewPass.passId} est conservée.`,
+      };
+    }
+    const kinds = orderedReviewKinds(reviewPass);
+    const rendered: string[] = [];
+    const pending: ReviewKind[] = [];
+    for (const kind of kinds) {
+      const result = reviewPass.results[kind];
+      if (!result || result.status === "pending") {
+        pending.push(kind);
+        continue;
+      }
+      rendered.push(renderPersistedReviewResult(reviewPass.passId, result));
+    }
+    const header = `Passe ${reviewPass.passId} (profondeur ${reviewPass.reviewDepth}) : ${rendered.length}/${kinds.length} dimension(s) rendue(s).`;
+    const pendingLine = pending.length === 0 ? "" : `\n\nEn attente : ${pending.join(", ")}.`;
+    const verdicts = rendered.length === 0 ? "" : `\n\n${rendered.join("\n\n")}`;
+    return { ok: true, result: `${header}${verdicts}${pendingLine}` };
   }
 
   reviewRequiresApproval(ticketId: string): boolean | null {
     return this.store.getReviewPass(ticketId)?.requiresApproval ?? null;
   }
 
+  /** English rendering: the body posted on the GitHub pull request. */
   reviewReport(ticketId: string): string | null {
-    const reviewPass = this.store.getReviewPass(ticketId);
-    if (!reviewPass) return null;
-    const results = requiredReviewKinds(reviewPass.reviewDepth).map((kind) => reviewPass.results[kind]);
-    if (results.some((result) => result?.status !== "completed")) return null;
-    const findings = dedupeFindings(
-      results.flatMap((result) => result?.findings.filter((finding) => finding.verificationStatus !== "rejected") ?? []),
-    );
-    const verdict = findings.length > 0 ? "Corrections recommandées" : "Aucune correction recommandée";
-    const summaries = results.map((result) => `- **${result?.kind ?? "review"}** : ${result?.summary ?? ""}`).join("\n");
-    const details = findings.length === 0
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_EN);
+  }
+
+  /** French rendering: the board comment shown in the app. */
+  reviewBoardReport(ticketId: string): string | null {
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR);
+  }
+
+  private renderReviewReport(ticketId: string, labels: ReviewReportLabels): string | null {
+    const findings = publishedReviewFindings(this.store.getReviewPass(ticketId));
+    if (findings === null) return null;
+    const verdict = findings.length > 0 ? labels.changesRecommended : labels.noChanges;
+    const counts = reviewFindingSeveritySchema.options.flatMap((severity) => {
+      const count = findings.filter((finding) => finding.severity === severity).length;
+      return count > 0 ? [`${count} ${severity}`] : [];
+    });
+    const countSummary = counts.length > 0 ? counts.join(", ") : labels.noFindings;
+    const outsideDiffFindings = findings.filter((finding) => finding.path === null || finding.line === null);
+    const details = outsideDiffFindings.length === 0
       ? ""
-      : `\n\n## Findings\n\n${findings.map((finding) => {
-        const location = finding.path ? ` — ${finding.path}${finding.line ? `:${finding.line}` : ""}` : "";
-        return `- **${finding.severity.toUpperCase()}**${location} — ${finding.summary}\n  ${finding.evidence}`;
-      }).join("\n")}`;
-    return `**Revue terminée — ${verdict}**\n\n${summaries}${details}`;
+      : `\n\n${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map(renderCollapsedFinding).join("\n\n")}`;
+    return `**${verdict}**\n\n${labels.keptLine(findings.length, countSummary)}${details}`;
+  }
+
+  async publishReview(
+    ticket: Ticket,
+    slotId: number,
+    passId: string,
+    correlationId: string,
+  ): Promise<{ ok: boolean; result: string }> {
+    const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
+    const previous = this.reviewStartQueues.get(ticket.id) ?? Promise.resolve();
+    const queued = previous
+      .catch(() => undefined)
+      .then(() => this.publishReviewNow(ticket, slotId, passId, correlationId, epoch));
+    this.reviewStartQueues.set(ticket.id, queued);
+    try {
+      return await queued;
+    } finally {
+      if (this.reviewStartQueues.get(ticket.id) === queued) this.reviewStartQueues.delete(ticket.id);
+    }
+  }
+
+  private async publishReviewNow(
+    ticket: Ticket,
+    slotId: number,
+    passId: string,
+    correlationId: string,
+    epoch: number,
+  ): Promise<{ ok: boolean; result: string }> {
+    if (ticket.kind !== "review" || !ticket.postComments || ticket.prUrl === null) {
+      return { ok: false, result: "publish_review est réservé aux tickets review avec postage GitHub activé." };
+    }
+    const prUrl = ticket.prUrl;
+    const reviewPass = this.store.getReviewPass(ticket.id);
+    if (!reviewPass || reviewPass.passId !== passId) {
+      return {
+        ok: false,
+        result: "Cette passe n'est plus courante. Lance une nouvelle passe complète avec delegate_review.",
+      };
+    }
+    const requirement = reviewPass.requiresApproval ? "approved" : "completed";
+    const gate = await this.reviewGate(ticket.id, slotId, requirement, correlationId);
+    if (!gate.ok) return { ok: false, result: `Publication refusée : ${gate.reason}` };
+    if (!isProjectKey(ticket.project)) return { ok: false, result: "Publication refusée : projet inconnu." };
+    return this.repoMutex.run(getProject(ticket.project).repoPath, () =>
+      this.publishReviewUnderRepoLock(ticket, slotId, prUrl, passId, epoch));
+  }
+
+  private async publishReviewUnderRepoLock(
+    ticket: Ticket,
+    slotId: number,
+    prUrl: string,
+    passId: string,
+    epoch: number,
+  ): Promise<{ ok: boolean; result: string }> {
+    const slot = this.store.getSlot(slotId);
+    if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch || slot?.ticketId !== ticket.id) {
+      return { ok: false, result: "Publication annulée : le slot de review a été libéré." };
+    }
+    const currentPass = this.store.getReviewPass(ticket.id);
+    if (!currentPass || currentPass.passId !== passId) {
+      return { ok: false, result: "Publication annulée : une nouvelle passe a remplacé celle-ci." };
+    }
+    const report = this.reviewReport(ticket.id);
+    if (report === null) return { ok: false, result: "Publication refusée : résultats de review incomplets." };
+    const reviewedCommitSha = currentPass.reviewedCommitSha;
+    if (reviewedCommitSha === null) {
+      return {
+        ok: false,
+        result: "Cette ancienne passe n'a pas de SHA revu vérifiable. Lance une nouvelle passe complète avant publication.",
+      };
+    }
+    if (!this.store.bindReviewPassCommit(ticket.id, passId, reviewedCommitSha)) {
+      return { ok: false, result: "Publication annulée : la passe courante a changé. Lance une nouvelle passe complète." };
+    }
+    const entries = passDimensionFindings(this.store.getReviewPass(ticket.id)) ?? [];
+    const findings = keptFindings(entries);
+    const refutedCount = entries.filter((entry) =>
+      entry.finding.verificationStatus !== "rejected" && isSelfRefuting(entry.finding)).length;
+    const comments = findings.flatMap((finding) => {
+      if (finding.path === null || finding.line === null) return [];
+      return [{
+        path: finding.path,
+        line: finding.line,
+        body: renderFinding(finding),
+      }];
+    });
+    const event = reviewPublicationEvent(findings);
+    const marker = `<!-- kanban-review-pass:${passId} -->`;
+    const published = await this.system.publishReview(slotPath(slotId), prUrl, {
+      expectedCommitSha: reviewedCommitSha,
+      marker,
+      body: report,
+      comments,
+      event,
+    });
+    if (!published.ok || published.reviewId === null) return { ok: false, result: `Publication refusée : ${published.reason}` };
+    if (!this.store.recordReviewPublication({
+      ticketId: ticket.id,
+      passId,
+      reviewId: published.reviewId,
+      commitSha: reviewedCommitSha,
+    })) {
+      return {
+        ok: false,
+        result: "La review a été publiée, mais son accusé n'a pas pu être persisté. Rappelle publish_review pour le récupérer.",
+      };
+    }
+    this.store.logEvent(ticket.id, "review_published", {
+      passId,
+      reviewId: published.reviewId,
+      commitSha: reviewedCommitSha,
+    });
+    const refutedNote = refutedCount === 0 ? "" : ` (${refutedCount} finding(s) auto-réfuté(s) ignoré(s))`;
+    return {
+      ok: true,
+      result: `Review publiée sur le commit ${reviewedCommitSha}${refutedNote}. Appelle maintenant done().`,
+    };
   }
 
   /** Number of implementation lots running or being prepared for this ticket. */
@@ -424,17 +777,170 @@ export class DelegationManager {
     kind: ReviewKind,
     context: string,
   ): Promise<{ ok: boolean; result: string }> {
+    const startId = nanoid(8);
+    const startedAt = Date.now();
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
     const previous = this.reviewStartQueues.get(ticket.id) ?? Promise.resolve();
+    const queuedBehindAnotherStart = this.reviewStartQueues.has(ticket.id);
+    log.info("review mise en file de démarrage", { ticketId: ticket.id, kind, startId, queuedBehindAnotherStart });
     const queued = previous
       .catch(() => undefined)
-      .then(() => this.startReviewNow(ticket, slotId, kind, context, epoch));
+      .then(() => {
+        log.info("review sortie de la file de démarrage", {
+          ticketId: ticket.id,
+          kind,
+          startId,
+          queueWaitMs: Date.now() - startedAt,
+        });
+        return this.startReviewNow(ticket, slotId, kind, context, epoch, startId);
+      });
     this.reviewStartQueues.set(ticket.id, queued);
     try {
       return await queued;
+    } catch (error) {
+      const reason = getErrorMessage(error);
+      log.error("démarrage de review échoué", {
+        ticketId: ticket.id,
+        kind,
+        startId,
+        elapsedMs: Date.now() - startedAt,
+        errorName: error instanceof Error ? error.name : "unknown",
+      });
+      return { ok: false, result: `Impossible de lancer la review ${kind} : ${reason}` };
     } finally {
+      const elapsedMs = Date.now() - startedAt;
+      const timing = { ticketId: ticket.id, kind, startId, elapsedMs };
+      if (elapsedMs >= SLOW_REVIEW_START_WARN_MS) log.warn("démarrage de review LENT", timing);
+      else log.info("démarrage de review", timing);
       if (this.reviewStartQueues.get(ticket.id) === queued) this.reviewStartQueues.delete(ticket.id);
     }
+  }
+
+  /** Pass id whose reviewer for this kind already rendered a verdict, or null (retry-safe delegate_review). */
+  private completedInCurrentPass(ticketId: string, kind: ReviewKind): string | null {
+    const activePass = this.activeReviewPasses.get(ticketId);
+    if (!activePass) return null;
+    const persisted = this.store.getReviewPass(ticketId);
+    if (!persisted || persisted.passId !== activePass.passId) return null;
+    return persisted.results[kind]?.status === "completed" ? activePass.passId : null;
+  }
+
+  /** Hash the worktree for a review pass, logging how long it took (the call dominates a slow start). */
+  private async timedCodeFingerprint(cwd: string, ticketId: string, kind: ReviewKind, startId: string): Promise<string> {
+    const startedAt = Date.now();
+    log.info("calcul de l'empreinte démarré", { ticketId, kind, startId });
+    const slowTimer = setTimeout(() => {
+      log.warn("calcul de l'empreinte toujours en cours", {
+        ticketId,
+        kind,
+        startId,
+        elapsedMs: Date.now() - startedAt,
+      });
+    }, SLOW_FINGERPRINT_WARN_MS);
+    try {
+      return await this.system.codeFingerprint(cwd);
+    } finally {
+      clearTimeout(slowTimer);
+      const elapsedMs = Date.now() - startedAt;
+      const timing = { ticketId, kind, startId, elapsedMs };
+      if (elapsedMs >= SLOW_FINGERPRINT_WARN_MS) log.warn("empreinte du code LENTE", timing);
+      else log.info("empreinte du code calculée", timing);
+    }
+  }
+
+  /**
+   * Resolve the review pass the reviewer joins, recomputing the worktree fingerprint only when the
+   * pass has none fresh enough — the mid-pass code-change guard stays meaningful, at one hash per
+   * FINGERPRINT_REUSE_WINDOW_MS instead of one per delegate_review call.
+   */
+  private async resolveReviewPass(
+    ticket: Ticket,
+    slotId: number,
+    cwd: string,
+    kind: ReviewKind,
+    depth: "light" | "full",
+    epoch: number,
+    requestedExecution: ResolvedExecution,
+    startId: string,
+  ): Promise<{ ok: true; pass: ActiveReviewPass } | { ok: false; result: string }> {
+    const cached = this.activeReviewPasses.get(ticket.id);
+    if (cached && cached.depth === depth && Date.now() - cached.fingerprintComputedAt < FINGERPRINT_REUSE_WINDOW_MS) {
+      return { ok: true, pass: cached };
+    }
+    const requiresApproval = ticket.kind !== "review" || (ticket.fixComments && ticket.prHeadBranch !== null);
+    let reviewedCommitSha = cached?.reviewedCommitSha ?? null;
+    if (!cached && ticket.kind === "review") {
+      if (!isProjectKey(ticket.project) || ticket.prUrl === null || ticket.prNumber === null) {
+        return { ok: false, result: `Impossible de préparer la review ${kind} : identité de PR incomplète.` };
+      }
+      const repoPath = getProject(ticket.project).repoPath;
+      const prUrl = ticket.prUrl;
+      const prNumber = ticket.prNumber;
+      const prepared = await this.repoMutex.run(repoPath, async () => {
+        const slot = this.store.getSlot(slotId);
+        if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch || slot?.ticketId !== ticket.id) {
+          return { ok: false, reason: "slot de review libéré pendant la préparation", commitSha: null };
+        }
+        if (requiresApproval) return this.system.readReviewHead(cwd, prUrl);
+        return this.system.prepareReviewWorktree({
+          repoPath,
+          slotPath: cwd,
+          prUrl,
+          prNumber,
+        });
+      });
+      if (!prepared.ok || prepared.commitSha === null) {
+        return { ok: false, result: `Impossible de préparer la review ${kind} : ${prepared.reason}` };
+      }
+      reviewedCommitSha = prepared.commitSha;
+    }
+    let codeFingerprint: string;
+    try {
+      codeFingerprint = await this.timedCodeFingerprint(cwd, ticket.id, kind, startId);
+    } catch (error) {
+      return { ok: false, result: `Impossible de lancer la review ${kind} : ${getErrorMessage(error)}` };
+    }
+    const computedAt = Date.now();
+    if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
+      return { ok: false, result: "Passe de review annulée pendant sa préparation." };
+    }
+    const reviewPass = this.activeReviewPasses.get(ticket.id);
+    if (reviewPass && (reviewPass.codeFingerprint !== codeFingerprint || reviewPass.depth !== depth)) {
+      return {
+        ok: false,
+        result: "Le code ou la profondeur a changé pendant la passe de review. Attends sa fin puis relance tous les reviewers.",
+      };
+    }
+    if (reviewPass) {
+      reviewPass.fingerprintComputedAt = computedAt;
+      return { ok: true, pass: reviewPass };
+    }
+    try {
+      await assertExecutionAvailable(this.system, requestedExecution);
+    } catch (error) {
+      return { ok: false, result: `Impossible de lancer la review ${kind} : ${getErrorMessage(error)}` };
+    }
+    if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
+      return { ok: false, result: "Passe de review annulée pendant sa préparation." };
+    }
+    const created: ActiveReviewPass = {
+      passId: nanoid(16),
+      codeFingerprint,
+      reviewedCommitSha,
+      fingerprintComputedAt: computedAt,
+      depth,
+      execution: requestedExecution,
+    };
+    this.store.beginReviewPass({
+      ticketId: ticket.id,
+      passId: created.passId,
+      codeFingerprint,
+      reviewedCommitSha,
+      reviewDepth: depth,
+      requiresApproval,
+    });
+    this.activeReviewPasses.set(ticket.id, created);
+    return { ok: true, pass: created };
   }
 
   /** Start one bounded, fresh-context reviewer session within the ticket's current review pass. */
@@ -444,6 +950,7 @@ export class DelegationManager {
     kind: ReviewKind,
     context: string,
     epoch: number,
+    startId: string,
   ): Promise<{ ok: boolean; result: string }> {
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
       return { ok: false, result: "Passe de review annulée avant son lancement." };
@@ -458,6 +965,13 @@ export class DelegationManager {
     if (this.activeReviews.has(key)) {
       return { ok: false, result: `La review ${kind} est déjà en cours.` };
     }
+    const completed = this.completedInCurrentPass(ticket.id, kind);
+    if (completed !== null) {
+      return {
+        ok: true,
+        result: `La review ${kind} est déjà rendue dans la passe ${completed} : relis son verdict avec read_review_results, ne la relance pas.`,
+      };
+    }
     const parentExecution = this.sessionHub.getExecutionConfig(ticket.id);
     const requestedExecution: ResolvedExecution = parentExecution
       ? { ...parentExecution, role: "reviewer" }
@@ -466,44 +980,10 @@ export class DelegationManager {
           effort: ticket.effort ?? "low",
         });
     const cwd = slotPath(slotId);
-    let codeFingerprint: string;
-    try {
-      codeFingerprint = await this.system.codeFingerprint(cwd);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false, result: `Impossible de lancer la review ${kind} : ${message}` };
-    }
-    if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
-      return { ok: false, result: "Passe de review annulée pendant sa préparation." };
-    }
     const depth = ticket.reviewDepth ?? "light";
-    let reviewPass = this.activeReviewPasses.get(ticket.id);
-    if (reviewPass && (reviewPass.codeFingerprint !== codeFingerprint || reviewPass.depth !== depth)) {
-      return {
-        ok: false,
-        result: "Le code ou la profondeur a changé pendant la passe de review. Attends sa fin puis relance tous les reviewers.",
-      };
-    }
-    if (!reviewPass) {
-      reviewPass = { passId: nanoid(16), codeFingerprint, depth, execution: requestedExecution };
-      try {
-        await assertExecutionAvailable(this.system, requestedExecution);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { ok: false, result: `Impossible de lancer la review ${kind} : ${message}` };
-      }
-      if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
-        return { ok: false, result: "Passe de review annulée pendant sa préparation." };
-      }
-      this.store.beginReviewPass({
-        ticketId: ticket.id,
-        passId: reviewPass.passId,
-        codeFingerprint,
-        reviewDepth: depth,
-        requiresApproval: ticket.kind !== "review" || (ticket.fixComments && ticket.prHeadBranch !== null),
-      });
-      this.activeReviewPasses.set(ticket.id, reviewPass);
-    }
+    const resolved = await this.resolveReviewPass(ticket, slotId, cwd, kind, depth, epoch, requestedExecution, startId);
+    if (!resolved.ok) return { ok: false, result: resolved.result };
+    const reviewPass = resolved.pass;
     const execution = reviewPass.execution;
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
@@ -522,6 +1002,7 @@ export class DelegationManager {
       settled: false,
       usageByModel: {},
       phase: "review",
+      languageRetries: 0,
       sourceResult: null,
       verificationAttempt: 0,
       ticket,
@@ -556,6 +1037,7 @@ export class DelegationManager {
         generation,
         permissionMode: "dontAsk",
         readOnly: true,
+        blockTypecheck: true,
         allowedTools: REVIEW_TOOLS,
         disallowedTools: REVIEW_DISALLOWED_TOOLS,
         skills: [],
@@ -634,19 +1116,45 @@ export class DelegationManager {
     }
     const parsed = submitReviewArgsSchema.safeParse(args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (reviewProseIsFrench(parsed.data)) {
+      if (state.languageRetries < MAX_LANGUAGE_RETRIES) {
+        state.languageRetries += 1;
+        return {
+          ok: false,
+          result: "Re-emit the same JSON with all prose in English (repository strings may stay verbatim inside backticks).",
+        };
+      }
+      log.warn("review acceptée en français après relance", { ticketId: state.ticketId, kind: state.kind });
+    }
     state.result = parsed.data;
     return { ok: true, result: "Review enregistrée. Termine le tour." };
+  }
+
+  /**
+   * Attach the provider session to its execution row without letting a failed write (locked SQLite,
+   * vanished row) escape into the provider's stream loop and kill the child session.
+   */
+  private attachChildSession(
+    generationId: string,
+    event: Extract<AgentSessionEvent, { type: "init" }>,
+    context: Record<string, unknown>,
+  ): void {
+    try {
+      this.store.attachExecutionSession({
+        generationId,
+        sessionId: event.sessionId,
+        configuredServiceTier: event.configuredServiceTier ?? null,
+      });
+    } catch (error) {
+      log.error("rattachement de session enfant impossible", { ...context, generationId, reason: String(error) });
+    }
   }
 
   private handleReviewEvent(state: ActiveReview, event: AgentSessionEvent): void {
     const current = this.activeReviews.get(reviewKey(state.ticketId, state.kind)) === state;
     if (event.type === "init") {
       state.sessionId = event.sessionId;
-      this.store.attachExecutionSession({
-        generationId: state.generationId,
-        sessionId: event.sessionId,
-        configuredServiceTier: event.configuredServiceTier ?? null,
-      });
+      this.attachChildSession(state.generationId, event, { ticketId: state.ticketId, kind: state.kind });
     }
     if (event.type === "turn_end") {
       state.usageByModel = mergeAgentUsageByModel(state.usageByModel, event.usageByModel);
@@ -674,8 +1182,9 @@ export class DelegationManager {
       this.closeAndFinalize(state, "completed", null);
       const needsVerification = state.result.findings.some((finding) => finding.severity !== "minor");
       if (!needsVerification) {
-        this.persistReviewResult(state, state.result, "not_needed");
-        this.deliverReviewResult(state, true, state.result, "");
+        const recorded = this.persistReviewResult(state, state.result, "not_needed");
+        if (recorded) this.deliverReviewResult(state, true, state.result, "");
+        else this.deliverReviewResult(state, false, null, EMPTY_REVIEW_FAILURE);
         this.clearReviewPassIfIdle(state.ticketId);
         return;
       }
@@ -701,8 +1210,9 @@ export class DelegationManager {
         summary: `${state.sourceResult.summary}\nContre-vérification : ${state.result.summary}`,
         findings,
       };
-      this.persistReviewResult(state, result, "verified", persistedFindings);
-      this.deliverReviewResult(state, true, result, "");
+      const recorded = this.persistReviewResult(state, result, "verified", persistedFindings);
+      if (recorded) this.deliverReviewResult(state, true, result, "");
+      else this.deliverReviewResult(state, false, null, EMPTY_REVIEW_FAILURE);
       this.closeAndFinalize(state, "completed", null);
       this.clearReviewPassIfIdle(state.ticketId);
       return;
@@ -738,12 +1248,32 @@ export class DelegationManager {
     if (!this.hasActiveReviews(ticketId)) this.activeReviewPasses.delete(ticketId);
   }
 
+  /**
+   * A completed dimension MUST carry a verdict and a summary: a blank one silently publishes an
+   * empty review round. Anything short of that is persisted as an explicit failure instead.
+   */
   private persistReviewResult(
     state: ActiveReview,
     result: ReviewResult,
     verificationStatus: "not_needed" | "verified",
     persistedFindings = result.findings,
-  ): void {
+  ): boolean {
+    if (result.summary.trim().length === 0) {
+      const failure = EMPTY_REVIEW_FAILURE;
+      this.store.recordReviewResult({
+        ticketId: state.ticketId,
+        passId: state.passId,
+        kind: state.kind,
+        status: "failed",
+        verdict: null,
+        summary: failure,
+        findings: dedupeIdenticalFindings(persistedFindings),
+        verificationStatus: "failed",
+        error: failure,
+      });
+      log.warn("résultat de review vide refusé", { ticketId: state.ticketId, kind: state.kind });
+      return false;
+    }
     this.store.recordReviewResult({
       ticketId: state.ticketId,
       passId: state.passId,
@@ -751,10 +1281,11 @@ export class DelegationManager {
       status: "completed",
       verdict: result.verdict,
       summary: result.summary,
-      findings: dedupeFindings(persistedFindings),
+      findings: dedupeIdenticalFindings(persistedFindings),
       verificationStatus,
       error: null,
     });
+    return true;
   }
 
   private async startVerification(source: ActiveReview, result: ReviewResult, attempt: number): Promise<void> {
@@ -777,6 +1308,7 @@ export class DelegationManager {
       settled: false,
       usageByModel: {},
       phase: "verification",
+      languageRetries: 0,
       sourceResult: result,
       verificationAttempt: attempt,
       ticket: source.ticket,
@@ -824,6 +1356,7 @@ export class DelegationManager {
         generation,
         permissionMode: "dontAsk",
         readOnly: true,
+        blockTypecheck: true,
         allowedTools: REVIEW_TOOLS,
         disallowedTools: REVIEW_DISALLOWED_TOOLS,
         skills: [],
@@ -874,6 +1407,13 @@ export class DelegationManager {
       summary: result?.summary ?? failure,
       findings: result?.findings ?? [],
     });
+    if (!delivered) {
+      log.warn("résultat de review non délivré à la session parente", {
+        ticketId: state.ticketId,
+        kind: state.kind,
+        passId: state.passId,
+      });
+    }
     this.store.logEvent(state.ticketId, "review_done", {
       kind: state.kind,
       ok,
@@ -902,11 +1442,7 @@ export class DelegationManager {
     const current = this.active.get(ticketId)?.get(state.label) === state;
     if (event.type === "init") {
       state.sessionId = event.sessionId;
-      this.store.attachExecutionSession({
-        generationId: state.generationId,
-        sessionId: event.sessionId,
-        configuredServiceTier: event.configuredServiceTier ?? null,
-      });
+      this.attachChildSession(state.generationId, event, { ticketId, label: state.label });
     }
     if (event.type === "turn_end") {
       state.usageByModel = mergeAgentUsageByModel(state.usageByModel, event.usageByModel);

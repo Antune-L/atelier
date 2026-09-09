@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { workerToolsForRole } from "./sessionRolePolicy.ts";
+import { settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 
 test("worker tool catalogs are bounded by session role", () => {
   expect(workerToolsForRole("reviewer")).toEqual(["submit_review"]);
@@ -11,4 +11,10 @@ test("worker tool catalogs are bounded by session role", () => {
   expect(workerToolsForRole("scout")).toEqual([]);
   expect(workerToolsForRole("one-shot")).toEqual([]);
   expect(workerToolsForRole("orchestrator").length).toBeGreaterThan(0);
+});
+
+test("delegated review sessions never load the operator's global settings", () => {
+  expect(settingSourcesForRole("reviewer")).toEqual(["project"]);
+  expect(settingSourcesForRole("orchestrator")).toEqual(["user", "project"]);
+  expect(settingSourcesForRole(undefined)).toEqual(["user", "project"]);
 });

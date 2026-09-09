@@ -8,7 +8,9 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, DEFAULT_PORT, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
+import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type {
@@ -21,6 +23,7 @@ import type {
   AgentTurnUsage,
 } from "./agentSession.ts";
 import {
+  CodexAppServerRpcError,
   connectCodexAppServer,
   type CodexAppServerConnection,
   type CodexAppServerNotification,
@@ -34,7 +37,9 @@ import {
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
+import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import { workerToolsForRole } from "./sessionRolePolicy.ts";
+import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 /** Concurrency the feasibility scout runs its per-ticket threads at (independent of implementer lots). */
 const FEASIBILITY_MAX_CONCURRENT_THREADS = 4;
@@ -42,6 +47,14 @@ const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const FORCE_CLOSE_GRACE_MS = 2_000;
 const WORKER_TOKEN_ENV = "KANBAN_WORKER_MCP_TOKEN";
 const API_KEY_PROVIDER_ID = "kanban_openai_api_key";
+/** How long a steering deadlock waits before asking the server whether the blocking turn still runs. */
+const BLOCKED_STEER_PROBE_MS = 5_000;
+const BLOCKED_STEER_PROBE_ATTEMPTS = 3;
+const LATEST_TURN_PROBE_LIMIT = 1;
+const RECONCILIATION_PAGE_LIMIT = 100;
+const CLOSING_REJECTION_DETAIL = "Session Codex en fermeture, message non rejoué";
+
+const log = createLogger("codex");
 
 type ConfigValue = string | number | boolean | ConfigValue[] | ConfigObject;
 interface ConfigObject {
@@ -84,10 +97,10 @@ const tokenUsageSchema = z.object({
   turnId: z.string(),
   tokenUsage: z.object({
     last: z.object({
-      inputTokens: z.number(),
-      cachedInputTokens: z.number(),
-      cacheWriteInputTokens: z.number(),
-      outputTokens: z.number(),
+      inputTokens: z.number().nonnegative(),
+      cachedInputTokens: z.number().nonnegative(),
+      cacheWriteInputTokens: z.number().nonnegative(),
+      outputTokens: z.number().nonnegative(),
     }),
   }),
 });
@@ -97,7 +110,7 @@ const turnCompletedSchema = z.object({
   turn: z.object({
     id: z.string(),
     status: z.enum(["completed", "interrupted", "failed", "inProgress"]),
-    error: z.object({ message: z.string() }).nullable(),
+    error: z.object({ message: z.string() }).nullable().optional(),
   }),
 });
 const errorNotificationSchema = z.object({
@@ -160,6 +173,8 @@ export interface CodexProviderDependencies {
   connect?(options: CodexAppServerOptions): Promise<CodexAppServerConnection>;
   resolveBinary?(): string;
   projectEnvironment?(cwd: string): Record<string, string | undefined>;
+  /** Test seam. Production always uses `BLOCKED_STEER_PROBE_MS`. */
+  blockedSteerProbeMs?: number;
 }
 
 function resolveBackendPort(): number {
@@ -311,21 +326,83 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function prepareNoVerifyHook(): PreparedHook {
+const NO_VERIFY_DENIAL_REASON = "L'option --no-verify est interdite.";
+const SUBAGENT_GIT_DENIAL_REASON = "Les sous-agents ne peuvent ni commit ni push.";
+
+/** Shell snippet denying with `reason` (JSON-encoded once, shell-quoted so accents/apostrophes survive). */
+function shellDeny(reason: string): string {
+  return `deny ${shellQuote(JSON.stringify(reason))}`;
+}
+
+/** Shell test matching `source` against a POSIX ERE, case-insensitively when `caseInsensitive`. */
+function shellGrepTest(source: string, pattern: string, caseInsensitive = false): string {
+  return `printf '%s' "${source}" | grep -E${caseInsensitive ? "i" : ""}q ${shellQuote(pattern)}`;
+}
+
+/** Shell snippet denying with `reason` when every test holds. */
+function shellDenyWhen(tests: string[], reason: string): string {
+  return `if ${tests.join(" && ")}; then\n  ${shellDeny(reason)}\nfi\n`;
+}
+
+function shellDenyOnMatch(source: string, pattern: string, reason: string): string {
+  return shellDenyWhen([shellGrepTest(source, pattern)], reason);
+}
+
+function reviewPublishingGuardScript(): string {
+  const { prPublish, apiCall, apiWriteMethod, apiReadMethod, apiWriteInput } = reviewPublishingDenyPatterns;
+  const reason = REVIEW_PUBLISHING_DENIAL_REASON;
+  const isApiCall = shellGrepTest("$input", apiCall);
+  return (
+    shellDenyOnMatch("$input", prPublish, reason) +
+    shellDenyWhen([isApiCall, shellGrepTest("$input", apiWriteMethod, true)], reason) +
+    shellDenyWhen(
+      [isApiCall, `! ${shellGrepTest("$input", apiReadMethod, true)}`, shellGrepTest("$input", apiWriteInput)],
+      reason,
+    )
+  );
+}
+
+/**
+ * Extracts the Bash command out of the hook's JSON stdin, so the typecheck patterns match the real
+ * command instead of its JSON-escaped envelope.
+ */
+function extractCommandScript(): string {
+  const extractor =
+    'let value="";try{const input=JSON.parse(await Bun.stdin.text());' +
+    'value=input?.tool_input?.command??input?.tool_input?.cmd??""}catch{}' +
+    'process.stdout.write(typeof value==="string"?value:"")';
+  return `command=$(printf '%s' "$input" | ${shellQuote(process.execPath)} -e ${shellQuote(extractor)})\n`;
+}
+
+function typecheckGuardScript(cwd: string): string {
+  return (
+    extractCommandScript() +
+    typecheckDenyPatterns(cwd)
+      .map((pattern) => shellDenyOnMatch("$command", pattern, TYPECHECK_DENIAL_REASON))
+      .join("")
+  );
+}
+
+function prepareNoVerifyHook(cwd: string, blockReviewPublishing: boolean, blockTypecheck: boolean): PreparedHook {
   const directory = mkdtempSync(join(tmpdir(), "kanban-codex-hooks-"));
   const path = join(directory, "deny-no-verify.sh");
+  const reviewPublishingGuard = blockReviewPublishing ? reviewPublishingGuardScript() : "";
+  const typecheckGuard = blockTypecheck ? typecheckGuardScript(cwd) : "";
   writeFileSync(
     path,
     `#!/bin/sh
+deny() {
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$1"
+  exit 0
+}
 input=$(cat)
 case "$input" in
   *--no-verify*)
-    printf '%s\\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"L option --no-verify est interdite."}}'
-    exit 0
+    ${shellDeny(NO_VERIFY_DENIAL_REASON)}
     ;;
 esac
-if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then
-  printf '%s\\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Les sous-agents ne peuvent ni commit ni push."}}'
+${reviewPublishingGuard}${typecheckGuard}if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then
+  ${shellDeny(SUBAGENT_GIT_DENIAL_REASON)}
 fi
 `,
     { encoding: "utf8", mode: 0o700 },
@@ -423,6 +500,7 @@ function createCodexAgentSession(
 ): AgentSessionHandle {
   const inbox: QueuedMessage[] = [];
   const usageByTurn = new Map<string, AgentTurnUsage>();
+  const endedTurns = new Set<string>();
   const childThreads = new Set<string>();
   const workerTools = workerToolsForRole(options.role);
   const hasWorkerServer = options.disableWorkerTools !== true && workerTools.length > 0;
@@ -441,6 +519,8 @@ function createCodexAgentSession(
   let fatalReported = false;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
   let forceTimer: ReturnType<typeof setTimeout> | null = null;
+  let blockedSteerProbeTimer: ReturnType<typeof setTimeout> | null = null;
+  let blockedSteerProbeAttempts = 0;
   const dispatchIdleWaiters: Array<() => void> = [];
   let resolveClosed: (() => void) | null = null;
   const closedPromise = new Promise<void>((resolve) => {
@@ -448,15 +528,33 @@ function createCodexAgentSession(
   });
 
   function emit(event: AgentSessionEvent): void {
-    options.onEvent(event);
+    try {
+      options.onEvent(event);
+    } catch (error) {
+      log.error("consommateur d'événement Codex en échec", { event: event.type, reason: getErrorMessage(error) });
+    }
   }
 
   function emitMessageStatus(
     message: QueuedMessage,
     status: "received" | "accepted" | "rejected",
     turnId: string | null,
+    error?: string,
   ): void {
-    emit({ type: "message_status", messageId: message.id, status, turnId });
+    emit({ type: "message_status", messageId: message.id, status, turnId, ...(error ? { error } : {}) });
+  }
+
+  function clearBlockedSteerProbe(): void {
+    if (blockedSteerProbeTimer) clearTimeout(blockedSteerProbeTimer);
+    blockedSteerProbeTimer = null;
+    blockedSteerProbeAttempts = 0;
+  }
+
+  /** Single source of truth for "this turn is over": no steering, no blocked queue, no stale id. */
+  function clearActiveTurn(turnId: string | null): void {
+    if (turnId === null || activeTurnId === turnId) activeTurnId = null;
+    blockedSteerTurnId = null;
+    clearBlockedSteerProbe();
   }
 
   function rejectQueuedMessages(): void {
@@ -488,28 +586,28 @@ function createCodexAgentSession(
     preparedHook.cleanup();
     if (closeTimer) clearTimeout(closeTimer);
     if (forceTimer) clearTimeout(forceTimer);
+    clearBlockedSteerProbe();
     resolveClosed?.();
     resolveClosed = null;
   }
 
   function emitTurnEnd(ok: boolean, subtype: string, turnId: string | null): void {
-    emit({
-      type: "turn_end",
-      ok,
-      subtype,
-      sessionId: threadId ?? "",
-      turnId,
-      usageByModel: usageForModel(options, turnId ? usageByTurn.get(turnId) : undefined),
-    });
+    if (turnId !== null && endedTurns.has(turnId)) return;
+    if (turnId !== null) endedTurns.add(turnId);
+    const usageByModel = usageForModel(options, turnId ? usageByTurn.get(turnId) : undefined);
     if (turnId) usageByTurn.delete(turnId);
+    emit({ type: "turn_end", ok, subtype, sessionId: threadId ?? "", turnId, usageByModel });
   }
 
   function reportFatal(error: unknown): void {
     if (fatalReported) return;
     fatalReported = true;
-    const message = describeCodexError(error instanceof Error ? error.message : String(error));
+    const message = describeCodexError(getErrorMessage(error));
+    const turnId = activeTurnId;
+    const hadPendingWork = turnId !== null || inbox.length > 0;
+    clearActiveTurn(turnId);
     emit({ type: "error", message });
-    if (activeTurnId !== null || inbox.length > 0) emitTurnEnd(false, "error", activeTurnId);
+    if (hadPendingWork) emitTurnEnd(false, "error", turnId);
   }
 
   function observedThread(id: string): boolean {
@@ -636,10 +734,9 @@ function createCodexAgentSession(
       const parsed = turnCompletedSchema.safeParse(notification.params);
       if (!parsed.success || parsed.data.threadId !== threadId) return;
       const turn = parsed.data.turn;
+      clearActiveTurn(turn.id);
       if (turn.error) emit({ type: "error", message: describeCodexError(turn.error.message) });
       emitTurnEnd(turn.status === "completed", turn.status, turn.id);
-      if (activeTurnId === turn.id) activeTurnId = null;
-      blockedSteerTurnId = null;
       scheduleDispatch();
       void finishIfDrained();
       return;
@@ -671,7 +768,7 @@ function createCodexAgentSession(
       do {
         const turns: TurnsResponse = await connection.request(
           "thread/turns/list",
-          { threadId, cursor, limit: 100, sortDirection: "desc", itemsView: "full" },
+          { threadId, cursor, limit: RECONCILIATION_PAGE_LIMIT, sortDirection: "desc", itemsView: "full" },
           turnsResponseSchema,
         );
         const accepted = turns.data.find((turn) =>
@@ -685,6 +782,104 @@ function createCodexAgentSession(
       await Bun.sleep(25);
     }
     return null;
+  }
+
+  async function latestTurn(): Promise<TurnsResponse["data"][number] | null> {
+    if (!connection || !threadId) return null;
+    const turns = await connection.request(
+      "thread/turns/list",
+      { threadId, cursor: null, limit: LATEST_TURN_PROBE_LIMIT, sortDirection: "desc", itemsView: "full" },
+      turnsResponseSchema,
+    );
+    return turns.data[0] ?? null;
+  }
+
+  function scheduleBlockedSteerProbe(turnId: string): void {
+    if (blockedSteerProbeTimer || closing || cleaned) return;
+    blockedSteerProbeTimer = setTimeout(() => {
+      blockedSteerProbeTimer = null;
+      void probeBlockedSteer(turnId);
+    }, dependencies.blockedSteerProbeMs ?? BLOCKED_STEER_PROBE_MS);
+  }
+
+  /** Watchdog for a queue blocked on an unacknowledged steer: unblock as soon as the turn is over. */
+  async function probeBlockedSteer(turnId: string): Promise<void> {
+    if (closing || cleaned || blockedSteerTurnId !== turnId) return;
+    blockedSteerProbeAttempts += 1;
+    const attempt = blockedSteerProbeAttempts;
+    try {
+      const turn = await latestTurn();
+      if (blockedSteerTurnId !== turnId) return;
+      if (!turn || turn.id !== turnId || turn.status !== "inProgress") {
+        log.warn("tour Codex bloquant terminé, file débloquée", { turnId, status: turn?.status ?? "absent" });
+        clearActiveTurn(turnId);
+        scheduleDispatch();
+        return;
+      }
+    } catch (error) {
+      log.warn("sonde du tour Codex bloquant en échec", { turnId, attempt, reason: getErrorMessage(error) });
+      if (blockedSteerTurnId !== turnId) return;
+    }
+    if (attempt >= BLOCKED_STEER_PROBE_ATTEMPTS) {
+      reportFatal(new Error(`Tour Codex ${turnId} bloqué : pilotage et réconciliation impossibles`));
+      return;
+    }
+    scheduleBlockedSteerProbe(turnId);
+  }
+
+  function blockOnSteer(turnId: string): void {
+    blockedSteerTurnId = turnId;
+    scheduleBlockedSteerProbe(turnId);
+  }
+
+  function reportUncertainDelivery(message: QueuedMessage, currentTurnId: string | null, error: unknown): void {
+    const detail = describeCodexError(`Envoi Codex incertain, message non rejoué : ${getErrorMessage(error)}`);
+    emitMessageStatus(message, "rejected", null, detail);
+    if (closing) return;
+    if (!currentTurnId) {
+      reportFatal(new Error(detail));
+      return;
+    }
+    log.warn("livraison Codex incertaine", { turnId: currentTurnId, reason: getErrorMessage(error) });
+    blockOnSteer(currentTurnId);
+  }
+
+  async function recoverFromSendFailure(
+    message: QueuedMessage,
+    currentTurnId: string | null,
+    error: unknown,
+  ): Promise<void> {
+    try {
+      const acceptedTurn = await acceptedTurnForMessage(message.id);
+      if (acceptedTurn) {
+        activeTurnId = acceptedTurn.active ? acceptedTurn.id : null;
+        emitMessageStatus(message, "accepted", acceptedTurn.id);
+        return;
+      }
+    } catch (reconciliationError) {
+      reportUncertainDelivery(message, currentTurnId, reconciliationError);
+      return;
+    }
+    if (!currentTurnId) {
+      emitMessageStatus(message, "rejected", null, getErrorMessage(error));
+      if (!closing) reportFatal(error);
+      return;
+    }
+    const steerRefused = error instanceof CodexAppServerRpcError;
+    if (steerRefused) {
+      log.warn("pilotage Codex refusé, message rejoué via turn/start", {
+        turnId: currentTurnId,
+        code: error.code,
+        reason: error.rpcMessage,
+      });
+      clearActiveTurn(currentTurnId);
+    }
+    if (closing) {
+      emitMessageStatus(message, "rejected", null, CLOSING_REJECTION_DETAIL);
+      return;
+    }
+    inbox.unshift(message);
+    if (!steerRefused) blockOnSteer(currentTurnId);
   }
 
   async function dispatch(): Promise<void> {
@@ -736,29 +931,7 @@ function createCodexAgentSession(
         emitMessageStatus(message, "accepted", started.turn.id);
       }
     } catch (error) {
-      try {
-        const acceptedTurn = await acceptedTurnForMessage(message.id);
-        if (acceptedTurn) {
-          activeTurnId = acceptedTurn.active ? acceptedTurn.id : null;
-          emitMessageStatus(message, "accepted", acceptedTurn.id);
-        } else if (currentTurnId) {
-          inbox.unshift(message);
-          blockedSteerTurnId = currentTurnId;
-        } else {
-          emitMessageStatus(message, "rejected", null);
-          if (!closing) reportFatal(error);
-        }
-      } catch (reconciliationError) {
-        emitMessageStatus(message, "rejected", null);
-        const detail = reconciliationError instanceof Error ? reconciliationError.message : String(reconciliationError);
-        const uncertainMessage = describeCodexError(`Envoi Codex incertain, message non rejoué : ${detail}`);
-        if (currentTurnId && !closing) {
-          emit({ type: "error", message: uncertainMessage });
-          blockedSteerTurnId = currentTurnId;
-        } else if (!closing) {
-          reportFatal(new Error(uncertainMessage));
-        }
-      }
+      await recoverFromSendFailure(message, currentTurnId, error);
     } finally {
       dispatching = false;
       resolveDispatchIdle();
@@ -788,14 +961,24 @@ function createCodexAgentSession(
   }
 
   async function forceClose(): Promise<void> {
-    if (activeTurnId && connection && threadId) {
+    const turnId = activeTurnId;
+    if (turnId && connection && threadId) {
       try {
-        await connection.request("turn/interrupt", { threadId, turnId: activeTurnId }, emptyResponseSchema);
-      } catch {
-        // Process teardown below is the final backstop.
+        await connection.request("turn/interrupt", { threadId, turnId }, emptyResponseSchema);
+      } catch (error) {
+        if (error instanceof CodexAppServerRpcError) {
+          log.warn("interruption Codex refusée, tour déjà terminé", { turnId, reason: error.rpcMessage });
+          clearActiveTurn(turnId);
+          await finishConnection();
+          return;
+        }
+        log.warn("interruption Codex en échec, arrêt du processus", { turnId, reason: getErrorMessage(error) });
       }
       forceTimer = setTimeout(() => {
-        if (activeTurnId) emitTurnEnd(false, "interrupted", activeTurnId);
+        if (activeTurnId === turnId) {
+          clearActiveTurn(turnId);
+          emitTurnEnd(false, "interrupted", turnId);
+        }
         void finishConnection();
       }, FORCE_CLOSE_GRACE_MS);
       return;
@@ -803,11 +986,21 @@ function createCodexAgentSession(
     await finishConnection();
   }
 
+  /** A resumed thread may still be mid-turn: adopt it so the first send steers instead of starting. */
+  async function adoptRunningTurn(): Promise<void> {
+    try {
+      const turn = await latestTurn();
+      if (turn?.status === "inProgress") activeTurnId = turn.id;
+    } catch (error) {
+      log.warn("dernier tour Codex indisponible après reprise", { threadId, reason: getErrorMessage(error) });
+    }
+  }
+
   async function bootstrap(): Promise<void> {
     let lastStderr = "";
     try {
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
-      preparedHook = prepareNoVerifyHook();
+      preparedHook = prepareNoVerifyHook(options.cwd, options.blockReviewPublishing === true, options.blockTypecheck === true);
       const environment = (dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd);
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
       const liveConnection = await (dependencies.connect ?? connectCodexAppServer)({
@@ -887,6 +1080,7 @@ function createCodexAgentSession(
         return;
       }
       threadId = response.thread.id;
+      if (options.resumeSessionId) await adoptRunningTurn();
       emit({ type: "init", sessionId: threadId, ...(response.serviceTier !== undefined ? { configuredServiceTier: response.serviceTier } : {}) });
       scheduleDispatch();
       await finishIfDrained();
@@ -930,14 +1124,28 @@ function createCodexAgentSession(
     interrupt: async () => {
       rejectQueuedMessages();
       await waitForDispatchIdle();
-      if (!connection || !threadId || !activeTurnId) return;
-      blockedSteerTurnId = activeTurnId;
-      await connection.request("turn/interrupt", { threadId, turnId: activeTurnId }, emptyResponseSchema);
+      const turnId = activeTurnId;
+      if (!connection || !threadId || !turnId) return;
+      blockedSteerTurnId = turnId;
+      try {
+        await connection.request("turn/interrupt", { threadId, turnId }, emptyResponseSchema);
+      } catch (error) {
+        if (error instanceof CodexAppServerRpcError) {
+          log.warn("interruption Codex ignorée, tour déjà terminé", { turnId, reason: error.rpcMessage });
+          clearActiveTurn(turnId);
+          return;
+        }
+        blockedSteerTurnId = null;
+        log.warn("interruption Codex en échec", { turnId, reason: getErrorMessage(error) });
+        throw error;
+      }
     },
     dispose: () => {
       closing = true;
       rejectQueuedMessages();
-      if (activeTurnId) emitTurnEnd(false, "interrupted", activeTurnId);
+      const turnId = activeTurnId;
+      clearActiveTurn(turnId);
+      if (turnId) emitTurnEnd(false, "interrupted", turnId);
       if (connection?.dispose) connection.dispose();
       else void connection?.close().catch(() => undefined);
       connection = null;
@@ -946,6 +1154,7 @@ function createCodexAgentSession(
     close: async () => {
       if (!closing) {
         closing = true;
+        clearBlockedSteerProbe();
         rejectQueuedMessages();
         await waitForDispatchIdle();
         if (activeTurnId) {

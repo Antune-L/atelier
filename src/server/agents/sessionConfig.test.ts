@@ -94,6 +94,33 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
   });
 });
 
+describe("buildImplementSessionConfig — review typecheck gate", () => {
+  const REVIEW_BRANCH = "feature/pr-head";
+
+  test("a read-only argus review blocks typecheck on both providers", () => {
+    for (const orchestrator of ["claude", "codex"] as const) {
+      const ticket = makeTicket({ orchestrator, kind: "review", fixComments: false, prHeadBranch: REVIEW_BRANCH });
+      const cfg = implementConfig(ticket);
+      expect(cfg.blockReviewPublishing).toBe(true);
+      expect(cfg.blockTypecheck).toBe(true);
+    }
+  });
+
+  test("a fixComments review implements code and may typecheck", () => {
+    for (const orchestrator of ["claude", "codex"] as const) {
+      const ticket = makeTicket({ orchestrator, kind: "review", fixComments: true, prHeadBranch: REVIEW_BRANCH });
+      const cfg = implementConfig(ticket);
+      expect(cfg.blockReviewPublishing).toBe(true);
+      expect(cfg.blockTypecheck).toBeUndefined();
+    }
+  });
+
+  test("a fixComments review without a PR head branch falls back to the read-only contract", () => {
+    const ticket = makeTicket({ orchestrator: "claude", kind: "review", fixComments: true, prHeadBranch: null });
+    expect(implementConfig(ticket).blockTypecheck).toBe(true);
+  });
+});
+
 describe("buildImplementSessionConfig — claude orchestrator", () => {
   test("claude×claude: provider claude, implementer+pr-fixer subagents, skills, composer bash rule", () => {
     const ticket = makeTicket({ orchestrator: "claude", implementer: "claude" });

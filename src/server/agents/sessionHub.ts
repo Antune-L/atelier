@@ -13,6 +13,7 @@
 import { nanoid } from "nanoid";
 
 import type { Implementer } from "../../shared/constants.ts";
+import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
 import type { ExecutionOwnerType } from "../../shared/schemas.ts";
 import type { TranscriptUpdate } from "../../shared/transcript.ts";
@@ -52,6 +53,8 @@ export interface SessionStartConfig {
   permissionMode: AgentPermissionMode;
   /** Structurally read-only session (Codex read-only sandbox; Claude enforces via tool gating). */
   readOnly?: boolean;
+  blockReviewPublishing?: boolean;
+  blockTypecheck?: boolean;
   /** Resume the provider-side conversation with this id (auto-reclaim; Codex only). */
   resumeSessionId?: string;
   /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
@@ -166,6 +169,15 @@ export interface SessionHubHandlers {
   onMessageStatus?(context: SessionMessageStatus): void;
   /** Recover messages that were never accepted, preserving their original client id. */
   getPendingMessages?(context: SessionExecutionContext): PendingSessionMessage[];
+  /** Persist a trace when one stream-event handler threw; the hub swallows the error either way. */
+  onHandlerError?(context: SessionHandlerError): void;
+}
+
+export interface SessionHandlerError {
+  ticketId: string;
+  eventType: AgentSessionEvent["type"];
+  handler: string;
+  error: string;
 }
 
 interface LiveSession {
@@ -269,7 +281,7 @@ export function renderSessionEvent(event: AgentSessionEvent, messageChannel?: Ch
         const turn = event.turnId ? ` pour le tour ${event.turnId}` : "";
         return `✓ message ${messageChannel ?? "channel"} ${event.messageId} accepté par le fournisseur${turn} (application sémantique non garantie)`;
       }
-      return `⚠️ message ${messageChannel ?? "channel"} ${event.messageId} rejeté avant acceptation`;
+      return `⚠️ message ${messageChannel ?? "channel"} ${event.messageId} rejeté avant acceptation${event.error ? ` : ${event.error}` : ""}`;
     case "tool_use": {
       const preview = previewToolInput(event.input);
       return preview ? `🔧 ${event.name}(${preview})` : `🔧 ${event.name}`;
@@ -373,6 +385,8 @@ export class SessionHub {
         generation,
         permissionMode: config.permissionMode,
         ...(config.readOnly !== undefined ? { readOnly: config.readOnly } : {}),
+        ...(config.blockReviewPublishing ? { blockReviewPublishing: true } : {}),
+        ...(config.blockTypecheck ? { blockTypecheck: true } : {}),
         ...(config.resumeSessionId ? { resumeSessionId: config.resumeSessionId } : {}),
         ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
         ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
@@ -414,17 +428,17 @@ export class SessionHub {
       if (sentMessageId !== messageId) throw new Error("Le provider n'a pas conservé l'identifiant du message.");
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      live.error = message;
-      this.handlers?.onMessageStatus?.({
-        ...context,
-        messageGenerationId: context.generationId,
-        status: "rejected",
-        turnId: null,
-        error: message,
+      const message = getErrorMessage(error);
+      log.warn("injection du message impossible", { ticketId, messageId, channel: event.type, reason: message });
+      this.safeHandler("onMessageStatus", ticketId, "message_status", () => {
+        this.handlers?.onMessageStatus?.({
+          ...context,
+          messageGenerationId: context.generationId,
+          status: "rejected",
+          turnId: null,
+          error: message,
+        });
       });
-      live.callbacks.onFailure?.(message, this.executionContext(live));
-      this.handlers?.onExecutionFailure?.(message, this.executionContext(live));
       return false;
     }
   }
@@ -499,6 +513,29 @@ export class SessionHub {
     });
   }
 
+  /**
+   * Run one stream-event handler in isolation: a throwing handler (a locked SQLite write, a failing
+   * zod parse) must never propagate back into the provider's read loop and kill the session.
+   */
+  private safeHandler(name: string, ticketId: string, eventType: AgentSessionEvent["type"], run: () => void): void {
+    try {
+      run();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      log.error("gestionnaire d'événement de session en échec", {
+        ticketId,
+        event: eventType,
+        handler: name,
+        stack: getErrorStack(error),
+      });
+      try {
+        this.handlers?.onHandlerError?.({ ticketId, eventType, handler: name, error: message });
+      } catch (traceError) {
+        log.warn("trace d'erreur de gestionnaire non persistée", { ticketId, reason: getErrorMessage(traceError) });
+      }
+    }
+  }
+
   private handleEvent(live: LiveSession, event: AgentSessionEvent): void {
     const ticketId = live.config.ticketId;
     const current = this.sessions.get(ticketId) === live;
@@ -506,46 +543,62 @@ export class SessionHub {
       live.sessionId = event.sessionId;
       live.configuredServiceTier = event.configuredServiceTier ?? null;
       const context = this.executionContext(live);
-      if (current) live.callbacks.onInit?.(context);
-      this.handlers?.onExecutionInit?.(context);
+      if (current) this.safeHandler("onInit", ticketId, event.type, () => live.callbacks.onInit?.(context));
+      this.safeHandler("onExecutionInit", ticketId, event.type, () => this.handlers?.onExecutionInit?.(context));
       log.info("session init", { ticketId, generation: live.generation, sessionId: event.sessionId });
     }
     if (event.type === "message_status") {
       const metadata = live.messageMetadata.get(event.messageId);
       if (metadata) {
-        this.handlers?.onMessageStatus?.({
-          ...this.executionContext(live),
-          messageId: event.messageId,
-          messageGenerationId: metadata.generationId,
-          channel: metadata.channel,
-          status: event.status,
-          turnId: event.turnId,
-          error: event.status === "rejected" ? "message rejeté par le provider" : null,
+        this.safeHandler("onMessageStatus", ticketId, event.type, () => {
+          this.handlers?.onMessageStatus?.({
+            ...this.executionContext(live),
+            messageId: event.messageId,
+            messageGenerationId: metadata.generationId,
+            channel: metadata.channel,
+            status: event.status,
+            turnId: event.turnId,
+            error: event.status === "rejected" ? "message rejeté par le provider" : null,
+          });
         });
       }
     }
     const messageChannel = event.type === "message_status" ? live.messageMetadata.get(event.messageId)?.channel : undefined;
-    if (current) this.appendExternalEvent(ticketId, live.generationId, event, "", messageChannel);
+    if (current) {
+      this.safeHandler("transcript", ticketId, event.type, () => {
+        this.appendExternalEvent(ticketId, live.generationId, event, "", messageChannel);
+      });
+    }
     if (current && (event.type === "tool_use" || event.type === "assistant_text" || event.type === "thinking" || event.type === "progress")) {
       const now = Date.now();
       if (now - live.lastActivityAt >= ACTIVITY_HEARTBEAT_MIN_INTERVAL_MS) {
         live.lastActivityAt = now;
-        this.handlers?.onActivity(ticketId);
+        this.safeHandler("onActivity", ticketId, event.type, () => this.handlers?.onActivity(ticketId));
       }
     }
     if (event.type === "turn_end") {
       live.usageByModel = mergeAgentUsageByModel(live.usageByModel, event.usageByModel);
-      this.handlers?.onExecutionUsage?.({
-        ...this.executionContext(live),
-        usageByModel: live.usageByModel,
+      this.safeHandler("onExecutionUsage", ticketId, event.type, () => {
+        this.handlers?.onExecutionUsage?.({
+          ...this.executionContext(live),
+          usageByModel: live.usageByModel,
+        });
       });
-      if (current) this.handlers?.onStop(ticketId, event.sessionId, event.usageByModel);
+      if (current) {
+        this.safeHandler("onStop", ticketId, event.type, () => {
+          this.handlers?.onStop(ticketId, event.sessionId, event.usageByModel);
+        });
+      }
     }
     if (event.type === "error") {
       live.error = event.message;
       if (current) {
-        live.callbacks.onFailure?.(event.message, this.executionContext(live));
-        this.handlers?.onExecutionFailure?.(event.message, this.executionContext(live));
+        this.safeHandler("onFailure", ticketId, event.type, () => {
+          live.callbacks.onFailure?.(event.message, this.executionContext(live));
+        });
+        this.safeHandler("onExecutionFailure", ticketId, event.type, () => {
+          this.handlers?.onExecutionFailure?.(event.message, this.executionContext(live));
+        });
       }
     }
   }

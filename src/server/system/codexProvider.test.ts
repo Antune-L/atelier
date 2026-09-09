@@ -6,14 +6,18 @@ import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS } from "../../shared/constants.ts
 import { TranscriptBuffer } from "../agents/transcriptBuffer.ts";
 import { WorkerMcpManager } from "../workerMcp.ts";
 import type { AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
-import type {
-  CodexAppServerConnection,
-  CodexAppServerNotification,
-  CodexAppServerOptions,
+import {
+  CodexAppServerRpcError,
+  JSONRPC_INVALID_REQUEST,
+  type CodexAppServerConnection,
+  type CodexAppServerNotification,
+  type CodexAppServerOptions,
 } from "./codexAppServer.ts";
 import { codexSessionPreToolUseHookHash } from "./codexHookTrust.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
+import { REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
+import { TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 interface RecordedRequest {
   method: string;
@@ -30,8 +34,16 @@ interface AppServerFixture {
   exit(code: number): void;
 }
 
+const RECONCILIATION_PAGE_LIMIT = 100;
+const PROBE_INTERVAL_MS = 5;
+
 interface AppServerFixtureOptions {
   steerResponseLost?: boolean;
+  steerTimesOut?: boolean;
+  steerRejectsNoActiveTurn?: boolean;
+  steerGate?: Promise<void>;
+  interruptRejectsNoActiveTurn?: boolean;
+  latestTurnInProgressId?: string;
   historicalMessageId?: string;
   historicalMessageOnSecondPage?: boolean;
   turnsListFails?: boolean;
@@ -61,15 +73,32 @@ function appServerFixture(options: AppServerFixtureOptions = {}): AppServerFixtu
       if (method === "thread/resume") return schema.parse({ thread: { id: "thread-resumed" } });
       if (method === "turn/start") return schema.parse({ turn: { id: "turn-1" } });
       if (method === "turn/steer") {
+        await options.steerGate;
+        if (options.steerRejectsNoActiveTurn) {
+          throw new CodexAppServerRpcError(JSONRPC_INVALID_REQUEST, "no active turn to steer");
+        }
+        if (options.steerTimesOut) throw new Error("Délai dépassé pour turn/steer");
         if (options.steerResponseLost) {
           lostSteerMessageId = z.object({ clientUserMessageId: z.string() }).parse(params).clientUserMessageId;
           throw new Error("Délai dépassé pour turn/steer");
         }
         return schema.parse({ turnId: "turn-1" });
       }
+      if (method === "turn/interrupt" && options.interruptRejectsNoActiveTurn) {
+        throw new CodexAppServerRpcError(JSONRPC_INVALID_REQUEST, "no active turn to interrupt");
+      }
       if (method === "thread/turns/list") {
         if (options.turnsListFails) throw new Error("historique indisponible");
-        const cursor = z.object({ cursor: z.string().nullable().optional() }).parse(params).cursor;
+        const listed = z
+          .object({ cursor: z.string().nullable().optional(), limit: z.number() })
+          .parse(params);
+        if (listed.limit < RECONCILIATION_PAGE_LIMIT) {
+          const latest = options.latestTurnInProgressId
+            ? { id: options.latestTurnInProgressId, status: "inProgress", items: [] }
+            : { id: "turn-1", status: "completed", items: [] };
+          return schema.parse({ data: [latest], nextCursor: null });
+        }
+        const cursor = listed.cursor;
         const historicalVisible = !options.historicalMessageOnSecondPage || cursor === "older-page";
         const acceptedMessageId = lostSteerMessageId ?? (historicalVisible ? options.historicalMessageId : undefined);
         return schema.parse({
@@ -108,6 +137,14 @@ function appServerFixture(options: AppServerFixtureOptions = {}): AppServerFixtu
     notify: (notification) => onNotification?.(notification),
     exit: (code) => resolveExit?.(code),
   };
+}
+
+function reconciliationRequests(fixture: AppServerFixture): RecordedRequest[] {
+  return fixture.requests.filter(
+    (request) =>
+      request.method === "thread/turns/list" &&
+      z.object({ limit: z.number() }).parse(request.params).limit === RECONCILIATION_PAGE_LIMIT,
+  );
 }
 
 async function waitFor(check: () => boolean): Promise<void> {
@@ -338,7 +375,7 @@ test("a durable message id is reconciled before replaying a resumed Codex thread
 
   expect(fixture.requests.filter((request) => request.method === "turn/start")).toHaveLength(0);
   expect(fixture.requests.filter((request) => request.method === "turn/steer")).toHaveLength(0);
-  expect(fixture.requests.filter((request) => request.method === "thread/turns/list")).toHaveLength(2);
+  expect(reconciliationRequests(fixture)).toHaveLength(2);
   expect(events).toContainEqual({
     type: "message_status",
     messageId,
@@ -365,7 +402,8 @@ test("a resumed Codex message is rejected rather than replayed when history is u
 
   expect(fixture.requests.filter((request) => request.method === "turn/start")).toHaveLength(0);
   expect(fixture.requests.filter((request) => request.method === "turn/steer")).toHaveLength(0);
-  expect(events).toContainEqual({ type: "message_status", messageId, status: "rejected", turnId: null });
+  const rejection = events.find((event) => event.type === "message_status" && event.status === "rejected");
+  expect(rejection).toMatchObject({ messageId, status: "rejected", turnId: null });
   await session.close();
 });
 
@@ -614,6 +652,75 @@ test("workspace sessions install a PreToolUse guard that denies no-verify", asyn
   expect(subagentResult.hookSpecificOutput.permissionDecision).toBe("deny");
   expect(await subagent.exited).toBe(0);
   await session.close();
+});
+
+/** How the generated hook embeds a denial reason: JSON-encoded, then POSIX single-quoted. */
+function shellQuotedJson(reason: string): string {
+  return `'${JSON.stringify(reason).replaceAll("'", `'"'"'`)}'`;
+}
+
+async function hookPathForSession(config: AgentSessionOptions): Promise<{ path: string; close: () => Promise<void> }> {
+  const fixture = appServerFixture();
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(config);
+  await waitFor(() => fixture.requests.some((request) => request.method === "thread/start"));
+  const started = fixture.requests.find((request) => request.method === "thread/start");
+  const command = z
+    .object({
+      config: z.object({
+        hooks: z.object({ PreToolUse: z.array(z.object({ hooks: z.array(z.object({ command: z.string() })) })) }),
+      }),
+    })
+    .parse(started?.params).config.hooks.PreToolUse[0]?.hooks[0]?.command;
+  return { path: (command ?? "").slice(1, -1), close: () => session.close() };
+}
+
+async function hookDecision(path: string, command: string): Promise<{ reason: string | null; exitCode: number }> {
+  const child = Bun.spawn([path], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  child.stdin.write(JSON.stringify({ tool_name: "Bash", tool_input: { command } }));
+  child.stdin.end();
+  const output = await new Response(child.stdout).text();
+  const exitCode = await child.exited;
+  if (output.trim() === "") return { reason: null, exitCode };
+  const parsed = z
+    .object({ hookSpecificOutput: z.object({ permissionDecisionReason: z.string() }) })
+    .parse(JSON.parse(output));
+  return { reason: parsed.hookSpecificOutput.permissionDecisionReason, exitCode };
+}
+
+test("the review guard hook denies typecheck and gh publishing with the shared reasons", async () => {
+  const config = options([]);
+  config.readOnly = false;
+  config.blockTypecheck = true;
+  config.blockReviewPublishing = true;
+  const hook = await hookPathForSession(config);
+  const script = readFileSync(hook.path, "utf8");
+  expect(script).toContain(shellQuotedJson(TYPECHECK_DENIAL_REASON));
+  expect(script).toContain(shellQuotedJson(REVIEW_PUBLISHING_DENIAL_REASON));
+
+  for (const command of ["bun run typecheck", "npx tsc --noEmit", "pnpm -C apps/web typecheck", "yarn run check:types"]) {
+    expect(await hookDecision(hook.path, command)).toEqual({ reason: TYPECHECK_DENIAL_REASON, exitCode: 0 });
+  }
+  expect(await hookDecision(hook.path, "gh pr comment 12 --body x")).toEqual({
+    reason: REVIEW_PUBLISHING_DENIAL_REASON,
+    exitCode: 0,
+  });
+  expect(await hookDecision(hook.path, "gh pr view 12")).toEqual({ reason: null, exitCode: 0 });
+  expect(await hookDecision(hook.path, "bun run test")).toEqual({ reason: null, exitCode: 0 });
+  await hook.close();
+});
+
+test("the review guard hook allows typecheck when the gate is off", async () => {
+  const config = options([]);
+  config.readOnly = false;
+  const hook = await hookPathForSession(config);
+  expect(readFileSync(hook.path, "utf8")).not.toContain(shellQuotedJson(TYPECHECK_DENIAL_REASON));
+  expect(await hookDecision(hook.path, "bun run typecheck")).toEqual({ reason: null, exitCode: 0 });
+  await hook.close();
 });
 
 test("native subagents cannot inherit the parent pipeline MCP", async () => {
@@ -872,4 +979,171 @@ test("forced disposal reaches a connection whose graceful close is stuck", async
   const count = events.length;
   fixture.notify({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "late", delta: "late" } });
   expect(events).toHaveLength(count);
+});
+
+test("a completed turn releases the session even when the event consumer throws", async () => {
+  const fixture = appServerFixture();
+  const events: AgentSessionEvent[] = [];
+  const config = options(events);
+  config.onEvent = (event) => {
+    events.push(event);
+    if (event.type === "turn_end") throw new Error("consommateur cassé");
+  };
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(config);
+  session.send("first");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+
+  session.send("second");
+  await waitFor(() => fixture.requests.filter((request) => request.method === "turn/start").length === 2);
+  expect(fixture.requests.some((request) => request.method === "turn/steer")).toBe(false);
+
+  const closed = session.close();
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+  await closed;
+});
+
+test("a steering refusal replays the message through turn/start without a fatal error", async () => {
+  const fixture = appServerFixture({ steerRejectsNoActiveTurn: true });
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(options(events));
+  session.send("first");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  const messageId = session.send("steer");
+  await waitFor(() => fixture.requests.filter((request) => request.method === "turn/start").length === 2);
+
+  expect(events).toContainEqual({ type: "message_status", messageId, status: "accepted", turnId: "turn-1" });
+  expect(events.some((event) => event.type === "error")).toBe(false);
+
+  const closed = session.close();
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+  await closed;
+});
+
+test("a blocked steering queue is unblocked by the watchdog once the turn is over", async () => {
+  const fixture = appServerFixture({ steerTimesOut: true });
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+    blockedSteerProbeMs: PROBE_INTERVAL_MS,
+  });
+  const session = provider.createSession(options(events));
+  session.send("first");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  const messageId = session.send("steer");
+  await waitFor(() => fixture.requests.filter((request) => request.method === "turn/start").length === 2);
+
+  expect(fixture.requests.filter((request) => request.method === "turn/steer")).toHaveLength(1);
+  expect(events).toContainEqual({ type: "message_status", messageId, status: "accepted", turnId: "turn-1" });
+  expect(events.some((event) => event.type === "error")).toBe(false);
+
+  const closed = session.close();
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+  await closed;
+});
+
+test("interrupting an already finished turn neither throws nor blocks the next send", async () => {
+  const fixture = appServerFixture({ interruptRejectsNoActiveTurn: true });
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(options(events));
+  session.send("first");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  await session.interrupt();
+
+  session.send("after interrupt");
+  await waitFor(() => fixture.requests.filter((request) => request.method === "turn/start").length === 2);
+  expect(fixture.requests.some((request) => request.method === "turn/steer")).toBe(false);
+
+  const closed = session.close();
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+  await closed;
+});
+
+test("a resumed thread still running its turn steers instead of starting a new turn", async () => {
+  const fixture = appServerFixture({ latestTurnInProgressId: "turn-resumed" });
+  const events: AgentSessionEvent[] = [];
+  const config = options(events);
+  config.resumeSessionId = "thread-existing";
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(config);
+  session.send("hello");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/steer"));
+
+  expect(fixture.requests.some((request) => request.method === "turn/start")).toBe(false);
+  const steer = fixture.requests.find((request) => request.method === "turn/steer");
+  expect(z.object({ expectedTurnId: z.string() }).parse(steer?.params).expectedTurnId).toBe("turn-resumed");
+
+  const closed = session.close();
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-resumed", turn: { id: "turn-resumed", status: "completed", error: null } },
+  });
+  await closed;
+});
+
+test("a delivery failure during close rejects the message instead of stalling the shutdown", async () => {
+  const gate = Promise.withResolvers<void>();
+  const fixture = appServerFixture({ steerRejectsNoActiveTurn: true, steerGate: gate.promise });
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(options(events));
+  session.send("first");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  const messageId = session.send("steer while closing");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/steer"));
+
+  const closed = session.close();
+  gate.resolve();
+  await Promise.race([
+    closed,
+    Bun.sleep(1_000).then(() => {
+      throw new Error("close ne s'est pas terminé");
+    }),
+  ]);
+
+  expect(fixture.requests.filter((request) => request.method === "turn/start")).toHaveLength(1);
+  const rejection = events.find(
+    (event) => event.type === "message_status" && event.messageId === messageId && event.status === "rejected",
+  );
+  expect(rejection).toBeDefined();
 });

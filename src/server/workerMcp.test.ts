@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
+import { createLogger, initLogFile } from "./logger.ts";
 import { WorkerMcpManager } from "./workerMcp.ts";
 
 const rpcResponseSchema = z.object({
@@ -78,4 +82,15 @@ test("revocation while a tool is running discards its late result", async () => 
   finish?.();
 
   expect((await responsePromise).status).toBe(401);
+});
+
+test("le logger retombe sur la console seule quand le dossier de logs est inutilisable", async () => {
+  const blocker = join(tmpdir(), `kanban-log-blocker-${Date.now()}`);
+  await Bun.write(blocker, "not a directory");
+  try {
+    expect(initLogFile(join(blocker, "logs"))).toBeNull();
+    expect(() => createLogger("test-fallback").info("toujours vivant")).not.toThrow();
+  } finally {
+    rmSync(blocker, { force: true });
+  }
 });

@@ -222,8 +222,12 @@ const reviewPassRowSchema = z.object({
   ticket_id: z.string(),
   pass_id: z.string(),
   code_fingerprint: z.string(),
+  reviewed_commit_sha: z.string().nullable(),
   review_depth: z.string(),
   requires_approval: z.number(),
+  published_review_id: z.number().nullable(),
+  published_commit_sha: z.string().nullable(),
+  published_at: z.number().nullable(),
   created_at: z.number(),
 });
 

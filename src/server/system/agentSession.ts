@@ -55,6 +55,7 @@ export type AgentSessionEvent = (
       messageId: string;
       status: "received" | "accepted" | "rejected";
       turnId: string | null;
+      error?: string;
     }
   | {
       type: "turn_end";
@@ -131,6 +132,8 @@ export interface AgentSessionOptions {
    * by the sandbox itself); Claude sessions enforce read-only via allowed/disallowed tools instead.
    */
   readOnly?: boolean;
+  blockReviewPublishing?: boolean;
+  blockTypecheck?: boolean;
   /**
    * Resume the provider-side conversation with this id instead of starting fresh (auto-reclaim).
    * Codex maps it to `resumeThread` (threads persist under ~/.codex/sessions); Claude ignores it —

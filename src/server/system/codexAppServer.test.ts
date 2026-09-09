@@ -15,7 +15,13 @@ afterEach(() => {
   }
 });
 
-function fakeAppServer(): string {
+const PROMPT_REJECTION_MS = 3_000;
+const STDOUT_END_REJECTION_MS = 1_000;
+const FIXTURE_EXIT_CODE = 3;
+const SHELL_PATH = "/bin/sh";
+const SHELL_KEEPALIVE_SECONDS = 30;
+
+function writeFixture(handlers: string): string {
   const directory = mkdtempSync(join(tmpdir(), "kanban-app-server-test-"));
   temporaryDirectories.push(directory);
   const path = join(directory, "server.mjs");
@@ -33,11 +39,16 @@ lines.on("line", (line) => {
     process.stdout.write(JSON.stringify({ method: "fixture/progress", params: { value: "seen" } }) + "\\n");
     process.stdout.write(JSON.stringify({ id: message.id, result: { value: message.params.value } }) + "\\n");
   }
+  ${handlers}
 });
 `,
     "utf8",
   );
   return path;
+}
+
+function fakeAppServer(): string {
+  return writeFixture("");
 }
 
 test("App Server transport performs the handshake and validates responses", async () => {
@@ -64,5 +75,67 @@ test("App Server transport rejects an invalid typed response", async () => {
   await expect(connection.request("echo", { value: "ok" }, z.object({ value: z.number() }))).rejects.toThrow(
     "Réponse invalide pour echo",
   );
+  await connection.close();
+});
+
+test("App Server transport survives a throwing notification handler", async () => {
+  const seen: string[] = [];
+  const connection = await connectCodexAppServer({
+    binaryPath: process.execPath,
+    commandArgs: [fakeAppServer()],
+    onNotification: (notification) => {
+      seen.push(notification.method);
+      throw new Error("consommateur cassé");
+    },
+  });
+
+  const schema = z.object({ value: z.string() });
+  expect(await connection.request("echo", { value: "un" }, schema)).toEqual({ value: "un" });
+  expect(await connection.request("echo", { value: "deux" }, schema)).toEqual({ value: "deux" });
+  expect(seen).toEqual(["fixture/progress", "fixture/progress"]);
+  await connection.close();
+});
+
+test("App Server transport rejects pending requests as soon as the process exits", async () => {
+  const connection = await connectCodexAppServer({
+    binaryPath: process.execPath,
+    commandArgs: [writeFixture(`else if (message.method === "boom") { process.exit(${FIXTURE_EXIT_CODE}); }`)],
+  });
+
+  const startedAt = Date.now();
+  await expect(connection.request("boom", {}, z.object({}))).rejects.toThrow("arrêté");
+  expect(Date.now() - startedAt).toBeLessThan(PROMPT_REJECTION_MS);
+  expect(await connection.exited).toBe(FIXTURE_EXIT_CODE);
+});
+
+test("App Server transport rejects pending requests when stdout ends while the process lives", async () => {
+  const fixture = writeFixture('else if (message.method === "mute") { process.stdout.end(); process.exit(0); }');
+  const connection = await connectCodexAppServer({
+    binaryPath: SHELL_PATH,
+    commandArgs: ["-c", `"${process.execPath}" "${fixture}"; exec 1>&-; sleep ${SHELL_KEEPALIVE_SECONDS}`],
+  });
+
+  const startedAt = Date.now();
+  try {
+    await expect(connection.request("mute", {}, z.object({}))).rejects.toThrow("fermée");
+    expect(Date.now() - startedAt).toBeLessThan(STDOUT_END_REJECTION_MS);
+  } finally {
+    connection.dispose?.();
+  }
+});
+
+test("App Server transport survives a throwing stderr handler", async () => {
+  const connection = await connectCodexAppServer({
+    binaryPath: process.execPath,
+    commandArgs: [writeFixture('else if (message.method === "noisy") { process.stderr.write("bruit\\n"); }')],
+    onStderr: () => {
+      throw new Error("consommateur stderr cassé");
+    },
+  });
+
+  connection.notify("noisy");
+  expect(await connection.request("echo", { value: "ok" }, z.object({ value: z.string() }))).toEqual({
+    value: "ok",
+  });
   await connection.close();
 });

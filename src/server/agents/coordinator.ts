@@ -1,12 +1,15 @@
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { getErrorStack } from "../../shared/errors.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   delegateImplementationArgsSchema,
   delegateReviewArgsSchema,
   doneArgsSchema,
+  publishReviewArgsSchema,
+  readReviewResultsArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
   submitAnswerArgsSchema,
@@ -41,8 +44,21 @@ import { addUsageByModel, toUsageByModel } from "./usage.ts";
 
 const log = createLogger("coordinator");
 
+/** Audit event recorded when a session stream handler threw and was swallowed by the hub. */
+const HANDLER_ERROR_EVENT = "handler_error";
+
+/**
+ * Rejection sink for the async handlers the hub invokes synchronously: an unhandled rejection there
+ * would escape the stream loop instead of staying a logged failure.
+ */
+function logRejection(message: string, ticketId: string): (error: unknown) => void {
+  return (error: unknown) => log.error(message, { ticketId, stack: getErrorStack(error) });
+}
+
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
+const SLOW_COORDINATOR_TOOL_MS = 15_000;
+const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 
 interface ToolResult {
   ok: boolean;
@@ -70,7 +86,11 @@ export class AgentCoordinator {
   ) {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
-      onStop: (ticketId, sessionId, usageByModel) => void this.onStop(ticketId, sessionId, usageByModel),
+      onStop: (ticketId, sessionId, usageByModel) => {
+        void this.onStop(ticketId, sessionId, usageByModel).catch(
+          logRejection("traitement de fin de tour impossible", ticketId),
+        );
+      },
       onActivity: (ticketId) => this.onActivity(ticketId),
       onExecutionStart: (context) => {
         this.store.startExecution({
@@ -91,15 +111,26 @@ export class AgentCoordinator {
         });
       },
       onExecutionInit: (context) => {
-        if (context.sessionId) {
+        if (!context.sessionId) return;
+        try {
           this.store.attachExecutionSession({
             generationId: context.generationId,
             sessionId: context.sessionId,
             configuredServiceTier: context.configuredServiceTier,
           });
+        } catch (error) {
+          log.error("rattachement de session d'exécution impossible", {
+            ticketId: context.ticketId,
+            generationId: context.generationId,
+            reason: String(error),
+          });
         }
       },
-      onExecutionFailure: (message, context) => void this.onExecutionFailure(context.ticketId, message),
+      onExecutionFailure: (message, context) => {
+        void this.onExecutionFailure(context.ticketId, message).catch(
+          logRejection("escalade d'échec d'exécution impossible", context.ticketId),
+        );
+      },
       onExecutionFinish: (context) => {
         this.store.finalizeExecution({
           generationId: context.generationId,
@@ -114,6 +145,13 @@ export class AgentCoordinator {
       onMessageQueued: (context) => this.onMessageQueued(context),
       onMessageStatus: (context) => this.onMessageStatus(context),
       getPendingMessages: (context) => this.getPendingMessages(context),
+      onHandlerError: (context) => {
+        this.store.logEvent(context.ticketId, HANDLER_ERROR_EVENT, {
+          eventType: context.eventType,
+          handler: context.handler,
+          error: context.error,
+        });
+      },
     });
   }
 
@@ -213,7 +251,7 @@ export class AgentCoordinator {
     await this.lifecycle.stall(
       ticketId,
       { title: "Session agent interrompue", body: `${ticket.title}: ${reason}` },
-      { logEvent: true },
+      { logEvent: true, reason },
     );
   }
 
@@ -251,12 +289,33 @@ export class AgentCoordinator {
       return { ok: false, result: "Session de test interactive : aucun tool de pipeline n'est disponible." };
     }
     this.markProgress(ctx.ticketId);
-    log.info("tool call", { ticketId: ctx.ticketId, tool: ctx.name });
+    const startedAt = Date.now();
+    const fields = {
+      ticketId: ctx.ticketId,
+      slotId: ctx.slotId,
+      generationId: ctx.generationId,
+      callId: ctx.callId,
+      tool: ctx.name,
+    };
+    log.info("tool call", fields);
     // Registry-derived dispatch: a tool name without an entry is a COMPILE error (Record over the
     // full WorkerToolName union), not a runtime fallthrough. submit_triage/submit_feasibility are
     // handled by their slot-gated early returns above; reaching them on a pipeline slot is illegal,
     // mirroring the previous switch's `default` ("tool inconnu").
-    return this.pipelineHandlers[ctx.name](ctx);
+    try {
+      const outcome = await this.pipelineHandlers[ctx.name](ctx);
+      const completion = { ...fields, ok: outcome.ok, elapsedMs: Date.now() - startedAt };
+      if (completion.elapsedMs >= SLOW_COORDINATOR_TOOL_MS) log.warn("réponse tool prête après délai", completion);
+      else log.info("réponse tool prête", completion);
+      return outcome;
+    } catch (error) {
+      log.error("tool call en échec avant réponse", {
+        ...fields,
+        elapsedMs: Date.now() - startedAt,
+        stack: getErrorStack(error),
+      });
+      throw error;
+    }
   }
 
   private readonly pipelineHandlers: Record<WorkerToolName, ToolHandler> = {
@@ -269,6 +328,8 @@ export class AgentCoordinator {
     fail: (ctx) => this.handleFail(ctx),
     delegate_implementation: (ctx) => this.handleDelegateImplementation(ctx),
     delegate_review: (ctx) => this.handleDelegateReview(ctx),
+    read_review_results: (ctx) => this.handleReadReviewResults(ctx),
+    publish_review: (ctx) => this.handlePublishReview(ctx),
     submit_review: () => ({ ok: false, result: "submit_review réservé aux sessions reviewer." }),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
@@ -354,20 +415,38 @@ export class AgentCoordinator {
     }
     const requiresApproval = this.delegation.reviewRequiresApproval(ctx.ticketId);
     const readOnlyReview = requiresApproval === false;
-    const reviewsPassed = readOnlyReview
-      ? await this.delegation.reviewsCompleted(ctx.ticketId, ctx.slotId)
-      : await this.delegation.reviewsApproved(ctx.ticketId, ctx.slotId);
-    if (!reviewsPassed) {
-      return {
-        ok: false,
-        result: readOnlyReview
-          ? "Gate échouée: toutes les dimensions doivent rendre un résultat vérifié sur le code courant."
-          : "Gate échouée: tous les reviewers indépendants requis doivent approuver le code courant.",
+    const requirement = readOnlyReview ? "completed" : "approved";
+    const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId);
+    if (!reviewGate.ok) {
+      const result = `Gate échouée: ${reviewGate.reason}`;
+      const fields = {
+        callId: ctx.callId,
+        generationId: ctx.generationId,
+        reasonCode: reviewGate.reasonCode,
+        reason: reviewGate.reason,
       };
+      this.store.logEvent(ctx.ticketId, REVIEW_GATE_REJECTED_EVENT, fields);
+      this.sessionHub.appendExternalLine(ctx.ticketId, `⚠️ done() rejeté : ${reviewGate.reason}`);
+      log.warn("gate done rejetée avant finalisation", { ticketId: ctx.ticketId, slotId: ctx.slotId, ...fields });
+      return { ok: false, result };
     }
-    const reviewReport = readOnlyReview ? this.delegation.reviewReport(ctx.ticketId) : null;
+    const reviewReport = readOnlyReview ? this.delegation.reviewBoardReport(ctx.ticketId) : null;
+    log.info("finalisation done démarrée", {
+      ticketId: ctx.ticketId,
+      slotId: ctx.slotId,
+      generationId: ctx.generationId,
+      callId: ctx.callId,
+      passId: reviewGate.passId,
+    });
     this.lifecycle.beginOpeningPr(ctx.ticketId);
     const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, parsed.data.pr_url);
+    log.info("finalisation done terminée", {
+      ticketId: ctx.ticketId,
+      slotId: ctx.slotId,
+      generationId: ctx.generationId,
+      callId: ctx.callId,
+      ok: outcome.ok,
+    });
     if (!outcome.ok) {
       return { ok: false, result: `Gate échouée: ${outcome.reason}. Corrige et rappelle done().` };
     }
@@ -375,7 +454,12 @@ export class AgentCoordinator {
       const comment = this.store.addComment(ctx.ticketId, "agent", reviewReport, null);
       this.hub.pushComment(comment);
     }
-    return { ok: true, result: "Ticket clôturé, slot libéré." };
+    return {
+      ok: true,
+      result: outcome.slotReleased
+        ? "Ticket clôturé, slot libéré."
+        : `Ticket clôturé. ${outcome.reason}`,
+    };
   }
 
   private async handleReadyForReview(ctx: SessionToolCall): Promise<ToolResult> {
@@ -430,6 +514,24 @@ export class AgentCoordinator {
       return { ok: false, result: "delegate_review indisponible pour cette session." };
     }
     return this.delegation.startReview(ticket, ctx.slotId, parsed.data.kind, parsed.data.context);
+  }
+
+  private handleReadReviewResults(ctx: SessionToolCall): ToolResult {
+    const parsed = readReviewResultsArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.kind === "ask") {
+      return { ok: false, result: "read_review_results indisponible pour cette session." };
+    }
+    return this.delegation.readReviewResults(ctx.ticketId, parsed.data.passId ?? null);
+  }
+
+  private async handlePublishReview(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = publishReviewArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket) return { ok: false, result: "publish_review indisponible pour cette session." };
+    return this.delegation.publishReview(ticket, ctx.slotId, parsed.data.passId, ctx.callId);
   }
 
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
@@ -510,7 +612,7 @@ export class AgentCoordinator {
     await this.lifecycle.stall(
       ticketId,
       { title: "Ticket bloqué", body: `${ticket.title}: tour terminé sans protocole` },
-      { logEvent: true },
+      { logEvent: true, reason: "tour terminé sans protocole" },
     );
     log.warn("ticket bloqué (stalled)", { ticketId });
   }

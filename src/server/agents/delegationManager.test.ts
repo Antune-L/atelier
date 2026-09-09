@@ -12,11 +12,13 @@ import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
 import type { AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
+import type { PublishReviewOptions, PublishReviewResult } from "../system/types.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
 
 import { DelegationManager } from "./delegationManager.ts";
 import { SessionHub } from "./sessionHub.ts";
+import { reviewPublicationState } from "./slotManager.ts";
 
 interface RecordedSession {
   opts: AgentSessionOptions;
@@ -29,13 +31,21 @@ interface RecordedSession {
 /** Fake adapter that records every spawned session and exposes its onEvent for test-driven streams. */
 class RecordingSystemAdapter extends FakeSystemAdapter {
   readonly sessions: RecordedSession[] = [];
+  readonly publishedReviews: PublishReviewOptions[] = [];
   fingerprint = "code-v1";
+  fingerprintCalls = 0;
   hangOnClose = false;
   throwOnClose = false;
   runtimeGate: Promise<void> | null = null;
 
   override async codeFingerprint(): Promise<string> {
+    this.fingerprintCalls++;
     return this.fingerprint;
+  }
+
+  override async publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {
+    this.publishedReviews.push(opts);
+    return super.publishReview(slotPath, prUrl, opts);
   }
 
   override async checkCodexRuntime() {
@@ -79,8 +89,8 @@ function reviewFinding(severity: "critical" | "major" | "minor", id = "finding-1
   return {
     id,
     severity,
-    summary: "Finding vérifiable",
-    evidence: "src/example.ts:12 démontre le problème",
+    summary: "Verifiable finding",
+    evidence: "src/example.ts:12 shows the broken contract",
     ruleSource: null,
     path: "src/example.ts",
     line: 12,
@@ -156,6 +166,7 @@ function newDelegatedTicket(): Ticket {
 
 /** Start a parent Claude session for the ticket so implementation_done has a live target. */
 function startParentSession(sessionHub: SessionHub, ticketId: string): void {
+  store.updateSlot(3, { ticketId, repoPath: "/tmp/repo", tmuxSession: null, status: "busy" });
   sessionHub.start({
     ticketId,
     slotId: 3,
@@ -185,7 +196,7 @@ async function startAndApproveReviews(
     if (!review || !kind) throw new Error("review session missing");
     await review.opts.onToolCall("submit_review", {
       verdict: "approve",
-      summary: `${kind} validé`,
+      summary: `${kind} approved`,
       findings: [],
     });
     review.opts.onEvent({
@@ -474,9 +485,30 @@ describe("DelegationManager — independent reviews", () => {
     await startAndApproveReviews(delegation, system, ticket, FULL_REVIEW_KINDS);
 
     expect(system.sessions).toHaveLength(7);
-    expect(system.sessions[5]?.sent[0]).toContain("architecturales");
-    expect(system.sessions[6]?.sent[0]).toContain("failles de sécurité");
+    expect(system.sessions[5]?.sent[0]).toContain("architectural boundaries");
+    expect(system.sessions[6]?.sent[0]).toContain("security flaws");
     expect(await delegation.reviewsApproved(ticket.id, 3)).toBe(true);
+  });
+
+  test("read_review_results replays the persisted verdicts and reports the pending dimensions", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+
+    expect(delegation.readReviewResults(ticket.id, null)).toEqual({
+      ok: false,
+      result: "Aucune passe de review enregistrée pour ce ticket : lance delegate_review.",
+    });
+
+    startParentSession(sessionHub, ticket.id);
+    await startAndApproveReviews(delegation, system, ticket, ["quality"]);
+
+    const replay = delegation.readReviewResults(ticket.id, null);
+    expect(replay.ok).toBe(true);
+    expect(replay.result).toContain("[completed] review quality terminée");
+    expect(replay.result).toContain("verdict approve : quality approved");
+    expect(replay.result).toContain("En attente : conventions, regression, logic.");
+    expect(delegation.readReviewResults(ticket.id, "passe-inconnue").ok).toBe(false);
   });
 
   test("approvals survive a manager restart but a code change invalidates the gate", async () => {
@@ -519,7 +551,9 @@ describe("DelegationManager — independent reviews", () => {
       orchestrator: "codex",
       reviewDepth: "light",
       fixComments: false,
+      prNumber: 42,
       prHeadBranch: "feat/review",
+      prUrl: "https://github.com/example/repo/pull/42",
     });
     startParentSession(sessionHub, ticket.id);
 
@@ -532,7 +566,7 @@ describe("DelegationManager — independent reviews", () => {
       if (!review || !kind) throw new Error("review session missing");
       await review.opts.onToolCall("submit_review", {
         verdict: kind === "conventions" ? "revise" : "approve",
-        summary: `${kind} terminé`,
+        summary: `${kind} reviewed`,
         findings: kind === "conventions" ? [reviewFinding("minor")] : [],
       });
       review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: `review-${kind}`, usageByModel: {} });
@@ -544,7 +578,7 @@ describe("DelegationManager — independent reviews", () => {
     expect(delegation.reviewRequiresApproval(ticket.id)).toBe(false);
     const restarted = new DelegationManager(store, system, sessionHub, new ClientHub(store));
     expect(await restarted.reviewsCompleted(ticket.id, 3)).toBe(true);
-    expect(store.getReviewPass(ticket.id)?.results.conventions?.findings[0]?.summary).toBe("Finding vérifiable");
+    expect(store.getReviewPass(ticket.id)?.results.conventions?.findings[0]?.summary).toBe("Verifiable finding");
   });
 
   test("important findings wait for an independent verification and persist its calibrated result", async () => {
@@ -557,7 +591,7 @@ describe("DelegationManager — independent reviews", () => {
     if (!review) throw new Error("review session missing");
     await review.opts.onToolCall("submit_review", {
       verdict: "revise",
-      summary: "impact important proposé",
+      summary: "important impact claimed",
       findings: [reviewFinding("critical")],
     });
     review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-quality", usageByModel: {} });
@@ -571,10 +605,10 @@ describe("DelegationManager — independent reviews", () => {
     expect(store.getReviewPass(ticket.id)?.results.quality?.verificationStatus).toBe("pending");
     const verifier = system.sessions[2];
     if (!verifier) throw new Error("verification session missing");
-    expect(verifier.sent[0]).toContain("contre-vérifies indépendamment");
+    expect(verifier.sent[0]).toContain("independently counter-check");
     await verifier.opts.onToolCall("submit_review", {
       verdict: "revise",
-      summary: "impact confirmé mais local",
+      summary: "impact confirmed but local",
       findings: [reviewFinding("minor")],
     });
     verifier.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "verify-quality", usageByModel: {} });
@@ -598,7 +632,7 @@ describe("DelegationManager — independent reviews", () => {
     if (!review) throw new Error("review session missing");
     await review.opts.onToolCall("submit_review", {
       verdict: "revise",
-      summary: "régression proposée",
+      summary: "regression claimed",
       findings: [reviewFinding("major")],
     });
     review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-logic", usageByModel: {} });
@@ -619,6 +653,39 @@ describe("DelegationManager — independent reviews", () => {
     expect(system.sessions).toHaveLength(4);
   });
 
+  test("a second delegate_review in the same pass reuses the fingerprint instead of recomputing it", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const afterFirst = system.fingerprintCalls;
+    expect((await delegation.startReview(ticket, 3, "logic", "diff")).ok).toBe(true);
+
+    expect(system.fingerprintCalls).toBe(afterFirst);
+    expect(store.getReviewPass(ticket.id)?.codeFingerprint).toBe("code-v1");
+  });
+
+  test("delegate_review on a dimension already rendered points at read_review_results", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    expect((await delegation.startReview(ticket, 3, "logic", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+    await review.opts.onToolCall("submit_review", { verdict: "approve", summary: "quality approved", findings: [] });
+    review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-quality", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const sessionCount = system.sessions.length;
+    const retry = await delegation.startReview(ticket, 3, "quality", "diff");
+
+    expect(retry.ok).toBe(true);
+    expect(retry.result).toContain("read_review_results");
+    expect(system.sessions).toHaveLength(sessionCount);
+  });
+
   test("stopping a parent cancels reviewer starts that are still queued", async () => {
     const { system, delegation } = setup();
     const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
@@ -629,5 +696,303 @@ describe("DelegationManager — independent reviews", () => {
     expect((await first).ok).toBe(false);
     expect((await second).ok).toBe(false);
     expect(system.sessions).toHaveLength(0);
+  });
+});
+
+describe("DelegationManager — review report and publication", () => {
+  function newReviewTicket(): Ticket {
+    return ticketSchema.parse({
+      ...newDelegatedTicket(),
+      kind: "review",
+      orchestrator: "codex",
+      reviewDepth: "light",
+      fixComments: false,
+      postComments: true,
+      prNumber: 42,
+      prHeadBranch: "feat/review",
+      prUrl: "https://github.com/example/repo/pull/42",
+    });
+  }
+
+  async function submitReviews(
+    delegation: DelegationManager,
+    system: RecordingSystemAdapter,
+    ticket: Ticket,
+    resultsByKind: Record<string, { verdict: "approve" | "revise"; summary: string; findings: unknown[] }>,
+  ): Promise<void> {
+    for (const kind of LIGHT_REVIEW_KINDS) {
+      expect((await delegation.startReview(ticket, 3, kind, `diff ${kind}`)).ok).toBe(true);
+    }
+    const reviews = system.sessions.slice(-LIGHT_REVIEW_KINDS.length);
+    for (const [index, review] of reviews.entries()) {
+      const kind = LIGHT_REVIEW_KINDS[index];
+      if (!review || !kind) throw new Error("review session missing");
+      await review.opts.onToolCall("submit_review", resultsByKind[kind]);
+      review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: `review-${kind}`, usageByModel: {} });
+    }
+    await sleep(SETTLE_WAIT_MS);
+  }
+
+  test("a French submit_review is refused once then accepted with a warning", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+
+    const french = {
+      verdict: "revise",
+      summary: "Le fichier ne respecte pas la convention du dépôt sur cette ligne.",
+      findings: [reviewFinding("minor")],
+    };
+    const refused = await review.opts.onToolCall("submit_review", french);
+    expect(refused.ok).toBe(false);
+    expect(refused.result).toContain("Re-emit the same JSON with all prose in English");
+
+    const accepted = await review.opts.onToolCall("submit_review", french);
+    expect(accepted.ok).toBe(true);
+  });
+
+  test("an English review quoting a French UI string in backticks passes the gate", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const review = system.sessions[1];
+    if (!review) throw new Error("review session missing");
+
+    const outcome = await review.opts.onToolCall("submit_review", {
+      verdict: "approve",
+      summary: "The header still renders `« Région, ligue et comité »` verbatim, which is correct.",
+      findings: [],
+    });
+
+    expect(outcome.ok).toBe(true);
+  });
+
+  test("the report is English, deduplicated across dimensions and free of self-refuting findings", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    await submitReviews(delegation, system, ticket, {
+      quality: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      conventions: {
+        verdict: "revise",
+        summary: "One naming issue",
+        findings: [{ ...reviewFinding("minor", "conv-1"), summary: "Missing await on the store write", line: 61 }],
+      },
+      regression: {
+        verdict: "revise",
+        summary: "Same defect seen from the consumers",
+        findings: [{
+          ...reviewFinding("minor", "reg-1"),
+          summary: "The store write is missing an await",
+          evidence: "src/example.ts:73 drops the promise so the row is never persisted",
+          line: 73,
+        }],
+      },
+      logic: {
+        verdict: "revise",
+        summary: "One optional cleanup",
+        findings: [{ ...reviewFinding("minor", "logic-1"), summary: "Nice to have helper extraction", line: 200 }],
+      },
+    });
+
+    const report = delegation.reviewReport(ticket.id);
+    expect(report).toContain("**Review complete — changes recommended**");
+    expect(report).toContain("1 finding(s) kept: 1 minor.");
+    expect(report).not.toContain("retenu");
+  });
+
+  test("the board report renders the same structure in French", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    await submitReviews(delegation, system, ticket, {
+      quality: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      conventions: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      regression: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      logic: {
+        verdict: "revise",
+        summary: "One anchorless finding",
+        findings: [{ ...reviewFinding("minor", "logic-1"), path: null, line: null }],
+      },
+    });
+
+    const report = delegation.reviewBoardReport(ticket.id);
+    expect(report).toContain("**Revue terminée — modifications recommandées**");
+    expect(report).toContain("1 finding(s) retenu(s) : 1 minor.");
+    expect(report).toContain("## Findings hors du diff");
+    expect(report).not.toContain("Review complete");
+    expect(report).not.toContain("finding(s) kept");
+  });
+
+  test("an extra dimension result changes neither the published event nor the done gate expectation", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    await submitReviews(delegation, system, ticket, {
+      quality: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      conventions: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      regression: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      logic: {
+        verdict: "revise",
+        summary: "One minor naming issue",
+        findings: [{ ...reviewFinding("minor", "logic-1"), summary: "Rename the helper", line: 61 }],
+      },
+    });
+    const passId = store.getReviewPass(ticket.id)?.passId;
+    if (passId === undefined) throw new Error("review pass missing");
+    // NOTE(ali): a security result on a light pass is out of the required dimensions on both sides.
+    store.recordReviewResult({
+      ticketId: ticket.id,
+      passId,
+      kind: "security",
+      status: "completed",
+      verdict: "revise",
+      summary: "One extra dimension nobody asked for",
+      findings: [{
+        ...reviewFinding("major", "sec-1"),
+        summary: "Unvalidated input reaches the query",
+        line: 300,
+        verificationStatus: "confirmed",
+        originalSeverity: null,
+      }],
+      verificationStatus: "verified",
+      error: null,
+    });
+
+    const published = await delegation.publishReview(ticket, 3, passId, "corr-extra");
+
+    expect(published.ok).toBe(true);
+    expect(system.publishedReviews.at(-1)?.event).toBe("COMMENT");
+    expect(reviewPublicationState(store.getReviewPass(ticket.id))).toBe("COMMENTED");
+  });
+
+  test("a review result without an exploitable summary is delivered as a failed review_done", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+    expect((await delegation.startReview(ticket, 3, "quality", "diff")).ok).toBe(true);
+    const parent = system.sessions[0];
+    const review = system.sessions[1];
+    if (!parent || !review) throw new Error("sessions missing");
+
+    expect((await review.opts.onToolCall("submit_review", {
+      verdict: "approve",
+      summary: "   ",
+      findings: [],
+    })).ok).toBe(true);
+    review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "review-quality", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    expect(store.getReviewPass(ticket.id)?.results.quality?.status).toBe("failed");
+    const delivered = parent.sent.find((message) => message.includes("review quality"));
+    expect(delivered).toContain("ÉCHOUÉE");
+    expect(delivered).toContain("review terminée sans verdict ni synthèse exploitables");
+  });
+
+  test("publishing a minor-only pass posts a COMMENT review with one merged comment", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    await submitReviews(delegation, system, ticket, {
+      quality: { verdict: "approve", summary: "Nothing to report", findings: [] },
+      conventions: {
+        verdict: "revise",
+        summary: "One naming issue",
+        findings: [{ ...reviewFinding("minor", "conv-1"), summary: "Missing await on the store write", line: 61 }],
+      },
+      regression: {
+        verdict: "revise",
+        summary: "Same defect seen from the consumers",
+        findings: [{
+          ...reviewFinding("minor", "reg-1"),
+          summary: "The store write is missing an await",
+          evidence: "src/example.ts:73 drops the promise so the row is never persisted",
+          line: 73,
+        }],
+      },
+      logic: {
+        verdict: "revise",
+        summary: "One optional cleanup",
+        findings: [{ ...reviewFinding("minor", "logic-1"), summary: "Nice to have helper extraction", line: 200 }],
+      },
+    });
+    const passId = store.getReviewPass(ticket.id)?.passId;
+    if (passId === undefined) throw new Error("review pass missing");
+
+    const published = await delegation.publishReview(ticket, 3, passId, "corr-1");
+
+    expect(published.ok).toBe(true);
+    expect(published.result).toContain("1 finding(s) auto-réfuté(s) ignoré(s)");
+    const posted = system.publishedReviews[0];
+    expect(posted?.event).toBe("COMMENT");
+    expect(posted?.comments).toHaveLength(1);
+    expect(posted?.comments[0]?.line).toBe(61);
+    expect(posted?.comments[0]?.body).not.toContain("src/example.ts:61 —");
+    expect(posted?.comments[0]?.body).toContain("drops the promise");
+    expect(posted?.comments[0]?.body).toContain("Also flagged by: regression.");
+  });
+
+  test("publishing a pass with a major finding requests changes", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    for (const kind of LIGHT_REVIEW_KINDS) {
+      expect((await delegation.startReview(ticket, 3, kind, `diff ${kind}`)).ok).toBe(true);
+    }
+    const reviews = system.sessions.slice(-LIGHT_REVIEW_KINDS.length);
+    for (const [index, review] of reviews.entries()) {
+      const kind = LIGHT_REVIEW_KINDS[index];
+      if (!review || !kind) throw new Error("review session missing");
+      const major = kind === "logic";
+      await review.opts.onToolCall("submit_review", {
+        verdict: major ? "revise" : "approve",
+        summary: major ? "One broken contract" : "Nothing to report",
+        findings: major ? [{ ...reviewFinding("major", "logic-1"), summary: "The refund amount is doubled" }] : [],
+      });
+      review.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: `review-${kind}`, usageByModel: {} });
+    }
+    await sleep(SETTLE_WAIT_MS);
+    const verifier = system.sessions.at(-1);
+    if (!verifier) throw new Error("verification session missing");
+    await verifier.opts.onToolCall("submit_review", {
+      verdict: "revise",
+      summary: "Confirmed against the mapper",
+      findings: [{ ...reviewFinding("major", "logic-1"), summary: "The refund amount is doubled" }],
+    });
+    verifier.opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId: "verify-logic", usageByModel: {} });
+    await sleep(SETTLE_WAIT_MS);
+
+    const passId = store.getReviewPass(ticket.id)?.passId;
+    if (passId === undefined) throw new Error("review pass missing");
+    const published = await delegation.publishReview(ticket, 3, passId, "corr-2");
+
+    expect(published.ok).toBe(true);
+    expect(published.result).not.toContain("auto-réfuté");
+    expect(system.publishedReviews[0]?.event).toBe("REQUEST_CHANGES");
+  });
+
+  test("publishing a clean pass approves the PR", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const ticket = newReviewTicket();
+    startParentSession(sessionHub, ticket.id);
+
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+    const passId = store.getReviewPass(ticket.id)?.passId;
+    if (passId === undefined) throw new Error("review pass missing");
+    const published = await delegation.publishReview(ticket, 3, passId, "corr-3");
+
+    expect(published.ok).toBe(true);
+    expect(system.publishedReviews[0]?.event).toBe("APPROVE");
+    expect(system.publishedReviews[0]?.body).toContain("**Review complete — no changes recommended**");
+    expect(system.publishedReviews[0]?.body).toContain("0 finding(s) kept: no findings.");
   });
 });

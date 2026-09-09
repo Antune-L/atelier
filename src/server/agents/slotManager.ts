@@ -10,23 +10,27 @@ import {
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
   REVIEWER_BRANCH_SUFFIX,
+  TERMINAL_STAGES,
   type Column,
 } from "../../shared/constants.ts";
-import { getErrorMessage } from "../../shared/errors.ts";
+import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
-import type { Store } from "../db/store.ts";
+import type { ReviewPass, Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
-import type { DoneGateResult } from "../system/types.ts";
+import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts";
+import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
+import { reviewPublicationEvent } from "./reviewFindings.ts";
+import { publishedReviewFindings } from "./reviewPass.ts";
 import { assertExecutionAvailable, resolveTicketExecution, type ResolvedExecution } from "./executionConfig.ts";
 import {
   buildAskContract,
@@ -66,8 +70,16 @@ const SLUG_MAX_LENGTH = 40;
 
 /** tmux session-name prefix for a standalone (ticket-less) runnable worktree session. */
 const WORKTREE_SESSION_PREFIX = "worktree";
+
 /** Branch-name prefix of a standalone worktree session's fresh branch. */
 const WORKTREE_BRANCH_PREFIX = "worktree";
+
+/** Mirrors what publish_review actually posts: same kept findings, same event → same review state. */
+export function reviewPublicationState(reviewPass: ReviewPass | null): ReviewPublicationState | null {
+  const findings = publishedReviewFindings(reviewPass);
+  if (findings === null) return null;
+  return REVIEW_PUBLICATION_STATE_BY_EVENT[reviewPublicationEvent(findings)];
+}
 
 /**
  * Outcome of an auto-reclaim attempt:
@@ -116,7 +128,7 @@ export function slotPath(slotId: number): string {
  * copy env → install → tmux spawn → done gate → release. Serializes git ops per repo.
  */
 export class SlotManager {
-  private readonly repoMutex = new KeyedMutex();
+  private readonly repoMutex: KeyedMutex;
   private readonly queue: string[] = [];
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
@@ -161,7 +173,10 @@ export class SlotManager {
     private readonly notifier: Notifier,
     private readonly lifecycle: TicketLifecycle,
     private readonly config: SlotManagerConfig,
-  ) {}
+    repoMutex = new KeyedMutex(),
+  ) {
+    this.repoMutex = repoMutex;
+  }
 
   /** Entry point when a ticket is dragged into "À implémenter". */
   async startTicket(ticketId: string): Promise<void> {
@@ -329,7 +344,7 @@ export class SlotManager {
   async stopTestSession(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !ticket.testing || ticket.slotId === null) return;
-    await this.releaseSlot(ticket.slotId, ticket);
+    await this.releaseSlotIfOwned(ticket, ticket.slotId);
     this.touch(this.store.updateTicket(ticketId, { testing: false, slotId: null, error: null }));
     this.store.logEvent(ticketId, "test_session_stopped", {});
     log.info("session de test arrêtée", { ticketId });
@@ -596,7 +611,7 @@ export class SlotManager {
         // it is recreated fresh from origin/baseBranch just below.
         await this.system.deleteLocalBranch(project.repoPath, branch);
         await this.system.fetch(project.repoPath, baseBranch);
-        if (resolving || reviewFix || cleanFix || reviewRead) {
+        if (resolving || reviewFix || cleanFix) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
@@ -610,6 +625,15 @@ export class SlotManager {
             branch,
             baseBranch,
           });
+          if (reviewRead && ticket.prUrl !== null && ticket.prNumber !== null) {
+            const prepared = await this.system.prepareReviewWorktree({
+              repoPath: project.repoPath,
+              slotPath: path,
+              prUrl: ticket.prUrl,
+              prNumber: ticket.prNumber,
+            });
+            if (!prepared.ok) throw new Error(prepared.reason);
+          }
         }
       });
 
@@ -700,6 +724,9 @@ export class SlotManager {
       return this.system.verifyReviewDone(path, prUrl, {
         requirePostedSince: ticket.postComments ? ticket.createdAt : null,
         publicationMarker: ticket.postComments && reviewPass ? `<!-- kanban-review-pass:${reviewPass.passId} -->` : null,
+        expectedCommitSha: reviewPass?.publishedCommitSha ?? reviewPass?.reviewedCommitSha ?? null,
+        publishedReviewId: reviewPass?.publishedReviewId ?? null,
+        expectedReviewState: reviewPublicationState(reviewPass),
         requirePushedBranch: reviewPass?.requiresApproval ? ticket.prHeadBranch : null,
       });
     }
@@ -707,6 +734,9 @@ export class SlotManager {
       return this.system.verifyReviewDone(path, prUrl, {
         requirePostedSince: null,
         publicationMarker: null,
+        expectedCommitSha: null,
+        publishedReviewId: null,
+        expectedReviewState: null,
         requirePushedBranch: ticket.prHeadBranch,
       });
     }
@@ -714,9 +744,19 @@ export class SlotManager {
   }
 
   /** Verify and release a slot on done(pr_url). */
-  async finishTicket(ticketId: string, slotId: number, prUrl: string): Promise<{ ok: boolean; reason: string }> {
+  async finishTicket(
+    ticketId: string,
+    slotId: number,
+    prUrl: string,
+  ): Promise<{ ok: boolean; reason: string; slotReleased: boolean }> {
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket || !ticket.branch) return { ok: false, reason: "ticket ou branche introuvable" };
+    const slot = this.store.getSlot(slotId);
+    if (!ticket || !ticket.branch) {
+      return { ok: false, reason: "ticket ou branche introuvable", slotReleased: false };
+    }
+    if (ticket.slotId !== slotId || slot?.ticketId !== ticketId) {
+      return { ok: false, reason: "slot périmé ou détenu par un autre ticket", slotReleased: false };
+    }
     const path = slotPath(slotId);
 
     log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
@@ -735,7 +775,7 @@ export class SlotManager {
         // and Stop-hook still guard a session that genuinely dies in this stage.
         this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
         log.info("gate done échouée — l'agent corrige et réessaie", { ticketId, reason: gate.reason, consecutiveFailures });
-        return { ok: false, reason: gate.reason };
+        return { ok: false, reason: gate.reason, slotReleased: false };
       }
       log.warn("gate done échouée (épuisée)", { ticketId, reason: gate.reason, consecutiveFailures });
       await this.lifecycle.stall(
@@ -743,9 +783,15 @@ export class SlotManager {
         { title: "Gate done échouée", body: `${ticket.title}: ${gate.reason}` },
         { error: gate.reason },
       );
-      return { ok: false, reason: gate.reason };
+      return { ok: false, reason: gate.reason, slotReleased: false };
     }
-    log.info("ticket terminé, slot libéré", { ticketId, slotId, prUrl });
+    const currentTicket = this.store.getTicket(ticketId);
+    const currentSlot = this.store.getSlot(slotId);
+    if (currentTicket?.slotId !== slotId || currentSlot?.ticketId !== ticketId) {
+      log.warn("finalisation done ignorée après changement de propriétaire du slot", { ticketId, slotId, prUrl });
+      return { ok: false, reason: "slot périmé ou détenu par un autre ticket", slotReleased: false };
+    }
+    log.info("gate done validée", { ticketId, slotId, prUrl });
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
     // Review and clean tickets land in their own "PR reviewed" column instead of the generic "done".
@@ -767,7 +813,7 @@ export class SlotManager {
         // Instead of parking the card in "failed" for a manual resolve, spawn a rebase/resolution
         // session automatically (bounded by AUTO_MERGE_RESOLVE_MAX to break the resolve→fail loop).
         if (await this.tryAutoResolveMerge(ticket, slotId, prUrl, merge.reason)) {
-          return { ok: true, reason: "" };
+          return { ok: true, reason: "", slotReleased: true };
         }
       }
     }
@@ -778,7 +824,6 @@ export class SlotManager {
     // still present for gh's cwd.
     const agentSummary = ticket.kind === "feature" && !mergeError ? await this.system.fetchPrSummary(path, prUrl) : null;
 
-    await this.releaseSlot(slotId, ticket, mergeError ? "failed" : "completed");
     this.touch(
       this.store.updateTicket(ticketId, {
         column,
@@ -793,11 +838,49 @@ export class SlotManager {
       }),
     );
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
+    const cleanupError = await this.cleanupTerminalSlot(
+      slotId,
+      ticket,
+      mergeError ? "failed" : "completed",
+      false,
+    );
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id, true);
     // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
     if (!mergeError) void this.startDependents(ticketId);
     this.pumpQueue();
-    return { ok: true, reason: "" };
+    return {
+      ok: true,
+      reason: cleanupError === null ? "" : `ticket clôturé, nettoyage du slot à reprendre : ${cleanupError}`,
+      slotReleased: cleanupError === null,
+    };
+  }
+
+  private async cleanupTerminalSlot(
+    slotId: number,
+    ticket: Ticket,
+    executionStatus: "completed" | "failed",
+    recovery: boolean,
+  ): Promise<string | null> {
+    try {
+      await this.releaseSlot(slotId, ticket, executionStatus);
+      if (recovery) this.store.logEvent(ticket.id, "slot_cleanup_recovered", { slotId });
+      log.info(recovery ? "nettoyage différé du slot terminé" : "slot libéré après finalisation", {
+        ticketId: ticket.id,
+        slotId,
+      });
+      return null;
+    } catch (error) {
+      const reason = getErrorMessage(error);
+      this.store.updateSlot(slotId, { status: "failed" });
+      this.hub.pushSlots(this.store.listSlots());
+      this.store.logEvent(ticket.id, "slot_cleanup_failed", { slotId, reason, recovery });
+      log.error(recovery ? "nettoyage différé du slot toujours en échec" : "nettoyage du slot échoué après finalisation", {
+        ticketId: ticket.id,
+        slotId,
+        stack: getErrorStack(error),
+      });
+      return reason;
+    }
   }
 
   /**
@@ -1031,16 +1114,32 @@ export class SlotManager {
     return `${ticket.title} → PR ${ticket.prDraft ? "draft " : ""}ouverte`;
   }
 
+  /**
+   * Best-effort release used by abandon and test-session stop. `releaseSlot` throws when the ticket
+   * no longer holds the slot, so the ownership check is mandatory here: pumpQueue may have freed the
+   * slot and handed it to another ticket, and releasing it then would tear down the victim's worktree.
+   */
+  private async releaseSlotIfOwned(ticket: Ticket, slotId: number): Promise<void> {
+    if (this.store.getSlot(slotId)?.ticketId === ticket.id) {
+      await this.releaseSlot(slotId, ticket);
+      return;
+    }
+    log.warn("slot déjà réattribué, libération ignorée", { ticketId: ticket.id, slotId });
+  }
+
   /** Cleanup agent session + tmux shell + worktree + local branch. Called on done and on abandon. */
   async releaseSlot(
     slotId: number,
     ticket: Ticket,
     executionStatus: "completed" | "failed" | "cancelled" = "cancelled",
   ): Promise<void> {
+    const slot = this.store.getSlot(slotId);
+    if (slot?.ticketId !== ticket.id) {
+      throw new Error(`releaseSlot: le slot ${slotId} n'appartient plus au ticket ${ticket.id}`);
+    }
     this.clearPhase(ticket.id);
     // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
     this.sessionHub.disconnect(ticket.id, executionStatus);
-    const slot = this.store.getSlot(slotId);
     if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
     if (!isProjectKey(ticket.project)) return;
     const project = getProject(ticket.project);
@@ -1060,9 +1159,7 @@ export class SlotManager {
   async abandonTicket(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
-    if (ticket.slotId !== null) {
-      await this.releaseSlot(ticket.slotId, ticket);
-    }
+    if (ticket.slotId !== null) await this.releaseSlotIfOwned(ticket, ticket.slotId);
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "abandoned",
@@ -1122,6 +1219,15 @@ export class SlotManager {
       const recovered = this.store.getTicket(ticketId);
       if (!recovered) continue;
 
+      if (
+        recovered.slotId === null
+        && recovered.stage !== null
+        && TERMINAL_STAGES.includes(recovered.stage)
+      ) {
+        await this.cleanupTerminalSlot(slot.id, recovered, recovered.stage === "failed" ? "failed" : "completed", true);
+        continue;
+      }
+
       // A test session is an ephemeral tmux shell on a "done" card: end it cleanly on restart.
       if (recovered.testing) {
         await this.releaseSlot(slot.id, recovered);
@@ -1162,6 +1268,20 @@ export class SlotManager {
   async retry(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    const cleanupSlot = this.store.listSlots().find((slot) =>
+      slot.ticketId === ticketId
+      && ticket.slotId === null
+      && ticket.stage !== null
+      && TERMINAL_STAGES.includes(ticket.stage));
+    if (cleanupSlot) {
+      await this.cleanupTerminalSlot(
+        cleanupSlot.id,
+        ticket,
+        ticket.stage === "failed" ? "failed" : "completed",
+        true,
+      );
+      return;
+    }
     if (ticket.slotId !== null) {
       const slot = this.store.getSlot(ticket.slotId);
       if (slot && (slot.status === "interrupted" || slot.status === "failed" || slot.status === "stalled")) {

@@ -17,6 +17,8 @@ import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
+import { isReviewFixSession } from "./contract.ts";
+
 import type { SessionStartConfig } from "./sessionHub.ts";
 
 /**
@@ -395,6 +397,16 @@ export interface ImplementSessionInput {
   resumeSessionId?: string;
 }
 
+/**
+ * Guards applied to a review session: it never publishes to GitHub itself, and it never typechecks —
+ * except a fixComments review, which implements code on the PR head branch and needs the typecheck.
+ */
+function reviewSessionGuards(ticket: Ticket): { blockReviewPublishing?: true; blockTypecheck?: true } {
+  if (ticket.kind !== "review") return {};
+  if (isReviewFixSession(ticket)) return { blockReviewPublishing: true };
+  return { blockReviewPublishing: true, blockTypecheck: true };
+}
+
 /** Resolved Codex knobs for a ticket: per-ticket override, else the persisted app-settings default. */
 export function codexKnobs(ticket: Ticket): { model: string; effort: string; serviceTier: "default" | "fast" } {
   return {
@@ -435,6 +447,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       delegateServiceTier: delegateKnobs.serviceTier,
       role: "orchestrator",
       permissionMode: "dontAsk",
+      ...reviewSessionGuards(ticket),
       // An ask ticket never writes: pin the Codex sandbox to read-only instead of tool-gating.
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -465,6 +478,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     delegateEffort,
     delegateServiceTier: delegateKnobs?.serviceTier,
     permissionMode: "dontAsk",
+    ...reviewSessionGuards(ticket),
     permissionAllow: [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`],
     allowedTools: [
       ...IMPLEMENTER_SAFE_TOOLS,

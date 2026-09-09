@@ -31,8 +31,9 @@ import { Store } from "./db/store.ts";
 import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
-import { createLogger } from "./logger.ts";
+import { createLogger, initLogFile } from "./logger.ts";
 import { migrateConfigJsonIfPresent } from "./migration.ts";
+import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
@@ -48,6 +49,8 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."
 /** Subpath, relative to resourcesRoot, holding the built web UI served as a static SPA. */
 const WEB_DIST_SUBPATH = join("dist", "web");
 const SPA_FALLBACK_FILE = "index.html";
+/** Subpath, relative to dataRoot, holding the rotating server log file. */
+const LOGS_SUBPATH = "logs";
 
 /**
  * Boot options. Defaults keep the web/dev path on the repo root for both roots.
@@ -158,6 +161,8 @@ async function serveStaticAsset(webDist: string, pathname: string): Promise<Resp
 export async function startServer(opts: StartServerOptions = {}): Promise<RunningServer> {
   const resourcesRoot = opts.resourcesRoot ?? PROJECT_ROOT;
   const dataRoot = opts.dataRoot ?? PROJECT_ROOT;
+  const logFilePath = initLogFile(join(dataRoot, LOGS_SUBPATH));
+  if (logFilePath !== null) createLogger("boot").info("journal serveur persisté", { path: logFilePath });
   // dev-desktop self-update: serve from the live repo so a soft-reload (location.reload()) picks up
   // freshly rebuilt assets without killing the window. The packaged .app never sets repoRoot.
   const webDist =
@@ -204,10 +209,11 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     userTerminals,
   );
 
+  const repoMutex = new KeyedMutex();
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
-  });
-  const delegationManager = new DelegationManager(store, system, sessionHub, clientHub);
+  }, repoMutex);
+  const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
   // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated Codex child.
   sessionHub.onDisconnect((ticketId) => delegationManager.stop(ticketId));
   const coordinator = new AgentCoordinator(

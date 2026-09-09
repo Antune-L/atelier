@@ -2,10 +2,21 @@
 
 import { z } from "zod";
 
+import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
+
+import { createLogger } from "../logger.ts";
 import { verifyCodexBinaryVersion } from "./codexBinary.ts";
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const JSONRPC_INTERNAL_ERROR = -32603;
+export const JSONRPC_INVALID_REQUEST = -32600;
+const MAX_LINE_BUFFER_CHARS = 8_000_000;
+const CONNECTION_CLOSED_MESSAGE = "Connexion Codex App Server fermée";
+const STDOUT_END_GRACE_MS = 100;
+const STDOUT_STREAM_LABEL = "stdout";
+const STDERR_STREAM_LABEL = "stderr";
+
+const log = createLogger("codex-app-server");
 
 const rpcErrorSchema = z.object({ code: z.number(), message: z.string() });
 const incomingSchema = z.object({
@@ -24,17 +35,20 @@ const initializeResponseSchema = z.object({
 export class CodexAppServerProtocolError extends Error {}
 
 export class CodexAppServerRpcError extends Error {
+  readonly rpcMessage: string;
+
   constructor(
     readonly code: number,
     message: string,
   ) {
     super(`${message} (${code})`);
+    this.rpcMessage = message;
   }
 }
 
 export class CodexAppServerInitializationError extends Error {
   constructor(readonly reason: unknown) {
-    super(`Initialisation Codex App Server impossible : ${errorMessage(reason)}`);
+    super(`Initialisation Codex App Server impossible : ${getErrorMessage(reason)}`);
   }
 }
 
@@ -68,8 +82,19 @@ export interface CodexAppServerConnection {
   readonly exited: Promise<number>;
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function describeLine(line: string): Record<string, unknown> {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return {};
+  }
+  const parsed = incomingSchema.safeParse(raw);
+  if (!parsed.success) return {};
+  const fields: Record<string, unknown> = {};
+  if (parsed.data.method !== undefined) fields.method = parsed.data.method;
+  if (parsed.data.id !== undefined) fields.id = parsed.data.id;
+  return fields;
 }
 
 /** Spawn and initialize one isolated App Server connection. */
@@ -104,9 +129,10 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
   let closed = false;
+  let stdoutReaderAlive = true;
 
   function write(message: unknown): void {
-    if (closed) throw new Error("Connexion Codex App Server fermée");
+    if (closed) throw new Error(CONNECTION_CLOSED_MESSAGE);
     proc.stdin.write(`${JSON.stringify(message)}\n`);
     proc.stdin.flush();
   }
@@ -150,8 +176,18 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
     else request.accept(message.result);
   }
 
+  /** A throwing line consumer must never escape into the read loop: it would kill the connection. */
+  function safeConsumeLine(stream: string, line: string, onLine: (line: string) => void): void {
+    try {
+      onLine(line);
+    } catch (error) {
+      log.error("consommateur de ligne en échec", { stream, ...describeLine(line), stack: getErrorStack(error) });
+    }
+  }
+
   async function readLines(
     stream: ReadableStream<Uint8Array>,
+    label: string,
     onLine: (line: string) => void,
   ): Promise<void> {
     const reader = stream.getReader();
@@ -165,18 +201,42 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
       while (newline >= 0) {
         const line = buffer.slice(0, newline).trim();
         buffer = buffer.slice(newline + 1);
-        if (line) onLine(line);
+        if (line) safeConsumeLine(label, line, onLine);
         newline = buffer.indexOf("\n");
+      }
+      if (buffer.length > MAX_LINE_BUFFER_CHARS) {
+        log.error("ligne trop longue, tampon abandonné", { stream: label, chars: buffer.length });
+        buffer = "";
       }
     }
     const tail = `${buffer}${decoder.decode()}`.trim();
-    if (tail) onLine(tail);
+    if (tail) safeConsumeLine(label, tail, onLine);
   }
 
-  void readLines(proc.stdout, handleLine).catch((error) => {
-    rejectPending(new Error(`Lecture Codex App Server interrompue : ${errorMessage(error)}`));
+  function handleStdoutEnd(): void {
+    stdoutReaderAlive = false;
+    if (closed) return;
+    const timer = setTimeout(() => {
+      if (closed) return;
+      closed = true;
+      if (pending.size > 0) {
+        log.warn("flux stdout terminé, requêtes en attente rejetées", { pending: pending.size });
+      }
+      rejectPending(new Error(CONNECTION_CLOSED_MESSAGE));
+    }, STDOUT_END_GRACE_MS);
+    void exited.finally(() => clearTimeout(timer));
+  }
+
+  void readLines(proc.stdout, STDOUT_STREAM_LABEL, handleLine)
+    .then(handleStdoutEnd)
+    .catch((error) => {
+      stdoutReaderAlive = false;
+      log.error("lecture stdout interrompue", { stack: getErrorStack(error) });
+      rejectPending(new Error(`Lecture Codex App Server interrompue : ${getErrorMessage(error)}`));
+    });
+  void readLines(proc.stderr, STDERR_STREAM_LABEL, (line) => options.onStderr?.(line)).catch((error) => {
+    log.error("lecture stderr interrompue", { stack: getErrorStack(error) });
   });
-  void readLines(proc.stderr, (line) => options.onStderr?.(line));
 
   const exited = proc.exited.then((exitCode) => {
     closed = true;
@@ -186,12 +246,13 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
 
   return {
     request: <T>(method: string, params: unknown, schema: z.ZodType<T>): Promise<T> => {
-      if (closed) return Promise.reject(new Error("Connexion Codex App Server fermée"));
+      if (closed) return Promise.reject(new Error(CONNECTION_CLOSED_MESSAGE));
       const id = nextId;
       nextId += 1;
       return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
+          log.warn("délai de requête dépassé", { method, pending: pending.size, stdoutReaderAlive });
           reject(new Error(`Délai dépassé pour ${method}`));
         }, options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
         pending.set(id, {
@@ -208,7 +269,7 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
         } catch (error) {
           clearTimeout(timer);
           pending.delete(id);
-          reject(new Error(errorMessage(error)));
+          reject(new Error(getErrorMessage(error)));
         }
       });
     },
@@ -216,7 +277,7 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
     close: async () => {
       if (closed) return;
       closed = true;
-      rejectPending(new Error("Connexion Codex App Server fermée"));
+      rejectPending(new Error(CONNECTION_CLOSED_MESSAGE));
       proc.stdin.end();
       const timer = setTimeout(() => proc.kill(), 2_000);
       await exited;

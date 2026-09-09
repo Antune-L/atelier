@@ -62,6 +62,45 @@ export interface DoneGateResult {
   reason: string;
 }
 
+export interface PrepareReviewWorktreeOptions {
+  repoPath: string;
+  slotPath: string;
+  prUrl: string;
+  prNumber: number;
+}
+
+export interface ReviewHeadResult extends DoneGateResult {
+  commitSha: string | null;
+}
+
+export interface ReviewPublicationComment {
+  path: string;
+  line: number;
+  body: string;
+}
+
+export type ReviewPublicationEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+export type ReviewPublicationState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
+
+/** The GitHub review state each publication event produces, mirrored by the done gate. */
+export const REVIEW_PUBLICATION_STATE_BY_EVENT = {
+  APPROVE: "APPROVED",
+  REQUEST_CHANGES: "CHANGES_REQUESTED",
+  COMMENT: "COMMENTED",
+} satisfies Record<ReviewPublicationEvent, ReviewPublicationState>;
+
+export interface PublishReviewOptions {
+  expectedCommitSha: string;
+  marker: string;
+  body: string;
+  comments: ReviewPublicationComment[];
+  event: ReviewPublicationEvent;
+}
+
+export interface PublishReviewResult extends DoneGateResult {
+  reviewId: number | null;
+}
+
 /** A tmux window's geometry, used to decide whether a viewer connect will reflow (and reprint) the pane. */
 export interface PaneSize {
   cols: number;
@@ -86,6 +125,9 @@ export interface ReviewDoneOptions {
   requirePostedSince: number | null;
   /** Stable marker tying the GitHub COMMENT review to the current persisted review pass. */
   publicationMarker: string | null;
+  expectedCommitSha: string | null;
+  publishedReviewId: number | null;
+  expectedReviewState: ReviewPublicationState | null;
   /**
    * When set (fixComments review or clean ticket), also require a clean tree with the PR branch fully
    * pushed. The gate compares `origin/<branch>..HEAD` (the worktree's checked-out tip), so a clean
@@ -198,6 +240,9 @@ export interface SystemAdapter {
   verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult>;
   /** Hash current tracked and untracked worktree contents, independent from commit identity. */
   codeFingerprint(slotPath: string): Promise<string>;
+  prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult>;
+  readReviewHead(slotPath: string, prUrl: string): Promise<ReviewHeadResult>;
+  publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult>;
   /**
    * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists
    * on origin first, then runs `gh pr create [--draft] --base <baseBranch> --fill`. Returns the PR URL

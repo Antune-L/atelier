@@ -155,12 +155,13 @@ describe("buildReviewContract", () => {
     expect(contract).toContain("delegate_review");
   });
 
-  test("codex → independent read-only reviewers then gh publication", () => {
+  test("codex → independent read-only reviewers then backend publication", () => {
     const contract = buildReviewContract(reviewTicket("codex", "codex"), REVIEW_OPTS);
     expect(contract).toContain("session Codex");
-    expect(contract).toContain("gh api");
+    expect(contract).toContain("publish_review");
+    expect(contract).not.toContain("gh api");
     expect(contract).toContain("delegate_review");
-    expect(contract).toContain("kanban-review-pass:<passId>");
+    expect(contract).toContain("head GitHub exact");
     expect(contract).toContain("Un verdict revise est une conclusion valide");
   });
 

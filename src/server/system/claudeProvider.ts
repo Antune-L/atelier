@@ -23,7 +23,10 @@ import type {
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
+import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
+
+import { createLogger } from "../logger.ts";
 
 import type {
   AgentProvider,
@@ -35,7 +38,11 @@ import type {
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
-import { workerToolsForRole } from "./sessionRolePolicy.ts";
+import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
+import { settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
+
+const log = createLogger("claude-provider");
 
 const MCP_SERVER_NAME = "kanban";
 /** Graceful close lets the in-flight turn flush its result; force teardown if it never ends. */
@@ -44,22 +51,34 @@ const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
 
-/**
- * Block `git commit/push --no-verify` (it bypasses git hooks) — the old `templates/preToolUse.ts`
- * deny guard, now an in-process PreToolUse hook. Returning `{}` allows the call.
- */
-const denyNoVerifyHook: HookCallback = async (input) => {
-  if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") return {};
-  const parsed = bashCommandSchema.safeParse(input.tool_input);
-  if (!parsed.success || !NO_VERIFY_PATTERN.test(parsed.data.command)) return {};
-  return {
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: "L'option --no-verify est interdite (elle contourne les hooks git).",
-    },
+/** In-process PreToolUse hook denying every Bash command matched by `isDenied`; `{}` allows it. */
+function denyBashHook(isDenied: (command: string) => boolean, reason: string): HookCallback {
+  return async (input) => {
+    if (input.hook_event_name !== "PreToolUse" || input.tool_name !== "Bash") return {};
+    const parsed = bashCommandSchema.safeParse(input.tool_input);
+    if (!parsed.success || !isDenied(parsed.data.command)) return {};
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    };
   };
-};
+}
+
+/** `git commit/push --no-verify` bypasses git hooks — the old `templates/preToolUse.ts` deny guard. */
+const denyNoVerifyHook = denyBashHook(
+  (command) => NO_VERIFY_PATTERN.test(command),
+  "L'option --no-verify est interdite (elle contourne les hooks git).",
+);
+
+const denyReviewPublishingHook = denyBashHook(isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON);
+
+function denyTypecheckHook(cwd: string): HookCallback {
+  const scriptNames = new Set(typecheckScriptNames(cwd));
+  return denyBashHook((command) => launchesTypecheck(command, scriptNames), TYPECHECK_DENIAL_REASON);
+}
 
 export type SdkEffort = NonNullable<Options["effort"]>;
 type SdkAgents = NonNullable<Options["agents"]>;
@@ -194,6 +213,9 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   let disposed = false;
   const abortController = new AbortController();
   const sdkEffort = toSdkEffort(opts.effort);
+  const preToolUseHooks: HookCallback[] = [denyNoVerifyHook];
+  if (opts.blockReviewPublishing) preToolUseHooks.push(denyReviewPublishingHook);
+  if (opts.blockTypecheck) preToolUseHooks.push(denyTypecheckHook(opts.cwd));
   const queryOptions: Options = {
     abortController,
     cwd: opts.cwd,
@@ -201,8 +223,9 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     systemPrompt: { type: "preset", preset: "claude_code" },
     // NOTE: "user" is required so host-installed skills (`~/.claude/skills`, e.g. argus-review) are
     // discovered — `skills` below is only a filter over what `settingSources` finds, not a source. It
-    // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) into the session.
-    settingSources: ["user", "project"],
+    // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) AND
+    // `~/.claude/CLAUDE.md` into the session, hence the reviewer carve-out in settingSourcesForRole.
+    settingSources: settingSourcesForRole(opts.role),
     permissionMode: opts.permissionMode,
     mcpServers: { ...(workerTools.length > 0 ? { [MCP_SERVER_NAME]: mcpServer } : {}), ...extraMcpServers },
     allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
@@ -210,7 +233,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
     env: envWithProjectNode(opts.cwd),
     stderr: () => {},
-    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [denyNoVerifyHook] }] },
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: preToolUseHooks }] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     ...buildSettings(opts.permissionAllow, opts.permissionDeny),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
@@ -278,11 +301,21 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
 async function pumpStream(sessionPromise: Promise<Query>, onEvent: (event: AgentSessionEvent) => void): Promise<void> {
   try {
     const session = await sessionPromise;
-    for await (const message of session) {
-      dispatchClaudeMessage(message, onEvent);
-    }
+    for await (const message of session) safeDispatchClaudeMessage(message, onEvent);
   } catch (error) {
-    onEvent({ type: "error", message: error instanceof Error ? error.message : String(error) });
+    onEvent({ type: "error", message: getErrorMessage(error) });
+  }
+}
+
+/**
+ * A consumer throwing on one message must not be mistaken for a stream failure: reporting it as a
+ * fatal `error` event stalls the ticket and kills every delegated child.
+ */
+function safeDispatchClaudeMessage(message: SDKMessage, onEvent: (event: AgentSessionEvent) => void): void {
+  try {
+    dispatchClaudeMessage(message, onEvent);
+  } catch (error) {
+    log.error("traitement d'un message du flux impossible", { type: message.type, stack: getErrorStack(error) });
   }
 }
 

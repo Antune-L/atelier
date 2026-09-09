@@ -167,7 +167,7 @@ describe("Store execution lifecycle", () => {
     reopened.markAgentMessageAccepted({ id: "message-b", sessionId: "session-1", turnId: "turn-1", acceptedAt: 12 });
     reopened.markAgentMessageRejected({ id: "message-b", error: "late rejection", rejectedAt: 13 });
     reopened.markAgentMessageRejected({ id: "message-a", error: "provider rejected", rejectedAt: 14 });
-    expect(reopened.listPendingAgentMessages("ticket", "ticket-1")).toEqual([]);
+    expect(reopened.listPendingAgentMessages("ticket", "ticket-1").map((message) => message.id)).toEqual(["message-a"]);
     const terminal = reopened.listAgentMessages("ticket", "ticket-1");
     expect(terminal.find((message) => message.id === "message-b")?.status).toBe("accepted");
     expect(terminal.find((message) => message.id === "message-b")?.error).toBeNull();

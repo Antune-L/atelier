@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { z } from "zod";
 
 import { isWorkerToolName, WORKER_TOOLS } from "../shared/protocol.ts";
@@ -22,6 +24,9 @@ const HTTP_METHOD_NOT_ALLOWED = 405;
 
 const BEARER_PREFIX = "Bearer ";
 const DEFAULT_PROTOCOL_VERSION = "2025-03-26";
+
+/** Above this, a tool call is worth flagging: the incident that motivated this instrumentation. */
+const SLOW_TOOL_CALL_MS = 15_000;
 
 const requestSchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -129,7 +134,31 @@ export class WorkerMcpManager {
       if (handlers.allowedTools && !handlers.allowedTools.includes(call.data.name)) {
         return rpcError(id, JSONRPC_METHOD_NOT_FOUND, `outil interdit pour cette session : ${call.data.name}`);
       }
-      const outcome = await handlers.onToolCall(call.data.name, call.data.arguments ?? {});
+      const tool = call.data.name;
+      const callId = randomUUID();
+      const startedAt = Date.now();
+      let outcome: { ok: boolean; result: string };
+      try {
+        outcome = await handlers.onToolCall(tool, call.data.arguments ?? {});
+      } catch (error) {
+        const elapsedMs = Date.now() - startedAt;
+        log.error("appel d'outil échoué", {
+          tool,
+          callId,
+          elapsedMs,
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+        if (this.registry.get(token) !== handlers || (handlers.isActive && !handlers.isActive())) {
+          return new Response("session MCP révoquée", { status: HTTP_UNAUTHORIZED });
+        }
+        return rpcResult(id, {
+          content: [{ type: "text", text: `Erreur interne pendant ${tool} (référence ${callId}).` }],
+          isError: true,
+        });
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= SLOW_TOOL_CALL_MS) log.warn("appel d'outil lent", { tool, callId, elapsedMs });
+      else log.debug("appel d'outil terminé", { tool, callId, elapsedMs });
       if (this.registry.get(token) !== handlers || (handlers.isActive && !handlers.isActive())) {
         return new Response("session MCP révoquée", { status: HTTP_UNAUTHORIZED });
       }

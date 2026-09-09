@@ -10,8 +10,12 @@ import type {
   ImportNotionOptions,
   PaneSize,
   PaneStream,
+  PrepareReviewWorktreeOptions,
+  PublishReviewOptions,
+  PublishReviewResult,
   ReformulateOptions,
   ReviewDoneOptions,
+  ReviewHeadResult,
   RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
@@ -296,6 +300,21 @@ export class FakeSystemAdapter implements SystemAdapter {
     return "dry-run-code-fingerprint";
   }
 
+  async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {
+    this.log("prepareReviewWorktree", { ...opts });
+    return { ok: true, reason: "", commitSha: "dry-run-review-head" };
+  }
+
+  async readReviewHead(slotPath: string, prUrl: string): Promise<ReviewHeadResult> {
+    this.log("readReviewHead", { slotPath, prUrl });
+    return { ok: true, reason: "", commitSha: "dry-run-review-head" };
+  }
+
+  async publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {
+    this.log("publishReview", { slotPath, prUrl, ...opts });
+    return { ok: true, reason: "", reviewId: 1 };
+  }
+
   async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
     this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
     // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).
@@ -314,6 +333,9 @@ export class FakeSystemAdapter implements SystemAdapter {
       prUrl,
       requirePostedSince: opts.requirePostedSince,
       publicationMarker: opts.publicationMarker,
+      expectedCommitSha: opts.expectedCommitSha,
+      publishedReviewId: opts.publishedReviewId,
+      expectedReviewState: opts.expectedReviewState,
       requirePushedBranch: opts.requirePushedBranch,
     });
     return { ok: true, reason: "" };

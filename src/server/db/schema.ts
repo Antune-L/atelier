@@ -226,8 +226,12 @@ CREATE TABLE IF NOT EXISTS review_passes (
   ticket_id TEXT PRIMARY KEY REFERENCES tickets(id),
   pass_id TEXT NOT NULL UNIQUE,
   code_fingerprint TEXT NOT NULL,
+  reviewed_commit_sha TEXT,
   review_depth TEXT NOT NULL,
   requires_approval INTEGER NOT NULL DEFAULT 1,
+  published_review_id INTEGER,
+  published_commit_sha TEXT,
+  published_at INTEGER,
   created_at INTEGER NOT NULL
 );
 
@@ -356,13 +360,21 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
 
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "requires_approval", ddl: "ALTER TABLE review_passes ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 1" },
+  { column: "reviewed_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN reviewed_commit_sha TEXT" },
+  { column: "published_review_id", ddl: "ALTER TABLE review_passes ADD COLUMN published_review_id INTEGER" },
+  { column: "published_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN published_commit_sha TEXT" },
+  { column: "published_at", ddl: "ALTER TABLE review_passes ADD COLUMN published_at INTEGER" },
 ];
+
+/** SQLite lock wait before a concurrent write fails with SQLITE_BUSY (several sessions write usage at once). */
+const BUSY_TIMEOUT_MS = 5_000;
 
 export function createDatabase(path: string): Database {
   snapshotBeforeCodexCatalogMigration(path);
   const db = new Database(path, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA foreign_keys = ON;");
+  db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
   db.exec(SCHEMA_SQL);
   const reviewPassPolicyExisted = hasColumn(db, "review_passes", "requires_approval");
   migrate(db, "tickets", TICKET_MIGRATIONS);

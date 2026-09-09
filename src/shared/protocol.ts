@@ -94,6 +94,14 @@ export const delegateReviewArgsSchema = z.object({
   context: z.string().min(1),
 });
 
+export const readReviewResultsArgsSchema = z.object({
+  passId: z.string().min(1).nullish(),
+});
+
+export const publishReviewArgsSchema = z.object({
+  passId: z.string().min(1),
+});
+
 export const reviewFindingSeveritySchema = z.enum(["critical", "major", "minor"]);
 export const reviewFindingVerificationSchema = z.enum(["not_needed", "pending", "confirmed", "demoted", "rejected"]);
 export const reviewFindingSchema = z.object({
@@ -236,9 +244,21 @@ export const WORKER_TOOLS = [
     argsSchema: delegateReviewArgsSchema,
   },
   {
+    name: "read_review_results",
+    description:
+      "Relit les verdicts de review déjà persistés pour la passe courante du ticket (ou la passe `passId` si fournie). À utiliser quand un événement review_done n'est pas arrivé, plutôt que de relancer les reviewers.",
+    argsSchema: readReviewResultsArgsSchema,
+  },
+  {
+    name: "publish_review",
+    description:
+      "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Réservé aux tickets review avec postage GitHub activé.",
+    argsSchema: publishReviewArgsSchema,
+  },
+  {
     name: "submit_review",
     description:
-      "Réservé à une session reviewer : soumet son verdict, sa synthèse et ses findings au parent.",
+      "Réservé à une session reviewer : soumet son verdict, sa synthèse et ses findings au parent. Chaque chaîne (summary, evidence, ruleSource) doit être rédigée en anglais.",
     argsSchema: submitReviewArgsSchema,
   },
   {
@@ -280,6 +300,8 @@ const WORKER_TOOL_NAMES = [
   "fail",
   "delegate_implementation",
   "delegate_review",
+  "read_review_results",
+  "publish_review",
   "submit_review",
   "submit_triage",
   "submit_feasibility",

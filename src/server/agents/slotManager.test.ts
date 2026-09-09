@@ -156,3 +156,39 @@ test("relaunch restores a Claude parent's captured Codex delegate after ticket e
     db.close();
   }
 });
+
+test("abandon moves the card even when its slot was already handed to another ticket", async () => {
+  const db = createDatabase(":memory:");
+  const store = new Store(db);
+  store.createProject("test-proj", {
+    label: "Test",
+    repoPath: "/tmp/repo",
+    baseBranch: "main",
+    commitTimeoutMs: 60_000,
+    defaultAutoMerge: false,
+    defaultAddScreenshots: false,
+  });
+  initProjectRegistry(store);
+  const stale = store.createTicket(makeTicket({}));
+  const owner = store.createTicket(makeTicket({}));
+  store.updateTicket(stale.id, { slotId: 1 });
+  store.updateSlot(1, { ticketId: owner.id, status: "busy" });
+
+  const system = new RelaunchSystem();
+  const hub = new ClientHub(store);
+  const sessionHub = new SessionHub(system);
+  const notifier = new Notifier(hub);
+  const lifecycle = new TicketLifecycle(store, hub, notifier);
+  const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
+
+  try {
+    await slots.abandonTicket(stale.id);
+    expect(store.getTicket(stale.id)?.column).toBe("abandoned");
+    expect(store.getTicket(stale.id)?.slotId).toBeNull();
+    expect(store.getSlot(1)?.ticketId).toBe(owner.id);
+  } finally {
+    sessionHub.disconnectAll();
+    await sessionHub.drainClosingSessions();
+    db.close();
+  }
+});

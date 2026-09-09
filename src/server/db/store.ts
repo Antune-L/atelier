@@ -66,8 +66,12 @@ export interface ReviewPass {
   ticketId: string;
   passId: string;
   codeFingerprint: string;
+  reviewedCommitSha: string | null;
   reviewDepth: ReviewDepth;
   requiresApproval: boolean;
+  publishedReviewId: number | null;
+  publishedCommitSha: string | null;
+  publishedAt: number | null;
   createdAt: number;
   approvals: Partial<Record<ReviewKind, boolean>>;
   results: Partial<Record<ReviewKind, PersistedReviewResult>>;
@@ -537,6 +541,7 @@ export class Store {
     ticketId: string;
     passId: string;
     codeFingerprint: string;
+    reviewedCommitSha: string | null;
     reviewDepth: ReviewDepth;
     requiresApproval: boolean;
     createdAt?: number;
@@ -545,12 +550,13 @@ export class Store {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(input.ticketId);
       this.db.query(
         `INSERT OR REPLACE INTO review_passes
-          (ticket_id, pass_id, code_fingerprint, review_depth, requires_approval, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          (ticket_id, pass_id, code_fingerprint, reviewed_commit_sha, review_depth, requires_approval, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.ticketId,
         input.passId,
         input.codeFingerprint,
+        input.reviewedCommitSha,
         input.reviewDepth,
         input.requiresApproval ? 1 : 0,
         input.createdAt ?? Date.now(),
@@ -559,6 +565,37 @@ export class Store {
     const reviewPass = this.getReviewPass(input.ticketId);
     if (!reviewPass) throw new Error("beginReviewPass: passe introuvable après insertion");
     return reviewPass;
+  }
+
+  bindReviewPassCommit(ticketId: string, passId: string, commitSha: string): boolean {
+    const result = this.db.query(
+      `UPDATE review_passes SET reviewed_commit_sha = ?
+       WHERE ticket_id = ? AND pass_id = ? AND (reviewed_commit_sha IS NULL OR reviewed_commit_sha = ?)`,
+    ).run(commitSha, ticketId, passId, commitSha);
+    return result.changes === 1;
+  }
+
+  recordReviewPublication(input: {
+    ticketId: string;
+    passId: string;
+    reviewId: number;
+    commitSha: string;
+    publishedAt?: number;
+  }): boolean {
+    const result = this.db.query(
+      `UPDATE review_passes
+       SET reviewed_commit_sha = ?, published_review_id = ?, published_commit_sha = ?, published_at = ?
+       WHERE ticket_id = ? AND pass_id = ? AND reviewed_commit_sha = ?`,
+    ).run(
+      input.commitSha,
+      input.reviewId,
+      input.commitSha,
+      input.publishedAt ?? Date.now(),
+      input.ticketId,
+      input.passId,
+      input.commitSha,
+    );
+    return result.changes === 1;
   }
 
   /** Persist one reviewer outcome only when its pass is still current. */
@@ -625,8 +662,12 @@ export class Store {
       ticketId: row.ticket_id,
       passId: row.pass_id,
       codeFingerprint: row.code_fingerprint,
+      reviewedCommitSha: row.reviewed_commit_sha,
       reviewDepth: reviewDepthSchema.parse(row.review_depth),
       requiresApproval: row.requires_approval === 1,
+      publishedReviewId: row.published_review_id,
+      publishedCommitSha: row.published_commit_sha,
+      publishedAt: row.published_at,
       createdAt: row.created_at,
       approvals,
       results,
@@ -703,7 +744,7 @@ export class Store {
       `UPDATE agent_messages
        SET status = 'received', session_id = COALESCE(?, session_id), turn_id = COALESCE(?, turn_id),
            received_at = COALESCE(received_at, ?)
-       WHERE id = ? AND status IN ('queued', 'received')`,
+       WHERE id = ? AND status IN ('queued', 'received', 'rejected')`,
     ).run(input.sessionId ?? null, input.turnId ?? null, input.receivedAt ?? Date.now(), input.id);
     return this.getAgentMessage(input.id);
   }
@@ -714,13 +755,14 @@ export class Store {
     this.db.query(
       `UPDATE agent_messages
        SET status = 'accepted', session_id = COALESCE(?, session_id), turn_id = COALESCE(?, turn_id),
-           received_at = COALESCE(received_at, ?), accepted_at = COALESCE(accepted_at, ?), error = NULL
-       WHERE id = ? AND status IN ('queued', 'received')`,
+           received_at = COALESCE(received_at, ?), accepted_at = COALESCE(accepted_at, ?),
+           rejected_at = NULL, error = NULL
+       WHERE id = ? AND status IN ('queued', 'received', 'rejected')`,
     ).run(input.sessionId ?? null, input.turnId ?? null, acceptedAt, acceptedAt, input.id);
     return this.getAgentMessage(input.id);
   }
 
-  /** Mark a definitive provider rejection. Rejected messages require an explicit new user action. */
+  /** Mark a delivery rejection. The message stays a replay candidate for the next (re)connection. */
   markAgentMessageRejected(input: MarkAgentMessageRejectedInput): AgentMessage | null {
     this.db.query(
       `UPDATE agent_messages
@@ -730,12 +772,12 @@ export class Store {
     return this.getAgentMessage(input.id);
   }
 
-  /** Replay candidates in stable order, including receipt without confirmed semantic acceptance. */
+  /** Replay candidates in stable order: never accepted, including receipt or rejection without acceptance. */
   listPendingAgentMessages(ownerType: ExecutionOwnerType, ownerId: string): AgentMessage[] {
     return this.db
       .query(
         `SELECT * FROM agent_messages
-         WHERE owner_type = ? AND owner_id = ? AND status IN ('queued', 'received')
+         WHERE owner_type = ? AND owner_id = ? AND status IN ('queued', 'received', 'rejected')
          ORDER BY created_at ASC, id ASC`,
       )
       .all(ownerType, ownerId)

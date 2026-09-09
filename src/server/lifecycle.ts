@@ -146,15 +146,15 @@ export class TicketLifecycle {
    * "stalled", broadcast ticket+slots, notify. Used by the Stop-hook escalation (no error,
    * "Ticket bloqué", logs "stalled") and the done-gate exhaustion path (carries the gate reason as
    * error, "Gate done échouée", no extra event — it already logged DONE_GATE_FAILED_EVENT). The
-   * callers differ only in the notify title/body, the recorded error, and whether a "stalled" event
-   * is emitted — the transition itself is identical.
+   * callers differ only in the notify title/body, the recorded error, the optional `reason` carried
+   * by the "stalled" event, and whether that event is emitted — the transition itself is identical.
    */
   async stall(
     ticketId: string,
     notify: { title: string; body: string },
-    opts: { error?: string | null; logEvent?: boolean } = {},
+    opts: { error?: string | null; logEvent?: boolean; reason?: string } = {},
   ): Promise<Ticket> {
-    const { error = null, logEvent = false } = opts;
+    const { error = null, logEvent = false, reason } = opts;
     const ticket = this.store.updateTicket(ticketId, {
       stage: "stalled",
       ...(error !== null ? { error } : {}),
@@ -164,7 +164,7 @@ export class TicketLifecycle {
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
     await this.notifier.notify(notify.title, notify.body, ticketId);
-    if (logEvent) this.store.logEvent(ticketId, "stalled", {});
+    if (logEvent) this.store.logEvent(ticketId, "stalled", reason === undefined ? {} : { reason });
     return ticket;
   }
 }

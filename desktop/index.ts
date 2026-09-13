@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import Electrobun, { ApplicationMenu, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
 import { z } from "zod";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
+import { createMcpSettingsController } from "./mcpSettings.ts";
+import type { AtelierDesktopRpcSchema, McpTokenSource } from "./mcpRpc.ts";
 import { spawnRelauncher } from "./relaunch.ts";
 import { repairPath } from "./repairPath.ts";
 
@@ -81,6 +83,8 @@ const newWindowEventSchema = z.object({
     detail: z.union([z.string(), z.object({ url: z.string() })]),
   }),
 });
+
+const navigationEventSchema = z.object({ data: z.object({ detail: z.string() }) });
 
 /** Returns the http(s) target of a `new-window-open` event, or null for anything we shouldn't route out. */
 function externalUrlFromNewWindowEvent(event: unknown): string | null {
@@ -190,6 +194,8 @@ async function waitForHealth(port: number): Promise<void> {
 
 async function boot(): Promise<void> {
   const roots = resolveRoots();
+  const configuredMcpToken = process.env.KANBAN_MCP_TOKEN?.trim();
+  const tokenSource: McpTokenSource = configuredMcpToken ? "environment" : "managed";
 
   // 1. Bootstrap config + env BEFORE importing the server (config.ts throws at import otherwise).
   const configPath = ensureConfig(roots);
@@ -236,6 +242,37 @@ async function boot(): Promise<void> {
     },
   });
 
+  const atelierOrigin = `http://localhost:${server.port}`;
+  let trustedRpcCaller = true;
+  const assertTrustedCaller = (): void => {
+    if (!trustedRpcCaller) throw new Error("appel RPC refusé hors d’Atelier");
+  };
+  const mcpSettingsController = createMcpSettingsController({
+    dataRoot: roots.dataRoot,
+    endpointUrl: `${atelierOrigin}/mcp`,
+    tokenSource,
+    getToken: () => {
+      const token = process.env.KANBAN_MCP_TOKEN?.trim();
+      if (!token) throw new Error("jeton MCP indisponible");
+      return token;
+    },
+    updateToken: (token) => {
+      process.env.KANBAN_MCP_TOKEN = token;
+      server.updateMcpToken(token);
+    },
+    writeClipboard: (token) => Utils.clipboardWriteText(token),
+    assertTrustedCaller,
+  });
+  const desktopRpc = BrowserView.defineRPC<AtelierDesktopRpcSchema>({
+    handlers: {
+      requests: {
+        getMcpSettings: () => mcpSettingsController.getMcpSettings(),
+        copyMcpToken: () => mcpSettingsController.copyMcpToken(),
+        regenerateMcpToken: () => mcpSettingsController.regenerateMcpToken(),
+      },
+    },
+  });
+
   let tornDown = false;
   const teardown = async (): Promise<void> => {
     if (tornDown) return;
@@ -278,7 +315,26 @@ async function boot(): Promise<void> {
       title: WINDOW_TITLE,
       url: `http://localhost:${server.port}`,
       frame: { width: WINDOW_WIDTH, height: WINDOW_HEIGHT, x: 0, y: 0 },
+      rpc: desktopRpc,
     });
+    mainWindow.webview.on("will-navigate", () => {
+      trustedRpcCaller = false;
+    });
+    const updateTrustedRpcCaller = (event: unknown): void => {
+      const parsed = navigationEventSchema.safeParse(event);
+      if (!parsed.success) {
+        trustedRpcCaller = false;
+        return;
+      }
+      try {
+        const committedUrl = new URL(parsed.data.data.detail);
+        trustedRpcCaller = committedUrl.origin === atelierOrigin && committedUrl.pathname === "/";
+      } catch {
+        trustedRpcCaller = false;
+      }
+    };
+    mainWindow.webview.on("did-commit-navigation", updateTrustedRpcCaller);
+    mainWindow.webview.on("dom-ready", updateTrustedRpcCaller);
 
     // `target="_blank"` / window.open links (e.g. the "Voir la PR" link) have no default handler in
     // WKWebView — the click silently does nothing. Route them to the system browser instead.

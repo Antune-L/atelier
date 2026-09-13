@@ -20,6 +20,7 @@ import {
 import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
+import { McpSettings } from "@/components/McpSettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { Dialog } from "@/components/ui/dialog";
@@ -56,7 +57,7 @@ const NO_MATCH_MESSAGE = "Aucun réglage ne correspond à cette recherche.";
 const SETTINGS_GROUPS = ["Application", "Connexions"] as const;
 type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
-type SettingsSectionId = "appearance" | "defaults" | "profiles" | "projects" | "providers";
+type SettingsSectionId = "appearance" | "defaults" | "profiles" | "projects" | "providers" | "mcp";
 
 interface SettingsSection {
   id: SettingsSectionId;
@@ -105,6 +106,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "Fournisseurs",
     group: "Connexions",
     keywords: ["codex", "claude", "composer", "cursor", "connexion", "fast", "statut", "détection"],
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    group: "Connexions",
+    keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur"],
   },
 ];
 
@@ -261,7 +268,8 @@ function SettingsSectionPanel({
   if (sectionId === "defaults") return <AgentDefaultsSettings query={query} />;
   if (sectionId === "profiles") return <ProfilesSettings />;
   if (sectionId === "projects") return <ProjectsSettings />;
-  return <ProvidersSettings />;
+  if (sectionId === "providers") return <ProvidersSettings />;
+  return <McpSettings />;
 }
 
 /** Theme picker; the only row here, hidden when the search query doesn't match it. */

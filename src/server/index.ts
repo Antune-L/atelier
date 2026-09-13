@@ -1,5 +1,6 @@
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "node:net";
 
 import { Elysia } from "elysia";
 
@@ -35,9 +36,11 @@ import { createLogger, initLogFile } from "./logger.ts";
 import { migrateConfigJsonIfPresent } from "./migration.ts";
 import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
+import { PublicMcpManager } from "./publicMcp.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
+import { createTicketOperations } from "./ticketOperations.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
 import { UserTerminalManager } from "./userTerminalManager.ts";
@@ -62,6 +65,8 @@ const LOGS_SUBPATH = "logs";
  * Web mode leaves all of these unset and inherits the repo-root defaults.
  */
 export interface StartServerOptions {
+  port?: number;
+  mcpToken?: string | null;
   /** Read-only assets: dist/web, templates, the vendored composer driver (default: repo root). */
   resourcesRoot?: string;
   /** Writable data: kanban.db, uploads/, config.json, slots/ (default: repo root). */
@@ -80,6 +85,7 @@ export interface StartServerOptions {
 
 export interface RunningServer {
   port: number;
+  updateMcpToken(token: string): void;
   /** Kill detached tmux sessions backing occupied slots (desktop shutdown only). */
   teardownSessions(): Promise<void>;
   /** Stop the HTTP/WS server, the watchdog timer, and close the database. */
@@ -96,6 +102,21 @@ function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
 
 function isTerminalSocket(ws: { data: SocketData }): ws is TerminalSocket {
   return ws.data.kind === "terminal";
+}
+
+async function resolveServerPort(requestedPort: number): Promise<number> {
+  if (requestedPort !== 0) return requestedPort;
+  const probe = createServer();
+  await new Promise<void>((resolveListening, rejectListening) => {
+    probe.once("error", rejectListening);
+    probe.listen(0, "127.0.0.1", resolveListening);
+  });
+  const address = probe.address();
+  await new Promise<void>((resolveClosed, rejectClosed) => {
+    probe.close((error) => error === undefined ? resolveClosed() : rejectClosed(error));
+  });
+  if (address === null || typeof address === "string") throw new Error("port de test indisponible");
+  return address.port;
 }
 
 const HTTP_NOT_FOUND = 404;
@@ -170,7 +191,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       ? join(opts.repoRoot, WEB_DIST_SUBPATH)
       : join(resourcesRoot, WEB_DIST_SUBPATH);
 
-  const port = Number(process.env.PORT ?? DEFAULT_PORT);
+  const requestedPort = opts.port ?? Number(process.env.PORT ?? DEFAULT_PORT);
+  const port = await resolveServerPort(requestedPort);
   const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");
 
   // Warm the claude binary early (packaged app: detect a user install or download the pinned one) so
@@ -230,6 +252,21 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
+  const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
+  const mcpToken = configuredMcpToken?.trim() || null;
+  const publicMcpManager = mcpToken === null
+    ? null
+    : new PublicMcpManager(
+      createTicketOperations({
+        store,
+        hub: clientHub,
+        lifecycle,
+        slots: slotManager,
+        feasibility: feasibilityManager,
+      }),
+      mcpToken,
+      system.dryRun,
+    );
 
   await runFirstBootSetup(store, system);
   await slotManager.recover();
@@ -327,6 +364,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       if (url.pathname === HTTP_PATH_WORKER_MCP) {
         return workerMcpManager.handleRequest(request);
       }
+      if (url.pathname === "/mcp" && publicMcpManager !== null) {
+        return publicMcpManager.handleRequest({
+          request,
+          peerAddress: srv.requestIP(request)?.address ?? null,
+          port: srv.port ?? port,
+        });
+      }
       if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
         return serveUpload(dataRoot, url.pathname);
       }
@@ -358,6 +402,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
     port: server.port ?? port,
+    updateMcpToken(token: string) {
+      publicMcpManager?.setToken(token);
+    },
     async teardownSessions() {
       await slotManager.teardownSessions();
       await delegationManager.drainClosingSessions();

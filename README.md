@@ -26,6 +26,26 @@ Dans les worktrees, une version numérique dans `.nvmrc` doit être installée v
 
 Running from source instead? See [docs/development.md](docs/development.md).
 
+## MCP local
+
+Atelier expose un serveur MCP Streamable HTTP sur `http://localhost:52817/mcp`. Il accepte uniquement les connexions provenant de la machine locale et exige l’en-tête `Authorization: Bearer <token>`.
+
+Dans l’application macOS, un jeton aléatoire persistant est créé au premier lancement dans `~/Library/Application Support/kanban-agents/mcp-token`, avec des permissions limitées au compte utilisateur. La variable `KANBAN_MCP_TOKEN` permet de fournir un autre jeton au lancement. Depuis les sources, l’endpoint reste désactivé tant que cette variable n’est pas définie :
+
+Les réglages de l’application desktop affichent l’URL MCP et permettent de copier le jeton sans l’exposer à la page web. Le bouton de régénération remplace immédiatement le jeton géré par Atelier ; il est désactivé lorsqu’un jeton est fourni par `KANBAN_MCP_TOKEN`.
+
+```bash
+KANBAN_MCP_TOKEN=remplacez-par-un-secret-long bun run dev
+```
+
+Configurez ensuite le client MCP avec l’URL ci-dessus et le jeton comme en-tête Bearer. Les outils disponibles sont `list_projects`, `list_tickets`, `create_todo_ticket`, `update_ticket`, `analyze_tickets` et `start_ticket`. Les réponses indiquent aussi `dryRun` afin qu’un agent distingue le bac à sable du serveur réel.
+
+`create_todo_ticket` crée toujours une carte passive dans TODO. Il accepte les mêmes options qu’une création depuis l’application : contenu (`title`, `description`, `externalUrl`), pipeline (`prdEnabled`, `verifyFeature` pour la vérification E2E, `prDraft`, `autoMerge`, `stealth`, `directPush`, `addScreenshots`, `argusMultiLoop`), branche et empilement (`baseBranch`, `dependsOn`), ainsi que l’orchestrateur, l’implémenteur et leurs modèles/efforts Claude ou Codex (`orchestrator`, `implementer`, `model`, `effort`, `implementerModel`, `implementerEffort`, `codexModel`, `codexEffort`, `codexFast`, `codexImplementerModel`, `codexImplementerEffort`, `codexImplementerFast`, `feasibilityEngine`). `requestId` est obligatoire et rend la création idempotente : un nouvel appel strictement identique retourne la carte existante, tandis qu’un même identifiant avec des options différentes est refusé. Utilisez ensuite `start_ticket` pour lancer la carte ; `create_todo_ticket` refuse le champ `start`.
+
+`analyze_tickets` reçoit une liste non vide d’identifiants et lance uniquement leur étude de faisabilité en arrière-plan. Il ne démarre aucune implémentation. La réponse distingue les identifiants acceptés (`startedIds`) des cartes absentes ou déjà occupées (`rejected`) ; les résultats de l’étude sont ensuite enregistrés sur chaque carte.
+
+`update_ticket` modifie une carte existante tant qu’elle se trouve dans TODO et qu’aucune analyse ou implémentation n’est en cours. Il accepte le contenu et toutes les options éditables du formulaire, notamment le projet, la branche, la dépendance, les modèles, les efforts, l’orchestrateur, l’implémenteur et les options de pipeline. Un champ omis reste inchangé ; `null` et `false` sont des valeurs explicites. Cet outil ne déplace pas et ne démarre pas la carte.
+
 ## How it works
 
 ```mermaid

@@ -33,9 +33,16 @@ import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapExecutionRunRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapExecutionRunRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
+
+export class TicketCreationRequestConflictError extends Error {
+  constructor(requestId: string) {
+    super(`la clé de requête ${requestId} a déjà été utilisée avec un contenu différent`);
+    this.name = "TicketCreationRequestConflictError";
+  }
+}
 
 const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
 const reviewVerdictSchema = z.enum(["approve", "revise"]);
@@ -887,6 +894,26 @@ export class Store {
         now,
       );
     return this.finalizeCreate(id, "createTicket", { title: input.title });
+  }
+
+  createTicketIdempotent(requestId: string, payload: string, input: NewTicket): { created: boolean; ticket: Ticket } {
+    return this.transaction(() => {
+      const raw = this.db
+        .query("SELECT * FROM ticket_creation_requests WHERE request_id = ?")
+        .get(requestId);
+      if (raw) {
+        const existing = mapTicketCreationRequestRow(raw);
+        if (existing.payload !== payload) throw new TicketCreationRequestConflictError(requestId);
+        const ticket = this.getTicket(existing.ticket_id);
+        if (!ticket) throw new Error(`createTicketIdempotent: ticket ${existing.ticket_id} introuvable`);
+        return { created: false, ticket };
+      }
+      const ticket = this.createTicket(input);
+      this.db
+        .query("INSERT INTO ticket_creation_requests (request_id, payload, ticket_id, created_at) VALUES (?, ?, ?, ?)")
+        .run(requestId, payload, ticket.id, Date.now());
+      return { created: true, ticket };
+    });
   }
 
   /** Create a review ticket: straight into "À implémenter", carrying the target PR + argus knobs. */

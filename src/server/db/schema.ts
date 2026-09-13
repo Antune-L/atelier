@@ -95,6 +95,13 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ticket_creation_requests (
+  request_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS slots (
   id INTEGER PRIMARY KEY,
   ticket_id TEXT REFERENCES tickets(id),
@@ -266,6 +273,7 @@ CREATE TABLE IF NOT EXISTS configuration_migrations (
 
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_creation_requests_ticket ON ticket_creation_requests(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 CREATE INDEX IF NOT EXISTS idx_execution_runs_owner ON execution_runs(owner_type, owner_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_execution_runs_session ON execution_runs(session_id);

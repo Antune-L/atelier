@@ -523,7 +523,7 @@ function isHttpUrl(value: string): boolean {
  * Optional external tracker URL submitted by the UI. The UI may send an empty string when the
  * field is left blank, so we trim, treat empty as null, and require a valid http(s) URL otherwise.
  */
-const externalUrlSchema = z
+export const externalUrlSchema = z
   .union([z.string(), z.null()])
   .transform((v) => {
     if (v === null) return null;
@@ -554,7 +554,7 @@ export function deriveTitleFromDescription(description: string): string {
  * Per-ticket options shared by single creation and CSV import: the target project plus the
  * pipeline toggles and agent knobs picked at creation (null = fall back to server config).
  */
-const ticketBatchOptionsSchema = z.object({
+export const ticketBatchOptionsSchema = z.object({
   project: projectKeySchema,
   prdEnabled: z.boolean().default(false),
   prDraft: z.boolean().default(true),
@@ -660,7 +660,7 @@ export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
 
 /** Start the batch feasibility analysis on a set of already-existing tickets (e.g. all of TODO). */
 export const analyzeTicketsSchema = z.object({
-  ids: z.array(z.string().min(1)).min(1),
+  ids: z.array(z.string().min(1)).min(1).describe("Identifiants des cartes existantes à analyser."),
 });
 export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
 

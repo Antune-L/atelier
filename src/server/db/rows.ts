@@ -102,6 +102,18 @@ const ticketRowSchema = z.object({
 });
 export type TicketRow = z.infer<typeof ticketRowSchema>;
 
+const ticketCreationRequestRowSchema = z.object({
+  request_id: z.string(),
+  payload: z.string(),
+  ticket_id: z.string(),
+  created_at: z.number(),
+});
+export type TicketCreationRequestRow = z.infer<typeof ticketCreationRequestRowSchema>;
+
+export function mapTicketCreationRequestRow(raw: unknown): TicketCreationRequestRow {
+  return ticketCreationRequestRowSchema.parse(raw);
+}
+
 const commentRowSchema = z.object({
   id: z.string(),
   ticket_id: z.string(),

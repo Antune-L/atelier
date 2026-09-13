@@ -28,12 +28,11 @@ import {
   updateAutomationSchema,
   updateProfileSchema,
   updateProjectSchema,
-  updateTicketSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode } from "../shared/schemas.ts";
 import type { ProjectConfig } from "./config.ts";
-import { MODELS, getProject, isProjectKey, listProjectKeys } from "./config.ts";
+import { MODELS, getProject, isProjectKey } from "./config.ts";
 
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
@@ -45,7 +44,7 @@ import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
-import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
+import type { NewTicket, Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -54,6 +53,11 @@ import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
 import type { UserTerminalManager } from "./userTerminalManager.ts";
+import {
+  createTicketOperations,
+  ticketDependencyError,
+  TicketOperationError,
+} from "./ticketOperations.ts";
 
 const log = createLogger("triage");
 
@@ -182,6 +186,15 @@ function jsonError(set: { status?: number | string }, status: number, message: s
   return { error: message };
 }
 
+function ticketOperationError(
+  set: { status?: number | string },
+  error: TicketOperationError,
+): { error: string } {
+  if (error.code === "NOT_FOUND") return jsonError(set, HTTP_NOT_FOUND, error.message);
+  if (error.code === "CONFLICT") return jsonError(set, HTTP_CONFLICT, error.message);
+  return jsonError(set, HTTP_BAD_REQUEST, error.message);
+}
+
 /** 400 response when the (orchestrator, implementer) pair is disallowed (Codex orchestrates only Codex — PR1), else null. */
 function agentPairError(
   set: { status?: number | string },
@@ -214,26 +227,6 @@ function isBlocked(ticket: Ticket, store: Store): boolean {
   // stacked-PR blocking behavior, incl. directPush parents whose feat/… branch has no PR either).
   if (parent.prUrl === null && !isSplitMother(parent)) return true;
   return false;
-}
-
-/**
- * Validate a proposed dependsOn for `ticketId` (null on create): parent exists, same project, no
- * cycle. Returns an error message or null.
- */
-function dependencyError(store: Store, ticketId: string | null, dependsOn: string, project: string): string | null {
-  const parent = store.getTicket(dependsOn);
-  if (!parent) return "ticket dont il dépend introuvable";
-  if (parent.project !== project) return "la dépendance doit être dans le même projet";
-  // Walk the parent chain; reaching ticketId (on edit) is a cycle.
-  const seen = new Set<string>();
-  let cursor: typeof parent | null = parent;
-  while (cursor) {
-    if (cursor.id === ticketId) return "dépendance circulaire interdite";
-    if (seen.has(cursor.id)) break;
-    seen.add(cursor.id);
-    cursor = cursor.dependsOn ? store.getTicket(cursor.dependsOn) : null;
-  }
-  return null;
 }
 
 /** Mother branch name for a split: `split/<motherId>-<slug>`. */
@@ -438,21 +431,10 @@ async function performSplit(
 
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
+  const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
 
   return new Elysia({ prefix: "/api" })
-    .get("/projects", () =>
-      listProjectKeys().map((key) => {
-        const project = getProject(key);
-        return {
-          key,
-          label: project.label,
-          baseBranch: project.baseBranch,
-          defaultAutoMerge: project.defaultAutoMerge,
-          defaultAddScreenshots: project.defaultAddScreenshots,
-          color: project.color,
-        };
-      }),
-    )
+    .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
       const projects: ManagedProject[] = [];
       for (const key of store.listProjectKeys()) {
@@ -627,7 +609,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const pairError = agentPairError(set, parsed.data.orchestrator, parsed.data.implementer);
       if (pairError) return pairError;
       if (parsed.data.dependsOn !== null) {
-        const depError = dependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
+        const depError = ticketDependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
       }
       // Title is optional: fall back to a slice of the description when left blank.
@@ -752,29 +734,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/analyze", ({ body, set }) => {
       const parsed = analyzeTicketsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      // Re-run is allowed on any TODO ticket whose analysis isn't already live and which isn't processing.
-      const eligible = parsed.data.ids
-        .map((id) => store.getTicket(id))
-        .filter((ticket): ticket is Ticket => ticket !== null)
-        .filter((ticket) => ticket.triageStatus !== "running" && !isProcessing(ticket.stage));
-
-      const idsByProject = new Map<string, string[]>();
-      for (const ticket of eligible) {
-        const group = idsByProject.get(ticket.project) ?? [];
-        group.push(ticket.id);
-        idsByProject.set(ticket.project, group);
-      }
-
-      // The manager marks each ticket running then persists/pushes verdicts via the worker channel.
-      for (const [project, ids] of idsByProject) {
-        void deps.feasibility.start(ids, project).catch((e) => {
-          log.error("démarrage de l'analyse en lot échoué", {
-            error: getErrorMessage(e),
-          });
-        });
-      }
-
-      return { started: eligible.length };
+      return ticketOperations.analyzeTickets(parsed.data.ids);
     })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);
@@ -872,73 +832,12 @@ export function createApiRoutes(deps: RouteDeps) {
       return ticket;
     })
     .patch("/tickets/:id", ({ params, body, set }) => {
-      const ticket = store.getTicket(params.id);
-      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
-      if (ticket.triageStatus === "running") {
-        return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de modifier");
+      try {
+        return ticketOperations.updateTicket(params.id, body);
+      } catch (error) {
+        if (error instanceof TicketOperationError) return ticketOperationError(set, error);
+        throw error;
       }
-      const parsed = updateTicketSchema.safeParse(body);
-      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      if (parsed.data.project !== undefined && parsed.data.project !== ticket.project) {
-        // Key validity is independent of the card's column: reject an unknown
-        // project (400) before the TODO-only transition rule (409).
-        if (!isProjectKey(parsed.data.project)) {
-          return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
-        }
-        if (ticket.column !== "todo") {
-          return jsonError(set, HTTP_CONFLICT, "le projet ne peut être changé que dans TODO");
-        }
-      }
-      if (parsed.data.dependsOn !== undefined && parsed.data.dependsOn !== null) {
-        const depError = dependencyError(store, ticket.id, parsed.data.dependsOn, parsed.data.project ?? ticket.project);
-        if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
-      }
-      // The agent pair pins the whole session's driver: like the project, it can only move in TODO,
-      // and the resulting (merged) pair must stay allowed (Codex orchestrates only Codex — PR1 invariant).
-      if (parsed.data.orchestrator !== undefined || parsed.data.implementer !== undefined) {
-        if (ticket.column !== "todo") {
-          return jsonError(set, HTTP_CONFLICT, "orchestrateur/implémenteur modifiables uniquement dans TODO");
-        }
-        const pairError = agentPairError(
-          set,
-          parsed.data.orchestrator ?? ticket.orchestrator,
-          parsed.data.implementer ?? ticket.implementer,
-        );
-        if (pairError) return pairError;
-      }
-      const patch: TicketPatch = { ...parsed.data };
-      // directPush ⊕ stealth ⊕ autoMerge: directPush wins, then stealth. Force the others off
-      // whenever the resulting ticket is in a no-PR mode.
-      const resultingDirectPush = parsed.data.directPush ?? ticket.directPush;
-      if (resultingDirectPush) {
-        patch.stealth = false;
-        patch.autoMerge = false;
-      } else if (parsed.data.stealth ?? ticket.stealth) {
-        patch.autoMerge = false;
-      }
-      patch.directPush = resultingDirectPush;
-      // A project change invalidates the saved base-branch override (it is
-      // project-specific). Reset it unless the same request supplies a new one.
-      if (
-        parsed.data.project !== undefined &&
-        parsed.data.project !== ticket.project &&
-        parsed.data.baseBranch === undefined
-      ) {
-        patch.baseBranch = null;
-      }
-      // A blank title is not rejected: derive one from the (new or existing)
-      // description so the title stays genuinely optional, as on creation.
-      if (parsed.data.title !== undefined && parsed.data.title.trim() === "") {
-        const derived = deriveTitleFromDescription(
-          parsed.data.description ?? ticket.description,
-        );
-        // Never blank an existing title: fall back to it when nothing derivable.
-        patch.title = derived || ticket.title;
-      }
-      const updated = store.updateTicket(params.id, patch);
-      hub.pushTicket(updated);
-      return updated;
     })
     .post("/tickets/:id/move", async ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);

@@ -3,12 +3,13 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { $ } from "bun";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
+import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr } from "../../shared/schemas.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { createLogger } from "../logger.ts";
@@ -64,6 +65,8 @@ const NOTION_IMPORT_ALLOWED_TOOLS = ["Read", ...NOTION_READ_TOOLS.map((name) => 
 const AUTOMATION_TIMEOUT_MS = 30 * 60 * 1000;
 /** Keep only the tail of a failed install's output in the surfaced error. */
 const INSTALL_ERROR_TAIL = 500;
+const SETUP_ERROR_EXCERPT_PART = 250;
+const SETUP_LOG_FILE_MODE = 0o600;
 /**
  * Forced on every setup/install/project script: stdin is already detached, so any tool that would
  * otherwise prompt (corepack "download pnpm?", pnpm auth, husky) must auto-resolve instead of
@@ -82,6 +85,12 @@ interface ShellRunResult {
   timedOut: boolean;
   stdout: string;
   stderr: string;
+}
+
+function setupOutputExcerpt(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.length <= INSTALL_ERROR_TAIL) return trimmed;
+  return `${trimmed.slice(0, SETUP_ERROR_EXCERPT_PART)}\n…\n${trimmed.slice(-SETUP_ERROR_EXCERPT_PART)}`;
 }
 
 /** Conventional worktree setup script paths (relative to the repo), tried in order when no explicit command is configured. */
@@ -206,7 +215,10 @@ export class RealSystemAdapter implements SystemAdapter {
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
   private readonly shellStartupDirectories = new Map<string, string>();
 
-  constructor(workerMcpManager: WorkerMcpManager) {
+  constructor(
+    workerMcpManager: WorkerMcpManager,
+    private readonly logsDirectory?: string,
+  ) {
     this.providers = { claude: claudeProvider, codex: createCodexProvider(workerMcpManager) };
   }
 
@@ -256,11 +268,45 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null> {
+    const res = await $`git -C ${repoPath} worktree list --porcelain -z`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`git worktree list a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+
+    const branchRef = `refs/heads/${branch}`;
+    for (const record of res.stdout.toString().split("\0\0")) {
+      const fields = record.split("\0");
+      if (!fields.includes(`branch ${branchRef}`)) continue;
+      const pathField = fields.find((field) => field.startsWith("worktree "));
+      const path = pathField?.slice("worktree ".length);
+      if (!path || fields.some((field) => field.startsWith("prunable")) || !existsSync(path)) {
+        throw new Error(`la branche ${branch} référence un worktree Git absent ou obsolète`);
+      }
+      const currentBranch = await $`git -C ${path} symbolic-ref --quiet HEAD`.nothrow().quiet();
+      if (currentBranch.exitCode !== 0 || currentBranch.stdout.toString().trim() !== branchRef) {
+        throw new Error(`le worktree ${path} ne pointe plus vers la branche ${branch}`);
+      }
+      return path;
+    }
+    return null;
+  }
+
   async worktreeAdd(opts: GitWorktreeAddOptions): Promise<void> {
+    const branchRef = `refs/heads/${opts.branch}`;
+    const branchCheck = await $`git -C ${opts.repoPath} show-ref --verify --quiet ${branchRef}`.nothrow().quiet();
+    if (branchCheck.exitCode !== 0 && branchCheck.exitCode !== 1) {
+      const detail = branchCheck.stderr.toString().trim() || branchCheck.stdout.toString().trim();
+      throw new Error(`vérification de la branche ${opts.branch} a échoué (code ${branchCheck.exitCode}) : ${detail}`);
+    }
+
     const res =
-      await $`git -C ${opts.repoPath} worktree add ${opts.slotPath} -b ${opts.branch} origin/${opts.baseBranch}`
-        .nothrow()
-        .quiet();
+      branchCheck.exitCode === 0
+        ? await $`git -C ${opts.repoPath} worktree add ${opts.slotPath} ${opts.branch}`.nothrow().quiet()
+        : await $`git -C ${opts.repoPath} worktree add ${opts.slotPath} -b ${opts.branch} origin/${opts.baseBranch}`
+            .nothrow()
+            .quiet();
     if (res.exitCode !== 0) {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       throw new Error(`git worktree add a échoué (code ${res.exitCode}) : ${detail}`);
@@ -322,12 +368,35 @@ export class RealSystemAdapter implements SystemAdapter {
       BRANCH: opts.branch,
       BASE_BRANCH: opts.baseBranch,
     });
-    if (res.timedOut) throw new Error(`timeout (${opts.timeoutMs}ms): ${command}`);
+    const setupLogPath = await this.persistSetupOutput(res.stdout, res.stderr);
+    const logDetail = setupLogPath === null ? "" : `\nJournal complet : ${setupLogPath}`;
+    if (res.timedOut) {
+      const stdoutExcerpt = setupOutputExcerpt(res.stdout);
+      const stderrExcerpt = setupOutputExcerpt(res.stderr);
+      const detail = [`stdout:\n${stdoutExcerpt}`, `stderr:\n${stderrExcerpt}`].join("\n");
+      throw new Error(`timeout (${opts.timeoutMs}ms): ${command}\n${detail}${logDetail}`);
+    }
     if (res.exitCode !== 0) {
-      const stdoutTail = res.stdout.trim().slice(-INSTALL_ERROR_TAIL);
-      const stderrTail = res.stderr.trim().slice(-INSTALL_ERROR_TAIL);
-      const detail = [`stdout:\n${stdoutTail}`, `stderr:\n${stderrTail}`].join("\n");
-      throw new Error(`le script de configuration du worktree a échoué (code ${res.exitCode}) : ${detail}`);
+      const stdoutExcerpt = setupOutputExcerpt(res.stdout);
+      const stderrExcerpt = setupOutputExcerpt(res.stderr);
+      const detail = [`stdout:\n${stdoutExcerpt}`, `stderr:\n${stderrExcerpt}`].join("\n");
+      throw new Error(`le script de configuration du worktree a échoué (code ${res.exitCode}) : ${detail}${logDetail}`);
+    }
+  }
+
+  private async persistSetupOutput(stdout: string, stderr: string): Promise<string | null> {
+    if (this.logsDirectory === undefined) return null;
+    const logPath = resolve(
+      this.logsDirectory,
+      `worktree-setup-${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}.log`,
+    );
+    try {
+      await mkdir(this.logsDirectory, { recursive: true });
+      await writeFile(logPath, `[stdout]\n${stdout}\n[stderr]\n${stderr}`, { mode: SETUP_LOG_FILE_MODE });
+      return logPath;
+    } catch (error) {
+      log.warn("journal du setup du worktree non persisté", { error: getErrorMessage(error), logPath });
+      return null;
     }
   }
 

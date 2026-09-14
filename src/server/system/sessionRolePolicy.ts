@@ -11,7 +11,6 @@ export function workerToolsForRole(role: AgentSessionRole | undefined): WorkerTo
   if (role === "triage") return ["ask_user", "submit_triage", "fail"];
   if (role === "feasibility") return ["submit_feasibility", "fail"];
   if (role === "split") return ["submit_split", "fail"];
-  if (role === "reviewer") return ["submit_review"];
   return [];
 }
 

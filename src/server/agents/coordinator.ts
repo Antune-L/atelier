@@ -423,7 +423,11 @@ export class AgentCoordinator {
     }
     const requiresApproval = this.delegation.reviewRequiresApproval(ctx.ticketId);
     const readOnlyReview = requiresApproval === false;
-    const requirement = readOnlyReview ? "completed" : "approved";
+    const ticket = this.store.getTicket(ctx.ticketId);
+    const opensFeaturePr = ticket?.kind === "feature" && !ticket.stealth && !ticket.directPush;
+    let requirement: "approved" | "approved_or_limit" | "completed" = "approved";
+    if (readOnlyReview) requirement = "completed";
+    else if (opensFeaturePr) requirement = "approved_or_limit";
     const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId);
     if (!reviewGate.ok) {
       const result = `Gate échouée: ${reviewGate.reason}`;
@@ -438,7 +442,13 @@ export class AgentCoordinator {
       log.warn("gate done rejetée avant finalisation", { ticketId: ctx.ticketId, slotId: ctx.slotId, ...fields });
       return { ok: false, result };
     }
-    const reviewReport = readOnlyReview ? this.delegation.reviewBoardReport(ctx.ticketId) : null;
+    const reviewReport = readOnlyReview || reviewGate.acceptedWithFindings
+      ? this.delegation.reviewBoardReport(ctx.ticketId)
+      : null;
+    if (reviewGate.acceptedWithFindings && ticket?.autoMerge === true) {
+      this.store.updateTicket(ctx.ticketId, { autoMerge: false });
+      this.store.logEvent(ctx.ticketId, "auto_merge_disabled_after_review_limit", { passId: reviewGate.passId });
+    }
     log.info("finalisation done démarrée", {
       ticketId: ctx.ticketId,
       slotId: ctx.slotId,

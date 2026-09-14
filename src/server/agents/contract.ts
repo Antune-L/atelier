@@ -106,6 +106,9 @@ function reviewKinds(depth: ReviewDepth): string[] {
 const READ_REVIEW_RESULTS_HINT =
   "Les verdicts arrivent en événements `review_done`. Si l'un d'eux n'arrive pas (ou après un redémarrage de session), appelle `read_review_results()` pour relire les verdicts déjà persistés au lieu de relancer les reviewers.";
 
+const FORMAT_BEFORE_REVIEW_HINT =
+  "AVANT CHAQUE batch de reviewers (première passe et chaque relecture après correction), découvre le formatter déjà configuré via les instructions et scripts du dépôt, applique-le aux fichiers pertinents modifiés en respectant ses ignores et les consignes sur les fichiers générés, puis exécute son check avec un code de sortie réel (ne déduis pas le succès d'une sortie RTK résumée ou masquée). N'invente aucun script, ne lance aucun téléchargement global via npx et, si aucun formatter n'est configuré, suis les conventions documentées sans prétendre avoir exécuté un check. Si un formatter configuré échoue ou est indisponible, résous le problème ou appelle `fail()` AVANT `delegate_review` : ce préflight ne consomme jamais une boucle de correction.";
+
 function reviewCalls(depth: ReviewDepth): string {
   return reviewKinds(depth).map((kind) => `\`delegate_review(kind="${kind}", context=...)\``).join(", ");
 }
@@ -125,11 +128,12 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   const depth = ticket.reviewDepth ?? "light";
   const kinds = reviewKinds(depth);
   return [
+    `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `3. reviewing : récupère le diff complet et appelle EN PARALLÈLE les ${kinds.length} reviewers indépendants : ${reviewCalls(depth)}. Passe à chacun la description/PRD et le diff utile, sans leur transmettre le raisonnement privé ni le résultat d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
     ...figmaLines,
     `3a. ${READ_REVIEW_RESULTS_HINT}`,
-    `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`done()\` avant les ${kinds.length} verdicts \`approve\` sur le code courant ; un échec bloque la validation.`,
-    `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}, sinon fail().`,
+    `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`done()\` avant les ${kinds.length} résultats vérifiés sur le code courant ; un reviewer échoué ou une dimension manquante bloque la validation.`,
+    `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, ne relance plus et ne fail pas pour ce seul motif : poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale clairement les findings encore ouverts dans sa description. Au-delà de ce budget, le backend refuse toute passe supplémentaire : \`delegate_review\` répond en erreur. Le backend désactive alors l'auto-merge.`,
   ];
 }
 
@@ -380,6 +384,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     '1. `update_stage("implementing")`.',
     `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
     "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
+    `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
@@ -600,6 +605,7 @@ function buildReviewFixLines(
   const kinds = reviewKinds(depth);
 
   const reviewAndFixSteps = [
+    `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `2. Récupère le diff complet de la PR (\`gh pr diff ${ticket.prNumber}\`) puis lance EN PARALLÈLE les ${kinds.length} sessions indépendantes : ${reviewCalls(depth)}. Transmets la profondeur ${depth}, les dimensions (${reviewDimensions}) et le diff à chacune, sans résultat ni raisonnement d'une autre. Termine ton tour et attends leurs événements \`review_done\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     `3. \`update_stage("fixing")\` : si un reviewer demande revise, applique uniquement les corrections pertinentes. Ne relance pas les reviewers avant d'avoir testé, commité et poussé ces corrections.`,
@@ -696,6 +702,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     "## Étapes",
     '1. `update_stage("implementing")`.',
     isCodex ? codexTriageStep : claudeTriageStep,
+    `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `3. \`update_stage("reviewing")\` : récupère le diff courant puis lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 événements \`review_done\` avec verdict approve sur le code courant ; corrige et relance les 4 si nécessaire. Un échec bloque \`done()\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',

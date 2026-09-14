@@ -16,13 +16,14 @@
  */
 
 import { nanoid } from "nanoid";
+import { z } from "zod";
 
 import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
 import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/protocol.ts";
-import type { ReviewFinding, ReviewKind, WorkerToolName } from "../../shared/protocol.ts";
+import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
 
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
 import { getProject, isProjectKey } from "../config.ts";
@@ -40,7 +41,7 @@ import {
   reviewProseIsFrench,
   reviewPublicationEvent,
 } from "./reviewFindings.ts";
-import { passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
+import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
 import { codexImplementerKnobs } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
@@ -64,12 +65,6 @@ const SLOW_FINGERPRINT_WARN_MS = 2_000;
 const REVIEW_GATE_FINGERPRINT_TIMEOUT_MS = 30_000;
 /** Above this, a whole delegate_review start (queue wait included) is logged as a warning. */
 const SLOW_REVIEW_START_WARN_MS = 10_000;
-
-/**
- * A reviewer that answered in French is asked once to re-emit the same JSON in English; a second
- * French answer is accepted (and logged) so a stubborn model cannot loop the pass forever.
- */
-const MAX_LANGUAGE_RETRIES = 1;
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string): string {
@@ -113,6 +108,8 @@ interface ReviewResult {
   findings: ReviewFinding[];
 }
 
+const REVIEW_OUTPUT_SCHEMA = z.toJSONSchema(submitReviewArgsSchema, { io: "output" });
+
 interface ActiveReview {
   handle: AgentSessionHandle | null;
   ticketId: string;
@@ -127,7 +124,6 @@ interface ActiveReview {
   settled: boolean;
   usageByModel: Record<string, AgentTurnUsage>;
   phase: "review" | "verification";
-  languageRetries: number;
   sourceResult: ReviewResult | null;
   verificationAttempt: number;
   ticket: Ticket;
@@ -144,10 +140,10 @@ interface ActiveReviewPass {
   execution: ResolvedExecution;
 }
 
-type ReviewGateRequirement = "approved" | "completed";
+type ReviewGateRequirement = "approved" | "approved_or_limit" | "completed";
 
 type ReviewGateResult =
-  | { ok: true; passId: string }
+  | { ok: true; passId: string; acceptedWithFindings: boolean }
   | { ok: false; reason: string; reasonCode: "code_changed" | "fingerprint_error" | "fingerprint_timeout" | "incomplete_review" | "missing_review" };
 
 interface ClosableExecution {
@@ -221,14 +217,14 @@ Requested depth: ${depth}. Your assigned dimension is ${kind}; return an autonom
 ## Context provided by the orchestrator
 ${context}
 
-Inspect the files and the diff in the worktree yourself. Then you MUST call submit_review with:
+Inspect the files and the diff in the worktree yourself. Return a structured response with:
 - verdict=approve only if no actionable finding remains; otherwise verdict=revise;
 - summary: a concise, evidence-based conclusion;
 - findings: objects { id, severity, summary, evidence, ruleSource, path, line }.
 
 ${REVIEWER_RULES}
 
-Do not call any other pipeline tool.`;
+Do not call any pipeline tool.`;
 }
 
 function verificationPrompt(ticket: Ticket, kind: ReviewKind, result: ReviewResult): string {
@@ -243,8 +239,8 @@ Candidate findings: ${JSON.stringify(candidates)}
 
 ${REVIEWER_RULES}
 
-Call submit_review with the confirmed findings only. Use verdict=revise if any remains, approve otherwise.
-State briefly in the summary which findings you rejected or downgraded. Do not call any other tool.`;
+Return the confirmed findings only. Use verdict=revise if any remains, approve otherwise.
+State briefly in the summary which findings you rejected or downgraded. Do not call any pipeline tool.`;
 }
 
 /** Inline comment body: GitHub already renders the `path:line` anchor, so it is not repeated here. */
@@ -430,17 +426,31 @@ export class DelegationManager {
         reasonCode: "code_changed",
       };
     }
-    const incompleteKinds = requiredReviewKinds(reviewPass.reviewDepth).filter((kind) => {
+    const requiredKinds = requiredReviewKinds(reviewPass.reviewDepth);
+    const incompleteKinds = requiredKinds.filter((kind) => {
       if (requirement === "completed") return reviewPass.results[kind]?.status !== "completed";
-      return reviewPass.approvals[kind] !== true;
+      if (requirement === "approved") return reviewPass.approvals[kind] !== true;
+      return reviewPass.results[kind]?.status !== "completed";
     });
     if (incompleteKinds.length > 0) {
-      const missing = requirement === "completed" ? "résultat vérifié manquant" : "approbation manquante";
+      const missing = requirement === "approved" ? "approbation manquante" : "résultat vérifié manquant";
       return {
         ok: false,
         reason: `Review incomplète : ${missing} pour ${incompleteKinds.join(", ")}.`,
         reasonCode: "incomplete_review",
       };
+    }
+    const hasOpenFindings = requiredKinds.some((kind) => reviewPass.results[kind]?.verdict === "revise");
+    if (requirement === "approved_or_limit" && hasOpenFindings) {
+      const ticket = this.store.getTicket(ticketId);
+      const allowed = allowedReviewPasses(ticket);
+      if (ticket?.kind !== "feature" || ticket.reviewRounds < allowed) {
+        return {
+          ok: false,
+          reason: `Review non approuvée : corrige les findings pertinents puis relance tous les reviewers (${ticket?.reviewRounds ?? 0}/${allowed} passes effectuées).`,
+          reasonCode: "incomplete_review",
+        };
+      }
     }
     log.info("gate de review acceptée", {
       ticketId,
@@ -450,7 +460,7 @@ export class DelegationManager {
       passId: reviewPass.passId,
       elapsedMs: Date.now() - startedAt,
     });
-    return { ok: true, passId: reviewPass.passId };
+    return { ok: true, passId: reviewPass.passId, acceptedWithFindings: hasOpenFindings };
   }
 
   async reviewsCompleted(ticketId: string, slotId: number): Promise<boolean> {
@@ -849,6 +859,32 @@ export class DelegationManager {
   }
 
   /**
+   * Refusal for a brand new pass once the feature ticket burnt its budget, or `null` when a pass is
+   * still allowed. Only a stored pass whose required dimensions all completed counts as consumed:
+   * a pass whose reviewers crashed — or one lost across a backend restart — must stay re-runnable.
+   */
+  private reviewBudgetExhausted(ticket: Ticket): { ok: false; result: string } | null {
+    if (ticket.kind !== "feature") return null;
+    const allowed = allowedReviewPasses(ticket);
+    if (ticket.reviewRounds < allowed) return null;
+    const stored = this.store.getReviewPass(ticket.id);
+    if (!stored) return null;
+    const complete = requiredReviewKinds(stored.reviewDepth).every(
+      (kind) => stored.results[kind]?.status === "completed",
+    );
+    if (!complete) return null;
+    log.warn("budget de passes de review épuisé", {
+      ticketId: ticket.id,
+      rounds: ticket.reviewRounds,
+      allowed,
+    });
+    return {
+      ok: false,
+      result: `Budget de passes de review épuisé (${ticket.reviewRounds}/${allowed}) : ne relance plus les reviewers. Poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale les findings encore ouverts dans sa description.`,
+    };
+  }
+
+  /**
    * Resolve the review pass the reviewer joins, recomputing the worktree fingerprint only when the
    * pass has none fresh enough — the mid-pass code-change guard stays meaningful, at one hash per
    * FINGERPRINT_REUSE_WINDOW_MS instead of one per delegate_review call.
@@ -915,6 +951,8 @@ export class DelegationManager {
       reviewPass.fingerprintComputedAt = computedAt;
       return { ok: true, pass: reviewPass };
     }
+    const exhausted = this.reviewBudgetExhausted(ticket);
+    if (exhausted !== null) return exhausted;
     try {
       await assertExecutionAvailable(this.system, requestedExecution);
     } catch (error) {
@@ -1002,7 +1040,6 @@ export class DelegationManager {
       settled: false,
       usageByModel: {},
       phase: "review",
-      languageRetries: 0,
       sourceResult: null,
       verificationAttempt: 0,
       ticket,
@@ -1041,7 +1078,9 @@ export class DelegationManager {
         allowedTools: REVIEW_TOOLS,
         disallowedTools: REVIEW_DISALLOWED_TOOLS,
         skills: [],
-        onToolCall: (name, args) => this.handleReviewTool(state, name, args),
+        disableWorkerTools: true,
+        outputSchema: REVIEW_OUTPUT_SCHEMA,
+        onToolCall: async () => ({ ok: false, result: "Session reviewer : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleReviewEvent(state, event),
       });
       state.handle = handle;
@@ -1103,33 +1142,6 @@ export class DelegationManager {
     while (this.closingExecutions.size > 0) await Promise.allSettled([...this.closingExecutions]);
   }
 
-  private async handleReviewTool(
-    state: ActiveReview,
-    name: WorkerToolName,
-    args: unknown,
-  ): Promise<{ ok: boolean; result: string }> {
-    if (this.activeReviews.get(reviewKey(state.ticketId, state.kind)) !== state) {
-      return { ok: false, result: "génération de review périmée" };
-    }
-    if (name !== "submit_review") {
-      return { ok: false, result: "Session reviewer : seul submit_review est autorisé." };
-    }
-    const parsed = submitReviewArgsSchema.safeParse(args);
-    if (!parsed.success) return { ok: false, result: parsed.error.message };
-    if (reviewProseIsFrench(parsed.data)) {
-      if (state.languageRetries < MAX_LANGUAGE_RETRIES) {
-        state.languageRetries += 1;
-        return {
-          ok: false,
-          result: "Re-emit the same JSON with all prose in English (repository strings may stay verbatim inside backticks).",
-        };
-      }
-      log.warn("review acceptée en français après relance", { ticketId: state.ticketId, kind: state.kind });
-    }
-    state.result = parsed.data;
-    return { ok: true, result: "Review enregistrée. Termine le tour." };
-  }
-
   /**
    * Attach the provider session to its execution row without letting a failed write (locked SQLite,
    * vanished row) escape into the provider's stream loop and kill the child session.
@@ -1158,6 +1170,17 @@ export class DelegationManager {
     }
     if (event.type === "turn_end") {
       state.usageByModel = mergeAgentUsageByModel(state.usageByModel, event.usageByModel);
+      if (current && event.ok) {
+        const parsed = submitReviewArgsSchema.safeParse(event.structuredOutput);
+        if (parsed.success) {
+          state.result = parsed.data;
+          if (reviewProseIsFrench(parsed.data)) {
+            log.warn("review structurée acceptée en français", { ticketId: state.ticketId, kind: state.kind });
+          }
+        } else {
+          state.lastError = `réponse structurée invalide : ${parsed.error.message}`;
+        }
+      }
     }
     if (!current) return;
     if (event.type === "error") state.lastError = event.message;
@@ -1218,11 +1241,11 @@ export class DelegationManager {
       return;
     }
     if (state.phase === "verification" && state.sourceResult && state.verificationAttempt < 2) {
-      this.closeAndFinalize(state, "failed", state.lastError || "submit_review absent");
+      this.closeAndFinalize(state, "failed", state.lastError || "réponse structurée absente");
       void this.startVerification(state, state.sourceResult, state.verificationAttempt + 1);
       return;
     }
-    const failure = state.lastError || "le reviewer s'est terminé sans appeler submit_review";
+    const failure = state.lastError || "le reviewer s'est terminé sans réponse structurée";
     this.store.recordReviewResult({
       ticketId: state.ticketId,
       passId: state.passId,
@@ -1308,7 +1331,6 @@ export class DelegationManager {
       settled: false,
       usageByModel: {},
       phase: "verification",
-      languageRetries: 0,
       sourceResult: result,
       verificationAttempt: attempt,
       ticket: source.ticket,
@@ -1360,7 +1382,9 @@ export class DelegationManager {
         allowedTools: REVIEW_TOOLS,
         disallowedTools: REVIEW_DISALLOWED_TOOLS,
         skills: [],
-        onToolCall: (name, args) => this.handleReviewTool(state, name, args),
+        disableWorkerTools: true,
+        outputSchema: REVIEW_OUTPUT_SCHEMA,
+        onToolCall: async () => ({ ok: false, result: "Session reviewer : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleReviewEvent(state, event),
       });
       state.handle.send(verificationPrompt(source.ticket, source.kind, result));

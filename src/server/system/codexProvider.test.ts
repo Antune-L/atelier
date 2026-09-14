@@ -560,11 +560,13 @@ test("an explicit CODEX_API_KEY selects a thread-scoped provider without persist
   await session.close();
 });
 
-test("reviewer sessions receive only their result tool", async () => {
+test("reviewer sessions receive no pipeline MCP and constrain their final response", async () => {
   const fixture = appServerFixture();
-  const config = options([]);
+  const events: AgentSessionEvent[] = [];
+  const config = options(events);
   config.role = "reviewer";
   config.disableWorkerTools = false;
+  config.outputSchema = { type: "object", additionalProperties: false };
   const provider = createCodexProvider(new WorkerMcpManager(), {
     connect: fixture.connect,
     resolveBinary: () => "/fixture/codex",
@@ -572,16 +574,34 @@ test("reviewer sessions receive only their result tool", async () => {
   });
   const session = provider.createSession(config);
   await waitFor(() => fixture.requests.some((request) => request.method === "thread/start"));
+  session.send("Review this change.");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
 
-  const started = fixture.requests.find((request) => request.method === "thread/start");
-  const enabledTools = z
+  const threadStarted = fixture.requests.find((request) => request.method === "thread/start");
+  const mcpServers = z
     .object({
       config: z.object({
-        mcp_servers: z.object({ kanban: z.object({ enabled_tools: z.array(z.string()) }) }),
+        mcp_servers: z.record(z.string(), z.unknown()).optional(),
       }),
     })
-    .parse(started?.params).config.mcp_servers.kanban.enabled_tools;
-  expect(enabledTools).toEqual(["submit_review"]);
+    .parse(threadStarted?.params).config.mcp_servers;
+  expect(mcpServers).toBeUndefined();
+  const turnStarted = fixture.requests.find((request) => request.method === "turn/start");
+  expect(z.object({ outputSchema: z.unknown() }).parse(turnStarted?.params).outputSchema).toEqual(config.outputSchema);
+  const structuredOutput = { verdict: "approve", summary: "No findings", findings: [] };
+  fixture.notify({
+    method: "item/completed",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: { id: "review-result", type: "agentMessage", text: JSON.stringify(structuredOutput), phase: "final_answer" },
+    },
+  });
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null, items: [] } },
+  });
+  expect(events.find((event) => event.type === "turn_end")?.structuredOutput).toEqual(structuredOutput);
   await session.close();
 });
 

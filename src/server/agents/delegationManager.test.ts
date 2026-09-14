@@ -54,7 +54,25 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
   }
 
   override startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
-    const record: RecordedSession = { opts, sent: [], closed: false, interrupted: false, disposed: false };
+    let structuredOutput: unknown;
+    const recordedOpts: AgentSessionOptions = {
+      ...opts,
+      onToolCall: async (name, args) => {
+        if (opts.role === "reviewer" && name === "submit_review") {
+          structuredOutput = args;
+          return { ok: true, result: "structured review fixture recorded" };
+        }
+        return opts.onToolCall(name, args);
+      },
+      onEvent: (event) => {
+        if (opts.role === "reviewer" && event.type === "turn_end" && event.structuredOutput === undefined) {
+          opts.onEvent({ ...event, structuredOutput });
+          return;
+        }
+        opts.onEvent(event);
+      },
+    };
+    const record: RecordedSession = { opts: recordedOpts, sent: [], closed: false, interrupted: false, disposed: false };
     this.sessions.push(record);
     return {
       ticketId: opts.ticketId,
@@ -525,7 +543,7 @@ describe("DelegationManager — independent reviews", () => {
     expect(await restarted.reviewsApproved(ticket.id, 3)).toBe(false);
   });
 
-  test("a missing submit_review never becomes an approval", async () => {
+  test("a missing structured response never becomes an approval", async () => {
     const { system, sessionHub, delegation } = setup();
     const created = newDelegatedTicket();
     const ticket = store.updateTicket(created.id, { orchestrator: "codex" });
@@ -733,7 +751,7 @@ describe("DelegationManager — review report and publication", () => {
     await sleep(SETTLE_WAIT_MS);
   }
 
-  test("a French submit_review is refused once then accepted with a warning", async () => {
+  test("a French structured review is accepted without blocking the pass", async () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = ticketSchema.parse({ ...newDelegatedTicket(), orchestrator: "codex", reviewDepth: "light" });
     startParentSession(sessionHub, ticket.id);
@@ -746,12 +764,16 @@ describe("DelegationManager — review report and publication", () => {
       summary: "Le fichier ne respecte pas la convention du dépôt sur cette ligne.",
       findings: [reviewFinding("minor")],
     };
-    const refused = await review.opts.onToolCall("submit_review", french);
-    expect(refused.ok).toBe(false);
-    expect(refused.result).toContain("Re-emit the same JSON with all prose in English");
-
-    const accepted = await review.opts.onToolCall("submit_review", french);
-    expect(accepted.ok).toBe(true);
+    review.opts.onEvent({
+      type: "turn_end",
+      ok: true,
+      subtype: "success",
+      sessionId: "review-quality",
+      usageByModel: {},
+      structuredOutput: french,
+    });
+    await sleep(SETTLE_WAIT_MS);
+    expect(store.getReviewPass(ticket.id)?.results.quality?.status).toBe("completed");
   });
 
   test("an English review quoting a French UI string in backticks passes the gate", async () => {

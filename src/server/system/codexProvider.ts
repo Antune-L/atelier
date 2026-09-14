@@ -1,6 +1,7 @@
 /** Interactive Codex provider backed by the stable `codex app-server` protocol. */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -123,7 +124,12 @@ const itemLifecycleSchema = z.object({
   threadId: z.string(),
   turnId: z.string(),
   item: z.discriminatedUnion("type", [
-    z.object({ type: z.literal("agentMessage"), id: z.string(), text: z.string() }),
+    z.object({
+      type: z.literal("agentMessage"),
+      id: z.string(),
+      text: z.string(),
+      phase: z.enum(["commentary", "final_answer"]).nullable().optional(),
+    }),
     z.object({ type: z.literal("reasoning"), id: z.string(), summary: z.array(z.string()), content: z.array(z.string()) }),
     z.object({ type: z.literal("plan"), id: z.string(), text: z.string() }),
     z.object({ type: z.literal("commandExecution"), id: z.string(), command: z.string(), status: z.string(), aggregatedOutput: z.string().nullable().optional() }),
@@ -167,6 +173,41 @@ interface PreparedAgents {
 interface PreparedHook {
   config: ConfigObject;
   cleanup(): void;
+}
+
+async function gitMetadataWritableRoots(
+  cwd: string,
+  environment: Record<string, string | undefined>,
+): Promise<string[]> {
+  const gitProcess = Bun.spawn(
+    ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
+    { env: { ...process.env, ...environment }, stdout: "pipe", stderr: "pipe" },
+  );
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(gitProcess.stdout).text(),
+    new Response(gitProcess.stderr).text(),
+    gitProcess.exited,
+  ]);
+  if (exitCode !== 0) {
+    if (stderr.includes("not a git repository")) return [];
+    throw new Error(`Métadonnées Git du worktree introuvables (code ${exitCode}) : ${stderr.trim()}`);
+  }
+  const paths = z.tuple([z.string(), z.string(), z.string()]).parse(stdout.trimEnd().split("\n"));
+  const [topLevel, gitDirectory, commonDirectory] = await Promise.all([
+    realpath(paths[0]),
+    realpath(paths[1]),
+    realpath(paths[2]),
+  ]);
+  const canonicalCwd = await realpath(cwd);
+  if (topLevel !== canonicalCwd) {
+    throw new Error(`Le cwd Codex n'est pas la racine du worktree Git : ${cwd}`);
+  }
+  const metadataDirectories = [...new Set([gitDirectory, commonDirectory])];
+  const metadataStats = await Promise.all(metadataDirectories.map((path) => stat(path)));
+  if (metadataStats.some((metadataStat) => !metadataStat.isDirectory())) {
+    throw new Error("Les métadonnées Git résolues ne sont pas des répertoires");
+  }
+  return metadataDirectories;
 }
 
 export interface CodexProviderDependencies {
@@ -475,11 +516,15 @@ function threadConfig(
   agents: ConfigObject | null,
   skills: ConfigValue[] | null,
   hooks: ConfigObject,
+  gitWritableRoots: string[],
 ): ConfigObject {
   const config: ConfigObject = {
     allow_login_shell: false,
     web_search: "live",
-    sandbox_workspace_write: { network_access: options.readOnly !== true },
+    sandbox_workspace_write: {
+      network_access: options.readOnly !== true,
+      ...(gitWritableRoots.length > 0 ? { writable_roots: gitWritableRoots } : {}),
+    },
     shell_environment_policy: { inherit: "all", ignore_default_excludes: false },
     features: { hooks: true, plugins: false, skill_mcp_dependency_install: false, fast_mode: options.serviceTier === "fast" },
     service_tier: options.serviceTier ?? "default",
@@ -513,6 +558,7 @@ function createCodexAgentSession(
 ): AgentSessionHandle {
   const inbox: QueuedMessage[] = [];
   const usageByTurn = new Map<string, AgentTurnUsage>();
+  const finalAgentMessageByTurn = new Map<string, string>();
   const endedTurns = new Set<string>();
   const childThreads = new Set<string>();
   const workerTools = workerToolsForRole(options.role);
@@ -600,16 +646,37 @@ function createCodexAgentSession(
     if (closeTimer) clearTimeout(closeTimer);
     if (forceTimer) clearTimeout(forceTimer);
     clearBlockedSteerProbe();
+    finalAgentMessageByTurn.clear();
     resolveClosed?.();
     resolveClosed = null;
   }
 
-  function emitTurnEnd(ok: boolean, subtype: string, turnId: string | null): void {
+  function emitTurnEnd(ok: boolean, subtype: string, turnId: string | null, structuredOutput?: unknown): void {
     if (turnId !== null && endedTurns.has(turnId)) return;
     if (turnId !== null) endedTurns.add(turnId);
     const usageByModel = usageForModel(options, turnId ? usageByTurn.get(turnId) : undefined);
     if (turnId) usageByTurn.delete(turnId);
-    emit({ type: "turn_end", ok, subtype, sessionId: threadId ?? "", turnId, usageByModel });
+    emit({
+      type: "turn_end",
+      ok,
+      subtype,
+      sessionId: threadId ?? "",
+      turnId,
+      usageByModel,
+      ...(structuredOutput !== undefined ? { structuredOutput } : {}),
+    });
+  }
+
+  function parseStructuredOutput(turnId: string): unknown {
+    if (!options.outputSchema) return undefined;
+    const text = finalAgentMessageByTurn.get(turnId);
+    finalAgentMessageByTurn.delete(turnId);
+    if (text === undefined) return undefined;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   function reportFatal(error: unknown): void {
@@ -637,6 +704,9 @@ function createCodexAgentSession(
     const emit = (event: AgentSessionEvent): void => emitFrom(parsed.data.threadId, event);
     const item = parsed.data.item;
     if (item.type === "agentMessage") {
+      if (options.outputSchema && completed && parsed.data.threadId === threadId && item.phase !== "commentary") {
+        finalAgentMessageByTurn.set(parsed.data.turnId, item.text);
+      }
       if (completed) emit({ type: "assistant_text", text: item.text, stream: { itemId: `${parsed.data.turnId}:${item.id}`, mode: "snapshot" } });
       return;
     }
@@ -749,7 +819,7 @@ function createCodexAgentSession(
       const turn = parsed.data.turn;
       clearActiveTurn(turn.id);
       if (turn.error) emit({ type: "error", message: describeCodexError(turn.error.message) });
-      emitTurnEnd(turn.status === "completed", turn.status, turn.id);
+      emitTurnEnd(turn.status === "completed", turn.status, turn.id, parseStructuredOutput(turn.id));
       scheduleDispatch();
       void finishIfDrained();
       return;
@@ -937,6 +1007,7 @@ function createCodexAgentSession(
             model: options.model,
             effort: options.effort,
             serviceTier: options.serviceTier ?? "default",
+            ...(options.outputSchema ? { outputSchema: options.outputSchema } : {}),
           },
           turnStartResponseSchema,
         );
@@ -1049,6 +1120,7 @@ function createCodexAgentSession(
       }
       skillInputs = preparedSkills?.inputs ?? [];
       const servers = buildMcpServers(options, workerToken, workerTools, inheritedServerNames);
+      const gitWritableRoots = options.readOnly === true ? [] : await gitMetadataWritableRoots(options.cwd, environment);
       const config = threadConfig(
         options,
         environment,
@@ -1056,6 +1128,7 @@ function createCodexAgentSession(
         preparedAgents.config,
         preparedSkills?.config ?? null,
         preparedHook.config,
+        gitWritableRoots,
       );
       const modelProvider = hasExplicitCodexApiKey(environment) ? API_KEY_PROVIDER_ID : undefined;
       const response = options.resumeSessionId

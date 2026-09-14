@@ -212,7 +212,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await migrateConfigJsonIfPresent(store, process.env.KANBAN_CONFIG ?? join(dataRoot, "config.json"));
   initProjectRegistry(store);
   const workerMcpManager = new WorkerMcpManager();
-  const system = createSystemAdapter(workerMcpManager);
+  const system = createSystemAdapter(workerMcpManager, join(dataRoot, LOGS_SUBPATH));
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
   const sessionHub = new SessionHub(system);

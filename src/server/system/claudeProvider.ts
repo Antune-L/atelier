@@ -239,6 +239,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
     ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
+    ...(opts.outputSchema ? { outputFormat: { type: "json_schema", schema: opts.outputSchema } } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };
 
@@ -345,7 +346,16 @@ export function dispatchClaudeMessage(message: SDKMessage, onEvent: (event: Agen
           costUsd: usage.costUSD,
         };
       }
-      onEvent({ type: "turn_end", ok, subtype: message.subtype, sessionId: message.session_id, usageByModel });
+      onEvent({
+        type: "turn_end",
+        ok,
+        subtype: message.subtype,
+        sessionId: message.session_id,
+        usageByModel,
+        ...(message.subtype === "success" && message.structured_output !== undefined
+          ? { structuredOutput: message.structured_output }
+          : {}),
+      });
       return;
     }
     case "rate_limit_event":

@@ -123,6 +123,10 @@ export function slotPath(slotId: number): string {
   return join(SLOTS_ROOT, `slot-${slotId}`);
 }
 
+function featureBranch(ticket: Ticket): string {
+  return `feat/${ticket.id}-${slugify(ticket.title)}`;
+}
+
 /**
  * Owns the full slot lifecycle: cleanup → fetch → worktree add → deposit config →
  * copy env → install → tmux spawn → done gate → release. Serializes git ops per repo.
@@ -180,7 +184,21 @@ export class SlotManager {
 
   /** Entry point when a ticket is dragged into "À implémenter". */
   async startTicket(ticketId: string): Promise<void> {
-    const free = this.store.findFreeSlot();
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return;
+    let reusableSlotId: number | null;
+    try {
+      reusableSlotId = await this.findReusableFeatureSlot(ticket);
+    } catch (error) {
+      const reason = getErrorMessage(error);
+      this.markWorktreeReuseFailed(ticket, reason);
+      return;
+    }
+    const current = this.store.getTicket(ticketId);
+    if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticketId) || this.sessionHub.isConnected(ticketId)) {
+      return;
+    }
+    const free = reusableSlotId === null ? this.store.findFreeSlot() : this.store.getSlot(reusableSlotId);
     if (!free) {
       if (!this.queue.includes(ticketId)) {
         this.queue.push(ticketId);
@@ -189,7 +207,84 @@ export class SlotManager {
       }
       return;
     }
-    await this.launchInSlot(free.id, ticketId);
+    if (free.status !== "free" || free.ticketId !== null || this.store.getWorktreeSession(free.id) !== null) {
+      this.markWorktreeReuseFailed(ticket, `le slot Atelier ${free.id} vient d'être réservé par une autre session`);
+      return;
+    }
+    await this.launchInSlot(free.id, ticketId, reusableSlotId !== null);
+  }
+
+  private async findReusableFeatureSlot(ticket: Ticket): Promise<number | null> {
+    if (ticket.kind !== "feature" || ticket.resolvingConflicts || !isProjectKey(ticket.project)) return null;
+    const project = getProject(ticket.project);
+    const branch = featureBranch(ticket);
+    const worktreePath = await this.system.findWorktreeByBranch(project.repoPath, branch);
+    if (worktreePath === null) return null;
+    const slot = this.store.listSlots().find((candidate) => slotPath(candidate.id) === worktreePath);
+    if (!slot) throw new Error(`la branche ${branch} est déjà utilisée hors des slots Atelier : ${worktreePath}`);
+    if (slot.id === ticket.slotId && slot.ticketId === ticket.id) return slot.id;
+    const owner = this.store.listTickets(true).find((candidate) => candidate.id !== ticket.id && candidate.slotId === slot.id);
+    const available =
+      slot.status === "free" &&
+      slot.ticketId === null &&
+      (slot.repoPath === null || slot.repoPath === project.repoPath) &&
+      this.store.getWorktreeSession(slot.id) === null &&
+      !this.sessionHub.isConnected(ticket.id) &&
+      owner === undefined;
+    if (!available) throw new Error(`la branche ${branch} est déjà utilisée par le slot Atelier ${slot.id}`);
+    return slot.id;
+  }
+
+  private markWorktreeReuseFailed(ticket: Ticket, reason: string): void {
+    const current = this.store.getTicket(ticket.id);
+    if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticket.id) || this.sessionHub.isConnected(ticket.id)) {
+      return;
+    }
+    const ownedSlot = current.slotId === null ? null : this.store.getSlot(current.slotId);
+    if (ownedSlot?.ticketId === ticket.id) {
+      this.markFailed(ticket.id, ownedSlot.id, reason);
+      return;
+    }
+    this.touch(
+      this.store.updateTicket(ticket.id, {
+        column: "failed",
+        stage: "failed",
+        error: reason,
+        resolvingConflicts: false,
+        finishedAt: Date.now(),
+      }),
+    );
+    this.store.logEvent(ticket.id, "failed", { reason });
+    log.error("reprise du worktree refusée", { ticketId: ticket.id, reason });
+    void this.notifier.notify("Ticket en échec", reason, ticket.id);
+  }
+
+  private async resumeAttachedFeatureWorktree(ticket: Ticket): Promise<boolean> {
+    const reusableSlotId = await this.findReusableFeatureSlot(ticket);
+    if (reusableSlotId === null || reusableSlotId === ticket.slotId) return false;
+    const current = this.store.getTicket(ticket.id);
+    if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticket.id) || this.sessionHub.isConnected(ticket.id)) {
+      return true;
+    }
+    const reusableSlot = this.store.getSlot(reusableSlotId);
+    if (
+      !reusableSlot ||
+      reusableSlot.status !== "free" ||
+      reusableSlot.ticketId !== null ||
+      this.store.getWorktreeSession(reusableSlotId) !== null
+    ) {
+      throw new Error(`le slot Atelier ${reusableSlotId} vient d'être réservé par une autre session`);
+    }
+    if (ticket.slotId !== null) {
+      const previousSlot = this.store.getSlot(ticket.slotId);
+      const releasable =
+        previousSlot?.ticketId === ticket.id &&
+        (previousSlot.status === "failed" || previousSlot.status === "interrupted" || previousSlot.status === "stalled");
+      if (!releasable) throw new Error(`le ticket ${ticket.id} possède encore le slot Atelier ${ticket.slotId}`);
+      this.store.updateSlot(ticket.slotId, { ticketId: null, repoPath: null, tmuxSession: null, status: "free" });
+    }
+    await this.launchInSlot(reusableSlotId, ticket.id, true);
+    return true;
   }
 
   private pumpQueue(): void {
@@ -533,7 +628,7 @@ export class SlotManager {
     }
   }
 
-  private async launchInSlot(slotId: number, ticketId: string): Promise<void> {
+  private async launchInSlot(slotId: number, ticketId: string, reuseWorktree = false): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     if (!isProjectKey(ticket.project)) {
@@ -543,7 +638,7 @@ export class SlotManager {
     const project = getProject(ticket.project);
     const baseBranch = resolveBaseBranch(ticket, project, this.store);
     const path = slotPath(slotId);
-    const slug = slugify(ticket.title);
+    if (!reuseWorktree) this.store.resetReviewCycle(ticketId);
     // Resolving merge conflicts reuses the EXISTING PR branch (its commits); a fresh feature run
     // forks a new branch off the base.
     const resolving = ticket.resolvingConflicts && ticket.branch !== null;
@@ -558,7 +653,7 @@ export class SlotManager {
     // base — a fresh branch off base made argus reconstruct the PR via `git show origin/<branch>:...`.
     const reviewRead = ticket.kind === "review" && !ticket.fixComments && ticket.prHeadBranch !== null;
     // The repeated null checks are required: TS does not carry the narrowing across `resolving`/`reviewFix`/`cleanFix`.
-    let branch = `feat/${ticket.id}-${slug}`;
+    let branch = featureBranch(ticket);
     // For an existing-branch checkout (resolving/reviewFix/cleanFix), the origin ref to start from.
     // A clean ticket's local branch is suffixed to avoid colliding with the PR head branch when it is
     // already checked out in another worktree; it still starts from and pushes back to the PR head.
@@ -604,21 +699,22 @@ export class SlotManager {
       await assertCodexImplementerAvailable(this.system, ticket, execution);
       this.setPhase(ticketId, SETUP_PHASES.worktree);
       await this.repoMutex.run(project.repoPath, async () => {
-        const previous = this.store.getSlot(slotId);
-        await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
-        // A failed/stuck prior launch leaves the feature branch behind; `worktree add -b`
-        // then aborts (git exits 255, "branch already exists"). Drop the leftover first —
-        // it is recreated fresh from origin/baseBranch just below.
-        await this.system.deleteLocalBranch(project.repoPath, branch);
-        await this.system.fetch(project.repoPath, baseBranch);
-        if (resolving || reviewFix || cleanFix) {
+        if (reuseWorktree) {
+          const attachedPath = await this.system.findWorktreeByBranch(project.repoPath, branch);
+          if (attachedPath !== path) throw new Error(`la branche ${branch} n'est plus attachée au slot Atelier ${slotId}`);
+        } else {
+          const previous = this.store.getSlot(slotId);
+          await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
+          await this.system.fetch(project.repoPath, baseBranch);
+        }
+        if (!reuseWorktree && (resolving || reviewFix || cleanFix)) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
           const start = startBranch ?? branch;
           await this.system.fetch(project.repoPath, start);
           await this.system.worktreeAddExisting(project.repoPath, path, branch, start);
-        } else {
+        } else if (!reuseWorktree) {
           await this.system.worktreeAdd({
             repoPath: project.repoPath,
             slotPath: path,
@@ -637,7 +733,7 @@ export class SlotManager {
         }
       });
 
-      await this.system.copyEnvFiles(project.repoPath, path);
+      if (!reuseWorktree) await this.system.copyEnvFiles(project.repoPath, path);
       // An ask ticket is read-only (explore + answer); the project setup script and dep install are
       // pure overhead, so skip both to start answering faster. Feature/review tickets need a built
       // tree (typecheck/lint/argus) and the project's own setup (e.g. generated .env). The setup
@@ -1268,6 +1364,13 @@ export class SlotManager {
   async retry(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    try {
+      if (await this.resumeAttachedFeatureWorktree(ticket)) return;
+    } catch (error) {
+      const reason = getErrorMessage(error);
+      this.markWorktreeReuseFailed(ticket, reason);
+      return;
+    }
     const cleanupSlot = this.store.listSlots().find((slot) =>
       slot.ticketId === ticketId
       && ticket.slotId === null
@@ -1314,6 +1417,12 @@ export class SlotManager {
     if (!ticket) return false;
     if (this.isLaunching(ticketId)) {
       log.warn("relance ignorée : lancement déjà en cours", { ticketId });
+      return false;
+    }
+    try {
+      if (await this.resumeAttachedFeatureWorktree(ticket)) return true;
+    } catch (error) {
+      this.markWorktreeReuseFailed(ticket, getErrorMessage(error));
       return false;
     }
     if (ticket.slotId !== null) {

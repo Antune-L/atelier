@@ -543,6 +543,14 @@ export class Store {
     return this.db.query("SELECT * FROM execution_runs ORDER BY started_at ASC").all().map(mapExecutionRunRow);
   }
 
+  resetReviewCycle(ticketId: string): void {
+    this.transaction(() => {
+      this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
+      this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
+      this.db.query("UPDATE tickets SET review_rounds = 0 WHERE id = ?").run(ticketId);
+    });
+  }
+
   /** Replace the ticket's current review pass and invalidate every verdict from older code. */
   beginReviewPass(input: {
     ticketId: string;
@@ -555,6 +563,7 @@ export class Store {
   }): ReviewPass {
     this.transaction(() => {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(input.ticketId);
+      this.db.query("UPDATE tickets SET review_rounds = review_rounds + 1 WHERE id = ?").run(input.ticketId);
       this.db.query(
         `INSERT OR REPLACE INTO review_passes
           (ticket_id, pass_id, code_fingerprint, reviewed_commit_sha, review_depth, requires_approval, created_at)

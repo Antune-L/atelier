@@ -64,6 +64,7 @@ export type AgentSessionEvent = (
       sessionId: string;
       usageByModel: Record<string, AgentTurnUsage>;
       turnId?: string | null;
+      structuredOutput?: unknown;
     }
   | { type: "rate_limit"; status: string; resetsAt: number | null }
   | { type: "error"; message: string }
@@ -177,6 +178,7 @@ export interface AgentSessionOptions {
    * provider's `settingSources` (the host `~/.claude/skills` via the `user` source).
    */
   skills?: string[];
+  outputSchema?: Record<string, unknown>;
   /** Routes a worker tool call to the backend; the returned text is what the agent sees. */
   onToolCall(name: WorkerToolName, args: unknown): Promise<AgentSessionToolResult>;
   /** Receives parsed stream events (assistant text, tool uses, turn boundaries, errors). */

@@ -120,6 +120,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null> {
+    this.log("findWorktreeByBranch", { repoPath, branch });
+    return null;
+  }
+
   async worktreeAdd(opts: GitWorktreeAddOptions): Promise<void> {
     this.log("worktreeAdd", { ...opts });
     await delay(FAKE_SETTLE_MS);

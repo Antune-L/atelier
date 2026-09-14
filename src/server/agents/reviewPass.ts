@@ -3,8 +3,9 @@
  * the done gate so both derive the same GitHub review event from the same set.
  */
 
-import type { ReviewDepth } from "../../shared/constants.ts";
+import { MAX_REVIEW_ROUNDS, type ReviewDepth } from "../../shared/constants.ts";
 import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
+import type { Ticket } from "../../shared/schemas.ts";
 import type { ReviewPass } from "../db/store.ts";
 
 import { keptFindings, type DimensionFinding } from "./reviewFindings.ts";
@@ -36,4 +37,12 @@ export function passDimensionFindings(reviewPass: ReviewPass | null): DimensionF
 export function publishedReviewFindings(reviewPass: ReviewPass | null): ReviewFinding[] | null {
   const entries = passDimensionFindings(reviewPass);
   return entries === null ? null : keptFindings(entries);
+}
+
+/**
+ * How many review passes a ticket may consume before the done gate accepts open `revise` findings.
+ * `argusMultiLoop` buys exactly one extra pass on top of the default budget.
+ */
+export function allowedReviewPasses(ticket: Pick<Ticket, "argusMultiLoop"> | null): number {
+  return ticket?.argusMultiLoop === true ? MAX_REVIEW_ROUNDS + 1 : MAX_REVIEW_ROUNDS;
 }

@@ -160,7 +160,7 @@ describe("read-only triage/split sessions", () => {
     expect(split.readOnly).toBe(true);
   });
 
-  test("Analyse + and feasibility expose bounded native scouts to Codex", () => {
+  test("Codex Analyse + keeps bounded scouts while feasibility uses generic children", () => {
     const triage = buildTriageSessionConfig({
       ticketId: "t1",
       cwd: CWD,
@@ -183,8 +183,22 @@ describe("read-only triage/split sessions", () => {
     });
     expect(feasibility.ownerType).toBe("batch");
     expect(feasibility.provider).toBe("codex");
-    expect(Object.values(feasibility.agents ?? {})[0]?.role).toBe("scout");
+    expect(feasibility.agents).toBeUndefined();
+    expect(feasibility.allowedTools).toContain("Agent");
     expect(feasibility.allowedTools).not.toContain("mcp__claude_ai_Slack__slack_read_thread");
+  });
+
+  test("Claude feasibility keeps the configured read-only scout", () => {
+    const feasibility = buildFeasibilitySessionConfig({
+      batchId: "feasibility-batch-1",
+      cwd: CWD,
+      model: "sonnet",
+      effort: "high",
+      driver: "claude",
+    });
+
+    expect(feasibility.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.role).toBe("scout");
+    expect(feasibility.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.tools).not.toContain("Bash");
   });
 
   test("claude driver → claude provider with read-only tools", () => {

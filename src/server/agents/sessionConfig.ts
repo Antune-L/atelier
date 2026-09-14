@@ -290,7 +290,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     allowedTools: [...(driver === "codex" ? CODEX_READONLY_TOOLS : READONLY_TOOLS), "Agent"],
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver) },
+    agents: driver === "claude" ? { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver) } : undefined,
     skills: NO_SKILLS,
   };
 }

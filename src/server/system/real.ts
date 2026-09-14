@@ -324,7 +324,9 @@ export class RealSystemAdapter implements SystemAdapter {
     });
     if (res.timedOut) throw new Error(`timeout (${opts.timeoutMs}ms): ${command}`);
     if (res.exitCode !== 0) {
-      const detail = (res.stderr + res.stdout).trim().slice(-INSTALL_ERROR_TAIL);
+      const stdoutTail = res.stdout.trim().slice(-INSTALL_ERROR_TAIL);
+      const stderrTail = res.stderr.trim().slice(-INSTALL_ERROR_TAIL);
+      const detail = [`stdout:\n${stdoutTail}`, `stderr:\n${stderrTail}`].join("\n");
       throw new Error(`le script de configuration du worktree a échoué (code ${res.exitCode}) : ${detail}`);
     }
   }
@@ -1282,7 +1284,7 @@ const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
 ];
 
 /**
- * Resolve the first conventional worktree script to a `sh <absolutePath>` command (so it runs without
+ * Resolve the first conventional worktree script to a `bash <absolutePath>` command (so it runs without
  * a +x bit), ALWAYS pointing at the copy that lives inside the slot. Null when no candidate exists.
  *
  * Why the slot copy, never the repo copy: daedalus-style scripts derive their target worktree from
@@ -1290,7 +1292,7 @@ const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
  * Running the repo's copy would make them mutate the MAIN checkout (offset its .env, package.json, etc.)
  * instead of the slot. The script is normally tracked, so `worktree add` already checked it out into the
  * slot; when a repo keeps it untracked it is absent from the slot, so copy it in first (Bun.write also
- * creates parent dirs). The copy loses the +x bit, which is fine — we invoke it via `sh <path>`.
+ * creates parent dirs). The copy loses the +x bit, which is fine — we invoke it via `bash <path>`.
  */
 async function resolveWorktreeScriptCommand(
   candidates: readonly string[],
@@ -1299,11 +1301,11 @@ async function resolveWorktreeScriptCommand(
 ): Promise<string | null> {
   for (const rel of candidates) {
     const inSlot = join(slotPath, rel);
-    if (await Bun.file(inSlot).exists()) return `sh ${shQuote(inSlot)}`;
+    if (await Bun.file(inSlot).exists()) return `bash ${shQuote(inSlot)}`;
     const inRepo = join(repoPath, rel);
     if (await Bun.file(inRepo).exists()) {
       await Bun.write(inSlot, Bun.file(inRepo));
-      return `sh ${shQuote(inSlot)}`;
+      return `bash ${shQuote(inSlot)}`;
     }
   }
   return null;

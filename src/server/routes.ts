@@ -177,6 +177,7 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     repoPath: p.repoPath,
     baseBranch: p.baseBranch,
     commitTimeoutMs: p.commitTimeoutMs,
+    ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };
 }
@@ -447,7 +448,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { label, repoPath, baseBranch, commitTimeoutMs, color } = parsed.data;
+      const { label, repoPath, baseBranch, commitTimeoutMs, runScript, color } = parsed.data;
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
         label,
@@ -456,6 +457,7 @@ export function createApiRoutes(deps: RouteDeps) {
         commitTimeoutMs,
         defaultAutoMerge: false,
         defaultAddScreenshots: false,
+        ...(runScript !== undefined ? { runScript } : {}),
         ...(color !== undefined ? { color } : {}),
       });
       set.status = HTTP_CREATED;

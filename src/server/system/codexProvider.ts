@@ -302,7 +302,20 @@ function prepareAgents(
   role: AgentSessionOptions["role"],
   serviceTier: "default" | "fast",
 ): PreparedAgents {
-  if (!agents || Object.keys(agents).length === 0) return { config: null, cleanup: () => {} };
+  const definitions = Object.entries(agents ?? {});
+  if (definitions.length === 0) {
+    if (role === "feasibility") {
+      return {
+        config: {
+          enabled: true,
+          max_concurrent_threads_per_session: FEASIBILITY_MAX_CONCURRENT_THREADS,
+          max_depth: 1,
+        },
+        cleanup: () => {},
+      };
+    }
+    return { config: null, cleanup: () => {} };
+  }
   const directory = mkdtempSync(join(tmpdir(), "kanban-codex-agents-"));
   let declarations: ConfigObject = { enabled: true };
   if (role === "feasibility") {
@@ -310,7 +323,7 @@ function prepareAgents(
   } else if (role === "orchestrator") {
     declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS };
   }
-  for (const [name, definition] of Object.entries(agents)) {
+  for (const [name, definition] of definitions) {
     const fileName = `${name.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}.toml`;
     const path = join(directory, fileName);
     writeFileSync(path, agentToml(name, definition, serviceTier), { encoding: "utf8", mode: 0o600 });

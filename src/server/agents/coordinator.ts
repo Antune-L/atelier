@@ -270,9 +270,10 @@ export class AgentCoordinator {
     if (ctx.slotId === FEASIBILITY_SLOT_ID) {
       log.info("tool call (faisabilité)", { batchId: ctx.ticketId, tool: ctx.name });
       if (ctx.name === "submit_feasibility") return this.handleSubmitFeasibility(ctx);
+      if (ctx.name === "fail") return this.handleFailFeasibility(ctx);
       return {
         ok: false,
-        result: "Session de faisabilité en lecture seule : seul submit_feasibility est autorisé.",
+        result: "Session de faisabilité en lecture seule : seuls submit_feasibility et fail sont autorisés.",
       };
     }
     // A split worker identifies with SPLIT_SLOT_ID: it runs on a stage-null card outside the slot
@@ -356,6 +357,13 @@ export class AgentCoordinator {
     // ctx.ticketId is the synthetic batch id, not a real ticket.
     await this.feasibility.complete(ctx.ticketId, parsed.data.results);
     return { ok: true, result: "Verdicts de faisabilité enregistrés." };
+  }
+
+  private async handleFailFeasibility(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = failArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    await this.feasibility.fail(ctx.ticketId, parsed.data.reason);
+    return { ok: true, result: "Échec de l'analyse de faisabilité enregistré." };
   }
 
   private handleUpdateStage(ctx: SessionToolCall): ToolResult {

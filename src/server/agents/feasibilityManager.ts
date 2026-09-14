@@ -58,6 +58,7 @@ function toTriageResult(result: FeasibilityResult): TriageResult {
 
 interface FeasibilitySession {
   ticketIds: string[];
+  ticketVersions: Map<string, number>;
   project: ProjectConfig;
   execution: ResolvedExecution;
   /** Number of prior automatic relaunches; 0 for the initial spawn. */
@@ -202,11 +203,26 @@ export class FeasibilityBatchManager {
 
     this.store.logEvent(null, "feasibility_started", { batchId, count: tickets.length, attempt });
     log.info("faisabilité en lot démarrée", { batchId, count: tickets.length, attempt });
+    const ticketVersions = new Map(tickets.map((ticket) => [ticket.id, ticket.updatedAt]));
 
     try {
       await assertExecutionAvailable(this.system, execution);
       if (this.stopped) return;
       const prompt = buildFeasibilityBatchContract(tickets, project, this.store, execution.provider);
+      const timer = setTimeout(
+        () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
+        FEASIBILITY_TIMEOUT_MS,
+      );
+      const session: FeasibilitySession = {
+        ticketIds: tickets.map((ticket) => ticket.id),
+        ticketVersions,
+        project,
+        execution,
+        attempt,
+        timer,
+      };
+      this.sessions.set(batchId, session);
+      for (const ticket of tickets) this.ticketToBatch.set(ticket.id, batchId);
       this.sessionHub.start(
         buildFeasibilitySessionConfig({
           batchId,
@@ -216,24 +232,14 @@ export class FeasibilityBatchManager {
           serviceTier: execution.serviceTier,
           driver: execution.provider,
         }),
-        { onFailure: (reason) => void this.handleBatchFailure(batchId, reason) },
+        {
+          onFailure: (reason) => void this.handleBatchFailure(batchId, reason),
+          onTurnEnd: () => void this.handleBatchFailure(batchId, "tour terminé sans verdict de faisabilité"),
+        },
       );
       // The contract is the session's first user turn — no connect poll, no drop race.
       this.sessionHub.sendEvent(batchId, { type: "ticket", payload: prompt });
       log.info("contrat de faisabilité délivré", { batchId });
-      const timer = setTimeout(
-        () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
-        FEASIBILITY_TIMEOUT_MS,
-      );
-      const session: FeasibilitySession = {
-        ticketIds: tickets.map((ticket) => ticket.id),
-        project,
-        execution,
-        attempt,
-        timer,
-      };
-      this.sessions.set(batchId, session);
-      for (const ticket of tickets) this.ticketToBatch.set(ticket.id, batchId);
     } catch (error) {
       this.cleanup(batchId);
       await this.retryOrFail(
@@ -243,6 +249,7 @@ export class FeasibilityBatchManager {
         attempt,
         batchId,
         getErrorMessage(error),
+        ticketVersions,
       );
     }
   }
@@ -251,14 +258,15 @@ export class FeasibilityBatchManager {
   async complete(batchId: string, results: FeasibilityResult[]): Promise<void> {
     const session = this.sessions.get(batchId);
     const expectedIds = session?.ticketIds ?? results.map((result) => result.ticketId);
+    const ticketVersions = session?.ticketVersions;
     this.cleanup(batchId, "completed");
 
     const byId = new Map(results.map((result) => [result.ticketId, result]));
     for (const ticketId of expectedIds) {
       const result = byId.get(ticketId);
-      if (result) {
+      if (result && this.isCurrentBatchTicket(ticketId, ticketVersions?.get(ticketId))) {
         this.persistVerdict(ticketId, toTriageResult(result));
-      } else {
+      } else if (!result && this.isCurrentBatchTicket(ticketId, ticketVersions?.get(ticketId))) {
         this.failTicket(ticketId, "non évalué par la session de faisabilité");
       }
     }
@@ -279,6 +287,10 @@ export class FeasibilityBatchManager {
   /** The batch id (= live transcript key) evaluating `ticketId`, for the polled agent viewer; null if none. */
   batchKeyForTicket(ticketId: string): string | null {
     return this.ticketToBatch.get(ticketId) ?? null;
+  }
+
+  async fail(batchId: string, reason: string): Promise<void> {
+    await this.handleBatchFailure(batchId, reason);
   }
 
   /** Legacy terminal-WS bridge: SDK sessions have no tmux pane (the viewer polls the transcript instead). */
@@ -338,6 +350,11 @@ export class FeasibilityBatchManager {
     this.store.logEvent(ticketId, "feasibility_failed", { reason });
   }
 
+  private isCurrentBatchTicket(ticketId: string, expectedUpdatedAt: number | undefined): boolean {
+    const ticket = this.store.getTicket(ticketId);
+    return ticket?.triageStatus === "running" && ticket.updatedAt === expectedUpdatedAt;
+  }
+
   /**
    * A live batch failed for a retriable reason (timeout / never connected): tear it down and route
    * to `retryOrFail` with the session's context. No-op when the session was already torn down.
@@ -345,9 +362,9 @@ export class FeasibilityBatchManager {
   private async handleBatchFailure(batchId: string, reason: string): Promise<void> {
     const session = this.sessions.get(batchId);
     if (!session) return;
-    const { ticketIds, project, execution, attempt } = session;
+    const { ticketIds, ticketVersions, project, execution, attempt } = session;
     this.cleanup(batchId, "failed");
-    await this.retryOrFail(ticketIds, project, execution, attempt, batchId, reason);
+    await this.retryOrFail(ticketIds, project, execution, attempt, batchId, reason, ticketVersions);
   }
 
   /**
@@ -361,7 +378,18 @@ export class FeasibilityBatchManager {
     attempt: number,
     batchId: string,
     reason: string,
+    ticketVersions: Map<string, number>,
   ): Promise<void> {
+    const currentTicketIds = ticketIds.filter((ticketId) =>
+      this.isCurrentBatchTicket(ticketId, ticketVersions.get(ticketId)),
+    );
+    for (const ticketId of ticketIds) {
+      if (!currentTicketIds.includes(ticketId)) this.scheduledTickets.delete(ticketId);
+    }
+    if (currentTicketIds.length === 0) {
+      this.drainQueue();
+      return;
+    }
     if (attempt < FEASIBILITY_AUTO_RELAUNCH_MAX) {
       log.warn("faisabilité en lot relancée automatiquement", { batchId, reason, attempt: attempt + 1 });
       this.store.logEvent(null, FEASIBILITY_AUTO_RELAUNCH_EVENT, {
@@ -369,11 +397,11 @@ export class FeasibilityBatchManager {
         reason,
         attempt: attempt + 1,
       });
-      if (!this.stopped) this.pending.push({ ticketIds, project, execution, attempt: attempt + 1 });
+      if (!this.stopped) this.pending.push({ ticketIds: currentTicketIds, project, execution, attempt: attempt + 1 });
       this.drainQueue();
       return;
     }
-    for (const ticketId of ticketIds) {
+    for (const ticketId of currentTicketIds) {
       this.failTicket(ticketId, reason);
       this.scheduledTickets.delete(ticketId);
     }

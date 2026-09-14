@@ -114,7 +114,6 @@ export interface AgentSessionOptions {
   ticketId: string;
   slotId: number;
   cwd: string;
-  /** Which provider drives this session. Triage/split/feasibility sessions are always "claude". */
   provider: Extract<Implementer, "claude" | "codex">;
   /** Runtime role used to scope tools and credentials. */
   role?: AgentSessionRole;

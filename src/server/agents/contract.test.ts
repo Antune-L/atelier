@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { isAllowedAgentPair } from "../../shared/constants.ts";
 import type { CommitLanguage, Implementer, Orchestrator } from "../../shared/constants.ts";
-import { initProjectRegistry } from "../config.ts";
+import { getProject, initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
 import { FIXTURE_PROJECT_KEY, makeTicket } from "../testing/fixtures.ts";
@@ -14,6 +14,7 @@ import {
   buildAskContract,
   buildCleanContract,
   buildConflictResolutionContract,
+  buildFeasibilityBatchContract,
   buildReviewContract,
   buildTicketContract,
 } from "./contract.ts";
@@ -24,11 +25,12 @@ const REVIEW_OPTS = { commitLanguage: COMMIT_LANGUAGE };
 
 let dbPath = "";
 let db: Database;
+let store: Store;
 
 beforeAll(() => {
   dbPath = tmpDbPath();
   db = createDatabase(dbPath);
-  const store = new Store(db);
+  store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, {
     label: "Test Project",
     repoPath: "/tmp/repo",
@@ -39,6 +41,33 @@ beforeAll(() => {
   });
   // Contracts resolve the project via config's module-level Store registry.
   initProjectRegistry(store);
+});
+
+describe("buildFeasibilityBatchContract", () => {
+  test("uses the configured read-only scout type for Claude", () => {
+    const contract = buildFeasibilityBatchContract(
+      [makeTicket({ project: FIXTURE_PROJECT_KEY })],
+      getProject(FIXTURE_PROJECT_KEY),
+      store,
+      "claude",
+    );
+
+    expect(contract).toContain('subagent_type: "feasibility-scout"');
+  });
+
+  test("uses generic fresh Codex agents without advertising an unavailable custom type", () => {
+    const contract = buildFeasibilityBatchContract(
+      [makeTicket({ project: FIXTURE_PROJECT_KEY })],
+      getProject(FIXTURE_PROJECT_KEY),
+      store,
+      "codex",
+    );
+
+    expect(contract).toContain("task_name");
+    expect(contract).toContain('fork_turns: "none"');
+    expect(contract).toContain("aucun outil kanban");
+    expect(contract).not.toContain("feasibility-scout");
+  });
 });
 
 afterAll(() => {

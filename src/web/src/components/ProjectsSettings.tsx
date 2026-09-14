@@ -217,6 +217,7 @@ function ProjectPanel({
   const [label, setLabel] = useState(project?.label ?? "");
   const [repoPath, setRepoPath] = useState(project?.repoPath ?? "");
   const [baseBranch, setBaseBranch] = useState(project?.baseBranch ?? "");
+  const [runScript, setRunScript] = useState(project?.runScript ?? "");
   const [unit, setUnit] = useState<TimeoutUnit>(initialUnit);
   const [timeoutValue, setTimeoutValue] = useState(String(initialTimeoutMs / timeoutUnitMs(initialUnit)));
   const [color, setColor] = useState(project?.color ?? DEFAULT_PROJECT_COLOR);
@@ -233,6 +234,7 @@ function ProjectPanel({
     repoPath !== project.repoPath ||
     commitTimeoutMs !== String(project.commitTimeoutMs) ||
     baseBranch !== project.baseBranch ||
+    runScript !== (project.runScript ?? "") ||
     color !== (project.color ?? DEFAULT_PROJECT_COLOR);
 
   const pickFolder = async (): Promise<void> => {
@@ -254,6 +256,7 @@ function ProjectPanel({
     if (repoPath !== current.repoPath) patch.repoPath = repoPath.trim();
     if (baseBranch !== current.baseBranch) patch.baseBranch = baseBranch.trim();
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
+    if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
     if (color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
     return patch;
   };
@@ -264,6 +267,7 @@ function ProjectPanel({
       repoPath: repoPath.trim(),
       baseBranch: baseBranch.trim(),
       commitTimeoutMs: Number(commitTimeoutMs),
+      ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
       color,
     };
     const created = await api.createProject(input);
@@ -275,6 +279,7 @@ function ProjectPanel({
     setLabel(saved.label);
     setRepoPath(saved.repoPath);
     setBaseBranch(saved.baseBranch);
+    setRunScript(saved.runScript ?? "");
     await onSaved();
     flashSaved();
   };
@@ -338,6 +343,13 @@ function ProjectPanel({
         </Field>
         <Field label="Branche de base">
           <Input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
+        </Field>
+        <Field label="Commande de démarrage">
+          <Input
+            value={runScript}
+            onChange={(e) => setRunScript(e.target.value)}
+            placeholder="bun run dev"
+          />
         </Field>
         <Field label="Délai max d'un commit">
           <div className="flex w-full items-center gap-2">

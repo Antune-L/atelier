@@ -447,9 +447,18 @@ export function buildFeasibilityBatchContract(
         ]),
     "",
     "## Ta mission",
-    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent natif à contexte frais avec`,
-    `\`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (sous-agent en lecture seule, sans Task ni Bash : il ne`,
-    "peut pas relancer d'autre sous-agent). Chaque sous-agent décide si SON ticket est implémentable EXACTEMENT",
+    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent natif à contexte frais.`,
+    ...(driver === "claude"
+      ? [
+          `Utilise \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (sous-agent en lecture seule, sans Task ni Bash : il ne`,
+          "peut pas relancer d'autre sous-agent).",
+        ]
+      : [
+          "Utilise un sous-agent générique avec un `task_name` unique composé de lettres minuscules, chiffres et `_`,",
+          "`fork_turns: \"none\"`, sans `agent_type`, `model` ni `reasoning_effort`. Dans son message, recopie le ticket",
+          "exact et impose : lecture seule, aucun sous-agent, aucun outil kanban, rapport rendu uniquement au parent.",
+        ]),
+    "Chaque sous-agent décide si SON ticket est implémentable EXACTEMENT",
     "tel qu'il est écrit contre CE dépôt, sans le reformuler. Lance-les EN PARALLÈLE (fan-out, un seul par ticket).",
     "N'imbrique JAMAIS les sous-agents : un sous-agent ne doit jamais en lancer un autre.",
     "",

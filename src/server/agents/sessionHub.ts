@@ -136,6 +136,7 @@ export interface SessionMessageStatus extends SessionExecutionContext {
 export interface SessionStartCallbacks {
   onInit?(context: SessionExecutionContext): void;
   onFailure?(message: string, context: SessionExecutionContext): void;
+  onTurnEnd?(context: SessionExecutionContext): void;
 }
 
 export interface SessionHubHandlers {
@@ -587,6 +588,9 @@ export class SessionHub {
       if (current) {
         this.safeHandler("onStop", ticketId, event.type, () => {
           this.handlers?.onStop(ticketId, event.sessionId, event.usageByModel);
+        });
+        this.safeHandler("onTurnEnd", ticketId, event.type, () => {
+          live.callbacks.onTurnEnd?.(this.executionContext(live));
         });
       }
     }

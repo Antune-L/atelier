@@ -483,6 +483,7 @@ export const managedProjectSchema = z.object({
   repoPath: z.string().min(1),
   baseBranch: baseBranchSchema,
   commitTimeoutMs: z.number().int().positive(),
+  runScript: z.string().optional(),
   color: z.string().optional(),
 });
 export type ManagedProject = z.infer<typeof managedProjectSchema>;
@@ -493,6 +494,7 @@ export const createProjectSchema = z.object({
   repoPath: z.string().min(1),
   baseBranch: baseBranchSchema,
   commitTimeoutMs: z.number().int().positive(),
+  runScript: z.string().optional(),
   color: z.string().optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
@@ -503,6 +505,7 @@ export const updateProjectSchema = z.object({
   repoPath: z.string().min(1).optional(),
   baseBranch: baseBranchSchema.optional(),
   commitTimeoutMs: z.number().int().positive().optional(),
+  runScript: z.string().nullable().optional(),
   color: z.string().optional(),
 });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;

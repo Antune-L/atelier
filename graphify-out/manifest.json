@@ -850,8 +850,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1789392424.1934104,
-    "ast_hash": "48b63c3c7d851cefce7b6da7169ee1b7",
+    "mtime": 1789394780.668711,
+    "ast_hash": "21a98008ea22938c976dab3251397532",
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.test.ts": {

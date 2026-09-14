@@ -108,7 +108,11 @@ interface ReviewResult {
   findings: ReviewFinding[];
 }
 
-const REVIEW_OUTPUT_SCHEMA = z.toJSONSchema(submitReviewArgsSchema, { io: "output" });
+// NOTE(ali): the Claude Code CLI validates `--json-schema` with a draft-07 validator and rejects the
+// `$schema` draft 2020-12 URI zod emits, so it is stripped before being handed to the session.
+const { $schema: _reviewSchemaDraft, ...REVIEW_OUTPUT_SCHEMA } = z.toJSONSchema(submitReviewArgsSchema, {
+  io: "output",
+});
 
 interface ActiveReview {
   handle: AgentSessionHandle | null;

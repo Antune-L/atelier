@@ -37,7 +37,7 @@ import {
   type CodexCommandHook,
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
-import { envWithProjectNode } from "./nvmNode.ts";
+import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import { workerToolsForRole } from "./sessionRolePolicy.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
@@ -181,7 +181,7 @@ async function gitMetadataWritableRoots(
 ): Promise<string[]> {
   const gitProcess = Bun.spawn(
     ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
-    { env: { ...process.env, ...environment }, stdout: "pipe", stderr: "pipe" },
+    { env: { ...agentBaseEnv(), ...environment }, stdout: "pipe", stderr: "pipe" },
   );
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(gitProcess.stdout).text(),
@@ -1086,6 +1086,8 @@ function createCodexAgentSession(
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
       preparedHook = prepareNoVerifyHook(options.cwd, options.blockReviewPublishing === true, options.blockTypecheck === true);
       const environment = (dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd);
+      // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
+      // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
       const liveConnection = await (dependencies.connect ?? connectCodexAppServer)({
         binaryPath: (dependencies.resolveBinary ?? resolveCodexBinary)(),

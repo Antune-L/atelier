@@ -9,11 +9,27 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** Env prefix reserved for the server's own boot contract; never inherited by a child process. */
+export const AGENT_ENV_EXCLUDED_PREFIX = "KANBAN_";
+
+/**
+ * `process.env` minus every `KANBAN_*` key. The desktop app exports KANBAN_DB / KANBAN_CONFIG /
+ * KANBAN_DRY_RUN / KANBAN_SETUP onto the server process; inherited verbatim, an agent running the
+ * project's own test suite boots a test server against the LIVE database and interrupts live
+ * tickets. A child that legitimately needs one of these keys must pass it back explicitly.
+ */
+export function agentBaseEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !key.startsWith(AGENT_ENV_EXCLUDED_PREFIX)),
+  );
+}
+
 /** Prepend the pinned Node, or report an actionable error before running under a different version. */
 export function envWithProjectNode(cwd: string): Record<string, string | undefined> {
   const binDir = nvmNodeBinDir(cwd);
-  if (binDir === null) return { ...process.env };
-  return { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+  const base = agentBaseEnv();
+  if (binDir === null) return base;
+  return { ...base, PATH: `${binDir}:${base.PATH ?? ""}` };
 }
 
 /**

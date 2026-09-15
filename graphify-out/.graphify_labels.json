@@ -111,14 +111,8 @@
   "109": "nvmNode.ts",
   "110": "Profile",
   "111": ".start",
-  "112": "PrSelectRow.tsx",
-  "113": "bootstrap.ts",
   "114": "createMcpServer",
   "115": "useLocalDraft.ts",
-  "116": "settings.tsx",
-  "117": "codexBinary.ts",
-  "118": "codexHookTrust.ts",
-  "119": "RunningServer",
   "120": "useSavedFlash.ts",
   "121": "TicketMeta.tsx",
   "122": "performSplit",
@@ -137,9 +131,5 @@
   "135": "Stage (pipeline state)",
   "136": "Ticket",
   "137": "Ticket Lifecycle",
-  "138": "Triage / Feasibility",
-  "139": "agentToml",
-  "140": "createCodexAgentSession",
-  "141": "profileMatching.test.ts",
-  "142": "PreparedAgents"
+  "138": "Triage / Feasibility"
 }

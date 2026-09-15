@@ -125,13 +125,13 @@
     "semantic_hash": ""
   },
   "src/server/index.ts": {
-    "mtime": 1789375908.5564637,
-    "ast_hash": "936520c1077129aa88236c3c5a61b8c4",
+    "mtime": 1789464427.5502582,
+    "ast_hash": "e17b7a85df99738a48a3b8e45d5bf1c3",
     "semantic_hash": ""
   },
   "src/server/lifecycle.ts": {
-    "mtime": 1788767852.0259035,
-    "ast_hash": "5d97e632c122e4fb91d472f09346cb52",
+    "mtime": 1789464427.5506246,
+    "ast_hash": "1290b2331cf43eff0abe0c4a4419ac96",
     "semantic_hash": ""
   },
   "src/server/logger.ts": {
@@ -165,8 +165,8 @@
     "semantic_hash": ""
   },
   "src/server/system/real.ts": {
-    "mtime": 1789384870.8153672,
-    "ast_hash": "f291d47ef1f88bd25d42aa385bf8d254",
+    "mtime": 1789464427.5523682,
+    "ast_hash": "d4563a29b34fa463383e008dd8b9f1c3",
     "semantic_hash": ""
   },
   "src/server/system/types.ts": {
@@ -875,8 +875,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexProvider.ts": {
-    "mtime": 1789392053.13394,
-    "ast_hash": "5ac4e8da6b30c4f0245731f70ca443a4",
+    "mtime": 1789464427.5513449,
+    "ast_hash": "6847147333f01f3a8345421278bfecaa",
     "semantic_hash": ""
   },
   "src/server/testing/fixtures.ts": {
@@ -930,8 +930,8 @@
     "semantic_hash": ""
   },
   "src/server/system/nvmNode.ts": {
-    "mtime": 1788614958.627296,
-    "ast_hash": "b16b84dae70c7d18bdf123071f70d605",
+    "mtime": 1789464427.5518482,
+    "ast_hash": "f0e0e7fc6f7bebed629588195e698592",
     "semantic_hash": ""
   },
   "scripts/downgrade-codex-catalog.ts": {
@@ -1010,8 +1010,8 @@
     "semantic_hash": ""
   },
   "src/server/system/nvmNode.test.ts": {
-    "mtime": 1788615005.0481932,
-    "ast_hash": "e3aabbaccee95289d574c1154131cb62",
+    "mtime": 1789464427.551614,
+    "ast_hash": "0c60601a6cf4932a6ed8f8a09d589632",
     "semantic_hash": ""
   },
   "src/server/system/oneShotSession.test.ts": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "src/server/mcp.e2e.test.ts": {
-    "mtime": 1789309576.5328834,
-    "ast_hash": "f2f8a3a467fbfb39c60faf1e8574115d",
+    "mtime": 1789464427.5509512,
+    "ast_hash": "b94ad494b771fad9fa00b5ebe01bb4c5",
     "semantic_hash": ""
   },
   "src/server/publicMcp.ts": {

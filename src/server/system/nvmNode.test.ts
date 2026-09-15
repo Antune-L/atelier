@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { envWithProjectNode } from "./nvmNode.ts";
+import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { prepareProjectShell } from "./projectShell.ts";
 
 test("project Node survives shell startup, and missing versions/aliases fail explicitly", async () => {
@@ -40,5 +40,21 @@ test("project Node survives shell startup, and missing versions/aliases fail exp
     else process.env.ZDOTDIR = oldZdot;
     if (startup) await rm(startup, { recursive: true, force: true });
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("agent env drops the server's KANBAN_* boot contract but keeps everything else", () => {
+  const oldDb = process.env.KANBAN_DB;
+  const oldPath = process.env.PATH;
+  try {
+    process.env.KANBAN_DB = "/live/kanban.db";
+    const env = agentBaseEnv();
+    expect(env.KANBAN_DB).toBeUndefined();
+    expect(Object.keys(env).some((key) => key.startsWith("KANBAN_"))).toBe(false);
+    expect(env.PATH).toBe(oldPath);
+    expect(envWithProjectNode(tmpdir()).KANBAN_DB).toBeUndefined();
+  } finally {
+    if (oldDb === undefined) delete process.env.KANBAN_DB;
+    else process.env.KANBAN_DB = oldDb;
   }
 });

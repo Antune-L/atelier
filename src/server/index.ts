@@ -55,6 +55,20 @@ const SPA_FALLBACK_FILE = "index.html";
 /** Subpath, relative to dataRoot, holding the rotating server log file. */
 const LOGS_SUBPATH = "logs";
 
+/** Writable files resolved under dataRoot. */
+const DB_FILENAME = "kanban.db";
+const CONFIG_FILENAME = "config.json";
+
+/**
+ * An explicit `dataRoot` (desktop, tests) wins over the env override: a test server booted on a
+ * temp dir must never reopen the live desktop database inherited through KANBAN_DB/KANBAN_CONFIG.
+ * Web mode passes no root and keeps the env-first behaviour.
+ */
+function resolveDataFile(explicitRoot: string | undefined, filename: string, envOverride: string | undefined): string {
+  if (explicitRoot !== undefined) return join(explicitRoot, filename);
+  return envOverride ?? join(PROJECT_ROOT, filename);
+}
+
 /**
  * Boot options. Defaults keep the web/dev path on the repo root for both roots.
  *
@@ -62,7 +76,8 @@ const LOGS_SUBPATH = "logs";
  * env (set by desktop/bootstrap.applyDesktopEnv before this module is dynamically imported), because
  * config.ts / system / boot.ts read their env at import time, before opts exist: KANBAN_CONFIG +
  * KANBAN_DB (writable paths), KANBAN_CLAUDE_BINARY (override the resolved SDK native binary path).
- * Web mode leaves all of these unset and inherits the repo-root defaults.
+ * Web mode leaves all of these unset and inherits the repo-root defaults. `dataRoot`, when given,
+ * overrides KANBAN_DB / KANBAN_CONFIG (see resolveDataFile).
  */
 export interface StartServerOptions {
   port?: number;
@@ -193,7 +208,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const requestedPort = opts.port ?? Number(process.env.PORT ?? DEFAULT_PORT);
   const port = await resolveServerPort(requestedPort);
-  const dbPath = process.env.KANBAN_DB ?? join(dataRoot, "kanban.db");
+  const dbPath = resolveDataFile(opts.dataRoot, DB_FILENAME, process.env.KANBAN_DB);
 
   // Warm the claude binary early (packaged app: detect a user install or download the pinned one) so
   // it is usually ready before the first ticket launch. Non-blocking: a cold download must not delay
@@ -209,7 +224,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const staleExecutionGenerations = store.listExecutionRuns()
     .filter((run) => run.status === "running")
     .map((run) => run.generationId);
-  await migrateConfigJsonIfPresent(store, process.env.KANBAN_CONFIG ?? join(dataRoot, "config.json"));
+  await migrateConfigJsonIfPresent(store, resolveDataFile(opts.dataRoot, CONFIG_FILENAME, process.env.KANBAN_CONFIG));
   initProjectRegistry(store);
   const workerMcpManager = new WorkerMcpManager();
   const system = createSystemAdapter(workerMcpManager, join(dataRoot, LOGS_SUBPATH));

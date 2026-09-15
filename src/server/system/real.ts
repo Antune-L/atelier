@@ -22,7 +22,7 @@ import { createCodexProvider } from "./codexProvider.ts";
 import { computeCodeFingerprint } from "./codeFingerprint.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
-import { envWithProjectNode } from "./nvmNode.ts";
+import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
 import { renderCollapsedDetails } from "./reviewMarkdown.ts";
@@ -554,7 +554,7 @@ export class RealSystemAdapter implements SystemAdapter {
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      env: { ...process.env },
+      env: agentBaseEnv(),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
@@ -624,12 +624,12 @@ export class RealSystemAdapter implements SystemAdapter {
         // Auto-run the launch command, then `exec zsh -l` so the user keeps an interactive worktree
         // shell once it exits/stops. `wrapped` is passed as a single `zsh -lc` argument.
         const wrapped = `${opts.initialCommand}; exec zsh -l`;
-        await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -lc ${wrapped}`.quiet();
+        await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -lc ${wrapped}`.env(agentBaseEnv()).quiet();
         return;
       }
       // A plain interactive login shell — no keep-alive wrapper: when the user `exit`s, the session
       // dies and the cell settles on "session terminée" (consistent with the live-stream teardown).
-      await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -l`.quiet();
+      await $`tmux new-session -d -s ${opts.sessionName} -c ${opts.cwd} -x ${TERMINAL_DEFAULT_COLS} -y ${TERMINAL_DEFAULT_ROWS} ${environmentArgs} zsh -l`.env(agentBaseEnv()).quiet();
     } catch (error) {
       await this.killSession(opts.sessionName);
       throw error;

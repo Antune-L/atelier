@@ -1,3 +1,4 @@
+import { TERMINAL_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import type { Ticket } from "../shared/schemas.ts";
 
@@ -45,17 +46,30 @@ export class TicketLifecycle {
 
   /** Resume to the implementing stage only (column untouched). Used when the last question is answered. */
   resumeImplementing(ticketId: string): Ticket {
-    const ticket = this.store.updateTicket(ticketId, { stage: "implementing" });
+    const ticket = this.store.updateTicket(ticketId, { stage: "implementing", ...this.errorReset(ticketId, "implementing") });
     this.hub.pushTicket(ticket);
     return ticket;
   }
 
   /** Single-field stage update carrying the log + push ritual (agent's update_stage tool). */
   setStage(ticketId: string, stage: Stage): Ticket {
-    const ticket = this.store.updateTicket(ticketId, { stage });
+    const ticket = this.store.updateTicket(ticketId, { stage, ...this.errorReset(ticketId, stage) });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "update_stage", { stage });
     return ticket;
+  }
+
+  /**
+   * Leaving a terminal stage for an active one clears the message that killed the previous run:
+   * otherwise a card that resumed working keeps showing a stale error (e.g. "session perdue au
+   * redémarrage"). Returns an empty patch fragment when the transition is not a revival.
+   */
+  private errorReset(ticketId: string, nextStage: Stage): { error?: null } {
+    const current = this.store.getTicket(ticketId);
+    if (current === null || current.error === null) return {};
+    if (current.stage === null || !TERMINAL_STAGES.includes(current.stage)) return {};
+    if (TERMINAL_STAGES.includes(nextStage)) return {};
+    return { error: null };
   }
 
   /** PRD submitted: column prd, stage awaiting_answers, store markdown, push, log, notify. */
@@ -64,6 +78,7 @@ export class TicketLifecycle {
       column: "prd",
       stage: "awaiting_answers",
       prdMarkdown: markdown,
+      ...this.errorReset(ticketId, "awaiting_answers"),
     });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "submit_prd", {});

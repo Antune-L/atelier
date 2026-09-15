@@ -162,7 +162,11 @@ const textContentResultSchema = z.object({
   })),
 });
 
+/** Env keys the desktop app exports; a stray one here would boot this test server on the live data. */
+const ISOLATED_ENV_KEYS = ["KANBAN_DB", "KANBAN_CONFIG", "KANBAN_SETUP", "KANBAN_DRY_RUN"] as const;
+
 let dataRoot = "";
+const savedEnv = new Map<string, string | undefined>();
 let runningServer: RunningServer | null = null;
 let client: Client | null = null;
 let transport: StreamableHTTPClientTransport | null = null;
@@ -203,6 +207,13 @@ async function waitForSocketOpen(socket: WebSocket): Promise<void> {
 }
 
 beforeAll(async () => {
+  // createSystemAdapter / startServer read these at call time, so neutralising them here is enough:
+  // an agent shell that inherited the desktop env must not make this boot touch the live database.
+  for (const key of ISOLATED_ENV_KEYS) {
+    savedEnv.set(key, process.env[key]);
+    delete process.env[key];
+  }
+  process.env.KANBAN_DRY_RUN = "1";
   dataRoot = await mkdtemp(join(tmpdir(), "kanban-mcp-e2e-"));
   await writeFile(join(dataRoot, "config.json"), JSON.stringify({
     projects: {
@@ -238,6 +249,10 @@ afterAll(async () => {
   await runningServer?.teardownSessions();
   await runningServer?.stop();
   if (dataRoot !== "") await rm(dataRoot, { recursive: true, force: true });
+  for (const [key, value] of savedEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 });
 
 test("an official MCP client lists, creates idempotently, starts, and updates REST and WebSocket clients", async () => {

@@ -13,7 +13,7 @@ const EMBEDDED_BINARIES = ["codex-bin", "codex-code-mode-host"];
 
 const buildDir = process.env.ELECTROBUN_BUILD_DIR;
 if (!buildDir) {
-  console.error("verifyDesktopBundle: ELECTROBUN_BUILD_DIR manquant (le script doit tourner en hook postBuild)");
+  console.error("verifyDesktopBundle: ELECTROBUN_BUILD_DIR is missing (this script must run as a postBuild hook)");
   process.exit(1);
 }
 
@@ -21,7 +21,7 @@ const appBundle = readdirSync(buildDir).find(
   (entry) => entry.endsWith(".app") && existsSync(join(buildDir, entry, "Contents", "Resources", "app")),
 );
 if (!appBundle) {
-  console.error(`verifyDesktopBundle: aucun bundle .app avec Resources/app sous ${buildDir}`);
+  console.error(`verifyDesktopBundle: no .app bundle with Resources/app under ${buildDir}`);
   process.exit(1);
 }
 
@@ -29,15 +29,15 @@ const resourcesApp = join(buildDir, appBundle, "Contents", "Resources", "app");
 for (const name of EMBEDDED_BINARIES) {
   const path = join(resourcesApp, name);
   if (!existsSync(path)) {
-    console.error(`verifyDesktopBundle: binaire embarqué manquant : ${path}`);
+    console.error(`verifyDesktopBundle: embedded binary missing: ${path}`);
     process.exit(1);
   }
   try {
     accessSync(path, constants.X_OK);
   } catch {
-    console.error(`verifyDesktopBundle: binaire non exécutable (+x perdu par la copie) : ${path}`);
+    console.error(`verifyDesktopBundle: binary is not executable (+x lost during the copy): ${path}`);
     process.exit(1);
   }
 }
 
-console.log(`verifyDesktopBundle: OK (${EMBEDDED_BINARIES.join(", ")} exécutables dans ${appBundle})`);
+console.log(`verifyDesktopBundle: OK (${EMBEDDED_BINARIES.join(", ")} executable in ${appBundle})`);

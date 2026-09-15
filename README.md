@@ -1,6 +1,6 @@
 # Atelier
 
-> Orchestrate coding agents from a kanban board. Drag a ticket across a column and a real agent — Claude Code, OpenAI Codex, or Cursor Composer — implements it end to end: isolated worktree, blocking review, local tests, GitHub PR.
+> Orchestrate coding agents from a kanban board. Drag a ticket into a column and a real agent — Claude Code, OpenAI Codex, or Cursor Composer — implements it end to end: isolated worktree, blocking review, local tests, GitHub PR.
 
 ![Atelier demo](docs/demo.gif)
 
@@ -16,42 +16,42 @@ xattr -dr com.apple.quarantine /Applications/Atelier.app
 
 First launch needs `git` and a logged-in Claude Code session (run `claude` once); the full pipeline also needs `tmux` and an authenticated `gh` CLI. If no `claude` install is found on the machine, the app downloads the pinned version automatically (one-time, ~220 MB).
 
-Pour Codex, l’application réutilise la connexion Codex existante. Les modèles proposés sont GPT-6 Astra, GPT-5.6 Sol et GPT-5.6 Terra, avec les niveaux de raisonnement annoncés par le compte connecté. Claude reste disponible. Le bouton « Vérifier à nouveau », accessible dans les réglages même si Codex est indisponible, actualise la connexion et les modèles sans redémarrer l’application ; le défaut reste Terra / medium.
+For Codex, the app reuses the existing Codex connection. The available models are GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Luna and GPT-5.6 Terra, with the reasoning levels advertised by the connected account. Claude remains available. The « Vérifier à nouveau » (check again) button stays available in the settings even when Codex is unreachable; it refreshes the connection and the model list without restarting the app. The default stays Terra / medium.
 
-Pour une implémentation Codex, le modèle, l’effort et le mode FAST de l’implémenteur peuvent être distincts de ceux de l’orchestrateur. Par défaut, ils héritent des réglages Codex existants ; une valeur explicitement choisie reste indépendante. Les profils enregistrent ces choix. Les configurations sont figées au lancement et conservées lors des reprises : modifier le ticket ou les paramètres ensuite ne change pas une exécution déjà démarrée.
+For a Codex implementation, the implementer's model, effort and FAST mode can differ from the orchestrator's. By default they inherit the existing Codex settings; an explicitly chosen value stays independent. Profiles store these choices. Configurations are frozen at launch and kept across resumes: editing the ticket or the settings afterwards does not change a run that has already started.
 
-Le SDK et le binaire Codex sont épinglés en `0.153.4`. Les sessions interactives utilisent l’App Server du même binaire pour recevoir les messages pendant un tour, interrompre et reprendre une conversation. Les opérations PRD et Notion suivent également l’agent choisi. L’import Notion nécessite que la connexion MCP Notion soit autorisée pour ce client.
+The Codex SDK and binary are pinned to `0.153.4`. Interactive sessions use that same binary's App Server to receive messages during a turn, interrupt a turn and resume a conversation. PRD and Notion operations also follow the chosen agent. Notion import requires the Notion MCP connection to be authorized for this client.
 
-Dans les worktrees, une version numérique dans `.nvmrc` doit être installée via nvm. Cette version est appliquée à l’installation, aux scripts, aux agents et au terminal. Une version absente ou un alias non pris en charge produit un diagnostic explicite avant le lancement.
+In worktrees, the numeric version declared in `.nvmrc` must be installed via nvm. That version is then applied to the install, the scripts, the agents and the terminal. A missing version or an unsupported alias produces an explicit diagnostic before launch.
 
 Running from source instead? See [docs/development.md](docs/development.md).
 
-## MCP local
+## Local MCP
 
-Atelier expose un serveur MCP Streamable HTTP sur `http://localhost:52817/mcp`. Il accepte uniquement les connexions provenant de la machine locale et exige l’en-tête `Authorization: Bearer <token>`.
+Atelier exposes a Streamable HTTP MCP server on `http://localhost:52817/mcp`. It only accepts connections coming from the local machine and requires the `Authorization: Bearer <token>` header.
 
-Dans l’application macOS, un jeton aléatoire persistant est créé au premier lancement dans `~/Library/Application Support/kanban-agents/mcp-token`, avec des permissions limitées au compte utilisateur. La variable `KANBAN_MCP_TOKEN` permet de fournir un autre jeton au lancement. Depuis les sources, l’endpoint reste désactivé tant que cette variable n’est pas définie :
-
-Les réglages de l’application desktop affichent l’URL MCP et permettent de copier le jeton sans l’exposer à la page web. Le bouton de régénération remplace immédiatement le jeton géré par Atelier ; il est désactivé lorsqu’un jeton est fourni par `KANBAN_MCP_TOKEN`.
+In the macOS app, a persistent random token is created at first launch in `~/Library/Application Support/kanban-agents/mcp-token`, with permissions restricted to the user account. The `KANBAN_MCP_TOKEN` variable lets you supply another token at launch. From source, the endpoint stays disabled as long as that variable is not set:
 
 ```bash
-KANBAN_MCP_TOKEN=remplacez-par-un-secret-long bun run dev
+KANBAN_MCP_TOKEN=replace-with-a-long-secret bun run dev
 ```
 
-Configurez ensuite le client MCP avec l’URL ci-dessus et le jeton comme en-tête Bearer. Les outils disponibles sont `list_projects`, `list_tickets`, `create_todo_ticket`, `update_ticket`, `analyze_tickets` et `start_ticket`. Les réponses indiquent aussi `dryRun` afin qu’un agent distingue le bac à sable du serveur réel.
+Then configure the MCP client with the URL above and the token as a Bearer header. The available tools are `list_projects`, `list_tickets`, `create_todo_ticket`, `update_ticket`, `analyze_tickets` and `start_ticket`. Responses also report `dryRun` so that an agent can tell the sandbox apart from the real server.
 
-`create_todo_ticket` crée toujours une carte passive dans TODO. Il accepte les mêmes options qu’une création depuis l’application : contenu (`title`, `description`, `externalUrl`), pipeline (`prdEnabled`, `verifyFeature` pour la vérification E2E, `prDraft`, `autoMerge`, `stealth`, `directPush`, `addScreenshots`, `argusMultiLoop`), branche et empilement (`baseBranch`, `dependsOn`), ainsi que l’orchestrateur, l’implémenteur et leurs modèles/efforts Claude ou Codex (`orchestrator`, `implementer`, `model`, `effort`, `implementerModel`, `implementerEffort`, `codexModel`, `codexEffort`, `codexFast`, `codexImplementerModel`, `codexImplementerEffort`, `codexImplementerFast`, `feasibilityEngine`). `requestId` est obligatoire et rend la création idempotente : un nouvel appel strictement identique retourne la carte existante, tandis qu’un même identifiant avec des options différentes est refusé. Utilisez ensuite `start_ticket` pour lancer la carte ; `create_todo_ticket` refuse le champ `start`.
+The desktop app settings show the MCP URL and let you copy the token without exposing it to the web page. The regenerate button immediately replaces the token managed by Atelier; it is disabled when a token is supplied through `KANBAN_MCP_TOKEN`.
 
-`analyze_tickets` reçoit une liste non vide d’identifiants et lance uniquement leur étude de faisabilité en arrière-plan. Il ne démarre aucune implémentation. La réponse distingue les identifiants acceptés (`startedIds`) des cartes absentes ou déjà occupées (`rejected`) ; les résultats de l’étude sont ensuite enregistrés sur chaque carte.
+`create_todo_ticket` always creates a passive card in TODO. It accepts the same options as creating one from the app: content (`title`, `description`, `externalUrl`), pipeline (`prdEnabled`, `verifyFeature` for E2E verification, `prDraft`, `autoMerge`, `stealth`, `directPush`, `addScreenshots`, `argusMultiLoop`), branch and stacking (`baseBranch`, `dependsOn`), as well as the orchestrator, the implementer and their Claude or Codex models/efforts (`orchestrator`, `implementer`, `model`, `effort`, `implementerModel`, `implementerEffort`, `codexModel`, `codexEffort`, `codexFast`, `codexImplementerModel`, `codexImplementerEffort`, `codexImplementerFast`, `feasibilityEngine`). `requestId` is mandatory and makes creation idempotent: a strictly identical new call returns the existing card, while the same identifier with different options is rejected. Use `start_ticket` afterwards to launch the card; `create_todo_ticket` rejects the `start` field.
 
-`update_ticket` modifie une carte existante tant qu’elle se trouve dans TODO et qu’aucune analyse ou implémentation n’est en cours. Il accepte le contenu et toutes les options éditables du formulaire, notamment le projet, la branche, la dépendance, les modèles, les efforts, l’orchestrateur, l’implémenteur et les options de pipeline. Un champ omis reste inchangé ; `null` et `false` sont des valeurs explicites. Cet outil ne déplace pas et ne démarre pas la carte.
+`analyze_tickets` takes a non-empty list of identifiers and starts only their feasibility study in the background; it starts no implementation. The response separates accepted identifiers (`startedIds`) from missing or already busy cards (`rejected`); the study results are then recorded on each card.
+
+`update_ticket` edits an existing card as long as it sits in TODO and no analysis or implementation is running. It accepts the content and every editable option in the form, in particular the project, the branch, the dependency, the models, the efforts, the orchestrator, the implementer and the pipeline options. An omitted field stays unchanged; `null` and `false` are explicit values. This tool neither moves nor starts the card.
 
 ## How it works
 
 ```mermaid
 flowchart LR
     A[Kanban board] -->|drag ticket| B[Isolated worktree slot]
-    B --> C[Session Claude ou Codex]
+    B --> C[Claude or Codex session]
     C --> D[Implement + review + tests]
     D --> E[GitHub PR]
     E --> F{Server-verified gates}

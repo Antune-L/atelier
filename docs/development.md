@@ -33,7 +33,7 @@ bun run dev          # backend (:52817) + Vite frontend (:52818)
 
 Then open **http://localhost:52818**. The frontend proxies `/api` and `/ws` to the backend.
 
-By default, `bun run dev` runs in **dry-run** mode: no side effects (no real `claude`/tmux/git/gh, no repo touched). The full pipeline is still exercisable end to end — this is the recommended mode to explore the app and develop.
+By default, `bun run dev` runs in **dry-run** mode: no side effects (no real `claude`/tmux/git/gh, no repo touched). The full pipeline is still exercisable end to end — this is the recommended mode for exploring the app and developing against it.
 
 Other scripts:
 
@@ -91,7 +91,7 @@ The pipeline contract injected into each session (`src/server/agents/contract.ts
 | `minos-pr-feedback`      | **Clean** ticket                                                                  | Fetches PR review threads, triages by relevance, applies only pertinent fixes                                               |
 | `composer-implement`     | **Feature** ticket with **Composer** as implementer                               | Delegates code-writing to Cursor headless via `templates/run_composer.sh` (vendored script — keep in sync with the skill)   |
 
-**Ask**, **test**, and **conflict-resolution** tickets do not invoke a dedicated skill — read-only exploration or manual git per the contract.
+**Ask** tickets and **conflict-resolution** runs do not invoke a dedicated skill — read-only exploration or manual git per the contract.
 
 In real mode, these skills must be available in the Claude Code environment running the agent; otherwise the agent cannot run the steps that reference them. Source definitions and install instructions: [Antune-L/skillzer](https://github.com/Antune-L/skillzer).
 

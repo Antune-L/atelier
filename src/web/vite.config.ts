@@ -8,7 +8,7 @@ const DEV_PORT = 52818;
 const HTTPS_PORT = 443;
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 
-// Routes servies par le backend Bun : partagées par le serveur de dev et `vite preview` (mode real).
+// Routes served by the Bun backend: shared by the dev server and `vite preview` (real mode).
 const backendProxy = {
   "/api": { target: `http://localhost:${BACKEND_PORT}`, changeOrigin: true },
   "/ws": { target: `ws://localhost:${BACKEND_PORT}`, ws: true },
@@ -16,9 +16,9 @@ const backendProxy = {
 };
 
 export default defineConfig(({ mode }) => {
-  // Domaine custom local servi derrière un reverse proxy HTTPS (ex: atelier.bixu.fr).
-  // Lu depuis .env (racine projet) via loadEnv → indépendant du lanceur (bun/npx/IDE).
-  // Non défini → dev localhost standard (allowedHosts/HMR par défaut).
+  // Local custom domain served behind an HTTPS reverse proxy (e.g. atelier.bixu.fr).
+  // Read from .env (project root) via loadEnv → independent of the launcher (bun/npx/IDE).
+  // Undefined → standard localhost dev (default allowedHosts/HMR).
   const devHost = loadEnv(mode, PROJECT_ROOT, "").DEV_HOST;
 
   return {
@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
       }),
       proxy: backendProxy,
     },
-    // Mode `real` : build figé servi par `vite preview` (pas de HMR), même topologie que le dev.
+    // `real` mode: frozen build served by `vite preview` (no HMR), same topology as dev.
     preview: {
       port: DEV_PORT,
       ...(devHost && { allowedHosts: [devHost] }),

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version du dry-run (X.Y.Z, sans le v) — aucun artefact publié"
+        description: "Dry-run version (X.Y.Z, without the v) — no artifact is published"
         required: false
         default: "0.0.0"
 
@@ -26,7 +26,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      - name: Résoudre la version
+      - name: Resolve the version
         id: meta
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
@@ -38,7 +38,7 @@ jobs:
             version="${DISPATCH_VERSION}"
           fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Version invalide: $version" >&2
+            echo "Invalid version: $version" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -48,7 +48,7 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Installer les dépendances
+      - name: Install dependencies
         run: bun install --frozen-lockfile
 
       - name: Typecheck
@@ -60,12 +60,12 @@ jobs:
       - name: Tests
         run: bun test
 
-      - name: Packager le DMG
+      - name: Package the DMG
         env:
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
         run: bun run release:desktop "$RELEASE_VERSION"
 
-      - name: Publier la release GitHub
+      - name: Publish the GitHub release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:

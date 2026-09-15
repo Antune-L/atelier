@@ -70,19 +70,19 @@ const createTodoTicketOutputSchema = z.object({
 });
 const analyzeTicketsInputSchema = analyzeTicketsSchema.strict();
 const analyzeTicketsOutputSchema = z.object({
-  started: z.number().int().min(0).describe("Nombre de demandes d'analyse acceptées."),
-  startedIds: z.array(z.string()).describe("Identifiants acceptés pour lancement en arrière-plan."),
+  started: z.number().int().min(0).describe("Number of accepted analysis requests."),
+  startedIds: z.array(z.string()).describe("Identifiers accepted for background launch."),
   rejected: z.array(z.object({
     id: z.string(),
     reason: z.enum(["not_found", "busy"]),
-  })).describe("Identifiants refusés car absents ou déjà en cours de traitement."),
+  })).describe("Identifiers rejected because they are missing or already being processed."),
   dryRun: z.boolean(),
 });
 const updateTicketInputSchema = updateTicketSchema
-  .extend({ ticketId: z.string().min(1).describe("Identifiant de la carte TODO à modifier.") })
+  .extend({ ticketId: z.string().min(1).describe("Identifier of the TODO card to update.") })
   .strict()
   .refine((input) => Object.keys(input).length > 1, {
-    message: "au moins une option à modifier est requise",
+    message: "at least one option to update is required",
   });
 const editableTicketSchema = ticketSchema.pick({
   id: true,
@@ -131,42 +131,42 @@ const startTicketOutputSchema = z.object({
 const PUBLIC_TOOLS = [
   {
     name: "list_projects",
-    description: "Liste les projets Atelier disponibles pour créer une carte.",
+    description: "Lists the Atelier projects available for creating a card.",
     inputSchema: z.toJSONSchema(listProjectsInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(listProjectsOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: true },
   },
   {
     name: "list_tickets",
-    description: "Liste une page compacte de cartes Atelier, filtrable par projet et colonne.",
+    description: "Lists a compact page of Atelier cards, filterable by project and column.",
     inputSchema: z.toJSONSchema(listTicketsInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(listTicketsOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: true },
   },
   {
     name: "create_todo_ticket",
-    description: "Crée une carte passive dans TODO sans démarrer d'agent.",
+    description: "Creates a passive card in TODO without starting an agent.",
     inputSchema: z.toJSONSchema(createTodoTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(createTodoTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
     name: "analyze_tickets",
-    description: "Lance en arrière-plan l'étude de faisabilité de cartes existantes, sans démarrer leur implémentation. Chaque carte conserve son moteur de faisabilité configuré.",
+    description: "Runs the feasibility study of existing cards in the background, without starting their implementation. Each card keeps its configured feasibility engine.",
     inputSchema: z.toJSONSchema(analyzeTicketsInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(analyzeTicketsOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   },
   {
     name: "update_ticket",
-    description: "Modifie le contenu, le projet, la branche, la dépendance ou les options d'agent et de pipeline d'une carte TODO existante. Les champs omis restent inchangés; null et false sont appliqués explicitement. Ne déplace ni ne démarre la carte et ne lance pas d'analyse.",
+    description: "Updates the content, project, branch, dependency, or agent and pipeline options of an existing TODO card. Omitted fields stay unchanged; null and false are applied explicitly. Does not move or start the card, and does not run an analysis.",
     inputSchema: z.toJSONSchema(updateTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(updateTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
     name: "start_ticket",
-    description: "Demande le démarrage d'une carte TODO et retourne son état de mise en file.",
+    description: "Requests the start of a TODO card and returns its queueing status.",
     inputSchema: z.toJSONSchema(startTicketInputSchema, { io: "input" }),
     outputSchema: z.toJSONSchema(startTicketOutputSchema, { io: "output" }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
@@ -250,7 +250,7 @@ function isAuthorized(request: Request, token: string): boolean {
 
 function toolResult(schema: OutputValidator, value: unknown): McpTextResult {
   const parsed = schema.safeParse(value);
-  if (!parsed.success) return toolError(new Error("sortie MCP invalide"));
+  if (!parsed.success) return toolError(new Error("invalid MCP output"));
   const structuredContent = parsed.data;
   return {
     content: [{ type: TEXT_CONTENT_TYPE, text: JSON.stringify(structuredContent) }],
@@ -266,7 +266,7 @@ function toolError(error: unknown): McpTextResult {
       isError: true,
     };
   }
-  const result = { error: { code: "INTERNAL_ERROR", message: "erreur interne du serveur" } };
+  const result = { error: { code: "INTERNAL_ERROR", message: "internal server error" } };
   return {
     content: [{ type: TEXT_CONTENT_TYPE, text: JSON.stringify(result) }],
     isError: true,
@@ -289,17 +289,17 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
     try {
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(listProjectsOutputSchema, { projects: operations.listProjects(), dryRun });
       }
       if (request.params.name === "list_tickets") {
         const parsed = listTicketsInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(listTicketsOutputSchema, { ...operations.listTickets(parsed.data), dryRun });
       }
       if (request.params.name === "create_todo_ticket") {
         const parsed = createTodoTicketInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(createTodoTicketOutputSchema, {
           ...operations.createTodoTicket(parsed.data),
           dryRun,
@@ -307,7 +307,7 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
       }
       if (request.params.name === "analyze_tickets") {
         const parsed = analyzeTicketsInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(analyzeTicketsOutputSchema, {
           ...operations.analyzeTickets(parsed.data.ids),
           dryRun,
@@ -315,7 +315,7 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
       }
       if (request.params.name === "update_ticket") {
         const parsed = updateTicketInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         const { ticketId, ...patch } = parsed.data;
         return toolResult(updateTicketOutputSchema, {
           ticket: operations.updateTicket(ticketId, patch, { requireTodo: true }),
@@ -324,13 +324,13 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
       }
       if (request.params.name === "start_ticket") {
         const parsed = startTicketInputSchema.safeParse(input);
-        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "entrée invalide");
+        if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
         return toolResult(startTicketOutputSchema, {
           ...await operations.startTicket(parsed.data.ticketId),
           dryRun,
         });
       }
-      return toolError(new TicketOperationError("NOT_FOUND", `outil inconnu : ${request.params.name}`));
+      return toolError(new TicketOperationError("NOT_FOUND", `unknown tool: ${request.params.name}`));
     } catch (error) {
       return toolError(error);
     }
@@ -361,18 +361,18 @@ export class PublicMcpManager {
 
   async handleRequest({ request, peerAddress, port }: PublicMcpRequest): Promise<Response> {
     if (peerAddress === null || !isLoopbackHost(peerAddress)) {
-      return jsonResponse(HTTP_FORBIDDEN, "accès MCP limité à la machine locale");
+      return jsonResponse(HTTP_FORBIDDEN, "MCP access is restricted to the local machine");
     }
     if (!isAllowedHost(request, port) || !isAllowedOrigin(request, port)) {
-      return jsonResponse(HTTP_FORBIDDEN, "hôte ou origine MCP refusé");
+      return jsonResponse(HTTP_FORBIDDEN, "MCP host or origin rejected");
     }
     if (!isAuthorized(request, this.token)) {
-      return jsonResponse(HTTP_UNAUTHORIZED, "authentification MCP requise", {
+      return jsonResponse(HTTP_UNAUTHORIZED, "MCP authentication required", {
         "www-authenticate": "Bearer",
       });
     }
     if (request.method !== "POST") {
-      return jsonResponse(HTTP_BAD_REQUEST, "seules les requêtes MCP POST sont acceptées");
+      return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
     const server = createMcpServer(this.operations, this.dryRun);

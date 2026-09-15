@@ -1,8 +1,10 @@
 # CONTEXT — domain glossary
 
 Domain vocabulary for kanban-agents. These are the nouns the code, the README, and
-architecture reviews should use. User-facing strings are French; these identifiers are
-English (matching the code). Keep this file in sync as concepts crystallize.
+architecture reviews should use. Documentation, the public MCP surface and these identifiers
+are English (matching the code); the UI strings under `src/web`, the agent prompts under
+`src/server/agents` and the log/error messages elsewhere in `src/server` and `desktop` stay
+French. See the full rule in AGENTS.md. Keep this file in sync as concepts crystallize.
 
 ## Work items
 
@@ -15,8 +17,8 @@ argus on a PR), `clean` (triage + fix PR feedback), `ask` (read-only question an
 a comment). *Conflict resolution* is a mode on a feature ticket (`resolvingConflicts`),
 not a kind.
 
-**Column** — the board lane a card sits in (8: todo, implementing, prd, done, merged,
-reviewed, failed, abandoned). The coarse, user-visible axis.
+**Column** — the board lane a card sits in (10: todo, implementing, prd, to_review, done,
+merged, reviewed, answered, failed, abandoned). The coarse, user-visible axis.
 
 **Stage** — the fine-grained pipeline state (12: queued … opening_pr / done / failed /
 interrupted / stalled). A *different axis* from Column. Use `ACTIVE_STAGES` /

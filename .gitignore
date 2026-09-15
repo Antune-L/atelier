@@ -28,5 +28,5 @@ graphify-out/.graphify_*.json
 .codex/
 /plans/
 
-# Logs serveur persistés
+# Persisted server logs
 logs/

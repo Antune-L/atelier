@@ -14,7 +14,7 @@ const projectKeySchema = z.string().min(1);
 // characters (no leading dash, no shell metacharacters) because the value is
 // interpolated into the `gh pr create --base <branch>` command the agent runs.
 const BRANCH_NAME_RE = /^[A-Za-z0-9._/][A-Za-z0-9._/-]*$/;
-const baseBranchSchema = z.string().regex(BRANCH_NAME_RE, "nom de branche invalide");
+const baseBranchSchema = z.string().regex(BRANCH_NAME_RE, "invalid branch name");
 export const columnSchema = z.enum(COLUMNS);
 export const stageSchema = z.enum(STAGES);
 export const commentAuthorSchema = z.enum(COMMENT_AUTHORS);
@@ -533,7 +533,7 @@ export const externalUrlSchema = z
     const trimmed = v.trim();
     return trimmed.length === 0 ? null : trimmed;
   })
-  .refine((v) => v === null || isHttpUrl(v), { message: "URL invalide" });
+  .refine((v) => v === null || isHttpUrl(v), { message: "invalid URL" });
 
 /** Max length of a title auto-derived from the description. */
 const DERIVED_TITLE_MAX_LENGTH = 80;
@@ -663,7 +663,7 @@ export type MoveTicketInput = z.infer<typeof moveTicketSchema>;
 
 /** Start the batch feasibility analysis on a set of already-existing tickets (e.g. all of TODO). */
 export const analyzeTicketsSchema = z.object({
-  ids: z.array(z.string().min(1)).min(1).describe("Identifiants des cartes existantes à analyser."),
+  ids: z.array(z.string().min(1)).min(1).describe("Identifiers of the existing cards to analyze."),
 });
 export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
 

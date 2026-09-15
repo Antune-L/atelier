@@ -1,13 +1,13 @@
 import { useEffect } from "react";
 
 /**
- * WKWebView (desktop Electrobun) joue le system beep macOS quand un keydown
- * atteint la responder chain AppKit sans être consommé. Échap → cancelOperation:
- * n'a aucun responder, donc beep sauf si la page appelle preventDefault().
- * Bubble phase, en dernier : Radix (dismissable layer) ignore un Escape déjà
- * defaultPrevented, donc il faut le laisser fermer sa couche avant nous. Les
- * handlers qui consomment Escape en capture (terminal fullscreen, lightbox)
- * font leur propre preventDefault.
+ * WKWebView (Electrobun desktop) plays the macOS system beep when a keydown
+ * reaches the AppKit responder chain without being consumed. Escape →
+ * cancelOperation: has no responder, hence the beep unless the page calls
+ * preventDefault(). Bubble phase, last: Radix (dismissable layer) ignores an
+ * Escape that is already defaultPrevented, so it must be allowed to close its
+ * layer before we do anything. Handlers that consume Escape in the capture
+ * phase (terminal fullscreen, lightbox) do their own preventDefault.
  */
 export function useSuppressEscapeBeep(): void {
   useEffect(() => {

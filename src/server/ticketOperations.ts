@@ -25,39 +25,39 @@ const log = createLogger("ticket-operations");
 export const createTodoTicketInputSchema = ticketBatchOptionsSchema
   .partial()
   .extend({
-    project: z.string().min(1).describe("Clé d'un projet retourné par list_projects."),
-    title: z.string().optional().describe("Titre optionnel, déduit de la description lorsqu'il est vide."),
-    description: z.string().optional().describe("Description Markdown de la carte."),
-    externalUrl: externalUrlSchema.optional().describe("URL HTTP(S) d'une carte externe, ou null."),
-    prdEnabled: ticketBatchOptionsSchema.shape.prdEnabled.removeDefault().optional().describe("Préparer et faire valider un PRD avant l'implémentation."),
-    prDraft: ticketBatchOptionsSchema.shape.prDraft.removeDefault().optional().describe("Ouvrir la pull request en brouillon."),
-    autoMerge: ticketBatchOptionsSchema.shape.autoMerge.removeDefault().optional().describe("Fusionner automatiquement la pull request après validation."),
-    stealth: ticketBatchOptionsSchema.shape.stealth.removeDefault().optional().describe("Implémenter sans ouvrir de pull request."),
-    directPush: ticketBatchOptionsSchema.shape.directPush.removeDefault().optional().describe("Pousser directement sur la branche de base, sans pull request; désactive stealth et autoMerge."),
-    addScreenshots: ticketBatchOptionsSchema.shape.addScreenshots.removeDefault().optional().describe("Ajouter des captures d'écran à la pull request."),
-    verifyFeature: ticketBatchOptionsSchema.shape.verifyFeature.removeDefault().optional().describe("Exécuter une vérification fonctionnelle E2E (end-to-end) dans un navigateur réel."),
-    argusMultiLoop: ticketBatchOptionsSchema.shape.argusMultiLoop.removeDefault().optional().describe("Répéter la revue Argus jusqu'à obtenir deux passes consécutives sans finding."),
-    baseBranch: ticketBatchOptionsSchema.shape.baseBranch.removeDefault().optional().describe("Branche de départ et cible de pull request; null utilise celle du projet."),
-    dependsOn: z.string().nullable().optional().describe("Identifiant d'une carte parente du même projet pour une pull request empilée."),
-    model: ticketBatchOptionsSchema.shape.model.removeDefault().optional().describe("Modèle Claude de l'orchestrateur; null utilise le réglage serveur."),
-    effort: ticketBatchOptionsSchema.shape.effort.removeDefault().optional().describe("Effort Claude de l'orchestrateur; null utilise le réglage serveur."),
-    implementerModel: ticketBatchOptionsSchema.shape.implementerModel.removeDefault().optional().describe("Modèle Claude délégué à l'implémentation; null utilise le réglage serveur."),
-    implementerEffort: ticketBatchOptionsSchema.shape.implementerEffort.removeDefault().optional().describe("Effort Claude délégué à l'implémentation; null utilise le réglage serveur."),
-    orchestrator: ticketBatchOptionsSchema.shape.orchestrator.removeDefault().optional().describe("Fournisseur qui pilote tout le ticket."),
-    implementer: ticketBatchOptionsSchema.shape.implementer.removeDefault().optional().describe("Agent qui écrit le code d'implémentation."),
-    codexModel: ticketBatchOptionsSchema.shape.codexModel.removeDefault().optional().describe("Modèle Codex de l'orchestrateur; null utilise le réglage serveur."),
-    codexEffort: ticketBatchOptionsSchema.shape.codexEffort.removeDefault().optional().describe("Effort Codex de l'orchestrateur; null utilise le réglage serveur."),
-    codexFast: ticketBatchOptionsSchema.shape.codexFast.removeDefault().optional().describe("Activer le mode rapide de l'orchestrateur Codex."),
-    codexImplementerModel: ticketBatchOptionsSchema.shape.codexImplementerModel.removeDefault().optional().describe("Modèle du sous-agent Codex d'implémentation; null utilise le réglage serveur."),
-    codexImplementerEffort: ticketBatchOptionsSchema.shape.codexImplementerEffort.removeDefault().optional().describe("Effort du sous-agent Codex d'implémentation; null utilise le réglage serveur."),
-    codexImplementerFast: ticketBatchOptionsSchema.shape.codexImplementerFast.removeDefault().optional().describe("Mode rapide du sous-agent Codex; null hérite de l'orchestrateur."),
-    feasibilityEngine: ticketBatchOptionsSchema.shape.feasibilityEngine.removeDefault().optional().describe("Moteur utilisé pour l'analyse de faisabilité; null suit l'orchestrateur."),
-    requestId: z.string().trim().min(1).describe("Identifiant idempotent persistant choisi par le client."),
+    project: z.string().min(1).describe("Key of a project returned by list_projects."),
+    title: z.string().optional().describe("Optional title, derived from the description when empty."),
+    description: z.string().optional().describe("Markdown description of the card."),
+    externalUrl: externalUrlSchema.optional().describe("HTTP(S) URL of an external card, or null."),
+    prdEnabled: ticketBatchOptionsSchema.shape.prdEnabled.removeDefault().optional().describe("Prepare and get a PRD approved before implementation."),
+    prDraft: ticketBatchOptionsSchema.shape.prDraft.removeDefault().optional().describe("Open the pull request as a draft."),
+    autoMerge: ticketBatchOptionsSchema.shape.autoMerge.removeDefault().optional().describe("Automatically merge the pull request after validation."),
+    stealth: ticketBatchOptionsSchema.shape.stealth.removeDefault().optional().describe("Implement without opening a pull request."),
+    directPush: ticketBatchOptionsSchema.shape.directPush.removeDefault().optional().describe("Push directly to the base branch, without a pull request; disables stealth and autoMerge."),
+    addScreenshots: ticketBatchOptionsSchema.shape.addScreenshots.removeDefault().optional().describe("Add screenshots to the pull request."),
+    verifyFeature: ticketBatchOptionsSchema.shape.verifyFeature.removeDefault().optional().describe("Run an E2E (end-to-end) functional verification in a real browser."),
+    argusMultiLoop: ticketBatchOptionsSchema.shape.argusMultiLoop.removeDefault().optional().describe("Repeat the Argus review until two consecutive passes without findings."),
+    baseBranch: ticketBatchOptionsSchema.shape.baseBranch.removeDefault().optional().describe("Starting branch and pull request target; null uses the project's branch."),
+    dependsOn: z.string().nullable().optional().describe("Identifier of a parent card in the same project for a stacked pull request."),
+    model: ticketBatchOptionsSchema.shape.model.removeDefault().optional().describe("Claude model of the orchestrator; null uses the server setting."),
+    effort: ticketBatchOptionsSchema.shape.effort.removeDefault().optional().describe("Claude effort of the orchestrator; null uses the server setting."),
+    implementerModel: ticketBatchOptionsSchema.shape.implementerModel.removeDefault().optional().describe("Claude model delegated to implementation; null uses the server setting."),
+    implementerEffort: ticketBatchOptionsSchema.shape.implementerEffort.removeDefault().optional().describe("Claude effort delegated to implementation; null uses the server setting."),
+    orchestrator: ticketBatchOptionsSchema.shape.orchestrator.removeDefault().optional().describe("Provider that drives the whole ticket."),
+    implementer: ticketBatchOptionsSchema.shape.implementer.removeDefault().optional().describe("Agent that writes the implementation code."),
+    codexModel: ticketBatchOptionsSchema.shape.codexModel.removeDefault().optional().describe("Codex model of the orchestrator; null uses the server setting."),
+    codexEffort: ticketBatchOptionsSchema.shape.codexEffort.removeDefault().optional().describe("Codex effort of the orchestrator; null uses the server setting."),
+    codexFast: ticketBatchOptionsSchema.shape.codexFast.removeDefault().optional().describe("Enable fast mode for the Codex orchestrator."),
+    codexImplementerModel: ticketBatchOptionsSchema.shape.codexImplementerModel.removeDefault().optional().describe("Model of the Codex implementation subagent; null uses the server setting."),
+    codexImplementerEffort: ticketBatchOptionsSchema.shape.codexImplementerEffort.removeDefault().optional().describe("Effort of the Codex implementation subagent; null uses the server setting."),
+    codexImplementerFast: ticketBatchOptionsSchema.shape.codexImplementerFast.removeDefault().optional().describe("Fast mode of the Codex subagent; null inherits from the orchestrator."),
+    feasibilityEngine: ticketBatchOptionsSchema.shape.feasibilityEngine.removeDefault().optional().describe("Engine used for the feasibility study; null follows the orchestrator."),
+    requestId: z.string().trim().min(1).describe("Persistent idempotent identifier chosen by the client."),
   })
   .strict()
   .refine(
     (input) => (input.title ?? "").trim().length > 0 || (input.description ?? "").trim().length > 0,
-    { message: "titre ou description requis", path: ["title"] },
+    { message: "title or description required", path: ["title"] },
   );
 
 export type TicketOperationErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT";
@@ -173,9 +173,13 @@ function isProcessing(stage: Ticket["stage"]): boolean {
   return ACTIVE_STAGES.includes(stage);
 }
 
+function requestKeyConflictMessage(requestId: string): string {
+  return `request key ${requestId} was already used with different content`;
+}
+
 function normalizeCreateInput(input: CreateTodoTicketInput) {
   const parsed = createTodoTicketInputSchema.safeParse(input);
-  if (!parsed.success) throw new TicketOperationError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "entrée invalide");
+  if (!parsed.success) throw new TicketOperationError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "invalid input");
   const title = parsed.data.title ?? "";
   const description = parsed.data.description ?? "";
   let externalUrl: string | null = parsed.data.externalUrl ?? null;
@@ -198,12 +202,12 @@ export function ticketDependencyError(
   project: string,
 ): string | null {
   const parent = store.getTicket(dependsOn);
-  if (!parent) return "ticket dont il dépend introuvable";
-  if (parent.project !== project) return "la dépendance doit être dans le même projet";
+  if (!parent) return "ticket it depends on not found";
+  if (parent.project !== project) return "the dependency must be in the same project";
   const seen = new Set<string>();
   let cursor: Ticket | null = parent;
   while (cursor) {
-    if (cursor.id === ticketId) return "dépendance circulaire interdite";
+    if (cursor.id === ticketId) return "circular dependency not allowed";
     if (seen.has(cursor.id)) break;
     seen.add(cursor.id);
     cursor = cursor.dependsOn ? store.getTicket(cursor.dependsOn) : null;
@@ -230,18 +234,18 @@ export class TicketOperations {
 
   listTickets(input: ListTicketsInput = {}): TicketPage {
     if (input.project !== undefined && !isProjectKey(input.project)) {
-      throw new TicketOperationError("INVALID_INPUT", "projet inconnu");
+      throw new TicketOperationError("INVALID_INPUT", "unknown project");
     }
     if (input.column !== undefined && !columnSchema.safeParse(input.column).success) {
-      throw new TicketOperationError("INVALID_INPUT", "colonne inconnue");
+      throw new TicketOperationError("INVALID_INPUT", "unknown column");
     }
     const limit = input.limit ?? DEFAULT_TICKET_LIST_LIMIT;
     const offset = input.offset ?? 0;
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TICKET_LIST_LIMIT) {
-      throw new TicketOperationError("INVALID_INPUT", `limit doit être compris entre 1 et ${MAX_TICKET_LIST_LIMIT}`);
+      throw new TicketOperationError("INVALID_INPUT", `limit must be between 1 and ${MAX_TICKET_LIST_LIMIT}`);
     }
     if (!Number.isInteger(offset) || offset < 0) {
-      throw new TicketOperationError("INVALID_INPUT", "offset doit être un entier positif ou nul");
+      throw new TicketOperationError("INVALID_INPUT", "offset must be a positive integer or zero");
     }
     const filtered = this.deps.store
       .listTickets(false)
@@ -255,14 +259,14 @@ export class TicketOperations {
   createTodoTicket(input: CreateTodoTicketInput): CreateTodoTicketResult {
     const normalized = normalizeCreateInput(input);
     if (!isProjectKey(normalized.project)) {
-      throw new TicketOperationError("INVALID_INPUT", "projet inconnu");
+      throw new TicketOperationError("INVALID_INPUT", "unknown project");
     }
     const orchestrator = normalized.orchestrator ?? "claude";
     const implementer = normalized.implementer ?? "claude";
     if (!isAllowedAgentPair(orchestrator, implementer)) {
       throw new TicketOperationError(
         "INVALID_INPUT",
-        "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).",
+        "Unsupported orchestrator/implementer combination: Codex only orchestrates Codex (cross delegation is coming later).",
       );
     }
     if (normalized.dependsOn !== undefined && normalized.dependsOn !== null) {
@@ -312,7 +316,7 @@ export class TicketOperations {
       return { created: result.created, ticket: compactTicket(result.ticket) };
     } catch (error) {
       if (error instanceof TicketCreationRequestConflictError) {
-        throw new TicketOperationError("CONFLICT", error.message);
+        throw new TicketOperationError("CONFLICT", requestKeyConflictMessage(normalized.requestId));
       }
       throw error;
     }
@@ -341,7 +345,7 @@ export class TicketOperations {
 
     for (const [project, projectIds] of idsByProject) {
       void this.deps.feasibility.start(projectIds, project).catch((error: unknown) => {
-        log.error("démarrage de l'analyse en lot échoué", {
+        log.error("batch analysis start failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       });
@@ -352,28 +356,28 @@ export class TicketOperations {
 
   updateTicket(ticketId: string, input: unknown, options: UpdateTicketOptions = {}): Ticket {
     const ticket = this.deps.store.getTicket(ticketId);
-    if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket introuvable");
+    if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
     if (options.requireTodo && ticket.column !== "todo") {
-      throw new TicketOperationError("CONFLICT", "seul un ticket TODO peut être modifié par MCP");
+      throw new TicketOperationError("CONFLICT", "only a TODO ticket can be updated through MCP");
     }
     if (isProcessing(ticket.stage)) {
-      throw new TicketOperationError("CONFLICT", "ticket verrouillé (en traitement)");
+      throw new TicketOperationError("CONFLICT", "ticket locked (being processed)");
     }
     if (ticket.triageStatus === "running") {
-      throw new TicketOperationError("CONFLICT", "analyse en cours : attends le verdict avant de modifier");
+      throw new TicketOperationError("CONFLICT", "analysis in progress: wait for the verdict before updating");
     }
 
     const parsed = updateTicketSchema.safeParse(input);
     if (!parsed.success) {
-      throw new TicketOperationError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "entrée invalide");
+      throw new TicketOperationError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "invalid input");
     }
     const project = parsed.data.project ?? ticket.project;
     if (parsed.data.project !== undefined && parsed.data.project !== ticket.project) {
       if (!isProjectKey(parsed.data.project)) {
-        throw new TicketOperationError("INVALID_INPUT", "projet inconnu");
+        throw new TicketOperationError("INVALID_INPUT", "unknown project");
       }
       if (ticket.column !== "todo") {
-        throw new TicketOperationError("CONFLICT", "le projet ne peut être changé que dans TODO");
+        throw new TicketOperationError("CONFLICT", "the project can only be changed in TODO");
       }
     }
 
@@ -392,7 +396,7 @@ export class TicketOperations {
       if (ticket.column !== "todo") {
         throw new TicketOperationError(
           "CONFLICT",
-          "orchestrateur/implémenteur modifiables uniquement dans TODO",
+          "orchestrator/implementer can only be changed in TODO",
         );
       }
       const orchestrator = parsed.data.orchestrator ?? ticket.orchestrator;
@@ -400,7 +404,7 @@ export class TicketOperations {
       if (!isAllowedAgentPair(orchestrator, implementer)) {
         throw new TicketOperationError(
           "INVALID_INPUT",
-          "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).",
+          "Unsupported orchestrator/implementer combination: Codex only orchestrates Codex (cross delegation is coming later).",
         );
       }
     }
@@ -434,20 +438,20 @@ export class TicketOperations {
 
   async startTicket(ticketId: string): Promise<StartTicketResult> {
     const ticket = this.deps.store.getTicket(ticketId);
-    if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket introuvable");
+    if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
     if (isActive(ticket)) return { status: "already_started", ticket: compactTicket(ticket) };
     if (ticket.column !== "todo") {
-      throw new TicketOperationError("CONFLICT", "seul un ticket TODO peut être lancé");
+      throw new TicketOperationError("CONFLICT", "only a TODO ticket can be started");
     }
     if (ticket.triageStatus === "running") {
-      throw new TicketOperationError("CONFLICT", "analyse en cours : attends le verdict avant de lancer l'implémentation");
+      throw new TicketOperationError("CONFLICT", "analysis in progress: wait for the verdict before starting the implementation");
     }
     if (isBlocked(ticket, this.deps.store)) {
-      throw new TicketOperationError("CONFLICT", "en attente de la PR du ticket dont il dépend");
+      throw new TicketOperationError("CONFLICT", "waiting for the PR of the ticket it depends on");
     }
     const queued = this.deps.lifecycle.enqueue(ticketId);
     void this.deps.slots.startTicket(ticketId).catch((error: unknown) => {
-      log.error("démarrage du ticket échoué", {
+      log.error("ticket start failed", {
         ticketId,
         error: error instanceof Error ? error.message : String(error),
       });

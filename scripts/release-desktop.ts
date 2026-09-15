@@ -55,8 +55,8 @@ function assertPackageVersionInSync(
   const version = installedPackageVersion(packagePath);
   if (version !== expected) {
     fail(
-      `${label} (${expected}) ne correspond pas au SDK installé (${String(version)}) — ` +
-        `mettre à jour la constante dans ${constantPath}`,
+      `${label} (${expected}) does not match the installed SDK (${String(version)}) — ` +
+        `update the constant in ${constantPath}`,
     );
   }
 }
@@ -84,7 +84,7 @@ async function writeSha256(filePath: string, fileName: string): Promise<void> {
 
 const version = process.argv[2] ?? "";
 if (!VERSION_PATTERN.test(version)) {
-  fail(`version invalide "${version}" — attendu X.Y.Z ou X.Y.Z-suffixe (tag sans le "v")`);
+  fail(`invalid version "${version}" — expected X.Y.Z or X.Y.Z-suffix (tag without the "v")`);
 }
 
 assertSdkVersionsInSync();
@@ -92,7 +92,7 @@ assertSdkVersionsInSync();
 await run(["bun", "run", "build:web"]);
 await run([ELECTROBUN_BIN, "build", "--env=stable"], { ATELIER_VERSION: version, ATELIER_RELEASE: "1" });
 
-if (!existsSync(BUILT_DMG)) fail(`DMG introuvable : ${BUILT_DMG}`);
+if (!existsSync(BUILT_DMG)) fail(`DMG not found: ${BUILT_DMG}`);
 
 mkdirSync(RELEASE_FOLDER, { recursive: true });
 const artifactName = `Atelier-v${version}-arm64.dmg`;

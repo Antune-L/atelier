@@ -24,7 +24,7 @@ Codex sessions run through the same provider abstraction (`src/server/system/cod
 
 ## Ticket flow
 
-1. Card created in **TODO**, dragged to **To implement**.
+1. Card created in the `todo` column, dragged to `implementing`.
 2. A slot (git worktree) is acquired; a `claude` SDK session starts in-process.
 3. The agent drives its work through the MCP tools: `update_stage`, `ask_user`, `done`, `fail`.
 4. `done(pr_url)` → the backend verifies on its own (clean tree, branch pushed, PR exists) before closing.

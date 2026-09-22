@@ -40,7 +40,7 @@
     "semantic_hash": ""
   },
   "package.json": {
-    "mtime": 1790096118.7885828,
+    "mtime": 1790096218.3668063,
     "ast_hash": "b0d670238136d1ac9cb82e96b93d7712",
     "semantic_hash": ""
   },
@@ -125,8 +125,8 @@
     "semantic_hash": ""
   },
   "src/server/index.ts": {
-    "mtime": 1789464751.6301599,
-    "ast_hash": "e17b7a85df99738a48a3b8e45d5bf1c3",
+    "mtime": 1790097331.538576,
+    "ast_hash": "ff096e2f001bba37eae325c3071097e6",
     "semantic_hash": ""
   },
   "src/server/lifecycle.ts": {
@@ -210,7 +210,7 @@
     "semantic_hash": "2e98876af90b99cdefcf35accc6b6ed6"
   },
   "src/shared/pricing.ts": {
-    "mtime": 1790096118.7890146,
+    "mtime": 1790096218.3681045,
     "ast_hash": "2997cbce57c10729a62d86ed277a3a87",
     "semantic_hash": ""
   },
@@ -475,8 +475,8 @@
     "semantic_hash": "08afadef2ce763fc9bcd5d2529256fb1"
   },
   "src/web/src/hooks/useCapabilities.ts": {
-    "mtime": 1788635260.5843494,
-    "ast_hash": "44c8e297918d9c06c8a11d2ce42e2b55",
+    "mtime": 1790097331.5388203,
+    "ast_hash": "6730904644f44cd57a869d276dda0db2",
     "semantic_hash": ""
   },
   "src/web/src/hooks/useProfiles.ts": {
@@ -1040,7 +1040,7 @@
     "semantic_hash": ""
   },
   "src/shared/pricing.test.ts": {
-    "mtime": 1790096118.788771,
+    "mtime": 1790096218.3671818,
     "ast_hash": "2f5b309f0e93d86e46588676c9ecfebd",
     "semantic_hash": ""
   },

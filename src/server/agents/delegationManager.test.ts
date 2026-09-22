@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import type { VcsProvider } from "../../shared/constants.ts";
 import type { ReviewKind } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { ticketSchema } from "../../shared/schemas.ts";
@@ -43,9 +44,14 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
     return this.fingerprint;
   }
 
-  override async publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {
+  override async publishReview(
+    slotPath: string,
+    prUrl: string,
+    opts: PublishReviewOptions,
+    provider: VcsProvider,
+  ): Promise<PublishReviewResult> {
     this.publishedReviews.push(opts);
-    return super.publishReview(slotPath, prUrl, opts);
+    return super.publishReview(slotPath, prUrl, opts, provider);
   }
 
   override async checkCodexRuntime() {

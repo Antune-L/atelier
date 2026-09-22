@@ -41,8 +41,8 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span className="font-mono">{pr.headBranch}</span>
           <span>· {pr.author}</span>
-          <span className="text-success">+{pr.additions}</span>
-          <span className="text-destructive">-{pr.deletions}</span>
+          {pr.additions !== null && <span className="text-success">+{pr.additions}</span>}
+          {pr.deletions !== null && <span className="text-destructive">-{pr.deletions}</span>}
           {needsAttention && <Badge variant="warning">À reviewer</Badge>}
           {pr.isDraft && <Badge variant="secondary">Draft</Badge>}
         </div>

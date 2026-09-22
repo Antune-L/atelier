@@ -2,10 +2,13 @@
  * The side-effect boundary. Every external mutation (git lifecycle, tmux, gh,
  * osascript, ~/.claude.json) goes through this interface so the server can boot
  * and run end-to-end with a fake implementation (dry-run) during dev/test.
+ *
+ * PR-related methods take the project's `VcsProvider`: the adapter keeps the plain-git half and
+ * resolves the provider half to a `VcsClient` (see `./vcs/types.ts`).
  */
 
-import type { OpenPr } from "../../shared/schemas.ts";
-import type { Orchestrator } from "../../shared/constants.ts";
+import type { OpenPr, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -67,6 +70,7 @@ export interface PrepareReviewWorktreeOptions {
   slotPath: string;
   prUrl: string;
   prNumber: number;
+  provider: VcsProvider;
 }
 
 export interface ReviewHeadResult extends DoneGateResult {
@@ -82,7 +86,7 @@ export interface ReviewPublicationComment {
 export type ReviewPublicationEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 export type ReviewPublicationState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED";
 
-/** The GitHub review state each publication event produces, mirrored by the done gate. */
+/** The review state each publication event produces, mirrored by the done gate. */
 export const REVIEW_PUBLICATION_STATE_BY_EVENT = {
   APPROVE: "APPROVED",
   REQUEST_CHANGES: "CHANGES_REQUESTED",
@@ -119,11 +123,11 @@ export interface WorktreeSetupOptions {
 
 export interface ReviewDoneOptions {
   /**
-   * When set, the gate also requires a review posted by the current gh user at or after this
+   * When set, the gate also requires a review posted by the current provider user at or after this
    * epoch ms (safety net for argus --post). Null keeps the plain PR-existence check.
    */
   requirePostedSince: number | null;
-  /** Stable marker tying the GitHub COMMENT review to the current persisted review pass. */
+  /** Stable marker tying the published COMMENT review to the current persisted review pass. */
   publicationMarker: string | null;
   expectedCommitSha: string | null;
   publishedReviewId: number | null;
@@ -228,7 +232,7 @@ export interface SystemAdapter {
   resizePane(sessionName: string, cols: number, rows: number): Promise<void>;
 
   // ---- done() gate verification ----
-  verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
+  verifyDone(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   /**
    * Stealth ready-for-review gate: clean working tree AND branch fully pushed (no commits ahead of
    * origin/<branch>). Mirrors verifyDone minus the `gh pr view` check — a stealth ticket has no PR yet.
@@ -242,22 +246,27 @@ export interface SystemAdapter {
   /** Hash current tracked and untracked worktree contents, independent from commit identity. */
   codeFingerprint(slotPath: string): Promise<string>;
   prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult>;
-  readReviewHead(slotPath: string, prUrl: string): Promise<ReviewHeadResult>;
-  publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult>;
+  readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult>;
+  publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions, provider: VcsProvider): Promise<PublishReviewResult>;
   /**
    * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists
-   * on origin first, then runs `gh pr create [--draft] --base <baseBranch> --fill`. Returns the PR URL
-   * on success; ok=false with the captured stderr/stdout on failure.
+   * on origin first, then asks the provider to open the PR from it. Returns the PR URL on success;
+   * ok=false with the captured stderr/stdout on failure.
    */
-  createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }>;
+  createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }, provider: VcsProvider): Promise<{ ok: boolean; url: string; reason: string }>;
   /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
-  verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult>;
-  /** PR description body (`gh pr view --json body`), used as the agent-work summary. null when unreadable. */
-  fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null>;
+  verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions, provider: VcsProvider): Promise<DoneGateResult>;
+  /** PR description body, used as the agent-work summary. null when unreadable. */
+  fetchPrSummary(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
 
   // ---- PR listing (review entry point) ----
-  /** Open PRs of the project repo, as surfaced by `gh pr list`. Throws on CLI failure. */
-  listOpenPrs(repoPath: string): Promise<OpenPr[]>;
+  /** Open PRs of the project repo, as surfaced by the provider. Throws on CLI failure. */
+  listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
+  /**
+   * Cheap read-only reachability check of the project's VCS provider (list one PR). Never throws:
+   * every failure (missing CLI, unparseable remote, CLI error) comes back as `ok: false` + message.
+   */
+  testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
 
   // ---- branch listing (base branch picker) ----
   /** Remote branch names of the project repo (`git ls-remote --heads origin`). Throws on CLI failure. */
@@ -265,9 +274,9 @@ export interface SystemAdapter {
 
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
-  mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult>;
-  /** Read the PR's GitHub merge state. `merged` is true only when state === "MERGED". `state` is "OPEN"|"MERGED"|"CLOSED"|"" (empty when unreadable). */
-  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
+  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
+  /** Read the PR's merge state, neutralised by the provider's client. `merged` is true only for "merged". */
+  checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
 
   // ---- project test commands ----
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;

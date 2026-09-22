@@ -160,7 +160,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
               <Row label="PR analysée" value={`#${ticket.prNumber}`} />
             )}
             <Row
-              label="Commentaires postés sur GitHub"
+              label="Commentaires postés sur la PR"
               value={ticket.postComments ? YES : NO}
             />
             <Row

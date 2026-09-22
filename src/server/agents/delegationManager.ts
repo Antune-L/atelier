@@ -26,7 +26,7 @@ import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/prot
 import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
 
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
-import { getProject, isProjectKey } from "../config.ts";
+import { getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
@@ -247,7 +247,10 @@ Return the confirmed findings only. Use verdict=revise if any remains, approve o
 State briefly in the summary which findings you rejected or downgraded. Do not call any pipeline tool.`;
 }
 
-/** Inline comment body: GitHub already renders the `path:line` anchor, so it is not repeated here. */
+/**
+ * Inline comment body: GitHub already renders the `path:line` anchor, so it is not repeated here.
+ * A provider whose threads do not show it (Azure DevOps) prepends it in its own client.
+ */
 function renderFinding(finding: ReviewFinding): string {
   return `**${finding.severity.toUpperCase()}** — ${finding.summary}\n\n${finding.evidence}`;
 }
@@ -629,7 +632,7 @@ export class DelegationManager {
       body: report,
       comments,
       event,
-    });
+    }, projectVcsProvider(ticket.project));
     if (!published.ok || published.reviewId === null) return { ok: false, result: `Publication refusée : ${published.reason}` };
     if (!this.store.recordReviewPublication({
       ticketId: ticket.id,
@@ -648,9 +651,12 @@ export class DelegationManager {
       commitSha: reviewedCommitSha,
     });
     const refutedNote = refutedCount === 0 ? "" : ` (${refutedCount} finding(s) auto-réfuté(s) ignoré(s))`;
+    // A client that degraded a capability rather than failing (GitHub self-approval, an Azure vote
+    // refused by a policy) reports it as a reason on an ok result: surface it to the session.
+    const degradedNote = published.reason === "" ? "" : ` Note : ${published.reason}.`;
     return {
       ok: true,
-      result: `Review publiée sur le commit ${reviewedCommitSha}${refutedNote}. Appelle maintenant done().`,
+      result: `Review publiée sur le commit ${reviewedCommitSha}${refutedNote}.${degradedNote} Appelle maintenant done().`,
     };
   }
 
@@ -913,7 +919,7 @@ export class DelegationManager {
       if (!isProjectKey(ticket.project) || ticket.prUrl === null || ticket.prNumber === null) {
         return { ok: false, result: `Impossible de préparer la review ${kind} : identité de PR incomplète.` };
       }
-      const repoPath = getProject(ticket.project).repoPath;
+      const { repoPath, vcsProvider } = getProject(ticket.project);
       const prUrl = ticket.prUrl;
       const prNumber = ticket.prNumber;
       const prepared = await this.repoMutex.run(repoPath, async () => {
@@ -921,12 +927,13 @@ export class DelegationManager {
         if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch || slot?.ticketId !== ticket.id) {
           return { ok: false, reason: "slot de review libéré pendant la préparation", commitSha: null };
         }
-        if (requiresApproval) return this.system.readReviewHead(cwd, prUrl);
+        if (requiresApproval) return this.system.readReviewHead(cwd, prUrl, vcsProvider);
         return this.system.prepareReviewWorktree({
           repoPath,
           slotPath: cwd,
           prUrl,
           prNumber,
+          provider: vcsProvider,
         });
       });
       if (!prepared.ok || prepared.commitSha === null) {

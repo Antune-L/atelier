@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { nanoid } from "nanoid";
 
-import { CODEX_MODELS, CODEX_PROFILE_SEEDED_META_KEY, CODEX_SEED_PROFILE, DEFAULT_CODEX_MODEL, DEFAULT_PROFILES, ORCHESTRATOR_BACKFILL_META_KEY, SLOT_COUNT, type ProfileConfig } from "../../shared/constants.ts";
+import { CODEX_MODELS, CODEX_PROFILE_SEEDED_META_KEY, CODEX_SEED_PROFILE, DEFAULT_CODEX_MODEL, DEFAULT_PROFILES, DEFAULT_VCS_PROVIDER, ORCHESTRATOR_BACKFILL_META_KEY, SLOT_COUNT, type ProfileConfig } from "../../shared/constants.ts";
 
 export const CODEX_CATALOG_MIGRATION_ID = "codex-catalog-v4";
 export const CODEX_CATALOG_MIGRATED_META_KEY = "codex_catalog_v4_migrated";
@@ -150,6 +150,7 @@ CREATE TABLE IF NOT EXISTS projects (
   repo_path TEXT NOT NULL,
   base_branch TEXT NOT NULL,
   commit_timeout_ms INTEGER NOT NULL,
+  vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}',
   default_auto_merge INTEGER NOT NULL DEFAULT 0,
   default_add_screenshots INTEGER NOT NULL DEFAULT 0,
   color TEXT,
@@ -366,6 +367,11 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "error", ddl: "ALTER TABLE review_approvals ADD COLUMN error TEXT" },
 ];
 
+/** Columns added to `projects` after the original schema; applied idempotently to existing DBs. */
+const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "vcs_provider", ddl: `ALTER TABLE projects ADD COLUMN vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}'` },
+];
+
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "requires_approval", ddl: "ALTER TABLE review_passes ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 1" },
   { column: "reviewed_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN reviewed_commit_sha TEXT" },
@@ -387,6 +393,7 @@ export function createDatabase(path: string): Database {
   const reviewPassPolicyExisted = hasColumn(db, "review_passes", "requires_approval");
   migrate(db, "tickets", TICKET_MIGRATIONS);
   migrate(db, "profiles", PROFILE_MIGRATIONS);
+  migrate(db, "projects", PROJECT_MIGRATIONS);
   migrate(db, "execution_runs", EXECUTION_MIGRATIONS);
   migrate(db, "review_passes", REVIEW_PASS_MIGRATIONS);
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);

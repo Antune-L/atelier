@@ -27,6 +27,7 @@ import {
   type Orchestrator,
   type Stage,
 } from "@shared/constants";
+import { prNumberFromUrl } from "@shared/prUrl";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
 import { isCodexFastServiceTier, type CodexRuntimeStatus } from "@shared/codexCapabilities";
 
@@ -353,15 +354,7 @@ export function ticketImplementationDuration(
   return effectiveWorkDurationMs(ticket);
 }
 
-const PR_URL_NUMBER_REGEX = /\/pull\/(\d+)/;
-
-/** Extracts the PR number from a GitHub PR URL (e.g. ".../pull/123" → 123), or null. */
-export function prNumberFromUrl(prUrl: string | null): number | null {
-  if (prUrl === null) return null;
-  const match = PR_URL_NUMBER_REGEX.exec(prUrl);
-  if (match === null || match[1] === undefined) return null;
-  return Number.parseInt(match[1], 10);
-}
+export { prNumberFromUrl };
 
 /** PR number to display on a card: stored `prNumber`, else parsed from `prUrl`. */
 export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): number | null {

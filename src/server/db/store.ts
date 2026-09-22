@@ -23,7 +23,8 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
+import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
@@ -180,6 +181,7 @@ export interface NewProject {
   repoPath: string;
   baseBranch: string;
   commitTimeoutMs: number;
+  vcsProvider?: VcsProvider;
   defaultAutoMerge: boolean;
   defaultAddScreenshots: boolean;
   color?: string;
@@ -196,6 +198,7 @@ export interface ProjectPatch {
   repoPath?: string;
   baseBranch?: string;
   commitTimeoutMs?: number;
+  vcsProvider?: VcsProvider;
   defaultAutoMerge?: boolean;
   defaultAddScreenshots?: boolean;
   color?: string | null;
@@ -1351,8 +1354,8 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
     this.db
       .query(
-        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         key,
@@ -1374,6 +1377,7 @@ export class Store {
         nextOrder,
         now,
         now,
+        data.vcsProvider ?? DEFAULT_VCS_PROVIDER,
       );
     const project = this.getProjectRow(key);
     if (!project) throw new Error(`createProject: projet ${key} introuvable après insertion`);
@@ -1386,6 +1390,7 @@ export class Store {
     if (patch.repoPath !== undefined) builder.set("repo_path", patch.repoPath);
     if (patch.baseBranch !== undefined) builder.set("base_branch", patch.baseBranch);
     if (patch.commitTimeoutMs !== undefined) builder.set("commit_timeout_ms", patch.commitTimeoutMs);
+    if (patch.vcsProvider !== undefined) builder.set("vcs_provider", patch.vcsProvider);
     if (patch.defaultAutoMerge !== undefined) builder.set("default_auto_merge", patch.defaultAutoMerge ? 1 : 0);
     if (patch.defaultAddScreenshots !== undefined) builder.set("default_add_screenshots", patch.defaultAddScreenshots ? 1 : 0);
     if (patch.color !== undefined) builder.set("color", patch.color);

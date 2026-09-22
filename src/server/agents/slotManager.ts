@@ -15,7 +15,7 @@ import {
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
-import { MODELS, SLOTS_ROOT, getProject, isProjectKey } from "../config.ts";
+import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
 import type { ReviewPass, Store } from "../db/store.ts";
@@ -727,6 +727,7 @@ export class SlotManager {
               slotPath: path,
               prUrl: ticket.prUrl,
               prNumber: ticket.prNumber,
+              provider: project.vcsProvider,
             });
             if (!prepared.ok) throw new Error(prepared.reason);
           }
@@ -774,6 +775,7 @@ export class SlotManager {
         slotId,
         cwd: path,
         composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+        vcsProvider: projectVcsProvider(ticket.project),
         // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
         ...(opts?.resume && ticket.sessionId ? { resumeSessionId: ticket.sessionId } : {}),
       }),
@@ -815,6 +817,7 @@ export class SlotManager {
    * lost when the slot is released; everything else gates on the standard feature done.
    */
   private doneGate(ticket: Ticket, path: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+    const provider = projectVcsProvider(ticket.project);
     if (ticket.kind === "review") {
       const reviewPass = this.store.getReviewPass(ticket.id);
       return this.system.verifyReviewDone(path, prUrl, {
@@ -824,7 +827,7 @@ export class SlotManager {
         publishedReviewId: reviewPass?.publishedReviewId ?? null,
         expectedReviewState: reviewPublicationState(reviewPass),
         requirePushedBranch: reviewPass?.requiresApproval ? ticket.prHeadBranch : null,
-      });
+      }, provider);
     }
     if (ticket.kind === "clean") {
       return this.system.verifyReviewDone(path, prUrl, {
@@ -834,9 +837,9 @@ export class SlotManager {
         publishedReviewId: null,
         expectedReviewState: null,
         requirePushedBranch: ticket.prHeadBranch,
-      });
+      }, provider);
     }
-    return this.system.verifyDone(path, branch, prUrl);
+    return this.system.verifyDone(path, branch, prUrl, provider);
   }
 
   /** Verify and release a slot on done(pr_url). */
@@ -896,7 +899,7 @@ export class SlotManager {
     let mergeError: string | null = null;
     if (ticket.autoMerge && ticket.kind === "feature") {
       log.info("auto-merge de la PR", { ticketId, prUrl });
-      const merge = await this.system.mergePr(path, ticket.branch, prUrl);
+      const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {
         column = "merged";
         this.store.logEvent(ticketId, "auto_merged", { prUrl });
@@ -918,7 +921,9 @@ export class SlotManager {
     // landed in done/merged; a review/clean ticket's PR body is not the agent's work, and a
     // merge-failed ticket never surfaces it). Read before releasing the slot, while the worktree is
     // still present for gh's cwd.
-    const agentSummary = ticket.kind === "feature" && !mergeError ? await this.system.fetchPrSummary(path, prUrl) : null;
+    const agentSummary = ticket.kind === "feature" && !mergeError
+      ? await this.system.fetchPrSummary(path, prUrl, projectVcsProvider(ticket.project))
+      : null;
 
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -1138,7 +1143,8 @@ export class SlotManager {
     }
     this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
     const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
-    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft: ticket.prDraft });
+    const provider = getProject(ticket.project).vcsProvider;
+    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft: ticket.prDraft }, provider);
     if (!result.ok) {
       // Roll the stage back to the resting "done" so the card stays in "À review" and a retry is allowed.
       this.touch(this.store.updateTicket(ticketId, { stage: "done", error: result.reason }));
@@ -1146,7 +1152,7 @@ export class SlotManager {
       return { ok: false, reason: result.reason, prUrl: null };
     }
     // Capture the agent's work summary from the PR description before releasing the slot (gh cwd).
-    const agentSummary = await this.system.fetchPrSummary(slotPath(ticket.slotId), result.url);
+    const agentSummary = await this.system.fetchPrSummary(slotPath(ticket.slotId), result.url, provider);
     await this.releaseSlot(ticket.slotId, ticket);
     this.touch(
       this.store.updateTicket(ticketId, {

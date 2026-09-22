@@ -31,9 +31,10 @@ import type {
   UpdateProjectInput,
   UpdateTicketInput,
   UploadResult,
+  VcsConnectionResult,
   WorktreeSession,
 } from "@shared/schemas";
-import type { Column } from "@shared/constants";
+import type { Column, PrState } from "@shared/constants";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -118,6 +119,8 @@ export const api = {
     request("/api/tickets/analyze", { method: "POST", body: JSON.stringify(input) }),
   projectPrs: (key: string): Promise<OpenPr[]> => request(`/api/projects/${key}/prs`),
   projectBranches: (key: string): Promise<string[]> => request(`/api/projects/${key}/branches`),
+  testProjectConnection: (key: string): Promise<VcsConnectionResult> =>
+    request(`/api/projects/${key}/test-connection`),
   createReviews: (input: CreateReviewInput): Promise<Ticket[]> =>
     request("/api/reviews", { method: "POST", body: JSON.stringify(input) }),
   createCleaners: (input: CreateCleanInput): Promise<Ticket[]> =>
@@ -134,7 +137,7 @@ export const api = {
     request(`/api/tickets/${id}/validate-prd`, { method: "POST", body: JSON.stringify({ note }) }),
   markMerged: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/merged`, { method: "POST" }),
-  checkMerged: (id: string): Promise<{ merged: boolean; state: string; ticket?: Ticket }> =>
+  checkMerged: (id: string): Promise<{ merged: boolean; state: PrState; ticket?: Ticket }> =>
     request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),

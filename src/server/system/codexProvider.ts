@@ -39,6 +39,7 @@ import {
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
+import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
 import { workerToolsForRole } from "./sessionRolePolicy.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
@@ -402,17 +403,49 @@ function shellDenyOnMatch(source: string, pattern: string, reason: string): stri
   return shellDenyWhen([shellGrepTest(source, pattern)], reason);
 }
 
-function reviewPublishingGuardScript(): string {
-  const { prPublish, apiCall, apiWriteMethod, apiReadMethod, apiWriteInput } = reviewPublishingDenyPatterns;
-  const reason = REVIEW_PUBLISHING_DENIAL_REASON;
-  const isApiCall = shellGrepTest("$input", apiCall);
+/** Shell variable holding the one command segment the review-publishing deny blocks look at. */
+const SEGMENT_SHELL_VAR = "$segment";
+
+/**
+ * Deny block for one raw-API escape hatch (`gh api`, `az devops invoke`/`az rest`): a write method
+ * denies outright, and a request body denies unless the segment explicitly names a read method.
+ */
+function apiWriteDenyScript(patterns: ApiDenyPatterns, reason: string): string {
+  const isCall = shellGrepTest(SEGMENT_SHELL_VAR, patterns.call);
   return (
-    shellDenyOnMatch("$input", prPublish, reason) +
-    shellDenyWhen([isApiCall, shellGrepTest("$input", apiWriteMethod, true)], reason) +
+    shellDenyWhen([isCall, shellGrepTest(SEGMENT_SHELL_VAR, patterns.writeMethod, true)], reason) +
     shellDenyWhen(
-      [isApiCall, `! ${shellGrepTest("$input", apiReadMethod, true)}`, shellGrepTest("$input", apiWriteInput)],
+      [
+        isCall,
+        `! ${shellGrepTest(SEGMENT_SHELL_VAR, patterns.readMethod, true)}`,
+        shellGrepTest(SEGMENT_SHELL_VAR, patterns.writeInput),
+      ],
       reason,
     )
+  );
+}
+
+/**
+ * NOTE(ali): the deny blocks MUST see one command segment at a time, exactly like the in-process
+ * predicate — run on the whole input, a read method anywhere (`gh api user --method GET && az devops
+ * invoke … --in-file b.json`) suppresses the write deny of another segment. `tr` turns every
+ * separator into a newline; backslashes are separators too, so a `\n` escaped inside the JSON
+ * envelope splits as well. The `for` loop runs in the main shell, so `deny` can still exit the hook.
+ */
+function perSegmentScript(body: string): string {
+  return (
+    `set -f\nIFS='\n'\n` +
+    `for segment in $(printf '%s' "$input" | tr ';&|\\\\' '\\n\\n\\n\\n'); do\n` +
+    `${body}done\nunset IFS\nset +f\n`
+  );
+}
+
+function reviewPublishingGuardScript(): string {
+  const { commands, apis } = reviewPublishingDenyPatterns;
+  const reason = REVIEW_PUBLISHING_DENIAL_REASON;
+  return perSegmentScript(
+    commands.map((pattern) => shellDenyOnMatch(SEGMENT_SHELL_VAR, pattern, reason)).join("") +
+      apis.map((patterns) => apiWriteDenyScript(patterns, reason)).join(""),
   );
 }
 

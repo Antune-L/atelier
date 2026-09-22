@@ -1,6 +1,7 @@
-import type { OpenPr } from "../../shared/schemas.ts";
+import type { OpenPr, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { CODEX_MODELS, CODEX_EFFORTS } from "../../shared/constants.ts";
+import type { PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -21,56 +22,12 @@ import type {
   SystemAdapter,
   WorktreeSetupOptions,
 } from "./types.ts";
+import { FakeVcsClient } from "./vcs/fake.ts";
+import type { VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
 
 const FAKE_SETTLE_MS = 50;
-
-/** Base offset for the deterministic dry-run stealth PR number (createPr). */
-const FAKE_STEALTH_PR_BASE = 900;
-
-/** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
-const FAKE_OPEN_PRS: OpenPr[] = [
-  {
-    number: 142,
-    title: "feat: panier multi-devises",
-    url: "https://github.com/acme/repo/pull/142",
-    headBranch: "feat/panier-devises",
-    baseBranch: "main",
-    isDraft: false,
-    reviewDecision: "REVIEW_REQUIRED",
-    updatedAt: "2026-06-12T09:30:00Z",
-    author: "alice",
-    additions: 320,
-    deletions: 45,
-  },
-  {
-    number: 137,
-    title: "fix: race condition au checkout",
-    url: "https://github.com/acme/repo/pull/137",
-    headBranch: "fix/checkout-race",
-    baseBranch: "develop",
-    isDraft: false,
-    reviewDecision: "",
-    updatedAt: "2026-06-11T14:05:00Z",
-    author: "bob",
-    additions: 28,
-    deletions: 12,
-  },
-  {
-    number: 130,
-    title: "chore: bump des dépendances",
-    url: "https://github.com/acme/repo/pull/130",
-    headBranch: "chore/bump-deps",
-    baseBranch: "main",
-    isDraft: true,
-    reviewDecision: "APPROVED",
-    updatedAt: "2026-06-09T08:00:00Z",
-    author: "carol",
-    additions: 980,
-    deletions: 970,
-  },
-];
 
 /** ASCII carriage return — marks an Enter keystroke in the dry-run shell echo. */
 const CARRIAGE_RETURN = 0x0d;
@@ -93,6 +50,8 @@ function delay(ms: number): Promise<void> {
  */
 export class FakeSystemAdapter implements SystemAdapter {
   readonly dryRun = true;
+  /** One fake client for every provider: dry-run never talks to a real PR host. */
+  private readonly vcsClient = new FakeVcsClient();
   private readonly liveSessions = new Set<string>();
   private readonly captureCounters = new Map<string, number>();
   private readonly paneStreams = new Map<string, FakePaneStream>();
@@ -101,6 +60,10 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   private log(action: string, detail: Record<string, unknown> = {}): void {
     dryRunLog.debug(action, detail);
+  }
+
+  private vcs(_provider: VcsProvider): VcsClient {
+    return this.vcsClient;
   }
 
   async seedWorkspaceTrust(paths: string[]): Promise<void> {
@@ -285,9 +248,9 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("resizePane", { sessionName, cols, rows });
   }
 
-  async verifyDone(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+  async verifyDone(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
     this.log("verifyDone", { slotPath, branch, prUrl });
-    return { ok: true, reason: "" };
+    return this.vcs(provider).verifyPrExists(slotPath, prUrl);
   }
 
   async verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult> {
@@ -307,29 +270,37 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {
     this.log("prepareReviewWorktree", { ...opts });
-    return { ok: true, reason: "", commitSha: "dry-run-review-head" };
+    return this.vcs(opts.provider).readPrHead(opts.slotPath, opts.prUrl);
   }
 
-  async readReviewHead(slotPath: string, prUrl: string): Promise<ReviewHeadResult> {
+  async readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult> {
     this.log("readReviewHead", { slotPath, prUrl });
-    return { ok: true, reason: "", commitSha: "dry-run-review-head" };
+    return this.vcs(provider).readPrHead(slotPath, prUrl);
   }
 
-  async publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {
+  async publishReview(
+    slotPath: string,
+    prUrl: string,
+    opts: PublishReviewOptions,
+    provider: VcsProvider,
+  ): Promise<PublishReviewResult> {
     this.log("publishReview", { slotPath, prUrl, ...opts });
-    return { ok: true, reason: "", reviewId: 1 };
+    return this.vcs(provider).publishReview(slotPath, prUrl, opts);
   }
 
-  async createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }): Promise<{ ok: boolean; url: string; reason: string }> {
+  async createPr(
+    slotPath: string,
+    baseBranch: string,
+    opts: { draft: boolean },
+    provider: VcsProvider,
+  ): Promise<{ ok: boolean; url: string; reason: string }> {
     this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
-    // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).
-    const prNumber = FAKE_STEALTH_PR_BASE + baseBranch.length;
-    return { ok: true, url: `https://github.com/fake/repo/pull/${prNumber}`, reason: "" };
+    return this.vcs(provider).createPr(slotPath, baseBranch, opts);
   }
 
-  async fetchPrSummary(slotPath: string, prUrl: string): Promise<string | null> {
+  async fetchPrSummary(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
     this.log("fetchPrSummary", { slotPath, prUrl });
-    return "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
+    return this.vcs(provider).fetchPrSummary(slotPath, prUrl);
   }
 
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
@@ -346,9 +317,14 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
-  async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
+  async listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]> {
     this.log("listOpenPrs", { repoPath });
-    return FAKE_OPEN_PRS;
+    return this.vcs(provider).listOpenPrs(repoPath);
+  }
+
+  async testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult> {
+    this.log("testVcsConnection", { repoPath, provider });
+    return this.vcs(provider).testConnection(repoPath, Date.now());
   }
 
   async listBranches(repoPath: string): Promise<string[]> {
@@ -356,14 +332,15 @@ export class FakeSystemAdapter implements SystemAdapter {
     return ["main", "develop", "staging"];
   }
 
-  async mergePr(slotPath: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+  async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
     this.log("mergePr", { slotPath, branch, prUrl });
-    return { ok: true, reason: "" };
+    return this.vcs(provider).mergePr(slotPath, prUrl);
   }
 
-  async checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }> {
+  async checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }> {
     this.log("checkPrMerged", { repoPath, prUrl });
-    return { merged: true, state: "MERGED" };
+    const state = await this.vcs(provider).readPrState(repoPath, prUrl);
+    return { merged: state === "merged", state };
   }
 
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {

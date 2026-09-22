@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL } from "../../shared/constants.ts";
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import type { AgentMessage, Automation, AutomationRun, Comment, ExecutionRun, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentMessageChannelSchema,
@@ -25,6 +25,7 @@ import {
   stageSchema,
   triageStatusSchema,
   triageVerdictSchema,
+  vcsProviderSchema,
 } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { isProjectKey } from "../config.ts";
@@ -152,6 +153,7 @@ const projectRowSchema = z.object({
   repo_path: z.string(),
   base_branch: z.string(),
   commit_timeout_ms: z.number(),
+  vcs_provider: vcsProviderSchema.catch(DEFAULT_VCS_PROVIDER),
   default_auto_merge: z.number(),
   default_add_screenshots: z.number(),
   color: z.string().nullable(),
@@ -416,6 +418,7 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
     label: row.label,
     repoPath: row.repo_path,
     baseBranch: row.base_branch,
+    vcsProvider: row.vcs_provider,
     defaultAutoMerge: row.default_auto_merge === 1,
     defaultAddScreenshots: row.default_add_screenshots === 1,
     commitTimeoutMs: row.commit_timeout_ms,

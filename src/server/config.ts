@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 
-import type { AgentEffort, CodexEffort, CodexModel } from "../shared/constants.ts";
-import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL } from "../shared/constants.ts";
+import type { AgentEffort, CodexEffort, CodexModel, VcsProvider } from "../shared/constants.ts";
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../shared/constants.ts";
 import type { AppSettings } from "../shared/schemas.ts";
+import { vcsProviderSchema } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
+import { createLogger } from "./logger.ts";
 
 /**
  * Single source of machine-specific configuration. Project repo paths, base
@@ -18,6 +20,8 @@ import type { Store } from "./db/store.ts";
  * Infrastructure knobs (PORT, KANBAN_DB, BACKEND_*) stay in env (see index.ts).
  */
 
+const log = createLogger("config");
+
 export const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export const projectConfigSchema = z.object({
@@ -25,6 +29,8 @@ export const projectConfigSchema = z.object({
   repoPath: z.string().min(1),
   /** Base branch and PR target. */
   baseBranch: z.string().min(1),
+  /** Hosting provider of the repository (drives the read-only connection test). */
+  vcsProvider: vcsProviderSchema.default(DEFAULT_VCS_PROVIDER),
   /** Default state of the "auto-merge PR" toggle for new tickets in this project. */
   defaultAutoMerge: z.boolean().default(false),
   /** Default state of the "add screenshots to PR" toggle for new tickets in this project. */
@@ -141,6 +147,16 @@ export function getProject(key: string): ProjectConfig {
   const project = requireStore().getProjectRow(key);
   if (!project) throw new Error(`projet inconnu: ${key}`);
   return project;
+}
+
+/**
+ * VCS provider of a project, falling back to the default when the key is unknown (deleted project).
+ * Callers rely on the call never throwing, so the fallback is logged rather than raised.
+ */
+export function projectVcsProvider(key: string): VcsProvider {
+  if (isProjectKey(key)) return getProject(key).vcsProvider;
+  log.warn("projet inconnu : repli sur le fournisseur VCS par défaut", { key, provider: DEFAULT_VCS_PROVIDER });
+  return DEFAULT_VCS_PROVIDER;
 }
 
 export function listProjectKeys(): string[] {

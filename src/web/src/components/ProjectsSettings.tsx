@@ -1,7 +1,10 @@
 import { ChevronRight, FolderOpen } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import type { CreateProjectInput, ManagedProject, UpdateProjectInput } from "@shared/schemas";
+import type { VcsProvider } from "@shared/constants";
+import { DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS } from "@shared/constants";
+import type { CreateProjectInput, ManagedProject, UpdateProjectInput, VcsConnectionResult } from "@shared/schemas";
+import { vcsProviderSchema } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmPopover } from "@/components/ui/confirm";
@@ -27,6 +30,34 @@ const DEFAULT_PROJECT_COLOR = "#6366f1";
 const DEFAULT_COMMIT_TIMEOUT_MS = 600000;
 const REFERENCE_COMMIT_TIMEOUT_MS = 120000;
 const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
+const MUTED_TEXT_CLASS = "text-muted-foreground";
+
+/** Narrow the native `<select>` value without a cast; an unknown value falls back to the default. */
+function toVcsProvider(value: string): VcsProvider {
+  const parsed = vcsProviderSchema.safeParse(value);
+  return parsed.success ? parsed.data : DEFAULT_VCS_PROVIDER;
+}
+
+interface ConnectionHint {
+  message: string;
+  className: string;
+}
+
+/** The connection test only means something against the persisted project, hence the two guards. */
+function connectionHint(
+  saved: boolean,
+  dirty: boolean,
+  testing: boolean,
+  result: VcsConnectionResult | null,
+): ConnectionHint {
+  if (!saved) return { message: "Enregistrez le projet pour tester la connexion.", className: MUTED_TEXT_CLASS };
+  if (dirty) {
+    return { message: "Enregistrez vos modifications pour tester la connexion.", className: MUTED_TEXT_CLASS };
+  }
+  if (testing) return { message: "Test en cours…", className: MUTED_TEXT_CLASS };
+  if (result === null) return { message: "", className: MUTED_TEXT_CLASS };
+  return { message: result.message, className: result.ok ? "text-success" : "text-destructive" };
+}
 
 function isPositiveIntegerString(value: string): boolean {
   const parsed = Number(value);
@@ -218,6 +249,9 @@ function ProjectPanel({
   const [repoPath, setRepoPath] = useState(project?.repoPath ?? "");
   const [baseBranch, setBaseBranch] = useState(project?.baseBranch ?? "");
   const [runScript, setRunScript] = useState(project?.runScript ?? "");
+  const [vcsProvider, setVcsProvider] = useState<VcsProvider>(project?.vcsProvider ?? DEFAULT_VCS_PROVIDER);
+  const [connection, setConnection] = useState<VcsConnectionResult | null>(null);
+  const [testing, setTesting] = useState(false);
   const [unit, setUnit] = useState<TimeoutUnit>(initialUnit);
   const [timeoutValue, setTimeoutValue] = useState(String(initialTimeoutMs / timeoutUnitMs(initialUnit)));
   const [color, setColor] = useState(project?.color ?? DEFAULT_PROJECT_COLOR);
@@ -235,7 +269,10 @@ function ProjectPanel({
     commitTimeoutMs !== String(project.commitTimeoutMs) ||
     baseBranch !== project.baseBranch ||
     runScript !== (project.runScript ?? "") ||
+    vcsProvider !== project.vcsProvider ||
     color !== (project.color ?? DEFAULT_PROJECT_COLOR);
+
+  const hint = connectionHint(project !== null, dirty, testing, connection);
 
   const pickFolder = async (): Promise<void> => {
     onError(null);
@@ -256,6 +293,7 @@ function ProjectPanel({
     if (repoPath !== current.repoPath) patch.repoPath = repoPath.trim();
     if (baseBranch !== current.baseBranch) patch.baseBranch = baseBranch.trim();
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
+    if (vcsProvider !== current.vcsProvider) patch.vcsProvider = vcsProvider;
     if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
     if (color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
     return patch;
@@ -267,6 +305,7 @@ function ProjectPanel({
       repoPath: repoPath.trim(),
       baseBranch: baseBranch.trim(),
       commitTimeoutMs: Number(commitTimeoutMs),
+      vcsProvider,
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
       color,
     };
@@ -280,8 +319,22 @@ function ProjectPanel({
     setRepoPath(saved.repoPath);
     setBaseBranch(saved.baseBranch);
     setRunScript(saved.runScript ?? "");
+    setVcsProvider(saved.vcsProvider);
+    setConnection(null);
     await onSaved();
     flashSaved();
+  };
+
+  const testConnection = async (current: ManagedProject): Promise<void> => {
+    onError(null);
+    setTesting(true);
+    try {
+      setConnection(await api.testProjectConnection(current.key));
+    } catch (e) {
+      setConnection({ ok: false, message: errorMessage(e), checkedAt: Date.now() });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const submit = async (): Promise<void> => {
@@ -343,6 +396,36 @@ function ProjectPanel({
         </Field>
         <Field label="Branche de base">
           <Input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
+        </Field>
+        <Field label="Fournisseur">
+          <div className="flex w-full flex-col items-start gap-1.5">
+            <Select
+              value={vcsProvider}
+              onChange={(e) => setVcsProvider(toVcsProvider(e.target.value))}
+              aria-label="Fournisseur"
+            >
+              {VCS_PROVIDERS.map((option) => (
+                <option key={option} value={option}>
+                  {VCS_PROVIDER_LABELS[option]}
+                </option>
+              ))}
+            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (project !== null) void testConnection(project);
+                }}
+                disabled={project === null || dirty || testing || busy}
+              >
+                Tester la connexion
+              </Button>
+              <span role="status" className={`text-xs ${hint.className}`}>
+                {hint.message}
+              </span>
+            </div>
+          </div>
         </Field>
         <Field label="Commande de démarrage">
           <Input

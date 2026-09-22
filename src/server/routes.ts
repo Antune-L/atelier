@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
-import type { Implementer, Orchestrator, Stage } from "../shared/constants.ts";
+import type { Implementer, Orchestrator, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
 import { runRecordedAction } from "./recordedAction.ts";
@@ -30,7 +30,7 @@ import {
   updateProjectSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode } from "../shared/schemas.ts";
+import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
@@ -67,9 +67,10 @@ const DISALLOWED_AGENT_PAIR_MSG =
 
 interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
-  listOpenPrs(repoPath: string): Promise<OpenPr[]>;
+  listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
   listBranches(repoPath: string): Promise<string[]>;
-  checkPrMerged(repoPath: string, prUrl: string): Promise<{ merged: boolean; state: string }>;
+  testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
+  checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -120,9 +121,9 @@ const BUILD_ERROR_TAIL = 600;
 /** Timeout for lightweight git introspection commands (rev-parse, diff --name-only). */
 const GIT_QUERY_TIMEOUT_MS = 5_000;
 /** Reported PR state for directPush tickets, which have no real PR to query. */
-const DIRECT_PUSH_MERGED_STATE = "MERGED";
+const DIRECT_PUSH_MERGED_STATE: PrState = "merged";
 /** Reported PR state for split mothers, whose integration branch carries no real PR to query. */
-const SPLIT_MERGED_STATE = "MERGED";
+const SPLIT_MERGED_STATE: PrState = "merged";
 /** Length of the generated, opaque project key (nanoid). */
 const PROJECT_KEY_LENGTH = 10;
 /**
@@ -142,16 +143,23 @@ const HTTP_CONFLICT = 409;
 const HTTP_INTERNAL_ERROR = 500;
 const HTTP_BAD_GATEWAY = 502;
 
-/** Markdown body shown on a review card, summarizing the target PR. */
-function reviewDescription(pr: OpenPr): string {
-  return [
-    `Revue autonome (argus) de [PR #${pr.number}](${pr.url})`,
-    "",
+/** Shared bullet list describing the target PR of a review/clean card. */
+function prSummaryLines(pr: OpenPr): string[] {
+  const lines = [
     `- **Titre** : ${pr.title}`,
     `- **Branche** : \`${pr.headBranch}\``,
     `- **Auteur** : ${pr.author}`,
-    `- **Diff** : +${pr.additions} / -${pr.deletions}`,
-  ].join("\n");
+  ];
+  // Azure DevOps exposes no diff stat on a PR; omit the bullet rather than print zeros.
+  if (pr.additions !== null && pr.deletions !== null) {
+    lines.push(`- **Diff** : +${pr.additions} / -${pr.deletions}`);
+  }
+  return lines;
+}
+
+/** Markdown body shown on a review card, summarizing the target PR. */
+function reviewDescription(pr: OpenPr): string {
+  return [`Revue autonome (argus) de [PR #${pr.number}](${pr.url})`, "", ...prSummaryLines(pr)].join("\n");
 }
 
 /** Markdown body shown on a clean card, summarizing the target PR and the user-provided context. */
@@ -159,10 +167,7 @@ function cleanDescription(pr: OpenPr, context: string): string {
   return [
     `Nettoyage des retours de [PR #${pr.number}](${pr.url})`,
     "",
-    `- **Titre** : ${pr.title}`,
-    `- **Branche** : \`${pr.headBranch}\``,
-    `- **Auteur** : ${pr.author}`,
-    `- **Diff** : +${pr.additions} / -${pr.deletions}`,
+    ...prSummaryLines(pr),
     "",
     "## Contexte fourni",
     context.trim() || "(aucun)",
@@ -177,6 +182,7 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     repoPath: p.repoPath,
     baseBranch: p.baseBranch,
     commitTimeoutMs: p.commitTimeoutMs,
+    vcsProvider: p.vcsProvider,
     ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };
@@ -448,13 +454,14 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { label, repoPath, baseBranch, commitTimeoutMs, runScript, color } = parsed.data;
+      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, color } = parsed.data;
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
         label,
         repoPath,
         baseBranch,
         commitTimeoutMs,
+        vcsProvider,
         defaultAutoMerge: false,
         defaultAddScreenshots: false,
         ...(runScript !== undefined ? { runScript } : {}),
@@ -491,9 +498,9 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
       const project = getProject(params.key);
       try {
-        return await deps.system.listOpenPrs(project.repoPath);
+        return await deps.system.listOpenPrs(project.repoPath, project.vcsProvider);
       } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec gh pr list"));
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec du listing des PR"));
       }
     })
     .get("/projects/:key/branches", async ({ params, set }) => {
@@ -503,6 +510,19 @@ export function createApiRoutes(deps: RouteDeps) {
         return await deps.system.listBranches(project.repoPath);
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec listing branches"));
+      }
+    })
+    .get("/projects/:key/test-connection", async ({ params, set }) => {
+      if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      const project = getProject(params.key);
+      try {
+        return await deps.system.testVcsConnection(project.repoPath, project.vcsProvider);
+      } catch (error) {
+        return {
+          ok: false,
+          message: getErrorMessage(error, "échec du test de connexion"),
+          checkedAt: Date.now(),
+        };
       }
     })
     .get("/capabilities", async ({ query }) => {
@@ -937,11 +957,11 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
       const project = getProject(ticket.project);
-      let result: { merged: boolean; state: string };
+      let result: { merged: boolean; state: PrState };
       try {
-        result = await deps.system.checkPrMerged(project.repoPath, ticket.prUrl);
+        result = await deps.system.checkPrMerged(project.repoPath, ticket.prUrl, project.vcsProvider);
       } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec gh pr view"));
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de la lecture de la PR"));
       }
       if (!result.merged) return { merged: false, state: result.state };
       // Mirror /merged: stamp finishedAt so the board orders newest-first.

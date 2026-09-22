@@ -8,7 +8,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, type Column } from "@shared/constants";
+import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, type Column } from "@shared/constants";
 
 import { BoardColumn } from "@/components/BoardColumn";
 import {
@@ -162,7 +162,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       const result = await api.checkMerged(ticket.id);
       const body = result.merged
         ? "PR déjà mergée."
-        : `PR non mergée (état : ${result.state || "inconnu"}).`;
+        : `PR non mergée (état : ${PR_STATE_LABELS[result.state] || "inconnu"}).`;
       boardStore.notify("Merge vérifié", body);
     } catch (e) {
       boardStore.notify("Vérification échouée", e instanceof Error ? e.message : "Vérification du merge échouée");

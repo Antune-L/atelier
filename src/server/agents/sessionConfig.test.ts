@@ -11,6 +11,8 @@ import {
   buildTriageSessionConfig,
 } from "./sessionConfig.ts";
 
+import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
+
 const COMPOSER_SCRIPT = "/tmp/composer-driver.sh";
 const CWD = "/tmp/worktree";
 
@@ -20,6 +22,7 @@ function implementConfig(ticket: ReturnType<typeof makeTicket>, resumeSessionId?
     slotId: 1,
     cwd: CWD,
     composerScriptPath: COMPOSER_SCRIPT,
+    vcsProvider: DEFAULT_VCS_PROVIDER,
     ...(resumeSessionId ? { resumeSessionId } : {}),
   });
 }

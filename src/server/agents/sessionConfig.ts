@@ -12,12 +12,14 @@ import {
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
   TRIAGE_SLOT_ID,
 } from "../../shared/constants.ts";
-import type { Orchestrator } from "../../shared/constants.ts";
+import type { Orchestrator, VcsProvider } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
 import { isReviewFixSession } from "./contract.ts";
+import { vcsCommands } from "./vcsCommands.ts";
+import type { VcsCommandTable } from "./vcsCommands.ts";
 
 import type { SessionStartConfig } from "./sessionHub.ts";
 
@@ -47,7 +49,8 @@ const IMPLEMENTER_SAFE_TOOLS = [
  * Skills referenced by the pipeline contract (review, regression map, mockup fidelity, PR feedback
  * triage). The provider adapts these project instructions to its own session format.
  */
-const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-review", "minos-pr-feedback"];
+const MINOS_PR_FEEDBACK_SKILL = "minos-pr-feedback";
+const CONTRACT_SKILLS = ["argus-review", "regression-check", "mockup-fidelity-review", MINOS_PR_FEEDBACK_SKILL];
 
 /** Read-only triage/feasibility/split sessions invoke no skill; scope context to none. */
 const NO_SKILLS: string[] = [];
@@ -343,6 +346,44 @@ const BASH_ALLOWLIST = [
   "Bash(echo:*)",
 ];
 
+/**
+ * Azure DevOps projects only: the three read/create `az repos pr` commands the pipeline contract
+ * actually asks for, plus the remote read the `az repos pr create` template needs to resolve its
+ * org/project/repository triple. Deliberately no `Bash(az:*)` and no `az rest`.
+ */
+const AZURE_BASH_ALLOWLIST = [
+  "Bash(az repos pr create:*)",
+  "Bash(az repos pr show:*)",
+  "Bash(az repos pr list:*)",
+  "Bash(git remote get-url:*)",
+];
+
+/**
+ * Azure DevOps clean sessions only: the REST escape hatch the PR-feedback flow needs to read the
+ * comment threads and resolve the ones it treated (`--http-method GET`, then `PATCH` with
+ * `{"status":"fixed"}`). This is the parity of `Bash(gh api:*)`, which the GitHub flow already has.
+ * It is NEVER granted to a review session: `reviewPublishingGuard` denies every mutating `az` form
+ * there, and this rule would otherwise hand a reviewer a way to write to the PR outside
+ * `publish_review`.
+ */
+const AZURE_CLEAN_BASH_ALLOWLIST = ["Bash(az devops invoke:*)"];
+
+/**
+ * The bash allow-list of a full implementation session, widened only for an Azure DevOps project,
+ * and further for its clean tickets (the only kind whose contract drives `az devops invoke`).
+ */
+function bashAllowlist(ticket: Ticket, vcsProvider: VcsProvider, composerScriptPath: string): string[] {
+  if (vcsProvider !== "azureDevops") return [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`];
+  const clean = ticket.kind === "clean" ? AZURE_CLEAN_BASH_ALLOWLIST : [];
+  return [...BASH_ALLOWLIST, ...AZURE_BASH_ALLOWLIST, ...clean, `Bash(${composerScriptPath}:*)`];
+}
+
+/** Skills listed for a session: one the provider cannot serve is dropped rather than advertised. */
+function sessionSkills(vcs: VcsCommandTable): string[] {
+  if (vcs.clean.minosSkill) return CONTRACT_SKILLS;
+  return CONTRACT_SKILLS.filter((skill) => skill !== MINOS_PR_FEEDBACK_SKILL);
+}
+
 const IMPLEMENTER_PROMPT = `Tu es le sous-agent implémenteur. Ton unique rôle est d'écrire le code de la fonctionnalité décrite, intégralement, dans le worktree courant.
 
 Consignes :
@@ -353,10 +394,10 @@ Consignes :
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
 - Quand tu as terminé, rends la main en résumant ce que tu as implémenté et les fichiers touchés.`;
 
-const PR_FIXER_PROMPT = `Tu es le sous-agent pr-fixer. Ton unique rôle est d'appliquer les corrections pertinentes des retours de review d'une PR, intégralement, dans le worktree courant (déjà positionné sur la branche head de la PR).
+const prFixerPrompt = (vcs: VcsCommandTable) => `Tu es le sous-agent pr-fixer. Ton unique rôle est d'appliquer les corrections pertinentes des retours de review d'une PR, intégralement, dans le worktree courant (déjà positionné sur la branche head de la PR).
 
 Consignes :
-- Tu reçois dans ton prompt les findings de review et/ou le numéro de la PR. Tu peux aussi lire les commentaires de review postés via \`gh pr view <url> --json reviews\` et \`gh api\`.
+- Tu reçois dans ton prompt les findings de review et/ou le numéro de la PR. ${vcs.prFeedbackRead}
 - N'applique que les corrections PERTINENTES (ignore les nits et les points hors périmètre).
 - Respecte les conventions de code du projet.
 - Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
@@ -375,11 +416,16 @@ function implementerAgent(model: string, effort: string, serviceTier?: "default"
   };
 }
 
-function prFixerAgent(model: string, effort: string, serviceTier?: "default" | "fast"): AgentSubagentDefinition {
+function prFixerAgent(
+  vcs: VcsCommandTable,
+  model: string,
+  effort: string,
+  serviceTier?: "default" | "fast",
+): AgentSubagentDefinition {
   return {
     description:
       "Applique les corrections demandées par les retours de review d'une PR dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.",
-    prompt: PR_FIXER_PROMPT,
+    prompt: prFixerPrompt(vcs),
     model,
     effort,
     ...(serviceTier ? { serviceTier } : {}),
@@ -393,6 +439,8 @@ export interface ImplementSessionInput {
   cwd: string;
   /** Absolute path to the vendored Composer driver script (allowed bash for the composer implementer). */
   composerScriptPath: string;
+  /** The project's PR host: picks the provider command table and the extra bash allow rules. */
+  vcsProvider: VcsProvider;
   /** Provider-side conversation to resume on a relaunch (Codex only; Claude restarts fresh). */
   resumeSessionId?: string;
 }
@@ -427,7 +475,8 @@ export function codexImplementerKnobs(ticket: Ticket): { model: string; effort: 
 
 /** Config for a feature/ask/review/clean/conflict implementation session (full tools, git-owning). */
 export function buildImplementSessionConfig(input: ImplementSessionInput): SessionStartConfig {
-  const { ticket, slotId, cwd, composerScriptPath, resumeSessionId } = input;
+  const { ticket, slotId, cwd, composerScriptPath, vcsProvider, resumeSessionId } = input;
+  const vcs = vcsCommands(vcsProvider);
   // A ticket whose ORCHESTRATOR is "codex" runs EVERY session on Codex, including the auto-triggered
   // conflict-resolution one (buildConflictResolutionContract carries a codex-flavored framing).
   if (ticket.orchestrator === "codex") {
@@ -452,10 +501,10 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       allowedTools: [...IMPLEMENTER_SAFE_TOOLS, "ToolSearch", ...(ticket.verifyFeature ? ["mcp__playwright"] : [])],
-      skills: CONTRACT_SKILLS,
+      skills: sessionSkills(vcs),
       agents: {
         implementer: implementerAgent(delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
-        "pr-fixer": prFixerAgent(delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
+        "pr-fixer": prFixerAgent(vcs, delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
       },
       ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),
     };
@@ -479,7 +528,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     delegateServiceTier: delegateKnobs?.serviceTier,
     permissionMode: "dontAsk",
     ...reviewSessionGuards(ticket),
-    permissionAllow: [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`],
+    permissionAllow: bashAllowlist(ticket, vcsProvider, composerScriptPath),
     allowedTools: [
       ...IMPLEMENTER_SAFE_TOOLS,
       "ToolSearch",
@@ -487,10 +536,10 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       // "mcp__playwright" (server-level rule) allows every tool of the attached Playwright server.
       ...(ticket.verifyFeature ? ["mcp__playwright"] : []),
     ],
-    skills: CONTRACT_SKILLS,
+    skills: sessionSkills(vcs),
     agents: {
       implementer: implementerAgent(implementerModel, implementerEffort),
-      "pr-fixer": prFixerAgent(implementerModel, implementerEffort),
+      "pr-fixer": prFixerAgent(vcs, implementerModel, implementerEffort),
     },
     ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),
   };

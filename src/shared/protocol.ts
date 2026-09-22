@@ -217,7 +217,7 @@ export const WORKER_TOOLS = [
   },
   {
     name: "done",
-    description: "Signale la fin du ticket avec l'URL de la PR draft. Le backend vérifie avant de clôturer.",
+    description: "Signale la fin du ticket avec l'URL de la PR draft (GitHub ou Azure DevOps selon le projet). Le backend vérifie avant de clôturer.",
     argsSchema: doneArgsSchema,
   },
   {
@@ -252,7 +252,7 @@ export const WORKER_TOOLS = [
   {
     name: "publish_review",
     description:
-      "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Réservé aux tickets review avec postage GitHub activé.",
+      "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Le backend publie sur l'hôte de PR du projet (review GitHub, fils de commentaires + vote Azure DevOps). Réservé aux tickets review dont le postage est activé.",
     argsSchema: publishReviewArgsSchema,
   },
   {

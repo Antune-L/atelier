@@ -18,7 +18,12 @@
 
 Real mode only (see below):
 
-- `tmux` and `gh` (authenticated GitHub CLI)
+- `tmux`
+- The CLI of each project's VCS provider:
+  - GitHub projects: `gh` (authenticated GitHub CLI).
+  - Azure DevOps projects: `az` with the `azure-devops` extension (`az extension add --name azure-devops`) and a
+    signed-in account (`az login`). Cloud only (`https://dev.azure.com/<org>`); on-premises Azure DevOps Server is
+    not supported.
 - An authenticated **Claude Code** session on the machine — the agents reuse the host login. Run `claude` once and log in (Pro/Max OAuth, stored in the macOS Keychain / `~/.claude/.credentials.json`). The app overrides no `HOME`, so every agent uses whichever account `claude` is logged into on this machine.
 
 ## Getting started
@@ -62,7 +67,7 @@ To have agents actually spawn `claude`, create worktrees and open PRs:
 bun run real         # KANBAN_DRY_RUN=0 on kanban-real.db
 ```
 
-Needs the real-mode prerequisites above (`tmux`, authenticated `gh`, a logged-in Claude session). It runs git/tmux/gh/filesystem for real, using the SDK's bundled native `claude` binary — no separately installed CLI required.
+Needs the real-mode prerequisites above (`tmux`, the authenticated provider CLI — `gh` or `az` — and a logged-in Claude session). It runs git/tmux/gh/filesystem for real, using the SDK's bundled native `claude` binary — no separately installed CLI required.
 
 ### Codex agents (optional)
 
@@ -85,13 +90,25 @@ The pipeline contract injected into each session (`src/server/agents/contract.ts
 | Skill                    | When                                                                              | Role                                                                                                                        |
 | ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `paris-research`         | **Feature** ticket with "Research plan" enabled                                   | Two independent research sub-agents on the approach, then an orchestrator verdict — feeds the PRD or implementation framing |
-| `argus` (`argus-review`) | **Feature** ticket (reviewing step); **review** ticket                            | Parallel review of the diff or PR (light or full), with optional inline posting on GitHub                                   |
+| `argus` (`argus-review`) | **Feature** ticket (reviewing step); **review** ticket                            | Parallel review of the diff or PR (light or full); its own inline posting (`--post`) is GitHub-only and unused here         |
 | `regression-check`       | **Feature** ticket (anti-regression step)                                         | Maps consumers of changed symbols and flags potential regressions                                                           |
 | `mockup-fidelity-review` | **Feature** ticket with functional verification + mockups (Figma links or images) | Compares the live UI to mockups before opening the PR                                                                       |
-| `minos-pr-feedback`      | **Clean** ticket                                                                  | Fetches PR review threads, triages by relevance, applies only pertinent fixes                                               |
+| `minos-pr-feedback`      | **Clean** ticket on a **GitHub** project                                          | Fetches PR review threads, triages by relevance, applies only pertinent fixes                                               |
 | `composer-implement`     | **Feature** ticket with **Composer** as implementer                               | Delegates code-writing to Cursor headless via `templates/run_composer.sh` (vendored script — keep in sync with the skill)   |
 
 **Ask** tickets and **conflict-resolution** runs do not invoke a dedicated skill — read-only exploration or manual git per the contract.
+
+`argus`'s inline posting (`--post`) and `minos-pr-feedback` both drive the GitHub API (REST and GraphQL), so they are **GitHub-only**. On an Azure DevOps project they are bypassed: `minos-pr-feedback` is not even listed for the session, and both the Claude and the Codex clean contracts carry the equivalent `az devops invoke` commands inline instead. Review publication never goes through `argus --post` on either provider — it is the backend's `publish_review` (see below).
+
+### Azure DevOps: review and clean behaviour
+
+An Azure DevOps project runs the same review and clean flows as a GitHub one, through `az` + `az devops invoke` (`src/server/system/vcs/azureDevops.ts`). Differences to expect:
+
+- **Review publication.** One general comment thread carries the review body, the reviewed commit and the pass marker (its thread id is the `reviewId` the app persists); one inline thread carries each finding, anchored on the latest PR iteration's `changeTrackingId`. A finding whose file is absent from that iteration's changes is folded into the summary body, exactly as a GitHub finding outside the diff hunks. Azure threads show no `path:line` header, so the inline body repeats the location.
+- **Verdict → reviewer vote** (`az repos pr set-vote`): `APPROVE` → `approve`, `REQUEST_CHANGES` → `wait-for-author`, `COMMENT` → no vote at all. A refused vote (author voting on their own PR, a branch policy) does **not** fail the publication: the threads stay, and the reason is surfaced to the session — the same degradation the GitHub client applies to a self-approval.
+- **Clean flow.** Feedback is read with one `az devops invoke --resource pullRequestThreads --http-method GET`; a treated thread is resolved with the same resource in `PATCH` with `{"status":"fixed"}` — the Azure equivalent of GitHub's `minimizeComment`. System threads, deleted threads and threads already `fixed`/`closed`/`wontFix`/`byDesign` are ignored.
+- **Permissions.** `Bash(az devops invoke:*)` is granted to Azure **clean** sessions only (parity with `Bash(gh api:*)` on GitHub). A review session never gets it, and `src/server/system/reviewPublishingGuard.ts` denies every mutating `az` form there so publication stays the backend's job.
+- **Limits.** Cloud only. Merging squashes instead of rebasing (`az repos pr update` exposes no rebase strategy). The PR payload carries no diff stat, so additions/deletions are hidden, and no last-activity date exists, so the picker orders by creation date.
 
 In real mode, these skills must be available in the Claude Code environment running the agent; otherwise the agent cannot run the steps that reference them. Source definitions and install instructions: [Antune-L/skillzer](https://github.com/Antune-L/skillzer).
 
@@ -106,7 +123,7 @@ bun run build:desktop  # .app → build/dev-macos-arm64/
 
 ### Electrobun dev on a new machine
 
-`bun run dev:desktop` is also a **real-mode** launcher: it starts real `claude` sessions (plus `tmux` shells for interactive test terminals), creates git worktrees, runs project setup/install commands, and opens PRs through `gh`. It differs from `bun run real` in a few important ways:
+`bun run dev:desktop` is also a **real-mode** launcher: it starts real `claude` sessions (plus `tmux` shells for interactive test terminals), creates git worktrees, runs project setup/install commands, and opens PRs through the project's provider CLI (`gh` or `az`). It differs from `bun run real` in a few important ways:
 
 - it runs `build:web` before starting the app (the agents run in-process — no agent bundles to build);
 - the agent runs the SDK's native `claude` binary; a dev run resolves it from `node_modules`, while a packaged `.app` detects a user install or downloads the pinned version at first launch (only the Apache-2.0 `codex` binary is embedded);

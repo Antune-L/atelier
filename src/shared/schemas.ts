@@ -1,7 +1,7 @@
 import { transcriptUpdateSchema } from "./transcript.ts";
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { isNotionUrl } from "./notion.ts";
 import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
@@ -476,6 +476,17 @@ export const projectInfoSchema = z.object({
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
 
+/** Hosting provider of the project repository, picked per project in the settings. */
+export const vcsProviderSchema = z.enum(VCS_PROVIDERS);
+
+/** Result of the read-only "test connection" probe run against the project repository. */
+export const vcsConnectionResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+  checkedAt: z.number(),
+});
+export type VcsConnectionResult = z.infer<typeof vcsConnectionResultSchema>;
+
 /** Full editable shape of a managed project as surfaced by the project management API. */
 export const managedProjectSchema = z.object({
   key: projectKeySchema,
@@ -483,6 +494,7 @@ export const managedProjectSchema = z.object({
   repoPath: z.string().min(1),
   baseBranch: baseBranchSchema,
   commitTimeoutMs: z.number().int().positive(),
+  vcsProvider: vcsProviderSchema,
   runScript: z.string().optional(),
   color: z.string().optional(),
 });
@@ -494,6 +506,7 @@ export const createProjectSchema = z.object({
   repoPath: z.string().min(1),
   baseBranch: baseBranchSchema,
   commitTimeoutMs: z.number().int().positive(),
+  vcsProvider: vcsProviderSchema.default(DEFAULT_VCS_PROVIDER),
   runScript: z.string().optional(),
   color: z.string().optional(),
 });
@@ -505,6 +518,7 @@ export const updateProjectSchema = z.object({
   repoPath: z.string().min(1).optional(),
   baseBranch: baseBranchSchema.optional(),
   commitTimeoutMs: z.number().int().positive().optional(),
+  vcsProvider: vcsProviderSchema.optional(),
   runScript: z.string().nullable().optional(),
   color: z.string().optional(),
 });
@@ -667,22 +681,26 @@ export const analyzeTicketsSchema = z.object({
 });
 export type AnalyzeTicketsInput = z.infer<typeof analyzeTicketsSchema>;
 
-/** One open GitHub PR surfaced by `gh pr list` (and the unit the user picks to review). */
+/** Provider-neutral review status of an open PR, mapped by each VCS client. */
+export const prReviewStatusSchema = z.enum(PR_REVIEW_STATUSES);
+
+/** One open PR surfaced by the project's VCS provider (and the unit the user picks to review). */
 export const openPrSchema = z.object({
   number: z.number().int(),
   title: z.string(),
   url: z.url(),
   headBranch: z.string(),
-  /** The PR's real target branch, detected via `gh` (`baseRefName`) — argus reviews against it.
+  /** The PR's real target branch, as detected by the provider — argus reviews against it.
    * Validated like any base branch since it ends up interpolated into the argus `--base` command. */
   baseBranch: baseBranchSchema,
   isDraft: z.boolean(),
-  /** "", "REVIEW_REQUIRED", "APPROVED", "CHANGES_REQUESTED" — drives the "needs attention" highlight. */
-  reviewDecision: z.string(),
+  /** Neutral review status — drives the "needs attention" highlight. */
+  reviewStatus: prReviewStatusSchema,
   updatedAt: z.string(),
   author: z.string(),
-  additions: z.number().int(),
-  deletions: z.number().int(),
+  /** Diff size, null when the provider does not expose it (Azure DevOps has no such field). */
+  additions: z.number().int().nullable(),
+  deletions: z.number().int().nullable(),
 });
 export type OpenPr = z.infer<typeof openPrSchema>;
 

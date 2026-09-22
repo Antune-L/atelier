@@ -121,6 +121,32 @@ export function isAllowedAgentPair(orchestrator: Orchestrator, implementer: Impl
   return orchestrator === "codex" ? implementer === "codex" : true;
 }
 
+export const VCS_PROVIDERS = ["github", "azureDevops"] as const;
+export type VcsProvider = (typeof VCS_PROVIDERS)[number];
+
+export const VCS_PROVIDER_LABELS: Record<VcsProvider, string> = {
+  github: "GitHub",
+  azureDevops: "Azure DevOps",
+};
+
+export const DEFAULT_VCS_PROVIDER: VcsProvider = "github";
+
+/** Provider-neutral lifecycle state of a pull request, mapped at the VCS client boundary. */
+export const PR_STATES = ["open", "merged", "closed", "unknown"] as const;
+export type PrState = (typeof PR_STATES)[number];
+
+/** State shown to the user when a merge check reports back ("" keeps the caller's own fallback wording). */
+export const PR_STATE_LABELS: Record<PrState, string> = {
+  open: "OPEN",
+  merged: "MERGED",
+  closed: "CLOSED",
+  unknown: "",
+};
+
+/** Provider-neutral review status of an open PR; drives the "needs attention" highlight in the picker. */
+export const PR_REVIEW_STATUSES = ["none", "needs_review", "approved", "changes_requested"] as const;
+export type PrReviewStatus = (typeof PR_REVIEW_STATUSES)[number];
+
 /** Language the agent writes commit messages and PR title/description in. */
 export const COMMIT_LANGUAGES = ["en", "fr"] as const;
 export type CommitLanguage = (typeof COMMIT_LANGUAGES)[number];

@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { ACTIVE_STAGES, SPLIT_BRANCH_PREFIX } from "@shared/constants";
+import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
@@ -323,7 +323,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
             ctx.onClose();
             return;
           }
-          ctx.onError(`PR non mergée (état : ${result.state || "inconnu"})`);
+          ctx.onError(`PR non mergée (état : ${PR_STATE_LABELS[result.state] || "inconnu"})`);
         } catch (error) {
           ctx.onError(errorMessage(error, "Vérification du merge échouée"));
         }

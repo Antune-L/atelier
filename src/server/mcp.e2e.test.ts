@@ -964,7 +964,7 @@ test("list_tickets includes ask and clean cards created by the existing REST wor
         headBranch: "feature/e2e",
         baseBranch: "main",
         isDraft: false,
-        reviewDecision: "",
+        reviewStatus: "none",
         updatedAt: "2026-09-13T00:00:00.000Z",
         author: "e2e",
         additions: 1,

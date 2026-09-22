@@ -22,3 +22,17 @@ describe("nullable pricing", () => {
     });
   });
 });
+
+describe("per-model pricing overrides", () => {
+  test("prices dated Opus 5.5 ids at the Opus 5.5 input rate", () => {
+    expect(costOf({ "claude-opus-5-5-20260915": USAGE })).toBe(4);
+  });
+
+  test("keeps Opus 5 on the opus family rate", () => {
+    expect(costOf({ "claude-opus-5": USAGE })).toBe(5);
+  });
+
+  test("prices Opus 5.5 cache reads at 0.05x input", () => {
+    expect(costOf({ "claude-opus-5-5": { ...USAGE, input_tokens: 0, cache_read_input_tokens: 1_000_000 } })).toBeCloseTo(0.2);
+  });
+});

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { BranchCombobox, Label } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
+import { resolveProjectChoice } from "@/lib/projectSelection";
 
 interface WorktreePanelProps {
   projects: ProjectInfo[];
@@ -20,7 +21,7 @@ interface WorktreePanelProps {
  */
 export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = projectChoice ?? projects[0]?.key ?? "";
+  const project = resolveProjectChoice(projects, projectChoice);
   const selectedProject = projects.find((p) => p.key === project);
   const [baseBranchChoice, setBaseBranchChoice] = useState<string | null>(null);
   const baseBranch = baseBranchChoice ?? selectedProject?.baseBranch ?? "";

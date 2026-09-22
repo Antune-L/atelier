@@ -29,6 +29,7 @@ const OPTIONS_HEADING_ID = "ticket-detail-options-heading";
 /** Pre-launch configuration of a TODO ticket: target, dependency and agent knobs. */
 export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps) {
   const { tickets: boardTickets } = useBoard();
+  const selectableProjects = projects.filter((project) => !project.hidden || project.key === ticket.project);
   // Base-branch picker state. null = remote list not loaded yet.
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branchesKey, setBranchesKey] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
               onChange={(e) => e.target.value !== ticket.project && patch({ project: e.target.value })}
               className="w-full"
             >
-              {projects.map((p) => (
+              {selectableProjects.map((p) => (
                 <option key={p.key} value={p.key}>
                   {p.label}
                 </option>

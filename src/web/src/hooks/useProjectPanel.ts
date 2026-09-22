@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import type { OpenPr, ProjectInfo } from "@shared/schemas";
 
 import { api } from "@/lib/api";
+import { resolveProjectChoice } from "@/lib/projectSelection";
 
 const LOAD_ERROR = "Échec du chargement des PRs";
 
@@ -31,7 +32,7 @@ export interface ProjectPanelState {
  */
 export function useProjectPanel(projects: ProjectInfo[]): ProjectPanelState {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = projectChoice ?? projects[0]?.key ?? "";
+  const project = resolveProjectChoice(projects, projectChoice);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [prs, setPrs] = useState<OpenPr[] | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -17,6 +17,7 @@ import { api } from "@/lib/api";
 import { dependencyCandidates } from "@/lib/display";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { handleMediaPaste } from "@/lib/paste";
+import { resolveProjectChoice } from "@/lib/projectSelection";
 
 const SHEET_TITLE = "Nouveau ticket";
 
@@ -47,7 +48,7 @@ export function NewTicketSheet({ open, projects, onClose }: NewTicketSheetProps)
   const [description, setDescription, clearDescription] = useLocalDraft(NEW_TICKET_DESCRIPTION_DRAFT);
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = projectChoice ?? projects[0]?.key ?? "";
+  const project = resolveProjectChoice(projects, projectChoice);
   const selectedProject = projects.find((p) => p.key === project);
   const notionScope = `${project}\n${externalUrl}`;
   const currentNotionScope = useRef(notionScope);

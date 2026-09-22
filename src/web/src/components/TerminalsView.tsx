@@ -28,6 +28,7 @@ interface TerminalsViewProps {
  * ⌘W with nothing left to close opens a quit confirmation (desktop).
  */
 export function TerminalsView({ projects, projectFilter }: TerminalsViewProps): ReactNode {
+  const selectableProjects = useMemo(() => projects.filter((project) => !project.hidden), [projects]);
   const [activeProject, setActiveProject] = useState<string | null>(null);
   const [quitOpen, setQuitOpen] = useState(false);
   const [quitPending, setQuitPending] = useState(false);
@@ -35,10 +36,12 @@ export function TerminalsView({ projects, projectFilter }: TerminalsViewProps): 
 
   // Default the active tab to the global filter (when a single project) or the first project.
   useEffect(() => {
-    if (activeProject && projects.some((p) => p.key === activeProject)) return;
-    const seeded = projects.some((p) => p.key === projectFilter) ? projectFilter : projects[0]?.key ?? null;
+    if (activeProject && selectableProjects.some((project) => project.key === activeProject)) return;
+    const seeded = selectableProjects.some((project) => project.key === projectFilter)
+      ? projectFilter
+      : selectableProjects[0]?.key ?? null;
     setActiveProject(seeded);
-  }, [projects, projectFilter, activeProject]);
+  }, [selectableProjects, projectFilter, activeProject]);
 
   const activeLabel = projects.find((p) => p.key === activeProject)?.label ?? "";
   const terminals = useTerminals(activeProject);
@@ -81,7 +84,7 @@ export function TerminalsView({ projects, projectFilter }: TerminalsViewProps): 
     <>
       <div className="flex h-full min-h-0 flex-col gap-3">
         <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b pb-2">
-          {projects.map((project) => (
+          {selectableProjects.map((project) => (
             <button
               key={project.key}
               type="button"

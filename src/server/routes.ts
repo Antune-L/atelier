@@ -183,6 +183,8 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     baseBranch: p.baseBranch,
     commitTimeoutMs: p.commitTimeoutMs,
     vcsProvider: p.vcsProvider,
+    hidden: p.hidden ?? false,
+    sortOrder: p.sortOrder ?? 0,
     ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };

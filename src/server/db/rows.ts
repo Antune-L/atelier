@@ -165,6 +165,7 @@ const projectRowSchema = z.object({
   scripts_lint: z.string().nullable(),
   scripts_test: z.string().nullable(),
   worktree_ports: z.string().nullable(),
+  hidden: z.number(),
   sort_order: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
@@ -422,6 +423,8 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
     defaultAutoMerge: row.default_auto_merge === 1,
     defaultAddScreenshots: row.default_add_screenshots === 1,
     commitTimeoutMs: row.commit_timeout_ms,
+    hidden: row.hidden === 1,
+    sortOrder: row.sort_order,
   };
   const scripts = buildScripts(row);
   if (scripts !== undefined) project.scripts = scripts;

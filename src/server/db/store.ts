@@ -208,6 +208,7 @@ export interface ProjectPatch {
   worktreeTeardownScript?: string | null;
   scripts?: { typecheck?: string; lint?: string; test?: string } | null;
   worktreePorts?: { label: string; base: number }[] | null;
+  hidden?: boolean;
   sortOrder?: number;
 }
 
@@ -1406,6 +1407,7 @@ export class Store {
     if (patch.worktreePorts !== undefined) {
       builder.set("worktree_ports", patch.worktreePorts === null ? null : JSON.stringify(patch.worktreePorts));
     }
+    if (patch.hidden !== undefined) builder.set("hidden", patch.hidden ? 1 : 0);
     if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
     builder.set("updated_at", Date.now());
     builder.runWhere(this.db, "projects", "key", key);

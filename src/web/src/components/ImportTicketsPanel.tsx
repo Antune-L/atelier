@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { parseTicketsCsv, type ParsedTicketsCsv } from "@/lib/csv";
 import { cn } from "@/lib/utils";
+import { resolveProjectChoice } from "@/lib/projectSelection";
 
 interface ImportTicketsPanelProps {
   projects: ProjectInfo[];
@@ -39,7 +40,7 @@ export function ImportTicketsPanel({
   onClose,
 }: ImportTicketsPanelProps) {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = projectChoice ?? projects[0]?.key ?? "";
+  const project = resolveProjectChoice(projects, projectChoice);
 
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);

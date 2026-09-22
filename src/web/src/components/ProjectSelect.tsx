@@ -17,6 +17,7 @@ export function ProjectSelect({ id, projects, value, onChange }: ProjectSelectPr
     <div className="space-y-1.5">
       <Label htmlFor={id} className={FIELD_LABEL_CLASSES}>Projet</Label>
       <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="w-full">
+        {projects.length === 0 && <option value="">Aucun projet visible</option>}
         {projects.map((p) => (
           <option key={p.key} value={p.key}>
             {p.label}

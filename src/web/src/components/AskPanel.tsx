@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { handleMediaPaste } from "@/lib/paste";
+import { resolveProjectChoice } from "@/lib/projectSelection";
 
 interface AskPanelProps {
   projects: ProjectInfo[];
@@ -28,7 +29,7 @@ interface AskPanelProps {
 export function AskPanel({ projects, onClose }: AskPanelProps) {
   const capabilities = useCapabilities();
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = projectChoice ?? projects[0]?.key ?? "";
+  const project = resolveProjectChoice(projects, projectChoice);
   const [question, setQuestion] = useState("");
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);

@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS projects (
   scripts_lint TEXT,
   scripts_test TEXT,
   worktree_ports TEXT,
+  hidden INTEGER NOT NULL DEFAULT 0,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -370,6 +371,7 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
 /** Columns added to `projects` after the original schema; applied idempotently to existing DBs. */
 const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "vcs_provider", ddl: `ALTER TABLE projects ADD COLUMN vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}'` },
+  { column: "hidden", ddl: "ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0" },
 ];
 
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [

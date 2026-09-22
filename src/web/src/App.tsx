@@ -58,12 +58,14 @@ const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGr
 export function App() {
   useSuppressEscapeBeep();
   const projects = useProjects();
+  const selectableProjects = projects.filter((project) => !project.hidden);
   const projectsLoaded = useProjectsLoaded();
   const showOnboarding = projectsLoaded && projects.length === 0;
   const { slots, openTicketId } = useBoard();
   const [view, setView] = useState<SidebarView>("home");
   const [homeView, setHomeView] = useState<HomeView>("kanban");
   const [filter, setFilter] = useState("all");
+  const effectiveFilter = selectableProjects.some((project) => project.key === filter) ? filter : "all";
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
@@ -107,7 +109,7 @@ export function App() {
       return (
         <Board
           projects={projects}
-          projectFilter={filter}
+          projectFilter={effectiveFilter}
           searchQuery={search}
           onOpenTicket={(t) => boardStore.openTicket(t.id)}
           onAddTicket={() => setCreating(true)}
@@ -118,7 +120,7 @@ export function App() {
       return (
         <AgentsView
           projects={projects}
-          projectFilter={filter}
+          projectFilter={effectiveFilter}
           searchQuery={search}
           onOpenTicket={(t) => boardStore.openTicket(t.id)}
         />
@@ -129,14 +131,14 @@ export function App() {
     }
     return (
       <WorkflowView
-        projectFilter={filter}
+        projectFilter={effectiveFilter}
         onOpenTicket={(t) => boardStore.openTicket(t.id)}
       />
     );
   };
 
   const renderView = (): ReactNode => {
-    if (view === "terminals") return <TerminalsView projects={projects} projectFilter={filter} />;
+    if (view === "terminals") return <TerminalsView projects={projects} projectFilter={effectiveFilter} />;
     if (view === "stats") return <StatsView projects={projects} />;
     if (view === "automation") return <AutomationView />;
     return renderHome();
@@ -193,12 +195,12 @@ export function App() {
                 aria-label="Rechercher un ticket"
               />
               <Select
-                value={filter}
+                value={effectiveFilter}
                 onChange={(e) => setFilter(e.target.value)}
                 className="h-7 text-xs"
               >
                 <option value="all">Tous les projets</option>
-                {projects.map((p) => (
+                {selectableProjects.map((p) => (
                   <option key={p.key} value={p.key}>
                     {p.label}
                   </option>
@@ -268,12 +270,12 @@ export function App() {
 
       <NewTicketSheet
         open={creating}
-        projects={projects}
+        projects={selectableProjects}
         onClose={() => setCreating(false)}
       />
       <ToolDialogs
         openTool={openTool}
-        projects={projects}
+        projects={selectableProjects}
         onClose={() => setOpenTool(null)}
       />
       <SettingsModal

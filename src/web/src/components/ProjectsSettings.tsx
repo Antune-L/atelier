@@ -1,4 +1,7 @@
-import { ChevronRight, FolderOpen } from "lucide-react";
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { ChevronRight, Eye, EyeOff, FolderOpen, GripVertical } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { VcsProvider } from "@shared/constants";
@@ -17,6 +20,7 @@ import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+import { cn } from "@/lib/utils";
 import {
   formatCommitTimeout,
   mostCommonValue,
@@ -31,6 +35,8 @@ const DEFAULT_COMMIT_TIMEOUT_MS = 600000;
 const REFERENCE_COMMIT_TIMEOUT_MS = 120000;
 const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
 const MUTED_TEXT_CLASS = "text-muted-foreground";
+const DRAG_ACTIVATION_DISTANCE = 6;
+const REORDER_ERROR = "Erreur lors de la réorganisation";
 
 /** Narrow the native `<select>` value without a cast; an unknown value falls back to the default. */
 function toVcsProvider(value: string): VcsProvider {
@@ -87,6 +93,12 @@ export function ProjectsSettings() {
   const [error, setError] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE },
+    }),
+  );
 
   useEffect(() => {
     let active = true;
@@ -131,6 +143,54 @@ export function ProjectsSettings() {
     setSelectedKey(null);
   };
 
+  const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
+    const { active, over } = event;
+    setError(null);
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = projects.findIndex((project) => project.key === active.id);
+    const newIndex = projects.findIndex((project) => project.key === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(projects, oldIndex, newIndex);
+    setProjects(reordered);
+    setMutationBusy(true);
+    const results = await Promise.allSettled(
+      reordered.map((project, index) => api.updateProject(project.key, { sortOrder: index })),
+    );
+    try {
+      await reload();
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") setError(errorMessage(failure.reason, REORDER_ERROR));
+    } catch (cause) {
+      setError(errorMessage(cause, REORDER_ERROR));
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
+  const toggleVisibility = async (project: ManagedProject): Promise<void> => {
+    setError(null);
+    const previousProjects = projects;
+    setMutationBusy(true);
+    setProjects((current) =>
+      current.map((item) => (item.key === project.key ? { ...item, hidden: !project.hidden } : item)),
+    );
+    try {
+      await api.updateProject(project.key, { hidden: !project.hidden });
+      await reload();
+    } catch (cause) {
+      try {
+        await reload();
+      } catch {
+        setProjects(previousProjects);
+      }
+      setError(errorMessage(cause));
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -140,18 +200,26 @@ export function ProjectsSettings() {
 
       <div className="flex flex-col gap-4 min-[720px]:flex-row min-[720px]:items-start">
         <div className="space-y-2 min-[720px]:w-[260px] min-[720px]:shrink-0">
-          {projects.map((project) => (
-            <ProjectListRow
-              key={project.key}
-              project={project}
-              selected={!showCreate && selected?.key === project.key}
-              showTimeout={project.commitTimeoutMs !== reference}
-              onSelect={() => {
-                setCreating(false);
-                setSelectedKey(project.key);
-              }}
-            />
-          ))}
+          <DndContext sensors={sensors} onDragEnd={(event) => void handleDragEnd(event)}>
+            <SortableContext items={projects.map((project) => project.key)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2">
+                {projects.map((project) => (
+                  <SortableProjectListRow
+                    key={project.key}
+                    project={project}
+                    selected={!showCreate && selected?.key === project.key}
+                    showTimeout={project.commitTimeoutMs !== reference}
+                    disabled={mutationBusy}
+                    onSelect={() => {
+                      setCreating(false);
+                      setSelectedKey(project.key);
+                    }}
+                    onToggleVisibility={() => void toggleVisibility(project)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
           {projects.length > 0 && (
             <DashedAddButton label="Ajouter un projet" onClick={() => setCreating(true)} />
           )}
@@ -181,35 +249,105 @@ interface ProjectListRowProps {
   project: ManagedProject;
   selected: boolean;
   showTimeout: boolean;
+  disabled: boolean;
   onSelect: () => void;
+  onToggleVisibility: () => void;
 }
 
-function ProjectListRow({ project, selected, showTimeout, onSelect }: ProjectListRowProps) {
+function SortableProjectListRow(props: ProjectListRowProps) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.project.key,
+    disabled: props.disabled,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <ProjectListRow
+        {...props}
+        dragHandleAttributes={attributes}
+        dragHandleListeners={listeners}
+        setActivatorNodeRef={setActivatorNodeRef}
+      />
+    </div>
+  );
+}
+
+type DragHandleAttributes = ReturnType<typeof useSortable>["attributes"];
+type DragHandleListeners = ReturnType<typeof useSortable>["listeners"];
+
+interface ProjectListRowInternalProps extends ProjectListRowProps {
+  dragHandleAttributes: DragHandleAttributes;
+  dragHandleListeners: DragHandleListeners;
+  setActivatorNodeRef: (element: HTMLElement | null) => void;
+}
+
+function ProjectListRow({
+  project,
+  selected,
+  showTimeout,
+  disabled,
+  onSelect,
+  onToggleVisibility,
+  dragHandleAttributes,
+  dragHandleListeners,
+  setActivatorNodeRef,
+}: ProjectListRowInternalProps) {
   const borderClass = selected ? "border-primary bg-accent/40" : "border-border hover:bg-accent/20";
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={selected}
-      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors ${borderClass}`}
+    <div
+      className={cn("flex w-full items-center gap-1 rounded-md border px-1.5 py-1 transition-colors", borderClass)}
     >
-      <span
-        className="h-3 w-3 shrink-0 rounded-sm"
-        style={{ backgroundColor: project.color ?? DEFAULT_PROJECT_COLOR }}
-      />
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block truncate text-sm font-semibold">{project.label}</span>
-        <span className="block truncate font-mono text-xs text-muted-foreground" title={project.repoPath}>
-          {shortenHomePath(project.repoPath)}
+      <button
+        ref={setActivatorNodeRef}
+        type="button"
+        disabled={disabled}
+        className="cursor-grab p-1 text-muted-foreground active:cursor-grabbing"
+        aria-label={`Réorganiser ${project.label}`}
+        {...dragHandleAttributes}
+        {...dragHandleListeners}
+      >
+        <GripVertical className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected}
+        disabled={disabled}
+        className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left disabled:opacity-60"
+      >
+        <span
+          className="h-3 w-3 shrink-0 rounded-sm"
+          style={{ backgroundColor: project.color ?? DEFAULT_PROJECT_COLOR }}
+        />
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="block truncate text-sm font-semibold">{project.label}</span>
+          <span className="block truncate font-mono text-xs text-muted-foreground" title={project.repoPath}>
+            {shortenHomePath(project.repoPath)}
+          </span>
+          <span className="flex flex-wrap items-center gap-1 pt-0.5">
+            <Pill>{project.baseBranch}</Pill>
+            {showTimeout && <Pill>commit {formatCommitTimeout(project.commitTimeoutMs)}</Pill>}
+          </span>
         </span>
-        <span className="flex flex-wrap items-center gap-1 pt-0.5">
-          <Pill>{project.baseBranch}</Pill>
-          {showTimeout && <Pill>commit {formatCommitTimeout(project.commitTimeoutMs)}</Pill>}
-        </span>
-      </span>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onToggleVisibility}
+        className="p-1 text-muted-foreground hover:text-foreground"
+        aria-label={`${project.hidden ? "Afficher" : "Cacher"} ${project.label} dans les sélecteurs`}
+        aria-pressed={project.hidden}
+      >
+        {project.hidden ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
   );
 }
 

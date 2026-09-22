@@ -18,9 +18,11 @@ interface StatCardProps {
 /** A dashboard card with its own independent project filter over the shared record set. */
 export function StatCard({ title, description, projects, records, children }: StatCardProps): ReactNode {
   const [project, setProject] = useState<string>(ALL_PROJECTS);
+  const selectableProjects = projects.filter((item) => !item.hidden);
+  const selectedProject = selectableProjects.some((item) => item.key === project) ? project : ALL_PROJECTS;
   const filtered = useMemo(
-    () => (project === ALL_PROJECTS ? records : records.filter((r) => r.project === project)),
-    [project, records],
+    () => (selectedProject === ALL_PROJECTS ? records : records.filter((r) => r.project === selectedProject)),
+    [selectedProject, records],
   );
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-4">
@@ -30,13 +32,13 @@ export function StatCard({ title, description, projects, records, children }: St
           {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
         </div>
         <Select
-          value={project}
+          value={selectedProject}
           onChange={(e) => setProject(e.target.value)}
           className="h-8 w-40 shrink-0 bg-background text-xs"
           aria-label={`Filtrer « ${title} » par projet`}
         >
           <option value={ALL_PROJECTS}>Tous les projets</option>
-          {projects.map((p) => (
+          {selectableProjects.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
             </option>

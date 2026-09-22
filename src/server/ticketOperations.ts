@@ -227,6 +227,7 @@ export class TicketOperations {
         baseBranch: project.baseBranch,
         defaultAutoMerge: project.defaultAutoMerge,
         defaultAddScreenshots: project.defaultAddScreenshots,
+        hidden: project.hidden ?? false,
         ...(project.color !== undefined ? { color: project.color } : {}),
       };
     });

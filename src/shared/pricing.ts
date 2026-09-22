@@ -8,7 +8,10 @@ import type { ModelUsage, SessionUsage, UsageByModel } from "./schemas.ts";
  * (tokens = source of truth).
  *
  * Prices are Anthropic public list prices, expressed in USD per million tokens (MTok). Cache reads
- * bill at 0.1x the base input rate; cache writes (creation) bill at 1.25x. Maintain manually.
+ * bill at 0.1x the base input rate by default (Opus 5.5: 0.05x); cache writes (creation) bill at
+ * 1.25x. `MODEL_PRICING` overrides a family rate for specific model ids (matched by prefix so
+ * dated ids like "claude-opus-5-5-20260915" resolve); anything else falls back to `PRICING`.
+ * Maintain manually.
  */
 
 /**
@@ -22,6 +25,8 @@ const MTOK = 1_000_000;
 
 /** Cache-read tokens bill at this fraction of the base input rate. */
 const CACHE_READ_MULTIPLIER = 0.1;
+/** Opus 5.5 cache reads bill at a lower fraction of its base input rate. */
+const OPUS_5_5_CACHE_READ_MULTIPLIER = 0.05;
 /** Cache-creation (write) tokens bill at this fraction of the base input rate. */
 const CACHE_CREATE_MULTIPLIER = 1.25;
 
@@ -37,11 +42,11 @@ interface FamilyPricing {
   cacheCreate: number;
 }
 
-function familyPricing(input: number, output: number): FamilyPricing {
+function familyPricing(input: number, output: number, cacheReadMultiplier = CACHE_READ_MULTIPLIER): FamilyPricing {
   return {
     input,
     output,
-    cacheRead: input * CACHE_READ_MULTIPLIER,
+    cacheRead: input * cacheReadMultiplier,
     cacheCreate: input * CACHE_CREATE_MULTIPLIER,
   };
 }
@@ -53,6 +58,20 @@ export const PRICING: Record<ModelFamily, FamilyPricing> = {
   haiku: familyPricing(1, 5),
   fable: familyPricing(10, 50),
 };
+
+/** Per-model-id overrides, keyed by id prefix; checked before the family table. */
+const MODEL_PRICING: Record<string, FamilyPricing> = {
+  "claude-opus-5-5": familyPricing(4, 20, OPUS_5_5_CACHE_READ_MULTIPLIER),
+};
+
+function pricingOf(modelId: string): FamilyPricing | null {
+  const lower = modelId.toLowerCase();
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (lower.startsWith(prefix)) return pricing;
+  }
+  const family = normalizeModel(modelId);
+  return family === null ? null : PRICING[family];
+}
 
 /**
  * Map a full transcript model id (e.g. "claude-opus-4-7-20250930") to a known family by substring.
@@ -69,9 +88,8 @@ export function normalizeModel(modelId: string): ModelFamily | null {
 
 /** Cost in USD of one model's usage; null means no explicit price is known. */
 function costOfModel(modelId: string, usage: ModelUsage): number | null {
-  const family = normalizeModel(modelId);
-  if (family === null) return null;
-  const p = PRICING[family];
+  const p = pricingOf(modelId);
+  if (p === null) return null;
   return (
     (usage.input_tokens * p.input +
       usage.output_tokens * p.output +

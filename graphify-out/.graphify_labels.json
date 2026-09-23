@@ -119,6 +119,18 @@
   "117": "WorkflowView.tsx",
   "118": "connectCodexAppServer",
   "119": "McpSettingsControllerDependencies",
+  "120": "ProjectSelect.tsx",
+  "121": "dialog.tsx",
   "122": "notionImport.ts",
-  "123": "useSuppressEscapeBeep.ts"
+  "123": "useSuppressEscapeBeep.ts",
+  "124": "AgentMessage",
+  "125": "TerminalSessionManager",
+  "126": "OverviewTab.tsx",
+  "127": "prUrl.ts",
+  "128": "SlotPips.tsx",
+  "129": "FakePaneStream",
+  "130": ".analyzeTickets",
+  "131": "App.tsx",
+  "132": ".handleMessage",
+  "133": "TerminalsView.tsx"
 }

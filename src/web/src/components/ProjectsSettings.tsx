@@ -1,5 +1,5 @@
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronRight, Eye, EyeOff, FolderOpen, GripVertical } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -38,6 +38,55 @@ const MUTED_TEXT_CLASS = "text-muted-foreground";
 const DRAG_ACTIVATION_DISTANCE = 6;
 const REORDER_ERROR = "Erreur lors de la réorganisation";
 const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
+const UNGROUPED_LABEL = "Sans groupe";
+
+interface ProjectGroup {
+  key: string;
+  label: string;
+  projects: ManagedProject[];
+}
+
+function projectGroupIdentity(project: ManagedProject): { key: string; label: string } {
+  const group = project.group?.trim();
+  if (!group) return { key: "ungrouped", label: UNGROUPED_LABEL };
+  return { key: `named:${group}`, label: group };
+}
+
+function groupProjects(projects: ManagedProject[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  for (const project of projects) {
+    const identity = projectGroupIdentity(project);
+    const group = groups.get(identity.key);
+    if (group) group.projects.push(project);
+    else groups.set(identity.key, { ...identity, projects: [project] });
+  }
+  return [...groups.values()];
+}
+
+function reorderProjectsWithinGroup(
+  projects: ManagedProject[],
+  group: ProjectGroup,
+  activeKey: string,
+  overKey: string,
+): ManagedProject[] {
+  const oldIndex = group.projects.findIndex((project) => project.key === activeKey);
+  const newIndex = group.projects.findIndex((project) => project.key === overKey);
+  if (oldIndex === -1 || newIndex === -1) return projects;
+
+  const reorderedGroup = [...group.projects];
+  const activeProject = reorderedGroup[oldIndex];
+  if (!activeProject) return projects;
+  reorderedGroup.splice(oldIndex, 1);
+  reorderedGroup.splice(newIndex, 0, activeProject);
+
+  let groupIndex = 0;
+  return projects.map((project) => {
+    if (projectGroupIdentity(project).key !== group.key) return project;
+    const replacement = reorderedGroup[groupIndex];
+    groupIndex += 1;
+    return replacement ?? project;
+  });
+}
 
 /** Narrow the native `<select>` value without a cast; an unknown value falls back to the default. */
 function toVcsProvider(value: string): VcsProvider {
@@ -132,6 +181,7 @@ export function ProjectsSettings() {
   const selected = projects.find((p) => p.key === selectedKey) ?? projects[0] ?? null;
   const showCreate = creating || projects.length === 0;
   const reference = referenceCommitTimeout(projects);
+  const projectGroups = groupProjects(projects);
 
   const onCreated = async (created: ManagedProject): Promise<void> => {
     await reload();
@@ -149,11 +199,13 @@ export function ProjectsSettings() {
     setError(null);
     if (!over || active.id === over.id) return;
 
-    const oldIndex = projects.findIndex((project) => project.key === active.id);
-    const newIndex = projects.findIndex((project) => project.key === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
+    const activeGroup = projectGroups.find((group) => group.projects.some((project) => project.key === active.id));
+    const overGroup = projectGroups.find((group) => group.projects.some((project) => project.key === over.id));
+    const activeProject = activeGroup?.projects.find((project) => project.key === active.id);
+    const overProject = overGroup?.projects.find((project) => project.key === over.id);
+    if (!activeGroup || activeGroup.key !== overGroup?.key || !activeProject || !overProject) return;
 
-    const reordered = arrayMove(projects, oldIndex, newIndex);
+    const reordered = reorderProjectsWithinGroup(projects, activeGroup, activeProject.key, overProject.key);
     setProjects(reordered);
     setMutationBusy(true);
     const results = await Promise.allSettled(
@@ -201,25 +253,41 @@ export function ProjectsSettings() {
 
       <div className="flex flex-col gap-4 min-[720px]:flex-row min-[720px]:items-start">
         <div className="space-y-2 min-[720px]:w-[260px] min-[720px]:shrink-0">
+          {projects.length > 1 && (
+            <p className="text-xs text-muted-foreground">Glissez pour réordonner les projets dans leur groupe.</p>
+          )}
           <DndContext sensors={sensors} onDragEnd={(event) => void handleDragEnd(event)}>
-            <SortableContext items={projects.map((project) => project.key)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2">
-                {projects.map((project) => (
-                  <SortableProjectListRow
-                    key={project.key}
-                    project={project}
-                    selected={!showCreate && selected?.key === project.key}
-                    showTimeout={project.commitTimeoutMs !== reference}
-                    disabled={mutationBusy}
-                    onSelect={() => {
-                      setCreating(false);
-                      setSelectedKey(project.key);
-                    }}
-                    onToggleVisibility={() => void toggleVisibility(project)}
-                  />
-                ))}
-              </div>
-            </SortableContext>
+            <div className="space-y-3">
+              {projectGroups.map((group) => (
+                <section key={group.key} className="rounded-lg border border-dashed border-border p-2">
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <h4 className="truncate text-xs font-semibold text-foreground">{group.label}</h4>
+                    <span className="shrink-0 text-xs text-muted-foreground">{group.projects.length}</span>
+                  </div>
+                  <SortableContext
+                    items={group.projects.map((project) => project.key)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-2">
+                      {group.projects.map((project) => (
+                        <SortableProjectListRow
+                          key={project.key}
+                          project={project}
+                          selected={!showCreate && selected?.key === project.key}
+                          showTimeout={project.commitTimeoutMs !== reference}
+                          disabled={mutationBusy}
+                          onSelect={() => {
+                            setCreating(false);
+                            setSelectedKey(project.key);
+                          }}
+                          onToggleVisibility={() => void toggleVisibility(project)}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </section>
+              ))}
+            </div>
           </DndContext>
           {projects.length > 0 && (
             <DashedAddButton label="Ajouter un projet" onClick={() => setCreating(true)} />

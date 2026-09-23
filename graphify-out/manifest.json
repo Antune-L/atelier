@@ -100,23 +100,23 @@
     "semantic_hash": "ad73237a3f52bdace8ac0aadaeb4738c"
   },
   "src/server/config.ts": {
-    "mtime": 1790097723.1471756,
-    "ast_hash": "4c8ce3044e4009848818de87e5572488",
+    "mtime": 1790150937.9823942,
+    "ast_hash": "181ca5491d288e27988afeea0b76d777",
     "semantic_hash": ""
   },
   "src/server/db/rows.ts": {
-    "mtime": 1790097723.2838006,
-    "ast_hash": "e6589374cbb88517017e74008a600f10",
+    "mtime": 1790150938.1323655,
+    "ast_hash": "2bfdcfeebb38141224464782550b0292",
     "semantic_hash": ""
   },
   "src/server/db/schema.ts": {
-    "mtime": 1790097723.2134826,
-    "ast_hash": "345270b831c7b14ada7cb9068c74cf5d",
+    "mtime": 1790150938.0500796,
+    "ast_hash": "e9b8b303c967581c63b94e4d3d93bf3f",
     "semantic_hash": ""
   },
   "src/server/db/store.ts": {
-    "mtime": 1790097723.358203,
-    "ast_hash": "b1356e8c82d2fc0905f03279d48ede7c",
+    "mtime": 1790150938.1963315,
+    "ast_hash": "2ed9fc6d11bf5b2342f9210c31cfdfc5",
     "semantic_hash": ""
   },
   "src/server/hub.ts": {
@@ -150,8 +150,8 @@
     "semantic_hash": "1888cf6a2f7ebc34b9e3497cf1e355ad"
   },
   "src/server/routes.ts": {
-    "mtime": 1790097723.4916494,
-    "ast_hash": "da6b30f30bfc61a19a8d4f4f1223ce27",
+    "mtime": 1790150938.2594047,
+    "ast_hash": "428abd08a91ed9f08355829e9fef413f",
     "semantic_hash": ""
   },
   "src/server/system/fake.ts": {
@@ -220,13 +220,13 @@
     "semantic_hash": ""
   },
   "src/shared/schemas.ts": {
-    "mtime": 1790097723.4269907,
-    "ast_hash": "5dfcbb3b0b7f2ca422b7fd4a0440ac08",
+    "mtime": 1790150964.3887255,
+    "ast_hash": "2f387fe8c96d8be8aba8904441ecfbaf",
     "semantic_hash": ""
   },
   "src/web/src/App.tsx": {
-    "mtime": 1790097772.1848035,
-    "ast_hash": "cdabbc976c63e14379300562ea6189bc",
+    "mtime": 1790151007.4710138,
+    "ast_hash": "902cde18a30f70be04452ae2aa2f5216",
     "semantic_hash": ""
   },
   "src/web/src/components/AgentProfileConfig.tsx": {
@@ -295,13 +295,13 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ProjectPrPicker.tsx": {
-    "mtime": 1788692730.2236903,
-    "ast_hash": "69f0696e5bc4a86aa2c4d2d6dbcfe6c2",
+    "mtime": 1790151061.6411097,
+    "ast_hash": "68dc6442f016aaf4867c015cfe9a12a8",
     "semantic_hash": ""
   },
   "src/web/src/components/ProjectSelect.tsx": {
-    "mtime": 1790097772.251309,
-    "ast_hash": "e2d8a75529199f1de88e4736f7deb53e",
+    "mtime": 1790151225.7174308,
+    "ast_hash": "82a056d5205dfaaf1ee818673bb82b28",
     "semantic_hash": ""
   },
   "src/web/src/components/QuitConfirmModal.tsx": {
@@ -385,8 +385,8 @@
     "semantic_hash": "d5d8e4474707940b6294e136e1152ec5"
   },
   "src/web/src/components/stats/StatCard.tsx": {
-    "mtime": 1790097836.6184998,
-    "ast_hash": "19d64f1657dff5fce5e293595698d6b4",
+    "mtime": 1790151061.7127848,
+    "ast_hash": "e88d3bb6d59c9f1a11892cb742b0c57e",
     "semantic_hash": ""
   },
   "src/web/src/components/stats/StatCharts.tsx": {
@@ -800,8 +800,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ProjectsSettings.tsx": {
-    "mtime": 1790098040.4862857,
-    "ast_hash": "67909f842c66a44225a7a799d1062c15",
+    "mtime": 1790150974.5991802,
+    "ast_hash": "716e20f647f78d504ce3fe6ffea7ba4e",
     "semantic_hash": ""
   },
   "src/web/src/hooks/usePrdSearch.ts": {
@@ -1205,8 +1205,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/LaunchForm.tsx": {
-    "mtime": 1790097836.5424228,
-    "ast_hash": "02579ee8706564bfcd053b8678954082",
+    "mtime": 1790151007.3434863,
+    "ast_hash": "32f1678faf48f425b0d44746736142a1",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/MetaRow.tsx": {
@@ -1330,13 +1330,13 @@
     "semantic_hash": ""
   },
   "src/server/publicMcp.ts": {
-    "mtime": 1789464693.5186143,
-    "ast_hash": "594926b29bf2e79ed3ddef305d63eebc",
+    "mtime": 1790150964.4674401,
+    "ast_hash": "606dc5836a5a906d6916e128b534a078",
     "semantic_hash": ""
   },
   "src/server/ticketOperations.ts": {
-    "mtime": 1790097723.5694652,
-    "ast_hash": "ab533c5b7fe7a2f23fa4072c3e1810e1",
+    "mtime": 1790150938.3220086,
+    "ast_hash": "ca5ceb3ffd1e4904244768c34ad6aee5",
     "semantic_hash": ""
   },
   "desktop/bootstrap.test.ts": {
@@ -1442,6 +1442,121 @@
   "src/web/src/lib/projectSelection.ts": {
     "mtime": 1790097772.115859,
     "ast_hash": "86c5e1e37c915e0e28a7c7be8081c208",
+    "semantic_hash": ""
+  },
+  ".project-picker-prototypes/.openai/hosting.json": {
+    "mtime": 1790150590.4124846,
+    "ast_hash": "b46aa8c3afff16d5ed8bec4c5602aafd",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-05-18-489Z.yml": {
+    "mtime": 1790150718.4910867,
+    "ast_hash": "571c267c99ad93da94d01fda536af2b8",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-09-59-709Z.yml": {
+    "mtime": 1790150999.7120404,
+    "ast_hash": "ce3640c6a28d2ddf7bdfc1e1fdc45946",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-10-05-955Z.yml": {
+    "mtime": 1790151005.9562583,
+    "ast_hash": "0f63da4b67d9bbd1d9d996121d4ab371",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-10-14-121Z.yml": {
+    "mtime": 1790151014.122615,
+    "ast_hash": "dcadfbb043ec27a2182413c6bbbdb23a",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-10-30-061Z.yml": {
+    "mtime": 1790151030.0666625,
+    "ast_hash": "1061621f3b2006272d71beb7caa37d4b",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-10-53-732Z.yml": {
+    "mtime": 1790151053.7332692,
+    "ast_hash": "31aa720667e196959baeef9d37053fe6",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-11-13-833Z.yml": {
+    "mtime": 1790151073.8357959,
+    "ast_hash": "d0b86c8814db17487ddaa2a42a21d911",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-11-32-829Z.yml": {
+    "mtime": 1790151092.8329139,
+    "ast_hash": "cac4ca8891fd7c85c59d8640f4d1ee96",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-11-46-583Z.yml": {
+    "mtime": 1790151106.5839446,
+    "ast_hash": "9aed708c27afb66f50113dc138d6111a",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-12-14-437Z.yml": {
+    "mtime": 1790151134.4387739,
+    "ast_hash": "11bb705727f8910e4e30910d30dfccbc",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-12-24-851Z.yml": {
+    "mtime": 1790151144.852616,
+    "ast_hash": "33a4fe29fcc8098dfcc8f0ad7e85a85c",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-12-37-405Z.yml": {
+    "mtime": 1790151157.4073703,
+    "ast_hash": "e6ee04f6cb782800f84c6c255293cd13",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-12-53-488Z.yml": {
+    "mtime": 1790151173.4900784,
+    "ast_hash": "49e9d2d4ff110d0908f6700092532f2c",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-13-42-234Z.yml": {
+    "mtime": 1790151222.2360559,
+    "ast_hash": "edc4be15e24334f2dd5c8e0caae81925",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-13-52-505Z.yml": {
+    "mtime": 1790151232.5062523,
+    "ast_hash": "416955fce1a2293549dbc22975e60143",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-14-03-353Z.yml": {
+    "mtime": 1790151243.3546212,
+    "ast_hash": "121d86177698eeddffb8304825cfbea0",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-14-13-097Z.yml": {
+    "mtime": 1790151253.1029038,
+    "ast_hash": "929394ee4153bfdb4a0dc3bdc5cbcc75",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-14-28-516Z.yml": {
+    "mtime": 1790151268.5184834,
+    "ast_hash": "e30a55db8cc740137850025a6813ced2",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-14-39-715Z.yml": {
+    "mtime": 1790151279.71783,
+    "ast_hash": "0c2b116333ada85f56bfe3fa5597f9d5",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-14-52-111Z.yml": {
+    "mtime": 1790151292.1137705,
+    "ast_hash": "268706a4471eba5fea8bcd509f92de9f",
+    "semantic_hash": ""
+  },
+  "projectGroupingState.md": {
+    "mtime": 1790152173.9884913,
+    "ast_hash": "5e28d1bc41fbd29d0d29ac46301b2252",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-09-23T08-06-00-785Z.png": {
+    "mtime": 1790150760.7875936,
+    "ast_hash": "1a5d4ddc2c68a9700d258168e34ca8f4",
     "semantic_hash": ""
   }
 }

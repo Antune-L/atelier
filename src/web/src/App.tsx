@@ -8,6 +8,7 @@ import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
 import { PrdView } from "@/components/PrdView";
+import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
@@ -28,7 +29,6 @@ import {
   PopoverMenuItem,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjects, useProjectsLoaded } from "@/hooks/useProjects";
@@ -194,18 +194,17 @@ export function App() {
                 className="h-7 w-44 text-xs"
                 aria-label="Rechercher un ticket"
               />
-              <Select
+              <ProjectSelect
+                id="board-project-filter"
+                projects={selectableProjects}
                 value={effectiveFilter}
-                onChange={(e) => setFilter(e.target.value)}
-                className="h-7 text-xs"
-              >
-                <option value="all">Tous les projets</option>
-                {selectableProjects.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
-                ))}
-              </Select>
+                onChange={setFilter}
+                label={null}
+                ariaLabel="Filtrer le tableau par projet"
+                options={[{ key: "all", label: "Tous les projets" }]}
+                className="w-44"
+                triggerClassName="h-7 bg-background text-xs"
+              />
               <div className="flex items-center gap-0.5">
                 <Button
                   variant="ghost"

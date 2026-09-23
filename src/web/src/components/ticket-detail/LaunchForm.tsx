@@ -4,6 +4,7 @@ import type { Orchestrator } from "@shared/constants";
 import type { ProjectInfo, Ticket, UpdateTicketInput } from "@shared/schemas";
 
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
+import { ProjectSelect } from "@/components/ProjectSelect";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { BranchCombobox, Label } from "@/components/ui/input";
@@ -84,21 +85,12 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
     <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 lg:grid-cols-2">
       {canEditTarget && (
         <>
-          <div className="space-y-1.5">
-            <Label htmlFor={PROJECT_ID} className={FIELD_LABEL_CLASSES}>Projet</Label>
-            <Select
-              id={PROJECT_ID}
-              value={ticket.project}
-              onChange={(e) => e.target.value !== ticket.project && patch({ project: e.target.value })}
-              className="w-full"
-            >
-              {selectableProjects.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-          </div>
+          <ProjectSelect
+            id={PROJECT_ID}
+            projects={selectableProjects}
+            value={ticket.project}
+            onChange={(project) => project !== ticket.project && patch({ project })}
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor={BASE_BRANCH_ID} className={FIELD_LABEL_CLASSES}>Branche de base du worktree</Label>

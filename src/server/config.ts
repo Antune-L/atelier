@@ -66,6 +66,7 @@ export const projectConfigSchema = z.object({
   instructions: z.string().optional(),
   /** Optional CSS color value used as the background of the project badge on ticket cards. */
   color: z.string().optional(),
+  group: z.string().transform((value) => value.trim() || undefined).optional(),
   hidden: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   /**

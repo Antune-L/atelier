@@ -1,8 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 
 import type { ProjectInfo, StatRecord } from "@shared/schemas";
 
-import { Select } from "@/components/ui/select";
+import { ProjectSelect } from "@/components/ProjectSelect";
 
 const ALL_PROJECTS = "all";
 
@@ -17,6 +17,7 @@ interface StatCardProps {
 
 /** A dashboard card with its own independent project filter over the shared record set. */
 export function StatCard({ title, description, projects, records, children }: StatCardProps): ReactNode {
+  const projectSelectId = useId();
   const [project, setProject] = useState<string>(ALL_PROJECTS);
   const selectableProjects = projects.filter((item) => !item.hidden);
   const selectedProject = selectableProjects.some((item) => item.key === project) ? project : ALL_PROJECTS;
@@ -31,19 +32,17 @@ export function StatCard({ title, description, projects, records, children }: St
           <h2 className="text-sm font-semibold">{title}</h2>
           {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
         </div>
-        <Select
+        <ProjectSelect
+          id={projectSelectId}
+          projects={selectableProjects}
           value={selectedProject}
-          onChange={(e) => setProject(e.target.value)}
-          className="h-8 w-40 shrink-0 bg-background text-xs"
-          aria-label={`Filtrer « ${title} » par projet`}
-        >
-          <option value={ALL_PROJECTS}>Tous les projets</option>
-          {selectableProjects.map((p) => (
-            <option key={p.key} value={p.key}>
-              {p.label}
-            </option>
-          ))}
-        </Select>
+          onChange={setProject}
+          label={null}
+          ariaLabel={`Filtrer « ${title} » par projet`}
+          options={[{ key: ALL_PROJECTS, label: "Tous les projets" }]}
+          className="w-40 shrink-0"
+          triggerClassName="h-8 bg-background text-xs"
+        />
       </div>
       {children(filtered)}
     </div>

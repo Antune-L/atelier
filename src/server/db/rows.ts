@@ -157,6 +157,7 @@ const projectRowSchema = z.object({
   default_auto_merge: z.number(),
   default_add_screenshots: z.number(),
   color: z.string().nullable(),
+  group_name: z.string().nullable(),
   instructions: z.string().nullable(),
   worktree_script: z.string().nullable(),
   run_script: z.string().nullable(),
@@ -433,6 +434,7 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
   if (row.worktree_teardown_script !== null) project.worktreeTeardownScript = row.worktree_teardown_script;
   if (row.instructions !== null) project.instructions = row.instructions;
   if (row.color !== null) project.color = row.color;
+  if (row.group_name !== null && row.group_name.trim().length > 0) project.group = row.group_name.trim();
   const worktreePorts = parseWorktreePorts(row.worktree_ports);
   if (worktreePorts !== undefined) project.worktreePorts = worktreePorts;
   return project;

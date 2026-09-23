@@ -154,6 +154,7 @@ CREATE TABLE IF NOT EXISTS projects (
   default_auto_merge INTEGER NOT NULL DEFAULT 0,
   default_add_screenshots INTEGER NOT NULL DEFAULT 0,
   color TEXT,
+  group_name TEXT,
   instructions TEXT,
   worktree_script TEXT,
   run_script TEXT,
@@ -372,6 +373,7 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
 const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "vcs_provider", ddl: `ALTER TABLE projects ADD COLUMN vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}'` },
   { column: "hidden", ddl: "ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0" },
+  { column: "group_name", ddl: "ALTER TABLE projects ADD COLUMN group_name TEXT" },
 ];
 
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [

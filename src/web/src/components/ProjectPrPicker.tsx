@@ -4,17 +4,14 @@ import type { ReactNode } from "react";
 import type { ProjectInfo } from "@shared/schemas";
 
 import { PrSelectRow } from "@/components/PrSelectRow";
+import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/input";
-import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
-import { Select } from "@/components/ui/select";
 import type { ProjectPanelState } from "@/hooks/useProjectPanel";
 import { cn } from "@/lib/utils";
 
 interface ProjectPrPickerProps {
   projects: ProjectInfo[];
   panel: ProjectPanelState;
-  /** Unique prefix for the project <Select>'s id/label association (e.g. "review", "clean"). */
   idPrefix: string;
 }
 
@@ -41,21 +38,13 @@ export function ProjectPrPicker({ projects, panel, idPrefix }: ProjectPrPickerPr
   return (
     <>
       <div className="flex items-end gap-2">
-        <div className="flex-1 space-y-1.5">
-          <Label htmlFor={selectId} className={FIELD_LABEL_CLASSES}>Projet</Label>
-          <Select
-            id={selectId}
-            value={project}
-            onChange={(e) => setProjectChoice(e.target.value)}
-            className="w-full"
-          >
-            {projects.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </Select>
-        </div>
+        <ProjectSelect
+          id={selectId}
+          projects={projects}
+          value={project}
+          onChange={setProjectChoice}
+          className="min-w-0 flex-1"
+        />
         <Button variant="outline" onClick={refresh} disabled={loading} aria-label="Rafraîchir les PRs">
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
         </Button>

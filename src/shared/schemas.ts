@@ -473,6 +473,7 @@ export const projectInfoSchema = z.object({
   defaultAddScreenshots: z.boolean(),
   /** Optional CSS color value used as the background of the project badge on ticket cards. */
   color: z.string().optional(),
+  group: z.string().optional(),
   hidden: z.boolean(),
 });
 export type ProjectInfo = z.infer<typeof projectInfoSchema>;
@@ -498,6 +499,7 @@ export const managedProjectSchema = z.object({
   vcsProvider: vcsProviderSchema,
   runScript: z.string().optional(),
   color: z.string().optional(),
+  group: z.string().optional(),
   hidden: z.boolean(),
   sortOrder: z.number().int(),
 });
@@ -512,6 +514,7 @@ export const createProjectSchema = z.object({
   vcsProvider: vcsProviderSchema.default(DEFAULT_VCS_PROVIDER),
   runScript: z.string().optional(),
   color: z.string().optional(),
+  group: z.string().transform((value) => value.trim() || undefined).optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 
@@ -524,6 +527,7 @@ export const updateProjectSchema = z.object({
   vcsProvider: vcsProviderSchema.optional(),
   runScript: z.string().nullable().optional(),
   color: z.string().optional(),
+  group: z.union([z.string().transform((value) => value.trim() || null), z.null()]).optional(),
   hidden: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 });

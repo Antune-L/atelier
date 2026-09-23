@@ -185,6 +185,7 @@ export interface NewProject {
   defaultAutoMerge: boolean;
   defaultAddScreenshots: boolean;
   color?: string;
+  group?: string;
   instructions?: string;
   worktreeScript?: string;
   runScript?: string;
@@ -202,6 +203,7 @@ export interface ProjectPatch {
   defaultAutoMerge?: boolean;
   defaultAddScreenshots?: boolean;
   color?: string | null;
+  group?: string | null;
   instructions?: string | null;
   worktreeScript?: string | null;
   runScript?: string | null;
@@ -1355,8 +1357,8 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
     this.db
       .query(
-        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         key,
@@ -1367,6 +1369,7 @@ export class Store {
         data.defaultAutoMerge ? 1 : 0,
         data.defaultAddScreenshots ? 1 : 0,
         data.color ?? null,
+        data.group?.trim() || null,
         data.instructions ?? null,
         data.worktreeScript ?? null,
         data.runScript ?? null,
@@ -1395,6 +1398,7 @@ export class Store {
     if (patch.defaultAutoMerge !== undefined) builder.set("default_auto_merge", patch.defaultAutoMerge ? 1 : 0);
     if (patch.defaultAddScreenshots !== undefined) builder.set("default_add_screenshots", patch.defaultAddScreenshots ? 1 : 0);
     if (patch.color !== undefined) builder.set("color", patch.color);
+    if (patch.group !== undefined) builder.set("group_name", patch.group?.trim() || null);
     if (patch.instructions !== undefined) builder.set("instructions", patch.instructions);
     if (patch.worktreeScript !== undefined) builder.set("worktree_script", patch.worktreeScript);
     if (patch.runScript !== undefined) builder.set("run_script", patch.runScript);

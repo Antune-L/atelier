@@ -37,6 +37,7 @@ const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
 const MUTED_TEXT_CLASS = "text-muted-foreground";
 const DRAG_ACTIVATION_DISTANCE = 6;
 const REORDER_ERROR = "Erreur lors de la réorganisation";
+const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 
 /** Narrow the native `<select>` value without a cast; an unknown value falls back to the default. */
 function toVcsProvider(value: string): VcsProvider {
@@ -229,6 +230,7 @@ export function ProjectsSettings() {
           <ProjectPanel
             key={showCreate ? "new" : (selected?.key ?? "new")}
             project={showCreate ? null : selected}
+            projects={projects}
             canPickFolder={canPickFolder}
             cancellable={projects.length > 0}
             onError={setError}
@@ -361,6 +363,7 @@ function Pill({ children }: { children: ReactNode }) {
 
 interface ProjectPanelProps {
   project: ManagedProject | null;
+  projects: ManagedProject[];
   canPickFolder: boolean;
   cancellable: boolean;
   onError: (message: string | null) => void;
@@ -372,6 +375,7 @@ interface ProjectPanelProps {
 
 function ProjectPanel({
   project,
+  projects,
   canPickFolder,
   cancellable,
   onError,
@@ -384,6 +388,7 @@ function ProjectPanel({
   const initialUnit = timeoutUnitOf(initialTimeoutMs);
 
   const [label, setLabel] = useState(project?.label ?? "");
+  const [group, setGroup] = useState(project?.group ?? "");
   const [repoPath, setRepoPath] = useState(project?.repoPath ?? "");
   const [baseBranch, setBaseBranch] = useState(project?.baseBranch ?? "");
   const [runScript, setRunScript] = useState(project?.runScript ?? "");
@@ -399,10 +404,15 @@ function ProjectPanel({
 
   const commitTimeoutMs = String(Number(timeoutValue) * timeoutUnitMs(unit));
   const valid = isValidDraft(label, repoPath, baseBranch, timeoutValue);
+  const normalizedGroup = group.trim();
+  const groupSuggestions = Array.from(
+    new Set(projects.flatMap((managedProject) => (managedProject.group ? [managedProject.group] : []))),
+  ).sort((left, right) => left.localeCompare(right));
 
   const dirty =
     project === null ||
     label !== project.label ||
+    group !== (project.group ?? "") ||
     repoPath !== project.repoPath ||
     commitTimeoutMs !== String(project.commitTimeoutMs) ||
     baseBranch !== project.baseBranch ||
@@ -428,6 +438,7 @@ function ProjectPanel({
   const buildPatch = (current: ManagedProject): UpdateProjectInput => {
     const patch: UpdateProjectInput = {};
     if (label !== current.label) patch.label = label.trim();
+    if (group !== (current.group ?? "")) patch.group = normalizedGroup || null;
     if (repoPath !== current.repoPath) patch.repoPath = repoPath.trim();
     if (baseBranch !== current.baseBranch) patch.baseBranch = baseBranch.trim();
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
@@ -444,6 +455,7 @@ function ProjectPanel({
       baseBranch: baseBranch.trim(),
       commitTimeoutMs: Number(commitTimeoutMs),
       vcsProvider,
+      ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
       color,
     };
@@ -454,6 +466,7 @@ function ProjectPanel({
   const update = async (current: ManagedProject): Promise<void> => {
     const saved = await api.updateProject(current.key, buildPatch(current));
     setLabel(saved.label);
+    setGroup(saved.group ?? "");
     setRepoPath(saved.repoPath);
     setBaseBranch(saved.baseBranch);
     setRunScript(saved.runScript ?? "");
@@ -511,6 +524,20 @@ function ProjectPanel({
       <div className="flex flex-col gap-3">
         <Field label="Nom">
           <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nom du projet" />
+        </Field>
+        <Field label="Groupe / client">
+          <Input
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            placeholder="Fauna"
+            aria-label="Groupe ou client"
+            list={PROJECT_GROUP_LIST_ID}
+          />
+          <datalist id={PROJECT_GROUP_LIST_ID}>
+            {groupSuggestions.map((suggestion) => (
+              <option key={suggestion} value={suggestion} />
+            ))}
+          </datalist>
         </Field>
         <Field label="Chemin">
           <div className="flex w-full items-center gap-2">

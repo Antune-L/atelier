@@ -119,8 +119,6 @@
   "117": "WorkflowView.tsx",
   "118": "connectCodexAppServer",
   "119": "McpSettingsControllerDependencies",
-  "120": "repairPath.ts",
-  "121": ".analyzeTickets",
   "122": "notionImport.ts",
   "123": "useSuppressEscapeBeep.ts"
 }

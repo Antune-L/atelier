@@ -47,6 +47,7 @@ const projectSchema = z.object({
   defaultAutoMerge: z.boolean(),
   defaultAddScreenshots: z.boolean(),
   color: z.string().optional(),
+  group: z.string().optional(),
 });
 
 const listProjectsInputSchema = z.object({});
@@ -277,6 +278,18 @@ function invalidInput(message: string): McpTextResult {
   return toolError(new TicketOperationError("INVALID_INPUT", message));
 }
 
+function listPublicProjects(operations: TicketOperations): z.infer<typeof projectSchema>[] {
+  return operations.listProjects().map((project) => ({
+    key: project.key,
+    label: project.label,
+    baseBranch: project.baseBranch,
+    defaultAutoMerge: project.defaultAutoMerge,
+    defaultAddScreenshots: project.defaultAddScreenshots,
+    ...(project.color !== undefined ? { color: project.color } : {}),
+    ...(project.group !== undefined ? { group: project.group } : {}),
+  }));
+}
+
 function createMcpServer(operations: TicketOperations, dryRun: boolean): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -290,7 +303,7 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
       if (request.params.name === "list_projects") {
         const parsed = listProjectsInputSchema.safeParse(input);
         if (!parsed.success) return invalidInput(parsed.error.issues[0]?.message ?? "invalid input");
-        return toolResult(listProjectsOutputSchema, { projects: operations.listProjects(), dryRun });
+        return toolResult(listProjectsOutputSchema, { projects: listPublicProjects(operations), dryRun });
       }
       if (request.params.name === "list_tickets") {
         const parsed = listTicketsInputSchema.safeParse(input);

@@ -228,6 +228,7 @@ export class TicketOperations {
         defaultAutoMerge: project.defaultAutoMerge,
         defaultAddScreenshots: project.defaultAddScreenshots,
         hidden: project.hidden ?? false,
+        ...(project.group !== undefined ? { group: project.group } : {}),
         ...(project.color !== undefined ? { color: project.color } : {}),
       };
     });

@@ -7,14 +7,20 @@ const BASE =
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (
-    <input ref={ref} className={cn(BASE, "h-9", className)} {...props} />
+    <input ref={ref} autoCorrect="off" autoCapitalize="none" className={cn(BASE, "h-9", className)} {...props} />
   ),
 );
 Input.displayName = "Input";
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ className, ...props }, ref) => (
-    <textarea ref={ref} className={cn(BASE, "min-h-[80px]", className)} {...props} />
+    <textarea
+      ref={ref}
+      autoCorrect="off"
+      autoCapitalize="none"
+      className={cn(BASE, "min-h-[80px]", className)}
+      {...props}
+    />
   ),
 );
 Textarea.displayName = "Textarea";
@@ -86,6 +92,8 @@ export function BranchCombobox({ id, value, onChange, options, disabled, classNa
         )}
         placeholder={disabled ? "Chargement…" : "Branche (existante ou nouvelle)"}
         autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="none"
       />
       {showList && (
         <ul

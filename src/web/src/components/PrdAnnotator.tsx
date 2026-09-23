@@ -137,6 +137,8 @@ export function PrdAnnotator({
                 onChange={(e) => search.onQueryChange(e.target.value)}
                 onKeyDown={search.onInputKeyDown}
                 placeholder="Rechercher…"
+                autoCorrect="off"
+                autoCapitalize="none"
                 className="h-7 w-44 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground"
               />
               <span className="w-14 shrink-0 text-center text-xs tabular-nums text-muted-foreground">

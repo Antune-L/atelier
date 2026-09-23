@@ -300,8 +300,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ProjectSelect.tsx": {
-    "mtime": 1790151225.7174308,
-    "ast_hash": "82a056d5205dfaaf1ee818673bb82b28",
+    "mtime": 1790154043.9285815,
+    "ast_hash": "244a00f44403a51bd221cddc9ec55a6a",
     "semantic_hash": ""
   },
   "src/web/src/components/QuitConfirmModal.tsx": {
@@ -430,8 +430,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ui/input.tsx": {
-    "mtime": 1788691922.8517668,
-    "ast_hash": "0d738b16f2b679bbc072bb59fc0e896d",
+    "mtime": 1790154043.8363454,
+    "ast_hash": "641b5c63987702696694fca96144a372",
     "semantic_hash": ""
   },
   "src/web/src/components/ui/markdown.tsx": {
@@ -770,8 +770,8 @@
     "semantic_hash": "03c3c2a1dc0faf1c9a8e3a87e6c2b4de"
   },
   "src/web/src/components/PrdAnnotator.tsx": {
-    "mtime": 1788692941.3729265,
-    "ast_hash": "535e269aa6ec1f4e0e479eb76db57dc9",
+    "mtime": 1790154044.010955,
+    "ast_hash": "7fe1008780e4af9543977f1c10486b28",
     "semantic_hash": ""
   },
   "src/web/src/components/PrdView.tsx": {

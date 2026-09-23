@@ -129,8 +129,5 @@
   "127": "prUrl.ts",
   "128": "SlotPips.tsx",
   "129": "FakePaneStream",
-  "130": ".analyzeTickets",
-  "131": "App.tsx",
-  "132": ".handleMessage",
-  "133": "TerminalsView.tsx"
+  "132": ".handleMessage"
 }

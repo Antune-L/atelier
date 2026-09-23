@@ -219,6 +219,8 @@ export function ProjectSelect({
             aria-label="Rechercher un client ou un projet"
             placeholder="Rechercher un client ou un projet…"
             autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
             className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
           <kbd className="rounded border px-1 py-0.5 text-[10px] text-muted-foreground">esc</kbd>

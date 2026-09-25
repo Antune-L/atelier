@@ -571,7 +571,8 @@ export class DelegationManager {
     const details = outsideDiffFindings.length === 0
       ? ""
       : `\n\n${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, humanTone)).join("\n\n")}`;
-    return `**${verdict}**\n\n${labels.keptLine(findings.length, countSummary)}${details}`;
+    const keptLine = humanTone ? "" : `\n\n${labels.keptLine(findings.length, countSummary)}`;
+    return `**${verdict}**${keptLine}${details}`;
   }
 
   async publishReview(

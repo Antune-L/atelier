@@ -1,7 +1,7 @@
 import { transcriptUpdateSchema } from "./transcript.ts";
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, REPO_INSPECTION_SOURCES, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
@@ -556,6 +556,31 @@ export const updateProjectSchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
+/** Folder picked in the project form, inspected server-side to prefill the other fields. */
+export const inspectProjectSchema = z.object({ repoPath: z.string().min(1) });
+export type InspectProjectInput = z.infer<typeof inspectProjectSchema>;
+
+const repoInspectionSourceSchema = z.enum(REPO_INSPECTION_SOURCES);
+const repoSuggestionSchema = z.object({ value: z.string(), source: repoInspectionSourceSchema });
+const vcsProviderSuggestionSchema = z.object({ value: vcsProviderSchema, source: repoInspectionSourceSchema });
+
+/** Deterministic suggestions derived from a repo folder (null when nothing could be inferred). */
+export const repoInspectionSchema = z.object({
+  repoPath: z.string(),
+  isGitRepo: z.boolean(),
+  existingProjectKey: z.string().nullable(),
+  label: repoSuggestionSchema.nullable(),
+  group: repoSuggestionSchema.nullable(),
+  baseBranch: repoSuggestionSchema.nullable(),
+  vcsProvider: vcsProviderSuggestionSchema.nullable(),
+  runScript: repoSuggestionSchema.nullable(),
+});
+export type RepoInspection = z.infer<typeof repoInspectionSchema>;
+
+/** VCS connection probe for a project that is not saved yet. */
+export const testConnectionDraftSchema = z.object({ repoPath: z.string().min(1), vcsProvider: vcsProviderSchema });
+export type TestConnectionDraftInput = z.infer<typeof testConnectionDraftSchema>;
 
 export const reorderProjectsSchema = z.object({
   keys: z.array(projectKeySchema),

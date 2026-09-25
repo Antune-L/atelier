@@ -3,14 +3,14 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { $ } from "bun";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { PrState, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { createLogger } from "../logger.ts";
@@ -27,6 +27,17 @@ import { CapabilityCache } from "./capabilityCache.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
+import {
+  buildRepoInspection,
+  LOCKFILE_NAMES,
+  PACKAGE_MANIFEST_FILE,
+  parsePackageManifest,
+  REPO_NOT_FOUND_MESSAGE,
+  hostnameFromSshConfig,
+  sshHostFromRemoteUrl,
+  vcsProviderFromRemoteUrl,
+} from "./repoInspection.ts";
+import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -109,6 +120,30 @@ const CLAUDE_BINARY_NAME = "claude";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
+
+/** Trimmed stdout of a read-only query, or null when it failed or printed nothing. */
+async function commandOutputOrNull(command: ReturnType<typeof $>): Promise<string | null> {
+  const res = await command.nothrow().quiet();
+  if (res.exitCode !== 0) return null;
+  return res.stdout.toString().trim() || null;
+}
+
+/** Resolve an SSH host alias of the origin URL (e.g. `github-perso`) to its real hostname, read-only. */
+async function resolveSshHostname(remoteUrl: string): Promise<string | null> {
+  const host = sshHostFromRemoteUrl(remoteUrl);
+  if (!host) return null;
+  const output = await commandOutputOrNull($`ssh -G ${host}`);
+  return output ? hostnameFromSshConfig(output) : null;
+}
+
+type GitRemoteFacts = Pick<RepoFacts, "remoteHead" | "currentBranch" | "remoteUrl" | "remoteSshHostname">;
+const NO_GIT_REMOTE_FACTS: GitRemoteFacts = { remoteHead: null, currentBranch: null, remoteUrl: null, remoteSshHostname: null };
+
+async function readPackageManifest(repoPath: string): Promise<PackageManifest | null> {
+  const file = Bun.file(join(repoPath, PACKAGE_MANIFEST_FILE));
+  if (!(await file.exists())) return null;
+  return parsePackageManifest(await file.text().catch(() => ""));
+}
 
 /**
  * Real adapter: performs actual git/tmux/gh/osascript/filesystem side effects.
@@ -860,6 +895,30 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult> {
     return this.vcs(provider).testConnection(repoPath, Date.now());
+  }
+
+  async inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">> {
+    const info = await stat(repoPath).catch(() => null);
+    if (!info?.isDirectory()) throw new Error(REPO_NOT_FOUND_MESSAGE);
+    const [isGitRepo, manifest] = await Promise.all([this.isGitWorkTree(repoPath), readPackageManifest(repoPath)]);
+    const lockfile = LOCKFILE_NAMES.find((name) => existsSync(join(repoPath, name))) ?? null;
+    const remotes = isGitRepo ? await this.readGitRemoteFacts(repoPath) : NO_GIT_REMOTE_FACTS;
+    return buildRepoInspection({ repoPath, isGitRepo, manifest, lockfile, knownGroups, ...remotes });
+  }
+
+  private async readGitRemoteFacts(repoPath: string): Promise<GitRemoteFacts> {
+    const [remoteHead, currentBranch, remoteUrl] = await Promise.all([
+      commandOutputOrNull($`git -C ${repoPath} symbolic-ref --quiet --short refs/remotes/origin/HEAD`),
+      commandOutputOrNull($`git -C ${repoPath} symbolic-ref --quiet --short HEAD`),
+      commandOutputOrNull($`git -C ${repoPath} remote get-url origin`),
+    ]);
+    const remoteSshHostname = remoteUrl && !vcsProviderFromRemoteUrl(remoteUrl) ? await resolveSshHostname(remoteUrl) : null;
+    return { remoteHead, currentBranch, remoteUrl, remoteSshHostname };
+  }
+
+  private async isGitWorkTree(repoPath: string): Promise<boolean> {
+    const res = await $`git -C ${repoPath} rev-parse --is-inside-work-tree`.nothrow().quiet();
+    return res.exitCode === 0;
   }
 
   async listBranches(repoPath: string): Promise<string[]> {

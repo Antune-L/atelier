@@ -20,9 +20,11 @@ import {
   deriveTitleFromDescription,
   importNotionSchema,
   importTicketsSchema,
+  inspectProjectSchema,
   moveTicketSchema,
   reorderProjectsSchema,
   startWorktreeSessionBodySchema,
+  testConnectionDraftSchema,
   updateAppSettingsSchema,
   updateAutomationSchema,
   updateProfileSchema,
@@ -30,7 +32,7 @@ import {
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { ManagedProject, OpenPr, SkillStatus, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import type { ManagedProject, OpenPr, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
@@ -70,6 +72,7 @@ interface PaneReader {
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
   listBranches(repoPath: string): Promise<string[]>;
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
+  inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
@@ -192,6 +195,19 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
 function jsonError(set: { status?: number | string }, status: number, message: string): { error: string } {
   set.status = status;
   return { error: message };
+}
+
+const TRAILING_SLASHES = /\/+$/;
+const VCS_CONNECTION_FAILURE_MESSAGE = "échec du test de connexion";
+const REPO_INSPECTION_FAILURE_MESSAGE = "échec de l'inspection du dossier";
+
+function normalizeRepoPath(repoPath: string): string {
+  return repoPath.trim().replace(TRAILING_SLASHES, "") || repoPath.trim();
+}
+
+/** A connection probe that threw still answers with the probe's own `ok: false` shape. */
+function vcsConnectionFailure(error: unknown): VcsConnectionResult {
+  return { ok: false, message: getErrorMessage(error, VCS_CONNECTION_FAILURE_MESSAGE), checkedAt: Date.now() };
 }
 
 function ticketOperationError(
@@ -539,6 +555,35 @@ export function createApiRoutes(deps: RouteDeps) {
       set.status = HTTP_CREATED;
       return toManagedProject(key, created);
     })
+    .post("/projects/inspect", async ({ body, set }) => {
+      const parsed = inspectProjectSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const { repoPath } = parsed.data;
+      const requestedPath = normalizeRepoPath(repoPath);
+      const knownGroups = new Set<string>();
+      let existingProjectKey: string | null = null;
+      for (const key of store.listProjectKeys()) {
+        const row = store.getProjectRow(key);
+        if (!row) continue;
+        if (row.group) knownGroups.add(row.group);
+        if (existingProjectKey === null && normalizeRepoPath(row.repoPath) === requestedPath) existingProjectKey = key;
+      }
+      try {
+        const inspection = await deps.system.inspectRepo(repoPath, [...knownGroups]);
+        return { ...inspection, existingProjectKey } satisfies RepoInspection;
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_REQUEST, getErrorMessage(error, REPO_INSPECTION_FAILURE_MESSAGE));
+      }
+    })
+    .post("/projects/test-connection", async ({ body, set }) => {
+      const parsed = testConnectionDraftSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      try {
+        return await deps.system.testVcsConnection(parsed.data.repoPath, parsed.data.vcsProvider);
+      } catch (error) {
+        return vcsConnectionFailure(error);
+      }
+    })
     .patch("/projects/:key", ({ params, body, set }) => {
       const project = store.getProjectRow(params.key);
       if (!project) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
@@ -594,11 +639,7 @@ export function createApiRoutes(deps: RouteDeps) {
       try {
         return await deps.system.testVcsConnection(project.repoPath, project.vcsProvider);
       } catch (error) {
-        return {
-          ok: false,
-          message: getErrorMessage(error, "échec du test de connexion"),
-          checkedAt: Date.now(),
-        };
+        return vcsConnectionFailure(error);
       }
     })
     .get("/capabilities", async ({ query }) => {

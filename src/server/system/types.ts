@@ -7,7 +7,7 @@
  * resolves the provider half to a `VcsClient` (see `./vcs/types.ts`).
  */
 
-import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
@@ -268,6 +268,12 @@ export interface SystemAdapter {
    * every failure (missing CLI, unparseable remote, CLI error) comes back as `ok: false` + message.
    */
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
+
+  /**
+   * Read-only, deterministic inspection of a folder picked in the project form (package.json, git
+   * refs, origin URL, lockfile) to prefill it. Throws "dossier introuvable" when it is not a directory.
+   */
+  inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
 
   // ---- branch listing (base branch picker) ----
   /** Remote branch names of the project repo (`git ls-remote --heads origin`). Throws on CLI failure. */

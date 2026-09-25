@@ -1,4 +1,6 @@
-import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import { basename } from "node:path";
+
+import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { CODEX_MODELS, CODEX_EFFORTS } from "../../shared/constants.ts";
@@ -6,6 +8,7 @@ import type { PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
@@ -333,6 +336,20 @@ export class FakeSystemAdapter implements SystemAdapter {
   async testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult> {
     this.log("testVcsConnection", { repoPath, provider });
     return this.vcs(provider).testConnection(repoPath, Date.now());
+  }
+
+  async inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">> {
+    this.log("inspectRepo", { repoPath, knownGroups });
+    const label = formatProjectLabel(basename(repoPath));
+    return {
+      repoPath,
+      isGitRepo: true,
+      label: label ? { value: label, source: "folderName" } : null,
+      group: null,
+      baseBranch: { value: FALLBACK_BASE_BRANCH, source: "remoteHead" },
+      vcsProvider: { value: "github", source: "remoteUrl" },
+      runScript: null,
+    };
   }
 
   async listBranches(repoPath: string): Promise<string[]> {

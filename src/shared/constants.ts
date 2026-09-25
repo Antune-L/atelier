@@ -133,6 +133,10 @@ export const VCS_PROVIDER_LABELS: Record<VcsProvider, string> = {
 
 export const DEFAULT_VCS_PROVIDER: VcsProvider = "github";
 
+/** Where a repo-inspection suggestion came from, so the project form can explain each prefilled field. */
+export const REPO_INSPECTION_SOURCES = ["packageManifest", "folderName", "parentFolder", "remoteHead", "currentBranch", "remoteUrl", "lockfile", "fallback"] as const;
+export type RepoInspectionSource = (typeof REPO_INSPECTION_SOURCES)[number];
+
 /** Provider-neutral lifecycle state of a pull request, mapped at the VCS client boundary. */
 export const PR_STATES = ["open", "merged", "closed", "unknown"] as const;
 export type PrState = (typeof PR_STATES)[number];

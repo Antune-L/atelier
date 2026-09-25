@@ -120,12 +120,9 @@
   "118": "StageProgressBar.tsx",
   "119": "AgentMessage",
   "120": "ProjectPanel.tsx",
-  "121": "usePrdSearch.ts",
   "122": "createMcpServer",
   "123": "projectDisplay.ts",
   "124": "useSavedFlash.ts",
   "125": "useSuppressEscapeBeep.ts",
-  "126": "Logger",
-  "127": "listProjectKeys",
   "128": "notionImport.ts"
 }

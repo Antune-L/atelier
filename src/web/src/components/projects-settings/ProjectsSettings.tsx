@@ -116,6 +116,13 @@ export function ProjectsSettings() {
     setCreating(false);
   };
 
+  const openExisting = (key: string): void => {
+    if (projects.find((project) => project.key === key)?.hidden) changeShowHidden(true);
+    setQuery("");
+    setCreating(false);
+    setSelectedKey(key);
+  };
+
   const onDeleted = async (): Promise<void> => {
     await reload();
     setSelectedKey(null);
@@ -188,6 +195,7 @@ export function ProjectsSettings() {
         onCreated={onCreated}
         onDeleted={onDeleted}
         onCancelCreate={() => setCreating(false)}
+        onOpenExisting={openExisting}
       />
     );
   };

@@ -14,13 +14,16 @@ import type {
   CreateTicketInput,
   ImportNotionInput,
   ImportTicketsInput,
+  InspectProjectInput,
   ManagedProject,
   OpenPr,
   Profile,
   ProjectInfo,
+  RepoInspection,
   StartWorktreeSessionBody,
   StatRecord,
   TerminalOutput,
+  TestConnectionDraftInput,
   Ticket,
   UpdateAppSettingsInput,
   UpdateAutomationInput,
@@ -60,6 +63,10 @@ export const api = {
     request("/api/project-groups/color", { method: "PUT", body: JSON.stringify({ group, color }) }),
   createProject: (input: CreateProjectInput): Promise<ManagedProject> =>
     request("/api/projects", { method: "POST", body: JSON.stringify(input) }),
+  inspectProject: (input: InspectProjectInput): Promise<RepoInspection> =>
+    request("/api/projects/inspect", { method: "POST", body: JSON.stringify(input) }),
+  testDraftConnection: (input: TestConnectionDraftInput): Promise<VcsConnectionResult> =>
+    request("/api/projects/test-connection", { method: "POST", body: JSON.stringify(input) }),
   updateProject: (key: string, patch: UpdateProjectInput): Promise<ManagedProject> =>
     request(`/api/projects/${encodeURIComponent(key)}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteProject: async (key: string): Promise<void> => {

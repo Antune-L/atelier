@@ -11,6 +11,7 @@ import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
+import { SkillsPreflightDialog } from "@/components/SkillsPreflightDialog";
 import { SlotPips } from "@/components/SlotPips";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
@@ -287,6 +288,7 @@ export function App() {
       >
         <ProjectsSettings />
       </Dialog>
+      <SkillsPreflightDialog suppressed={showOnboarding} />
 
       {updating && (
         <div className="fixed inset-0 z-dialog flex items-center justify-center bg-background/60">

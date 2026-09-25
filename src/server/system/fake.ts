@@ -1,4 +1,5 @@
-import type { OpenPr, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { CODEX_MODELS, CODEX_EFFORTS } from "../../shared/constants.ts";
 import type { PrState, VcsProvider } from "../../shared/constants.ts";
@@ -48,6 +49,8 @@ function delay(ms: number): Promise<void> {
  * Used by default in dev/test. The done() gate always passes so the pipeline
  * can be exercised end-to-end. tmux sessions are tracked in memory.
  */
+const FAKE_MISSING_SKILLS_ENV = "KANBAN_FAKE_MISSING_SKILLS";
+
 export class FakeSystemAdapter implements SystemAdapter {
   readonly dryRun = true;
   /** One fake client for every provider: dry-run never talks to a real PR host. */
@@ -361,6 +364,13 @@ export class FakeSystemAdapter implements SystemAdapter {
   async checkClaudeAvailable(): Promise<boolean> {
     // Same dry-run stance as checkComposerAvailable: the pipeline stays exerciseable end-to-end.
     return true;
+  }
+
+  async checkSkills(): Promise<SkillStatus[]> {
+    // NOTE: same dry-run stance as checkClaudeAvailable: every skill reported installed, unless
+    // KANBAN_FAKE_MISSING_SKILLS (comma-separated names) simulates missing ones to exercise the UI.
+    const missing = new Set((process.env[FAKE_MISSING_SKILLS_ENV] ?? "").split(",").map((name) => name.trim()));
+    return SKILL_REQUIREMENTS.map((skill) => ({ ...skill, installed: !missing.has(skill.name) }));
   }
 
   async checkCodexRuntime(): Promise<CodexRuntimeStatus> {

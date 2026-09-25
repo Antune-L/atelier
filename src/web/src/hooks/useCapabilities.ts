@@ -20,6 +20,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultCodexFast: false,
   canUpdate: false,
   canPickFolder: false,
+  skills: [],
 };
 
 const RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;

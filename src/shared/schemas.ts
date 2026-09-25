@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
+import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
 import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
 
@@ -854,6 +855,17 @@ export type TerminalOutput = z.infer<typeof terminalOutputSchema>;
 export const uploadResultSchema = z.object({ path: z.string(), url: z.string() });
 export type UploadResult = z.infer<typeof uploadResultSchema>;
 
+/** Detection result for one host skill (`~/.claude/skills/<name>/SKILL.md`). */
+export const skillStatusSchema = z.object({
+  name: z.string(),
+  tier: z.enum(SKILL_TIERS),
+  purpose: z.string(),
+  installed: z.boolean(),
+  /** Non-null when the skill is not published in skillzer: how to get it instead. */
+  installHint: z.string().nullable(),
+});
+export type SkillStatus = z.infer<typeof skillStatusSchema>;
+
 /** Backend-provided client config: capability flags + orchestrator defaults (UI gating/labels). */
 export const capabilitiesSchema = z.object({
   /** The Cursor headless CLI (Composer driver) is installed and authenticated. */
@@ -864,6 +876,8 @@ export const capabilitiesSchema = z.object({
   claudeAvailable: z.boolean(),
   /** Refreshable authentication and model catalog returned by the Codex runtime. */
   codex: codexRuntimeStatusSchema,
+  /** Host Claude Code skills the pipeline depends on, with their detection status. */
+  skills: z.array(skillStatusSchema),
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),
   /** Orchestrator reasoning effort used when a ticket leaves it unset (e.g. "medium"). */

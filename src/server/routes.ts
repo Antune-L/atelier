@@ -30,7 +30,7 @@ import {
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import type { ManagedProject, OpenPr, SkillStatus, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
@@ -81,6 +81,7 @@ interface PaneReader {
   importNotion(opts: ImportNotionOptions): Promise<string>;
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
   checkClaudeAvailable(): Promise<boolean>;
+  checkSkills(): Promise<SkillStatus[]>;
 }
 
 interface RouteDeps {
@@ -617,6 +618,7 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultCodexFast: MODELS.codexFast,
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
         canPickFolder: deps.pickFolder != null,
+        skills: await deps.system.checkSkills(),
       };
     })
     .get("/settings", () => store.getAppSettings())

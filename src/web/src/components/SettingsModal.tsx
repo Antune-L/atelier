@@ -23,6 +23,7 @@ import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
+import { SkillsStatusList } from "@/components/SkillsStatusList";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { SectionHeader } from "@/components/ui/settings";
@@ -58,7 +59,14 @@ const NO_MATCH_MESSAGE = "Aucun réglage ne correspond à cette recherche.";
 const SETTINGS_GROUPS = ["Application", "Connexions"] as const;
 type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
-type SettingsSectionId = "appearance" | "defaults" | "profiles" | "projects" | "providers" | "mcp";
+type SettingsSectionId =
+  | "appearance"
+  | "defaults"
+  | "profiles"
+  | "projects"
+  | "providers"
+  | "skills"
+  | "mcp";
 
 interface SettingsSection {
   id: SettingsSectionId;
@@ -118,6 +126,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "Fournisseurs",
     group: "Connexions",
     keywords: ["codex", "claude", "composer", "cursor", "connexion", "fast", "statut", "détection"],
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    group: "Connexions",
+    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "détection"],
   },
   {
     id: "mcp",
@@ -270,6 +284,7 @@ function SettingsSectionPanel({
   if (sectionId === "profiles") return <ProfilesSettings />;
   if (sectionId === "projects") return <ProjectsSettings />;
   if (sectionId === "providers") return <ProvidersSettings />;
+  if (sectionId === "skills") return <SkillsSettings />;
   return <McpSettings />;
 }
 
@@ -557,6 +572,21 @@ function ProvidersSettings() {
         }
       />
       {error !== null && <p className="text-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/** Host Claude Code skills detection, reachable after the preflight dialog was dismissed. */
+function SkillsSettings() {
+  const { skills } = useCapabilities();
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        title="Skills"
+        subtitle="Skills Claude Code détectés dans ~/.claude/skills et utilisés par les agents."
+      />
+      <SkillsStatusList skills={skills} />
     </div>
   );
 }

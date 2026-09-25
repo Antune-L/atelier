@@ -10,7 +10,8 @@ import { join, resolve } from "node:path";
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { PrState, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import type { OpenPr, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
@@ -50,6 +51,8 @@ import type { VcsClient } from "./vcs/types.ts";
 const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
+const CLAUDE_SKILLS_DIR = join(homedir(), ".claude", "skills");
+const SKILL_MANIFEST_FILE = "SKILL.md";
 const PROD_ENV_MARKER = "prod";
 /** Bound the synchronous one-shot reformulation SDK query (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
@@ -946,6 +949,13 @@ export class RealSystemAdapter implements SystemAdapter {
       // The SDK platform package is absent (packaged app before provisioning): fall through to PATH.
     }
     return Bun.which(CLAUDE_BINARY_NAME) !== null;
+  }
+
+  async checkSkills(): Promise<SkillStatus[]> {
+    return SKILL_REQUIREMENTS.map((skill) => ({
+      ...skill,
+      installed: existsSync(join(CLAUDE_SKILLS_DIR, skill.name, SKILL_MANIFEST_FILE)),
+    }));
   }
 
   checkCodexRuntime(refresh = false): Promise<CodexRuntimeStatus> {

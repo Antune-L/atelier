@@ -7,7 +7,7 @@
  * resolves the provider half to a `VcsClient` (see `./vcs/types.ts`).
  */
 
-import type { OpenPr, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { OpenPr, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
@@ -287,6 +287,8 @@ export interface SystemAdapter {
   checkComposerAvailable(): Promise<boolean>;
   /** Whether a runnable `claude` binary is resolvable (SDK platform package or a user install). */
   checkClaudeAvailable(): Promise<boolean>;
+  /** Install status of every host skill the pipeline depends on (`~/.claude/skills/<name>/SKILL.md`). */
+  checkSkills(): Promise<SkillStatus[]>;
   /** Fresh runtime/account/catalog status, sharing an in-flight probe when callers refresh together. */
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
 

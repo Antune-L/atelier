@@ -176,6 +176,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         if (!next) onClose();
       }}
       size="lg"
+      className="w-[calc(100vw-2rem)] max-w-[1152px]"
       title="Réglages"
     >
       <div className="flex gap-5">

@@ -20,7 +20,7 @@ For Codex, the app reuses the existing Codex connection. The available models ar
 
 For a Codex implementation, the implementer's model, effort and FAST mode can differ from the orchestrator's. By default they inherit the existing Codex settings; an explicitly chosen value stays independent. Profiles store these choices. Configurations are frozen at launch and kept across resumes: editing the ticket or the settings afterwards does not change a run that has already started.
 
-The Codex SDK and binary are pinned to `0.153.4`. Interactive sessions use that same binary's App Server to receive messages during a turn, interrupt a turn and resume a conversation. PRD and Notion operations also follow the chosen agent. Notion import requires the Notion MCP connection to be authorized for this client.
+The Codex SDK and binary are pinned to `0.153.4`. Interactive sessions use that same binary's App Server to receive messages during a turn, interrupt a turn and resume a conversation. Notion import also follows the chosen agent and requires the Notion MCP connection to be authorized for this client.
 
 In worktrees, the numeric version declared in `.nvmrc` must be installed via nvm. That version is then applied to the install, the scripts, the agents and the terminal. A missing version or an unsupported alias produces an explicit diagnostic before launch.
 

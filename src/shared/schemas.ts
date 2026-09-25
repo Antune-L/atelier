@@ -837,14 +837,6 @@ export const actionExecutionOptionsSchema = z
   });
 export type ActionExecutionOptions = z.infer<typeof actionExecutionOptionsSchema>;
 
-/** Generate (or revise) a standalone PRD from a free-form description; nothing is persisted. */
-export const generatePrdSchema = z.object({
-  description: z.string().min(1),
-  previousPrd: z.string().optional(),
-  feedback: z.string().optional(),
-}).and(actionExecutionOptionsSchema);
-export type GeneratePrdInput = z.infer<typeof generatePrdSchema>;
-
 /** Read a linked Notion card and synthesize its problem as markdown to append to a ticket description. */
 export const importNotionSchema = z.object({
   url: z.url().refine(isNotionUrl, { message: "URL Notion invalide" }),

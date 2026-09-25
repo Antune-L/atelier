@@ -18,10 +18,10 @@ import { TicketLifecycle } from "./lifecycle.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { FakeSystemAdapter } from "./system/fake.ts";
-import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
+import type { ImportNotionOptions } from "./system/types.ts";
 
 class ActionSystem extends FakeSystemAdapter {
-  calls: ReformulateOptions[] = [];
+  calls: ImportNotionOptions[] = [];
   runtimeChecks: boolean[] = [];
   runtimeStatus: CodexRuntimeStatus | null = null;
 
@@ -30,10 +30,6 @@ class ActionSystem extends FakeSystemAdapter {
     return this.runtimeStatus ?? super.checkCodexRuntime();
   }
 
-  override async reformulate(options: ReformulateOptions): Promise<string> {
-    this.calls.push(options);
-    return "# PRD";
-  }
   override async importNotion(options: ImportNotionOptions): Promise<string> {
     this.calls.push(options);
     return "# Notion";
@@ -76,22 +72,22 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
     }));
     expect(settingsResponse.status).toBe(200);
     expect((await settingsResponse.json()).codexFast).toBe(true);
-    expect((await post("/prd/generate", {
-      description: "Un formulaire", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "ultra", codexFast: true,
+    expect((await post("/notion/import", {
+      url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "ultra", codexFast: true,
     })).status).toBe(200);
     expect((await post("/notion/import", {
       url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-5.6-sol", codexEffort: "max",
     })).status).toBe(200);
-    expect((await post("/prd/generate", { description: "Claude par défaut" })).status).toBe(200);
-    expect((await post("/prd/generate", { description: "Ancien modèle", orchestrator: "codex", codexModel: "gpt-5.5" })).status).toBe(400);
+    expect((await post("/notion/import", { url: "https://www.notion.so/0123456789abcdef0123456789abcdef" })).status).toBe(200);
+    expect((await post("/notion/import", { url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-5.5" })).status).toBe(400);
     system.runtimeStatus = {
       status: "ready",
       models: [{ model: "gpt-5.6-terra", efforts: ["medium"], defaultEffort: "medium", serviceTiers: [], defaultServiceTier: null }],
       checkedAt: Date.now(),
       message: null,
     };
-    expect((await post("/prd/generate", {
-      description: "Modèle retiré du compte", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "ultra",
+    expect((await post("/notion/import", {
+      url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "ultra",
     })).status).toBe(502);
     expect(system.calls.map(({ provider, model, effort, serviceTier }) => ({ provider, model, effort, serviceTier }))).toEqual([
       { provider: "codex", model: "gpt-6-astra", effort: "ultra", serviceTier: "fast" },

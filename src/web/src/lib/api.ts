@@ -12,7 +12,6 @@ import type {
   CreateProjectInput,
   CreateReviewInput,
   CreateTicketInput,
-  GeneratePrdInput,
   ImportNotionInput,
   ImportTicketsInput,
   ManagedProject,
@@ -166,8 +165,6 @@ export const api = {
     request(`/api/notion/import`, { method: "POST", body: JSON.stringify(input) }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>
     request(`/api/tickets/${id}`, { method: "DELETE" }),
-  generatePrd: (input: GeneratePrdInput): Promise<{ markdown: string }> =>
-    request("/api/prd/generate", { method: "POST", body: JSON.stringify(input) }),
   terminal: (id: string, cursor?: string, incremental = false, signal?: AbortSignal): Promise<TerminalOutput> => {
     const query = new URLSearchParams();
     if (incremental) query.set("incremental", "1");

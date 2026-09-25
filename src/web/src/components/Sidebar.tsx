@@ -1,6 +1,5 @@
 import {
   BarChart3,
-  FileText,
   LayoutGrid,
   RefreshCw,
   Settings,
@@ -10,7 +9,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "stats" | "prd" | "automation";
+export type SidebarView = "home" | "stats" | "automation";
 
 interface SidebarProps {
   view: SidebarView;
@@ -30,7 +29,6 @@ interface NavEntry {
 const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Home", Icon: LayoutGrid },
   { value: "stats", label: "Stats", Icon: BarChart3 },
-  { value: "prd", label: "PRD", Icon: FileText },
   { value: "automation", label: "Automation", Icon: Zap },
 ];
 

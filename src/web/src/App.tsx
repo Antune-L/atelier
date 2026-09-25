@@ -7,7 +7,6 @@ import { AgentsView } from "@/components/AgentsView";
 import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
-import { PrdView } from "@/components/PrdView";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -251,16 +250,8 @@ export function App() {
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
-          <main
-            className={cn(
-              "min-h-0 flex-1",
-              view === "prd" ? "overflow-hidden" : "overflow-auto",
-            )}
-          >
-            <div className={view === "prd" ? "flex min-h-0 h-full flex-col" : "hidden"}>
-              <PrdView />
-            </div>
-            {view !== "prd" && renderView()}
+          <main className="min-h-0 flex-1 overflow-auto">
+            {renderView()}
           </main>
         </div>
       </div>

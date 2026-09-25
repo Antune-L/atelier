@@ -18,7 +18,6 @@ import {
   createReviewSchema,
   createTicketSchema,
   deriveTitleFromDescription,
-  generatePrdSchema,
   importNotionSchema,
   importTicketsSchema,
   moveTicketSchema,
@@ -49,7 +48,6 @@ import type { NewTicket, Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
-import { buildPrdPrompt } from "./agents/prd.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
@@ -1194,23 +1192,6 @@ export function createApiRoutes(deps: RouteDeps) {
       // idle timeout (which surfaced in the WebView as "Load failed").
       deps.reformulate.start(params.id);
       return { started: true };
-    })
-    .post("/prd/generate", async ({ body, set }) => {
-      const parsed = generatePrdSchema.safeParse(body);
-      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "requête invalide");
-      try {
-        const execution = resolveExecution("one-shot", parsed.data, { model: MODELS.triage, effort: MODELS.triageEffort });
-        await assertExecutionAvailable(deps.system, execution);
-        const markdown = await runRecordedAction(store, "prd-generate", execution, (onEvent) => deps.system.reformulate({
-          cwd: deps.projectRoot,
-          prompt: buildPrdPrompt(parsed.data),
-          ...execution,
-          onEvent,
-        }));
-        return { markdown };
-      } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de génération du PRD"));
-      }
     })
     .post("/notion/import", async ({ body, set }) => {
       const parsed = importNotionSchema.safeParse(body);

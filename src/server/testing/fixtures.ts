@@ -21,6 +21,8 @@ const BASE_TICKET: Ticket = {
   prHeadBranch: null,
   postComments: false,
   fixComments: false,
+  reviewLanguage: null,
+  humanTone: false,
   prdEnabled: false,
   prDraft: true,
   autoMerge: false,

@@ -2,17 +2,21 @@ import { GitPullRequest } from "lucide-react";
 import { useRef, useState } from "react";
 
 import {
+  COMMIT_LANGUAGES,
+  COMMIT_LANGUAGE_LABELS,
+  DEFAULT_COMMIT_LANGUAGE,
   REVIEW_DEPTHS,
   REVIEW_DEPTH_LABELS,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
   type CodexModel,
+  type CommitLanguage,
   type Orchestrator,
   type ReviewDepth,
 } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
-import { reviewDepthSchema } from "@shared/schemas";
+import { commitLanguageSchema, reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
 import { SessionDriverFields } from "@/components/SessionDriverFields";
@@ -21,6 +25,7 @@ import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs } from "@/components/ui/tabs";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
@@ -39,9 +44,13 @@ const BASE_BRANCH_AUTO = "";
 export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const panel = useProjectPanel(projects);
   const capabilities = useCapabilities();
+  const { settings } = useAppSettings();
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
+  const [language, setLanguage] = useState<CommitLanguage | null>(null);
+  const [humanTone, setHumanTone] = useState(false);
+  const resolvedLanguage = language ?? settings?.commitLanguage ?? DEFAULT_COMMIT_LANGUAGE;
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
@@ -84,6 +93,8 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         depth,
         postComments: true,
         fixComments,
+        language: resolvedLanguage,
+        humanTone,
         // Auto → null override (each PR keeps its own detected target branch).
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
         model,
@@ -120,6 +131,32 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
             </option>
           ))}
         </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="review-language" className={FIELD_LABEL_CLASSES}>Langue de la review</Label>
+        <Select
+          className="ml-2"
+          id="review-language"
+          value={resolvedLanguage}
+          onChange={(e) => setLanguage(commitLanguageSchema.parse(e.target.value))}
+        >
+          {COMMIT_LANGUAGES.map((l) => (
+            <option key={l} value={l}>
+              {COMMIT_LANGUAGE_LABELS[l]}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Switch checked={humanTone} onCheckedChange={setHumanTone} aria-labelledby="human-tone-label" />
+          <span id="human-tone-label" className="text-sm">Commentaires plus humains</span>
+        </div>
+        <p className="pl-11 text-xs text-muted-foreground">
+          Ton de collègue : remarques courtes et directes, sans jargon de reviewer.
+        </p>
       </div>
 
       <div className="space-y-1.5">

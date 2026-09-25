@@ -780,6 +780,8 @@ export function createApiRoutes(deps: RouteDeps) {
           reviewDepth: parsed.data.depth,
           postComments: parsed.data.postComments,
           fixComments: parsed.data.fixComments,
+          reviewLanguage: parsed.data.language ?? store.getAppSettings().commitLanguage,
+          humanTone: parsed.data.humanTone,
           model: parsed.data.model,
           effort: parsed.data.effort,
           orchestrator: parsed.data.orchestrator,

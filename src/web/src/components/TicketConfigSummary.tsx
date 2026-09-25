@@ -5,6 +5,7 @@ import {
   AGENT_MODEL_LABELS,
   CODEX_EFFORT_LABELS,
   CODEX_MODEL_LABELS,
+  COMMIT_LANGUAGE_LABELS,
   FEASIBILITY_ENGINE_LABELS,
   IMPLEMENTER_LABELS,
   ORCHESTRATOR_LABELS,
@@ -166,6 +167,16 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
             <Row
               label="Correction des retours"
               value={ticket.fixComments ? YES : NO}
+            />
+            {ticket.reviewLanguage && (
+              <Row
+                label="Langue de la review"
+                value={COMMIT_LANGUAGE_LABELS[ticket.reviewLanguage]}
+              />
+            )}
+            <Row
+              label="Commentaires humains"
+              value={ticket.humanTone ? YES : NO}
             />
           </>
         )}

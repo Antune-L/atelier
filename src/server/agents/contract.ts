@@ -1,4 +1,4 @@
-import { CLEANER_BRANCH_SUFFIX, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
@@ -18,6 +18,19 @@ const FEASIBILITY_DESC_MAX = 1200;
 function commitLanguageLabel(language: CommitLanguage): string {
   return language === "fr" ? "FRANÇAIS" : "ANGLAIS";
 }
+
+/** Language the review comments are written in: the ticket's own choice, else the app's commit language. */
+function resolveReviewLanguage(ticket: Ticket, fallback: CommitLanguage): CommitLanguage {
+  return ticket.reviewLanguage ?? fallback;
+}
+
+/** Header lines stating the review language and, when enabled, the human tone. */
+function reviewStyleHeaderLines(language: CommitLanguage, humanTone: boolean): string[] {
+  return [`Langue de la revue : ${COMMIT_LANGUAGE_LABELS[language]}`, humanTone ? "Ton : humain (concis)" : ""];
+}
+
+const HUMAN_TONE_DIRECTIVE =
+  "- Ton des commentaires : humain et concis. Écris comme un collègue qui relit la PR : phrases courtes, pas de jargon de reviewer automatique, pas de préambule, une remarque = une idée.";
 
 /** Instruction line forcing the language of commit messages and PR title/description. */
 function commitLanguageDirective(language: CommitLanguage): string {
@@ -547,6 +560,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
   const vcs = vcsCommands(project.vcsProvider);
   const prDiffCmd = vcs.prDiff({ prNumber: ticket.prNumber, baseBranch: reviewBase });
   const postComments = ticket.postComments;
+  const reviewLanguage = resolveReviewLanguage(ticket, opts.commitLanguage);
   const independentReviewSteps = [
     `2. Récupère le diff complet de la PR : \`${prDiffCmd}\`. Le backend positionne le worktree sur le head ${vcs.label} exact avant la nouvelle passe ; ne lance aucun fetch toi-même.`,
     `   Lance EN PARALLÈLE les ${kinds.length} dimensions indépendantes : ${reviewCalls(depth)}. Donne à chacun la PR, la profondeur, les dimensions (${reviewDimensions}) et le diff, sans le résultat ni le raisonnement d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
@@ -565,6 +579,7 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
       ? `Le worktree est déjà checkout sur le commit de la PR (branche locale \`${branch}${REVIEWER_BRANCH_SUFFIX}\`, jamais pushée) : lire/grepper les fichiers du worktree reflète l'état de la PR, pas de la base.`
       : "",
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
+    ...reviewStyleHeaderLines(reviewLanguage, ticket.humanTone),
     `Poster les commentaires sur ${vcs.label} : ${postComments ? "OUI" : "NON"}`,
     "",
     "## Contrat de pipeline",
@@ -574,7 +589,8 @@ export function buildReviewContract(ticket: Ticket, opts: { commitLanguage: Comm
     postComments ? "- `publish_review({ passId })` UNIQUEMENT après réception de tous les résultats requis de la passe courante." : "",
     "- `done(pr_url)` UNIQUEMENT une fois la revue terminée (et postée si demandé).",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
-    `- Rédige les commentaires de revue postés sur la PR en ${commitLanguageLabel(opts.commitLanguage)}.`,
+    `- Rédige les commentaires de revue postés sur la PR en ${commitLanguageLabel(reviewLanguage)}.`,
+    ticket.humanTone ? HUMAN_TONE_DIRECTIVE : "",
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans la revue en cours.",
@@ -619,6 +635,7 @@ function buildReviewFixLines(
   const vcs = vcsCommands(project.vcsProvider);
   const prDiffCmd = vcs.prDiff({ prNumber: ticket.prNumber, baseBranch: reviewBase });
   const postComments = ticket.postComments;
+  const reviewLanguage = resolveReviewLanguage(ticket, opts.commitLanguage);
 
   const reviewAndFixSteps = [
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
@@ -634,6 +651,7 @@ function buildReviewFixLines(
     `PR : ${ticket.prUrl}`,
     `Branche de la PR : ${branch}`,
     `Profondeur : ${depth === "full" ? "complète (full)" : "light"}`,
+    ...reviewStyleHeaderLines(reviewLanguage, ticket.humanTone),
     "",
     "## Contexte",
     `Le worktree courant est DÉJÀ positionné sur la branche head de la PR (\`${branch}\`). Tu vas reviewer la PR, corriger les retours, puis commiter et pousser sur CETTE MÊME branche (aucune nouvelle PR).`,
@@ -645,7 +663,9 @@ function buildReviewFixLines(
     `- \`done(pr_url)\` UNIQUEMENT après les ${kinds.length} reviews indépendantes approuvées sur le code courant, les corrections appliquées, commitées, et la branche poussée (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).`,
     postComments ? "- `publish_review({ passId })` après le commit et le push, avec le passId approuvé courant." : "",
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
-    `- Rédige les messages de commit et les commentaires de revue en ${commitLanguageLabel(opts.commitLanguage)}.`,
+    `- Rédige les messages de commit en ${commitLanguageLabel(opts.commitLanguage)}.`,
+    `- Rédige les commentaires de revue en ${commitLanguageLabel(reviewLanguage)}.`,
+    ticket.humanTone ? HUMAN_TONE_DIRECTIVE : "",
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours.",

@@ -23,7 +23,7 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
@@ -224,6 +224,8 @@ export interface NewReview {
   reviewDepth: ReviewDepth;
   postComments: boolean;
   fixComments: boolean;
+  reviewLanguage: CommitLanguage;
+  humanTone: boolean;
   baseBranch?: string | null;
   model: AgentModel | null;
   effort: AgentEffort | null;
@@ -937,8 +939,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, pr_url, orchestrator, implementer, codex_model, codex_effort, codex_fast, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, project, kind, model, effort, review_depth, pr_number, pr_head_branch, base_branch, post_comments, fix_comments, review_language, human_tone, pr_url, orchestrator, implementer, codex_model, codex_effort, codex_fast, column_name, stage, implementing_started_at, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'implementing', 'queued', ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -953,6 +955,8 @@ export class Store {
         input.baseBranch ?? null,
         input.postComments ? 1 : 0,
         input.fixComments ? 1 : 0,
+        input.reviewLanguage,
+        input.humanTone ? 1 : 0,
         input.prUrl,
         // A review/clean/ask kind has no implementing stage: mirror the orchestrator into implementer
         // so the column stays coherent (and the codex-orchestrator branches keyed on either agree).

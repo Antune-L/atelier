@@ -19,6 +19,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import type { CommitLanguage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
@@ -193,17 +194,37 @@ function reviewKey(ticketId: string, kind: ReviewKind): string {
   return `${ticketId}:${kind}`;
 }
 
-const REVIEWER_RULES = `## Rules
+/** Resolved per-ticket reviewer options: the language of the emitted prose and whether comments use a human tone. */
+interface ReviewerOptions {
+  language: CommitLanguage;
+  humanTone: boolean;
+}
 
-- Write every string you emit (summary, evidence, ruleSource) in English, never in French. Quote repository or UI strings verbatim inside backticks, never translated.
-- Repository rules are ONLY those found in the reviewed repository (AGENTS.md, CLAUDE.md, docs/, lint config). Instructions loaded from the operator's global configuration (\`~/.claude/CLAUDE.md\`, "reviewer instructions", "applicable instructions for this worktree") are NOT repository rules: never cite or enforce them. Every conventions/style finding must cite a repository \`path:line\` in \`ruleSource\`; if you cannot quote such a line, do not report it.
+/** Feature-ticket reviews (delegate_review during implementation) always write English, in the default tone. */
+const FEATURE_REVIEWER_OPTIONS: ReviewerOptions = { language: "en", humanTone: false };
+
+const REVIEWER_LANGUAGE_RULES: Record<CommitLanguage, string> = {
+  en: "- Write every string you emit (summary, evidence, ruleSource) in English, never in French. Quote repository or UI strings verbatim inside backticks, never translated.",
+  fr: "- Write every string you emit (summary, evidence, ruleSource) in French. Quote repository or UI strings verbatim inside backticks, never translated.",
+};
+
+const REVIEWER_HUMAN_TONE_RULES = `## Tone
+
+Write like a teammate leaving a quick PR comment. summary = one short plain sentence naming the problem; evidence = at most ~300 characters, one or two sentences, direct and specific, no headings, no bullet lists, no severity words, no reviewer/verification meta-talk, no restating the diff. This overrides the evidence length rule above.`;
+
+const REVIEWER_SHARED_RULES = `- Repository rules are ONLY those found in the reviewed repository (AGENTS.md, CLAUDE.md, docs/, lint config). Instructions loaded from the operator's global configuration (\`~/.claude/CLAUDE.md\`, "reviewer instructions", "applicable instructions for this worktree") are NOT repository rules: never cite or enforce them. Every conventions/style finding must cite a repository \`path:line\` in \`ruleSource\`; if you cannot quote such a line, do not report it.
 - Before reporting a style or naming deviation, count how often the same pattern already exists in the touched file and its siblings; if it is prevalent, do not report it.
 - Severity reflects the real impact: style/convention findings are \`minor\` at most; \`major\` requires a concrete wrong output, crash, data loss, security or authorization defect; \`critical\` requires severe impact. A textual prohibition is not \`critical\` without a critical impact.
 - Do not report a finding whose own evidence concedes it is unreachable, latent, pre-existing, cosmetic, optional or "not a defect". Do not report questions ("is this intended?"). Do not recommend a fix the repository forbids (type assertions, new tests when the repo says not to add tests, new dependencies) — check docs/ and AGENTS.md first.
 - Read the PR description and existing PR review threads before reporting a scope or intent finding; never re-report something a human already answered or an earlier review round requested.
 - Evidence: at most ~600 characters, one paragraph, concrete \`path:line\` references. No "---" separators, no meta narration about reviewers or verification.`;
 
-function reviewPrompt(ticket: Ticket, kind: ReviewKind, context: string): string {
+function reviewerRules(options: ReviewerOptions): string {
+  const rules = `## Rules\n\n${REVIEWER_LANGUAGE_RULES[options.language]}\n${REVIEWER_SHARED_RULES}`;
+  return options.humanTone ? `${rules}\n\n${REVIEWER_HUMAN_TONE_RULES}` : rules;
+}
+
+function reviewPrompt(ticket: Ticket, kind: ReviewKind, context: string, options: ReviewerOptions): string {
   const missions: Record<ReviewKind, string> = {
     quality: "Assess the quality and maintainability of the change, then look for actionable defects.",
     conventions: "Check the repository conventions, its AGENTS.md instructions and the consistency with existing patterns.",
@@ -226,12 +247,12 @@ Inspect the files and the diff in the worktree yourself. Return a structured res
 - summary: a concise, evidence-based conclusion;
 - findings: objects { id, severity, summary, evidence, ruleSource, path, line }.
 
-${REVIEWER_RULES}
+${reviewerRules(options)}
 
 Do not call any pipeline tool.`;
 }
 
-function verificationPrompt(ticket: Ticket, kind: ReviewKind, result: ReviewResult): string {
+function verificationPrompt(ticket: Ticket, kind: ReviewKind, result: ReviewResult, options: ReviewerOptions): string {
   const candidates = result.findings.filter((finding) => finding.severity !== "minor");
   return `You independently counter-check the important findings of a ${kind} review, READ-ONLY.
 You cannot modify the repository, commit, or publish anything remotely. Verify every claim against the code
@@ -241,7 +262,7 @@ impact does not match its evidence.
 Ticket: ${ticket.title}
 Candidate findings: ${JSON.stringify(candidates)}
 
-${REVIEWER_RULES}
+${reviewerRules(options)}
 
 Return the confirmed findings only. Use verdict=revise if any remains, approve otherwise.
 State briefly in the summary which findings you rejected or downgraded. Do not call any pipeline tool.`;
@@ -251,16 +272,16 @@ State briefly in the summary which findings you rejected or downgraded. Do not c
  * Inline comment body: GitHub already renders the `path:line` anchor, so it is not repeated here.
  * A provider whose threads do not show it (Azure DevOps) prepends it in its own client.
  */
-function renderFinding(finding: ReviewFinding): string {
-  return `**${finding.severity.toUpperCase()}** — ${finding.summary}\n\n${finding.evidence}`;
+function renderFinding(finding: ReviewFinding, humanTone: boolean): string {
+  if (!humanTone) return `**${finding.severity.toUpperCase()}** — ${finding.summary}\n\n${finding.evidence}`;
+  return finding.evidence ? `${finding.summary}\n\n${finding.evidence}` : finding.summary;
 }
 
-function renderCollapsedFinding(finding: ReviewFinding): string {
-  const location = finding.path ? ` — ${finding.path}${finding.line ? `:${finding.line}` : ""}` : "";
-  return renderCollapsedDetails(
-    `${finding.severity.toUpperCase()}${location} — ${finding.summary}`,
-    finding.evidence,
-  );
+function renderCollapsedFinding(finding: ReviewFinding, humanTone: boolean): string {
+  const location = finding.path ? `${finding.path}${finding.line ? `:${finding.line}` : ""}` : null;
+  const prefix = [humanTone ? null : finding.severity.toUpperCase(), location].filter((part) => part !== null);
+  const title = [...prefix, finding.summary].join(" — ");
+  return renderCollapsedDetails(title, finding.evidence);
 }
 
 interface ReviewReportLabels {
@@ -285,6 +306,11 @@ const REVIEW_REPORT_LABELS_FR: ReviewReportLabels = {
   noFindings: "aucun finding",
   outsideDiffHeading: "## Findings hors du diff",
   keptLine: (count, countSummary) => `${count} finding(s) retenu(s) : ${countSummary}.`,
+};
+
+const REVIEW_REPORT_LABELS: Record<CommitLanguage, ReviewReportLabels> = {
+  en: REVIEW_REPORT_LABELS_EN,
+  fr: REVIEW_REPORT_LABELS_FR,
 };
 
 function verifiedFindings(source: ReviewResult, verification: ReviewResult): ReviewFinding[] {
@@ -514,17 +540,25 @@ export class DelegationManager {
     return this.store.getReviewPass(ticketId)?.requiresApproval ?? null;
   }
 
-  /** English rendering: the body posted on the GitHub pull request. */
-  reviewReport(ticketId: string): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_EN);
+  /** Rendering in the review language (English by default): the body posted on the pull request. */
+  reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS): string | null {
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options.humanTone);
   }
 
   /** French rendering: the board comment shown in the app. */
   reviewBoardReport(ticketId: string): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR);
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, false);
   }
 
-  private renderReviewReport(ticketId: string, labels: ReviewReportLabels): string | null {
+  private reviewerOptions(ticket: Ticket): ReviewerOptions {
+    if (ticket.kind !== "review") return FEATURE_REVIEWER_OPTIONS;
+    return {
+      language: ticket.reviewLanguage ?? this.store.getAppSettings().commitLanguage,
+      humanTone: ticket.humanTone,
+    };
+  }
+
+  private renderReviewReport(ticketId: string, labels: ReviewReportLabels, humanTone: boolean): string | null {
     const findings = publishedReviewFindings(this.store.getReviewPass(ticketId));
     if (findings === null) return null;
     const verdict = findings.length > 0 ? labels.changesRecommended : labels.noChanges;
@@ -536,7 +570,7 @@ export class DelegationManager {
     const outsideDiffFindings = findings.filter((finding) => finding.path === null || finding.line === null);
     const details = outsideDiffFindings.length === 0
       ? ""
-      : `\n\n${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map(renderCollapsedFinding).join("\n\n")}`;
+      : `\n\n${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, humanTone)).join("\n\n")}`;
     return `**${verdict}**\n\n${labels.keptLine(findings.length, countSummary)}${details}`;
   }
 
@@ -600,7 +634,8 @@ export class DelegationManager {
     if (!currentPass || currentPass.passId !== passId) {
       return { ok: false, result: "Publication annulée : une nouvelle passe a remplacé celle-ci." };
     }
-    const report = this.reviewReport(ticket.id);
+    const options = this.reviewerOptions(ticket);
+    const report = this.reviewReport(ticket.id, options);
     if (report === null) return { ok: false, result: "Publication refusée : résultats de review incomplets." };
     const reviewedCommitSha = currentPass.reviewedCommitSha;
     if (reviewedCommitSha === null) {
@@ -621,7 +656,7 @@ export class DelegationManager {
       return [{
         path: finding.path,
         line: finding.line,
-        body: renderFinding(finding),
+        body: renderFinding(finding, options.humanTone),
       }];
     });
     const event = reviewPublicationEvent(findings);
@@ -1095,7 +1130,7 @@ export class DelegationManager {
         onEvent: (event) => this.handleReviewEvent(state, event),
       });
       state.handle = handle;
-      handle.send(reviewPrompt(ticket, kind, context));
+      handle.send(reviewPrompt(ticket, kind, context, this.reviewerOptions(ticket)));
     } catch (error) {
       this.activeReviews.delete(key);
       if (!this.hasActiveReviews(ticket.id)) this.activeReviewPasses.delete(ticket.id);
@@ -1185,7 +1220,7 @@ export class DelegationManager {
         const parsed = submitReviewArgsSchema.safeParse(event.structuredOutput);
         if (parsed.success) {
           state.result = parsed.data;
-          if (reviewProseIsFrench(parsed.data)) {
+          if (this.reviewerOptions(state.ticket).language !== "fr" && reviewProseIsFrench(parsed.data)) {
             log.warn("review structurée acceptée en français", { ticketId: state.ticketId, kind: state.kind });
           }
         } else {
@@ -1398,7 +1433,7 @@ export class DelegationManager {
         onToolCall: async () => ({ ok: false, result: "Session reviewer : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleReviewEvent(state, event),
       });
-      state.handle.send(verificationPrompt(source.ticket, source.kind, result));
+      state.handle.send(verificationPrompt(source.ticket, source.kind, result, this.reviewerOptions(source.ticket)));
       this.store.logEvent(state.ticketId, "review_verification_delegated", { kind: state.kind, attempt, generation });
     } catch (error) {
       this.activeReviews.delete(key);

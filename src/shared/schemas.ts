@@ -247,6 +247,10 @@ export const ticketSchema = z.object({
   postComments: z.boolean(),
   /** Review tickets only: after posting, delegate fixing the findings to the pr-fixer sub-agent, then push fixes to the PR branch. */
   fixComments: z.boolean(),
+  /** Review tickets only: language of the review comments posted on the PR (null for other kinds). */
+  reviewLanguage: commitLanguageSchema.nullable(),
+  /** Review tickets only: write the review comments in a human, conversational, concise tone. */
+  humanTone: z.boolean(),
   prdEnabled: z.boolean(),
   /** Open the PR as a draft (default true). Forced off when autoMerge is on. */
   prDraft: z.boolean(),
@@ -718,6 +722,9 @@ export const createReviewSchema = z.object({
   depth: reviewDepthSchema.default("full"),
   postComments: z.boolean().default(true),
   fixComments: z.boolean().default(false),
+  /** Language of the review comments; null = fall back to the app's commit language. */
+  language: commitLanguageSchema.nullable().default(null),
+  humanTone: z.boolean().default(false),
   /** Optional override for the argus review base; null means "use each PR's own detected target". */
   baseBranch: baseBranchSchema.nullable().default(null),
   // Agent model + reasoning effort picked at creation (null = fall back to server config).

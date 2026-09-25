@@ -55,7 +55,7 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1790331089.1897523,
+    "mtime": 1790336465.0686636,
     "ast_hash": "6298a52f5af5b7cd741da91c87ec11da",
     "semantic_hash": ""
   },
@@ -105,17 +105,17 @@
     "semantic_hash": ""
   },
   "src/server/db/rows.ts": {
-    "mtime": 1790330996.2806056,
+    "mtime": 1790336465.0704362,
     "ast_hash": "12f3db8aeb8468f069cf9d6daafdcdc8",
     "semantic_hash": ""
   },
   "src/server/db/schema.ts": {
-    "mtime": 1790330996.2807634,
+    "mtime": 1790336465.0707185,
     "ast_hash": "3b1701c68672a0fb37922b3ea3788e2c",
     "semantic_hash": ""
   },
   "src/server/db/store.ts": {
-    "mtime": 1790330996.2809863,
+    "mtime": 1790336465.0713885,
     "ast_hash": "2d9e13c47db8db3013b0705bb4ccd8fa",
     "semantic_hash": ""
   },
@@ -150,7 +150,7 @@
     "semantic_hash": "1888cf6a2f7ebc34b9e3497cf1e355ad"
   },
   "src/server/routes.ts": {
-    "mtime": 1790330996.2812002,
+    "mtime": 1790336465.0717623,
     "ast_hash": "60bee604fed8e71031e25908ef30544c",
     "semantic_hash": ""
   },
@@ -220,7 +220,7 @@
     "semantic_hash": ""
   },
   "src/shared/schemas.ts": {
-    "mtime": 1790330996.2815516,
+    "mtime": 1790336465.0723073,
     "ast_hash": "035404ae2ee97426c9e2ccb49d62f437",
     "semantic_hash": ""
   },
@@ -310,7 +310,7 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ReviewPrPanel.tsx": {
-    "mtime": 1790330996.2817886,
+    "mtime": 1790336465.0728018,
     "ast_hash": "b3c7213eac8682dde93cd8979a0fbcff",
     "semantic_hash": ""
   },
@@ -355,7 +355,7 @@
     "semantic_hash": ""
   },
   "src/web/src/components/TicketConfigSummary.tsx": {
-    "mtime": 1790330996.2819636,
+    "mtime": 1790336465.0730817,
     "ast_hash": "2b8674f67f8c79bed10f831e82bfbe9e",
     "semantic_hash": ""
   },
@@ -610,8 +610,8 @@
     "semantic_hash": "9e6f26df737799cccc53c1f0af56bfac"
   },
   "AGENTS.md": {
-    "mtime": 1790077557.1469681,
-    "ast_hash": "ddb8e6646fb5d66cd21cd1008a893146",
+    "mtime": 1790338731.4983764,
+    "ast_hash": "420d89f5c7bfe31d3a3e926925ca2289",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -840,7 +840,7 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1790330996.2804456,
+    "mtime": 1790336465.0693374,
     "ast_hash": "c367705b3decabd80278330de0d6fa1e",
     "semantic_hash": ""
   },
@@ -870,7 +870,7 @@
     "semantic_hash": ""
   },
   "src/server/testing/fixtures.ts": {
-    "mtime": 1790330996.2813578,
+    "mtime": 1790336465.0719855,
     "ast_hash": "43e3786b4313b6bb746562005cb7e20b",
     "semantic_hash": ""
   },
@@ -1380,8 +1380,8 @@
     "semantic_hash": ""
   },
   "docs/azure-devops-support-state.md": {
-    "mtime": 1790077557.147107,
-    "ast_hash": "8442f8fa943f19581a8820ed98ca7c3a",
+    "mtime": 1790338723.6188555,
+    "ast_hash": "5bee0282638237a43be810f9dbabaff0",
     "semantic_hash": ""
   },
   "src/server/system/boundedCommand.ts": {
@@ -1390,8 +1390,8 @@
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureDevops.ts": {
-    "mtime": 1790077557.1678019,
-    "ast_hash": "59691cf3e7d6fc7315a4f28e9aa5b968",
+    "mtime": 1790338723.6191285,
+    "ast_hash": "5a1c8d1d5e428ec0b32ca1f29a7dc749",
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureRemote.ts": {

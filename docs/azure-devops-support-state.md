@@ -152,7 +152,7 @@ Support Azure DevOps (Azure Repos) alongside GitHub, selectable per project (Git
     now shared by both clients. The REST vocabulary (api version, area, resource names, HTTP verbs, settled
     thread statuses, the resolve body) lives in the new `src/server/system/vcs/azureRest.ts`, imported by
     the client AND by the agent command table so a resource name is spelled once.
-  - **publishReview**: one general thread carries `body` + the outside-diff section + `Commit revu : <sha>`
+  - **publishReview**: one general thread carries `body` + the outside-diff section
     + the pass marker; its thread id is the `published_review_id` the app persists. One inline thread per
     finding, `threadContext` (`/path`, `rightFileStart/End` line + offsets 1→2) plus
     `pullRequestThreadContext.changeTrackingId` looked up by path in the LATEST iteration's

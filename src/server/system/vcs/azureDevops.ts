@@ -5,7 +5,7 @@
  * remote for repo-scoped calls, and from the PR web URL for PR-scoped ones.
  *
  * A review pass is published as comment threads (`az devops invoke --area git`): one general thread
- * carrying the marker, the reviewed commit and the review body, plus one inline thread per finding
+ * carrying the marker and the review body, plus one inline thread per finding
  * anchored on the latest iteration's changes. The verdict becomes a reviewer vote through
  * `az repos pr set-vote`.
  */
@@ -253,10 +253,6 @@ function renderInlineLocation(comment: ReviewPublicationComment): string {
   return `\`${comment.path}:${comment.line}\`\n\n`;
 }
 
-function reviewedCommitLine(commitSha: string): string {
-  return `Commit revu : \`${commitSha}\``;
-}
-
 async function readOriginRemote(repoPath: string): Promise<string | null> {
   const res = await runBoundedCommand(["git", "-C", repoPath, "remote", "get-url", "origin"], repoPath);
   if (res.exitCode !== 0 || res.timedOut) return null;
@@ -451,7 +447,7 @@ export class AzureDevopsVcsClient implements VcsClient {
       }
     }
 
-    const body = `${opts.body}${renderOutsideDiffSection(outsideDiff)}\n\n${reviewedCommitLine(opts.expectedCommitSha)}\n\n${opts.marker}`;
+    const body = `${opts.body}${renderOutsideDiffSection(outsideDiff)}\n\n${opts.marker}`;
     const summary = await this.createThread(cwd, context, {
       comments: [threadComment(body)],
       status: THREAD_STATUS_ACTIVE,

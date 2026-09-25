@@ -541,6 +541,11 @@ export const reorderProjectsSchema = z.object({
   keys: z.array(projectKeySchema),
 });
 
+export const updateProjectGroupColorSchema = z.object({
+  group: z.string().trim().min(1),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+});
+
 // ---- API input schemas ----
 
 /** Schemes accepted for an external tracker URL — it ends up rendered into an anchor href. */

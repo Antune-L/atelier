@@ -197,7 +197,7 @@ export function ProjectSelect({
     focusItem(event.key === "ArrowDown" ? 1 : -1, event.currentTarget);
   };
 
-  const projectOption = (key: string, optionLabel: string, groupLabel?: string): ReactNode => {
+  const projectOption = (key: string, optionLabel: string, groupLabel?: string, color?: string): ReactNode => {
     const selected = key === value;
     return (
       <button
@@ -215,8 +215,12 @@ export function ProjectSelect({
         )}
       >
         {groupLabel && (
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-muted-foreground">
-            {projectInitial(groupLabel)}
+          <span
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-muted-foreground"
+            style={color ? { backgroundColor: color } : undefined}
+            aria-hidden="true"
+          >
+            {color ? null : projectInitial(groupLabel)}
           </span>
         )}
         <span className="min-w-0 flex-1 truncate">{optionLabel}</span>
@@ -243,7 +247,16 @@ export function ProjectSelect({
           disabled={disabled || !hasChoices}
           className={cn("w-full justify-between px-3 font-normal", triggerClassName)}
         >
-          <span className="truncate">{selectedLabel}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            {selectedProject?.color && (
+              <span
+                className="h-3 w-3 shrink-0 rounded-sm"
+                style={{ backgroundColor: selectedProject.color }}
+                aria-hidden="true"
+              />
+            )}
+            <span className="truncate">{selectedLabel}</span>
+          </span>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </Button>
       </PopoverTrigger>
@@ -287,6 +300,7 @@ export function ProjectSelect({
             const expanded = normalizedQuery.length > 0 || expandedGroups.has(group.key);
             const reviewTotal = reviewCounts ? groupReviewCount(group, reviewCounts.counts) : null;
             const projectCount = reviewCounts ? group.projects.length : group.visibleProjects.length;
+            const groupColor = group.key === "ungrouped" ? undefined : group.projects[0]?.color;
             return (
               <div key={group.key} role="group" aria-label={group.label} className="mb-0.5 last:mb-0">
                 <button
@@ -301,8 +315,12 @@ export function ProjectSelect({
                   {expanded
                     ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                     : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />}
-                  <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-[10px] text-muted-foreground">
-                    {projectInitial(group.label)}
+                  <span
+                    className="flex h-5 w-5 items-center justify-center rounded bg-muted text-[10px] text-muted-foreground"
+                    style={groupColor ? { backgroundColor: groupColor } : undefined}
+                    aria-hidden="true"
+                  >
+                    {groupColor ? null : projectInitial(group.label)}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{group.label}</span>
                   <span className="font-normal text-muted-foreground" aria-label={`${projectCount} projets`}>
@@ -312,7 +330,8 @@ export function ProjectSelect({
                     <ReviewCountBadge count={reviewTotal.count} loading={reviewCounts.loading} partial={reviewTotal.partial} />
                   )}
                 </button>
-                  {expanded && group.visibleProjects.map((project) => projectOption(project.key, project.label, group.label))}
+                  {expanded && group.visibleProjects.map((project) =>
+                    projectOption(project.key, project.label, group.label, project.color))}
               </div>
             );
           })}

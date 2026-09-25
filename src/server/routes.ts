@@ -29,6 +29,7 @@ import {
   updateAutomationSchema,
   updateProfileSchema,
   updateProjectSchema,
+  updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { ManagedProject, OpenPr, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
@@ -516,10 +517,18 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!store.reorderProjects(parsed.data.keys)) return jsonError(set, HTTP_CONFLICT, "project order is stale or invalid");
       return { ok: true };
     })
+    .put("/project-groups/color", ({ body, set }) => {
+      const parsed = updateProjectGroupColorSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const { group, color } = parsed.data;
+      if (!store.setProjectGroupColor(group, color)) return jsonError(set, HTTP_NOT_FOUND, "groupe introuvable");
+      return { group, color };
+    })
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, color, group } = parsed.data;
+      if (group !== undefined && color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
         label,
@@ -537,9 +546,12 @@ export function createApiRoutes(deps: RouteDeps) {
       return toManagedProject(key, created);
     })
     .patch("/projects/:key", ({ params, body, set }) => {
-      if (!store.getProjectRow(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
+      const project = store.getProjectRow(params.key);
+      if (!project) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
       const parsed = updateProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const resultingGroup = parsed.data.group === undefined ? project.group : parsed.data.group;
+      if (resultingGroup && parsed.data.color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const updated = store.updateProject(params.key, parsed.data);
       // NOTE(ali): WS project broadcast (hub.pushProjects) lands with the projects-frontend ticket;
       // the PATCH response returns the fresh project so a refetching client stays consistent.

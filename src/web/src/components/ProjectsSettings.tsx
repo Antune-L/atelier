@@ -5,7 +5,7 @@ import { ChevronRight, Eye, EyeOff, FolderOpen, GripVertical } from "lucide-reac
 import { useEffect, useState, type ReactNode } from "react";
 
 import type { VcsProvider } from "@shared/constants";
-import { DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS } from "@shared/constants";
+import { DEFAULT_PROJECT_COLOR, DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS } from "@shared/constants";
 import type { CreateProjectInput, ManagedProject, UpdateProjectInput, VcsConnectionResult } from "@shared/schemas";
 import { vcsProviderSchema } from "@shared/schemas";
 
@@ -30,7 +30,6 @@ import {
   type TimeoutUnit,
 } from "@/lib/projectDisplay";
 
-const DEFAULT_PROJECT_COLOR = "#6366f1";
 const DEFAULT_COMMIT_TIMEOUT_MS = 600000;
 const REFERENCE_COMMIT_TIMEOUT_MS = 120000;
 const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
@@ -251,6 +250,28 @@ export function ProjectsSettings() {
     await persistOrder(reorderedGroups.flatMap((group) => group.projects));
   };
 
+  const updateGroupColor = async (group: ProjectGroup, color: string): Promise<void> => {
+    const previousProjects = projects;
+    setError(null);
+    setMutationBusy(true);
+    setProjects((current) => current.map((project) => (
+      projectGroupIdentity(project).key === group.key ? { ...project, color } : project
+    )));
+    try {
+      await api.updateProjectGroupColor(group.label, color);
+      await reload();
+    } catch (cause) {
+      try {
+        await reload();
+      } catch {
+        setProjects(previousProjects);
+      }
+      setError(errorMessage(cause));
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
   const toggleVisibility = async (project: ManagedProject): Promise<void> => {
     setError(null);
     const previousProjects = projects;
@@ -292,7 +313,13 @@ export function ProjectsSettings() {
             >
               <div className="space-y-3">
                 {projectGroups.map((group) => (
-                  <SortableProjectGroup key={group.key} group={group} disabled={mutationBusy || projectGroups.length < 2}>
+                  <SortableProjectGroup
+                    key={group.key}
+                    group={group}
+                    disabled={mutationBusy || projectGroups.length < 2}
+                    colorBusy={mutationBusy}
+                    onColorChange={(color) => void updateGroupColor(group, color)}
+                  >
                     <DndContext sensors={sensors} onDragEnd={(event) => void handleProjectDragEnd(group, event)}>
                       <SortableContext
                         items={group.projects.map((project) => projectSortId(project.key))}
@@ -350,10 +377,14 @@ export function ProjectsSettings() {
 function SortableProjectGroup({
   group,
   disabled,
+  colorBusy,
+  onColorChange,
   children,
 }: {
   group: ProjectGroup;
   disabled: boolean;
+  colorBusy: boolean;
+  onColorChange: (color: string) => void;
   children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
@@ -381,6 +412,17 @@ function SortableProjectGroup({
           <GripVertical className="h-4 w-4" aria-hidden="true" />
         </button>
         <h4 className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{group.label}</h4>
+        {group.key !== "ungrouped" && (
+          <input
+            type="color"
+            value={group.projects[0]?.color ?? DEFAULT_PROJECT_COLOR}
+            onChange={(event) => onColorChange(event.target.value)}
+            disabled={colorBusy}
+            className="h-6 w-7 shrink-0 cursor-pointer rounded border border-input bg-background p-0.5 disabled:cursor-default"
+            aria-label={`Couleur du groupe ${group.label}`}
+            title={`Couleur du groupe ${group.label}`}
+          />
+        )}
         <span className="shrink-0 text-xs text-muted-foreground">{group.projects.length}</span>
       </div>
       {children}
@@ -546,6 +588,9 @@ function ProjectPanel({
   const commitTimeoutMs = String(Number(timeoutValue) * timeoutUnitMs(unit));
   const valid = isValidDraft(label, repoPath, baseBranch, timeoutValue);
   const normalizedGroup = group.trim();
+  const grouped = normalizedGroup !== "";
+  const inheritedColor = projects.find((managedProject) => managedProject.group?.trim() === normalizedGroup)?.color
+    ?? DEFAULT_PROJECT_COLOR;
   const groupSuggestions = Array.from(
     new Set(projects.flatMap((managedProject) => (managedProject.group ? [managedProject.group] : []))),
   ).sort((left, right) => left.localeCompare(right));
@@ -559,7 +604,7 @@ function ProjectPanel({
     baseBranch !== project.baseBranch ||
     runScript !== (project.runScript ?? "") ||
     vcsProvider !== project.vcsProvider ||
-    color !== (project.color ?? DEFAULT_PROJECT_COLOR);
+    (!grouped && color !== (project.color ?? DEFAULT_PROJECT_COLOR));
 
   const hint = connectionHint(project !== null, dirty, testing, connection);
 
@@ -585,7 +630,7 @@ function ProjectPanel({
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
     if (vcsProvider !== current.vcsProvider) patch.vcsProvider = vcsProvider;
     if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
-    if (color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
+    if (!grouped && color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
     return patch;
   };
 
@@ -598,8 +643,8 @@ function ProjectPanel({
       vcsProvider,
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
-      color,
     };
+    if (!grouped) input.color = color;
     const created = await api.createProject(input);
     await onCreated(created);
   };
@@ -612,6 +657,7 @@ function ProjectPanel({
     setBaseBranch(saved.baseBranch);
     setRunScript(saved.runScript ?? "");
     setVcsProvider(saved.vcsProvider);
+    setColor(saved.color ?? DEFAULT_PROJECT_COLOR);
     setConnection(null);
     await onSaved();
     flashSaved();
@@ -764,13 +810,24 @@ function ProjectPanel({
           </div>
         </Field>
         <Field label="Couleur">
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            className="h-9 w-12 cursor-pointer rounded-md border border-input bg-background"
-            aria-label="Couleur"
-          />
+          {grouped ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span
+                className="h-6 w-6 shrink-0 rounded border border-input"
+                style={{ backgroundColor: inheritedColor }}
+                aria-hidden="true"
+              />
+              Héritée du groupe « {normalizedGroup} »
+            </div>
+          ) : (
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="h-9 w-12 cursor-pointer rounded-md border border-input bg-background"
+              aria-label="Couleur du projet"
+            />
+          )}
         </Field>
       </div>
 

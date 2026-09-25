@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { nanoid } from "nanoid";
 
-import { CODEX_MODELS, CODEX_PROFILE_SEEDED_META_KEY, CODEX_SEED_PROFILE, DEFAULT_CODEX_MODEL, DEFAULT_PROFILES, DEFAULT_VCS_PROVIDER, ORCHESTRATOR_BACKFILL_META_KEY, SLOT_COUNT, type ProfileConfig } from "../../shared/constants.ts";
+import { CODEX_MODELS, CODEX_PROFILE_SEEDED_META_KEY, CODEX_SEED_PROFILE, DEFAULT_CODEX_MODEL, DEFAULT_PROFILES, DEFAULT_PROJECT_COLOR, DEFAULT_VCS_PROVIDER, ORCHESTRATOR_BACKFILL_META_KEY, SLOT_COUNT, type ProfileConfig } from "../../shared/constants.ts";
 
 export const CODEX_CATALOG_MIGRATION_ID = "codex-catalog-v4";
 export const CODEX_CATALOG_MIGRATED_META_KEY = "codex_catalog_v4_migrated";
@@ -169,6 +169,11 @@ CREATE TABLE IF NOT EXISTS projects (
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_groups (
+  name TEXT PRIMARY KEY,
+  color TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS automations (
@@ -402,6 +407,10 @@ export function createDatabase(path: string): Database {
   migrate(db, "tickets", TICKET_MIGRATIONS);
   migrate(db, "profiles", PROFILE_MIGRATIONS);
   migrate(db, "projects", PROJECT_MIGRATIONS);
+  db.query(`INSERT OR IGNORE INTO project_groups (name, color)
+    SELECT TRIM(group_name), COALESCE(color, ?) FROM projects
+    WHERE group_name IS NOT NULL AND TRIM(group_name) != ''
+    ORDER BY sort_order ASC, created_at ASC`).run(DEFAULT_PROJECT_COLOR);
   migrate(db, "execution_runs", EXECUTION_MIGRATIONS);
   migrate(db, "review_passes", REVIEW_PASS_MIGRATIONS);
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);

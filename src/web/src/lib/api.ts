@@ -58,6 +58,8 @@ export const api = {
   manageProjects: (): Promise<ManagedProject[]> => request("/api/projects/manage"),
   reorderProjects: (keys: string[]): Promise<{ ok: boolean }> =>
     request("/api/projects/order", { method: "PUT", body: JSON.stringify({ keys }) }),
+  updateProjectGroupColor: (group: string, color: string): Promise<{ group: string; color: string }> =>
+    request("/api/project-groups/color", { method: "PUT", body: JSON.stringify({ group, color }) }),
   createProject: (input: CreateProjectInput): Promise<ManagedProject> =>
     request("/api/projects", { method: "POST", body: JSON.stringify(input) }),
   updateProject: (key: string, patch: UpdateProjectInput): Promise<ManagedProject> =>

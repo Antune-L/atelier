@@ -120,6 +120,7 @@ const azurePrListEntrySchema = z.object({
   reviewers: z.array(azureReviewerSchema).default([]),
   creationDate: z.string(),
   createdBy: azureIdentitySchema.nullable().default(null),
+  repository: z.object({ name: z.string() }),
 });
 
 /**
@@ -346,6 +347,7 @@ export class AzureDevopsVcsClient implements VcsClient {
       try {
         const ref = await repoRefFromRemote(repoPath);
         if (!ref) return [repoPath, null];
+        const repositoryName = ref.repository.toLowerCase();
         let count = 0;
         let offset = 0;
         let pageLength = REVIEW_COUNT_PAGE_SIZE;
@@ -359,7 +361,7 @@ export class AzureDevopsVcsClient implements VcsClient {
           if (res.exitCode !== 0 || res.timedOut) return [repoPath, null];
           const parsed = z.object({ value: z.array(azurePrListEntrySchema) }).safeParse(safeJsonParse(res.stdout));
           if (!parsed.success) return [repoPath, null];
-          count += parsed.data.value.filter((pr) => isPrNeedsAttention({
+          count += parsed.data.value.filter((pr) => pr.repository.name.toLowerCase() === repositoryName && isPrNeedsAttention({
             isDraft: pr.isDraft,
             reviewStatus: reviewStatusFromVotes(pr.reviewers.map((reviewer) => reviewer.vote)),
           })).length;

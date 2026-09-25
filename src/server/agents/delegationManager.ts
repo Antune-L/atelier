@@ -540,14 +540,17 @@ export class DelegationManager {
     return this.store.getReviewPass(ticketId)?.requiresApproval ?? null;
   }
 
-  /** Rendering in the review language (English by default): the body posted on the pull request. */
-  reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options.humanTone);
+  /**
+   * Rendering in the review language (English by default): the body posted on the pull request.
+   * Azure DevOps carries the verdict through the vote, so its summary thread skips the verdict line.
+   */
+  reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS, withVerdict = true): string | null {
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options.humanTone, withVerdict);
   }
 
   /** French rendering: the board comment shown in the app. */
   reviewBoardReport(ticketId: string): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, false);
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, false, true);
   }
 
   private reviewerOptions(ticket: Ticket): ReviewerOptions {
@@ -558,7 +561,12 @@ export class DelegationManager {
     };
   }
 
-  private renderReviewReport(ticketId: string, labels: ReviewReportLabels, humanTone: boolean): string | null {
+  private renderReviewReport(
+    ticketId: string,
+    labels: ReviewReportLabels,
+    humanTone: boolean,
+    withVerdict: boolean,
+  ): string | null {
     const findings = publishedReviewFindings(this.store.getReviewPass(ticketId));
     if (findings === null) return null;
     const verdict = findings.length > 0 ? labels.changesRecommended : labels.noChanges;
@@ -570,9 +578,13 @@ export class DelegationManager {
     const outsideDiffFindings = findings.filter((finding) => finding.path === null || finding.line === null);
     const details = outsideDiffFindings.length === 0
       ? ""
-      : `\n\n${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, humanTone)).join("\n\n")}`;
-    const keptLine = humanTone ? "" : `\n\n${labels.keptLine(findings.length, countSummary)}`;
-    return `**${verdict}**${keptLine}${details}`;
+      : `${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, humanTone)).join("\n\n")}`;
+    const sections = [
+      withVerdict ? `**${verdict}**` : "",
+      humanTone ? "" : labels.keptLine(findings.length, countSummary),
+      details,
+    ];
+    return sections.filter((section) => section !== "").join("\n\n");
   }
 
   async publishReview(
@@ -636,7 +648,8 @@ export class DelegationManager {
       return { ok: false, result: "Publication annulée : une nouvelle passe a remplacé celle-ci." };
     }
     const options = this.reviewerOptions(ticket);
-    const report = this.reviewReport(ticket.id, options);
+    const provider = projectVcsProvider(ticket.project);
+    const report = this.reviewReport(ticket.id, options, provider !== "azureDevops");
     if (report === null) return { ok: false, result: "Publication refusée : résultats de review incomplets." };
     const reviewedCommitSha = currentPass.reviewedCommitSha;
     if (reviewedCommitSha === null) {
@@ -668,7 +681,7 @@ export class DelegationManager {
       body: report,
       comments,
       event,
-    }, projectVcsProvider(ticket.project));
+    }, provider);
     if (!published.ok || published.reviewId === null) return { ok: false, result: `Publication refusée : ${published.reason}` };
     if (!this.store.recordReviewPublication({
       ticketId: ticket.id,

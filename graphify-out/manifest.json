@@ -220,8 +220,8 @@
     "semantic_hash": ""
   },
   "src/web/src/App.tsx": {
-    "mtime": 1790366530.0360289,
-    "ast_hash": "594521b48e91498034168a587313cda8",
+    "mtime": 1790367067.940666,
+    "ast_hash": "7975615e8c3bbc55f241e08fc0e7d959",
     "semantic_hash": ""
   },
   "src/web/src/components/AgentProfileConfig.tsx": {
@@ -295,8 +295,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ProjectSelect.tsx": {
-    "mtime": 1790348188.662641,
-    "ast_hash": "7f8850977b9699ea25641c28a932c595",
+    "mtime": 1790367193.6453204,
+    "ast_hash": "c4bebe67411cc2164accd35f41df6849",
     "semantic_hash": ""
   },
   "src/web/src/components/ReviewPrPanel.tsx": {
@@ -305,8 +305,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/SettingsModal.tsx": {
-    "mtime": 1790348557.7491539,
-    "ast_hash": "64f7c39b0b8b9c1319eb2094a1d9b4f6",
+    "mtime": 1790367067.9409964,
+    "ast_hash": "fb128ac7f0768e2050f85004ffedbde0",
     "semantic_hash": ""
   },
   "src/web/src/components/Sidebar.tsx": {
@@ -747,11 +747,6 @@
   "src/server/migration.ts": {
     "mtime": 1782761361.4955637,
     "ast_hash": "32e470f4d994e93b922f34d1234f1a5a",
-    "semantic_hash": ""
-  },
-  "src/web/src/components/ProjectsSettings.tsx": {
-    "mtime": 1790348188.5815334,
-    "ast_hash": "426f7eaea11afb4b18bd13d49f20df49",
     "semantic_hash": ""
   },
   "src/web/src/hooks/usePrdSearch.ts": {
@@ -1407,6 +1402,31 @@
   "src/web/src/hooks/desktopShortcut.ts": {
     "mtime": 1790365772.9297302,
     "ast_hash": "16c926e3d37c7c7cfb0d2373a52eba00",
+    "semantic_hash": ""
+  },
+  "src/web/src/components/projects-settings/ProjectList.tsx": {
+    "mtime": 1790367352.7639282,
+    "ast_hash": "c849e84511a72bd12f759125d2943892",
+    "semantic_hash": ""
+  },
+  "src/web/src/components/projects-settings/ProjectPanel.tsx": {
+    "mtime": 1790367067.9525437,
+    "ast_hash": "45fa5911226b61c3b057c058ce7c5027",
+    "semantic_hash": ""
+  },
+  "src/web/src/components/projects-settings/ProjectsSettings.tsx": {
+    "mtime": 1790367244.8244767,
+    "ast_hash": "e9c4d0d88d1ffdf3dab0125cd7a67c39",
+    "semantic_hash": ""
+  },
+  "src/web/src/lib/projectGroups.ts": {
+    "mtime": 1790367164.5872447,
+    "ast_hash": "f8189575039871c8afc03c6b0260e0e5",
+    "semantic_hash": ""
+  },
+  "src/web/src/lib/search.ts": {
+    "mtime": 1790367067.952857,
+    "ast_hash": "5bc67f94a881e072b55c893918a05390",
     "semantic_hash": ""
   }
 }

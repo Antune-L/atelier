@@ -8,7 +8,7 @@ import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
 import { ProjectSelect } from "@/components/ProjectSelect";
-import { ProjectsSettings } from "@/components/ProjectsSettings";
+import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SlotPips } from "@/components/SlotPips";

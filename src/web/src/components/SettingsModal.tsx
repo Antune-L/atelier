@@ -22,7 +22,7 @@ import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
-import { ProjectsSettings } from "@/components/ProjectsSettings";
+import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
 import { SectionHeader } from "@/components/ui/settings";
@@ -36,6 +36,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+import { matchesQuery, normalizeSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
@@ -126,18 +127,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   },
 ];
 
-const DIACRITICS_REGEX = /\p{Diacritic}/gu;
-
-function normalize(value: string): string {
-  return value.normalize("NFD").replace(DIACRITICS_REGEX, "").toLowerCase();
-}
-
-/** `query` is already normalized; an empty query matches everything. */
-function matchesQuery(query: string, ...texts: string[]): boolean {
-  if (query === "") return true;
-  return normalize(texts.join(" ")).includes(query);
-}
-
 function sectionMatches(section: SettingsSection, query: string): boolean {
   return matchesQuery(query, section.label, ...section.keywords);
 }
@@ -154,7 +143,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const profiles = useProfiles();
   const projects = useProjects();
 
-  const query = normalize(search.trim());
+  const query = normalizeSearch(search);
   const counts: Partial<Record<SettingsSectionId, number>> = {
     profiles: profiles.length,
     projects: projects.length,
@@ -163,7 +152,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   // Derived in the handler rather than an effect: typing jumps to the first section that still matches.
   const changeSearch = (value: string): void => {
     setSearch(value);
-    const nextQuery = normalize(value.trim());
+    const nextQuery = normalizeSearch(value);
     if (nextQuery === "") return;
     const firstMatch = SETTINGS_SECTIONS.find((section) => sectionMatches(section, nextQuery));
     if (firstMatch !== undefined) setSectionId(firstMatch.id);

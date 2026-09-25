@@ -8,19 +8,19 @@ import { Label } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ReviewCountSnapshot } from "@/hooks/useReviewCounts";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+import {
+  filterProjectGroups,
+  groupProjects,
+  projectGroupIdentity,
+  UNGROUPED_LABEL,
+  type ProjectGroup,
+} from "@/lib/projectGroups";
+import { matchesQuery, normalizeSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
-
-const UNGROUPED_LABEL = "Sans groupe";
 
 export interface ProjectSelectOption {
   key: string;
   label: string;
-}
-
-interface ProjectGroup {
-  key: string;
-  label: string;
-  projects: ProjectInfo[];
 }
 
 interface ProjectSelectProps {
@@ -68,7 +68,7 @@ function ReviewCountBadge({
   );
 }
 
-function groupReviewCount(group: ProjectGroup, counts: Record<string, number | null>): { count: number | null; partial: boolean } {
+function groupReviewCount(group: ProjectGroup<ProjectInfo>, counts: Record<string, number | null>): { count: number | null; partial: boolean } {
   let count = 0;
   let unavailable = false;
   let available = false;
@@ -82,27 +82,6 @@ function groupReviewCount(group: ProjectGroup, counts: Record<string, number | n
     count += projectCount;
   }
   return { count: available ? count : null, partial: unavailable };
-}
-
-function normalizeSearch(value: string): string {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function projectGroupIdentity(project: ProjectInfo): { key: string; label: string } {
-  const group = project.group?.trim();
-  if (!group) return { key: "ungrouped", label: UNGROUPED_LABEL };
-  return { key: `named:${group}`, label: group };
-}
-
-function groupProjects(projects: ProjectInfo[]): ProjectGroup[] {
-  const groups = new Map<string, ProjectGroup>();
-  for (const project of projects) {
-    const identity = projectGroupIdentity(project);
-    const group = groups.get(identity.key);
-    if (group) group.projects.push(project);
-    else groups.set(identity.key, { ...identity, projects: [project] });
-  }
-  return [...groups.values()];
 }
 
 function initialExpandedGroups(projects: ProjectInfo[], value: string): Set<string> {
@@ -138,17 +117,10 @@ export function ProjectSelect({
   const selectedProject = projects.find((project) => project.key === value);
   const selectedOption = options.find((option) => option.key === value);
   const selectedLabel = selectedProject?.label ?? selectedOption?.label ?? "Aucun projet visible";
-  const filteredGroups = groups
-    .map((group) => ({
-      ...group,
-      visibleProjects: group.projects.filter((project) =>
-        normalizeSearch(`${group.label} ${project.label} ${project.key}`).includes(normalizedQuery),
-      ),
-    }))
-    .filter((group) => group.visibleProjects.length > 0);
-  const filteredOptions = options.filter((option) =>
-    normalizeSearch(`${option.label} ${option.key}`).includes(normalizedQuery),
+  const filteredGroups = filterProjectGroups(groups, (project, group) =>
+    matchesQuery(normalizedQuery, group.label, project.label, project.key),
   );
+  const filteredOptions = options.filter((option) => matchesQuery(normalizedQuery, option.label, option.key));
   const resultCount = filteredOptions.length
     + filteredGroups.reduce((count, group) => count + group.visibleProjects.length, 0);
   const hasChoices = projects.length > 0 || options.length > 0;

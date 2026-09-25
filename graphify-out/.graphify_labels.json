@@ -108,16 +108,14 @@
   "106": "usePrdSearch.ts",
   "107": "azureRemote.ts",
   "108": "oneShotSession.ts",
-  "109": "StageProgressBar.tsx",
+  "109": "projectDisplay.ts",
   "110": "Profile",
   "111": "isProcessing",
   "112": "prd.ts",
   "113": "reformulate.ts",
-  "114": "WorktreeSession",
+  "114": "ApiDenyPatterns",
   "115": "isNotionUrl",
   "116": "settings.tsx",
   "117": "TicketMeta.tsx",
-  "118": "profileMatching.test.ts",
-  "119": "notionImport.ts",
-  "121": "prUrl.ts"
+  "118": "notionImport.ts"
 }

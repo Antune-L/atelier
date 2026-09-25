@@ -56,6 +56,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
   manageProjects: (): Promise<ManagedProject[]> => request("/api/projects/manage"),
+  reorderProjects: (keys: string[]): Promise<{ ok: boolean }> =>
+    request("/api/projects/order", { method: "PUT", body: JSON.stringify({ keys }) }),
   createProject: (input: CreateProjectInput): Promise<ManagedProject> =>
     request("/api/projects", { method: "POST", body: JSON.stringify(input) }),
   updateProject: (key: string, patch: UpdateProjectInput): Promise<ManagedProject> =>

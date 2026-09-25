@@ -1,5 +1,5 @@
-import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronRight, Eye, EyeOff, FolderOpen, GripVertical } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -39,6 +39,8 @@ const DRAG_ACTIVATION_DISTANCE = 6;
 const REORDER_ERROR = "Erreur lors de la réorganisation";
 const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 const UNGROUPED_LABEL = "Sans groupe";
+const GROUP_SORT_PREFIX = "group:";
+const PROJECT_SORT_PREFIX = "project:";
 
 interface ProjectGroup {
   key: string;
@@ -61,6 +63,14 @@ function groupProjects(projects: ManagedProject[]): ProjectGroup[] {
     else groups.set(identity.key, { ...identity, projects: [project] });
   }
   return [...groups.values()];
+}
+
+function groupSortId(key: string): string {
+  return `${GROUP_SORT_PREFIX}${key}`;
+}
+
+function projectSortId(key: string): string {
+  return `${PROJECT_SORT_PREFIX}${key}`;
 }
 
 function reorderProjectsWithinGroup(
@@ -148,6 +158,7 @@ export function ProjectsSettings() {
     useSensor(PointerSensor, {
       activationConstraint: { distance: DRAG_ACTIVATION_DISTANCE },
     }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   useEffect(() => {
@@ -194,32 +205,50 @@ export function ProjectsSettings() {
     setSelectedKey(null);
   };
 
-  const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
-    const { active, over } = event;
-    setError(null);
-    if (!over || active.id === over.id) return;
-
-    const activeGroup = projectGroups.find((group) => group.projects.some((project) => project.key === active.id));
-    const overGroup = projectGroups.find((group) => group.projects.some((project) => project.key === over.id));
-    const activeProject = activeGroup?.projects.find((project) => project.key === active.id);
-    const overProject = overGroup?.projects.find((project) => project.key === over.id);
-    if (!activeGroup || activeGroup.key !== overGroup?.key || !activeProject || !overProject) return;
-
-    const reordered = reorderProjectsWithinGroup(projects, activeGroup, activeProject.key, overProject.key);
+  const persistOrder = async (reordered: ManagedProject[]): Promise<void> => {
+    const previousProjects = projects;
     setProjects(reordered);
     setMutationBusy(true);
-    const results = await Promise.allSettled(
-      reordered.map((project, index) => api.updateProject(project.key, { sortOrder: index })),
-    );
     try {
+      await api.reorderProjects(reordered.map((project) => project.key));
       await reload();
-      const failure = results.find((result) => result.status === "rejected");
-      if (failure?.status === "rejected") setError(errorMessage(failure.reason, REORDER_ERROR));
     } catch (cause) {
+      try {
+        await reload();
+      } catch {
+        setProjects(previousProjects);
+      }
       setError(errorMessage(cause, REORDER_ERROR));
     } finally {
       setMutationBusy(false);
     }
+  };
+
+  const handleProjectDragEnd = async (group: ProjectGroup, event: DragEndEvent): Promise<void> => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const activeProject = group.projects.find((project) => projectSortId(project.key) === active.id);
+    const overProject = group.projects.find((project) => projectSortId(project.key) === over.id);
+    if (!activeProject || !overProject) return;
+
+    setError(null);
+    const reordered = reorderProjectsWithinGroup(projects, group, activeProject.key, overProject.key);
+    await persistOrder(reordered);
+  };
+
+  const handleGroupDragEnd = async (event: DragEndEvent): Promise<void> => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = projectGroups.findIndex((group) => groupSortId(group.key) === active.id);
+    const newIndex = projectGroups.findIndex((group) => groupSortId(group.key) === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reorderedGroups = [...projectGroups];
+    const movedGroup = reorderedGroups.splice(oldIndex, 1)[0];
+    if (!movedGroup) return;
+    reorderedGroups.splice(newIndex, 0, movedGroup);
+    setError(null);
+    await persistOrder(reorderedGroups.flatMap((group) => group.projects));
   };
 
   const toggleVisibility = async (project: ManagedProject): Promise<void> => {
@@ -254,40 +283,43 @@ export function ProjectsSettings() {
       <div className="flex flex-col gap-4 min-[720px]:flex-row min-[720px]:items-start">
         <div className="space-y-2 min-[720px]:w-[260px] min-[720px]:shrink-0">
           {projects.length > 1 && (
-            <p className="text-xs text-muted-foreground">Glissez pour réordonner les projets dans leur groupe.</p>
+            <p className="text-xs text-muted-foreground">Glissez pour réordonner les groupes ou les projets dans leur groupe.</p>
           )}
-          <DndContext sensors={sensors} onDragEnd={(event) => void handleDragEnd(event)}>
-            <div className="space-y-3">
-              {projectGroups.map((group) => (
-                <section key={group.key} className="rounded-lg border border-dashed border-border p-2">
-                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                    <h4 className="truncate text-xs font-semibold text-foreground">{group.label}</h4>
-                    <span className="shrink-0 text-xs text-muted-foreground">{group.projects.length}</span>
-                  </div>
-                  <SortableContext
-                    items={group.projects.map((project) => project.key)}
-                    strategy={verticalListSortingStrategy}
-                  >
-                    <div className="space-y-2">
-                      {group.projects.map((project) => (
-                        <SortableProjectListRow
-                          key={project.key}
-                          project={project}
-                          selected={!showCreate && selected?.key === project.key}
-                          showTimeout={project.commitTimeoutMs !== reference}
-                          disabled={mutationBusy}
-                          onSelect={() => {
-                            setCreating(false);
-                            setSelectedKey(project.key);
-                          }}
-                          onToggleVisibility={() => void toggleVisibility(project)}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </section>
-              ))}
-            </div>
+          <DndContext sensors={sensors} onDragEnd={(event) => void handleGroupDragEnd(event)}>
+            <SortableContext
+              items={projectGroups.map((group) => groupSortId(group.key))}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-3">
+                {projectGroups.map((group) => (
+                  <SortableProjectGroup key={group.key} group={group} disabled={mutationBusy || projectGroups.length < 2}>
+                    <DndContext sensors={sensors} onDragEnd={(event) => void handleProjectDragEnd(group, event)}>
+                      <SortableContext
+                        items={group.projects.map((project) => projectSortId(project.key))}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div className="space-y-2">
+                          {group.projects.map((project) => (
+                            <SortableProjectListRow
+                              key={project.key}
+                              project={project}
+                              selected={!showCreate && selected?.key === project.key}
+                              showTimeout={project.commitTimeoutMs !== reference}
+                              disabled={mutationBusy}
+                              onSelect={() => {
+                                setCreating(false);
+                                setSelectedKey(project.key);
+                              }}
+                              onToggleVisibility={() => void toggleVisibility(project)}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  </SortableProjectGroup>
+                ))}
+              </div>
+            </SortableContext>
           </DndContext>
           {projects.length > 0 && (
             <DashedAddButton label="Ajouter un projet" onClick={() => setCreating(true)} />
@@ -315,6 +347,47 @@ export function ProjectsSettings() {
   );
 }
 
+function SortableProjectGroup({
+  group,
+  disabled,
+  children,
+}: {
+  group: ProjectGroup;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: groupSortId(group.key),
+    disabled,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <section ref={setNodeRef} style={style} className="rounded-lg border border-dashed border-border bg-background p-2">
+      <div className="mb-2 flex items-center gap-1 px-1">
+        <button
+          ref={setActivatorNodeRef}
+          type="button"
+          disabled={disabled}
+          className="cursor-grab p-1 text-muted-foreground active:cursor-grabbing disabled:cursor-default"
+          aria-label={`Réorganiser le groupe ${group.label}`}
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <h4 className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{group.label}</h4>
+        <span className="shrink-0 text-xs text-muted-foreground">{group.projects.length}</span>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 interface ProjectListRowProps {
   project: ManagedProject;
   selected: boolean;
@@ -326,7 +399,7 @@ interface ProjectListRowProps {
 
 function SortableProjectListRow(props: ProjectListRowProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
-    id: props.project.key,
+    id: projectSortId(props.project.key),
     disabled: props.disabled,
   });
   const style = {

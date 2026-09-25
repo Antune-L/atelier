@@ -537,6 +537,10 @@ export const updateProjectSchema = z.object({
 });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 
+export const reorderProjectsSchema = z.object({
+  keys: z.array(projectKeySchema),
+});
+
 // ---- API input schemas ----
 
 /** Schemes accepted for an external tracker URL — it ends up rendered into an anchor href. */

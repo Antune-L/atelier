@@ -23,6 +23,7 @@ import {
   importNotionSchema,
   importTicketsSchema,
   moveTicketSchema,
+  reorderProjectsSchema,
   startWorktreeSessionBodySchema,
   updateAppSettingsSchema,
   updateAutomationSchema,
@@ -475,7 +476,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const project = store.getProjectRow(key);
       return project && !project.hidden ? [{ key, repoPath: project.repoPath, provider: project.vcsProvider }] : [];
     });
-    const identity = JSON.stringify([projects, store.reviewCompletionVersion()]);
+    const identity = JSON.stringify([projects.toSorted((left, right) => left.key.localeCompare(right.key)), store.reviewCompletionVersion()]);
     if (pendingReviewCounts?.identity === identity) return pendingReviewCounts.result;
     if (!refresh && reviewCountsCache?.identity === identity && Date.now() - reviewCountsCache.checkedAt < REVIEW_COUNT_TTL_MS) {
       return Promise.resolve(reviewCountsCache);
@@ -508,6 +509,12 @@ export function createApiRoutes(deps: RouteDeps) {
         projects.push(toManagedProject(key, row));
       }
       return projects;
+    })
+    .put("/projects/order", ({ body, set }) => {
+      const parsed = reorderProjectsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!store.reorderProjects(parsed.data.keys)) return jsonError(set, HTTP_CONFLICT, "project order is stale or invalid");
+      return { ok: true };
     })
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);

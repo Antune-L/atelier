@@ -1351,6 +1351,19 @@ export class Store {
     return keys;
   }
 
+  reorderProjects(keys: string[]): boolean {
+    return this.transaction(() => {
+      const currentKeys = this.listProjectKeys();
+      if (keys.length !== currentKeys.length || new Set(keys).size !== keys.length) return false;
+      const currentSet = new Set(currentKeys);
+      if (!keys.every((key) => currentSet.has(key))) return false;
+      const statement = this.db.query("UPDATE projects SET sort_order = ?, updated_at = ? WHERE key = ?");
+      const now = Date.now();
+      for (const [index, key] of keys.entries()) statement.run(index, now, key);
+      return true;
+    });
+  }
+
   reviewCompletionVersion(): string {
     const row = this.db.query("SELECT COUNT(*) AS count, MAX(finished_at) AS latest FROM tickets WHERE kind = 'review' AND column_name = 'reviewed'").get();
     const parsed = z.object({ count: z.number(), latest: z.number().nullable() }).parse(row);

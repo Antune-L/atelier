@@ -8,7 +8,12 @@ import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { ReviewPass } from "../db/store.ts";
 
-import { keptFindings, type DimensionFinding } from "./reviewFindings.ts";
+import {
+  DEFAULT_FINDING_RENDER_STYLE,
+  keptFindings,
+  type DimensionFinding,
+  type FindingRenderStyle,
+} from "./reviewFindings.ts";
 
 const LIGHT_REVIEW_KINDS: readonly ReviewKind[] = ["quality", "conventions", "regression", "logic"];
 const FULL_REVIEW_KINDS: readonly ReviewKind[] = [...LIGHT_REVIEW_KINDS, "architecture", "security"];
@@ -34,9 +39,12 @@ export function passDimensionFindings(reviewPass: ReviewPass | null): DimensionF
 }
 
 /** The findings `publish_review` posts for this pass, or `null` while the pass is incomplete. */
-export function publishedReviewFindings(reviewPass: ReviewPass | null): ReviewFinding[] | null {
+export function publishedReviewFindings(
+  reviewPass: ReviewPass | null,
+  style: FindingRenderStyle = DEFAULT_FINDING_RENDER_STYLE,
+): ReviewFinding[] | null {
   const entries = passDimensionFindings(reviewPass);
-  return entries === null ? null : keptFindings(entries);
+  return entries === null ? null : keptFindings(entries, style);
 }
 
 /**

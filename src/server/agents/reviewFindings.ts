@@ -4,6 +4,7 @@
  * event derived from the retained severities.
  */
 
+import type { CommitLanguage } from "../../shared/constants.ts";
 import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
 import type { ReviewPublicationEvent } from "../system/types.ts";
 
@@ -108,7 +109,18 @@ const DUPLICATE_SIMILARITY = 0.5;
 /** Tokens shorter than this carry no signal (articles, operators). */
 const MIN_TOKEN_LENGTH = 3;
 const SEVERITY_RANK: Record<ReviewFinding["severity"], number> = { critical: 3, major: 2, minor: 1 };
-const ALSO_FLAGGED_PREFIX = "Also flagged by: ";
+const ALSO_FLAGGED_PREFIX: Record<CommitLanguage, string> = {
+  en: "Also flagged by: ",
+  fr: "Aussi relevé par : ",
+};
+
+/** How merged findings are worded: the review language, and whether reviewer jargon is dropped. */
+export interface FindingRenderStyle {
+  language: CommitLanguage;
+  humanTone: boolean;
+}
+
+export const DEFAULT_FINDING_RENDER_STYLE: FindingRenderStyle = { language: "en", humanTone: false };
 
 export interface DimensionFinding {
   kind: ReviewKind | null;
@@ -149,7 +161,7 @@ function isSameDefect(left: ReviewFinding, right: ReviewFinding): boolean {
   return hasSimilarSummary(left, right);
 }
 
-function mergeCluster(cluster: DimensionFinding[]): ReviewFinding {
+function mergeCluster(cluster: DimensionFinding[], style: FindingRenderStyle): ReviewFinding {
   const winner = cluster.reduce((best, entry) =>
     SEVERITY_RANK[entry.finding.severity] > SEVERITY_RANK[best.finding.severity] ? entry : best);
   const evidence = cluster.reduce((longest, entry) =>
@@ -157,8 +169,9 @@ function mergeCluster(cluster: DimensionFinding[]): ReviewFinding {
   const otherKinds = [...new Set(cluster
     .filter((entry) => entry !== winner && entry.kind !== null && entry.kind !== winner.kind)
     .map((entry) => entry.kind))];
-  const alsoFlagged = otherKinds.length === 0 ? "" : `\n\n${ALSO_FLAGGED_PREFIX}${otherKinds.join(", ")}.`;
-  return { ...winner.finding, evidence: `${evidence}${alsoFlagged}` };
+  if (style.humanTone || otherKinds.length === 0) return { ...winner.finding, evidence };
+  const alsoFlagged = `${ALSO_FLAGGED_PREFIX[style.language]}${otherKinds.join(", ")}.`;
+  return { ...winner.finding, evidence: `${evidence}\n\n${alsoFlagged}` };
 }
 
 /** `path:line` identity of a finding, or null when it cannot be anchored in the diff. */
@@ -172,7 +185,10 @@ function findingAnchor(finding: ReviewFinding): string | null {
  * guarantees that no two survivors share one `path:line` (GitHub would stack several comments on
  * the same diff line).
  */
-export function dedupeFindings(entries: DimensionFinding[]): ReviewFinding[] {
+export function dedupeFindings(
+  entries: DimensionFinding[],
+  style: FindingRenderStyle = DEFAULT_FINDING_RENDER_STYLE,
+): ReviewFinding[] {
   const clusters: DimensionFinding[][] = [];
   const byAnchor = new Map<string, DimensionFinding[]>();
   for (const entry of entries) {
@@ -189,7 +205,7 @@ export function dedupeFindings(entries: DimensionFinding[]): ReviewFinding[] {
     cluster.push(entry);
     if (anchor !== null) byAnchor.set(anchor, cluster);
   }
-  return clusters.map(mergeCluster);
+  return clusters.map((cluster) => mergeCluster(cluster, style));
 }
 
 /** GitHub review event carried by the same review as the comments. */
@@ -199,10 +215,13 @@ export function reviewPublicationEvent(findings: ReviewFinding[]): ReviewPublica
 }
 
 /** Findings actually published: verified, not self-refuting, deduplicated across dimensions. */
-export function keptFindings(entries: DimensionFinding[]): ReviewFinding[] {
+export function keptFindings(
+  entries: DimensionFinding[],
+  style: FindingRenderStyle = DEFAULT_FINDING_RENDER_STYLE,
+): ReviewFinding[] {
   const retained = entries.filter((entry) =>
     entry.finding.verificationStatus !== "rejected" && !isSelfRefuting(entry.finding));
-  return dedupeFindings(retained);
+  return dedupeFindings(retained, style);
 }
 
 /**

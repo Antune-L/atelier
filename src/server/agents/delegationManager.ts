@@ -36,11 +36,13 @@ import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
 import {
+  DEFAULT_FINDING_RENDER_STYLE,
   dedupeIdenticalFindings,
   isSelfRefuting,
   keptFindings,
   reviewProseIsFrench,
   reviewPublicationEvent,
+  type FindingRenderStyle,
 } from "./reviewFindings.ts";
 import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
 import { codexImplementerKnobs } from "./sessionConfig.ts";
@@ -195,13 +197,13 @@ function reviewKey(ticketId: string, kind: ReviewKind): string {
 }
 
 /** Resolved per-ticket reviewer options: the language of the emitted prose and whether comments use a human tone. */
-interface ReviewerOptions {
-  language: CommitLanguage;
-  humanTone: boolean;
-}
+type ReviewerOptions = FindingRenderStyle;
 
 /** Feature-ticket reviews (delegate_review during implementation) always write English, in the default tone. */
-const FEATURE_REVIEWER_OPTIONS: ReviewerOptions = { language: "en", humanTone: false };
+/** The board comment is French in the default tone, whatever the ticket asked for on the PR. */
+const BOARD_FINDING_RENDER_STYLE: FindingRenderStyle = { language: "fr", humanTone: false };
+
+const FEATURE_REVIEWER_OPTIONS: ReviewerOptions = DEFAULT_FINDING_RENDER_STYLE;
 
 const REVIEWER_LANGUAGE_RULES: Record<CommitLanguage, string> = {
   en: "- Write every string you emit (summary, evidence, ruleSource) in English, never in French. Quote repository or UI strings verbatim inside backticks, never translated.",
@@ -545,12 +547,12 @@ export class DelegationManager {
    * Azure DevOps carries the verdict through the vote, so its summary thread skips the verdict line.
    */
   reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS, withVerdict = true): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options.humanTone, withVerdict);
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options, withVerdict);
   }
 
   /** French rendering: the board comment shown in the app. */
   reviewBoardReport(ticketId: string): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, false, true);
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, BOARD_FINDING_RENDER_STYLE, true);
   }
 
   private reviewerOptions(ticket: Ticket): ReviewerOptions {
@@ -564,10 +566,10 @@ export class DelegationManager {
   private renderReviewReport(
     ticketId: string,
     labels: ReviewReportLabels,
-    humanTone: boolean,
+    style: FindingRenderStyle,
     withVerdict: boolean,
   ): string | null {
-    const findings = publishedReviewFindings(this.store.getReviewPass(ticketId));
+    const findings = publishedReviewFindings(this.store.getReviewPass(ticketId), style);
     if (findings === null) return null;
     const verdict = findings.length > 0 ? labels.changesRecommended : labels.noChanges;
     const counts = reviewFindingSeveritySchema.options.flatMap((severity) => {
@@ -578,10 +580,10 @@ export class DelegationManager {
     const outsideDiffFindings = findings.filter((finding) => finding.path === null || finding.line === null);
     const details = outsideDiffFindings.length === 0
       ? ""
-      : `${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, humanTone)).join("\n\n")}`;
+      : `${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, style.humanTone)).join("\n\n")}`;
     const sections = [
       withVerdict ? `**${verdict}**` : "",
-      humanTone ? "" : labels.keptLine(findings.length, countSummary),
+      style.humanTone ? "" : labels.keptLine(findings.length, countSummary),
       details,
     ];
     return sections.filter((section) => section !== "").join("\n\n");
@@ -662,7 +664,7 @@ export class DelegationManager {
       return { ok: false, result: "Publication annulée : la passe courante a changé. Lance une nouvelle passe complète." };
     }
     const entries = passDimensionFindings(this.store.getReviewPass(ticket.id)) ?? [];
-    const findings = keptFindings(entries);
+    const findings = keptFindings(entries, options);
     const refutedCount = entries.filter((entry) =>
       entry.finding.verificationStatus !== "rejected" && isSelfRefuting(entry.finding)).length;
     const comments = findings.flatMap((finding) => {

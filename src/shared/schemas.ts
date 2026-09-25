@@ -70,6 +70,23 @@ export type ExecutionModelUsage = z.infer<typeof executionModelUsageSchema>;
 export const executionUsageByModelSchema = z.record(z.string().min(1), executionModelUsageSchema);
 export type ExecutionUsageByModel = z.infer<typeof executionUsageByModelSchema>;
 
+export const errorDetailsSourceSchema = z.enum(["agent_fail", "launch", "session_error", "done_gate", "worktree_reuse", "execution", "stalled"]);
+
+export const errorDetailsSchema = z.object({
+  message: z.string(),
+  stack: z.string().nullable(),
+  cause: z.string().nullable(),
+  source: errorDetailsSourceSchema,
+  stage: z.string().nullable(),
+  column: z.string().nullable(),
+  slotId: z.number().nullable(),
+  generationId: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  at: z.number(),
+});
+export type ErrorDetails = z.infer<typeof errorDetailsSchema>;
+export type ErrorDetailsSource = ErrorDetails["source"];
+
 export const executionRunSchema = z.object({
   id: z.string().min(1),
   ownerType: executionOwnerTypeSchema,
@@ -91,6 +108,7 @@ export const executionRunSchema = z.object({
   usageByModel: executionUsageByModelSchema,
   status: executionStatusSchema,
   error: z.string().nullable(),
+  errorDetails: errorDetailsSchema.nullable(),
   startedAt: z.number().int(),
   finishedAt: z.number().int().nullable(),
 });
@@ -307,6 +325,7 @@ export const ticketSchema = z.object({
   /** An interactive test session occupies a slot on this card's existing feature branch (no pipeline/gate/PR). */
   testing: z.boolean(),
   error: z.string().nullable(),
+  errorDetails: errorDetailsSchema.nullable(),
   archived: z.boolean(),
   watchdogFlagged: z.boolean(),
   pendingQuestions: z.number().int(),

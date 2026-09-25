@@ -1,3 +1,4 @@
+import { buildErrorDetails } from "../shared/errors.ts";
 import type { ExecutionRun, ExecutionUsageByModel } from "../shared/schemas.ts";
 import type { ResolvedExecution } from "./agents/executionConfig.ts";
 import type { Store } from "./db/store.ts";
@@ -39,6 +40,7 @@ export async function runRecordedAction(
     store.finalizeExecution({
       generationId, sessionId, status: "failed", usageByModel,
       error: error instanceof Error ? error.message : "Échec de l’opération",
+      errorDetails: buildErrorDetails(error, { source: "execution", generationId, sessionId, stage: null, column: null, slotId: null }),
     });
     throw error;
   }

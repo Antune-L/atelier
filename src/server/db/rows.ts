@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
-import type { AgentMessage, Automation, AutomationRun, Comment, ExecutionRun, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentMessage, Automation, AutomationRun, Comment, ErrorDetails, ExecutionRun, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentMessageChannelSchema,
   agentMessageStatusSchema,
@@ -13,6 +13,7 @@ import {
   codexModelSchema,
   columnSchema,
   commitLanguageSchema,
+  errorDetailsSchema,
   executionOwnerTypeSchema,
   executionStatusSchema,
   executionUsageByModelSchema,
@@ -88,6 +89,7 @@ const ticketRowSchema = z.object({
   resolving_conflicts: z.number(),
   testing: z.number(),
   error: z.string().nullable(),
+  error_details: z.string().nullable(),
   archived: z.number(),
   watchdog_flagged: z.number(),
   last_progress_at: z.number(),
@@ -216,6 +218,7 @@ const executionRunRowSchema = z.object({
   usage_by_model: z.string().nullable(),
   status: z.string(),
   error: z.string().nullable(),
+  error_details: z.string().nullable(),
   started_at: z.number(),
   finished_at: z.number().nullable(),
 });
@@ -285,6 +288,18 @@ function parseSessionUsage(raw: string | null): Ticket["sessionUsage"] {
   return parsed.success ? parsed.data : {};
 }
 
+function parseErrorDetails(raw: string | null): ErrorDetails | null {
+  if (raw === null) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const parsed = errorDetailsSchema.safeParse(json);
+  return parsed.success ? parsed.data : null;
+}
+
 export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
   const row = ticketRowSchema.parse(raw);
   return {
@@ -340,6 +355,7 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     resolvingConflicts: row.resolving_conflicts === 1,
     testing: row.testing === 1,
     error: row.error,
+    errorDetails: parseErrorDetails(row.error_details),
     archived: row.archived === 1,
     watchdogFlagged: row.watchdog_flagged === 1,
     pendingQuestions,
@@ -486,6 +502,7 @@ export function mapExecutionRunRow(raw: unknown): ExecutionRun {
     usageByModel: executionUsageByModelSchema.catch({}).parse(usage),
     status: executionStatusSchema.parse(row.status),
     error: row.error,
+    errorDetails: parseErrorDetails(row.error_details),
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };

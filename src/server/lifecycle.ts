@@ -1,6 +1,7 @@
 import { TERMINAL_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
-import type { Ticket } from "../shared/schemas.ts";
+import { buildErrorDetails } from "../shared/errors.ts";
+import type { ErrorDetails, ErrorDetailsSource, Ticket } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
@@ -64,12 +65,30 @@ export class TicketLifecycle {
    * otherwise a card that resumed working keeps showing a stale error (e.g. "session perdue au
    * redémarrage"). Returns an empty patch fragment when the transition is not a revival.
    */
-  private errorReset(ticketId: string, nextStage: Stage): { error?: null } {
+  private errorReset(ticketId: string, nextStage: Stage): { error?: null; errorDetails?: null } {
     const current = this.store.getTicket(ticketId);
-    if (current === null || current.error === null) return {};
+    if (current === null || (current.error === null && current.errorDetails === null)) return {};
     if (current.stage === null || !TERMINAL_STAGES.includes(current.stage)) return {};
     if (TERMINAL_STAGES.includes(nextStage)) return {};
-    return { error: null };
+    return { error: null, errorDetails: null };
+  }
+
+  errorDetailsFor(
+    ticketId: string,
+    error: unknown,
+    source: ErrorDetailsSource,
+    overrides: Partial<Pick<ErrorDetails, "slotId" | "sessionId" | "generationId">> = {},
+  ): ErrorDetails {
+    const ticket = this.store.getTicket(ticketId);
+    return buildErrorDetails(error, {
+      source,
+      stage: ticket?.stage ?? null,
+      column: ticket?.column ?? null,
+      slotId: ticket?.slotId ?? null,
+      sessionId: ticket?.sessionId ?? null,
+      generationId: null,
+      ...overrides,
+    });
   }
 
   /** PRD submitted: column prd, stage awaiting_answers, store markdown, push, log, notify. */
@@ -115,11 +134,13 @@ export class TicketLifecycle {
    */
   async fail(ticketId: string, reason: string, findings: string): Promise<Ticket> {
     const body = `**Échec**: ${reason}\n\n${findings}`;
+    const errorDetails = this.errorDetailsFor(ticketId, reason, "agent_fail");
     const comment = this.store.addComment(ticketId, "agent", body, null);
     const ticket = this.store.updateTicket(ticketId, {
       column: "failed",
       stage: "failed",
       error: reason,
+      errorDetails,
       // A conflict-resolution session that fails ends the run; clear the flag so a later launch
       // uses the normal contract.
       resolvingConflicts: false,
@@ -130,7 +151,7 @@ export class TicketLifecycle {
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
     await this.notifier.notify("Ticket en échec", `${ticket.title}: ${reason}`, ticket.id);
-    this.store.logEvent(ticketId, "fail", { reason });
+    this.store.logEvent(ticketId, "fail", { reason, details: errorDetails });
     return ticket;
   }
 
@@ -140,18 +161,20 @@ export class TicketLifecycle {
    * log "failed", notify (fire-and-forget). Distinct from `fail`: no comment, log name "failed",
    * un-awaited notify, slot always written.
    */
-  markLaunchFailed(ticketId: string, slotId: number, reason: string): Ticket {
+  markLaunchFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): Ticket {
+    const errorDetails = this.errorDetailsFor(ticketId, error, source, { slotId });
     const ticket = this.store.updateTicket(ticketId, {
       column: "failed",
       stage: "failed",
       error: reason,
+      errorDetails,
       resolvingConflicts: false,
       finishedAt: Date.now(),
     });
     this.store.updateSlot(slotId, { status: "failed" });
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
-    this.store.logEvent(ticketId, "failed", { reason });
+    this.store.logEvent(ticketId, "failed", { reason, details: errorDetails });
     void this.notifier.notify("Ticket en échec", `${reason}`, ticketId);
     return ticket;
   }
@@ -167,19 +190,27 @@ export class TicketLifecycle {
   async stall(
     ticketId: string,
     notify: { title: string; body: string },
-    opts: { error?: string | null; logEvent?: boolean; reason?: string } = {},
+    opts: { error?: string | null; errorDetails?: ErrorDetails | null; logEvent?: boolean; reason?: string } = {},
   ): Promise<Ticket> {
-    const { error = null, logEvent = false, reason } = opts;
+    const { error = null, errorDetails = null, logEvent = false, reason } = opts;
     const ticket = this.store.updateTicket(ticketId, {
       stage: "stalled",
       ...(error !== null ? { error } : {}),
+      ...(errorDetails !== null ? { errorDetails } : {}),
       finishedAt: Date.now(),
     });
     if (ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "stalled" });
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
     await this.notifier.notify(notify.title, notify.body, ticketId);
-    if (logEvent) this.store.logEvent(ticketId, "stalled", reason === undefined ? {} : { reason });
+    if (logEvent) this.store.logEvent(ticketId, "stalled", stalledEventPayload(reason, errorDetails));
     return ticket;
   }
+}
+
+function stalledEventPayload(reason: string | undefined, details: ErrorDetails | null): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if (reason !== undefined) payload.reason = reason;
+  if (details !== null) payload.details = details;
+  return payload;
 }

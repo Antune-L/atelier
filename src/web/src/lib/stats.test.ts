@@ -50,6 +50,7 @@ describe("effective execution statistics", () => {
       usageByModel: {},
       status: "completed",
       error: null,
+      errorDetails: null,
       startedAt: 2_000,
       finishedAt: 3_500,
     };
@@ -79,6 +80,7 @@ describe("effective execution statistics", () => {
       usageByModel: {},
       status: "completed",
       error: null,
+      errorDetails: null,
       startedAt: 0,
       finishedAt: 1,
     });

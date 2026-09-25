@@ -29,7 +29,7 @@ import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
-import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, Profile, ReformulateStatus, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, Profile, ReformulateStatus, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
@@ -308,6 +308,7 @@ export interface TicketPatch {
   resolvingConflicts?: boolean;
   testing?: boolean;
   error?: string | null;
+  errorDetails?: ErrorDetails | null;
   archived?: boolean;
   watchdogFlagged?: boolean;
   lastProgressAt?: number;
@@ -351,6 +352,7 @@ export interface FinalizeExecutionInput {
   status: Exclude<ExecutionStatus, "running">;
   usageByModel: ExecutionUsageByModel;
   error?: string | null;
+  errorDetails?: ErrorDetails | null;
   finishedAt?: number;
 }
 
@@ -389,6 +391,11 @@ const COLUMN_TO_DB = "column_name";
 
 /** Values SQLite accepts as positional bindings in our UPDATE statements. */
 type SqlBindValue = string | number | null;
+
+function serializeErrorDetails(details: ErrorDetails | null | undefined): string | null {
+  if (details === null || details === undefined) return null;
+  return JSON.stringify(details);
+}
 
 function nullableBooleanValue(value: boolean | null | undefined): number | null {
   if (value === null || value === undefined) return null;
@@ -466,8 +473,8 @@ export class Store {
     }
     this.db.query(
       `INSERT INTO execution_runs
-        (id, owner_type, owner_id, generation_id, session_id, role, orchestrator, effective_model, effective_effort, delegate_provider, delegate_effective_model, delegate_effective_effort, delegate_codex_fast, codex_fast, configured_service_tier, usage_by_model, status, error, started_at, finished_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'running', NULL, ?, NULL)`,
+        (id, owner_type, owner_id, generation_id, session_id, role, orchestrator, effective_model, effective_effort, delegate_provider, delegate_effective_model, delegate_effective_effort, delegate_codex_fast, codex_fast, configured_service_tier, usage_by_model, status, error, error_details, started_at, finished_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'running', NULL, NULL, ?, NULL)`,
     ).run(
       input.id,
       input.ownerType,
@@ -516,13 +523,14 @@ export class Store {
     this.db.query(
       `UPDATE execution_runs
        SET session_id = COALESCE(?, session_id), usage_by_model = COALESCE(?, usage_by_model),
-           status = ?, error = ?, finished_at = ?
+           status = ?, error = ?, error_details = ?, finished_at = ?
        WHERE generation_id = ? AND status = 'running'`,
     ).run(
       input.sessionId ?? null,
       serializedUsage,
       input.status,
       input.error ?? null,
+      serializeErrorDetails(input.errorDetails),
       input.finishedAt ?? Date.now(),
       input.generationId,
     );
@@ -1082,6 +1090,8 @@ export class Store {
     if (patch.resolvingConflicts !== undefined) set("resolving_conflicts", patch.resolvingConflicts ? 1 : 0);
     if (patch.testing !== undefined) set("testing", patch.testing ? 1 : 0);
     if (patch.error !== undefined) set("error", patch.error);
+    if (patch.errorDetails !== undefined) set("error_details", serializeErrorDetails(patch.errorDetails));
+    else if (patch.error === null) set("error_details", null);
     if (patch.archived !== undefined) set("archived", patch.archived ? 1 : 0);
     if (patch.watchdogFlagged !== undefined) set("watchdog_flagged", patch.watchdogFlagged ? 1 : 0);
     if (patch.lastProgressAt !== undefined) set("last_progress_at", patch.lastProgressAt);

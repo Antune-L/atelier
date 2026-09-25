@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   resolving_conflicts INTEGER NOT NULL DEFAULT 0,
   testing INTEGER NOT NULL DEFAULT 0,
   error TEXT,
+  error_details TEXT,
   archived INTEGER NOT NULL DEFAULT 0,
   watchdog_flagged INTEGER NOT NULL DEFAULT 0,
   last_progress_at INTEGER NOT NULL DEFAULT 0,
@@ -218,6 +219,7 @@ CREATE TABLE IF NOT EXISTS execution_runs (
   usage_by_model TEXT,
   status TEXT NOT NULL,
   error TEXT,
+  error_details TEXT,
   started_at INTEGER NOT NULL,
   finished_at INTEGER
 );
@@ -342,6 +344,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "codex_implementer_effort", ddl: "ALTER TABLE tickets ADD COLUMN codex_implementer_effort TEXT" },
   { column: "codex_implementer_fast", ddl: "ALTER TABLE tickets ADD COLUMN codex_implementer_fast INTEGER" },
   { column: "feasibility_engine", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_engine TEXT" },
+  { column: "error_details", ddl: "ALTER TABLE tickets ADD COLUMN error_details TEXT" },
 ];
 
 /**
@@ -367,6 +370,7 @@ const EXECUTION_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "delegate_effective_model", ddl: "ALTER TABLE execution_runs ADD COLUMN delegate_effective_model TEXT" },
   { column: "delegate_effective_effort", ddl: "ALTER TABLE execution_runs ADD COLUMN delegate_effective_effort TEXT" },
   { column: "delegate_codex_fast", ddl: "ALTER TABLE execution_runs ADD COLUMN delegate_codex_fast INTEGER" },
+  { column: "error_details", ddl: "ALTER TABLE execution_runs ADD COLUMN error_details TEXT" },
 ];
 
 const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [

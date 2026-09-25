@@ -59,6 +59,7 @@ const BASE_TICKET: Ticket = {
   resolvingConflicts: false,
   testing: false,
   error: null,
+  errorDetails: null,
   archived: false,
   watchdogFlagged: false,
   pendingQuestions: 0,

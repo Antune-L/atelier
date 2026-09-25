@@ -58,6 +58,7 @@ function logRejection(message: string, ticketId: string): (error: unknown) => vo
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
 const SLOW_COORDINATOR_TOOL_MS = 15_000;
+const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 
 interface ToolResult {
@@ -127,7 +128,7 @@ export class AgentCoordinator {
         }
       },
       onExecutionFailure: (message, context) => {
-        void this.onExecutionFailure(context.ticketId, message).catch(
+        void this.onExecutionFailure(context.ticketId, message, context).catch(
           logRejection("escalade d'échec d'exécution impossible", context.ticketId),
         );
       },
@@ -244,14 +245,19 @@ export class AgentCoordinator {
     });
   }
 
-  private async onExecutionFailure(ticketId: string, reason: string): Promise<void> {
+  private async onExecutionFailure(ticketId: string, reason: string, context: SessionExecutionContext): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null || !ACTIVE_STAGES.includes(ticket.stage)) return;
+    const errorDetails = this.lifecycle.errorDetailsFor(ticketId, reason, "session_error", {
+      slotId: context.slotId,
+      sessionId: context.sessionId,
+      generationId: context.generationId,
+    });
     this.sessionHub.disconnect(ticketId, "failed");
     await this.lifecycle.stall(
       ticketId,
       { title: "Session agent interrompue", body: `${ticket.title}: ${reason}` },
-      { logEvent: true, reason },
+      { logEvent: true, reason, errorDetails },
     );
   }
 
@@ -625,12 +631,16 @@ export class AgentCoordinator {
     // AUTO_RECLAIM_MAX times before giving up. The slot stays busy across the respawn. Only a hit cap
     // (escalate) falls through to stalled; a concurrent in-flight reclaim (ignore) must not clobber
     // the recovering session.
-    if ((await this.slots.tryAutoReclaim(ticketId, "tour terminé sans protocole")) !== "escalate") return;
+    if ((await this.slots.tryAutoReclaim(ticketId, NO_PROTOCOL_STALL_REASON)) !== "escalate") return;
 
     await this.lifecycle.stall(
       ticketId,
-      { title: "Ticket bloqué", body: `${ticket.title}: tour terminé sans protocole` },
-      { logEvent: true, reason: "tour terminé sans protocole" },
+      { title: "Ticket bloqué", body: `${ticket.title}: ${NO_PROTOCOL_STALL_REASON}` },
+      {
+        logEvent: true,
+        reason: NO_PROTOCOL_STALL_REASON,
+        errorDetails: this.lifecycle.errorDetailsFor(ticketId, NO_PROTOCOL_STALL_REASON, "stalled"),
+      },
     );
     log.warn("ticket bloqué (stalled)", { ticketId });
   }

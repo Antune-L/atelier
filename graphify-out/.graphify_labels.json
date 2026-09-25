@@ -119,5 +119,12 @@
   "117": "TicketMeta.tsx",
   "118": "notionImport.ts",
   "119": "delegationManager.test.ts",
-  "120": "reformulate.ts"
+  "120": "reformulate.ts",
+  "121": "WorktreeAddressWatcher",
+  "122": "performSplit",
+  "123": "RealPaneStream",
+  "124": "TerminalDescriptor",
+  "125": ".handleMessage",
+  "126": "isProcessing",
+  "127": "slotTemplates.ts"
 }

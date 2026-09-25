@@ -14,7 +14,7 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
-import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
@@ -190,8 +190,7 @@ export class SlotManager {
     try {
       reusableSlotId = await this.findReusableFeatureSlot(ticket);
     } catch (error) {
-      const reason = getErrorMessage(error);
-      this.markWorktreeReuseFailed(ticket, reason);
+      this.markWorktreeReuseFailed(ticket, getErrorMessage(error), error);
       return;
     }
     const current = this.store.getTicket(ticketId);
@@ -235,26 +234,28 @@ export class SlotManager {
     return slot.id;
   }
 
-  private markWorktreeReuseFailed(ticket: Ticket, reason: string): void {
+  private markWorktreeReuseFailed(ticket: Ticket, reason: string, error: unknown = reason): void {
     const current = this.store.getTicket(ticket.id);
     if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticket.id) || this.sessionHub.isConnected(ticket.id)) {
       return;
     }
     const ownedSlot = current.slotId === null ? null : this.store.getSlot(current.slotId);
     if (ownedSlot?.ticketId === ticket.id) {
-      this.markFailed(ticket.id, ownedSlot.id, reason);
+      this.markFailed(ticket.id, ownedSlot.id, reason, error, "worktree_reuse");
       return;
     }
+    const errorDetails = this.lifecycle.errorDetailsFor(ticket.id, error, "worktree_reuse");
     this.touch(
       this.store.updateTicket(ticket.id, {
         column: "failed",
         stage: "failed",
         error: reason,
+        errorDetails,
         resolvingConflicts: false,
         finishedAt: Date.now(),
       }),
     );
-    this.store.logEvent(ticket.id, "failed", { reason });
+    this.store.logEvent(ticket.id, "failed", { reason, details: errorDetails });
     log.error("reprise du worktree refusée", { ticketId: ticket.id, reason });
     void this.notifier.notify("Ticket en échec", reason, ticket.id);
   }
@@ -763,7 +764,7 @@ export class SlotManager {
       this.deliverContract(ticket);
     } catch (error) {
       this.clearPhase(ticketId);
-      this.markFailed(ticketId, slotId, getErrorMessage(error));
+      this.markFailed(ticketId, slotId, getErrorMessage(error), error);
     }
   }
 
@@ -880,7 +881,7 @@ export class SlotManager {
       await this.lifecycle.stall(
         ticketId,
         { title: "Gate done échouée", body: `${ticket.title}: ${gate.reason}` },
-        { error: gate.reason },
+        { error: gate.reason, errorDetails: this.lifecycle.errorDetailsFor(ticketId, gate.reason, "done_gate") },
       );
       return { ok: false, reason: gate.reason, slotReleased: false };
     }
@@ -1043,7 +1044,7 @@ export class SlotManager {
       await this.lifecycle.stall(
         ticketId,
         { title: "Gate ready_for_review échouée", body: `${ticket.title}: ${gate.reason}` },
-        { error: gate.reason },
+        { error: gate.reason, errorDetails: this.lifecycle.errorDetailsFor(ticketId, gate.reason, "done_gate") },
       );
       return { ok: false, reason: gate.reason };
     }
@@ -1095,7 +1096,7 @@ export class SlotManager {
       await this.lifecycle.stall(
         ticketId,
         { title: "Gate push direct échouée", body: `${ticket.title}: ${gate.reason}` },
-        { error: gate.reason },
+        { error: gate.reason, errorDetails: this.lifecycle.errorDetailsFor(ticketId, gate.reason, "done_gate") },
       );
       return { ok: false, reason: gate.reason };
     }
@@ -1276,9 +1277,9 @@ export class SlotManager {
     this.pumpQueue();
   }
 
-  private markFailed(ticketId: string, slotId: number, reason: string): void {
+  private markFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): void {
     this.clearPhase(ticketId);
-    this.lifecycle.markLaunchFailed(ticketId, slotId, reason);
+    this.lifecycle.markLaunchFailed(ticketId, slotId, reason, error, source);
     log.error("ticket en échec", { ticketId, slotId, reason });
   }
 
@@ -1373,8 +1374,7 @@ export class SlotManager {
     try {
       if (await this.resumeAttachedFeatureWorktree(ticket)) return;
     } catch (error) {
-      const reason = getErrorMessage(error);
-      this.markWorktreeReuseFailed(ticket, reason);
+      this.markWorktreeReuseFailed(ticket, getErrorMessage(error), error);
       return;
     }
     const cleanupSlot = this.store.listSlots().find((slot) =>
@@ -1428,7 +1428,7 @@ export class SlotManager {
     try {
       if (await this.resumeAttachedFeatureWorktree(ticket)) return true;
     } catch (error) {
-      this.markWorktreeReuseFailed(ticket, getErrorMessage(error));
+      this.markWorktreeReuseFailed(ticket, getErrorMessage(error), error);
       return false;
     }
     if (ticket.slotId !== null) {

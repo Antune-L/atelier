@@ -30,6 +30,9 @@ import { FakeVcsClient } from "./vcs/fake.ts";
 import type { VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
+const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
+const FAKE_CONVERSATION_REPLY =
+  "Réponse simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable. Active le mode réel (KANBAN_DRY_RUN=0) pour converser avec Claude ou Codex.";
 
 const FAKE_SETTLE_MS = 50;
 
@@ -141,21 +144,25 @@ export class FakeSystemAdapter implements SystemAdapter {
     // Synthetic: no real claude is spawned. Emit `init` then a couple of display-only events on the
     // next ticks so the caller can wire its handle and the live transcript viewer has something to
     // show in dry-run. No `turn_end` is emitted — that would drive the real nudge/stall lifecycle.
-    setTimeout(() => opts.onEvent({ type: "init", sessionId: `dry-${opts.ticketId}` }), 0);
-    setTimeout(
-      () =>
-        opts.onEvent({
-          type: "assistant_text",
-          text: "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.",
-        }),
-      0,
-    );
+    // NOTE(ali): an Atelier conversation idles between turns, so its synthetic session answers each message and ends the turn.
+    const conversational = opts.role === "atelier";
+    const sessionId = `dry-${opts.ticketId}`;
+    setTimeout(() => opts.onEvent({ type: "init", sessionId }), 0);
+    if (!conversational) {
+      setTimeout(() => opts.onEvent({ type: "assistant_text", text: FAKE_SESSION_TEXT }), 0);
+    }
     return {
       ticketId: opts.ticketId,
       send: (content, messageId = crypto.randomUUID()) => {
         this.log("agentSession.send", { ticketId: opts.ticketId, bytes: content.length });
         opts.onEvent({ type: "message_status", messageId, status: "received", turnId: null });
         opts.onEvent({ type: "message_status", messageId, status: "accepted", turnId: null });
+        if (conversational) {
+          setTimeout(() => {
+            opts.onEvent({ type: "assistant_text", text: FAKE_CONVERSATION_REPLY });
+            opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId, usageByModel: {} });
+          }, 0);
+        }
         return messageId;
       },
       interrupt: async () => this.log("agentSession.interrupt", { ticketId: opts.ticketId }),

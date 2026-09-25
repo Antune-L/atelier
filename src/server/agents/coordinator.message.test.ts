@@ -10,6 +10,7 @@ import { Notifier } from "../notifier.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 
+import { AtelierManager } from "./atelierManager.ts";
 import { AgentCoordinator } from "./coordinator.ts";
 import { DelegationManager } from "./delegationManager.ts";
 import { FeasibilityBatchManager } from "./feasibilityManager.ts";
@@ -75,6 +76,7 @@ function setup(): {
     feasibility,
     split,
     delegation,
+    new AtelierManager({ store, hub, sessionHub, system }),
   );
   return {
     store,

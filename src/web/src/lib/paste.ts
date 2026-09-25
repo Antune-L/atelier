@@ -5,6 +5,11 @@ import { api } from "@/lib/api";
 const IMAGE_PREFIX = "image/";
 const VIDEO_PREFIX = "video/";
 
+/** Append `markdown` on its own line to a text field value (used by the paste-to-upload handlers). */
+export function appendMarkdownLine(prev: string, markdown: string): string {
+  return prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`;
+}
+
 function isMedia(type: string): boolean {
   return type.startsWith(IMAGE_PREFIX) || type.startsWith(VIDEO_PREFIX);
 }

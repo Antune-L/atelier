@@ -1,10 +1,7 @@
-import { z } from "zod";
+import type { PrdAnnotation } from "@shared/schemas";
+import { prdAnnotationsSchema } from "@shared/schemas";
 
-export interface PrdAnnotation {
-  id: string;
-  quote: string;
-  comment: string;
-}
+export type { PrdAnnotation };
 
 export interface SelectionState {
   quote: string;
@@ -88,24 +85,9 @@ export function injectAnnotations(
   return { html: doc.body.innerHTML, anchoredIds };
 }
 
-/** Compose the annotations + general note into the markdown message sent to the agent. */
-export function compileFeedback(annotations: PrdAnnotation[], generalNote: string): string {
-  const parts: string[] = [];
-  if (annotations.length > 0) {
-    const count = annotations.length;
-    parts.push(`Retours sur le PRD (${count} annotation${count > 1 ? "s" : ""}) :`);
-    annotations.forEach((a, i) => {
-      parts.push(`${i + 1}. Concernant « ${a.quote} » :\n   ${a.comment}`);
-    });
-  }
-  const note = generalNote.trim();
-  if (note) parts.push(`Retour général :\n${note}`);
-  return parts.join("\n\n");
-}
+export { compileFeedback } from "@shared/prdFeedback";
 
-export const PRD_ANNOTATIONS_SCHEMA = z.array(
-  z.object({ id: z.string(), quote: z.string(), comment: z.string() }),
-) satisfies z.ZodType<PrdAnnotation[]>;
+export const PRD_ANNOTATIONS_SCHEMA = prdAnnotationsSchema;
 
 const HASH_SEED = 5381;
 const HASH_SHIFT = 5;

@@ -1,4 +1,14 @@
-import type { Automation, Comment, Slot, Ticket, WorktreeSession, WsClientEvent } from "@shared/schemas";
+import type {
+  Automation,
+  Comment,
+  Conversation,
+  ConversationMessage,
+  PrdDocumentRecord,
+  Slot,
+  Ticket,
+  WorktreeSession,
+  WsClientEvent,
+} from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
 
 import {
@@ -23,6 +33,7 @@ export interface BoardState {
   slots: Slot[];
   worktreeSessions: WorktreeSession[];
   automations: Automation[];
+  conversations: Conversation[];
   connected: boolean;
   toasts: Toast[];
   openTicketId: string | null;
@@ -30,11 +41,24 @@ export interface BoardState {
 
 type Listener = () => void;
 type CommentListener = (comment: Comment) => void;
+type ConversationMessageListener = (message: ConversationMessage) => void;
+type PrdDocumentListener = (prd: PrdDocumentRecord) => void;
 
 class BoardStore {
-  private state: BoardState = { tickets: [], slots: [], worktreeSessions: [], automations: [], connected: false, toasts: [], openTicketId: null };
+  private state: BoardState = {
+    tickets: [],
+    slots: [],
+    worktreeSessions: [],
+    automations: [],
+    conversations: [],
+    connected: false,
+    toasts: [],
+    openTicketId: null,
+  };
   private readonly listeners = new Set<Listener>();
   private readonly commentListeners = new Set<CommentListener>();
+  private readonly conversationMessageListeners = new Set<ConversationMessageListener>();
+  private readonly prdDocumentListeners = new Set<PrdDocumentListener>();
   private toastSeq = 0;
   private ws: WebSocket | null = null;
 
@@ -50,6 +74,16 @@ class BoardStore {
   subscribeComments = (listener: CommentListener): (() => void) => {
     this.commentListeners.add(listener);
     return () => this.commentListeners.delete(listener);
+  };
+
+  subscribeConversationMessages = (listener: ConversationMessageListener): (() => void) => {
+    this.conversationMessageListeners.add(listener);
+    return () => this.conversationMessageListeners.delete(listener);
+  };
+
+  subscribePrdDocuments = (listener: PrdDocumentListener): (() => void) => {
+    this.prdDocumentListeners.add(listener);
+    return () => this.prdDocumentListeners.delete(listener);
   };
 
   getSnapshot = (): BoardState => this.state;
@@ -89,7 +123,20 @@ class BoardStore {
           slots: event.slots,
           worktreeSessions: event.worktreeSessions,
           automations: event.automations,
+          conversations: event.conversations,
         });
+        break;
+      case "conversation":
+        this.rememberConversation(event.conversation);
+        break;
+      case "conversation_removed":
+        this.forgetConversation(event.conversationId);
+        break;
+      case "conversation_message":
+        for (const listener of this.conversationMessageListeners) listener(event.message);
+        break;
+      case "prd_document":
+        for (const listener of this.prdDocumentListeners) listener(event.prd);
         break;
       case "automations":
         this.set({ automations: event.automations });
@@ -132,6 +179,21 @@ class BoardStore {
     if (ticket.archived) return this.state.tickets.filter((t) => t.id !== ticket.id);
     if (exists) return this.state.tickets.map((t) => (t.id === ticket.id ? ticket : t));
     return [...this.state.tickets, ticket];
+  }
+
+  /** Apply a conversation returned by a REST call without waiting for its WS push. */
+  rememberConversation(conversation: Conversation): void {
+    this.set({ conversations: this.upsertConversation(conversation) });
+  }
+
+  forgetConversation(conversationId: string): void {
+    this.set({ conversations: this.state.conversations.filter((c) => c.id !== conversationId) });
+  }
+
+  private upsertConversation(conversation: Conversation): Conversation[] {
+    const exists = this.state.conversations.some((c) => c.id === conversation.id);
+    if (exists) return this.state.conversations.map((c) => (c.id === conversation.id ? conversation : c));
+    return [...this.state.conversations, conversation];
   }
 
   /** Show a transient toast triggered by the UI (not from a server event). */

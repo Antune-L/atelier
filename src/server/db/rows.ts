@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
-import type { AgentMessage, Automation, AutomationRun, Comment, ErrorDetails, ExecutionRun, Profile, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   agentMessageChannelSchema,
   agentMessageStatusSchema,
@@ -13,6 +13,10 @@ import {
   codexModelSchema,
   columnSchema,
   commitLanguageSchema,
+  conversationMessageRoleSchema,
+  conversationSessionStatusSchema,
+  conversationStatusSchema,
+  DEFAULT_RESEARCH_OPTIONS,
   errorDetailsSchema,
   executionOwnerTypeSchema,
   executionStatusSchema,
@@ -21,7 +25,11 @@ import {
   implementerSchema,
   kindSchema,
   orchestratorSchema,
+  prdAnnotationsSchema,
+  prdDocumentSchema,
+  prdDocumentStatusSchema,
   reformulateStatusSchema,
+  researchOptionsSchema,
   reviewDepthSchema,
   sessionUsageSchema,
   stageSchema,
@@ -65,6 +73,8 @@ const ticketRowSchema = z.object({
   depends_on: z.string().nullable(),
   child_order: z.number().nullable(),
   prd_markdown: z.string().nullable(),
+  source_prd_id: z.string().nullable(),
+  source_prd_task: z.string().nullable(),
   agent_summary: z.string().nullable(),
   column_name: z.string(),
   stage: z.string().nullable(),
@@ -330,6 +340,8 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     dependsOn: row.depends_on,
     childOrder: row.child_order,
     prdMarkdown: row.prd_markdown,
+    sourcePrdId: row.source_prd_id,
+    sourcePrdTask: row.source_prd_task,
     agentSummary: row.agent_summary,
     column: ticketColumnSchema.parse(row.column_name),
     stage: ticketStageSchema.parse(row.stage),
@@ -600,5 +612,112 @@ export function mapWorktreeSessionRow(raw: unknown): WorktreeSession {
     sessionName: row.session_name,
     createdAt: row.created_at,
     addresses: [],
+  };
+}
+
+const conversationRowSchema = z.object({
+  id: z.string(),
+  project: z.string(),
+  title: z.string(),
+  orchestrator: z.string(),
+  model: z.string().nullable(),
+  effort: z.string().nullable(),
+  codex_model: z.string().nullable(),
+  codex_effort: z.string().nullable(),
+  codex_fast: z.number(),
+  research_enabled: z.number(),
+  research_options: z.string(),
+  status: z.string(),
+  session_status: z.string(),
+  session_id: z.string().nullable(),
+  error: z.string().nullable(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+
+const conversationMessageRowSchema = z.object({
+  id: z.string(),
+  conversation_id: z.string(),
+  role: z.string(),
+  content: z.string(),
+  turn_id: z.string().nullable(),
+  created_at: z.number(),
+});
+
+const prdDocumentRowSchema = z.object({
+  id: z.string(),
+  conversation_id: z.string(),
+  revision: z.number(),
+  document_json: z.string(),
+  status: z.string(),
+  annotations_json: z.string(),
+  general_note: z.string(),
+  created_at: z.number(),
+  updated_at: z.number(),
+});
+
+function parseJsonColumn(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function parseResearchOptions(raw: string): ResearchOptions {
+  return researchOptionsSchema.catch(DEFAULT_RESEARCH_OPTIONS).parse(parseJsonColumn(raw));
+}
+
+function parsePrdAnnotations(raw: string): PrdAnnotation[] {
+  return prdAnnotationsSchema.catch([]).parse(parseJsonColumn(raw));
+}
+
+export function mapConversationRow(raw: unknown): Conversation {
+  const row = conversationRowSchema.parse(raw);
+  return {
+    id: row.id,
+    project: row.project,
+    title: row.title,
+    orchestrator: orchestratorSchema.parse(row.orchestrator),
+    model: agentModelSchema.nullable().catch(null).parse(row.model),
+    effort: agentEffortSchema.nullable().catch(null).parse(row.effort),
+    codexModel: codexModelSchema.nullable().catch(null).parse(row.codex_model),
+    codexEffort: codexEffortSchema.nullable().catch(null).parse(row.codex_effort),
+    codexFast: row.codex_fast === 1,
+    researchEnabled: row.research_enabled === 1,
+    researchOptions: parseResearchOptions(row.research_options),
+    status: conversationStatusSchema.parse(row.status),
+    sessionStatus: conversationSessionStatusSchema.parse(row.session_status),
+    sessionId: row.session_id,
+    error: row.error,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapConversationMessageRow(raw: unknown): ConversationMessage {
+  const row = conversationMessageRowSchema.parse(raw);
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: conversationMessageRoleSchema.parse(row.role),
+    content: row.content,
+    turnId: row.turn_id,
+    createdAt: row.created_at,
+  };
+}
+
+export function mapPrdDocumentRow(raw: unknown): PrdDocumentRecord {
+  const row = prdDocumentRowSchema.parse(raw);
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    revision: row.revision,
+    document: prdDocumentSchema.parse(parseJsonColumn(row.document_json)),
+    status: prdDocumentStatusSchema.parse(row.status),
+    annotations: parsePrdAnnotations(row.annotations_json),
+    generalNote: row.general_note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

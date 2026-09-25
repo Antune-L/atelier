@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import type { Ticket } from "@shared/schemas";
 
 import { AgentsView } from "@/components/AgentsView";
+import { AtelierView } from "@/components/atelier/AtelierView";
 import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
@@ -33,6 +34,7 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjects, useProjectsLoaded } from "@/hooks/useProjects";
 import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
 import { api } from "@/lib/api";
+import type { AtelierSeed, AtelierTarget } from "@/lib/atelier";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +73,7 @@ export function App() {
   const [openTool, setOpenTool] = useState<ToolKind | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [atelierTarget, setAtelierTarget] = useState<AtelierTarget | null>(null);
   const { canUpdate } = useCapabilities();
 
   const { tickets } = useBoard();
@@ -102,6 +105,40 @@ export function App() {
       setUpdating(false);
     }
   };
+
+  const selectView = (next: SidebarView): void => {
+    setAtelierTarget(null);
+    setView(next);
+  };
+
+  const openAtelier = (target: AtelierTarget): void => {
+    setAtelierTarget(target);
+    setView("atelier");
+  };
+
+  const openAtelierWithSeed = (seed: AtelierSeed): void => {
+    setCreating(false);
+    openAtelier({ kind: "seed", seed });
+  };
+
+  const openPrdOrigin = (prdId: string, project: string): void => {
+    boardStore.closeTicket();
+    openAtelier({ kind: "prd", prdId, project });
+  };
+
+  const projectFilterSelect = (
+    <ProjectSelect
+      id="board-project-filter"
+      projects={selectableProjects}
+      value={effectiveFilter}
+      onChange={setFilter}
+      label={null}
+      ariaLabel="Filtrer le tableau par projet"
+      options={[{ key: "all", label: "Tous les projets" }]}
+      className="w-44"
+      triggerClassName="h-7 bg-background text-xs"
+    />
+  );
 
   const renderHome = (): ReactNode => {
     if (homeView === "kanban") {
@@ -139,6 +176,9 @@ export function App() {
   const renderView = (): ReactNode => {
     if (view === "stats") return <StatsView projects={projects} />;
     if (view === "automation") return <AutomationView />;
+    if (view === "atelier") {
+      return <AtelierView projects={selectableProjects} projectFilter={effectiveFilter} target={atelierTarget} />;
+    }
     return renderHome();
   };
 
@@ -146,7 +186,7 @@ export function App() {
     <div className="flex h-screen flex-row bg-background">
       <Sidebar
         view={view}
-        onSelect={setView}
+        onSelect={selectView}
         onOpenSettings={() => setSettingsOpen(true)}
         onUpdate={handleUpdate}
         updating={updating}
@@ -192,17 +232,7 @@ export function App() {
                 className="h-7 w-44 text-xs"
                 aria-label="Rechercher un ticket"
               />
-              <ProjectSelect
-                id="board-project-filter"
-                projects={selectableProjects}
-                value={effectiveFilter}
-                onChange={setFilter}
-                label={null}
-                ariaLabel="Filtrer le tableau par projet"
-                options={[{ key: "all", label: "Tous les projets" }]}
-                className="w-44"
-                triggerClassName="h-7 bg-background text-xs"
-              />
+              {projectFilterSelect}
               <div className="flex items-center gap-0.5">
                 <Button
                   variant="ghost"
@@ -248,6 +278,7 @@ export function App() {
               </div>
             </div>
           )}
+          {view === "atelier" && <div className="ml-auto flex items-center">{projectFilterSelect}</div>}
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
@@ -261,6 +292,7 @@ export function App() {
         open={creating}
         projects={selectableProjects}
         onClose={() => setCreating(false)}
+        onOpenAtelier={openAtelierWithSeed}
       />
       <ToolDialogs
         openTool={openTool}
@@ -275,6 +307,7 @@ export function App() {
         ticket={openTicket}
         projects={projects}
         onClose={() => boardStore.closeTicket()}
+        onOpenPrdOrigin={openPrdOrigin}
       />
       <Toaster />
 

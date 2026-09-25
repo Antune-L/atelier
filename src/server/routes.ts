@@ -2,40 +2,48 @@ import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
-import type { Implementer, Orchestrator, PrState, Stage, VcsProvider } from "../shared/constants.ts";
+import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
 import { runRecordedAction } from "./recordedAction.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import {
   analyzeTicketsSchema,
+  consolidatePrdSchema,
   createAskSchema,
   createAutomationSchema,
   createCleanSchema,
   createCommentSchema,
+  createConversationSchema,
   createProfileSchema,
   createProjectSchema,
   createReviewSchema,
   createTicketSchema,
+  createTicketsFromPrdSchema,
   deriveTitleFromDescription,
   importNotionSchema,
   importTicketsSchema,
   inspectProjectSchema,
   moveTicketSchema,
+  postConversationMessageSchema,
   reorderProjectsSchema,
   startWorktreeSessionBodySchema,
   testConnectionDraftSchema,
   updateAppSettingsSchema,
   updateAutomationSchema,
+  updateConversationSchema,
+  updatePrdDocumentSchema,
   updateProfileSchema,
   updateProjectSchema,
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { ManagedProject, OpenPr, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import type { Conversation, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, PrdTask, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import { renderPrdAxisBrief, renderPrdMarkdown, renderPrdTaskBrief } from "../shared/prdMarkdown.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
+import type { AtelierManager } from "./agents/atelierManager.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
@@ -52,6 +60,7 @@ import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
+import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
 import {
   createTicketOperations,
@@ -98,9 +107,11 @@ interface RouteDeps {
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
   split: SplitManager;
+  atelier: AtelierManager;
   reformulate: ReformulateManager;
   automations: AutomationManager;
   projectRoot: string;
+  resourcesRoot?: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
   /** The real checkout root, for the self-update git guards + rebuild (desktop dev only). */
@@ -453,6 +464,268 @@ async function performSplit(
   return { created, mother };
 }
 
+function parkOrStart(deps: RouteDeps, ticket: Ticket, start: boolean): Ticket {
+  const { store, hub, lifecycle, slots } = deps;
+  // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
+  if (!start || isBlocked(ticket, store)) {
+    hub.pushTicket(ticket);
+    return ticket;
+  }
+  const started = lifecycle.enqueue(ticket.id);
+  // Slot launch does slow git worktree setup; don't block the HTTP response on it.
+  void slots.startTicket(ticket.id).catch((e) => {
+    log.error("démarrage du ticket échoué", {
+      ticketId: ticket.id,
+      error: getErrorMessage(e),
+    });
+  });
+  return started;
+}
+
+const ATELIER_DEFAULT_TITLE = "Nouvelle conversation";
+const ATELIER_SEED_TITLE_MAX_LENGTH = 60;
+const ATELIER_SETTING_KEYS = [
+  "orchestrator",
+  "model",
+  "effort",
+  "codexModel",
+  "codexEffort",
+  "codexFast",
+  "researchEnabled",
+  "researchOptions",
+] as const satisfies readonly (keyof UpdateConversationInput & keyof Conversation)[];
+const PRD_GOALS_HEADING = "## Objectifs";
+const PRD_JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+const PRD_HTML_CONTENT_TYPE = "text/html; charset=utf-8";
+const CONVERSATION_NOT_FOUND = "conversation introuvable";
+const PRD_NOT_FOUND = "PRD introuvable";
+const CONVERSATION_STATUS_FOR_PRD: Record<PrdDocumentStatus, ConversationStatus> = {
+  draft: "prd_draft",
+  validated: "prd_validated",
+};
+
+function conversationTitle(title: string | undefined, seed: string | undefined): string {
+  if (title) return title;
+  const seedLine = seed?.replace(/\s+/g, " ").trim().slice(0, ATELIER_SEED_TITLE_MAX_LENGTH).trim();
+  return seedLine || ATELIER_DEFAULT_TITLE;
+}
+
+function settingsChanged(before: Conversation, patch: UpdateConversationInput): boolean {
+  return ATELIER_SETTING_KEYS.some((key) => {
+    const next = patch[key];
+    return next !== undefined && JSON.stringify(next) !== JSON.stringify(before[key]);
+  });
+}
+
+function attachment(body: string, contentType: string, filename: string): Response {
+  return new Response(body, {
+    headers: { "content-type": contentType, "content-disposition": `attachment; filename="${filename}"` },
+  });
+}
+
+function prdExportName(record: PrdDocumentRecord, extension: string): string {
+  return `${record.document.id}-rev${record.revision}.${extension}`;
+}
+
+function orderSelectedTasks(doc: PrdDocument, selected: ReadonlySet<string>): PrdTask[] {
+  const pending = doc.tasks.filter((task) => selected.has(task.id));
+  const ordered: PrdTask[] = [];
+  const placed = new Set<string>();
+  while (pending.length > 0) {
+    const index = pending.findIndex((task) => task.dependsOn.every((dependency) => !selected.has(dependency) || placed.has(dependency)));
+    const [next] = pending.splice(index === -1 ? 0 : index, 1);
+    if (!next) break;
+    ordered.push(next);
+    placed.add(next.id);
+  }
+  return ordered;
+}
+
+interface PrdCardDraft {
+  title: string;
+  description: string;
+  sourcePrdTask: string | null;
+  dependsOnTask: string | null;
+}
+
+function prdCardDrafts(doc: PrdDocument, input: CreateTicketsFromPrdInput): PrdCardDraft[] | string {
+  const selected = new Set(input.selection);
+  if (input.split === "single") {
+    const goals = doc.goals.length > 0 ? `\n\n${PRD_GOALS_HEADING}\n${doc.goals.map((goal) => `- ${goal}`).join("\n")}` : "";
+    return [{ title: doc.title, description: `${doc.summary}${goals}`, sourcePrdTask: null, dependsOnTask: null }];
+  }
+  if (input.split === "axes") {
+    const unknown = input.selection.find((id) => !doc.axes.some((axis) => axis.id === id));
+    if (unknown !== undefined) return `axe inconnu : ${unknown}`;
+    return doc.axes.filter((axis) => selected.has(axis.id)).map((axis) => ({
+      title: `${axis.id} — ${axis.title}`,
+      description: renderPrdAxisBrief(doc, axis.id) ?? axis.summary,
+      sourcePrdTask: null,
+      dependsOnTask: null,
+    }));
+  }
+  const unknown = input.selection.find((id) => !doc.tasks.some((task) => task.id === id));
+  if (unknown !== undefined) return `tâche inconnue : ${unknown}`;
+  return orderSelectedTasks(doc, selected).map((task) => ({
+    title: `${task.id} — ${task.title}`,
+    description: renderPrdTaskBrief(doc, task.id) ?? task.expectedOutcome,
+    sourcePrdTask: task.id,
+    dependsOnTask: task.dependsOn.find((dependency) => selected.has(dependency)) ?? null,
+  }));
+}
+
+function createAtelierRoutes(deps: RouteDeps) {
+  const { store, hub, atelier } = deps;
+
+  function pushConversationStatus(conversationId: string, status: ConversationStatus): void {
+    hub.pushConversation(store.updateConversation(conversationId, { status }));
+  }
+
+  return new Elysia({ prefix: "/atelier" })
+    .get("/conversations", ({ query }) => store.listConversations(query.project || undefined))
+    .post("/conversations", ({ body, set }) => {
+      const parsed = createConversationSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const input = parsed.data;
+      if (!isProjectKey(input.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const conversation = store.createConversation({
+        project: input.project,
+        title: conversationTitle(input.title, input.seed),
+        orchestrator: input.orchestrator,
+        model: input.model,
+        effort: input.effort,
+        codexModel: input.codexModel,
+        codexEffort: input.codexEffort,
+        codexFast: input.codexFast ?? MODELS.codexFast,
+        researchEnabled: input.researchEnabled,
+        researchOptions: input.researchOptions,
+      });
+      hub.pushConversation(conversation);
+      if (input.seed) void atelier.postMessage(conversation.id, input.seed).delivered;
+      return store.getConversation(conversation.id) ?? conversation;
+    })
+    .get("/conversations/:id", ({ params, set }) => {
+      const conversation = store.getConversation(params.id);
+      if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      return {
+        conversation,
+        messages: store.listConversationMessages(params.id),
+        prds: store.listPrdDocuments(params.id),
+      };
+    })
+    .patch("/conversations/:id", ({ params, body, set }) => {
+      const conversation = store.getConversation(params.id);
+      if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      const parsed = updateConversationSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const updated = store.updateConversation(params.id, parsed.data);
+      hub.pushConversation(updated);
+      if (settingsChanged(conversation, parsed.data)) atelier.settingsChanged(params.id);
+      return store.getConversation(params.id) ?? updated;
+    })
+    .delete("/conversations/:id", ({ params, set }) => {
+      if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      atelier.close(params.id);
+      store.deleteConversation(params.id);
+      hub.pushConversationRemoved(params.id);
+      return { ok: true };
+    })
+    .post("/conversations/:id/messages", ({ params, body, set }) => {
+      if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      const parsed = postConversationMessageSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const { message, delivered } = atelier.postMessage(params.id, parsed.data.content);
+      void delivered;
+      return { message };
+    })
+    .post("/conversations/:id/interrupt", async ({ params, set }) => {
+      if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      await atelier.interrupt(params.id);
+      return { ok: true };
+    })
+    .post("/conversations/:id/consolidate", ({ params, body, set }) => {
+      if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      const parsed = consolidatePrdSchema.safeParse(body ?? {});
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      void atelier.consolidate(params.id, parsed.data.feedback).delivered;
+      return { ok: true };
+    })
+    .patch("/prd/:id", ({ params, body, set }) => {
+      const record = store.getPrdDocument(params.id);
+      if (!record) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
+      const parsed = updatePrdDocumentSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const updated = store.updatePrdDocument(params.id, parsed.data);
+      hub.pushPrdDocument(updated);
+      if (parsed.data.status) pushConversationStatus(updated.conversationId, CONVERSATION_STATUS_FOR_PRD[parsed.data.status]);
+      return updated;
+    })
+    .post("/prd/:id/regenerate", ({ params, set }) => {
+      if (!store.getPrdDocument(params.id)) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
+      void atelier.regenerate(params.id).delivered;
+      return { ok: true };
+    })
+    .get("/prd/:id/export.json", ({ params, set }) => {
+      const record = store.getPrdDocument(params.id);
+      if (!record) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
+      return attachment(JSON.stringify(record.document, null, 2), PRD_JSON_CONTENT_TYPE, prdExportName(record, "prd.json"));
+    })
+    .get("/prd/:id/export.html", async ({ params, set }) => {
+      const record = store.getPrdDocument(params.id);
+      if (!record) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
+      const previous = store.listPrdDocuments(record.conversationId).find((candidate) => candidate.revision === record.revision - 1);
+      try {
+        const html = await renderPrdHtml({
+          document: record.document,
+          previous: previous?.document ?? null,
+          ...(deps.resourcesRoot !== undefined ? { resourcesRoot: deps.resourcesRoot } : {}),
+        });
+        return attachment(html, PRD_HTML_CONTENT_TYPE, prdExportName(record, "prd.html"));
+      } catch (error) {
+        if (error instanceof PrdRenderError) return jsonError(set, HTTP_BAD_GATEWAY, error.message);
+        throw error;
+      }
+    })
+    .post("/prd/:id/tickets", ({ params, body, set }) => {
+      const record = store.getPrdDocument(params.id);
+      if (!record) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
+      const conversation = store.getConversation(record.conversationId);
+      if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      const parsed = createTicketsFromPrdSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isProjectKey(conversation.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      const { options, start } = parsed.data;
+      const pairError = agentPairError(set, options.orchestrator, options.implementer);
+      if (pairError) return pairError;
+      const drafts = prdCardDrafts(record.document, parsed.data);
+      if (typeof drafts === "string") return jsonError(set, HTTP_BAD_REQUEST, drafts);
+      const prdMarkdown = renderPrdMarkdown(record.document);
+      const stealth = options.directPush ? false : options.stealth;
+      const autoMerge = stealth || options.directPush ? false : options.autoMerge;
+      const created = new Map<string, string>();
+      const tickets = drafts.map((draft) => {
+        const ticket = store.createTicket({
+          ...options,
+          stealth,
+          autoMerge,
+          project: conversation.project,
+          prdEnabled: false,
+          externalUrl: null,
+          title: draft.title,
+          description: draft.description,
+          dependsOn: draft.dependsOnTask === null ? null : created.get(draft.dependsOnTask) ?? null,
+          prdMarkdown,
+          sourcePrdId: record.id,
+          sourcePrdTask: draft.sourcePrdTask,
+        });
+        if (draft.sourcePrdTask !== null) created.set(draft.sourcePrdTask, ticket.id);
+        return parkOrStart(deps, ticket, start);
+      });
+      pushConversationStatus(conversation.id, "cards_created");
+      return { tickets };
+    });
+}
+
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
@@ -511,6 +784,7 @@ export function createApiRoutes(deps: RouteDeps) {
   }
 
   return new Elysia({ prefix: "/api" })
+    .use(createAtelierRoutes(deps))
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
       const projects: ManagedProject[] = [];
@@ -787,21 +1061,7 @@ export function createApiRoutes(deps: RouteDeps) {
         codexImplementerFast: parsed.data.codexImplementerFast,
         feasibilityEngine: parsed.data.feasibilityEngine,
       });
-      // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
-      if (!parsed.data.start || isBlocked(ticket, store)) {
-        hub.pushTicket(ticket);
-        return ticket;
-      }
-      const started = lifecycle.enqueue(ticket.id);
-      // Slot launch does slow git worktree setup; don't block the HTTP response on it.
-      // Kick it off in the background and let the board update live (mirrors the review path).
-      void slots.startTicket(ticket.id).catch((e) => {
-        log.error("démarrage du ticket échoué", {
-          ticketId: ticket.id,
-          error: getErrorMessage(e),
-        });
-      });
-      return started;
+      return parkOrStart(deps, ticket, parsed.data.start);
     })
     .post("/tickets/import", ({ body, set }) => {
       const parsed = importTicketsSchema.safeParse(body);

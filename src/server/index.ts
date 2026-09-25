@@ -15,6 +15,7 @@ import {
 import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
+import { AtelierManager } from "./agents/atelierManager.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
@@ -234,6 +235,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
   const splitManager = new SplitManager(store, system, sessionHub);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
+  const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system });
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const repoMutex = new KeyedMutex();
@@ -254,6 +256,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     feasibilityManager,
     splitManager,
     delegationManager,
+    atelierManager,
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
@@ -278,6 +281,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
   reformulateManager.recoverStale();
+  atelierManager.recoverStale();
   watchdog.start();
   automationManager.start();
 
@@ -298,9 +302,11 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     triage: triageManager,
     feasibility: feasibilityManager,
     split: splitManager,
+    atelier: atelierManager,
     reformulate: reformulateManager,
     automations: automationManager,
     projectRoot: dataRoot,
+    resourcesRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
@@ -418,6 +424,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     },
     async stop() {
       watchdog.stop();
+      atelierManager.stop();
       automationManager.stop();
       await server.stop(true);
       await triageManager.teardownAll();

@@ -576,6 +576,7 @@ export const FEASIBILITY_SLOT_ID = -2;
  * coordinator, this id bars every pipeline tool.
  */
 export const DELEGATION_SLOT_ID = -4;
+export const ATELIER_SLOT_ID = -5;
 /** Max implementation lots an orchestrator may run in parallel on the same ticket worktree. */
 export const MAX_PARALLEL_IMPLEMENTERS = 4;
 /** Max chars of a lot `label` accepted by delegate_implementation. */
@@ -650,3 +651,43 @@ export const TERMINAL_DEFAULT_ROWS = 32;
  * whole static log on every resize, so its scrollback stacks duplicate frames (see capturePaneAnsi).
  */
 export const TERMINAL_SEED_HISTORY_LINES = 200;
+
+export const CONVERSATION_STATUSES = ["exploring", "prd_draft", "prd_validated", "cards_created"] as const;
+export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number];
+
+export const CONVERSATION_STATUS_LABELS: Record<ConversationStatus, string> = {
+  exploring: "Exploration",
+  prd_draft: "PRD en revue",
+  prd_validated: "PRD validé",
+  cards_created: "Cartes créées",
+};
+
+export const CONVERSATION_SESSION_STATUSES = ["idle", "running", "error"] as const;
+export type ConversationSessionStatus = (typeof CONVERSATION_SESSION_STATUSES)[number];
+
+export const CONVERSATION_MESSAGE_ROLES = ["user", "assistant", "activity"] as const;
+export type ConversationMessageRole = (typeof CONVERSATION_MESSAGE_ROLES)[number];
+
+export const PRD_DOCUMENT_STATUSES = ["draft", "validated"] as const;
+export type PrdDocumentStatus = (typeof PRD_DOCUMENT_STATUSES)[number];
+
+export const PRD_SPLIT_MODES = ["tasks", "single", "axes"] as const;
+export type PrdSplitMode = (typeof PRD_SPLIT_MODES)[number];
+
+export const PRD_SPLIT_MODE_LABELS: Record<PrdSplitMode, string> = {
+  tasks: "Une carte par tâche",
+  single: "Une seule carte",
+  axes: "Une carte par axe",
+};
+
+export const PRD_SINGLE_SELECTION = "single";
+
+export const RESEARCH_OPTION_KEYS = ["feasibility", "howTo", "externalDocs", "duplicates"] as const;
+export type ResearchOptionKey = (typeof RESEARCH_OPTION_KEYS)[number];
+
+export const RESEARCH_OPTION_LABELS: Record<ResearchOptionKey, string> = {
+  feasibility: "Faisabilité",
+  howTo: "Comment faire",
+  externalDocs: "Documentation externe",
+  duplicates: "Doublons",
+};

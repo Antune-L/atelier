@@ -1,6 +1,7 @@
 import {
   BarChart3,
   LayoutGrid,
+  MessageSquare,
   RefreshCw,
   Settings,
   Zap,
@@ -9,7 +10,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "stats" | "automation";
+export type SidebarView = "home" | "atelier" | "stats" | "automation";
 
 interface SidebarProps {
   view: SidebarView;
@@ -28,6 +29,7 @@ interface NavEntry {
 
 const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Home", Icon: LayoutGrid },
+  { value: "atelier", label: "Atelier", Icon: MessageSquare },
   { value: "stats", label: "Stats", Icon: BarChart3 },
   { value: "automation", label: "Automation", Icon: Zap },
 ];
@@ -39,7 +41,7 @@ const ITEM_INACTIVE =
 const ITEM_ACTIVE =
   "bg-accent text-foreground shadow-[inset_2px_0_0_hsl(var(--info))]";
 
-/** Permanent icon rail: Home / Stats / PRD / Automation, Settings pinned at the bottom. */
+/** Permanent icon rail: Home / Atelier / Stats / Automation, Settings pinned at the bottom. */
 export function Sidebar({
   view,
   onSelect,

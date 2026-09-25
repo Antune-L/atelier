@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   depends_on TEXT,
   child_order INTEGER,
   prd_markdown TEXT,
+  source_prd_id TEXT,
+  source_prd_task TEXT,
   agent_summary TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
@@ -283,7 +285,52 @@ CREATE TABLE IF NOT EXISTS configuration_migrations (
   UNIQUE(migration_id, direction, scope, record_id, field, previous_value)
 );
 
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  title TEXT NOT NULL,
+  orchestrator TEXT NOT NULL DEFAULT 'claude',
+  model TEXT,
+  effort TEXT,
+  codex_model TEXT,
+  codex_effort TEXT,
+  codex_fast INTEGER NOT NULL DEFAULT 0,
+  research_enabled INTEGER NOT NULL DEFAULT 0,
+  research_options TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'exploring',
+  session_status TEXT NOT NULL DEFAULT 'idle',
+  session_id TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  turn_id TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prd_documents (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL,
+  document_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  annotations_json TEXT NOT NULL DEFAULT '[]',
+  general_note TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(conversation_id, revision)
+);
+
 CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation ON conversation_messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_prd_documents_conversation ON prd_documents(conversation_id, revision);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_creation_requests_ticket ON ticket_creation_requests(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
@@ -345,6 +392,8 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "codex_implementer_fast", ddl: "ALTER TABLE tickets ADD COLUMN codex_implementer_fast INTEGER" },
   { column: "feasibility_engine", ddl: "ALTER TABLE tickets ADD COLUMN feasibility_engine TEXT" },
   { column: "error_details", ddl: "ALTER TABLE tickets ADD COLUMN error_details TEXT" },
+  { column: "source_prd_id", ddl: "ALTER TABLE tickets ADD COLUMN source_prd_id TEXT" },
+  { column: "source_prd_task", ddl: "ALTER TABLE tickets ADD COLUMN source_prd_task TEXT" },
 ];
 
 /**

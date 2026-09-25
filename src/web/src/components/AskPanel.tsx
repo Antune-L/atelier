@@ -14,7 +14,7 @@ import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
-import { handleMediaPaste } from "@/lib/paste";
+import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 
 interface AskPanelProps {
@@ -45,7 +45,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
   const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
 
   const appendToQuestion = (markdown: string): void => {
-    setQuestion((prev) => (prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`));
+    setQuestion((prev) => appendMarkdownLine(prev, markdown));
   };
 
   const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {

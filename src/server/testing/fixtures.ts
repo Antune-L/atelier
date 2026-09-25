@@ -36,6 +36,8 @@ const BASE_TICKET: Ticket = {
   dependsOn: null,
   childOrder: null,
   prdMarkdown: null,
+  sourcePrdId: null,
+  sourcePrdTask: null,
   agentSummary: null,
   column: "implementing",
   stage: null,

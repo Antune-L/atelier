@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
+import { prdDocumentSchema } from "./prdDocument.ts";
 
 // ---- Stage subset (agent-settable vs full) ----
 
@@ -56,6 +57,7 @@ const updateStageMcpArgsSchema = z.object({ stage: agentSettableStageSchema });
 
 export const askUserArgsSchema = z.object({ question: z.string().min(1) });
 export const submitPrdArgsSchema = z.object({ markdown: z.string().min(1) });
+export const submitPrdDocumentArgsSchema = z.object({ document: prdDocumentSchema });
 
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
@@ -278,6 +280,12 @@ export const WORKER_TOOLS = [
     description: "Soumet le découpage du ticket en sous-tickets (titre + synthèse par fille).",
     argsSchema: submitSplitMcpArgsSchema,
   },
+  {
+    name: "submit_prd_document",
+    description:
+      "Réservé à l'Atelier : soumet le PRD consolidé au format JSON structuré (schemaVersion 2). Le backend le valide et l'enregistre comme nouvelle révision.",
+    argsSchema: submitPrdDocumentArgsSchema,
+  },
 ] as const;
 
 export type WorkerTool = (typeof WORKER_TOOLS)[number];
@@ -306,6 +314,7 @@ const WORKER_TOOL_NAMES = [
   "submit_triage",
   "submit_feasibility",
   "submit_split",
+  "submit_prd_document",
 ] as const satisfies readonly WorkerToolName[];
 
 // Guard the other direction at type level: every registry name must appear in the tuple above.
@@ -345,5 +354,6 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("nudge"), message: z.string() }),
   z.object({ type: z.literal("user_comment"), body: z.string() }),
+  z.object({ type: z.literal("chat"), content: z.string() }),
 ]);
 export type ChannelEvent = z.infer<typeof channelEventSchema>;

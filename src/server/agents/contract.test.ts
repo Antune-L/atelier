@@ -296,3 +296,33 @@ describe("isAllowedAgentPair — full truth table", () => {
     expect(isAllowedAgentPair("codex", "codex")).toBe(true);
   });
 });
+
+describe("buildTicketContract with an Atelier PRD", () => {
+  const PRD_MARKDOWN = "# Recherches sauvegardées\n\n## Besoin\nSauvegarder une recherche.";
+
+  test.each([
+    ["claude", "claude"],
+    ["claude", "codex"],
+    ["codex", "codex"],
+  ] satisfies Array<[Orchestrator, Implementer]>)("injects the validated PRD for %s/%s without submit_prd", (orchestrator, implementer) => {
+    const contract = buildTicketContract(
+      makeTicket({ project: FIXTURE_PROJECT_KEY, orchestrator, implementer, prdEnabled: false, prdMarkdown: PRD_MARKDOWN }),
+      TICKET_OPTS,
+    );
+
+    const descriptionIndex = contract.indexOf("## Description");
+    const prdIndex = contract.indexOf("## PRD validé");
+    expect(prdIndex).toBeGreaterThan(descriptionIndex);
+    expect(contract.indexOf("## Contrat de pipeline")).toBeGreaterThan(prdIndex);
+    expect(contract).toContain(PRD_MARKDOWN);
+    expect(contract).toContain("déjà été élaboré et validé par l'utilisateur dans l'Atelier");
+    expect(contract).toContain("N'appelle PAS `submit_prd`");
+    expect(contract).not.toContain("`submit_prd(markdown)`");
+    expect(contract).not.toContain("Option PRD désactivée");
+  });
+
+  test("leaves a plain ticket without PRD section", () => {
+    const contract = buildTicketContract(makeTicket({ project: FIXTURE_PROJECT_KEY, prdEnabled: false, prdMarkdown: null }), TICKET_OPTS);
+    expect(contract).not.toContain("## PRD validé");
+  });
+});

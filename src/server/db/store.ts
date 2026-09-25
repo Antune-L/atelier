@@ -24,18 +24,18 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, FeasibilityEngine, Implementer, Orchestrator, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
-import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, Profile, ReformulateStatus, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapExecutionRunRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -122,6 +122,56 @@ export interface NewTicket {
   codexImplementerEffort?: CodexEffort | null;
   codexImplementerFast?: boolean | null;
   feasibilityEngine?: FeasibilityEngine | null;
+  prdMarkdown?: string | null;
+  sourcePrdId?: string | null;
+  sourcePrdTask?: string | null;
+}
+
+export interface NewConversation {
+  project: ProjectKey;
+  title: string;
+  orchestrator: Orchestrator;
+  model: AgentModel | null;
+  effort: AgentEffort | null;
+  codexModel: CodexModel | null;
+  codexEffort: CodexEffort | null;
+  codexFast: boolean;
+  researchEnabled: boolean;
+  researchOptions: ResearchOptions;
+}
+
+export interface ConversationPatch {
+  title?: string;
+  orchestrator?: Orchestrator;
+  model?: AgentModel | null;
+  effort?: AgentEffort | null;
+  codexModel?: CodexModel | null;
+  codexEffort?: CodexEffort | null;
+  codexFast?: boolean;
+  researchEnabled?: boolean;
+  researchOptions?: ResearchOptions;
+  status?: ConversationStatus;
+  sessionStatus?: ConversationSessionStatus;
+  sessionId?: string | null;
+  error?: string | null;
+}
+
+export interface NewConversationMessage {
+  conversationId: string;
+  role: ConversationMessageRole;
+  content: string;
+  turnId: string | null;
+}
+
+export interface NewPrdDocument {
+  conversationId: string;
+  document: PrdDocument;
+}
+
+export interface PrdDocumentPatch {
+  annotations?: PrdAnnotation[];
+  generalNote?: string;
+  status?: PrdDocumentStatus;
 }
 
 export interface NewProfile {
@@ -283,6 +333,8 @@ export interface TicketPatch {
   dependsOn?: string | null;
   childOrder?: number | null;
   prdMarkdown?: string | null;
+  sourcePrdId?: string | null;
+  sourcePrdTask?: string | null;
   agentSummary?: string | null;
   column?: Column;
   stage?: Stage | null;
@@ -881,8 +933,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -915,6 +967,9 @@ export class Store {
         input.codexImplementerEffort ?? null,
         nullableBooleanValue(input.codexImplementerFast),
         input.feasibilityEngine ?? null,
+        input.prdMarkdown ?? null,
+        input.sourcePrdId ?? null,
+        input.sourcePrdTask ?? null,
         now,
         now,
         now,
@@ -1050,6 +1105,8 @@ export class Store {
     if (patch.dependsOn !== undefined) set("depends_on", patch.dependsOn);
     if (patch.childOrder !== undefined) set("child_order", patch.childOrder);
     if (patch.prdMarkdown !== undefined) set("prd_markdown", patch.prdMarkdown);
+    if (patch.sourcePrdId !== undefined) set("source_prd_id", patch.sourcePrdId);
+    if (patch.sourcePrdTask !== undefined) set("source_prd_task", patch.sourcePrdTask);
     if (patch.agentSummary !== undefined) set("agent_summary", patch.agentSummary);
     if (patch.column !== undefined) {
       set(COLUMN_TO_DB, patch.column);
@@ -1620,6 +1677,156 @@ export class Store {
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;
+  }
+
+  // ---- Atelier: conversations, messages, PRD documents ----
+
+  listConversations(project?: string): Conversation[] {
+    const rows = project === undefined
+      ? this.db.query("SELECT * FROM conversations ORDER BY updated_at DESC").all()
+      : this.db.query("SELECT * FROM conversations WHERE project = ? ORDER BY updated_at DESC").all(project);
+    return rows.map(mapConversationRow);
+  }
+
+  getConversation(id: string): Conversation | null {
+    const raw = this.db.query("SELECT * FROM conversations WHERE id = ?").get(id);
+    return raw ? mapConversationRow(raw) : null;
+  }
+
+  createConversation(input: NewConversation): Conversation {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.db
+      .query(
+        `INSERT INTO conversations (id, project, title, orchestrator, model, effort, codex_model, codex_effort, codex_fast, research_enabled, research_options, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.project,
+        input.title,
+        input.orchestrator,
+        input.model,
+        input.effort,
+        input.codexModel,
+        input.codexEffort,
+        input.codexFast ? 1 : 0,
+        input.researchEnabled ? 1 : 0,
+        JSON.stringify(input.researchOptions),
+        now,
+        now,
+      );
+    return this.requireConversation(id, "createConversation");
+  }
+
+  updateConversation(id: string, patch: ConversationPatch): Conversation {
+    const builder = new SqlUpdateBuilder();
+    const set = builder.set.bind(builder);
+    if (patch.title !== undefined) set("title", patch.title);
+    if (patch.orchestrator !== undefined) set("orchestrator", patch.orchestrator);
+    if (patch.model !== undefined) set("model", patch.model);
+    if (patch.effort !== undefined) set("effort", patch.effort);
+    if (patch.codexModel !== undefined) set("codex_model", patch.codexModel);
+    if (patch.codexEffort !== undefined) set("codex_effort", patch.codexEffort);
+    if (patch.codexFast !== undefined) set("codex_fast", patch.codexFast ? 1 : 0);
+    if (patch.researchEnabled !== undefined) set("research_enabled", patch.researchEnabled ? 1 : 0);
+    if (patch.researchOptions !== undefined) set("research_options", JSON.stringify(patch.researchOptions));
+    if (patch.status !== undefined) set("status", patch.status);
+    if (patch.sessionStatus !== undefined) set("session_status", patch.sessionStatus);
+    if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
+    if (patch.error !== undefined) set("error", patch.error);
+    set("updated_at", Date.now());
+    builder.run(this.db, "conversations", id);
+    return this.requireConversation(id, "updateConversation");
+  }
+
+  deleteConversation(id: string): void {
+    this.transaction(() => {
+      this.db.query("DELETE FROM conversation_messages WHERE conversation_id = ?").run(id);
+      this.db.query("DELETE FROM prd_documents WHERE conversation_id = ?").run(id);
+      this.db.query("DELETE FROM conversations WHERE id = ?").run(id);
+    });
+  }
+
+  listConversationMessages(conversationId: string): ConversationMessage[] {
+    const rows = this.db
+      .query("SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC")
+      .all(conversationId);
+    return rows.map(mapConversationMessageRow);
+  }
+
+  addConversationMessage(input: NewConversationMessage): ConversationMessage {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.transaction(() => {
+      this.db
+        .query("INSERT INTO conversation_messages (id, conversation_id, role, content, turn_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, input.conversationId, input.role, input.content, input.turnId, now);
+      this.touchConversation(input.conversationId, now);
+    });
+    return this.requireConversationMessage(id);
+  }
+
+  updateConversationMessage(id: string, patch: { content: string }): ConversationMessage {
+    this.db.query("UPDATE conversation_messages SET content = ? WHERE id = ?").run(patch.content, id);
+    return this.requireConversationMessage(id);
+  }
+
+  listPrdDocuments(conversationId: string): PrdDocumentRecord[] {
+    const rows = this.db.query("SELECT * FROM prd_documents WHERE conversation_id = ? ORDER BY revision ASC").all(conversationId);
+    return rows.map(mapPrdDocumentRow);
+  }
+
+  getPrdDocument(id: string): PrdDocumentRecord | null {
+    const raw = this.db.query("SELECT * FROM prd_documents WHERE id = ?").get(id);
+    return raw ? mapPrdDocumentRow(raw) : null;
+  }
+
+  createPrdDocument(input: NewPrdDocument): PrdDocumentRecord {
+    const id = nanoid(10);
+    const now = Date.now();
+    this.transaction(() => {
+      const revision = this.scalar("SELECT COALESCE(MAX(revision), 0) AS n FROM prd_documents WHERE conversation_id = ?", input.conversationId) + 1;
+      const document: PrdDocument = { ...input.document, revision: String(revision) };
+      this.db
+        .query("INSERT INTO prd_documents (id, conversation_id, revision, document_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, input.conversationId, revision, JSON.stringify(document), now, now);
+      this.touchConversation(input.conversationId, now);
+    });
+    return this.requirePrdDocument(id, "createPrdDocument");
+  }
+
+  updatePrdDocument(id: string, patch: PrdDocumentPatch): PrdDocumentRecord {
+    const builder = new SqlUpdateBuilder();
+    const set = builder.set.bind(builder);
+    if (patch.annotations !== undefined) set("annotations_json", JSON.stringify(patch.annotations));
+    if (patch.generalNote !== undefined) set("general_note", patch.generalNote);
+    if (patch.status !== undefined) set("status", patch.status);
+    set("updated_at", Date.now());
+    builder.run(this.db, "prd_documents", id);
+    return this.requirePrdDocument(id, "updatePrdDocument");
+  }
+
+  private touchConversation(id: string, at: number): void {
+    this.db.query("UPDATE conversations SET updated_at = ? WHERE id = ?").run(at, id);
+  }
+
+  private requireConversation(id: string, method: string): Conversation {
+    const conversation = this.getConversation(id);
+    if (!conversation) throw new Error(`${method}: conversation ${id} introuvable`);
+    return conversation;
+  }
+
+  private requireConversationMessage(id: string): ConversationMessage {
+    const raw = this.db.query("SELECT * FROM conversation_messages WHERE id = ?").get(id);
+    if (!raw) throw new Error(`message de conversation ${id} introuvable`);
+    return mapConversationMessageRow(raw);
+  }
+
+  private requirePrdDocument(id: string, method: string): PrdDocumentRecord {
+    const record = this.getPrdDocument(id);
+    if (!record) throw new Error(`${method}: PRD ${id} introuvable`);
+    return record;
   }
 
   // ---- Meta (first-boot flag) ----

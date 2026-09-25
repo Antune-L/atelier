@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorStack } from "../../shared/errors.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
@@ -15,6 +15,7 @@ import {
   submitAnswerArgsSchema,
   submitFeasibilityArgsSchema,
   submitPrdArgsSchema,
+  submitPrdDocumentArgsSchema,
   submitSplitArgsSchema,
   submitTriageArgsSchema,
   updateStageArgsSchema,
@@ -27,6 +28,7 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { AgentTurnUsage } from "../system/agentSession.ts";
 
+import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type {
@@ -38,6 +40,7 @@ import type {
   SessionToolCall,
 } from "./sessionHub.ts";
 import type { SlotManager } from "./slotManager.ts";
+import { parseAtelierSessionKey } from "./sessionConfig.ts";
 import type { SplitManager } from "./splitManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 import { addUsageByModel, toUsageByModel } from "./usage.ts";
@@ -53,6 +56,16 @@ const HANDLER_ERROR_EVENT = "handler_error";
  */
 function logRejection(message: string, ticketId: string): (error: unknown) => void {
   return (error: unknown) => log.error(message, { ticketId, stack: getErrorStack(error) });
+}
+
+const PRD_ISSUE_ROOT = "(document)";
+
+function formatPrdDocumentIssues(issues: readonly { path: readonly PropertyKey[]; message: string }[]): string {
+  const lines = issues.map((issue) => {
+    const path = issue.path.map(String).join(".");
+    return `- ${path || PRD_ISSUE_ROOT} : ${issue.message}`;
+  });
+  return ["Document PRD invalide : corrige ces points puis rappelle submit_prd_document avec le document complet.", ...lines].join("\n");
 }
 
 const NUDGE_MESSAGE =
@@ -84,6 +97,7 @@ export class AgentCoordinator {
     private readonly feasibility: FeasibilityBatchManager,
     private readonly split: SplitManager,
     private readonly delegation: DelegationManager,
+    private readonly atelier: AtelierManager,
   ) {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
@@ -289,6 +303,11 @@ export class AgentCoordinator {
       if (ctx.name === "submit_split") return this.handleSubmitSplit(ctx);
       return { ok: false, result: "Session de découpage en lecture seule : seul submit_split est autorisé." };
     }
+    // NOTE(ali): Atelier sessions run on a synthetic `atelier-<id>` key (no ticket); only submit_prd_document and fail are allowed.
+    if (ctx.slotId === ATELIER_SLOT_ID) {
+      log.info("tool call (atelier)", { sessionKey: ctx.ticketId, tool: ctx.name });
+      return this.handleAtelierTool(ctx);
+    }
     // An interactive test session runs on a "done" card; it has no pipeline. `--tools` can't bar MCP
     // tools, so bar every pipeline tool here (same rationale as the triage/feasibility guards above).
     const testingTicket = this.store.getTicket(ctx.ticketId);
@@ -341,6 +360,7 @@ export class AgentCoordinator {
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
+    submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
   };
 
   private async handleSubmitSplit(ctx: SessionToolCall): Promise<ToolResult> {
@@ -348,6 +368,24 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     await this.split.complete(ctx.ticketId, parsed.data);
     return { ok: true, result: "Découpage enregistré." };
+  }
+
+  private handleAtelierTool(ctx: SessionToolCall): ToolResult {
+    const conversationId = parseAtelierSessionKey(ctx.ticketId);
+    if (conversationId === null || !this.store.getConversation(conversationId)) {
+      return { ok: false, result: "Conversation de l'Atelier introuvable." };
+    }
+    if (ctx.name === "submit_prd_document") {
+      const parsed = submitPrdDocumentArgsSchema.safeParse(ctx.args);
+      if (!parsed.success) return { ok: false, result: formatPrdDocumentIssues(parsed.error.issues) };
+      return { ok: true, result: this.atelier.handleSubmitPrd(conversationId, parsed.data.document) };
+    }
+    if (ctx.name === "fail") {
+      const parsed = failArgsSchema.safeParse(ctx.args);
+      if (!parsed.success) return { ok: false, result: parsed.error.message };
+      return { ok: true, result: this.atelier.handleFail(conversationId, parsed.data.reason) };
+    }
+    return { ok: false, result: "Session de l'Atelier en lecture seule : seuls submit_prd_document et fail sont autorisés." };
   }
 
   private async handleSubmitTriage(ctx: SessionToolCall): Promise<ToolResult> {

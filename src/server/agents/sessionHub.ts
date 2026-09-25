@@ -137,6 +137,7 @@ export interface SessionStartCallbacks {
   onInit?(context: SessionExecutionContext): void;
   onFailure?(message: string, context: SessionExecutionContext): void;
   onTurnEnd?(context: SessionExecutionContext): void;
+  onEvent?(event: AgentSessionEvent): void;
 }
 
 export interface SessionHubHandlers {
@@ -235,6 +236,8 @@ export function renderChannelEvent(event: ChannelEvent): string {
       return event.message;
     case "user_comment":
       return `Commentaire de l'utilisateur (à prendre en compte dans le travail en cours) : ${event.body}`;
+    case "chat":
+      return event.content;
   }
 }
 
@@ -604,6 +607,9 @@ export class SessionHub {
           this.handlers?.onExecutionFailure?.(event.message, this.executionContext(live));
         });
       }
+    }
+    if (current && live.callbacks.onEvent) {
+      this.safeHandler("onEvent", ticketId, event.type, () => live.callbacks.onEvent?.(event));
     }
   }
 

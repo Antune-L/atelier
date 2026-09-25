@@ -1,7 +1,9 @@
 import { transcriptUpdateSchema } from "./transcript.ts";
 import { z } from "zod";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, REPO_INSPECTION_SOURCES, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
+import type { ResearchOptionKey } from "./constants.ts";
+import { prdDocumentSchema } from "./prdDocument.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
@@ -56,7 +58,7 @@ export type SessionUsage = z.infer<typeof sessionUsageSchema>;
 
 // ---- Effective execution history ----
 
-export const executionOwnerTypeSchema = z.enum(["ticket", "action", "batch"]);
+export const executionOwnerTypeSchema = z.enum(["ticket", "action", "batch", "conversation"]);
 export const executionStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
 
 export const executionModelUsageSchema = z.object({
@@ -125,6 +127,7 @@ export const agentMessageChannelSchema = z.enum([
   "review_done",
   "nudge",
   "user_comment",
+  "chat",
 ]);
 export const agentMessageStatusSchema = z.enum(["queued", "received", "accepted", "rejected"]);
 
@@ -294,6 +297,8 @@ export const ticketSchema = z.object({
   /** Implementation order within a split family (0-based); null for non-split-child tickets. */
   childOrder: z.number().int().nullable(),
   prdMarkdown: z.string().nullable(),
+  sourcePrdId: z.string().nullable(),
+  sourcePrdTask: z.string().nullable(),
   /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
   agentSummary: z.string().nullable(),
   column: columnSchema,
@@ -674,6 +679,8 @@ export const createTicketSchema = ticketBatchOptionsSchema
     externalUrl: externalUrlSchema.default(null),
     /** Parent ticket this one stacks on (null = none). The PR forks from and targets the parent's branch. */
     dependsOn: z.string().nullable().default(null),
+    sourcePrdId: z.string().min(1).nullable().optional(),
+    sourcePrdTask: z.string().min(1).nullable().optional(),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
   })
@@ -986,6 +993,147 @@ export const updateAutomationSchema = z.object({
 });
 export type UpdateAutomationInput = z.infer<typeof updateAutomationSchema>;
 
+// ---- Atelier (conversation → PRD → cards) ----
+
+export { prdDocumentSchema };
+export type { PrdAxis, PrdDocument, PrdRequirement, PrdTask } from "./prdDocument.ts";
+
+export const conversationStatusSchema = z.enum(CONVERSATION_STATUSES);
+export const conversationSessionStatusSchema = z.enum(CONVERSATION_SESSION_STATUSES);
+export const conversationMessageRoleSchema = z.enum(CONVERSATION_MESSAGE_ROLES);
+export const prdDocumentStatusSchema = z.enum(PRD_DOCUMENT_STATUSES);
+export const prdSplitModeSchema = z.enum(PRD_SPLIT_MODES);
+
+export const researchOptionsSchema = z.object({
+  feasibility: z.boolean(),
+  howTo: z.boolean(),
+  externalDocs: z.boolean(),
+  duplicates: z.boolean(),
+}) satisfies z.ZodType<Record<ResearchOptionKey, boolean>>;
+export type ResearchOptions = z.infer<typeof researchOptionsSchema>;
+
+export const DEFAULT_RESEARCH_OPTIONS: ResearchOptions = {
+  feasibility: true,
+  howTo: true,
+  externalDocs: true,
+  duplicates: true,
+};
+
+export function enabledResearchOptionKeys(options: ResearchOptions): ResearchOptionKey[] {
+  return RESEARCH_OPTION_KEYS.filter((key) => options[key]);
+}
+
+export function researchOptionsFromKeys(keys: Iterable<ResearchOptionKey>): ResearchOptions {
+  const picked = new Set(keys);
+  return {
+    feasibility: picked.has("feasibility"),
+    howTo: picked.has("howTo"),
+    externalDocs: picked.has("externalDocs"),
+    duplicates: picked.has("duplicates"),
+  };
+}
+
+export const conversationSchema = z.object({
+  id: z.string().min(1),
+  project: projectKeySchema,
+  title: z.string(),
+  orchestrator: orchestratorSchema,
+  model: agentModelSchema.nullable(),
+  effort: agentEffortSchema.nullable(),
+  codexModel: codexModelSchema.nullable(),
+  codexEffort: codexEffortSchema.nullable(),
+  codexFast: z.boolean(),
+  researchEnabled: z.boolean(),
+  researchOptions: researchOptionsSchema,
+  status: conversationStatusSchema,
+  sessionStatus: conversationSessionStatusSchema,
+  sessionId: z.string().nullable(),
+  error: z.string().nullable(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+});
+export type Conversation = z.infer<typeof conversationSchema>;
+
+export const conversationMessageSchema = z.object({
+  id: z.string().min(1),
+  conversationId: z.string().min(1),
+  role: conversationMessageRoleSchema,
+  content: z.string(),
+  turnId: z.string().nullable(),
+  createdAt: z.number().int(),
+});
+export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
+
+export const prdAnnotationSchema = z.object({ id: z.string(), quote: z.string(), comment: z.string() });
+export type PrdAnnotation = z.infer<typeof prdAnnotationSchema>;
+export const prdAnnotationsSchema = z.array(prdAnnotationSchema);
+
+export const prdDocumentRecordSchema = z.object({
+  id: z.string().min(1),
+  conversationId: z.string().min(1),
+  revision: z.number().int().positive(),
+  document: prdDocumentSchema,
+  status: prdDocumentStatusSchema,
+  annotations: prdAnnotationsSchema,
+  generalNote: z.string(),
+  createdAt: z.number().int(),
+  updatedAt: z.number().int(),
+});
+export type PrdDocumentRecord = z.infer<typeof prdDocumentRecordSchema>;
+
+export const createConversationSchema = z.object({
+  project: projectKeySchema,
+  title: z.string().trim().optional(),
+  orchestrator: orchestratorSchema.default("claude"),
+  model: agentModelSchema.nullable().default(null),
+  effort: agentEffortSchema.nullable().default(null),
+  codexModel: codexModelSchema.nullable().default(null),
+  codexEffort: codexEffortSchema.nullable().default(null),
+  codexFast: z.boolean().nullable().default(null),
+  researchEnabled: z.boolean().default(false),
+  researchOptions: researchOptionsSchema.default(DEFAULT_RESEARCH_OPTIONS),
+  seed: z.string().trim().min(1).optional(),
+});
+export type CreateConversationInput = z.infer<typeof createConversationSchema>;
+
+export const updateConversationSchema = z.object({
+  title: z.string().trim().min(1).optional(),
+  orchestrator: orchestratorSchema.optional(),
+  model: agentModelSchema.nullable().optional(),
+  effort: agentEffortSchema.nullable().optional(),
+  codexModel: codexModelSchema.nullable().optional(),
+  codexEffort: codexEffortSchema.nullable().optional(),
+  codexFast: z.boolean().optional(),
+  researchEnabled: z.boolean().optional(),
+  researchOptions: researchOptionsSchema.optional(),
+  status: conversationStatusSchema.optional(),
+});
+export type UpdateConversationInput = z.infer<typeof updateConversationSchema>;
+
+export const postConversationMessageSchema = z.object({ content: z.string().trim().min(1) });
+export type PostConversationMessageInput = z.infer<typeof postConversationMessageSchema>;
+
+export const consolidatePrdSchema = z.object({ feedback: z.string().optional() });
+export type ConsolidatePrdInput = z.infer<typeof consolidatePrdSchema>;
+
+export const updatePrdDocumentSchema = z.object({
+  annotations: prdAnnotationsSchema.optional(),
+  generalNote: z.string().optional(),
+  status: prdDocumentStatusSchema.optional(),
+});
+export type UpdatePrdDocumentInput = z.infer<typeof updatePrdDocumentSchema>;
+
+export const prdTicketOptionsSchema = ticketBatchOptionsSchema.omit({ project: true, prdEnabled: true });
+export type PrdTicketOptions = z.infer<typeof prdTicketOptionsSchema>;
+
+export const createTicketsFromPrdSchema = z.object({
+  split: prdSplitModeSchema,
+  selection: z.array(z.string().min(1)).min(1),
+  options: prdTicketOptionsSchema.prefault({}),
+  start: z.boolean().default(false),
+});
+export type CreateTicketsFromPrdInput = z.infer<typeof createTicketsFromPrdSchema>;
+
 // ---- WebSocket (backend → client) ----
 
 export const wsClientEventSchema = z.discriminatedUnion("type", [
@@ -995,6 +1143,7 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     slots: z.array(slotSchema),
     worktreeSessions: z.array(worktreeSessionSchema),
     automations: z.array(automationSchema),
+    conversations: z.array(conversationSchema),
   }),
   z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
   z.object({ type: z.literal("automations"), automations: z.array(automationSchema) }),
@@ -1002,6 +1151,10 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("comment"), comment: commentSchema }),
   z.object({ type: z.literal("slots"), slots: z.array(slotSchema) }),
   z.object({ type: z.literal("worktree_sessions"), worktreeSessions: z.array(worktreeSessionSchema) }),
+  z.object({ type: z.literal("conversation"), conversation: conversationSchema }),
+  z.object({ type: z.literal("conversation_removed"), conversationId: z.string() }),
+  z.object({ type: z.literal("conversation_message"), message: conversationMessageSchema }),
+  z.object({ type: z.literal("prd_document"), prd: prdDocumentRecordSchema }),
   z.object({
     type: z.literal("notification"),
     title: z.string(),
@@ -1031,6 +1184,7 @@ export {
   readReviewResultsArgsSchema,
   publishReviewArgsSchema,
   submitReviewArgsSchema,
+  submitPrdDocumentArgsSchema,
   channelEventSchema,
 } from "./protocol.ts";
 export type { WorkerToolName, ChannelEvent } from "./protocol.ts";

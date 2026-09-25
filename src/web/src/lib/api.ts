@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 import type {
   AnalyzeTicketsInput,
   AppSettings,
@@ -12,11 +14,14 @@ import type {
   CreateProjectInput,
   CreateReviewInput,
   CreateTicketInput,
+  Conversation,
+  ConversationMessage,
   ImportNotionInput,
   ImportTicketsInput,
   InspectProjectInput,
   ManagedProject,
   OpenPr,
+  PrdDocumentRecord,
   Profile,
   ProjectInfo,
   RepoInspection,
@@ -27,7 +32,9 @@ import type {
   Ticket,
   UpdateAppSettingsInput,
   UpdateAutomationInput,
+  UpdateConversationInput,
   UpdateMode,
+  UpdatePrdDocumentInput,
   UpdateProfileInput,
   UpdateProjectInput,
   UpdateTicketInput,
@@ -35,11 +42,34 @@ import type {
   VcsConnectionResult,
   WorktreeSession,
 } from "@shared/schemas";
+import type { createConversationSchema, createTicketsFromPrdSchema } from "@shared/schemas";
 import type { Column, PrState } from "@shared/constants";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
 const PROJECT_IN_USE_MESSAGE = "Ce projet a des tickets associés";
+const ATELIER_BASE = "/api/atelier";
+
+export type CreateConversationBody = z.input<typeof createConversationSchema>;
+export type CreateTicketsFromPrdBody = z.input<typeof createTicketsFromPrdSchema>;
+
+export interface ConversationDetail {
+  conversation: Conversation;
+  messages: ConversationMessage[];
+  prds: PrdDocumentRecord[];
+}
+
+function atelierConversationPath(id: string): string {
+  return `${ATELIER_BASE}/conversations/${encodeURIComponent(id)}`;
+}
+
+function atelierPrdPath(id: string): string {
+  return `${ATELIER_BASE}/prd/${encodeURIComponent(id)}`;
+}
+
+export function atelierPrdExportUrl(id: string, format: "json" | "html"): string {
+  return `${atelierPrdPath(id)}/export.${format}`;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -185,6 +215,27 @@ export const api = {
     request(`/api/worktree-sessions/${slotId}`, { method: "DELETE" }),
   relaunchWorktreeSession: (slotId: number): Promise<{ ok: boolean }> =>
     request(`/api/worktree-sessions/${slotId}/relaunch`, { method: "POST" }),
+  atelierConversations: (project?: string): Promise<Conversation[]> =>
+    request(`${ATELIER_BASE}/conversations${project ? `?project=${encodeURIComponent(project)}` : ""}`),
+  atelierCreateConversation: (input: CreateConversationBody): Promise<Conversation> =>
+    request(`${ATELIER_BASE}/conversations`, { method: "POST", body: JSON.stringify(input) }),
+  atelierConversation: (id: string): Promise<ConversationDetail> => request(atelierConversationPath(id)),
+  atelierUpdateConversation: (id: string, patch: UpdateConversationInput): Promise<Conversation> =>
+    request(atelierConversationPath(id), { method: "PATCH", body: JSON.stringify(patch) }),
+  atelierDeleteConversation: (id: string): Promise<{ ok: boolean }> =>
+    request(atelierConversationPath(id), { method: "DELETE" }),
+  atelierPostMessage: (id: string, content: string): Promise<{ message: ConversationMessage }> =>
+    request(`${atelierConversationPath(id)}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
+  atelierInterrupt: (id: string): Promise<{ ok: boolean }> =>
+    request(`${atelierConversationPath(id)}/interrupt`, { method: "POST" }),
+  atelierConsolidate: (id: string, feedback?: string): Promise<{ ok: boolean }> =>
+    request(`${atelierConversationPath(id)}/consolidate`, { method: "POST", body: JSON.stringify({ feedback }) }),
+  atelierUpdatePrd: (id: string, patch: UpdatePrdDocumentInput): Promise<PrdDocumentRecord> =>
+    request(atelierPrdPath(id), { method: "PATCH", body: JSON.stringify(patch) }),
+  atelierRegeneratePrd: (id: string): Promise<{ ok: boolean }> =>
+    request(`${atelierPrdPath(id)}/regenerate`, { method: "POST" }),
+  atelierCreateTickets: (id: string, input: CreateTicketsFromPrdBody): Promise<{ tickets: Ticket[] }> =>
+    request(`${atelierPrdPath(id)}/tickets`, { method: "POST", body: JSON.stringify(input) }),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);

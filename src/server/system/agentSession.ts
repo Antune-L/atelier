@@ -36,7 +36,8 @@ export type AgentSessionRole =
   | "split"
   | "scout"
   | "reviewer"
-  | "one-shot";
+  | "one-shot"
+  | "atelier";
 
 export interface AgentStreamBlock {
   itemId: string;

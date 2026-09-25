@@ -61,6 +61,7 @@ interface TicketDetailProps {
   ticket: Ticket | null;
   projects: ProjectInfo[];
   onClose: () => void;
+  onOpenPrdOrigin?: (prdId: string, project: string) => void;
 }
 
 function isLocked(ticket: Ticket): boolean {
@@ -96,7 +97,7 @@ function isTextEntry(target: EventTarget | null): boolean {
   return TEXT_ENTRY_TAGS.includes(target.tagName) || target.isContentEditable;
 }
 
-export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
+export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: TicketDetailProps) {
   const { tickets: boardTickets } = useBoard();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -343,6 +344,7 @@ export function TicketDetail({ ticket, projects, onClose }: TicketDetailProps) {
               statusOptions={statusOptions}
               locked={locked}
               onStatusChange={(target) => void changeStatus(target)}
+              onOpenPrdOrigin={onOpenPrdOrigin}
             />
             <TicketActions
               ticket={current}

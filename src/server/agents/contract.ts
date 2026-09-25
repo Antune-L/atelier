@@ -48,15 +48,30 @@ function commitLanguageDirective(language: CommitLanguage): string {
  * Both delegated modes may split the work into up to MAX_PARALLEL_IMPLEMENTERS independent lots with
  * disjoint file scopes, launched in parallel in the same turn.
  */
+function hasValidatedAtelierPrd(ticket: Ticket): boolean {
+  return !ticket.prdEnabled && ticket.prdMarkdown !== null && ticket.prdMarkdown.trim().length > 0;
+}
+
+function buildValidatedPrdSection(ticket: Ticket): string {
+  if (!hasValidatedAtelierPrd(ticket)) return "";
+  return [
+    "## PRD validé",
+    "Ce PRD a déjà été élaboré et validé par l'utilisateur dans l'Atelier : implémente-le tel quel, sans appeler `submit_prd` ni attendre `prd_validated`. Planifie ton implémentation à partir de lui ; la description ci-dessus précise la part (tâche ou axe) qui revient à cette carte.",
+    "",
+    ticket.prdMarkdown ?? "",
+    "",
+  ].join("\n");
+}
+
 function buildImplementingSteps(
   ticket: Ticket,
   opts: { composerScriptPath: string },
   prdPath: string,
 ): string[] {
   if (ticket.implementer === "codex") {
-    const planSource = ticket.prdEnabled
-      ? "le PRD validé tel quel"
-      : "un plan concis et complet rédigé depuis la description du ticket";
+    let planSource = "un plan concis et complet rédigé depuis la description du ticket";
+    if (ticket.prdEnabled) planSource = "le PRD validé tel quel";
+    else if (hasValidatedAtelierPrd(ticket)) planSource = "un plan concis et complet rédigé depuis la section « PRD validé » (limité à la part décrite dans la description)";
     return [
       "2. implementing (délégué à une session Codex indépendante en arrière-plan) :",
       "   N'utilise JAMAIS le sous-agent natif `implementer` pour ce ticket : l'implémentation passe EXCLUSIVEMENT par le tool delegate_implementation.",
@@ -72,8 +87,8 @@ function buildImplementingSteps(
     return [
       "2. implementing (délégué à Composer 2.5) :",
       `   a. Écris le plan à coder dans /tmp/composer-plan-${ticket.id}.md : ${
-        ticket.prdEnabled
-          ? "reprends le PRD validé tel quel."
+        ticket.prdEnabled || hasValidatedAtelierPrd(ticket)
+          ? "reprends le PRD validé tel quel (section « PRD validé » pour une carte de l'Atelier)."
           : "rédige un plan concis et complet depuis la description."
       } Le script attend un CHEMIN de fichier, donc le plan doit exister sur disque.`,
       "   b. Lance le script Composer EN ARRIÈRE-PLAN sur le worktree courant (il écrit le code dans le worktree et ne commit JAMAIS). Le run dure 10–25 min : démarre-le en tâche de fond, ne le lance pas en appel synchrone bloquant.",
@@ -93,6 +108,15 @@ function buildImplementingSteps(
       `   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
       `   b. Décide d'ABORD du découpage, puis délègue l'implémentation au sous-agent \`implementer\` (outil Agent, \`subagent_type: implementer\`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Si le PRD se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, lance jusqu'à ${MAX_PARALLEL_IMPLEMENTERS} sous-agents \`implementer\` EN PARALLÈLE (plusieurs appels Agent dans le MÊME message), un par lot ; SINON fais UN SEUL appel couvrant toute la fonctionnalité.`,
       `      Dans le prompt de chaque sous-agent, transmets-lui : le chemin du PRD (${prdPath}) à lire et à garder en tête comme contrat à respecter de bout en bout, le worktree courant comme répertoire de travail, et son périmètre de fichiers exact ainsi que les fichiers auxquels il ne doit PAS toucher.`,
+      "   c. Attends que TOUS les sous-agents aient rendu la main, puis relis leur diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
+    ];
+  }
+  if (hasValidatedAtelierPrd(ticket)) {
+    return [
+      "2. implementing (délégué au sous-agent `implementer`) :",
+      `   a. Écris d'abord la section « PRD validé » de ce contrat telle quelle dans ${prdPath} : c'est la source de vérité de l'implémentation et le chemin que tu transmettras au sous-agent.`,
+      `   b. Décide ensuite du découpage, puis délègue l'implémentation au sous-agent \`implementer\` (outil Agent, \`subagent_type: implementer\`) : il écrit le code dans le worktree courant et ne commit JAMAIS ; toi (session principale) tu gardes la main sur git, review, tests et PR. Si la part à implémenter se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, lance jusqu'à ${MAX_PARALLEL_IMPLEMENTERS} sous-agents \`implementer\` EN PARALLÈLE (plusieurs appels Agent dans le MÊME message), un par lot ; SINON fais UN SEUL appel couvrant toute la part décrite.`,
+      `      Dans le prompt de chaque sous-agent, transmets-lui : le chemin du PRD (${prdPath}) à garder en tête comme contrat, la part (tâche ou axe) décrite dans la description du ticket, le worktree courant comme répertoire de travail, et son périmètre de fichiers exact ainsi que les fichiers auxquels il ne doit PAS toucher.`,
       "   c. Attends que TOUS les sous-agents aient rendu la main, puis relis leur diff (git diff), vérifie la cohérence avec le PRD et comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review.",
     ];
   }
@@ -192,6 +216,9 @@ function buildSessionFramingLine(ticket: Ticket): string {
 
 /** The `submit_prd` bullet keeps planning separate from the implementation child. */
 function buildPrdBullet(ticket: Ticket): string {
+  if (hasValidatedAtelierPrd(ticket)) {
+    return "- PRD déjà validé dans l'Atelier (section « PRD validé ») : N'appelle PAS `submit_prd` et n'attends aucun `prd_validated` ; implémente-le directement tel quel.";
+  }
   if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
   if (ticket.orchestrator === "codex") {
     return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via `delegate_implementation` (ne l'implémente pas dans cette phase de planification).";
@@ -311,6 +338,7 @@ export function buildTicketContract(
       ? "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé."
       : "Pour un lien Slack ou Figma, utilise uniquement un outil de lecture réellement exposé à cette session Codex. Si une source obligatoire est inaccessible, appelle ask_user au lieu d'inventer son contenu.",
     "",
+    buildValidatedPrdSection(ticket),
     buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
     buildSessionFramingLine(ticket),

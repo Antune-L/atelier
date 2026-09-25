@@ -6,6 +6,7 @@
  */
 
 import {
+  ATELIER_SLOT_ID,
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
   SPLIT_SLOT_ID,
@@ -13,7 +14,7 @@ import {
   TRIAGE_SLOT_ID,
 } from "../../shared/constants.ts";
 import type { Orchestrator, VcsProvider } from "../../shared/constants.ts";
-import type { Ticket } from "../../shared/schemas.ts";
+import type { ResearchOptions, Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
@@ -261,6 +262,61 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
     role: "split",
     permissionMode: "dontAsk",
     allowedTools: [...READONLY_TOOLS],
+    disallowedTools: READONLY_PLAIN_DISALLOWED,
+    skills: NO_SKILLS,
+  };
+}
+
+const ATELIER_SESSION_PREFIX = "atelier-";
+const ATELIER_WEB_TOOLS = ["WebSearch", "WebFetch"];
+
+export function atelierSessionKey(conversationId: string): string {
+  return `${ATELIER_SESSION_PREFIX}${conversationId}`;
+}
+
+export function parseAtelierSessionKey(key: string): string | null {
+  if (!key.startsWith(ATELIER_SESSION_PREFIX)) return null;
+  const conversationId = key.slice(ATELIER_SESSION_PREFIX.length);
+  return conversationId.length > 0 ? conversationId : null;
+}
+
+export interface AtelierSessionInput {
+  conversationId: string;
+  cwd: string;
+  model: string;
+  effort: string | null;
+  serviceTier?: "default" | "fast";
+  driver: Orchestrator;
+  researchOptions: ResearchOptions;
+  resumeSessionId?: string | null;
+}
+
+export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionStartConfig {
+  const { conversationId, cwd, model, effort, serviceTier = "default", driver, researchOptions, resumeSessionId } = input;
+  const base = {
+    ticketId: atelierSessionKey(conversationId),
+    slotId: ATELIER_SLOT_ID,
+    cwd,
+    model,
+    effort,
+    role: "atelier",
+    ownerType: "conversation",
+    ownerId: conversationId,
+    permissionMode: "dontAsk",
+  } satisfies Partial<SessionStartConfig>;
+  if (driver === "codex") {
+    return {
+      ...base,
+      provider: "codex",
+      serviceTier,
+      readOnly: true,
+      ...(resumeSessionId ? { resumeSessionId } : {}),
+    };
+  }
+  return {
+    ...base,
+    provider: "claude",
+    allowedTools: researchOptions.externalDocs ? [...READONLY_TOOLS, ...ATELIER_WEB_TOOLS] : [...READONLY_TOOLS],
     disallowedTools: READONLY_PLAIN_DISALLOWED,
     skills: NO_SKILLS,
   };

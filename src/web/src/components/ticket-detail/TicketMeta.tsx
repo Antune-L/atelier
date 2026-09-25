@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, MessageSquare } from "lucide-react";
 import { useState } from "react";
 
 import { COLUMN_LABELS, ORCHESTRATOR_LABELS, type Column } from "@shared/constants";
@@ -10,6 +10,7 @@ import { TicketCost } from "@/components/TicketCost";
 import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Select } from "@/components/ui/select";
+import { useBoard } from "@/hooks/useBoard";
 import { finishedKindLabel, formatDateTime } from "@/lib/display";
 
 const STATUS_SELECT_ID = "ticket-status";
@@ -49,6 +50,7 @@ interface TicketMetaProps {
   statusOptions: Column[];
   locked: boolean;
   onStatusChange: (target: Column) => void;
+  onOpenPrdOrigin?: (prdId: string, project: string) => void;
 }
 
 function statusTitle(ticket: Ticket, locked: boolean): string | undefined {
@@ -60,7 +62,8 @@ function statusTitle(ticket: Ticket, locked: boolean): string | undefined {
 }
 
 /** Key/value recap of the open ticket, shown in the sheet's right-hand column. */
-export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusChange }: TicketMetaProps) {
+export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusChange, onOpenPrdOrigin }: TicketMetaProps) {
+  const { conversations } = useBoard();
   const [pending, setPending] = useState<Column | null>(null);
   const pendingConfirm = pending === null ? undefined : STATUS_CONFIRMS[pending];
 
@@ -135,6 +138,15 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
           </a>
         </MetaRow>
       )}
+      {ticket.sourcePrdId !== null && (
+        <PrdOriginRow
+          prdId={ticket.sourcePrdId}
+          task={ticket.sourcePrdTask}
+          project={ticket.project}
+          hasConversations={conversations.some((c) => c.project === ticket.project)}
+          onOpen={onOpenPrdOrigin}
+        />
+      )}
       {ticket.prUrl !== null && (
         <MetaRow label="PR">
           <a href={ticket.prUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
@@ -144,5 +156,32 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
         </MetaRow>
       )}
     </div>
+  );
+}
+
+interface PrdOriginRowProps {
+  prdId: string;
+  task: string | null;
+  project: string;
+  hasConversations: boolean;
+  onOpen?: (prdId: string, project: string) => void;
+}
+
+function PrdOriginRow({ prdId, task, project, hasConversations, onOpen }: PrdOriginRowProps) {
+  const label = task === null ? "PRD (Atelier)" : `PRD · ${task} (Atelier)`;
+  if (!hasConversations || onOpen === undefined) {
+    return (
+      <MetaRow label="Origine">
+        <span className="text-muted-foreground">{hasConversations ? label : "PRD supprimé"}</span>
+      </MetaRow>
+    );
+  }
+  return (
+    <MetaRow label="Origine">
+      <button type="button" onClick={() => onOpen(prdId, project)} className={LINK_CLASSES}>
+        <MessageSquare className="h-3 w-3" />
+        {label}
+      </button>
+    </MetaRow>
   );
 }

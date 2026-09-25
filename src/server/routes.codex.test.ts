@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 
 import { capabilitiesSchema } from "../shared/schemas.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
+import { AtelierManager } from "./agents/atelierManager.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
@@ -49,9 +50,10 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
   const split = new SplitManager(store, system, sessionHub);
   const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
   const delegation = new DelegationManager(store, system, sessionHub, hub);
-  const coordinator = new AgentCoordinator(store, hub, sessionHub, notifier, lifecycle, slots, triage, feasibility, split, delegation);
+  const atelier = new AtelierManager({ store, hub, sessionHub, system });
+  const coordinator = new AgentCoordinator(store, hub, sessionHub, notifier, lifecycle, slots, triage, feasibility, split, delegation, atelier);
   const app = createApiRoutes({
-    store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator,
+    store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
     reformulate: new ReformulateManager(store, system, hub, notifier),
     automations: new AutomationManager(store, system, hub),
     projectRoot: "/tmp", composerAvailable: true,

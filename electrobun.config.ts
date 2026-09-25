@@ -15,6 +15,7 @@ import type { ElectrobunConfig } from "electrobun";
  *                      resolves it as a sibling of its own executable, so it must land next to
  *                      codex-bin or every MCP tool call dies with "codex-code-mode-host not found"
  *  - templates       → run_composer.sh driver
+ *  - vendor/prd      → renderPrd.py, the PRD JSON → HTML renderer run through python3 by the Atelier export
  *  - config.example.json → seeded into the writable dataRoot on first launch
  *
  * The `claude` binary is deliberately NOT embedded: it is proprietary (no redistribution grant), so
@@ -50,6 +51,7 @@ export default {
       "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex": "codex-bin",
       "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host": "codex-code-mode-host",
       "templates/run_composer.sh": "templates/run_composer.sh",
+      "vendor/prd/renderPrd.py": "vendor/prd/renderPrd.py",
       "config.example.json": "config.example.json",
     },
     mac: {

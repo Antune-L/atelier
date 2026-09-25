@@ -45,7 +45,6 @@ export function PrdAnnotator({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const contentRef = useRef<HTMLDivElement>(null);
-  const nextId = useRef(0);
 
   const baseHtml = useMemo(() => renderMarkdownToSafeHtml(markdown), [markdown]);
   const { html, anchoredIds } = useMemo(
@@ -92,8 +91,7 @@ export function PrdAnnotator({
   const saveAnnotation = (): void => {
     const comment = draft.trim();
     if (composing === null || !comment) return;
-    nextId.current += 1;
-    onAnnotationsChange([...annotations, { id: `ann-${nextId.current}`, quote: composing, comment }]);
+    onAnnotationsChange([...annotations, { id: crypto.randomUUID(), quote: composing, comment }]);
     setComposing(null);
     setDraft("");
   };

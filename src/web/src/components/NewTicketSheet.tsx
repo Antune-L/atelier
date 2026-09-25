@@ -1,3 +1,4 @@
+import { MessageSquare } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { isNotionUrl } from "@shared/notion";
@@ -14,9 +15,10 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
+import type { AtelierSeed } from "@/lib/atelier";
 import { dependencyCandidates } from "@/lib/display";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
-import { handleMediaPaste } from "@/lib/paste";
+import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 
 const SHEET_TITLE = "Nouveau ticket";
@@ -25,13 +27,14 @@ interface NewTicketSheetProps {
   open: boolean;
   projects: ProjectInfo[];
   onClose: () => void;
+  onOpenAtelier?: (seed: AtelierSeed) => void;
 }
 
 const NEW_TICKET_TITLE_DRAFT = "new-ticket:title";
 const NEW_TICKET_URL_DRAFT = "new-ticket:external-url";
 const NEW_TICKET_DESCRIPTION_DRAFT = "new-ticket:description";
 
-export function NewTicketSheet({ open, projects, onClose }: NewTicketSheetProps) {
+export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTicketSheetProps) {
   const notionRequest = useRef(0);
   // Drop any in-flight Notion import on each open→closed transition (no-useEffect idiom).
   const wasOpen = useRef(false);
@@ -134,9 +137,7 @@ export function NewTicketSheet({ open, projects, onClose }: NewTicketSheetProps)
   };
 
   const appendToDescription = (markdown: string): void => {
-    setDescription((prev) =>
-      prev.endsWith("\n") || prev === "" ? `${prev}${markdown}\n` : `${prev}\n${markdown}\n`,
-    );
+    setDescription((prev) => appendMarkdownLine(prev, markdown));
   };
 
   const importFromNotion = async (): Promise<void> => {
@@ -283,6 +284,19 @@ export function NewTicketSheet({ open, projects, onClose }: NewTicketSheetProps)
                   className="min-h-[320px] flex-1"
                   placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
                 />
+                {onOpenAtelier && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => onOpenAtelier({ project, title, description })}
+                    disabled={!project}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    Élaborer dans l'Atelier
+                  </Button>
+                )}
               </div>
             </div>
             <div className="space-y-4">

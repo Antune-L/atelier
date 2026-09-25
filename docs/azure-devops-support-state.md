@@ -152,8 +152,9 @@ Support Azure DevOps (Azure Repos) alongside GitHub, selectable per project (Git
     now shared by both clients. The REST vocabulary (api version, area, resource names, HTTP verbs, settled
     thread statuses, the resolve body) lives in the new `src/server/system/vcs/azureRest.ts`, imported by
     the client AND by the agent command table so a resource name is spelled once.
-  - **publishReview**: one general thread carries `body` + the outside-diff section
-    + the pass marker; its thread id is the `published_review_id` the app persists. One inline thread per
+  - **publishReview**: the thread carrying the completion marker (see the idempotency scheme) is the
+    `published_review_id` the app persists; when `body` + the outside-diff section is non-empty it is the
+    general summary thread carrying that text. One inline thread per
     finding, `threadContext` (`/path`, `rightFileStart/End` line + offsets 1→2) plus
     `pullRequestThreadContext.changeTrackingId` looked up by path in the LATEST iteration's
     `pullRequestIterationChanges`, `iterationContext` = {1, latest}. A finding whose file is absent from
@@ -161,21 +162,25 @@ Support Azure DevOps (Azure Repos) alongside GitHub, selectable per project (Git
     `renderOutsideDiffSection`, extracted from `github.ts` into `src/server/system/reviewMarkdown.ts` so the
     GitHub body stays byte-identical. Azure threads render no `path:line` header, so the inline body
     prepends the location in the Azure client only — `renderFinding` in `delegationManager.ts` is untouched.
-  - **Idempotency scheme chosen** (simplest robust one): the summary thread is posted LAST and carries the
-    bare pass marker. Each inline thread carries `<pass marker><!-- kanban-review-finding:<path>:<line> -->`,
-    so a retry after a partial failure re-reads the threads once and skips every finding already on the PR.
-    An inline marker CONTAINS the bare pass marker, so a bare substring test does NOT identify the summary
-    thread: "publication completed" is proven by `isSummaryThread` only — a non-deleted, non-system thread
-    whose first comment carries the pass marker AND no finding marker. `publishReview` short-circuits on
-    that thread alone, so a retry after a partial publication still posts the summary and casts the vote.
-    No identity lookup is needed anywhere (none is available: see lot 3).
+  - **Idempotency scheme chosen** (simplest robust one): the thread posted LAST carries the completion
+    marker `<pass marker><!-- kanban-review-complete -->`. Each inline thread carries
+    `<pass marker><!-- kanban-review-finding:<path>:<line> -->`, so a retry after a partial failure re-reads
+    the threads once and skips every finding already on the PR. Where the completion marker lands: on the
+    active summary thread when the visible body (`body` + outside-diff section, trimmed) is non-empty; else
+    on the last inline thread still to post (appended after its finding marker, no summary thread); else
+    on a marker-only summary thread created with status `closed` (4) so Azure hides it and no empty
+    comment shows. "Publication completed" is proven by `isCompletionThread` only — a non-deleted,
+    non-system thread whose first comment carries the completion marker, or (passes published before that
+    marker existed) the bare pass marker AND no finding marker. `publishReview` short-circuits on that
+    thread alone, so a retry after a partial publication still posts the completion marker and casts the
+    vote. No identity lookup is needed anywhere (none is available: see lot 3).
   - **Vote**: `az repos pr set-vote --id N --vote <name> --org URL`. `--vote` takes a NAME, not the numeric
     scale — `approve | approve-with-suggestions | reject | reset | wait-for-author` (verified in `--help`),
     which supersedes the numeric default recorded above. APPROVE → `approve`, REQUEST_CHANGES →
     `wait-for-author`, COMMENT → no call. A failed vote never fails the publication: the client returns
     `ok: true` with the refusal as `reason`, and `delegationManager` appends it to the session's result —
     the same client-owned capability degradation as the GitHub 422 self-approval downgrade.
-  - **verifyReviewPublication**: the SUMMARY thread (same `isSummaryThread` predicate) exists with the
+  - **verifyReviewPublication**: the COMPLETION thread (same `isCompletionThread` predicate) exists with the
     expected id, is not deleted nor a system thread, its `publishedDate` is at or after the gate cutoff,
     and `lastMergeSourceCommit.commitId` still equals the reviewed commit. The vote is deliberately NOT re-checked (NOTE in the client): it can be
     legitimately absent, so it is not proof of publication.

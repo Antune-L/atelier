@@ -81,6 +81,7 @@ const PR_COMPLETED_STATUS = "completed";
 /** Thread/comment enum values the create payload takes as integers (the GET side returns strings). */
 const COMMENT_TYPE_TEXT = 1;
 const THREAD_STATUS_ACTIVE = 1;
+const THREAD_STATUS_CLOSED = 4;
 const ROOT_PARENT_COMMENT_ID = 0;
 /** A one-character right-side selection: the narrowest anchor Azure accepts on a line. */
 const ANCHOR_START_OFFSET = 1;
@@ -204,13 +205,26 @@ type AzureThread = z.infer<typeof azureThreadSchema>;
  * Idempotency marker of ONE inline finding, derived from the pass marker the caller built. A retry
  * after a partial failure re-reads the threads and skips every finding whose marker is already on the
  * PR, so no inline thread is ever posted twice. An inline marker CONTAINS the bare pass marker, so
- * only `isSummaryThread` may be used to decide that a publication completed.
+ * only `isCompletionThread` may be used to decide that a publication completed.
  */
 const FINDING_MARKER_PREFIX = "<!-- kanban-review-finding:";
 const FINDING_MARKER_SUFFIX = " -->";
+const COMPLETION_MARKER = "<!-- kanban-review-complete -->";
+
+/** Marker of the thread posted LAST by a pass: its presence alone proves the publication completed. */
+function completionMarker(passMarker: string): string {
+  return `${passMarker}${COMPLETION_MARKER}`;
+}
 
 function inlineFindingMarker(passMarker: string, comment: ReviewPublicationComment): string {
   return `${passMarker}${FINDING_MARKER_PREFIX}${comment.path}:${comment.line}${FINDING_MARKER_SUFFIX}`;
+}
+
+/** An inline finding thread still to post: its content before any completion marker, plus its anchor. */
+interface PendingInlineThread {
+  content: string;
+  threadContext: Record<string, unknown>;
+  pullRequestThreadContext: Record<string, unknown>;
 }
 
 /** The thread's first comment, when it is a live human comment (system and deleted threads excluded). */
@@ -227,11 +241,12 @@ function threadCarriesMarker(thread: AzureThread, marker: string): boolean {
 }
 
 /**
- * The summary thread of a pass: it carries the bare pass marker and is not one of the pass's inline
- * finding threads (those carry the pass marker too, as a prefix of their own finding marker). It is
- * posted LAST, so it — and it alone — proves the whole publication completed.
+ * The completion thread of a pass: the thread posted LAST, which alone proves the whole publication
+ * completed. It carries the pass's completion marker; a pass published before that marker existed is
+ * recognised by its summary thread, which carries the bare pass marker without any finding marker.
  */
-function isSummaryThread(thread: AzureThread, passMarker: string): boolean {
+function isCompletionThread(thread: AzureThread, passMarker: string): boolean {
+  if (threadCarriesMarker(thread, completionMarker(passMarker))) return true;
   return threadCarriesMarker(thread, passMarker) && !threadCarriesMarker(thread, FINDING_MARKER_PREFIX);
 }
 
@@ -403,21 +418,23 @@ export class AzureDevopsVcsClient implements VcsClient {
   }
 
   /**
-   * One general thread carries the marker, the reviewed commit and the review body; one inline thread
-   * carries each finding whose file appears in the latest iteration's changes. A finding Azure cannot
-   * anchor is folded into the summary body instead of failing the publication, exactly as on GitHub.
-   * The persisted `reviewId` is the summary thread's id.
+   * One inline thread carries each finding whose file appears in the latest iteration's changes; a
+   * finding Azure cannot anchor is folded into the summary body instead of failing the publication,
+   * exactly as on GitHub. The completion marker lands on the last thing posted: the general summary
+   * thread when its body has visible content, otherwise the last inline thread, otherwise a closed
+   * marker-only thread so no empty comment shows. That thread's id is the persisted `reviewId`.
    */
   async publishReview(cwd: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {
     const context = await this.prContext(cwd, prUrl);
     if (context === null) return { ok: false, reason: "URL de PR Azure DevOps invalide ou PR illisible", reviewId: null };
     const threads = await this.readThreads(cwd, context);
     if (threads === null) return { ok: false, reason: "lecture des fils Azure DevOps échouée", reviewId: null };
-    const already = threads.find((thread) => isSummaryThread(thread, opts.marker));
+    const already = threads.find((thread) => isCompletionThread(thread, opts.marker));
     if (already !== undefined) return { ok: true, reason: "", reviewId: already.id };
 
     const anchors = await this.readChangeAnchors(cwd, context);
     const outsideDiff: ReviewPublicationComment[] = [];
+    const pending: PendingInlineThread[] = [];
     for (const comment of opts.comments) {
       const anchor = anchors?.byPath.get(azurePath(comment.path));
       if (anchors === null || anchor === undefined) {
@@ -426,9 +443,8 @@ export class AzureDevopsVcsClient implements VcsClient {
       }
       const marker = inlineFindingMarker(opts.marker, comment);
       if (threads.some((thread) => threadCarriesMarker(thread, marker))) continue;
-      const posted = await this.createThread(cwd, context, {
-        comments: [threadComment(`${renderInlineLocation(comment)}${comment.body}\n\n${marker}`)],
-        status: THREAD_STATUS_ACTIVE,
+      pending.push({
+        content: `${renderInlineLocation(comment)}${comment.body}\n\n${marker}`,
         threadContext: {
           filePath: azurePath(comment.path),
           rightFileStart: { line: comment.line, offset: ANCHOR_START_OFFSET },
@@ -442,15 +458,31 @@ export class AzureDevopsVcsClient implements VcsClient {
           },
         },
       });
-      if (posted === null) {
+    }
+
+    const completion = completionMarker(opts.marker);
+    const visibleBody = `${opts.body}${renderOutsideDiffSection(outsideDiff)}`.trim();
+    const completesInline = visibleBody === "" && pending.length > 0;
+    let lastInline: number | null = null;
+    for (const [index, { content, threadContext, pullRequestThreadContext }] of pending.entries()) {
+      const carriesCompletion = completesInline && index === pending.length - 1;
+      lastInline = await this.createThread(cwd, context, {
+        comments: [threadComment(carriesCompletion ? `${content}${completion}` : content)],
+        status: THREAD_STATUS_ACTIVE,
+        threadContext,
+        pullRequestThreadContext,
+      });
+      if (lastInline === null) {
         return { ok: false, reason: `publication d'un commentaire inline ${AZURE_LABEL} échouée`, reviewId: null };
       }
     }
+    if (completesInline) {
+      return { ok: true, reason: await this.castVote(cwd, context, opts.event), reviewId: lastInline };
+    }
 
-    const body = `${opts.body}${renderOutsideDiffSection(outsideDiff)}\n\n${opts.marker}`;
     const summary = await this.createThread(cwd, context, {
-      comments: [threadComment(body)],
-      status: THREAD_STATUS_ACTIVE,
+      comments: [threadComment(visibleBody === "" ? completion : `${visibleBody}\n\n${completion}`)],
+      status: visibleBody === "" ? THREAD_STATUS_CLOSED : THREAD_STATUS_ACTIVE,
     });
     if (summary === null) {
       return { ok: false, reason: `publication de la review ${AZURE_LABEL} échouée`, reviewId: null };
@@ -462,7 +494,7 @@ export class AzureDevopsVcsClient implements VcsClient {
    * NOTE(ali): the vote is deliberately NOT re-checked here. Azure refuses a vote in cases the app
    * cannot predict (author voting on their own PR, branch policy), and `publishReview` degrades
    * instead of failing, so the reviewer vote is not proof of a published pass. The proof is the
-   * summary thread — present, not deleted, posted after the gate's cutoff — on the reviewed commit.
+   * completion thread — present, not deleted, posted after the gate's cutoff — on the reviewed commit.
    */
   async verifyReviewPublication(cwd: string, prUrl: string, check: ReviewPublicationCheck): Promise<DoneGateResult> {
     const context = await this.prContext(cwd, prUrl);
@@ -473,7 +505,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     const threads = await this.readThreads(cwd, context);
     if (threads === null) return { ok: false, reason: "postage demandé mais lecture des fils échouée" };
     const posted = threads.some((thread) => {
-      if (thread.id !== check.reviewId || !isSummaryThread(thread, check.marker)) return false;
+      if (thread.id !== check.reviewId || !isCompletionThread(thread, check.marker)) return false;
       const publishedDate = reviewComment(thread)?.publishedDate ?? null;
       return publishedDate !== null && Date.parse(publishedDate) >= check.since;
     });

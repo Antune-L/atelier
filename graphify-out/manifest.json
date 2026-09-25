@@ -610,8 +610,8 @@
     "semantic_hash": "9e6f26df737799cccc53c1f0af56bfac"
   },
   "AGENTS.md": {
-    "mtime": 1790338733.8835056,
-    "ast_hash": "420d89f5c7bfe31d3a3e926925ca2289",
+    "mtime": 1790342750.0273175,
+    "ast_hash": "161f2832f0f257e94b65bf03cbc84091",
     "semantic_hash": ""
   },
   "CLAUDE.md": {
@@ -840,7 +840,7 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1790339616.0621207,
+    "mtime": 1790339636.7130573,
     "ast_hash": "dc65fd57ec533b270ee7e33438a58a14",
     "semantic_hash": ""
   },
@@ -1380,8 +1380,8 @@
     "semantic_hash": ""
   },
   "docs/azure-devops-support-state.md": {
-    "mtime": 1790338733.8838875,
-    "ast_hash": "5bee0282638237a43be810f9dbabaff0",
+    "mtime": 1790342750.0267618,
+    "ast_hash": "e15c2052a8a939dbed3968230a4b0ac5",
     "semantic_hash": ""
   },
   "src/server/system/boundedCommand.ts": {
@@ -1390,8 +1390,8 @@
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureDevops.ts": {
-    "mtime": 1790338733.8919191,
-    "ast_hash": "5a1c8d1d5e428ec0b32ca1f29a7dc749",
+    "mtime": 1790342729.1094046,
+    "ast_hash": "569bc7a8f1293fa6efb3e17beeaa91a1",
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureRemote.ts": {

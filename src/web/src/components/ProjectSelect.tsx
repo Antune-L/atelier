@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, GitPullRequest, Search } from "lucide-react";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
@@ -6,6 +6,7 @@ import type { ProjectInfo } from "@shared/schemas";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import type { ReviewCountSnapshot } from "@/hooks/useReviewCounts";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,54 @@ interface ProjectSelectProps {
   disabled?: boolean;
   className?: string;
   triggerClassName?: string;
+  reviewCounts?: ReviewCountSnapshot;
+}
+
+function ReviewCountBadge({
+  count,
+  loading,
+  partial = false,
+}: { count: number | null; loading: boolean; partial?: boolean }): ReactNode {
+  let label = "—";
+  let ariaLabel = "Nombre de PR à review indisponible";
+  if (loading) {
+    label = "…";
+    ariaLabel = "Chargement du nombre de PR à review";
+  } else if (count !== null) {
+    label = `${partial ? "≥" : ""}${count} PR`;
+    ariaLabel = `${partial ? "Au moins " : ""}${count} PR à review`;
+  }
+
+  return (
+    <span
+      aria-label={ariaLabel}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+        !loading && count !== null && count > 0
+          ? "border-warning/30 bg-warning/15 text-warning"
+          : "border-border bg-muted text-muted-foreground",
+      )}
+    >
+      <GitPullRequest className="h-3 w-3" aria-hidden="true" />
+      {label}
+    </span>
+  );
+}
+
+function groupReviewCount(group: ProjectGroup, counts: Record<string, number | null>): { count: number | null; partial: boolean } {
+  let count = 0;
+  let unavailable = false;
+  let available = false;
+  for (const project of group.projects) {
+    const projectCount = counts[project.key];
+    if (projectCount === null || projectCount === undefined) {
+      unavailable = true;
+      continue;
+    }
+    available = true;
+    count += projectCount;
+  }
+  return { count: available ? count : null, partial: unavailable };
 }
 
 function normalizeSearch(value: string): string {
@@ -77,6 +126,7 @@ export function ProjectSelect({
   disabled = false,
   className,
   triggerClassName,
+  reviewCounts,
 }: ProjectSelectProps): ReactNode {
   const groups = groupProjects(projects);
   const [open, setOpen] = useState(false);
@@ -91,16 +141,16 @@ export function ProjectSelect({
   const filteredGroups = groups
     .map((group) => ({
       ...group,
-      projects: group.projects.filter((project) =>
+      visibleProjects: group.projects.filter((project) =>
         normalizeSearch(`${group.label} ${project.label} ${project.key}`).includes(normalizedQuery),
       ),
     }))
-    .filter((group) => group.projects.length > 0);
+    .filter((group) => group.visibleProjects.length > 0);
   const filteredOptions = options.filter((option) =>
     normalizeSearch(`${option.label} ${option.key}`).includes(normalizedQuery),
   );
   const resultCount = filteredOptions.length
-    + filteredGroups.reduce((count, group) => count + group.projects.length, 0);
+    + filteredGroups.reduce((count, group) => count + group.visibleProjects.length, 0);
   const hasChoices = projects.length > 0 || options.length > 0;
 
   const changeOpen = (nextOpen: boolean): void => {
@@ -171,6 +221,9 @@ export function ProjectSelect({
         )}
         <span className="min-w-0 flex-1 truncate">{optionLabel}</span>
         {groupLabel && <span className="truncate font-mono text-[10px] text-muted-foreground">{key}</span>}
+        {groupLabel && reviewCounts && (
+          <ReviewCountBadge count={reviewCounts.counts[key] ?? null} loading={reviewCounts.loading} />
+        )}
         {selected && <Check className="h-3.5 w-3.5 shrink-0 text-info" aria-hidden="true" />}
       </button>
     );
@@ -232,6 +285,8 @@ export function ProjectSelect({
           {filteredOptions.map((option) => projectOption(option.key, option.label))}
           {filteredGroups.map((group) => {
             const expanded = normalizedQuery.length > 0 || expandedGroups.has(group.key);
+            const reviewTotal = reviewCounts ? groupReviewCount(group, reviewCounts.counts) : null;
+            const projectCount = reviewCounts ? group.projects.length : group.visibleProjects.length;
             return (
               <div key={group.key} role="group" aria-label={group.label} className="mb-0.5 last:mb-0">
                 <button
@@ -250,9 +305,14 @@ export function ProjectSelect({
                     {projectInitial(group.label)}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{group.label}</span>
-                  <span className="font-normal text-muted-foreground">{group.projects.length}</span>
+                  <span className="font-normal text-muted-foreground" aria-label={`${projectCount} projets`}>
+                    {projectCount}
+                  </span>
+                  {reviewCounts && reviewTotal && (
+                    <ReviewCountBadge count={reviewTotal.count} loading={reviewCounts.loading} partial={reviewTotal.partial} />
+                  )}
                 </button>
-                {expanded && group.projects.map((project) => projectOption(project.key, project.label, group.label))}
+                  {expanded && group.visibleProjects.map((project) => projectOption(project.key, project.label, group.label))}
               </div>
             );
           })}

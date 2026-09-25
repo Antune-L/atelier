@@ -15,6 +15,7 @@ import { z } from "zod";
 import { VCS_PROVIDER_LABELS } from "../../../shared/constants.ts";
 import type { PrReviewStatus, PrState } from "../../../shared/constants.ts";
 import { parsePrUrl } from "../../../shared/prUrl.ts";
+import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
@@ -48,6 +49,7 @@ const AZURE_LABEL = VCS_PROVIDER_LABELS.azureDevops;
 
 /** Cap the review picker to the most recent open PRs (mirrors the GitHub client). */
 const PR_LIST_LIMIT = "50";
+const REVIEW_COUNT_PAGE_SIZE = 100;
 const HEADS_REF_PREFIX = "refs/heads/";
 const PR_URL_SEGMENT = "pullrequest";
 /** Path segment separating the project from the repository in an Azure PR web URL. */
@@ -337,6 +339,39 @@ export class AzureDevopsVcsClient implements VcsClient {
       additions: null,
       deletions: null,
     }));
+  }
+
+  async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
+    const entries = await Promise.all(repoPaths.map(async (repoPath): Promise<[string, number | null]> => {
+      try {
+        const ref = await repoRefFromRemote(repoPath);
+        if (!ref) return [repoPath, null];
+        let count = 0;
+        let offset = 0;
+        let pageLength = REVIEW_COUNT_PAGE_SIZE;
+        while (pageLength === REVIEW_COUNT_PAGE_SIZE) {
+          const res = await runBoundedCommand([
+            AZ_BINARY, "devops", "invoke", "--area", AZ_AREA_GIT, "--resource", "pullrequests",
+            "--route-parameters", `project=${ref.project}`, `repositoryId=${ref.repository}`,
+            "--query-parameters", "searchCriteria.status=active", `$top=${REVIEW_COUNT_PAGE_SIZE}`, `$skip=${offset}`,
+            "--org", ref.orgUrl, "--api-version", AZ_API_VERSION, "--http-method", "GET", "--detect", "false", "-o", "json",
+          ], repoPath);
+          if (res.exitCode !== 0 || res.timedOut) return [repoPath, null];
+          const parsed = z.object({ value: z.array(azurePrListEntrySchema) }).safeParse(safeJsonParse(res.stdout));
+          if (!parsed.success) return [repoPath, null];
+          count += parsed.data.value.filter((pr) => isPrNeedsAttention({
+            isDraft: pr.isDraft,
+            reviewStatus: reviewStatusFromVotes(pr.reviewers.map((reviewer) => reviewer.vote)),
+          })).length;
+          pageLength = parsed.data.value.length;
+          offset += REVIEW_COUNT_PAGE_SIZE;
+        }
+        return [repoPath, count];
+      } catch {
+        return [repoPath, null];
+      }
+    }));
+    return Object.fromEntries(entries);
   }
 
   async verifyPrExists(cwd: string, prUrl: string): Promise<DoneGateResult> {

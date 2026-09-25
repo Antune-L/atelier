@@ -845,6 +845,16 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcs(provider).listOpenPrs(repoPath);
   }
 
+  async listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>> {
+    const githubPaths = [...new Set(projects.filter((project) => project.provider === "github").map((project) => project.repoPath))];
+    const azurePaths = [...new Set(projects.filter((project) => project.provider === "azureDevops").map((project) => project.repoPath))];
+    const [github, azure] = await Promise.all([
+      this.vcs("github").listReviewCounts(githubPaths),
+      this.vcs("azureDevops").listReviewCounts(azurePaths),
+    ]);
+    return { ...github, ...azure };
+  }
+
   async testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult> {
     return this.vcs(provider).testConnection(repoPath, Date.now());
   }

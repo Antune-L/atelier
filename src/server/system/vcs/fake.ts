@@ -5,6 +5,7 @@
 
 import type { PrState } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
+import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
 import type { DoneGateResult, PublishReviewResult, ReviewHeadResult } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
@@ -66,6 +67,11 @@ export class FakeVcsClient implements VcsClient {
 
   async listOpenPrs(_repoPath: string): Promise<OpenPr[]> {
     return FAKE_OPEN_PRS;
+  }
+
+  async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
+    const count = FAKE_OPEN_PRS.filter(isPrNeedsAttention).length;
+    return Object.fromEntries(repoPaths.map((repoPath) => [repoPath, count]));
   }
 
   async verifyPrExists(_cwd: string, _prUrl: string): Promise<DoneGateResult> {

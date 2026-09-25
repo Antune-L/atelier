@@ -10,6 +10,7 @@ import { z } from "zod";
 import { VCS_PROVIDER_LABELS } from "../../../shared/constants.ts";
 import type { PrReviewStatus, PrState } from "../../../shared/constants.ts";
 import { parsePrUrl } from "../../../shared/prUrl.ts";
+import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
@@ -32,6 +33,9 @@ const GH_BINARY = "gh";
 const PR_LIST_FIELDS = "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
 /** Cap the review picker to the most recent open PRs. */
 const PR_LIST_LIMIT = "50";
+const REVIEW_COUNT_PAGE_SIZE = 100;
+const REVIEW_COUNT_BATCH_SIZE = 10;
+const GIT_REMOTE_SCP_RE = /^(?:[^@/]+@)?([^@/:]+):(.+)$/;
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
 /** GitHub PR state that proves the merge completed (vs. OPEN/CLOSED). */
@@ -71,6 +75,50 @@ const ghPrSchema = z.object({
   additions: z.number(),
   deletions: z.number(),
 });
+const reviewCountPageSchema = z.object({
+  nodes: z.array(z.object({ isDraft: z.boolean(), reviewDecision: z.string().nullable() }).nullable()),
+  pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+});
+const reviewCountResponseSchema = z.object({
+  data: z.record(z.string(), z.object({ pullRequests: reviewCountPageSchema }).nullable()),
+});
+
+interface GithubRepoRef {
+  host: string;
+  owner: string;
+  repository: string;
+}
+
+interface ReviewCountPageRequest {
+  ref: GithubRepoRef;
+  cursor: string | null;
+}
+
+function parseGithubRemote(remote: string): GithubRepoRef | null {
+  const trimmed = remote.trim();
+  const scp = GIT_REMOTE_SCP_RE.exec(trimmed);
+  let host: string;
+  let path: string;
+  if (scp && scp[1] && scp[2]) {
+    host = scp[1].toLowerCase();
+    path = scp[2];
+  } else {
+    try {
+      const url = new URL(trimmed);
+      host = url.hostname.toLowerCase();
+      path = url.pathname;
+    } catch {
+      return null;
+    }
+  }
+  const segments = path.replace(/^\/+/, "").replace(/\.git$/, "").split("/");
+  if (segments.length !== 2 || !segments[0] || !segments[1] || host === "") return null;
+  return { host, owner: segments[0], repository: segments[1] };
+}
+
+function githubRepoKey(ref: GithubRepoRef): string {
+  return `${ref.host}/${ref.owner}/${ref.repository}`;
+}
 
 /** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
 const ghPrStateSchema = z.object({ state: z.string() });
@@ -174,6 +222,77 @@ export class GithubVcsClient implements VcsClient {
       additions: pr.additions,
       deletions: pr.deletions,
     }));
+  }
+
+  async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
+    const counts: Record<string, number | null> = {};
+    const pathsByRepo = new Map<string, string[]>();
+    const refs = new Map<string, GithubRepoRef>();
+    await Promise.all(repoPaths.map(async (repoPath) => {
+      counts[repoPath] = null;
+      let remote;
+      try {
+        remote = await runBoundedCommand(["git", "-C", repoPath, "remote", "get-url", "origin"], repoPath);
+      } catch {
+        return;
+      }
+      if (remote.exitCode !== 0 || remote.timedOut) return;
+      const ref = parseGithubRemote(remote.stdout);
+      if (!ref) return;
+      const key = githubRepoKey(ref);
+      refs.set(key, ref);
+      pathsByRepo.set(key, [...(pathsByRepo.get(key) ?? []), repoPath]);
+    }));
+
+    let pending: ReviewCountPageRequest[] = [...refs.values()].map((ref) => ({ ref, cursor: null }));
+    const repoCounts = new Map<string, number>();
+    while (pending.length > 0) {
+      const next: ReviewCountPageRequest[] = [];
+      const byHost = Map.groupBy(pending, (request) => request.ref.host);
+      for (const [host, requests] of byHost) {
+        for (let start = 0; start < requests.length; start += REVIEW_COUNT_BATCH_SIZE) {
+          const batch = requests.slice(start, start + REVIEW_COUNT_BATCH_SIZE);
+          const fields = batch.map(({ ref, cursor }, index) => {
+            const after = cursor === null ? "" : `,after:${JSON.stringify(cursor)}`;
+            return `r${index}: repository(owner:${JSON.stringify(ref.owner)},name:${JSON.stringify(ref.repository)}) { pullRequests(states:OPEN,first:${REVIEW_COUNT_PAGE_SIZE}${after}) { nodes { isDraft reviewDecision } pageInfo { hasNextPage endCursor } } }`;
+          });
+          const query = `query { ${fields.join(" ")} }`;
+          let result;
+          try {
+            result = await withJsonRequestFile({ query }, (inputPath) => runBoundedCommand(
+              [GH_BINARY, "api", "graphql", "--hostname", host, "--input", inputPath],
+              repoPaths[0] ?? ".",
+            ));
+          } catch {
+            continue;
+          }
+          if (result.timedOut) continue;
+          const parsed = reviewCountResponseSchema.safeParse(safeJsonParse(result.stdout));
+          if (!parsed.success) continue;
+          for (const [index, request] of batch.entries()) {
+            const page = parsed.data.data[`r${index}`]?.pullRequests;
+            if (!page) continue;
+            const key = githubRepoKey(request.ref);
+            const pageCount = page.nodes.filter((node) => node && isPrNeedsAttention({
+              isDraft: node.isDraft,
+              reviewStatus: PR_REVIEW_STATUS_BY_DECISION[node.reviewDecision ?? ""] ?? "none",
+            })).length;
+            repoCounts.set(key, (repoCounts.get(key) ?? 0) + pageCount);
+            if (page.pageInfo.hasNextPage) {
+              if (!page.pageInfo.endCursor) {
+                repoCounts.delete(key);
+                continue;
+              }
+              next.push({ ref: request.ref, cursor: page.pageInfo.endCursor });
+            } else {
+              for (const repoPath of pathsByRepo.get(key) ?? []) counts[repoPath] = repoCounts.get(key) ?? 0;
+            }
+          }
+        }
+      }
+      pending = next;
+    }
+    return counts;
   }
 
   async verifyPrExists(_cwd: string, prUrl: string): Promise<DoneGateResult> {

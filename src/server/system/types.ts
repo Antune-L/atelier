@@ -262,6 +262,7 @@ export interface SystemAdapter {
   // ---- PR listing (review entry point) ----
   /** Open PRs of the project repo, as surfaced by the provider. Throws on CLI failure. */
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
+  listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
   /**
    * Cheap read-only reachability check of the project's VCS provider (list one PR). Never throws:
    * every failure (missing CLI, unparseable remote, CLI error) comes back as `ok: false` + message.

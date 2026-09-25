@@ -60,6 +60,7 @@ import {
 } from "./ticketOperations.ts";
 
 const log = createLogger("triage");
+const REVIEW_COUNT_TTL_MS = 5 * 60 * 1000;
 
 /** 400 message when an orchestrator/implementer pair violates isAllowedAgentPair (see PR1 invariant). */
 const DISALLOWED_AGENT_PAIR_MSG =
@@ -68,6 +69,7 @@ const DISALLOWED_AGENT_PAIR_MSG =
 interface PaneReader {
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
+  listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
   listBranches(repoPath: string): Promise<string[]>;
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
@@ -442,6 +444,59 @@ async function performSplit(
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
+  let reviewCountsCache: { identity: string; counts: Record<string, number | null>; checkedAt: number } | null = null;
+  let pendingReviewCounts: { identity: string; result: Promise<{ counts: Record<string, number | null>; checkedAt: number }> } | null = null;
+  let reviewCountsSequence = 0;
+  const projectPrCache = new Map<string, { identity: string; prs: OpenPr[]; checkedAt: number }>();
+  const projectPrPending = new Map<string, { identity: string; result: Promise<OpenPr[]> }>();
+
+  function getProjectPrs(key: string, repoPath: string, provider: VcsProvider, refresh: boolean): Promise<OpenPr[]> {
+    const identity = JSON.stringify([repoPath, provider, store.reviewCompletionVersion()]);
+    const pending = projectPrPending.get(key);
+    if (pending?.identity === identity) return pending.result;
+    const cached = projectPrCache.get(key);
+    if (!refresh && cached?.identity === identity && Date.now() - cached.checkedAt < REVIEW_COUNT_TTL_MS) {
+      return Promise.resolve(cached.prs);
+    }
+    const result = deps.system.listOpenPrs(repoPath, provider).then((prs) => {
+      if (projectPrPending.get(key)?.result === result) {
+        projectPrCache.set(key, { identity, prs, checkedAt: Date.now() });
+      }
+      return prs;
+    }).finally(() => {
+      if (projectPrPending.get(key)?.result === result) projectPrPending.delete(key);
+    });
+    projectPrPending.set(key, { identity, result });
+    return result;
+  }
+
+  function getReviewCounts(refresh: boolean) {
+    const projects = store.listProjectKeys().flatMap((key) => {
+      const project = store.getProjectRow(key);
+      return project && !project.hidden ? [{ key, repoPath: project.repoPath, provider: project.vcsProvider }] : [];
+    });
+    const identity = JSON.stringify([projects, store.reviewCompletionVersion()]);
+    if (pendingReviewCounts?.identity === identity) return pendingReviewCounts.result;
+    if (!refresh && reviewCountsCache?.identity === identity && Date.now() - reviewCountsCache.checkedAt < REVIEW_COUNT_TTL_MS) {
+      return Promise.resolve(reviewCountsCache);
+    }
+    const sequence = ++reviewCountsSequence;
+    const result = deps.system.listReviewCounts(projects).then((byPath) => {
+      const counts = Object.fromEntries(projects.map((project) => [project.key, byPath[project.repoPath] ?? null]));
+      const response = { identity, counts, checkedAt: Date.now() };
+      if (sequence === reviewCountsSequence) reviewCountsCache = response;
+      return response;
+    }).catch(() => {
+      const counts = Object.fromEntries(projects.map((project) => [project.key, null]));
+      const response = { identity, counts, checkedAt: Date.now() };
+      if (sequence === reviewCountsSequence) reviewCountsCache = response;
+      return response;
+    }).finally(() => {
+      if (pendingReviewCounts?.result === result) pendingReviewCounts = null;
+    });
+    pendingReviewCounts = { identity, result };
+    return result;
+  }
 
   return new Elysia({ prefix: "/api" })
     .get("/projects", () => ticketOperations.listProjects())
@@ -498,11 +553,15 @@ export function createApiRoutes(deps: RouteDeps) {
       const path = await deps.pickFolder();
       return { path: path ?? "" };
     })
-    .get("/projects/:key/prs", async ({ params, set }) => {
+    .get("/projects/review-counts", async ({ query }) => {
+      const { counts, checkedAt } = await getReviewCounts(query.refresh === "1");
+      return { counts, checkedAt };
+    })
+    .get("/projects/:key/prs", async ({ params, query, set }) => {
       if (!isProjectKey(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
       const project = getProject(params.key);
       try {
-        return await deps.system.listOpenPrs(project.repoPath, project.vcsProvider);
+        return await getProjectPrs(params.key, project.repoPath, project.vcsProvider, query.refresh === "1");
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec du listing des PR"));
       }

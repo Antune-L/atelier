@@ -28,6 +28,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
+import { refreshReviewCounts, useReviewCounts } from "@/hooks/useReviewCounts";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
@@ -43,6 +44,7 @@ const BASE_BRANCH_AUTO = "";
 
 export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const panel = useProjectPanel(projects);
+  const reviewCounts = useReviewCounts();
   const capabilities = useCapabilities();
   const { settings } = useAppSettings();
   const { project, prs, selected, error, setError, busy, setBusy } = panel;
@@ -115,7 +117,13 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
 
   return (
     <div className="space-y-4">
-      <ProjectPrPicker projects={projects} panel={panel} idPrefix="review" />
+      <ProjectPrPicker
+        projects={projects}
+        panel={panel}
+        idPrefix="review"
+        reviewCounts={reviewCounts}
+        onRefreshCounts={() => { void refreshReviewCounts(); }}
+      />
 
       <div className="space-y-1.5">
         <Label htmlFor="review-depth" className={FIELD_LABEL_CLASSES}>Niveau de review</Label>

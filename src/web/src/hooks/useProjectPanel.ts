@@ -39,9 +39,9 @@ export function useProjectPanel(projects: ProjectInfo[]): ProjectPanelState {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async (key: string): Promise<void> => {
+  const load = useCallback(async (key: string, refresh = false): Promise<void> => {
     try {
-      const data = await api.projectPrs(key);
+      const data = await api.projectPrs(key, refresh);
       setPrs(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : LOAD_ERROR);
@@ -53,7 +53,7 @@ export function useProjectPanel(projects: ProjectInfo[]): ProjectPanelState {
     setPrs(null);
     setError(null);
     setSelected(new Set());
-    void load(project);
+    void load(project, true);
   };
 
   // Load PRs for the active project on first render and on each project change (no useEffect).

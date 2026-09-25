@@ -322,6 +322,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).listOpenPrs(repoPath);
   }
 
+  async listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>> {
+    this.log("listReviewCounts", { projects: projects.length });
+    return this.vcs("github").listReviewCounts(projects.map((project) => project.repoPath));
+  }
+
   async testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult> {
     this.log("testVcsConnection", { repoPath, provider });
     return this.vcs(provider).testConnection(repoPath, Date.now());

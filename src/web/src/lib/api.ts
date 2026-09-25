@@ -117,7 +117,10 @@ export const api = {
     request("/api/tickets/import", { method: "POST", body: JSON.stringify(input) }),
   analyzeTickets: (input: AnalyzeTicketsInput): Promise<{ started: number }> =>
     request("/api/tickets/analyze", { method: "POST", body: JSON.stringify(input) }),
-  projectPrs: (key: string): Promise<OpenPr[]> => request(`/api/projects/${key}/prs`),
+  projectPrs: (key: string, refresh = false): Promise<OpenPr[]> =>
+    request(`/api/projects/${key}/prs${refresh ? "?refresh=1" : ""}`),
+  projectReviewCounts: (refresh = false): Promise<{ counts: Record<string, number | null>; checkedAt: number }> =>
+    request(`/api/projects/review-counts${refresh ? "?refresh=1" : ""}`),
   projectBranches: (key: string): Promise<string[]> => request(`/api/projects/${key}/branches`),
   testProjectConnection: (key: string): Promise<VcsConnectionResult> =>
     request(`/api/projects/${key}/test-connection`),

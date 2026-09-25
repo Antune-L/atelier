@@ -7,16 +7,19 @@ import { PrSelectRow } from "@/components/PrSelectRow";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
 import type { ProjectPanelState } from "@/hooks/useProjectPanel";
+import type { ReviewCountSnapshot } from "@/hooks/useReviewCounts";
 import { cn } from "@/lib/utils";
 
 interface ProjectPrPickerProps {
   projects: ProjectInfo[];
   panel: ProjectPanelState;
   idPrefix: string;
+  reviewCounts?: ReviewCountSnapshot;
+  onRefreshCounts?: () => void;
 }
 
 /** Project selector + open-PR multi-select list, shared by the review and clean PR panels. */
-export function ProjectPrPicker({ projects, panel, idPrefix }: ProjectPrPickerProps) {
+export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRefreshCounts }: ProjectPrPickerProps) {
   const { project, setProjectChoice, prs, loading, selected, toggle, refresh } = panel;
   const selectId = `${idPrefix}-project`;
 
@@ -43,9 +46,18 @@ export function ProjectPrPicker({ projects, panel, idPrefix }: ProjectPrPickerPr
           projects={projects}
           value={project}
           onChange={setProjectChoice}
+          reviewCounts={reviewCounts}
           className="min-w-0 flex-1"
         />
-        <Button variant="outline" onClick={refresh} disabled={loading} aria-label="Rafraîchir les PRs">
+        <Button
+          variant="outline"
+          onClick={() => {
+            refresh();
+            onRefreshCounts?.();
+          }}
+          disabled={loading}
+          aria-label="Rafraîchir les PRs"
+        >
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
         </Button>
       </div>

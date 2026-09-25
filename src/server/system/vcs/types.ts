@@ -38,6 +38,7 @@ export interface VcsClient {
   testConnection(repoPath: string, checkedAt: number): Promise<VcsConnectionResult>;
   /** Open PRs of the project repo. Throws on CLI failure. */
   listOpenPrs(repoPath: string): Promise<OpenPr[]>;
+  listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>>;
   /** done() gate: the PR still exists. */
   verifyPrExists(cwd: string, prUrl: string): Promise<DoneGateResult>;
   /** The PR's current head commit, as the provider reports it. */

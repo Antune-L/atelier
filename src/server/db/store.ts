@@ -1351,6 +1351,12 @@ export class Store {
     return keys;
   }
 
+  reviewCompletionVersion(): string {
+    const row = this.db.query("SELECT COUNT(*) AS count, MAX(finished_at) AS latest FROM tickets WHERE kind = 'review' AND column_name = 'reviewed'").get();
+    const parsed = z.object({ count: z.number(), latest: z.number().nullable() }).parse(row);
+    return `${parsed.count}:${parsed.latest ?? 0}`;
+  }
+
   getProjectRow(key: string): ProjectConfig | undefined {
     const raw = this.db.query("SELECT * FROM projects WHERE key = ?").get(key);
     return raw ? mapProjectRow(raw) : undefined;

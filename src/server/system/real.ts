@@ -99,6 +99,9 @@ const WORKTREE_SETUP_CANDIDATES = ["scripts/setup-worktree.sh", "setup-worktree.
 /** Conventional worktree teardown script paths (relative to the repo), tried in order when no explicit command is configured. */
 const WORKTREE_TEARDOWN_CANDIDATES = ["scripts/teardown-worktree.sh", "teardown-worktree.sh", ".kanban/teardown-worktree.sh"] as const;
 /** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
+const REVIEW_WORKTREE_DISCARD_ARGS = ["git", "checkout", "--", "."];
+const REVIEW_WORKTREE_CLEAN_ARGS = ["git", "clean", "-fd"];
+
 const CLAUDE_BINARY_NAME = "claude";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
@@ -705,6 +708,8 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {
     const client = this.vcs(opts.provider);
+    const reset = await this.resetReviewWorktree(opts.slotPath);
+    if (!reset.ok) return { ...reset, commitSha: null };
     const clean = await this.reviewWorktreeClean(opts.slotPath);
     if (!clean.ok) return { ...clean, commitSha: null };
     const remote = await client.readPrHead(opts.repoPath, opts.prUrl);
@@ -780,6 +785,22 @@ export class RealSystemAdapter implements SystemAdapter {
       };
     }
     return this.vcs(provider).publishReview(slotPath, prUrl, opts);
+  }
+
+  // NOTE(ali): safe only for a read-only review pass, which never produces a diff by design, so any local
+  // change comes from setup (copied env files, setup script) and blocks the pass for nothing. Never call it from
+  // readReviewHead: fix-mode reviews hold uncommitted fixes there. No `-x`: ignored files (.env, node_modules) stay.
+  private async resetReviewWorktree(slotPath: string): Promise<DoneGateResult> {
+    if (await this.isMainCheckout(slotPath)) {
+      return { ok: false, reason: `refus de remettre au propre le worktree de review : ${slotPath} est le checkout PRINCIPAL` };
+    }
+    for (const args of [REVIEW_WORKTREE_DISCARD_ARGS, REVIEW_WORKTREE_CLEAN_ARGS]) {
+      const res = await runBoundedCommand(args, slotPath);
+      if (res.exitCode !== 0) {
+        return { ok: false, reason: `remise au propre du worktree de review impossible : ${boundedCommandDetail(res)}` };
+      }
+    }
+    return { ok: true, reason: "" };
   }
 
   private async reviewWorktreeClean(slotPath: string): Promise<DoneGateResult> {

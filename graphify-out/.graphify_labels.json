@@ -120,9 +120,16 @@
   "118": "StageProgressBar.tsx",
   "119": "AgentMessage",
   "120": "ProjectPanel.tsx",
+  "121": "VcsConnectionResult",
   "122": "createMcpServer",
   "123": "projectDisplay.ts",
   "124": "useSavedFlash.ts",
   "125": "useSuppressEscapeBeep.ts",
-  "128": "notionImport.ts"
+  "126": "TicketOperations",
+  "127": "TerminalSessionManager",
+  "128": "notionImport.ts",
+  "129": "terminalManager.ts",
+  "130": "prUrl.ts",
+  "131": ".handleMessage",
+  "132": "isProcessing"
 }

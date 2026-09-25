@@ -76,12 +76,12 @@ Tickets can run on **OpenAI Codex** instead of Claude (via `@openai/codex-sdk`):
 - An authenticated Codex session: run `codex login` once (active ChatGPT subscription), or export `CODEX_API_KEY`.
 - The `codex` binary resolves from `node_modules` in dev; the packaged app embeds it (Apache-2.0, redistributable — unlike `claude`). Override with `KANBAN_CODEX_BINARY`.
 
-## Claude Code skills (real mode)
+## Agent skills (real mode)
 
-Agent sessions rely on **Claude Code skills** installed locally (`~/.claude/skills/`). Most of the skills used here live in [skillzer](https://github.com/Antune-L/skillzer) — install them with `npx skills add`:
+Agent sessions rely on **host skills** installed locally for each provider: `~/.claude/skills/` for Claude, `$CODEX_HOME/skills` (default `~/.codex/skills`) or `~/.agents/skills/` for Codex. Most of the skills used here live in [skillzer](https://github.com/Antune-L/skillzer) — install them for both providers with `npx skills add`:
 
 ```bash
-npx skills add Antune-L/skillzer/skills/<skill-name>
+npx skills add Antune-L/skillzer/skills/<skill-name> -g -a claude-code,codex -y
 # … see skillzer/README.md for the full list
 ```
 

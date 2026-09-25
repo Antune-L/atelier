@@ -6,6 +6,8 @@ This file provides guidance to coding agents (Claude Code, Cursor, etc.) when wo
 
 Local single-user kanban where autonomous Claude or Codex sessions implement tickets end-to-end (optional PRD → isolated worktree → blocking review → local tests → draft PR). The PR host is per project (`vcsProvider`): GitHub via the `gh` CLI, Azure DevOps via `az` + the `azure-devops` extension, behind the `VcsClient` seam in `src/server/system/vcs/`. `AgentProvider` separates the Claude Agent SDK (`query()` with streaming input) from the Codex App Server. The backend owns the sessions, injects user turns, routes worker tools and verifies gates; it never reasons. Native subagents and isolated delegated review sessions perform the reasoning under the injected contract. tmux is used **only** for interactive worktree/user/test shells, never for agents.
 
+**Read [MEMORY.md](./MEMORY.md) before starting a task**: it holds durable lessons not derivable from the code (for example, every host integration must cover both Claude and Codex). Append new non-obvious lessons there.
+
 Runtime is **Bun** throughout (server, build, tests). **Documentation is English** — Markdown, code comments, CI step labels, example-config metadata, and the whole public MCP surface (`publicMcp.ts` / `ticketOperations.ts` — tool and schema descriptions plus the errors returned to clients), which is the API contract an external MCP client reads. Internal runtime strings are a separate axis and are still largely French (product UI under `src/web`, agent prompts under `src/server/agents`, log/error messages elsewhere in `src/server` and `desktop`); leave them alone unless a ticket asks for them — some are asserted verbatim by tests.
 
 ## Commands

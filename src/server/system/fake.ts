@@ -3,8 +3,8 @@ import { basename } from "node:path";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
-import { CODEX_MODELS, CODEX_EFFORTS } from "../../shared/constants.ts";
-import type { PrState, VcsProvider } from "../../shared/constants.ts";
+import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
+import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -53,6 +53,11 @@ function delay(ms: number): Promise<void> {
  * can be exercised end-to-end. tmux sessions are tracked in memory.
  */
 const FAKE_MISSING_SKILLS_ENV = "KANBAN_FAKE_MISSING_SKILLS";
+const FAKE_MISSING_PROVIDER_SEPARATOR = ":";
+
+function fakeMissingKey(name: string, provider: Orchestrator): string {
+  return `${name}${FAKE_MISSING_PROVIDER_SEPARATOR}${provider}`;
+}
 
 export class FakeSystemAdapter implements SystemAdapter {
   readonly dryRun = true;
@@ -385,9 +390,22 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async checkSkills(): Promise<SkillStatus[]> {
     // NOTE: same dry-run stance as checkClaudeAvailable: every skill reported installed, unless
-    // KANBAN_FAKE_MISSING_SKILLS (comma-separated names) simulates missing ones to exercise the UI.
-    const missing = new Set((process.env[FAKE_MISSING_SKILLS_ENV] ?? "").split(",").map((name) => name.trim()));
-    return SKILL_REQUIREMENTS.map((skill) => ({ ...skill, installed: !missing.has(skill.name) }));
+    // KANBAN_FAKE_MISSING_SKILLS simulates missing ones to exercise the UI. Comma-separated entries:
+    // `name` (missing on every provider) or `name:claude` / `name:codex` (missing on that provider only).
+    const missing = new Set(
+      (process.env[FAKE_MISSING_SKILLS_ENV] ?? "").split(",").flatMap((rawEntry) => {
+        const entry = rawEntry.trim();
+        if (entry.includes(FAKE_MISSING_PROVIDER_SEPARATOR)) return [entry];
+        return ORCHESTRATORS.map((provider) => fakeMissingKey(entry, provider));
+      }),
+    );
+    return SKILL_REQUIREMENTS.map((skill) => ({
+      ...skill,
+      installed: {
+        claude: !missing.has(fakeMissingKey(skill.name, "claude")),
+        codex: !missing.has(fakeMissingKey(skill.name, "codex")),
+      },
+    }));
   }
 
   async checkCodexRuntime(): Promise<CodexRuntimeStatus> {

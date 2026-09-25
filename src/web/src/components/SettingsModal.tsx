@@ -18,6 +18,7 @@ import {
   type CommitLanguage,
 } from "@shared/constants";
 import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
+import { availableSkillProviders } from "@shared/skills";
 
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
@@ -131,7 +132,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "skills",
     label: "Skills",
     group: "Connexions",
-    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "détection"],
+    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection"],
   },
   {
     id: "mcp",
@@ -576,17 +577,17 @@ function ProvidersSettings() {
   );
 }
 
-/** Host Claude Code skills detection, reachable after the preflight dialog was dismissed. */
+/** Host skills detection per provider, reachable after the preflight dialog was dismissed. */
 function SkillsSettings() {
-  const { skills } = useCapabilities();
+  const capabilities = useCapabilities();
 
   return (
     <div className="space-y-4">
       <SectionHeader
         title="Skills"
-        subtitle="Skills Claude Code détectés dans ~/.claude/skills et utilisés par les agents."
+        subtitle="Skills utilisés par les agents, détectés dans ~/.claude/skills pour Claude et dans ~/.codex/skills ou ~/.agents/skills pour Codex."
       />
-      <SkillsStatusList skills={skills} />
+      <SkillsStatusList skills={capabilities.skills} availableProviders={availableSkillProviders(capabilities)} />
     </div>
   );
 }

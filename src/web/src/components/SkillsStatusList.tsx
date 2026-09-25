@@ -1,7 +1,15 @@
 import { ArrowUpRight, RefreshCw } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { SKILL_TIERS, SKILLZER_REPO_URL, skillzerInstallCommand } from "@shared/skills";
+import { ORCHESTRATORS, ORCHESTRATOR_LABELS } from "@shared/constants";
+import type { Orchestrator } from "@shared/constants";
+import {
+  SKILL_TIERS,
+  SKILLZER_REPO_URL,
+  expectedSkillPaths,
+  missingSkillProviders,
+  skillzerInstallCommand,
+} from "@shared/skills";
 import type { SkillTier } from "@shared/skills";
 import type { SkillStatus } from "@shared/schemas";
 
@@ -23,6 +31,8 @@ const MISSING_DOT_CLASSES: Record<SkillTier, string> = {
 const INSTALLED_DOT_CLASS = "bg-success";
 const INSTALLED_LABEL = "installé";
 const MISSING_LABEL = "manquant";
+const UNAVAILABLE_HINT = "non configuré";
+const EXPECTED_PATHS_SEPARATOR = " ou ";
 const COMMENT_PREFIX = "#";
 
 type CopyOutcome = "copied" | "selected";
@@ -34,8 +44,8 @@ const COPY_LABELS: Record<CopyOutcome, string> = {
 
 const COPY_IDLE_LABEL = "Copier";
 
-function expectedSkillPath(name: string): string {
-  return `~/.claude/skills/${name}/SKILL.md`;
+function isFullyInstalled(skill: SkillStatus): boolean {
+  return missingSkillProviders(skill.installed).length === 0;
 }
 
 function installLine(skill: SkillStatus): string {
@@ -54,16 +64,23 @@ function selectContents(node: HTMLElement | null): void {
 
 interface SkillsStatusListProps {
   skills: SkillStatus[];
+  /** Providers detected on this Mac; the others are greyed out. Defaults to every provider. */
+  availableProviders?: readonly Orchestrator[];
 }
 
-/** Host skills grouped by tier with their detection state, plus install commands for the missing ones. */
-export function SkillsStatusList({ skills }: SkillsStatusListProps) {
-  const missing = skills.filter((skill) => !skill.installed);
+/** Host skills grouped by tier with their per-provider detection state, plus install commands for the missing ones. */
+export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS }: SkillsStatusListProps) {
+  const missing = skills.filter((skill) => !isFullyInstalled(skill));
 
   return (
     <div className="space-y-4">
       {SKILL_TIERS.map((tier) => (
-        <SkillTierGroup key={tier} tier={tier} skills={skills.filter((skill) => skill.tier === tier)} />
+        <SkillTierGroup
+          key={tier}
+          tier={tier}
+          skills={skills.filter((skill) => skill.tier === tier)}
+          availableProviders={availableProviders}
+        />
       ))}
       {missing.length > 0 && <InstallBlock missing={missing} />}
       <SkillsActions />
@@ -71,9 +88,15 @@ export function SkillsStatusList({ skills }: SkillsStatusListProps) {
   );
 }
 
-function SkillTierGroup({ tier, skills }: { tier: SkillTier; skills: SkillStatus[] }) {
+interface SkillTierGroupProps {
+  tier: SkillTier;
+  skills: SkillStatus[];
+  availableProviders: readonly Orchestrator[];
+}
+
+function SkillTierGroup({ tier, skills, availableProviders }: SkillTierGroupProps) {
   if (skills.length === 0) return null;
-  const installedCount = skills.filter((skill) => skill.installed).length;
+  const installedCount = skills.filter(isFullyInstalled).length;
 
   return (
     <section className="space-y-1.5">
@@ -85,31 +108,62 @@ function SkillTierGroup({ tier, skills }: { tier: SkillTier; skills: SkillStatus
       </div>
       <ul className="divide-y rounded-md border">
         {skills.map((skill) => (
-          <SkillRow key={skill.name} skill={skill} />
+          <SkillRow key={skill.name} skill={skill} availableProviders={availableProviders} />
         ))}
       </ul>
     </section>
   );
 }
 
-function SkillRow({ skill }: { skill: SkillStatus }) {
-  const dotClass = skill.installed ? INSTALLED_DOT_CLASS : MISSING_DOT_CLASSES[skill.tier];
+interface SkillRowProps {
+  skill: SkillStatus;
+  availableProviders: readonly Orchestrator[];
+}
+
+function SkillRow({ skill, availableProviders }: SkillRowProps) {
+  return (
+    <li className="px-3 py-2">
+      <p className="font-mono text-sm">{skill.name}</p>
+      <p className="text-xs text-muted-foreground">{skill.purpose}</p>
+      <ul className="mt-1 space-y-0.5">
+        {ORCHESTRATORS.map((provider) => (
+          <ProviderStatus
+            key={provider}
+            skill={skill}
+            provider={provider}
+            available={availableProviders.includes(provider)}
+          />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+interface ProviderStatusProps {
+  skill: SkillStatus;
+  provider: Orchestrator;
+  available: boolean;
+}
+
+function ProviderStatus({ skill, provider, available }: ProviderStatusProps) {
+  const installed = skill.installed[provider];
+  const dotClass = installed ? INSTALLED_DOT_CLASS : MISSING_DOT_CLASSES[skill.tier];
 
   return (
-    <li className="flex items-start gap-3 px-3 py-2">
-      <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", dotClass)} aria-hidden />
-      <div className="min-w-0 flex-1">
-        <p className="font-mono text-sm">{skill.name}</p>
-        <p className="text-xs text-muted-foreground">{skill.purpose}</p>
-        {!skill.installed && (
-          <p className="font-mono text-2xs text-muted-foreground">
-            attendu : {expectedSkillPath(skill.name)}
-          </p>
-        )}
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {skill.installed ? INSTALLED_LABEL : MISSING_LABEL}
+    <li className={cn("text-2xs text-muted-foreground", !available && "opacity-50")}>
+      <span className="flex items-center gap-1.5">
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} aria-hidden />
+        <span className="text-foreground">{ORCHESTRATOR_LABELS[provider]}</span>
+        <span>
+          {installed ? INSTALLED_LABEL : MISSING_LABEL}
+          {!available && ` · ${UNAVAILABLE_HINT}`}
+        </span>
       </span>
+      {!installed && available && (
+        <span className="block pl-3 font-mono">
+          attendu : {expectedSkillPaths(skill.name, provider).join(EXPECTED_PATHS_SEPARATOR)}
+        </span>
+      )}
     </li>
   );
 }

@@ -880,12 +880,13 @@ export type TerminalOutput = z.infer<typeof terminalOutputSchema>;
 export const uploadResultSchema = z.object({ path: z.string(), url: z.string() });
 export type UploadResult = z.infer<typeof uploadResultSchema>;
 
-/** Detection result for one host skill (`~/.claude/skills/<name>/SKILL.md`). */
+/** Detection result for one host skill, per agent provider (see HOST_SKILL_ROOTS). */
 export const skillStatusSchema = z.object({
   name: z.string(),
   tier: z.enum(SKILL_TIERS),
   purpose: z.string(),
-  installed: z.boolean(),
+  /** `<name>/SKILL.md` exists in at least one of the provider's host skill roots. */
+  installed: z.object({ claude: z.boolean(), codex: z.boolean() }),
   /** Non-null when the skill is not published in skillzer: how to get it instead. */
   installHint: z.string().nullable(),
 });
@@ -901,7 +902,7 @@ export const capabilitiesSchema = z.object({
   claudeAvailable: z.boolean(),
   /** Refreshable authentication and model catalog returned by the Codex runtime. */
   codex: codexRuntimeStatusSchema,
-  /** Host Claude Code skills the pipeline depends on, with their detection status. */
+  /** Host skills the pipeline depends on, with their detection status per provider (Claude and Codex). */
   skills: z.array(skillStatusSchema),
   /** Orchestrator model used when a ticket leaves it unset (raw config value, e.g. "opus"). */
   defaultModel: z.string(),

@@ -1,6 +1,9 @@
 import { useState } from "react";
 
+import { ORCHESTRATOR_LABELS } from "@shared/constants";
+import type { Orchestrator } from "@shared/constants";
 import type { SkillStatus } from "@shared/schemas";
+import { availableSkillProviders, missingSkillProviders } from "@shared/skills";
 
 import { SkillsStatusList } from "@/components/SkillsStatusList";
 import { Button } from "@/components/ui/button";
@@ -9,6 +12,13 @@ import { Switch } from "@/components/ui/switch";
 import { useCapabilities } from "@/hooks/useCapabilities";
 
 const DISMISSED_STORAGE_KEY = "skills-preflight-dismissed";
+const SIGNATURE_PAIR_SEPARATOR = ":";
+const PROVIDER_LIST_SEPARATOR = " et ";
+
+interface MissingSkill {
+  skill: SkillStatus;
+  providers: Orchestrator[];
+}
 
 interface PreflightCopy {
   title: string;
@@ -31,26 +41,30 @@ function writeDismissedSignature(signature: string): void {
   }
 }
 
-/** Identifies the set of missing skills, so a newly missing skill shows the dialog again. */
-function missingSignature(missing: SkillStatus[]): string {
+/** Identifies the missing name+provider pairs, so a skill newly missing on any provider shows the dialog again. */
+function missingSignature(missing: MissingSkill[]): string {
   return missing
-    .map((skill) => skill.name)
+    .flatMap(({ skill, providers }) => providers.map((provider) => `${skill.name}${SIGNATURE_PAIR_SEPARATOR}${provider}`))
     .sort()
     .join(",");
 }
 
-function preflightCopy(missing: SkillStatus[]): PreflightCopy {
-  const missingRequired = missing.filter((skill) => skill.tier === "required").length;
-  if (missingRequired === 0) {
+function providerList(missing: MissingSkill[]): string {
+  const providers = new Set(missing.flatMap((entry) => entry.providers));
+  return [...providers].map((provider) => ORCHESTRATOR_LABELS[provider]).join(PROVIDER_LIST_SEPARATOR);
+}
+
+function preflightCopy(missing: MissingSkill[]): PreflightCopy {
+  const missingRequired = missing.filter((entry) => entry.skill.tier === "required");
+  if (missingRequired.length === 0) {
     return {
       title: "Skills recommandés absents",
-      description:
-        "Le pipeline fonctionne, mais ton CLAUDE.md global cite des skills introuvables : les agents les ignoreront. Ils sont disponibles sur skillzer.",
+      description: `Le pipeline fonctionne, mais tes instructions globales citent des skills introuvables pour ${providerList(missing)} : les agents les ignoreront. Ils sont disponibles sur skillzer.`,
     };
   }
-  const plural = missingRequired > 1 ? "s" : "";
+  const plural = missingRequired.length > 1 ? "s" : "";
   return {
-    title: `${missingRequired} skill${plural} requis manquant${plural} sur ce Mac`,
+    title: `${missingRequired.length} skill${plural} requis manquant${plural} pour ${providerList(missingRequired)}`,
     description:
       "Les agents ne pourront pas exécuter certaines étapes du pipeline (review, régression) : l'app fonctionnera moins bien. Installe-les depuis skillzer.",
   };
@@ -61,14 +75,18 @@ interface SkillsPreflightDialogProps {
   suppressed: boolean;
 }
 
-/** Warns once per session when host Claude Code skills the pipeline relies on are missing. */
+/** Warns once per session when host skills the pipeline relies on are missing for a provider detected on this Mac. */
 export function SkillsPreflightDialog({ suppressed }: SkillsPreflightDialogProps) {
-  const { skills } = useCapabilities();
+  const capabilities = useCapabilities();
+  const { skills } = capabilities;
+  const availableProviders = availableSkillProviders(capabilities);
   const [dismissedSignature] = useState(readDismissedSignature);
   const [closed, setClosed] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
 
-  const missing = skills.filter((skill) => !skill.installed);
+  const missing = skills
+    .map((skill) => ({ skill, providers: missingSkillProviders(skill.installed, availableProviders) }))
+    .filter((entry) => entry.providers.length > 0);
   const signature = missingSignature(missing);
   const open = !suppressed && !closed && missing.length > 0 && signature !== dismissedSignature;
 
@@ -100,7 +118,7 @@ export function SkillsPreflightDialog({ suppressed }: SkillsPreflightDialogProps
         </div>
       }
     >
-      <SkillsStatusList skills={skills} />
+      <SkillsStatusList skills={skills} availableProviders={availableProviders} />
     </Dialog>
   );
 }

@@ -11,7 +11,7 @@ import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/const
 import type { PrState, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
-import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
+import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
@@ -62,8 +62,11 @@ import type { VcsClient } from "./vcs/types.ts";
 const log = createLogger("system");
 
 const CLAUDE_JSON_PATH = join(homedir(), ".claude.json");
-const CLAUDE_SKILLS_DIR = join(homedir(), ".claude", "skills");
-const SKILL_MANIFEST_FILE = "SKILL.md";
+const SKILLS_DIR_NAME = "skills";
+const CLAUDE_SKILLS_DIR = join(homedir(), ".claude", SKILLS_DIR_NAME);
+const CODEX_HOME_ENV = "CODEX_HOME";
+const DEFAULT_CODEX_HOME = join(homedir(), ".codex");
+const AGENTS_SKILLS_DIR = join(homedir(), ".agents", SKILLS_DIR_NAME);
 const PROD_ENV_MARKER = "prod";
 /** Bound the synchronous one-shot reformulation SDK query (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
@@ -1011,9 +1014,15 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async checkSkills(): Promise<SkillStatus[]> {
+    const codexHome = process.env[CODEX_HOME_ENV] || DEFAULT_CODEX_HOME;
+    const codexRoots = [join(codexHome, SKILLS_DIR_NAME), AGENTS_SKILLS_DIR];
+    const hasManifest = (root: string, name: string): boolean => existsSync(join(root, name, SKILL_MANIFEST_FILE));
     return SKILL_REQUIREMENTS.map((skill) => ({
       ...skill,
-      installed: existsSync(join(CLAUDE_SKILLS_DIR, skill.name, SKILL_MANIFEST_FILE)),
+      installed: {
+        claude: hasManifest(CLAUDE_SKILLS_DIR, skill.name),
+        codex: codexRoots.some((root) => hasManifest(root, skill.name)),
+      },
     }));
   }
 

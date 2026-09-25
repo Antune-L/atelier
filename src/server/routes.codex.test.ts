@@ -19,7 +19,6 @@ import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { FakeSystemAdapter } from "./system/fake.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
-import { UserTerminalManager } from "./userTerminalManager.ts";
 
 class ActionSystem extends FakeSystemAdapter {
   calls: ReformulateOptions[] = [];
@@ -59,7 +58,7 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator,
     reformulate: new ReformulateManager(store, system, hub, notifier),
     automations: new AutomationManager(store, system, hub),
-    userTerminals: new UserTerminalManager(system), projectRoot: "/tmp", composerAvailable: true,
+    projectRoot: "/tmp", composerAvailable: true,
   });
   const post = (path: string, body: unknown) => app.handle(new Request(`http://localhost/api${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),

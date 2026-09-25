@@ -1,22 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
+import { ATELIER_SHORTCUT_EVENT, isShortcutDetail } from "@/hooks/desktopShortcut";
 import { useCaptureEscape } from "@/hooks/useCaptureEscape";
-import { ATELIER_SHORTCUT_EVENT } from "@/hooks/useTerminalShortcuts";
 
 const HIGHLIGHT_MATCH = "prd-search-match";
 const HIGHLIGHT_ACTIVE = "prd-search-active";
 const SHORTCUT_KEY = "f";
-
-interface ShortcutDetail {
-  key: string;
-  shiftKey?: boolean;
-}
-
-function isShortcutDetail(value: unknown): value is ShortcutDetail {
-  if (!value || typeof value !== "object") return false;
-  if (!("key" in value) || typeof value.key !== "string") return false;
-  return true;
-}
 
 function supportsHighlightApi(): boolean {
   return typeof CSS !== "undefined" && "highlights" in CSS && typeof Highlight !== "undefined";

@@ -19,7 +19,6 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultCodexEffort: "",
   defaultCodexFast: false,
   canUpdate: false,
-  canQuit: false,
   canPickFolder: false,
 };
 

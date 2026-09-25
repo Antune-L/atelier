@@ -525,9 +525,9 @@ export class RealSystemAdapter implements SystemAdapter {
 
   /** Shared spawn for the detached read-only worker-channel sessions (triage + batch feasibility). */
   async spawnShellSession(opts: SpawnShellOptions): Promise<void> {
-    // Reclaim a zombie of this name first: user-terminal sessions survive a backend restart (PRD §7),
-    // but `nextId` resets to 1 each process, so the derived name can collide with an orphan — without
-    // this `new-session` would fail and the POST would throw. Killing it (nothrow) is a no-op when absent.
+    // Reclaim a zombie of this name first: tmux shell sessions survive a backend restart, so the name
+    // can collide with an orphan — without this `new-session` would fail and the spawn would throw.
+    // Killing it (nothrow) is a no-op when absent.
     const startupDirectory = await prepareProjectShell(opts.cwd);
     await this.killSession(opts.sessionName);
     if (startupDirectory) this.shellStartupDirectories.set(opts.sessionName, startupDirectory);

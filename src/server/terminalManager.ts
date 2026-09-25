@@ -10,13 +10,11 @@ import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
 import type { SystemAdapter } from "./system/index.ts";
 import type { PaneStream } from "./system/types.ts";
-import type { UserTerminalManager } from "./userTerminalManager.ts";
 
 export interface TerminalSocketData {
   kind: "terminal";
-  /** Exactly one of these addresses the pane: an agent ticket, or a user terminal. */
+  /** Exactly one of these addresses the pane: an agent ticket, or a standalone worktree-session slot. */
   ticketId?: string;
-  terminalId?: string;
   /** A standalone worktree session's slot; resolves to that slot's tmux shell session. */
   slotId?: number;
   /**
@@ -220,8 +218,8 @@ class TerminalSession {
 }
 
 /**
- * Routes the `/ws/terminal` channel: resolves each viewer's address (an agent ticket or a user
- * terminal) to its tmux session, groups viewers into per-session TerminalSessions, and forwards
+ * Routes the `/ws/terminal` channel: resolves each viewer's address (an agent ticket or a
+ * worktree-session slot) to its tmux session, groups viewers into per-session TerminalSessions, and forwards
  * input/resize to tmux.
  */
 export class TerminalSessionManager {
@@ -232,7 +230,6 @@ export class TerminalSessionManager {
     private readonly system: SystemAdapter,
     private readonly triage: TriageManager,
     private readonly feasibility: FeasibilityBatchManager,
-    private readonly userTerminals: UserTerminalManager,
   ) {}
 
   async handleOpen(ws: TerminalSocket): Promise<void> {
@@ -246,13 +243,11 @@ export class TerminalSessionManager {
     // ticket's slot is reassigned mid-connection (see TerminalSocketData.resolvedSessionName).
     ws.data.resolvedSessionName = sessionName;
     // An agent pane is a full-screen TUI whose scrollback stacks duplicate frames on resize, so seed
-    // from the visible frame only; a user terminal — and a test session, which is a plain interactive
-    // shell (no Claude) — replays past commands on reopen and never reprints on reflow. terminalId
-    // addresses a user terminal; a standalone worktree-session slotId addresses its shell pane; a
-    // `testing` ticket addresses a shell pane; any other ticketId an agent.
+    // from the visible frame only; a shell pane (a plain interactive shell, no Claude) replays past
+    // commands on reopen and never reprints on reflow. A standalone worktree-session slotId addresses
+    // its shell pane; a `testing` ticket addresses a shell pane; any other ticketId an agent.
     const ticket = ws.data.ticketId !== undefined ? this.store.getTicket(ws.data.ticketId) : undefined;
-    const isShellPane =
-      ws.data.terminalId !== undefined || ws.data.slotId !== undefined || ticket?.testing === true;
+    const isShellPane = ws.data.slotId !== undefined || ticket?.testing === true;
     const seedHistoryLines = isShellPane ? TERMINAL_SEED_HISTORY_LINES : 0;
     // Only an agent pane reprints on reflow, and only when the size actually changes. attach() owns the
     // reflow so that, on the reprint path, the live stream is attached before the resize (see attach()).
@@ -302,9 +297,8 @@ export class TerminalSessionManager {
     }
   }
 
-  /** Resolve a viewer's address (ticket or user terminal) to its live tmux session, or null. */
+  /** Resolve a viewer's address (ticket or worktree-session slot) to its live tmux session, or null. */
   private resolveSession(data: TerminalSocketData): string | null {
-    if (data.terminalId !== undefined) return this.userTerminals.resolveSession(data.terminalId);
     if (data.slotId !== undefined) return this.store.getSlot(data.slotId)?.tmuxSession ?? null;
     if (data.ticketId === undefined) return null;
     return this.resolveTicketSession(data.ticketId);

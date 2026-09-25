@@ -43,7 +43,6 @@ import { createSystemAdapter } from "./system/index.ts";
 import { createTicketOperations } from "./ticketOperations.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
-import { UserTerminalManager } from "./userTerminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
 import { WorkerMcpManager } from "./workerMcp.ts";
 
@@ -92,8 +91,6 @@ export interface StartServerOptions {
   repoRoot?: string;
   /** Tear down the server (preserving tmux jobs) and relaunch the app (desktop dev only). */
   onRequestUpdate?: () => void;
-  /** Tear down tmux sessions + server and quit the desktop app. */
-  onRequestQuit?: () => void;
   /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
   onPickFolder?: () => Promise<string | null>;
 }
@@ -109,7 +106,7 @@ export interface RunningServer {
 
 type SocketData =
   | { kind: "client" }
-  | { kind: "terminal"; ticketId?: string; terminalId?: string; slotId?: number; cols: number; rows: number };
+  | { kind: "terminal"; ticketId?: string; slotId?: number; cols: number; rows: number };
 
 function isClientSocket(ws: { data: SocketData }): ws is ClientSocket {
   return ws.data.kind === "client";
@@ -237,14 +234,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
   const splitManager = new SplitManager(store, system, sessionHub);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
-  const userTerminals = new UserTerminalManager(system);
-  const terminalManager = new TerminalSessionManager(
-    store,
-    system,
-    triageManager,
-    feasibilityManager,
-    userTerminals,
-  );
+  const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const repoMutex = new KeyedMutex();
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
@@ -310,12 +300,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     split: splitManager,
     reformulate: reformulateManager,
     automations: automationManager,
-    userTerminals,
     projectRoot: dataRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
     onRequestUpdate: opts.onRequestUpdate,
-    onRequestQuit: opts.onRequestQuit,
     pickFolder: opts.onPickFolder,
   });
 
@@ -357,14 +345,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return new Response("upgrade failed", { status: 426 });
       }
       if (url.pathname === WS_PATH_TERMINAL) {
-        // Exactly one addressing param: an agent ticket pane, a user terminal, or a worktree-session slot.
+        // Exactly one addressing param: an agent ticket pane or a worktree-session slot.
         const ticketId = url.searchParams.get("ticketId") ?? undefined;
-        const terminalId = url.searchParams.get("terminalId") ?? undefined;
         const rawSlotId = url.searchParams.get("slotId");
         const parsedSlotId = rawSlotId === null ? Number.NaN : Number(rawSlotId);
         const slotId = Number.isInteger(parsedSlotId) ? parsedSlotId : undefined;
-        if (!ticketId && !terminalId && slotId === undefined) {
-          return new Response("ticketId, terminalId ou slotId requis", { status: 400 });
+        if (!ticketId && slotId === undefined) {
+          return new Response("ticketId ou slotId requis", { status: 400 });
         }
         // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
         const viewport = terminalViewportSchema.safeParse({
@@ -374,7 +361,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         const { cols, rows } = viewport.success
           ? viewport.data
           : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
-        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, terminalId, slotId, cols, rows } })) {
+        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, slotId, cols, rows } })) {
           return undefined;
         }
         return new Response("upgrade failed", { status: 426 });

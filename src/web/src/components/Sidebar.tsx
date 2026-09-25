@@ -4,14 +4,13 @@ import {
   LayoutGrid,
   RefreshCw,
   Settings,
-  SquareTerminal,
   Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "terminals" | "stats" | "prd" | "automation";
+export type SidebarView = "home" | "stats" | "prd" | "automation";
 
 interface SidebarProps {
   view: SidebarView;
@@ -30,7 +29,6 @@ interface NavEntry {
 
 const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Home", Icon: LayoutGrid },
-  { value: "terminals", label: "Terminal", Icon: SquareTerminal },
   { value: "stats", label: "Stats", Icon: BarChart3 },
   { value: "prd", label: "PRD", Icon: FileText },
   { value: "automation", label: "Automation", Icon: Zap },
@@ -43,7 +41,7 @@ const ITEM_INACTIVE =
 const ITEM_ACTIVE =
   "bg-accent text-foreground shadow-[inset_2px_0_0_hsl(var(--info))]";
 
-/** Permanent icon rail: Home / Terminal / Stats / PRD / Automation, Settings pinned at the bottom. */
+/** Permanent icon rail: Home / Stats / PRD / Automation, Settings pinned at the bottom. */
 export function Sidebar({
   view,
   onSelect,

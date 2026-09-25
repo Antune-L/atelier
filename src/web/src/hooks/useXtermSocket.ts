@@ -58,20 +58,19 @@ export function terminalWsUrl(params: Record<string, string>, cols: number, rows
 }
 
 export interface UseXtermSocketOptions {
-  /** Re-mounts the xterm/socket when this changes (the pane address: ticketId or terminalId). */
+  /** Re-mounts the xterm/socket when this changes (the pane address: ticketId or slotId). */
   target: string;
   /** Build the WS URL for the current viewport; called on every (re)connect. */
   buildWsUrl: (cols: number, rows: number) => string;
   /**
    * Whether keystrokes are forwarded. Read live inside the onData handler so toggling it never
-   * remounts the terminal. TerminalCell passes a ref that is always true (interactive); LiveTerminal
-   * passes its read-only-toggle ref (off by default).
+   * remounts the terminal. LiveTerminal passes its read-only-toggle ref (off by default).
    */
   inputEnabledRef: RefObject<boolean>;
   /**
    * Whether the session is expected to be running. A live frame resets the retry budget either way;
    * when not live, a dropped/exited stream settles immediately on "session terminée" instead of
-   * retrying (LiveTerminal's queued → setup window). TerminalCell is always live (true).
+   * retrying (LiveTerminal's queued → setup window).
    */
   liveRef: RefObject<boolean>;
 }
@@ -87,8 +86,8 @@ export interface UseXtermSocket {
  * Owns the xterm.js lifecycle for a `/ws/terminal` pane: opens the terminal, connects (deferring to
  * the first real container size so the very first frame has correct geometry), reconnects on a
  * dropped/seeding stream within a bounded budget, relays input/resize, and settles `exited` once the
- * pane is genuinely gone. Shared by LiveTerminal (read-only agent pane) and TerminalCell (interactive
- * user terminal); the two differences are parameterized via `buildWsUrl` and `inputEnabledRef`.
+ * pane is genuinely gone. Used by LiveTerminal for agent panes and worktree/test shell panes; the
+ * address and input policy are parameterized via `buildWsUrl` and `inputEnabledRef`.
  */
 export function useXtermSocket({
   target,
@@ -216,8 +215,8 @@ export function useXtermSocket({
     const observer = new ResizeObserver(() => {
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
       if (!socket) {
-        // Debounce the first connect: a split remounts the cell while react-resizable-panels
-        // reflows, so the first observation is often stale. Wait for dimensions to stabilize.
+        // Debounce the first connect: the container often reflows right after mount, so the first
+        // observation is often stale. Wait for dimensions to stabilize.
         if (initialConnectTimer) clearTimeout(initialConnectTimer);
         initialConnectTimer = setTimeout(() => {
           initialConnectTimer = null;

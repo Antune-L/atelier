@@ -21,7 +21,6 @@ import type {
   ProjectInfo,
   StartWorktreeSessionBody,
   StatRecord,
-  TerminalDescriptor,
   TerminalOutput,
   Ticket,
   UpdateAppSettingsInput,
@@ -148,7 +147,6 @@ export const api = {
     request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),
-  quitApp: (): Promise<{ ok: boolean }> => request("/api/internal/quit", { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
@@ -176,12 +174,6 @@ export const api = {
     if (cursor) query.set("cursor", cursor);
     return request(`/api/tickets/${id}/terminal?${query}`, { signal });
   },
-  listTerminals: (projectKey?: string): Promise<TerminalDescriptor[]> =>
-    request(`/api/terminals${projectKey ? `?projectKey=${encodeURIComponent(projectKey)}` : ""}`),
-  createTerminal: (projectKey: string): Promise<TerminalDescriptor> =>
-    request("/api/terminals", { method: "POST", body: JSON.stringify({ projectKey }) }),
-  deleteTerminal: (id: string): Promise<{ ok: boolean }> =>
-    request(`/api/terminals/${id}`, { method: "DELETE" }),
   startWorktreeSession: (input: StartWorktreeSessionBody): Promise<{ started: boolean }> =>
     request("/api/worktree-sessions", { method: "POST", body: JSON.stringify(input) }),
   listWorktreeSessions: (): Promise<WorktreeSession[]> => request("/api/worktree-sessions"),

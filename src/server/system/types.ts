@@ -140,7 +140,7 @@ export interface ReviewDoneOptions {
   requirePushedBranch: string | null;
 }
 
-/** A free interactive login-shell session for the user terminals (CMUX) view. */
+/** A free interactive login-shell session for a worktree or test shell pane. */
 export interface SpawnShellOptions {
   sessionName: string;
   cwd: string;
@@ -204,7 +204,7 @@ export interface SystemAdapter {
   importNotion(opts: ImportNotionOptions): Promise<string>;
   /** One-shot Agent SDK query for a background automation: runs the free-text prompt from cwd (~/), full toolset, and returns its final text. Throws on timeout/error. */
   runAutomation(opts: RunAutomationOptions): Promise<string>;
-  /** Spawn a detached interactive login-shell (zsh) session rooted at cwd for a user terminal. */
+  /** Spawn a detached interactive login-shell (zsh) session rooted at cwd for a worktree or test shell. */
   spawnShellSession(opts: SpawnShellOptions): Promise<void>;
   killSession(sessionName: string): Promise<void>;
   hasSession(sessionName: string): Promise<boolean>;

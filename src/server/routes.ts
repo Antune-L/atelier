@@ -16,7 +16,6 @@ import {
   createProfileSchema,
   createProjectSchema,
   createReviewSchema,
-  createTerminalBodySchema,
   createTicketSchema,
   deriveTitleFromDescription,
   generatePrdSchema,
@@ -54,7 +53,6 @@ import { buildPrdPrompt } from "./agents/prd.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { saveUpload } from "./uploads.ts";
-import type { UserTerminalManager } from "./userTerminalManager.ts";
 import {
   createTicketOperations,
   ticketDependencyError,
@@ -100,7 +98,6 @@ interface RouteDeps {
   split: SplitManager;
   reformulate: ReformulateManager;
   automations: AutomationManager;
-  userTerminals: UserTerminalManager;
   projectRoot: string;
   /** Probed once at boot: is the Cursor headless CLI (Composer driver) usable? */
   composerAvailable: boolean;
@@ -108,8 +105,6 @@ interface RouteDeps {
   repoRoot?: string;
   /** Tear down the server (not tmux) and relaunch the desktop app. Set only in dev desktop. */
   onRequestUpdate?: () => void;
-  /** Tear down tmux sessions + server and quit the desktop app. */
-  onRequestQuit?: () => void;
   /** Native folder picker (desktop only); resolves to the picked path or null when cancelled. */
   pickFolder?: () => Promise<string | null>;
 }
@@ -623,7 +618,6 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultCodexEffort: MODELS.codexEffort,
         defaultCodexFast: MODELS.codexFast,
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
-        canQuit: deps.onRequestQuit != null,
         canPickFolder: deps.pickFolder != null,
       };
     })
@@ -1262,23 +1256,6 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       return { output: deps.sessionHub.getTranscript(transcriptId), phase };
     })
-    .get("/terminals", async ({ query }) => {
-      const projectKey = typeof query.projectKey === "string" ? query.projectKey : undefined;
-      return deps.userTerminals.list(projectKey);
-    })
-    .post("/terminals", async ({ body, set }) => {
-      const parsed = createTerminalBodySchema.safeParse(body);
-      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      if (!isProjectKey(parsed.data.projectKey)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
-      const descriptor = await deps.userTerminals.create(parsed.data.projectKey);
-      set.status = HTTP_CREATED;
-      return descriptor;
-    })
-    .delete("/terminals/:id", async ({ params }) => {
-      // Idempotent: closing an unknown/already-dead terminal is a no-op.
-      await deps.userTerminals.close(params.id);
-      return { ok: true };
-    })
     .get("/worktree-sessions", () => slots.listWorktreeSessions())
     .post("/worktree-sessions", ({ body, set }) => {
       const parsed = startWorktreeSessionBodySchema.safeParse(body);
@@ -1362,11 +1339,5 @@ export function createApiRoutes(deps: RouteDeps) {
       // Defer so this {ok:true} flushes before the server stops and the process exits.
       setTimeout(onRequestUpdate, UPDATE_RELAUNCH_DELAY_MS);
       return { ok: true, mode };
-    })
-    .post("/internal/quit", ({ set }) => {
-      const { onRequestQuit } = deps;
-      if (!onRequestQuit) return jsonError(set, HTTP_CONFLICT, "quitter indisponible");
-      setTimeout(onRequestQuit, UPDATE_RELAUNCH_DELAY_MS);
-      return { ok: true };
     });
 }

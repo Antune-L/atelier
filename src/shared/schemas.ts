@@ -887,8 +887,6 @@ export const capabilitiesSchema = z.object({
   defaultCodexFast: z.boolean(),
   /** Dev desktop only: the in-app self-update (git pull + rebuild + relaunch) is wired. */
   canUpdate: z.boolean(),
-  /** Desktop app: quit via ⌘W×2 is wired (POST /api/internal/quit). */
-  canQuit: z.boolean(),
   /** Desktop app: the native folder picker (POST /api/native/pick-folder) is wired. */
   canPickFolder: z.boolean(),
 });
@@ -1077,24 +1075,6 @@ export const terminalServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("exit") }),
 ]);
 export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;
-
-/**
- * A user-owned interactive terminal session (CMUX view): a detached zsh tmux session rooted at the
- * project's repoPath. `sessionName` and `cwd` are server-only knowledge surfaced for display; the
- * client only ever addresses the opaque `id` (the WS stream resolves it back to a session name).
- */
-export const terminalDescriptorSchema = z.object({
-  id: z.string(),
-  projectKey: projectKeySchema,
-  sessionName: z.string(),
-  cwd: z.string(),
-  createdAt: z.number(),
-});
-export type TerminalDescriptor = z.infer<typeof terminalDescriptorSchema>;
-
-/** browser → backend: open a new user terminal in the given project (cwd resolved server-side). */
-export const createTerminalBodySchema = z.object({ projectKey: projectKeySchema });
-export type CreateTerminalBody = z.infer<typeof createTerminalBodySchema>;
 
 /** In-app self-update outcome: reload the webview in place (frontend-only diff) or relaunch the process. */
 export const updateModeSchema = z.enum(["reload", "relaunch"]);

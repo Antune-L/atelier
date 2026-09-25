@@ -14,7 +14,6 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SlotPips } from "@/components/SlotPips";
 import { StatsView } from "@/components/StatsView";
-import { TerminalsView } from "@/components/TerminalsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
 import { WorkflowView } from "@/components/WorkflowView";
@@ -138,7 +137,6 @@ export function App() {
   };
 
   const renderView = (): ReactNode => {
-    if (view === "terminals") return <TerminalsView projects={projects} projectFilter={effectiveFilter} />;
     if (view === "stats") return <StatsView projects={projects} />;
     if (view === "automation") return <AutomationView />;
     return renderHome();

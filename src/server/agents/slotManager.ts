@@ -137,6 +137,7 @@ export class SlotManager {
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
+  private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
   /** Watches each active worktree session's `.wt-offset` to re-push addresses once the dev server writes it. */
   private readonly watcher = new WorktreeAddressWatcher(() =>
     this.hub.pushWorktreeSessions(this.store.listWorktreeSessions()),
@@ -180,6 +181,10 @@ export class SlotManager {
     repoMutex = new KeyedMutex(),
   ) {
     this.repoMutex = repoMutex;
+  }
+
+  setDelegationDrain(drain: (ticketId: string) => Promise<void>): void {
+    this.delegationDrain = drain;
   }
 
   /** Entry point when a ticket is dragged into "À implémenter". */
@@ -1243,6 +1248,7 @@ export class SlotManager {
     this.clearPhase(ticket.id);
     // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
     this.sessionHub.disconnect(ticket.id, executionStatus);
+    await this.delegationDrain?.(ticket.id);
     if (slot?.tmuxSession) await this.system.killSession(slot.tmuxSession);
     if (!isProjectKey(ticket.project)) return;
     const project = getProject(ticket.project);
@@ -1525,6 +1531,7 @@ export class SlotManager {
 
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
     this.sessionHub.disconnect(ticketId);
+    await this.delegationDrain?.(ticketId);
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     this.startAgentSession(ticket, slotId, path, { resume: true });
     this.setPhase(ticketId, SETUP_PHASES.waiting);

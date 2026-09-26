@@ -71,7 +71,9 @@ Needs the real-mode prerequisites above (`tmux`, the authenticated provider CLI 
 
 ### Codex agents (optional)
 
-Tickets can run on **OpenAI Codex** instead of Claude (via `@openai/codex-sdk`): Codex is available as an orchestrator (it then implements itself) and as an implementer delegated to by a Claude orchestrator. A built-in **Codex** profile preset ships with the app. Requirements when a ticket uses Codex:
+Tickets can run on **OpenAI Codex** instead of Claude (via `@openai/codex-sdk`): Codex is available as an orchestrator and as an implementer delegated to by a Claude orchestrator. A built-in **Codex** profile preset ships with the app.
+
+For both Claude and Codex implementers, the orchestrator starts backend-owned child lots with `delegate_implementation`. Declared file scopes run in separate worktrees and are checked before integration into the ticket worktree. A lot without `files` uses the shared ticket worktree exclusively while it runs. Composer follows its separate script path. Requirements when a ticket uses Codex:
 
 - An authenticated Codex session: run `codex login` once (active ChatGPT subscription), or export `CODEX_API_KEY`.
 - The `codex` binary resolves from `node_modules` in dev; the packaged app embeds it (Apache-2.0, redistributable — unlike `claude`). Override with `KANBAN_CODEX_BINARY`.

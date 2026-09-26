@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { homedir } from "node:os";
+import { basename, join } from "node:path";
 
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
@@ -12,6 +13,7 @@ import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  ImplementationLotOptions,
   ImportNotionOptions,
   PaneSize,
   PaneStream,
@@ -57,6 +59,8 @@ function delay(ms: number): Promise<void> {
  */
 const FAKE_MISSING_SKILLS_ENV = "KANBAN_FAKE_MISSING_SKILLS";
 const FAKE_MISSING_PROVIDER_SEPARATOR = ":";
+const CODEX_HOME_ENV = "CODEX_HOME";
+const SKILLS_DIR_NAME = "skills";
 
 function fakeMissingKey(name: string, provider: Orchestrator): string {
   return `${name}${FAKE_MISSING_PROVIDER_SEPARATOR}${provider}`;
@@ -90,6 +94,23 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
     this.log("worktreeRemove", { repoPath, slotPath });
+  }
+
+  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+    this.log("prepareImplementationLot", { ...opts });
+    return { cwd: opts.slotPath };
+  }
+
+  async finishImplementationLot(opts: ImplementationLotOptions): Promise<void> {
+    this.log("finishImplementationLot", { ...opts });
+  }
+
+  cancelImplementationLot(opts: ImplementationLotOptions): void {
+    this.log("cancelImplementationLot", { ...opts });
+  }
+
+  async discardImplementationLot(opts: ImplementationLotOptions): Promise<void> {
+    this.log("discardImplementationLot", { ...opts });
   }
 
   async fetch(repoPath: string, baseBranch: string): Promise<void> {
@@ -406,8 +427,15 @@ export class FakeSystemAdapter implements SystemAdapter {
         return ORCHESTRATORS.map((provider) => fakeMissingKey(entry, provider));
       }),
     );
+    const home = homedir();
+    const codexHome = process.env[CODEX_HOME_ENV] || join(home, ".codex");
+    const roots = {
+      claude: [join(home, ".claude", SKILLS_DIR_NAME)],
+      codex: [join(codexHome, SKILLS_DIR_NAME), join(home, ".agents", SKILLS_DIR_NAME)],
+    };
     return SKILL_REQUIREMENTS.map((skill) => ({
       ...skill,
+      roots,
       installed: {
         claude: !missing.has(fakeMissingKey(skill.name, "claude")),
         codex: !missing.has(fakeMissingKey(skill.name, "codex")),

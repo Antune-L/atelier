@@ -892,6 +892,7 @@ export const skillStatusSchema = z.object({
   name: z.string(),
   tier: z.enum(SKILL_TIERS),
   purpose: z.string(),
+  roots: z.object({ claude: z.array(z.string()), codex: z.array(z.string()) }).optional(),
   /** `<name>/SKILL.md` exists in at least one of the provider's host skill roots. */
   installed: z.object({ claude: z.boolean(), codex: z.boolean() }),
   /** Non-null when the skill is not published in skillzer: how to get it instead. */

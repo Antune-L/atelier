@@ -300,9 +300,9 @@ describe("DelegationManager.start", () => {
     const ticket = newDelegatedTicket();
 
     for (let index = 0; index < MAX_PARALLEL_IMPLEMENTERS; index += 1) {
-      expect((await delegation.start(ticket, 3, `plan ${index}`, `lot-${index}`)).ok).toBe(true);
+      expect((await delegation.start(ticket, 3, `plan ${index}`, `lot-${index}`, [`src/lot-${index}.ts`])).ok).toBe(true);
     }
-    const refused = await delegation.start(ticket, 3, "plan de trop", "lot-en-trop");
+    const refused = await delegation.start(ticket, 3, "plan de trop", "lot-en-trop", ["src/lot-en-trop.ts"]);
     expect(refused.ok).toBe(false);
     expect(refused.result).toContain(String(MAX_PARALLEL_IMPLEMENTERS));
   });
@@ -310,8 +310,8 @@ describe("DelegationManager.start", () => {
   test("stop closes every child lot of the ticket", async () => {
     const { system, delegation } = setup();
     const ticket = newDelegatedTicket();
-    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
-    expect((await delegation.start(ticket, 3, "plan B", "lot-b")).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a", ["src/lot-a.ts"])).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan B", "lot-b", ["src/lot-b.ts"])).ok).toBe(true);
 
     delegation.stop(ticket.id);
 
@@ -364,8 +364,8 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
-    expect((await delegation.start(ticket, 3, "plan B", "lot-b")).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a", ["src/lot-a.ts"])).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan B", "lot-b", ["src/lot-b.ts"])).ok).toBe(true);
     const [parent, childA, childB] = system.sessions;
     if (!parent || !childA || !childB) throw new Error("sessions missing");
 
@@ -392,10 +392,10 @@ describe("DelegationManager — settlement", () => {
     const { system, sessionHub, delegation } = setup();
     const ticket = newDelegatedTicket();
     startParentSession(sessionHub, ticket.id);
-    expect((await delegation.start(ticket, 3, "plan A", "lot-a")).ok).toBe(true);
+    expect((await delegation.start(ticket, 3, "plan A", "lot-a", ["src/lot-a.ts"])).ok).toBe(true);
     let release = (): void => undefined;
     system.runtimeGate = new Promise<void>((resolve) => { release = resolve; });
-    const startingB = delegation.start(ticket, 3, "plan B", "lot-b");
+    const startingB = delegation.start(ticket, 3, "plan B", "lot-b", ["src/lot-b.ts"]);
     const [parent, childA] = system.sessions;
     if (!parent || !childA) throw new Error("sessions missing");
 

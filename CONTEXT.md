@@ -29,15 +29,15 @@ interrupted / stalled). A *different axis* from Column. Use `ACTIVE_STAGES` /
 
 **Slot** — a git-worktree execution unit from a fixed pool (`SLOT_COUNT`), at
 `SLOTS_ROOT/slot-N`. **SlotManager** owns its lifecycle: cleanup → fetch → worktree add →
-install → start SDK session → inject contract → done gate → release. Git ops per repo
+install → start provider session → inject contract → done gate → release. Git ops per repo
 serialize through `repoMutex`.
 
-**SessionHub** — owns each live SDK agent session (`@anthropic-ai/claude-agent-sdk`
-`query()` streaming-input, run in-process). Injects channel events as user turns, exposes
-the worker tools as an in-process MCP server, surfaces turn-end events, and keeps the
-per-session live transcript. Replaced the old `worker.ts` + WorkerHub WS bridge.
+**SessionHub** — owns each live Claude SDK or Codex App Server session. Injects channel
+events as user turns, exposes worker tools through the provider's MCP connection, surfaces
+turn-end events, and keeps the per-session live transcript. Replaced the old `worker.ts` +
+WorkerHub WS bridge.
 
-**Channel** — the two-way agent↔backend link. backend→agent: MCP notifications
+**Channel** — the two-way agent↔backend link. backend→agent: injected user turns
 (`ticket`, `answer`, `prd_validated`, `nudge`, `user_comment`). agent→backend: tool calls
 (`update_stage`, `ask_user`, `submit_prd`, `submit_answer`, `done`, `fail`,
 `submit_triage`, `submit_feasibility`).
@@ -49,8 +49,13 @@ coordinator, and the web client all derive from one declaration instead of hand-
 copies. *(Introduced by architecture candidate #2 — the wire-protocol seam.)*
 
 **Contract** — the pipeline instructions (`contract.ts`) injected verbatim as the first
-`ticket` channel event. The backend never reasons; the contract tells the agent's own
-native subagents what to do.
+`ticket` channel event. The backend never reasons; the contract tells the orchestrator
+when to delegate implementation and how to continue after each lot finishes.
+
+**Implementation lot** — a backend-owned Claude or Codex child session started through
+`delegate_implementation`. Declared file scopes receive separate worktrees and are checked
+when changes are integrated; omitting `files` reserves the shared ticket worktree while the
+lot runs. Composer uses a separate script path.
 
 **Done Gate** — server-side verification of `done(pr_url)`: clean tree, branch pushed, PR
 exists. The backend does not trust the agent. Failure → `stalled`, slot kept.

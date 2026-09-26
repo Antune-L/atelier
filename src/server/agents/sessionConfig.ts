@@ -1,10 +1,3 @@
-/**
- * Per-ticket agent session configs. Encapsulates the security posture the tmux sessions carried in
- * deposited `.claude/settings.json` + `.claude/agents/*.md`, now expressed as SDK session options:
- * a bash allowlist (`dontAsk` denies everything else) plus the implementer/pr-fixer subagents passed
- * programmatically instead of written into the worktree.
- */
-
 import {
   ATELIER_SLOT_ID,
   FEASIBILITY_SCOUT_AGENT_NAME,
@@ -16,7 +9,7 @@ import {
 import type { Orchestrator, VcsProvider } from "../../shared/constants.ts";
 import type { ResearchOptions, Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
-import type { AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
+import type { AgentSessionOptions, AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
 import { isReviewFixSession } from "./contract.ts";
 import { vcsCommands } from "./vcsCommands.ts";
@@ -346,6 +339,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     ownerType: "batch",
     ownerId: batchId,
     permissionMode: "dontAsk",
+    ...(driver === "codex" ? { readOnly: true } : {}),
     allowedTools: [...(driver === "codex" ? CODEX_READONLY_TOOLS : READONLY_TOOLS), "Agent"],
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
@@ -424,6 +418,18 @@ const AZURE_BASH_ALLOWLIST = [
  */
 const AZURE_CLEAN_BASH_ALLOWLIST = ["Bash(az devops invoke:*)"];
 
+const DELEGATED_GIT_READ_ALLOWLIST = new Set([
+  "Bash(git status:*)",
+  "Bash(git diff:*)",
+  "Bash(git log:*)",
+  "Bash(git rev-parse:*)",
+]);
+const DELEGATED_BASH_ALLOWLIST = BASH_ALLOWLIST.filter((rule) => {
+  if (rule.startsWith("Bash(gh ")) return false;
+  if (rule.startsWith("Bash(git ")) return DELEGATED_GIT_READ_ALLOWLIST.has(rule);
+  return true;
+});
+
 /**
  * The bash allow-list of a full implementation session, widened only for an Azure DevOps project,
  * and further for its clean tickets (the only kind whose contract drives `az devops invoke`).
@@ -440,15 +446,19 @@ function sessionSkills(vcs: VcsCommandTable): string[] {
   return CONTRACT_SKILLS.filter((skill) => skill !== MINOS_PR_FEEDBACK_SKILL);
 }
 
-const IMPLEMENTER_PROMPT = `Tu es le sous-agent implémenteur. Ton unique rôle est d'écrire le code de la fonctionnalité décrite, intégralement, dans le worktree courant.
-
-Consignes :
-- Implémente de bout en bout la fonctionnalité demandée. Si un chemin de PRD t'est fourni dans le prompt, lis-le et traite-le comme le contrat à respecter.
-- Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
-- Si ton prompt te donne un périmètre de fichiers (un lot), reste strictement dedans : d'autres sous-agents implémenteurs travaillent peut-être en parallèle dans le même worktree sur d'autres fichiers, ne touche JAMAIS aux leurs.
-- Respecte les conventions de code du projet.
-- Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
-- Quand tu as terminé, rends la main en résumant ce que tu as implémenté et les fichiers touchés.`;
+export function delegatedImplementerPermissions(
+  vcsProvider: VcsProvider,
+): Pick<AgentSessionOptions, "role" | "permissionMode" | "permissionAllow" | "allowedTools" | "disallowedTools" | "skills" | "disableWorkerTools"> {
+  return {
+    role: "implementer",
+    permissionMode: "dontAsk",
+    permissionAllow: [...DELEGATED_BASH_ALLOWLIST],
+    allowedTools: [...IMPLEMENTER_SAFE_TOOLS.filter((tool) => tool !== "Agent" && tool !== "Task"), "ToolSearch", ...SLACK_READONLY_TOOLS],
+    disallowedTools: ["Agent", "Task"],
+    skills: sessionSkills(vcsCommands(vcsProvider)),
+    disableWorkerTools: true,
+  };
+}
 
 const prFixerPrompt = (vcs: VcsCommandTable) => `Tu es le sous-agent pr-fixer. Ton unique rôle est d'appliquer les corrections pertinentes des retours de review d'une PR, intégralement, dans le worktree courant (déjà positionné sur la branche head de la PR).
 
@@ -459,18 +469,6 @@ Consignes :
 - Travaille uniquement dans le répertoire de travail courant (le worktree). Ne touche à aucun fichier en dehors.
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, les tests et la PR.
 - Quand tu as terminé, rends la main en résumant ce que tu as corrigé et les fichiers touchés.`;
-
-function implementerAgent(model: string, effort: string, serviceTier?: "default" | "fast"): AgentSubagentDefinition {
-  return {
-    description:
-      "Implémente intégralement la fonctionnalité demandée dans le worktree courant. Ne commit, ne push, n'ouvre jamais de PR.",
-    prompt: IMPLEMENTER_PROMPT,
-    model,
-    effort,
-    ...(serviceTier ? { serviceTier } : {}),
-    role: "implementer",
-  };
-}
 
 function prFixerAgent(
   vcs: VcsCommandTable,
@@ -552,14 +550,14 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       delegateServiceTier: delegateKnobs.serviceTier,
       role: "orchestrator",
       permissionMode: "dontAsk",
+      permissionAllow: bashAllowlist(ticket, vcsProvider, composerScriptPath),
       ...reviewSessionGuards(ticket),
       // An ask ticket never writes: pin the Codex sandbox to read-only instead of tool-gating.
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       allowedTools: [...IMPLEMENTER_SAFE_TOOLS, "ToolSearch", ...(ticket.verifyFeature ? ["mcp__playwright"] : [])],
       skills: sessionSkills(vcs),
-      agents: {
-        implementer: implementerAgent(delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
+    agents: {
         "pr-fixer": prFixerAgent(vcs, delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
       },
       ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),
@@ -594,7 +592,6 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     ],
     skills: sessionSkills(vcs),
     agents: {
-      implementer: implementerAgent(implementerModel, implementerEffort),
       "pr-fixer": prFixerAgent(vcs, implementerModel, implementerEffort),
     },
     ...(ticket.verifyFeature ? { extraMcpServers: { playwright: PLAYWRIGHT_MCP_SERVER } } : {}),

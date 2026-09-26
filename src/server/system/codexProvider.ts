@@ -32,6 +32,12 @@ import {
 } from "./codexAppServer.ts";
 import { resolveCodexBinary } from "./codexBinary.ts";
 import {
+  CODEX_BASH_DENIAL_REASON,
+  CODEX_DELEGATED_DENIAL_REASON,
+  CODEX_SCOUT_DENIAL_REASON,
+  codexCommandPolicyScript,
+} from "./codexCommandPolicy.ts";
+import {
   CODEX_SESSION_PRE_TOOL_USE_HOOK_KEY,
   codexSessionPreToolUseHookHash,
   type CodexCommandHook,
@@ -470,11 +476,20 @@ function typecheckGuardScript(cwd: string): string {
   );
 }
 
-function prepareNoVerifyHook(cwd: string, blockReviewPublishing: boolean, blockTypecheck: boolean): PreparedHook {
+function prepareNoVerifyHook(options: AgentSessionOptions): PreparedHook {
   const directory = mkdtempSync(join(tmpdir(), "kanban-codex-hooks-"));
   const path = join(directory, "deny-no-verify.sh");
-  const reviewPublishingGuard = blockReviewPublishing ? reviewPublishingGuardScript() : "";
-  const typecheckGuard = blockTypecheck ? typecheckGuardScript(cwd) : "";
+  const policyPath = join(directory, "command-policy.js");
+  const scoutTypes = Object.entries(options.agents ?? {})
+    .filter(([, definition]) => definition.role === "scout")
+    .map(([name]) => name);
+  const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility");
+  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer"), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  const reviewPublishingGuard = options.blockReviewPublishing === true ? reviewPublishingGuardScript() : "";
+  const typecheckGuard = options.blockTypecheck === true ? typecheckGuardScript(options.cwd) : "";
   writeFileSync(
     path,
     `#!/bin/sh
@@ -487,6 +502,13 @@ case "$input" in
   *--no-verify*)
     ${shellDeny(NO_VERIFY_DENIAL_REASON)}
     ;;
+esac
+policy=$(printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(policyPath)})
+case "$policy" in
+  allow) ;;
+  scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
+  nested) ${shellDeny(CODEX_DELEGATED_DENIAL_REASON)} ;;
+  *) ${shellDeny(CODEX_BASH_DENIAL_REASON)} ;;
 esac
 ${reviewPublishingGuard}${typecheckGuard}if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then
   ${shellDeny(SUBAGENT_GIT_DENIAL_REASON)}
@@ -504,7 +526,7 @@ fi
     config: {
       PreToolUse: [
         {
-          matcher: "^Bash$",
+          matcher: "^(Bash|apply_patch|spawn_agent)$",
           hooks: [handler],
         },
       ],
@@ -1117,7 +1139,7 @@ function createCodexAgentSession(
     let lastStderr = "";
     try {
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
-      preparedHook = prepareNoVerifyHook(options.cwd, options.blockReviewPublishing === true, options.blockTypecheck === true);
+      preparedHook = prepareNoVerifyHook(options);
       const environment = (dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd);
       // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).

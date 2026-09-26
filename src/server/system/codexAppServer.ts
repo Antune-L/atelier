@@ -13,6 +13,7 @@ export const JSONRPC_INVALID_REQUEST = -32600;
 const MAX_LINE_BUFFER_CHARS = 8_000_000;
 const CONNECTION_CLOSED_MESSAGE = "Connexion Codex App Server fermée";
 const STDOUT_END_GRACE_MS = 100;
+const CLOSE_GRACE_MS = 2_000;
 const STDOUT_STREAM_LABEL = "stdout";
 const STDERR_STREAM_LABEL = "stderr";
 
@@ -129,6 +130,7 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
   let closed = false;
+  let closePromise: Promise<void> | undefined;
   let stdoutReaderAlive = true;
 
   function write(message: unknown): void {
@@ -218,11 +220,10 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
     if (closed) return;
     const timer = setTimeout(() => {
       if (closed) return;
-      closed = true;
       if (pending.size > 0) {
         log.warn("flux stdout terminé, requêtes en attente rejetées", { pending: pending.size });
       }
-      rejectPending(new Error(CONNECTION_CLOSED_MESSAGE));
+      void close();
     }, STDOUT_END_GRACE_MS);
     void exited.finally(() => clearTimeout(timer));
   }
@@ -243,6 +244,19 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
     rejectPending(new Error(`Codex App Server arrêté (code ${exitCode})`));
     return exitCode;
   });
+
+  function close(): Promise<void> {
+    if (closePromise) return closePromise;
+    if (closed) return exited.then(() => undefined);
+    closed = true;
+    rejectPending(new Error(CONNECTION_CLOSED_MESSAGE));
+    proc.stdin.end();
+    const timer = setTimeout(() => proc.kill(), CLOSE_GRACE_MS);
+    closePromise = exited.then(() => {
+      clearTimeout(timer);
+    });
+    return closePromise;
+  }
 
   return {
     request: <T>(method: string, params: unknown, schema: z.ZodType<T>): Promise<T> => {
@@ -274,15 +288,7 @@ function spawnCodexAppServer(options: CodexAppServerOptions): CodexAppServerConn
       });
     },
     notify: (method, params) => write(params === undefined ? { method } : { method, params }),
-    close: async () => {
-      if (closed) return;
-      closed = true;
-      rejectPending(new Error(CONNECTION_CLOSED_MESSAGE));
-      proc.stdin.end();
-      const timer = setTimeout(() => proc.kill(), 2_000);
-      await exited;
-      clearTimeout(timer);
-    },
+    close,
     dispose: () => {
       closed = true;
       rejectPending(new Error("Connexion Codex App Server arrêtée"));

@@ -22,6 +22,7 @@ import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { computeCodeFingerprint } from "./codeFingerprint.ts";
+import { DelegationWorkspace } from "./delegationWorkspace.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
@@ -41,6 +42,7 @@ import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
 import type {
   DoneGateResult,
   GitWorktreeAddOptions,
+  ImplementationLotOptions,
   ImportNotionOptions,
   PaneSize,
   PaneStream,
@@ -158,6 +160,7 @@ export class RealSystemAdapter implements SystemAdapter {
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
+  private readonly delegationWorkspace = new DelegationWorkspace();
   private readonly shellStartupDirectories = new Map<string, string>();
   /** The PR hosts behind the VCS seam, keyed by the project's `vcsProvider`. */
   private readonly vcsClients: Record<VcsProvider, VcsClient> = {
@@ -207,12 +210,29 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
+    await this.delegationWorkspace.cleanupForSlot(slotPath, repoPath);
     // Full reset, best-effort: a stuck/half-built worktree can lose its `.git`
     // link (so `remove` fails) or leave a stale registration. `prune` clears the
     // dangling entry and `rm -rf` guarantees the path is empty and re-addable.
     await $`git -C ${repoPath} worktree remove ${slotPath} --force`.nothrow().quiet();
     await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
     await $`rm -rf ${slotPath}`.nothrow().quiet();
+  }
+
+  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+    return this.delegationWorkspace.prepare(opts);
+  }
+
+  async finishImplementationLot(opts: ImplementationLotOptions): Promise<void> {
+    await this.delegationWorkspace.finish(opts);
+  }
+
+  cancelImplementationLot(opts: ImplementationLotOptions): void {
+    this.delegationWorkspace.cancel(opts);
+  }
+
+  async discardImplementationLot(opts: ImplementationLotOptions): Promise<void> {
+    await this.delegationWorkspace.discard(opts);
   }
 
   async fetch(repoPath: string, baseBranch: string): Promise<void> {
@@ -1015,13 +1035,17 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async checkSkills(): Promise<SkillStatus[]> {
     const codexHome = process.env[CODEX_HOME_ENV] || DEFAULT_CODEX_HOME;
-    const codexRoots = [join(codexHome, SKILLS_DIR_NAME), AGENTS_SKILLS_DIR];
+    const roots = {
+      claude: [CLAUDE_SKILLS_DIR],
+      codex: [join(codexHome, SKILLS_DIR_NAME), AGENTS_SKILLS_DIR],
+    };
     const hasManifest = (root: string, name: string): boolean => existsSync(join(root, name, SKILL_MANIFEST_FILE));
     return SKILL_REQUIREMENTS.map((skill) => ({
       ...skill,
+      roots,
       installed: {
-        claude: hasManifest(CLAUDE_SKILLS_DIR, skill.name),
-        codex: codexRoots.some((root) => hasManifest(root, skill.name)),
+        claude: roots.claude.some((root) => hasManifest(root, skill.name)),
+        codex: roots.codex.some((root) => hasManifest(root, skill.name)),
       },
     }));
   }

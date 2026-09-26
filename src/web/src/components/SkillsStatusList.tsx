@@ -161,7 +161,7 @@ function ProviderStatus({ skill, provider, available }: ProviderStatusProps) {
       </span>
       {!installed && available && (
         <span className="block pl-3 font-mono">
-          attendu : {expectedSkillPaths(skill.name, provider).join(EXPECTED_PATHS_SEPARATOR)}
+          attendu : {expectedSkillPaths(skill.name, provider, skill.roots?.[provider]).join(EXPECTED_PATHS_SEPARATOR)}
         </span>
       )}
     </li>

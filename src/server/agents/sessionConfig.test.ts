@@ -47,8 +47,9 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
     expect(cfg.delegateModel).toBe("gpt-5.6-terra");
     expect(cfg.delegateEffort).toBe("low");
     expect(cfg.delegateServiceTier).toBe("default");
-    expect(cfg.agents?.implementer).toMatchObject({ model: "gpt-5.6-terra", effort: "low", serviceTier: "default" });
+    expect(cfg.agents?.implementer).toBeUndefined();
     expect(cfg.agents?.["pr-fixer"]).toMatchObject({ model: "gpt-5.6-terra", effort: "low", serviceTier: "default" });
+    expect(cfg.permissionAllow).toContain("Bash(git status:*)");
   });
 
   test("null implementer knobs inherit the resolved Codex orchestrator knobs", () => {
@@ -75,11 +76,11 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
     expect(cfg.effort).toBe(MODELS.codexEffort);
   });
 
-  test("attaches contract skills, native agents and Playwright MCP for feature verification", () => {
+  test("attaches contract skills, the PR fixer and Playwright MCP for feature verification", () => {
     const ticket = makeTicket({ orchestrator: "codex", implementer: "codex", verifyFeature: true });
     const cfg = implementConfig(ticket);
     expect(cfg.skills).toContain("regression-check");
-    expect(cfg.agents?.implementer?.role).toBe("implementer");
+    expect(cfg.agents?.["pr-fixer"]?.role).toBe("implementer");
     expect(cfg.extraMcpServers?.playwright?.command).toBe("npx");
   });
 
@@ -125,12 +126,12 @@ describe("buildImplementSessionConfig — review typecheck gate", () => {
 });
 
 describe("buildImplementSessionConfig — claude orchestrator", () => {
-  test("claude×claude: provider claude, implementer+pr-fixer subagents, skills, composer bash rule", () => {
+  test("claude×claude: provider claude, delegated implementation, PR fixer, skills, composer bash rule", () => {
     const ticket = makeTicket({ orchestrator: "claude", implementer: "claude" });
     const cfg = implementConfig(ticket);
     expect(cfg.provider).toBe("claude");
     const agentNames = Object.keys(cfg.agents ?? {});
-    expect(agentNames).toContain("implementer");
+    expect(agentNames).not.toContain("implementer");
     expect(agentNames).toContain("pr-fixer");
     expect((cfg.skills ?? []).length).toBeGreaterThan(0);
     expect(cfg.permissionAllow ?? []).toContain(`Bash(${COMPOSER_SCRIPT}:*)`);
@@ -145,7 +146,7 @@ describe("buildImplementSessionConfig — claude orchestrator", () => {
     const ticket = makeTicket({ orchestrator: "claude", implementer: "composer" });
     const cfg = implementConfig(ticket);
     expect(cfg.provider).toBe("claude");
-    expect(Object.keys(cfg.agents ?? {})).toContain("implementer");
+    expect(Object.keys(cfg.agents ?? {})).not.toContain("implementer");
     expect(cfg.permissionAllow ?? []).toContain(`Bash(${COMPOSER_SCRIPT}:*)`);
     expect(cfg.delegateProvider).toBe("composer");
     expect(cfg.delegateModel).toBeNull();

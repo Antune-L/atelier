@@ -243,7 +243,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
   }, repoMutex);
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
-  // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated Codex child.
+  slotManager.setDelegationDrain((ticketId) => delegationManager.drainTicket(ticketId));
+  // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated child.
   sessionHub.onDisconnect((ticketId) => delegationManager.stop(ticketId));
   const coordinator = new AgentCoordinator(
     store,

@@ -554,10 +554,10 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     const execution = this.sessionHub.getExecutionConfig(ctx.ticketId);
-    if (!ticket || execution?.delegateProvider !== "codex") {
+    if (!ticket || (execution?.delegateProvider !== "codex" && execution?.delegateProvider !== "claude")) {
       return {
         ok: false,
-        result: "delegate_implementation réservé aux tickets avec implémenteur Codex.",
+        result: "delegate_implementation réservé aux tickets avec implémenteur Codex ou Claude.",
       };
     }
     // A conflict-resolution session fixes merge conflicts inline; delegating a fresh implementation
@@ -565,7 +565,7 @@ export class AgentCoordinator {
     if (ticket.resolvingConflicts) {
       return { ok: false, result: "delegate_implementation indisponible en résolution de conflits : résous les conflits inline." };
     }
-    return this.delegation.start(ticket, ctx.slotId, parsed.data.plan, parsed.data.label);
+    return this.delegation.start(ticket, ctx.slotId, parsed.data.plan, parsed.data.label, parsed.data.files);
   }
 
   private async handleDelegateReview(ctx: SessionToolCall): Promise<ToolResult> {
@@ -711,11 +711,8 @@ export class AgentCoordinator {
   /** Default prd_validated note steering the Claude orchestrator toward its implementer's delegation path. */
   private defaultPrdNote(ticket: ReturnType<Store["getTicket"]>): string {
     if (!ticket) return "";
-    if (ticket.implementer === "codex") {
-      return `Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan) — un appel par lot indépendant à périmètre de fichiers disjoint, ${MAX_PARALLEL_IMPLEMENTERS} lots maximum et un label distinct par lot — puis termine ton tour et attends un événement implementation_done par lot ; ne poursuis pas l'implémentation dans cette session de planification.`;
-    }
-    if (ticket.implementer === "claude") {
-      return `Délègue l'implémentation à des sous-agents à contexte frais (outil Agent) qui gardent le PRD validé en tête comme contrat — un sous-agent par lot indépendant à périmètre de fichiers disjoint, ${MAX_PARALLEL_IMPLEMENTERS} maximum, lancés en parallèle dans le même message ; ne poursuis pas l'implémentation dans cette session de planification.`;
+    if (ticket.implementer === "codex" || ticket.implementer === "claude") {
+      return `Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan) — un appel par lot indépendant avec des files disjoints, ${MAX_PARALLEL_IMPLEMENTERS} lots maximum et un label distinct par lot — puis termine ton tour et attends un événement implementation_done par lot ; ne poursuis pas l'implémentation dans cette session de planification.`;
     }
     return "";
   }

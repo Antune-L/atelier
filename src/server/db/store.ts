@@ -617,6 +617,7 @@ export class Store {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
       this.db.query("UPDATE tickets SET review_rounds = 0 WHERE id = ?").run(ticketId);
+      this.logEvent(ticketId, "delegation_cycle_reset", null);
     });
   }
 
@@ -628,11 +629,14 @@ export class Store {
     reviewedCommitSha: string | null;
     reviewDepth: ReviewDepth;
     requiresApproval: boolean;
+    reuseRound: boolean;
     createdAt?: number;
   }): ReviewPass {
     this.transaction(() => {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(input.ticketId);
-      this.db.query("UPDATE tickets SET review_rounds = review_rounds + 1 WHERE id = ?").run(input.ticketId);
+      if (!input.reuseRound) {
+        this.db.query("UPDATE tickets SET review_rounds = review_rounds + 1 WHERE id = ?").run(input.ticketId);
+      }
       this.db.query(
         `INSERT OR REPLACE INTO review_passes
           (ticket_id, pass_id, code_fingerprint, reviewed_commit_sha, review_depth, requires_approval, created_at)
@@ -1604,6 +1608,38 @@ export class Store {
     this.db
       .query("INSERT INTO events (ticket_id, type, payload, created_at) VALUES (?, ?, ?, ?)")
       .run(ticketId, type, JSON.stringify(payload ?? null), Date.now());
+  }
+
+  implementationLotAttempts(ticketId: string, label: string): { started: number; failed: number } {
+    const row = this.db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE type = 'delegation_started') AS started,
+         COUNT(*) FILTER (WHERE type = 'delegation_started')
+           - COUNT(*) FILTER (WHERE type = 'delegation_done' AND json_extract(payload, '$.ok') = 1) AS failed
+       FROM events
+       WHERE ticket_id = ? AND type IN ('delegation_started', 'delegation_done')
+         AND json_extract(payload, '$.label') = ?
+         AND id > COALESCE((
+           SELECT MAX(id) FROM events WHERE ticket_id = ? AND type = 'delegation_cycle_reset'
+         ), 0)`,
+    ).get(ticketId, label, ticketId);
+    return z.object({ started: z.number(), failed: z.number() }).parse(row);
+  }
+
+  implementationLotScope(ticketId: string, label: string): string[] | null {
+    const row = this.db.query(
+      `SELECT payload FROM events
+       WHERE ticket_id = ? AND type = 'delegation_started'
+         AND json_extract(payload, '$.label') = ?
+         AND id > COALESCE((
+           SELECT MAX(id) FROM events WHERE ticket_id = ? AND type = 'delegation_cycle_reset'
+         ), 0)
+       ORDER BY id ASC LIMIT 1`,
+    ).get(ticketId, label, ticketId);
+    if (!row) return null;
+    const parsed = z.object({ payload: z.string() }).parse(row);
+    const event = z.object({ files: z.array(z.string()).optional() }).parse(JSON.parse(parsed.payload));
+    return event.files ?? [];
   }
 
   /**

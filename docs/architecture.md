@@ -10,11 +10,11 @@ src/
 templates/  run_composer.sh (Cursor headless driver)
 ```
 
-## Agent runtime (Agent SDK)
+## Agent runtime
 
-Each ticket runs a long-lived `claude` process via the official **`@anthropic-ai/claude-agent-sdk`** (`query()`, streaming-input), owned in-process by the backend — no tmux, no MCP channel. The board routes work; the backend verifies gates; the agents do the reasoning.
+Each ticket runs a backend-owned Claude SDK or Codex App Server session. Claude uses **`@anthropic-ai/claude-agent-sdk`** (`query()`, streaming input); Codex uses the App Server protocol. Neither provider uses tmux for agent sessions. The board routes work; the backend verifies gates; the agents do the reasoning.
 
-Wake events (`ticket`/`answer`/`nudge`) are injected as ordinary user turns, and the worker tools run as an in-process MCP server. No webhook, no `--dangerously-load-development-channels`, no `initialized` race.
+Wake events (`ticket`/`answer`/`nudge`) are injected as ordinary user turns. Claude worker tools run through an in-process MCP server; Codex reaches them through the backend's authenticated HTTP MCP endpoint.
 
 In dry-run (`bun run dev`, the default) no `claude` is spawned. The SDK's native binary is resolved by `src/server/system/claudeBinary.ts`: `KANBAN_CLAUDE_BINARY` override → `node_modules` → previously provisioned binary → detected Claude Code install → pinned npm download (packaged app only; dev always hits `node_modules`).
 
@@ -25,8 +25,9 @@ Codex sessions run through the same provider abstraction (`src/server/system/cod
 ## Ticket flow
 
 1. Card created in the `todo` column, dragged to `implementing`.
-2. A slot (git worktree) is acquired; a `claude` SDK session starts in-process.
-3. The agent drives its work through the MCP tools: `update_stage`, `ask_user`, `done`, `fail`.
-4. `done(pr_url)` → the backend verifies on its own (clean tree, branch pushed, PR exists) before closing.
+2. A slot (git worktree) is acquired; the selected provider starts an orchestrator session.
+3. For Claude and Codex implementers, the orchestrator calls `delegate_implementation` to start backend-owned child lots. Declared, non-overlapping file scopes receive separate worktrees; the backend rejects out-of-scope changes or conflicts when integrating them. A lot without `files` reserves the shared ticket worktree while it runs. Composer uses its separate script path.
+4. The agent drives the remaining work through the MCP tools: `update_stage`, `ask_user`, `done`, `fail`.
+5. `done(pr_url)` → the backend verifies on its own (clean tree, branch pushed, PR exists) before closing.
 
 For agent-facing implementation details (protocol, slots, conventions), see [AGENTS.md](../AGENTS.md).

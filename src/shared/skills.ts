@@ -5,10 +5,6 @@ export const SKILLZER_REPO_URL = "https://github.com/Antune-L/skillzer";
 
 export const SKILL_MANIFEST_FILE = "SKILL.md";
 
-/**
- * Host (user-level) skill roots each agent provider reads, as displayed to the user. Codex reads
- * `$CODEX_HOME/skills` (default `~/.codex/skills`, deprecated but still scanned) and `~/.agents/skills`.
- */
 export const HOST_SKILL_ROOTS: Record<Orchestrator, readonly string[]> = {
   claude: ["~/.claude/skills"],
   codex: ["~/.codex/skills", "~/.agents/skills"],
@@ -65,8 +61,8 @@ export function skillzerInstallCommand(name: string): string {
 }
 
 /** Manifest paths where a provider would detect the skill, as displayed to the user. */
-export function expectedSkillPaths(name: string, provider: Orchestrator): string[] {
-  return HOST_SKILL_ROOTS[provider].map((root) => `${root}/${name}/${SKILL_MANIFEST_FILE}`);
+export function expectedSkillPaths(name: string, provider: Orchestrator, roots = HOST_SKILL_ROOTS[provider]): string[] {
+  return roots.map((root) => `${root}/${name}/${SKILL_MANIFEST_FILE}`);
 }
 
 /** Providers among `providers` whose host skill roots lack the skill. */

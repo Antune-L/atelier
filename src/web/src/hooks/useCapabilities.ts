@@ -36,6 +36,8 @@ interface LoadOptions {
 
 let cache: Capabilities | null = null;
 let pending: Promise<void> | null = null;
+let pendingProbe = false;
+let queuedProbe: Promise<void> | null = null;
 let retryAttempt = 0;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 const subscribers = new Set<() => void>();
@@ -63,7 +65,6 @@ function scheduleRetry(status: CodexRuntimeStatus["status"]): void {
 }
 
 function loadCapabilities({ probe, announce }: LoadOptions): Promise<void> {
-  if (pending !== null) return pending;
   if (announce) {
     publish({
       ...(cache ?? UNKNOWN_CAPABILITIES),
@@ -76,10 +77,24 @@ function loadCapabilities({ probe, announce }: LoadOptions): Promise<void> {
       },
     });
   }
+  if (pending !== null) {
+    if (!probe || pendingProbe) return pending;
+    if (queuedProbe !== null) return queuedProbe;
+    queuedProbe = pending.then(() => {
+      queuedProbe = null;
+      return loadCapabilities({ probe: true, announce: false });
+    });
+    return queuedProbe;
+  }
+  pendingProbe = probe;
   pending = api
     .capabilities(probe)
-    .then(publish)
+    .then((data) => {
+      if (!probe && queuedProbe !== null) return;
+      publish(data);
+    })
     .catch((error: unknown) => {
+      if (!probe && queuedProbe !== null) return;
       const message = error instanceof Error ? error.message : "Vérification Codex impossible";
       publish({
         ...(cache ?? UNKNOWN_CAPABILITIES),
@@ -94,7 +109,8 @@ function loadCapabilities({ probe, announce }: LoadOptions): Promise<void> {
     })
     .finally(() => {
       pending = null;
-      if (cache !== null) scheduleRetry(cache.codex.status);
+      pendingProbe = false;
+      if (cache !== null && queuedProbe === null) scheduleRetry(cache.codex.status);
     });
   return pending;
 }

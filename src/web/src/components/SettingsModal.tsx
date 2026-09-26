@@ -580,12 +580,16 @@ function ProvidersSettings() {
 /** Host skills detection per provider, reachable after the preflight dialog was dismissed. */
 function SkillsSettings() {
   const capabilities = useCapabilities();
+  const roots = capabilities.skills[0]?.roots;
+  const skillPaths = roots === undefined
+    ? "dans les dossiers de skills de Claude et Codex"
+    : `dans ${roots.claude.join(" ou ")} pour Claude et ${roots.codex.join(" ou ")} pour Codex`;
 
   return (
     <div className="space-y-4">
       <SectionHeader
         title="Skills"
-        subtitle="Skills utilisés par les agents, détectés dans ~/.claude/skills pour Claude et dans ~/.codex/skills ou ~/.agents/skills pour Codex."
+        subtitle={`Skills utilisés par les agents, détectés ${skillPaths}.`}
       />
       <SkillsStatusList skills={capabilities.skills} availableProviders={availableSkillProviders(capabilities)} />
     </div>

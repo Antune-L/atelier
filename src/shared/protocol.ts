@@ -72,13 +72,14 @@ export const failArgsSchema = z.object({
 });
 
 /**
- * Plan handed to one delegated Codex implementation child (the validated PRD verbatim, or a concise
+ * Plan handed to one delegated implementation child (the validated PRD verbatim, or a concise
  * plan written from the ticket description). The child receives it as its single user turn. `label`
  * names the lot so several children can run in parallel on disjoint file scopes.
  */
 export const delegateImplementationArgsSchema = z.object({
   plan: z.string().min(1),
   label: z.string().trim().min(1).max(LOT_LABEL_MAX_LENGTH).default(DEFAULT_IMPLEMENTATION_LOT),
+  files: z.array(z.string().min(1)).optional(),
 });
 
 export const reviewKindSchema = z.enum([
@@ -236,7 +237,7 @@ export const WORKER_TOOLS = [
   {
     name: "delegate_implementation",
     description:
-      `Réservé aux tickets dont l'implémenteur est Codex. Délègue l'implémentation à une session Codex lancée en arrière-plan par le backend dans le worktree courant (elle écrit le code, ne commit jamais). Retourne immédiatement : termine ton tour et attends l'événement implementation_done. Appelable une fois par lot indépendant dans le même tour (max ${MAX_PARALLEL_IMPLEMENTERS} lots, un \`label\` distinct par lot, périmètres de fichiers disjoints) : tu recevras un événement implementation_done par lot.`,
+      `Réservé aux tickets dont l'implémenteur est Codex ou Claude. Délègue l'implémentation à une session indépendante lancée en arrière-plan par le backend (elle écrit le code, ne commit jamais). Déclare les chemins relatifs au dépôt dans \`files\` (fichiers ou dossiers, sans glob) ; les lots simultanés doivent avoir des périmètres disjoints. Sans \`files\`, le lot occupe tout le dépôt. Retourne immédiatement : termine ton tour et attends l'événement implementation_done. Appelable une fois par lot indépendant dans le même tour (max ${MAX_PARALLEL_IMPLEMENTERS} lots, un \`label\` distinct par lot) : tu recevras un événement implementation_done par lot.`,
     argsSchema: delegateImplementationArgsSchema,
   },
   {

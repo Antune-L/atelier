@@ -16,7 +16,7 @@ test("Codex 0.153.4 session hook trust matches the normalized upstream identity"
       timeout: 5,
       statusMessage: "Checking git policy",
     }),
-  ).toBe("sha256:077681b61cd89bc0567770b08dbb145265c6e8f65f9f1542dae941af1d63ccd7");
+  ).toBe("sha256:fe7f6e31b2858a535e5a5de5419ec8c88220a11a4412753aeaa5929f59a7be7f");
 });
 
 test("hook trust changes when the exact injected command changes", () => {

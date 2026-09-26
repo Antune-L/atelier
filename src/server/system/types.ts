@@ -20,6 +20,13 @@ export interface GitWorktreeAddOptions {
   baseBranch: string;
 }
 
+export interface ImplementationLotOptions {
+  ticketId: string;
+  slotPath: string;
+  label: string;
+  files: string[];
+}
+
 export interface ReformulateOptions {
   provider?: Orchestrator;
   onEvent?: (event: AgentSessionEvent) => void;
@@ -169,6 +176,10 @@ export interface SystemAdapter {
    * to start from — they differ for a clean ticket whose local branch is suffixed to avoid collisions.
    */
   worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
+  prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }>;
+  finishImplementationLot(opts: ImplementationLotOptions): Promise<void>;
+  cancelImplementationLot(opts: ImplementationLotOptions): void;
+  discardImplementationLot(opts: ImplementationLotOptions): Promise<void>;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
   /** Create <branch> on origin at origin/<baseBranch> without a worktree (split mother integration branch). */
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;

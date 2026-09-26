@@ -83,11 +83,7 @@ test("relaunch preserves requested default tier when runtime reported fast", asy
     expect(await slots.relaunch(ticket.id)).toBe(true);
     expect(system.sessions).toHaveLength(1);
     expect(system.sessions[0]?.serviceTier).toBe("default");
-    expect(system.sessions[0]?.agents?.implementer).toMatchObject({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      serviceTier: "fast",
-    });
+    expect(system.sessions[0]?.agents?.implementer).toBeUndefined();
   } finally {
     sessionHub.disconnectAll();
     await sessionHub.drainClosingSessions();

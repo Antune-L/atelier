@@ -79,7 +79,7 @@ describe("buildTicketContract — orchestrator/implementer framing", () => {
   test("Claude×Claude delegates implementation and both independent reviews", () => {
     const contract = buildTicketContract(makeTicket({ orchestrator: "claude", implementer: "claude" }), TICKET_OPTS);
     expect(contract).toContain("session Claude Code");
-    expect(contract).toContain("subagent_type: implementer");
+    expect(contract).toContain("delegate_implementation");
     expect(contract).toContain('delegate_review(kind="quality"');
     expect(contract).toContain('delegate_review(kind="conventions"');
     expect(contract).toContain('delegate_review(kind="regression"');
@@ -120,7 +120,7 @@ describe("buildTicketContract — PRD variants", () => {
     const ticket = makeTicket({ id: "tp-claude", orchestrator: "claude", implementer: "claude", prdEnabled: true });
     const contract = buildTicketContract(ticket, TICKET_OPTS);
     expect(contract).toContain(`/tmp/prd-${ticket.id}.md`);
-    expect(contract).toContain("subagent_type: implementer");
+    expect(contract).toContain("delegate_implementation");
   });
 
   test("Codex×Codex with PRD writes the PRD then delegates it", () => {

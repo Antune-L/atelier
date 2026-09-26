@@ -1,24 +1,10 @@
-/**
- * DelegationManager — runs the delegated Codex implementation child sessions.
- *
- * When a ticket has a Codex implementer, the parent calls `delegate_implementation` — once per
- * independent lot, up to MAX_PARALLEL_IMPLEMENTERS — and ends its turn. This manager spawns one bare
- * Codex session per lot in the same slot worktree, feeds it the plan, then pushes one
- * `implementation_done` (carrying the lot label and how many lots are still running) per lot back
- * into the parent. It also owns the separate read-only sessions
- * used for the independent review dimensions required by each review depth.
- *
- * The child is attached to the parent ticket: its stream events heartbeat the ticket's
- * lastProgressAt (the parent is idle while waiting, so the watchdog would otherwise flag it), its
- * transcript lines are appended to the parent's live viewer, its token usage is summed into the
- * ticket's sessionUsage (keyed by the child thread id), and any parent-session teardown
- * (release/relaunch/shutdown) cascades into a kill via SessionHub's disconnect listener.
- */
+import { posix } from "node:path";
 
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import type { Orchestrator } from "../../shared/constants.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
@@ -27,13 +13,13 @@ import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/prot
 import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
 
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
-import { getProject, isProjectKey, projectVcsProvider } from "../config.ts";
+import { getProject, isProjectKey, MODELS, projectVcsProvider } from "../config.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
 import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
-import type { SystemAdapter } from "../system/types.ts";
+import type { ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
 import {
   DEFAULT_FINDING_RENDER_STYLE,
@@ -45,7 +31,7 @@ import {
   type FindingRenderStyle,
 } from "./reviewFindings.ts";
 import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
-import { codexImplementerKnobs } from "./sessionConfig.ts";
+import { codexImplementerKnobs, delegatedImplementerPermissions } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
 import { mergeAgentUsageByModel, renderChannelEvent } from "./sessionHub.ts";
@@ -68,17 +54,45 @@ const SLOW_FINGERPRINT_WARN_MS = 2_000;
 const REVIEW_GATE_FINGERPRINT_TIMEOUT_MS = 30_000;
 /** Above this, a whole delegate_review start (queue wait included) is logged as a warning. */
 const SLOW_REVIEW_START_WARN_MS = 10_000;
+const GLOB_CHARACTERS = "*?[]{}";
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
-function childTranscriptPrefix(label: string): string {
-  return `⟨codex:${label}⟩ `;
+function childTranscriptPrefix(label: string, provider: Orchestrator): string {
+  return `⟨${provider}:${label}⟩ `;
 }
 
-const CHILD_FRAMING = `Tu es la session d'implémentation déléguée (Codex). Ton unique rôle est d'écrire le code décrit dans le plan ci-dessous, intégralement, dans le répertoire de travail courant (le worktree).
+function normalizeImplementationScope(files: readonly string[]): string[] | null {
+  const normalized: string[] = [];
+  for (const file of files) {
+    const path = file.trim();
+    const segments = path.split("/");
+    if (
+      path === "" || posix.isAbsolute(path) || path.includes("\\")
+      || /\p{Cc}/u.test(path)
+      || [...path].some((character) => GLOB_CHARACTERS.includes(character))
+      || segments.some((segment) => segment === "" || segment === "." || segment === ".." || segment === ".git")
+      || /^[a-z]:/iu.test(segments[0] ?? "")
+      || posix.normalize(path) !== path
+    ) return null;
+    normalized.push(path);
+  }
+  return [...new Set(normalized)].sort();
+}
+
+function implementationScopesOverlap(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length === 0 || right.length === 0) return true;
+  return left.some((file) => right.some((otherFile) => {
+    const first = file.toLowerCase();
+    const second = otherFile.toLowerCase();
+    return first === second || first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
+  }));
+}
+
+const CHILD_FRAMING = `Tu es la session d'implémentation déléguée. Ton unique rôle est d'écrire le code décrit dans le plan ci-dessous, intégralement, dans le répertoire de travail courant (le worktree).
 
 Consignes :
 - Travaille uniquement dans le worktree courant. Ne touche à aucun fichier en dehors.
-- Si le plan précise un périmètre de fichiers, reste strictement dedans : d'autres lots d'implémentation tournent peut-être en parallèle dans le même worktree, ne touche jamais à leurs fichiers.
+- Si le plan précise un périmètre de fichiers, reste strictement dedans : d'autres lots d'implémentation tournent peut-être en parallèle, ne touche jamais à leurs fichiers.
 - Respecte les conventions de code du projet.
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
 - Termine en résumant ce que tu as implémenté et les fichiers touchés (ce résumé est transmis à l'orchestrateur).
@@ -95,6 +109,12 @@ const SETTLE_DELAY_MS = 50;
 
 interface ActiveDelegation {
   label: string;
+  provider: Orchestrator;
+  files: readonly string[];
+  lotOptions: ImplementationLotOptions | null;
+  cancelled: boolean;
+  childClosed: boolean;
+  settlement: Promise<void> | null;
   handle: AgentSessionHandle | null;
   generationId: string;
   usageByModel: Record<string, AgentTurnUsage>;
@@ -335,13 +355,14 @@ export class DelegationManager {
   /** ticketId → label → child. One entry per running implementation lot of that ticket. */
   private readonly active = new Map<string, Map<string, ActiveDelegation>>();
   /** `${ticketId}:${label}` pairs whose child is being prepared (not yet in `active`). */
-  private readonly startingImplementations = new Set<string>();
+  private readonly startingImplementations = new Map<string, readonly string[]>();
   private readonly activeReviews = new Map<string, ActiveReview>();
   private readonly activeReviewPasses = new Map<string, ActiveReviewPass>();
   private readonly reviewStartQueues = new Map<string, Promise<unknown>>();
   private readonly reviewEpochs = new Map<string, number>();
   private readonly generations = new Map<string, number>();
   private readonly closingExecutions = new Set<Promise<void>>();
+  private readonly closingByTicket = new Map<string, Set<Promise<void>>>();
 
   constructor(
     private readonly store: Store,
@@ -716,7 +737,7 @@ export class DelegationManager {
     const running = this.active.get(ticketId)?.size ?? 0;
     const prefix = `${ticketId}:`;
     let starting = 0;
-    for (const key of this.startingImplementations) {
+    for (const key of this.startingImplementations.keys()) {
       if (key.startsWith(prefix)) starting += 1;
     }
     return running + starting;
@@ -726,10 +747,43 @@ export class DelegationManager {
     return this.active.get(ticketId)?.has(label) === true || this.startingImplementations.has(`${ticketId}:${label}`);
   }
 
-  /** Spawn one bare Codex child lot in the ticket's slot worktree and hand it the plan. Non-blocking. */
-  async start(ticket: Ticket, slotId: number, plan: string, label: string): Promise<{ ok: boolean; result: string }> {
+  /** Spawn one implementation child lot and hand it the plan. Non-blocking. */
+  start(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[] = []): Promise<{ ok: boolean; result: string }> {
+    const started = this.startNow(ticket, slotId, plan, label, files);
+    this.trackClosing(started.then(() => undefined), ticket.id);
+    return started;
+  }
+
+  private async startNow(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[]): Promise<{ ok: boolean; result: string }> {
+    const normalizedFiles = normalizeImplementationScope(files);
+    if (normalizedFiles === null) {
+      return { ok: false, result: "Périmètre invalide : utilise des chemins relatifs au dépôt, sans glob ni segment . ou ..." };
+    }
     if (this.hasLot(ticket.id, label)) {
       return { ok: false, result: `Le lot «${label}» est déjà en cours : attends son événement implementation_done.` };
+    }
+    const attempts = this.store.implementationLotAttempts(ticket.id, label);
+    if (attempts.started > 0 && (attempts.started !== 1 || attempts.failed !== 1)) {
+      return {
+        ok: false,
+        result: `Le lot «${label}» ne peut être relancé qu'une fois après son premier échec. Reprends l'implémentation toi-même ou appelle fail().`,
+      };
+    }
+    const previousFiles = this.store.implementationLotScope(ticket.id, label);
+    if (previousFiles !== null && JSON.stringify(previousFiles) !== JSON.stringify(normalizedFiles)) {
+      return { ok: false, result: `Le lot «${label}» doit conserver son périmètre de fichiers lors de sa relance.` };
+    }
+    const activeScopes = this.active.get(ticket.id);
+    for (const [otherLabel, state] of activeScopes ?? []) {
+      if (otherLabel !== label && implementationScopesOverlap(normalizedFiles, state.files)) {
+        return { ok: false, result: `Le périmètre du lot «${label}» chevauche celui du lot «${otherLabel}» en cours.` };
+      }
+    }
+    const startingPrefix = `${ticket.id}:`;
+    for (const [key, scope] of this.startingImplementations) {
+      if (key.startsWith(startingPrefix) && implementationScopesOverlap(normalizedFiles, scope)) {
+        return { ok: false, result: `Le périmètre du lot «${label}» chevauche celui d'un lot en préparation.` };
+      }
     }
     if (this.lotCount(ticket.id) >= MAX_PARALLEL_IMPLEMENTERS) {
       return {
@@ -739,30 +793,54 @@ export class DelegationManager {
     }
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
     const startingKey = `${ticket.id}:${label}`;
-    this.startingImplementations.add(startingKey);
+    this.startingImplementations.set(startingKey, normalizedFiles);
     const parentExecution = this.sessionHub.getExecutionConfig(ticket.id);
-    const fallbackKnobs = codexImplementerKnobs(ticket);
-    const knobs = parentExecution?.delegateProvider === "codex" && parentExecution.delegateModel && parentExecution.delegateEffort
+    let provider: Orchestrator = ticket.implementer === "claude" ? "claude" : "codex";
+    if (parentExecution?.delegateProvider === "codex" || parentExecution?.delegateProvider === "claude") {
+      provider = parentExecution.delegateProvider;
+    }
+    const fallbackKnobs: { model: string; effort: string; serviceTier: "default" | "fast" } = provider === "codex"
+      ? codexImplementerKnobs(ticket)
+      : {
+          model: ticket.implementerModel ?? MODELS.implementerModel,
+          effort: ticket.implementerEffort ?? MODELS.implementerEffort,
+          serviceTier: "default",
+        };
+    const knobs = parentExecution?.delegateProvider === provider && parentExecution.delegateModel && parentExecution.delegateEffort
       ? {
           model: parentExecution.delegateModel,
           effort: parentExecution.delegateEffort,
           serviceTier: parentExecution.delegateServiceTier ?? "default",
         }
       : fallbackKnobs;
+    const lotOptions: ImplementationLotOptions | null = normalizedFiles.length === 0
+      ? null
+      : { ticketId: ticket.id, slotPath: slotPath(slotId), label, files: normalizedFiles };
+    this.store.logEvent(ticket.id, "delegation_started", { provider, model: knobs.model, effort: knobs.effort, label, files: normalizedFiles });
+    let childCwd = slotPath(slotId);
     try {
-      await assertExecutionAvailable(this.system, {
-        provider: "codex",
-        model: knobs.model,
-        effort: knobs.effort,
-        serviceTier: knobs.serviceTier,
-      });
+      if (provider === "codex") {
+        await assertExecutionAvailable(this.system, {
+          provider,
+          model: knobs.model,
+          effort: knobs.effort,
+          serviceTier: knobs.serviceTier,
+        });
+      }
+      if (lotOptions !== null) {
+        const prepared = await this.system.prepareImplementationLot(lotOptions);
+        childCwd = prepared.cwd;
+      }
     } catch (error) {
       this.startingImplementations.delete(startingKey);
       const message = error instanceof Error ? error.message : String(error);
+      this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "launch" });
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
     this.startingImplementations.delete(startingKey);
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
+      if (lotOptions !== null) await this.system.discardImplementationLot(lotOptions);
+      this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "cancelled" });
       return { ok: false, result: "Délégation annulée pendant sa préparation." };
     }
     const generationKey = `${ticket.id}:implementation`;
@@ -771,6 +849,12 @@ export class DelegationManager {
     const generationId = nanoid(16);
     const state: ActiveDelegation = {
       label,
+      provider,
+      files: normalizedFiles,
+      lotOptions,
+      cancelled: false,
+      childClosed: false,
+      settlement: null,
       handle: null,
       generationId,
       usageByModel: {},
@@ -792,7 +876,7 @@ export class DelegationManager {
         generationId,
         sessionId: null,
         role: "implementer",
-        orchestrator: "codex",
+        orchestrator: provider,
         effectiveModel: knobs.model,
         effectiveEffort: knobs.effort,
         codexFast: knobs.serviceTier === "fast",
@@ -801,35 +885,37 @@ export class DelegationManager {
       const handle = this.system.startAgentSession({
         ticketId: ticket.id,
         slotId: DELEGATION_SLOT_ID,
-        cwd: slotPath(slotId),
-        provider: "codex",
+        cwd: childCwd,
+        provider,
         model: knobs.model,
         effort: knobs.effort,
         serviceTier: knobs.serviceTier,
-        role: "implementer",
         generation,
-        permissionMode: "dontAsk",
-        disableWorkerTools: true,
+        ...delegatedImplementerPermissions(projectVcsProvider(ticket.project)),
         onToolCall: async () => ({ ok: false, result: "Session d'implémentation déléguée : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleEvent(ticket.id, state, event),
       });
       state.handle = handle;
-      handle.send(`${CHILD_FRAMING}${plan}`);
+      const scopeDirective = normalizedFiles.length === 0
+        ? ""
+        : `\n- Périmètre déclaré de ce lot : ${normalizedFiles.join(", ")}. N'écris aucun autre fichier.\n`;
+      handle.send(`${CHILD_FRAMING}${scopeDirective}${plan}`);
     } catch (error) {
       this.removeLot(ticket.id, label, state);
       const message = error instanceof Error ? error.message : String(error);
-      if (executionStarted) this.closeAndFinalize(state, "failed", message);
+      if (executionStarted) await this.closeAndFinalize(state, "failed", message);
+      if (lotOptions !== null) await this.system.discardImplementationLot(lotOptions);
+      this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "launch" });
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
-    this.store.logEvent(ticket.id, "delegation_started", { model: knobs.model, effort: knobs.effort, label });
     this.sessionHub.appendExternalLine(
       ticket.id,
-      `${childTranscriptPrefix(label)}—— délégation Codex lancée (${knobs.model}) ——`,
+      `${childTranscriptPrefix(label, provider)}—— délégation ${provider} lancée (${knobs.model}) ——`,
     );
     log.info("délégation lancée", { ticketId: ticket.id, slotId, model: knobs.model, label });
     return {
       ok: true,
-      result: `Délégation du lot «${label}» lancée : une session Codex implémente ce plan en arrière-plan dans le worktree courant. Termine ton tour MAINTENANT ; tu recevras un événement implementation_done par lot lancé.`,
+      result: `Délégation du lot «${label}» lancée : une session ${provider} implémente ce plan en arrière-plan. Termine ton tour MAINTENANT ; tu recevras un événement implementation_done par lot lancé.`,
     };
   }
 
@@ -927,7 +1013,8 @@ export class DelegationManager {
   private reviewBudgetExhausted(ticket: Ticket): { ok: false; result: string } | null {
     if (ticket.kind !== "feature") return null;
     const allowed = allowedReviewPasses(ticket);
-    if (ticket.reviewRounds < allowed) return null;
+    const rounds = this.store.getTicket(ticket.id)?.reviewRounds ?? ticket.reviewRounds;
+    if (rounds < allowed) return null;
     const stored = this.store.getReviewPass(ticket.id);
     if (!stored) return null;
     const complete = requiredReviewKinds(stored.reviewDepth).every(
@@ -936,12 +1023,12 @@ export class DelegationManager {
     if (!complete) return null;
     log.warn("budget de passes de review épuisé", {
       ticketId: ticket.id,
-      rounds: ticket.reviewRounds,
+      rounds,
       allowed,
     });
     return {
       ok: false,
-      result: `Budget de passes de review épuisé (${ticket.reviewRounds}/${allowed}) : ne relance plus les reviewers. Poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale les findings encore ouverts dans sa description.`,
+      result: `Budget de passes de review épuisé (${rounds}/${allowed}) : ne relance plus les reviewers. Poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale les findings encore ouverts dans sa description.`,
     };
   }
 
@@ -1013,6 +1100,24 @@ export class DelegationManager {
       reviewPass.fingerprintComputedAt = computedAt;
       return { ok: true, pass: reviewPass };
     }
+    const persisted = this.store.getReviewPass(ticket.id);
+    if (
+      persisted?.codeFingerprint === codeFingerprint
+      && persisted.reviewDepth === depth
+      && persisted.reviewedCommitSha === reviewedCommitSha
+      && persisted.requiresApproval === requiresApproval
+    ) {
+      const restored: ActiveReviewPass = {
+        passId: persisted.passId,
+        codeFingerprint,
+        reviewedCommitSha,
+        fingerprintComputedAt: computedAt,
+        depth,
+        execution: requestedExecution,
+      };
+      this.activeReviewPasses.set(ticket.id, restored);
+      return { ok: true, pass: restored };
+    }
     const exhausted = this.reviewBudgetExhausted(ticket);
     if (exhausted !== null) return exhausted;
     try {
@@ -1031,6 +1136,9 @@ export class DelegationManager {
       depth,
       execution: requestedExecution,
     };
+    const reuseRound = persisted !== null && requiredReviewKinds(persisted.reviewDepth).some(
+      (requiredKind) => persisted.results[requiredKind]?.status !== "completed",
+    );
     this.store.beginReviewPass({
       ticketId: ticket.id,
       passId: created.passId,
@@ -1038,6 +1146,7 @@ export class DelegationManager {
       reviewedCommitSha,
       reviewDepth: depth,
       requiresApproval,
+      reuseRound,
     });
     this.activeReviewPasses.set(ticket.id, created);
     return { ok: true, pass: created };
@@ -1084,6 +1193,13 @@ export class DelegationManager {
     const resolved = await this.resolveReviewPass(ticket, slotId, cwd, kind, depth, epoch, requestedExecution, startId);
     if (!resolved.ok) return { ok: false, result: resolved.result };
     const reviewPass = resolved.pass;
+    const restoredCompleted = this.completedInCurrentPass(ticket.id, kind);
+    if (restoredCompleted !== null) {
+      return {
+        ok: true,
+        result: `La review ${kind} est déjà rendue dans la passe ${restoredCompleted} : relis son verdict avec read_review_results, ne la relance pas.`,
+      };
+    }
     const execution = reviewPass.execution;
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
@@ -1174,17 +1290,29 @@ export class DelegationManager {
     // NOTE(ali): drop the lots still being prepared too, otherwise a relaunched session is refused
     // with "déjà en cours"; the in-flight start bails on its epoch check and its delete is a no-op.
     const startingPrefix = `${ticketId}:`;
-    for (const key of this.startingImplementations) {
-      if (key.startsWith(startingPrefix)) this.startingImplementations.delete(key);
+    for (const key of this.startingImplementations.keys()) {
+      if (key.startsWith(startingPrefix)) {
+        this.startingImplementations.delete(key);
+      }
     }
     const lots = this.active.get(ticketId);
     if (lots) {
       this.active.delete(ticketId);
       for (const state of lots.values()) {
+        state.cancelled = true;
+        if (state.lotOptions !== null) this.system.cancelImplementationLot(state.lotOptions);
         void state.handle?.interrupt().catch((error: unknown) => {
           log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
         });
-        this.closeAndFinalize(state, "cancelled", null);
+        if (state.settlement === null) {
+          const cleanup = (async (): Promise<void> => {
+            await this.closeAndFinalize(state, "cancelled", null);
+            if (state.lotOptions !== null) await this.system.discardImplementationLot(state.lotOptions);
+          })();
+          this.trackClosing(cleanup, ticketId);
+        } else if (state.childClosed && state.lotOptions !== null) {
+          this.trackClosing(this.system.discardImplementationLot(state.lotOptions), ticketId);
+        }
         this.store.logEvent(ticketId, "delegation_killed", { label: state.label });
         log.info("délégation tuée (cascade parent)", { ticketId, label: state.label });
       }
@@ -1202,6 +1330,12 @@ export class DelegationManager {
 
   async drainClosingSessions(): Promise<void> {
     while (this.closingExecutions.size > 0) await Promise.allSettled([...this.closingExecutions]);
+  }
+
+  async drainTicket(ticketId: string): Promise<void> {
+    while ((this.closingByTicket.get(ticketId)?.size ?? 0) > 0) {
+      await Promise.all([...this.closingByTicket.get(ticketId) ?? []]);
+    }
   }
 
   /**
@@ -1536,25 +1670,57 @@ export class DelegationManager {
     if (!current) return;
     if (event.type === "assistant_text" && event.text.trim()) state.lastAssistantText = event.text.trim();
     if (event.type === "error") state.lastError = event.message;
-    this.sessionHub.appendExternalEvent(ticketId, state.generationId, event, childTranscriptPrefix(state.label));
+    this.sessionHub.appendExternalEvent(ticketId, state.generationId, event, childTranscriptPrefix(state.label, state.provider));
     this.heartbeat(ticketId, state);
     if (event.type === "turn_end" && !state.settled) {
       state.settled = true;
       this.recordUsage(ticketId, state, event.sessionId, event.usageByModel);
       const ok = event.ok;
-      setTimeout(() => this.settle(ticketId, state, ok), SETTLE_DELAY_MS);
+      setTimeout(() => {
+        const settlement = this.settle(ticketId, state, ok);
+        state.settlement = settlement;
+        this.trackClosing(settlement, ticketId);
+      }, SETTLE_DELAY_MS);
     }
   }
 
   /** One lot's single turn ended: tear it down and resume the parent via implementation_done. */
-  private settle(ticketId: string, state: ActiveDelegation, ok: boolean): void {
+  private async settle(ticketId: string, state: ActiveDelegation, turnOk: boolean): Promise<void> {
     if (this.active.get(ticketId)?.get(state.label) !== state) return;
-    // NOTE(ali): the lot stays registered until sendEvent returns so the coordinator's onStop gate
-    // still sees the ticket as active while the parent ends the turn woken by a previous lot.
-    const remaining = this.lotCount(ticketId) - 1;
-    const summary = ok
+    const closed = await this.closeHandle(state);
+    state.childClosed = true;
+    let ok = turnOk && closed;
+    let summary = ok
       ? state.lastAssistantText
-      : state.lastError || state.lastAssistantText || "la session Codex s'est terminée en erreur sans détail";
+      : state.lastError || state.lastAssistantText || "la session déléguée s'est terminée en erreur sans détail";
+    if (!closed) summary = "La session déléguée n'a pas pu être fermée avant l'intégration de ses fichiers.";
+    try {
+      if (state.lotOptions !== null) {
+        if (ok && !state.cancelled) await this.system.finishImplementationLot(state.lotOptions);
+        else await this.system.discardImplementationLot(state.lotOptions);
+      }
+    } catch (error) {
+      ok = false;
+      summary = `Intégration du lot impossible : ${getErrorMessage(error)}`;
+      if (state.lotOptions !== null) {
+        try {
+          await this.system.discardImplementationLot(state.lotOptions);
+        } catch (discardError) {
+          summary += ` Nettoyage impossible : ${getErrorMessage(discardError)}`;
+        }
+      }
+    }
+    if (state.cancelled || this.active.get(ticketId)?.get(state.label) !== state) {
+      this.store.finalizeExecution({ generationId: state.generationId, status: "cancelled", usageByModel: state.usageByModel });
+      return;
+    }
+    this.store.finalizeExecution({
+      generationId: state.generationId,
+      status: ok ? "completed" : "failed",
+      usageByModel: state.usageByModel,
+      error: ok ? null : summary,
+    });
+    const remaining = this.lotCount(ticketId) - 1;
     const delivered = this.sessionHub.sendEvent(ticketId, {
       type: "implementation_done",
       ok,
@@ -1564,54 +1730,69 @@ export class DelegationManager {
     });
     this.removeLot(ticketId, state.label, state);
     this.store.logEvent(ticketId, "delegation_done", { ok, delivered, label: state.label, remaining });
-    this.closeAndFinalize(state, ok ? "completed" : "failed", ok ? null : summary);
     log.info("délégation terminée", { ticketId, ok, delivered, label: state.label, remaining });
     if (!delivered) log.warn("implementation_done non délivré : session parente absente", { ticketId });
+  }
+
+  private async closeHandle(state: ClosableExecution): Promise<boolean> {
+    const handle = state.handle;
+    if (!handle) return true;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        handle.close(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Délai de fermeture de session enfant dépassé")), this.closeTimeoutMs);
+          timeout.unref();
+        }),
+      ]);
+      return true;
+    } catch (closeError) {
+      handle.dispose?.();
+      log.warn("fermeture de session enfant incomplète", {
+        generationId: state.generationId,
+        reason: closeError instanceof Error ? closeError.message : String(closeError),
+      });
+      return false;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  private trackClosing(closing: Promise<void>, ticketId?: string): void {
+    this.closingExecutions.add(closing);
+    if (ticketId !== undefined) {
+      const ticketClosings = this.closingByTicket.get(ticketId) ?? new Set<Promise<void>>();
+      ticketClosings.add(closing);
+      this.closingByTicket.set(ticketId, ticketClosings);
+    }
+    void closing.finally(() => {
+      this.closingExecutions.delete(closing);
+      if (ticketId !== undefined) {
+        const ticketClosings = this.closingByTicket.get(ticketId);
+        ticketClosings?.delete(closing);
+        if (ticketClosings?.size === 0) this.closingByTicket.delete(ticketId);
+      }
+    }).catch((error: unknown) => {
+      log.warn("finalisation de session enfant impossible", { reason: String(error) });
+    });
   }
 
   private closeAndFinalize(
     state: ClosableExecution,
     status: "completed" | "failed" | "cancelled",
     error: string | null,
-  ): void {
-    const finalize = (): void => {
+  ): Promise<void> {
+    const closing = this.closeHandle(state).then(() => {
       this.store.finalizeExecution({
         generationId: state.generationId,
         status,
         usageByModel: state.usageByModel,
         error,
       });
-    };
-    const handle = state.handle;
-    if (!handle) {
-      finalize();
-      return;
-    }
-    const boundedClose = (async (): Promise<void> => {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await Promise.race([
-          handle.close(),
-          new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => reject(new Error("Délai de fermeture de session enfant dépassé")), this.closeTimeoutMs);
-            timeout.unref();
-          }),
-        ]);
-      } catch (closeError) {
-        handle.dispose?.();
-        log.warn("fermeture de session enfant incomplète", {
-          generationId: state.generationId,
-          reason: closeError instanceof Error ? closeError.message : String(closeError),
-        });
-      } finally {
-        if (timeout) clearTimeout(timeout);
-        finalize();
-      }
-    })();
-    this.closingExecutions.add(boundedClose);
-    void boundedClose.finally(() => this.closingExecutions.delete(boundedClose)).catch((error: unknown) => {
-      log.warn("finalisation de session enfant impossible", { reason: String(error) });
     });
+    this.trackClosing(closing);
+    return closing;
   }
 
   /** Sum the child turn's usage into the parent ticket (keyed by the child thread id). */

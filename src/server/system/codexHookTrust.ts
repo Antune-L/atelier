@@ -34,7 +34,7 @@ export function codexSessionPreToolUseHookHash(handler: CodexCommandHook): strin
         statusMessage: handler.statusMessage,
       },
     ],
-    matcher: "^Bash$",
+    matcher: "^(Bash|apply_patch|spawn_agent)$",
   };
   const digest = createHash("sha256").update(canonicalJson(normalizedIdentity)).digest("hex");
   return `sha256:${digest}`;

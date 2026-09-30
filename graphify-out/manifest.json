@@ -55,8 +55,8 @@
     "semantic_hash": "f2233324b1853a52b57c3cb06affa423"
   },
   "src/server/agents/contract.ts": {
-    "mtime": 1790448967.5419965,
-    "ast_hash": "84b26f551c654c798183c4774074e079",
+    "mtime": 1790773475.750951,
+    "ast_hash": "1d95228840a34912af0801d840de3d0d",
     "semantic_hash": ""
   },
   "src/server/agents/coordinator.ts": {
@@ -685,8 +685,8 @@
     "semantic_hash": "950c44aa9b25072bf628a5fab08ce4e1"
   },
   "src/server/agents/sessionHub.ts": {
-    "mtime": 1790449042.032549,
-    "ast_hash": "98239a6222ceb1b70d50045821377107",
+    "mtime": 1790773257.7833948,
+    "ast_hash": "c8f5a867b05463ce974b3e0e89e94616",
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
@@ -700,13 +700,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.ts": {
-    "mtime": 1790449217.1235867,
-    "ast_hash": "b81f9664de173dfcd651a11087042ed9",
+    "mtime": 1790773110.1345665,
+    "ast_hash": "c34a23870fdc32828acc5b8175dce0af",
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
-    "mtime": 1789391532.2743697,
-    "ast_hash": "8147bc6d0a8f525d33db7b1f985e4817",
+    "mtime": 1790773132.7090528,
+    "ast_hash": "8315f7beddc3afb025e9130b4967f902",
     "semantic_hash": ""
   },
   "src/server/agents/split.ts": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1790449071.2724319,
-    "ast_hash": "06eb55627e5c3bfa13bf4d3532c537dc",
+    "mtime": 1790773475.7741892,
+    "ast_hash": "8ca280a5ca5a3c5dc38583ef1347a6d1",
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.test.ts": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexProvider.ts": {
-    "mtime": 1790448798.5972555,
-    "ast_hash": "cfe5a342950ff857950e5abf96c5df75",
+    "mtime": 1790773475.716287,
+    "ast_hash": "7da604aa30b555688f5f325d93999132",
     "semantic_hash": ""
   },
   "src/server/testing/fixtures.ts": {
@@ -1455,8 +1455,8 @@
     "semantic_hash": ""
   },
   "MEMORY.md": {
-    "mtime": 1790370258.9961834,
-    "ast_hash": "a45ac1645b995c995e3babda3a3b7a1c",
+    "mtime": 1790773245.5336814,
+    "ast_hash": "ce6d787b359ce9bf47b795eb89ffec5e",
     "semantic_hash": ""
   },
   "src/server/agents/atelier.ts": {
@@ -1597,6 +1597,11 @@
   "src/server/system/delegationWorkspace.ts": {
     "mtime": 1790449122.5579085,
     "ast_hash": "c1b5aa674bce9c02715bd568c5f63c80",
+    "semantic_hash": ""
+  },
+  "src/server/system/permissionDiagnostics.ts": {
+    "mtime": 1790773192.3345168,
+    "ast_hash": "1ce4d2ebee4c729052f1884f1364f973",
     "semantic_hash": ""
   }
 }

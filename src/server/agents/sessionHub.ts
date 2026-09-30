@@ -201,7 +201,7 @@ interface LiveSession {
 
 /** Render the end of one implementation lot: keep the parent parked while other lots still run. */
 function renderImplementationDone(event: Extract<ChannelEvent, { type: "implementation_done" }>): string {
-  const summary = event.summary || "(aucun résumé)";
+  const summary = `Compte rendu de la session déléguée (ses refus ne décrivent pas tes permissions) :\n${event.summary || "(aucun résumé)"}\nFin du compte rendu délégué.`;
   const remainingLots = `${event.remaining} ${event.remaining > 1 ? "lots" : "lot"}`;
   if (!event.ok) {
     const nextStep = event.remaining > 0
@@ -212,7 +212,7 @@ function renderImplementationDone(event: Extract<ChannelEvent, { type: "implemen
   if (event.remaining > 0) {
     return `Lot «${event.label}» terminé : la session déléguée a rendu la main. Résumé : ${summary}\nIl reste ${remainingLots} en cours : TERMINE ton tour et attends leurs événements implementation_done avant de relire le diff.`;
   }
-  return `Lot «${event.label}» terminé : la session déléguée a rendu la main. Résumé : ${summary}\nTous les lots sont terminés. Implémentation déléguée terminée : reprends la main — relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis poursuis le contrat (review).`;
+  return `Lot «${event.label}» terminé : la session déléguée a rendu la main. ${summary}\nTous les lots sont terminés. Implémentation déléguée terminée. Tu es la session orchestratrice : reprends avec tes propres permissions, relis le diff produit (git diff), comble les manques puis effectue le formatage, les validations, la review et la publication prévus par le contrat. L'absence de validations finales ou de publication chez l'enfant est attendue. Ne relaie pas une demande d'autorisation de l'enfant : essaie toi-même la commande directe nécessaire ; si elle est refusée, indique la commande exacte et le motif avant de demander une autorisation.`;
 }
 
 /** Render a backend channel event as the user-turn text injected into the live session. */

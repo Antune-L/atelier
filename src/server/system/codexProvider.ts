@@ -1,6 +1,6 @@
 /** Interactive Codex provider backed by the stable `codex app-server` protocol. */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,6 +44,7 @@ import {
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
+import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
 import { workerToolsForRole } from "./sessionRolePolicy.ts";
@@ -179,6 +180,7 @@ interface PreparedAgents {
 
 interface PreparedHook {
   config: ConfigObject;
+  drainDenials(): void;
   cleanup(): void;
 }
 
@@ -480,6 +482,22 @@ function prepareNoVerifyHook(options: AgentSessionOptions): PreparedHook {
   const directory = mkdtempSync(join(tmpdir(), "kanban-codex-hooks-"));
   const path = join(directory, "deny-no-verify.sh");
   const policyPath = join(directory, "command-policy.js");
+  const denialWriterPath = join(directory, "permission-denial.js");
+  const denialJournalPath = join(directory, "permission-denials.jsonl");
+  writeFileSync(denialJournalPath, "", { encoding: "utf8", mode: 0o600 });
+  writeFileSync(denialWriterPath, `import { appendFileSync } from "node:fs";
+try {
+  const request = JSON.parse(await Bun.stdin.text());
+  const command = request?.tool_input?.command ?? request?.tool_input?.cmd;
+  appendFileSync(process.argv[2], JSON.stringify({
+    toolName: request.tool_name,
+    command: typeof command === "string" ? command : null,
+    reason: JSON.parse(process.argv[3]),
+    ...(typeof request.agent_id === "string" ? { sourceId: request.agent_id } : {}),
+  }) + "\\n");
+} catch { process.exitCode = 0; }
+`, { encoding: "utf8", mode: 0o600 });
+  let denialJournalOffset = 0;
   const scoutTypes = Object.entries(options.agents ?? {})
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
@@ -494,6 +512,7 @@ function prepareNoVerifyHook(options: AgentSessionOptions): PreparedHook {
     path,
     `#!/bin/sh
 deny() {
+  printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(denialWriterPath)} ${shellQuote(denialJournalPath)} "$1"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$1"
   exit 0
 }
@@ -536,6 +555,21 @@ fi
           trusted_hash: codexSessionPreToolUseHookHash(handler),
         },
       },
+    },
+    drainDenials: () => {
+      try {
+        const journal = readFileSync(denialJournalPath, "utf8");
+        const completeEnd = journal.lastIndexOf("\n") + 1;
+        const entries = journal.slice(denialJournalOffset, completeEnd);
+        denialJournalOffset = completeEnd;
+        for (const line of entries.split("\n")) {
+          if (!line) continue;
+          const denial = permissionDenialSchema.parse(JSON.parse(line));
+          reportPermissionDenial(options, denial);
+        }
+      } catch (error) {
+        log.warn("lecture d'un refus de permission impossible", { ticketId: options.ticketId, reason: getErrorMessage(error) });
+      }
     },
     cleanup: () => rmSync(directory, { recursive: true, force: true }),
   };
@@ -620,7 +654,7 @@ function createCodexAgentSession(
   const hasWorkerServer = options.disableWorkerTools !== true && workerTools.length > 0;
   const workerToken = hasWorkerServer ? nanoid(32) : null;
   let preparedAgents: PreparedAgents = { config: null, cleanup: () => {} };
-  let preparedHook: PreparedHook = { config: {}, cleanup: () => {} };
+  let preparedHook: PreparedHook = { config: {}, drainDenials: () => {}, cleanup: () => {} };
   let connection: CodexAppServerConnection | null = null;
   let threadId: string | null = null;
   let activeTurnId: string | null = null;
@@ -694,6 +728,7 @@ function createCodexAgentSession(
 
   function cleanup(): void {
     if (cleaned) return;
+    preparedHook.drainDenials();
     cleaned = true;
     if (workerToken) mcpManager.unregister(workerToken);
     preparedAgents.cleanup();
@@ -869,6 +904,7 @@ function createCodexAgentSession(
       return;
     }
     if (notification.method === "turn/completed") {
+      preparedHook.drainDenials();
       const parsed = turnCompletedSchema.safeParse(notification.params);
       if (!parsed.success || parsed.data.threadId !== threadId) return;
       const turn = parsed.data.turn;

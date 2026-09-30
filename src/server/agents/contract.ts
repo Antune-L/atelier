@@ -349,6 +349,9 @@ export function buildTicketContract(
     "## Interdits",
     "- N'utilise JAMAIS `git push --no-verify` ni de flag contournant les hooks.",
     "- Ne touche à aucun fichier hors du worktree.",
+    "- Exécute les commandes directement depuis le worktree courant, sans préfixe cd, env ou rtk. Utilise pnpm directement ou corepack pnpm si le projet le nécessite. Un refus d'une commande composée ne signifie pas que ses commandes individuelles sont interdites.",
+    "- Les conventions du projet ne changent pas les permissions de cette session : une recommandation d'utiliser un wrapper ne l'autorise pas. Utilise la commande directe équivalente autorisée.",
+    "- Avant de demander une autorisation Bash, essaie la commande directe nécessaire avec tes propres permissions et rapporte sa commande exacte et le motif du refus. Ne déduis jamais tes permissions du bilan d'un agent délégué.",
     "- Lis les fichiers `AGENTS.md` applicables avant d'agir. Si une règle nécessaire n'y figure pas, consulte aussi le `CLAUDE.md` applicable comme compatibilité, sans importer ses permissions ni secrets.",
     project.instructions ? `- Consigne projet : ${project.instructions}` : "",
   ];

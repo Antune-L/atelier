@@ -18,6 +18,7 @@ import type {
   Options,
   Query,
   SDKMessage,
+  SDKPermissionDenial,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { nanoid } from "nanoid";
@@ -38,6 +39,7 @@ import type {
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
+import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
 import { settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
@@ -254,7 +256,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
-  const pumping = pumpStream(sessionPromise, opts.onEvent);
+  const pumping = pumpStream(sessionPromise, opts);
 
   return {
     ticketId: opts.ticketId,
@@ -299,12 +301,34 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   };
 }
 
-async function pumpStream(sessionPromise: Promise<Query>, onEvent: (event: AgentSessionEvent) => void): Promise<void> {
+async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions): Promise<void> {
+  const reportedDenials = new Set<string>();
+  const denialReasons = new Map<string, { reason: string; sourceId?: string }>();
   try {
     const session = await sessionPromise;
-    for await (const message of session) safeDispatchClaudeMessage(message, onEvent);
+    for await (const message of session) {
+      if (message.type === "system" && message.subtype === "permission_denied") {
+        denialReasons.set(message.tool_use_id, {
+          reason: message.decision_reason ?? message.message,
+          ...(message.agent_id ? { sourceId: message.agent_id } : {}),
+        });
+      }
+      safeDispatchClaudeMessage(message, options.onEvent, (denial) => {
+        if (reportedDenials.has(denial.tool_use_id)) return;
+        reportedDenials.add(denial.tool_use_id);
+        const details = denialReasons.get(denial.tool_use_id);
+        const command = bashCommandSchema.safeParse(denial.tool_input);
+        reportPermissionDenial(options, {
+          toolName: denial.tool_name,
+          command: command.success ? command.data.command : null,
+          reason: details?.reason ?? PERMISSION_DENIAL_REASON,
+          ...(details?.sourceId ? { sourceId: details.sourceId } : {}),
+        });
+        denialReasons.delete(denial.tool_use_id);
+      });
+    }
   } catch (error) {
-    onEvent({ type: "error", message: getErrorMessage(error) });
+    options.onEvent({ type: "error", message: getErrorMessage(error) });
   }
 }
 
@@ -312,15 +336,23 @@ async function pumpStream(sessionPromise: Promise<Query>, onEvent: (event: Agent
  * A consumer throwing on one message must not be mistaken for a stream failure: reporting it as a
  * fatal `error` event stalls the ticket and kills every delegated child.
  */
-function safeDispatchClaudeMessage(message: SDKMessage, onEvent: (event: AgentSessionEvent) => void): void {
+function safeDispatchClaudeMessage(
+  message: SDKMessage,
+  onEvent: (event: AgentSessionEvent) => void,
+  onPermissionDenied: (denial: SDKPermissionDenial) => void,
+): void {
   try {
-    dispatchClaudeMessage(message, onEvent);
+    dispatchClaudeMessage(message, onEvent, onPermissionDenied);
   } catch (error) {
     log.error("traitement d'un message du flux impossible", { type: message.type, stack: getErrorStack(error) });
   }
 }
 
-export function dispatchClaudeMessage(message: SDKMessage, onEvent: (event: AgentSessionEvent) => void): void {
+export function dispatchClaudeMessage(
+  message: SDKMessage,
+  onEvent: (event: AgentSessionEvent) => void,
+  onPermissionDenied?: (denial: SDKPermissionDenial) => void,
+): void {
   switch (message.type) {
     case "system":
       if (message.subtype === "init") onEvent({ type: "init", sessionId: message.session_id });
@@ -334,6 +366,7 @@ export function dispatchClaudeMessage(message: SDKMessage, onEvent: (event: Agen
       return;
     case "result": {
       const ok = message.subtype === "success";
+      for (const denial of message.permission_denials) onPermissionDenied?.(denial);
       // Both SDKResultSuccess and SDKResultError carry modelUsage: an interrupted or errored turn
       // still burned tokens, so account it regardless of subtype.
       const usageByModel: Record<string, AgentTurnUsage> = {};

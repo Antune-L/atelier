@@ -95,6 +95,10 @@ Consignes :
 - Si le plan précise un périmètre de fichiers, reste strictement dedans : d'autres lots d'implémentation tournent peut-être en parallèle, ne touche jamais à leurs fichiers.
 - Respecte les conventions de code du projet.
 - Ne commit JAMAIS, ne push JAMAIS, n'ouvre JAMAIS de PR : la session orchestratrice garde la main sur git, la review, les tests et la PR.
+- Exécute les commandes directement depuis le worktree courant, sans préfixe cd, env ou rtk. Utilise pnpm directement ou corepack pnpm si le projet le nécessite. Un refus d'une commande composée ne signifie pas que ses commandes individuelles sont interdites.
+- Les conventions du projet ne changent pas les permissions de cette session : une recommandation d'utiliser un wrapper ne l'autorise pas. Utilise la commande directe équivalente autorisée.
+- Les validations finales et la publication appartiennent à l'orchestrateur : leur absence n'est pas un échec de ton lot. Ne demande pas d'élargir tes permissions ni de relancer ta session pour ces étapes.
+- Si une commande nécessaire à l'écriture du code est refusée, rapporte la commande exacte et le motif dans ton bilan, sans conclure que tout Bash est interdit.
 - Termine en résumant ce que tu as implémenté et les fichiers touchés (ce résumé est transmis à l'orchestrateur).
 
 ## Plan à implémenter

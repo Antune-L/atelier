@@ -367,6 +367,7 @@ const BASH_ALLOWLIST = [
   "Bash(bunx:*)",
   "Bash(npm run:*)",
   "Bash(pnpm:*)",
+  "Bash(corepack pnpm:*)",
   "Bash(yarn:*)",
   "Bash(node:*)",
   "Bash(sleep:*)",

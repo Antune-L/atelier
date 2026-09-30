@@ -1,16 +1,16 @@
 # Graph Report - kanban-agents  (2026-09-30)
 
 ## Corpus Check
-- 306 files · ~782,932 words
+- 306 files · ~782,953 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3822 nodes · 9838 edges · 165 communities (147 shown, 18 thin omitted)
+- 3822 nodes · 9827 edges · 150 communities (132 shown, 18 thin omitted)
 - Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 59 edges (avg confidence: 0.62)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `bb4d91b7`
+- Built from commit: `dba30b4c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -125,7 +125,6 @@
 - Profile
 - FakePaneStream
 - useSavedFlash.ts
-- repairPath.ts
 - ApiDenyPatterns
 - relaunch.ts
 - settings.tsx
@@ -135,7 +134,6 @@
 - ProjectPanel.tsx
 - VcsConnectionResult
 - createMcpServer
-- AutomationView.tsx
 - useSavedFlash.ts
 - prMerge.ts
 - TicketOperations
@@ -143,39 +141,26 @@
 - slotTemplates.ts
 - KeyedMutex
 - renderPrdHtml.ts
-- AgentsView.tsx
-- usePrdSearch.ts
-- StageProgressBar.tsx
 - id
 - split.ts
 - createAtelierRoutes
 - performSplit
 - WorktreeAddressWatcher
-- sessionHub.test.ts
-- useProjects.ts
 - runRecordedAction
 - $defs
-- useTickTimer.ts
 - title
 - preDraft
 - AgentMessage
 - codexBinary.ts
-- SlotPips.tsx
 - uploads.ts
-- settings.tsx
 - prd.schema.json
 - McpSettingsControllerDependencies
-- sessionRolePolicy.ts
 - useSavedFlash.ts
 - CodexProviderDependencies
 - permissionDiagnostics.ts
 - PreparedAgents
-- .createTodoTicket
 - createMcpServer
 - WorktreeAddressWatcher
-- performSplit
-- isProcessing
-- TicketOperationError
 
 ## God Nodes (most connected - your core abstractions)
 1. `Store` - 149 edges
@@ -183,7 +168,7 @@
 3. `SystemAdapter` - 79 edges
 4. `FakeSystemAdapter` - 78 edges
 5. `createApiRoutes()` - 77 edges
-6. `cn()` - 76 edges
+6. `cn()` - 74 edges
 7. `RealSystemAdapter` - 71 edges
 8. `SlotManager` - 58 edges
 9. `DelegationManager` - 55 edges
@@ -204,59 +189,59 @@
 ## Import Cycles
 - None detected.
 
-## Communities (165 total, 18 thin omitted)
+## Communities (150 total, 18 thin omitted)
 
 ### Community 0 - "Contract Building & Slots"
 Cohesion: 0.02
 Nodes (116): buildNotionImportPrompt(), CONVERSATION_STATUS_FOR_PRD, log, PrdCardDraft, ConversationStatus, ActionExecutionOptions, actionExecutionOptionsSchema, agentMessageSchema (+108 more)
 
 ### Community 1 - "Terminals UI & Notifications"
-Cohesion: 0.09
-Nodes (27): analyzeTicketsInputSchema, analyzeTicketsOutputSchema, columnSchema, compactTicketSchema, createTodoTicketOutputSchema, editableTicketSchema, effectivePort(), isAllowedHost() (+19 more)
+Cohesion: 0.08
+Nodes (29): analyzeTicketsInputSchema, analyzeTicketsOutputSchema, columnSchema, compactTicketSchema, createTodoTicketOutputSchema, editableTicketSchema, effectivePort(), isAllowedHost() (+21 more)
 
 ### Community 3 - "Feasibility Batch Management"
-Cohesion: 0.08
-Nodes (48): CONVERSATION_STATUS_LABELS, PRD_SPLIT_MODE_LABELS, PRD_SPLIT_MODES, PrdSplitMode, AtelierViewProps, PrdSeen, candidatesFor(), CardCandidate (+40 more)
+Cohesion: 0.07
+Nodes (51): PrdDocumentPatch, PRD_SPLIT_MODE_LABELS, PRD_SPLIT_MODES, PrdSplitMode, PrdAnnotation, AtelierViewProps, PrdSeen, candidatesFor() (+43 more)
 
 ### Community 4 - "Ticket Action Panels"
-Cohesion: 0.15
-Nodes (8): CapturingSystem, AckSystem, RecordingSystem, RecordedSession, RecordingSystem, CapturingSystem, AgentSessionHandle, AgentSessionOptions
+Cohesion: 0.11
+Nodes (15): CapturingSystem, AckSystem, RecordingSystem, SessionExecutionContext, SessionExecutionFinish, SessionExecutionUsage, SessionHandlerError, SessionMessageStatus (+7 more)
 
 ### Community 5 - "Fake System Adapter"
-Cohesion: 0.10
-Nodes (28): RepoInspectionSource, CreateProjectInput, RepoInspection, UpdateProjectInput, ConnectionHint, CreateStep, isPositiveIntegerString(), isValidDraft() (+20 more)
+Cohesion: 0.11
+Nodes (22): RepoInspectionSource, CreateProjectInput, RepoInspection, UpdateProjectInput, ConnectionHint, CreateStep, isPositiveIntegerString(), isValidDraft() (+14 more)
 
 ### Community 6 - "Shared Zod Schemas"
-Cohesion: 0.09
-Nodes (34): PrdDocumentPatch, PrdAnnotation, prdAnnotationsSchema, FeedbackDraft, PrdAnnotator(), PrdAnnotatorProps, BREADCRUMB, NO_ANNOTATIONS (+26 more)
+Cohesion: 0.08
+Nodes (34): prdAnnotationsSchema, BREADCRUMB, NO_ANNOTATIONS, PrdReviewDialog(), PrdReviewDialogProps, ActivityTab(), isUnanswered(), NO_COMMENT_COLUMNS (+26 more)
 
 ### Community 7 - "Settings & Profiles UI"
 Cohesion: 0.06
 Nodes (7): RelaunchSystem, delay(), fakeShellPrompt(), FakeSystemAdapter, hexToBytes(), ReviewDoneOptions, WorktreeSetupOptions
 
 ### Community 8 - "PR Selection & Slots Bar"
-Cohesion: 0.21
-Nodes (14): AgentCard(), STATE_STRIPE_COLORS, TicketCard(), TicketCardProps, TriageDot(), truncateParentTitle(), ANIMATED_STAGES, formatRelativeDuration() (+6 more)
+Cohesion: 0.11
+Nodes (24): CompactTicket, ListTicketsInput, Column, COLUMN_LABELS, COLUMN_ORDER, COLUMNS, ACTIVE_COLUMNS, Board() (+16 more)
 
 ### Community 9 - "Real System Adapter"
 Cohesion: 0.05
-Nodes (69): AGENT_EFFORT_FULL_LABELS, AGENT_EFFORT_LABELS, AGENT_MODEL_FULL_LABELS, AGENT_MODEL_LABELS, AUTOMATION_RUN_STATUSES, CODEX_EFFORT_FULL_LABELS, CODEX_EFFORT_LABELS, CODEX_MODEL_LABELS (+61 more)
+Nodes (64): AGENT_EFFORT_FULL_LABELS, AGENT_EFFORT_LABELS, AGENT_MODEL_FULL_LABELS, AGENT_MODEL_LABELS, AUTOMATION_RUN_STATUSES, CODEX_EFFORT_FULL_LABELS, CODEX_EFFORT_LABELS, CODEX_MODEL_LABELS (+56 more)
 
 ### Community 10 - "Slot Config & Worktree Watch"
-Cohesion: 0.12
-Nodes (12): directories, initializeParamsSchema, log, requestSchema, rpcError(), rpcResult(), rpcResponseSchema, toolCallParamsSchema (+4 more)
+Cohesion: 0.10
+Nodes (15): directories, settingSourcesForRole(), workerToolsForRole(), initializeParamsSchema, log, requestSchema, rpcError(), rpcResult() (+7 more)
 
 ### Community 11 - "Core Domain Concepts"
 Cohesion: 0.03
 Nodes (62): agentMessageRowSchema, AutomationRow, automationRowSchema, AutomationRunRow, automationRunRowSchema, buildScripts(), CommentRow, commentRowSchema (+54 more)
 
 ### Community 12 - "Board & Sidebar Layout"
-Cohesion: 0.21
-Nodes (14): ManagedProject, dragKeys(), groupCountLabel(), groupSortId(), ListGroup, ProjectList(), ProjectListProps, ProjectListRowProps (+6 more)
+Cohesion: 0.24
+Nodes (3): DelegationWorkspace, workspacePath(), ImplementationLotOptions
 
 ### Community 13 - "Database Store Operations"
 Cohesion: 0.05
-Nodes (51): COLUMN_LABELS, COLUMN_ORDER, COLUMNS, wsClientEventSchema, HOME_VIEW_OPTIONS, HomeView, ACTIVE_COLUMNS, Board() (+43 more)
+Nodes (52): AUTOMATION_TRIGGER_LABELS, AUTOMATION_TRIGGERS, AutomationRunStatus, AutomationTrigger, isNotionUrl(), NOTION_HOSTS, HOME_VIEW_OPTIONS, HomeView (+44 more)
 
 ### Community 14 - "Coordinator & Protocol"
 Cohesion: 0.15
@@ -287,8 +272,8 @@ Cohesion: 0.08
 Nodes (83): agent_context_html(), agent_entry_count(), axes_html(), axis_anchor(), axis_head_html(), axis_items(), axis_section_html(), axis_statuses() (+75 more)
 
 ### Community 22 - "DB Row Schemas & Mappers"
-Cohesion: 0.08
-Nodes (37): RFC-4180, isNotionUrl(), NOTION_HOSTS, ProjectInfo, AskPanelProps, ComposeState, NewConversationFormProps, BoardProps (+29 more)
+Cohesion: 0.07
+Nodes (39): RFC-4180, ProjectInfo, AskPanelProps, CardsPanelProps, CleanPrPanelProps, ImportTicketsPanel(), ImportTicketsPanelProps, ProjectPrPickerProps (+31 more)
 
 ### Community 23 - "Dev Dependencies"
 Cohesion: 0.08
@@ -335,16 +320,16 @@ Cohesion: 0.10
 Nodes (21): scripts, build:desktop, build:web, dev, dev:desktop, dev:proxy, dev:server, dev:web (+13 more)
 
 ### Community 34 - "Board Columns"
-Cohesion: 0.16
-Nodes (22): AppliedPath, copyDependencies(), copyPath(), DelegationWorkspace, ensureParentDirectory(), FileState, git(), installStagedPath() (+14 more)
+Cohesion: 0.23
+Nodes (19): AppliedPath, copyDependencies(), copyPath(), ensureParentDirectory(), FileState, git(), installStagedPath(), integrateChanges() (+11 more)
 
 ### Community 35 - "NPM Scripts"
 Cohesion: 0.17
 Nodes (9): ReformulateManager, stalledEventPayload(), TicketLifecycle, RouteDeps, Stage, ErrorDetailsSource, Ticket, DescriptionTabProps (+1 more)
 
 ### Community 36 - "Runtime Dependencies"
-Cohesion: 0.11
-Nodes (15): cleanDescription(), createApiRoutes(), isBlocked(), isSplitMother(), isWebOnlyPath(), jsonError(), normalizeRepoPath(), PaneReader (+7 more)
+Cohesion: 0.09
+Nodes (19): cleanDescription(), createApiRoutes(), createSplitChildren(), isBlocked(), isSplitMother(), isWebOnlyPath(), jsonError(), normalizeRepoPath() (+11 more)
 
 ### Community 37 - "Claude SDK Provider"
 Cohesion: 0.09
@@ -371,8 +356,8 @@ Cohesion: 0.15
 Nodes (15): ACTIVE_BAR, AREA_CURSOR, AXIS_PROPS, BAR_CURSOR, CHART_PALETTE, colorAt(), DurationBars(), DurationDatum (+7 more)
 
 ### Community 43 - "Demo Pipeline Concepts"
-Cohesion: 0.15
-Nodes (7): FakePaneStream, PaneStream, dataMessage(), normalizeSeed(), send(), TerminalSession, visibleText()
+Cohesion: 0.20
+Nodes (6): PaneStream, dataMessage(), normalizeSeed(), send(), TerminalSession, visibleText()
 
 ### Community 44 - "Chart Primitives"
 Cohesion: 0.31
@@ -391,20 +376,20 @@ Cohesion: 0.13
 Nodes (30): buildAskContract(), buildCleanContract(), buildConflictResolutionContract(), buildFeasibilityBatchContract(), buildFeasibilityContextSection(), buildImplementingSteps(), buildMockupReviewStep(), buildPlanningStep() (+22 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.09
-Nodes (22): NewTicket, TicketCreationRequestConflictError, AnalyzeTicketRejectionReason, AnalyzeTicketsResult, CompactTicket, createTicketOperations(), CreateTodoTicketInput, createTodoTicketInputSchema (+14 more)
+Cohesion: 0.08
+Nodes (27): NewTicket, TicketCreationRequestConflictError, agentPairError(), AnalyzeTicketRejectionReason, AnalyzeTicketsResult, createTicketOperations(), CreateTodoTicketInput, createTodoTicketInputSchema (+19 more)
 
 ### Community 49 - "Slot State"
-Cohesion: 0.11
-Nodes (10): active, ensureNotificationPermission(), getAudioContext(), isSupported(), loadSoundBuffer(), playBuffer(), playNotificationSound(), showDesktopNotification() (+2 more)
+Cohesion: 0.07
+Nodes (22): wsClientEventSchema, ATTENTION_STATUSES, sessionOf(), SlotPips(), SlotPipsProps, STATUS_LABELS, STATUS_PIP_CLASSES, active (+14 more)
 
 ### Community 50 - "Stats Hooks & Cards"
 Cohesion: 0.16
 Nodes (12): ChartConfig, ChartContainer, ChartContainerProps, ChartContext, ChartContextValue, ChartLegendContent(), ChartLegendContentProps, ChartTooltipContent() (+4 more)
 
 ### Community 52 - "repairPath.ts"
-Cohesion: 0.20
-Nodes (10): terminalServerMessageSchema, badgeLabelFor(), LiveTerminal(), LiveTerminalOptions, LiveTerminalProps, TERMINAL_THEME, terminalWsUrl(), textEncoder (+2 more)
+Cohesion: 0.06
+Nodes (39): Block, blockText(), compactChunks(), firstCharCode(), TranscriptBuffer, trimBlockStart(), AgentStreamBlock, TERMINAL_STAGES (+31 more)
 
 ### Community 53 - "User Terminal Manager"
 Cohesion: 0.33
@@ -412,23 +397,23 @@ Nodes (5): CONTEXT — domain glossary, Execution, Proposed (not yet built), Sea
 
 ### Community 54 - "Community 54"
 Cohesion: 0.07
-Nodes (28): extractPrUrl(), ghPrHeadSchema, ghPrSchema, ghPrStateSchema, ghRestPullSchema, ghRestReviewPagesSchema, ghRestReviewSchema, ghRestReviewsSchema (+20 more)
+Nodes (27): BoundedCommandResult, connectionFailure(), connectionResult(), ghPrHeadSchema, ghPrSchema, ghPrStateSchema, ghRestPullSchema, ghRestReviewPagesSchema (+19 more)
 
 ### Community 56 - "CSV Parsing"
-Cohesion: 0.13
-Nodes (23): isProcessing(), ACTIVE_STAGES, ColumnActionsMenu(), ColumnActionsMenuProps, ColumnMenuItem, ActionContext, buildActions(), ConfirmSpec (+15 more)
+Cohesion: 0.22
+Nodes (13): isProcessing(), ACTIVE_STAGES, ActionContext, buildActions(), ConfirmSpec, errorMessage(), RETRY_STAGES, TicketAction (+5 more)
 
 ### Community 57 - "Community 57"
-Cohesion: 0.18
-Nodes (7): withJsonRequestFile(), ReviewPublicationState, GithubVcsClient, pullApiEndpoint(), reviewApiEndpoint(), rightSideDiffLines(), ReviewPublicationCheck
+Cohesion: 0.12
+Nodes (10): RecordingSystemAdapter, withJsonRequestFile(), PublishReviewOptions, PublishReviewResult, ReviewPublicationState, GithubVcsClient, pullApiEndpoint(), reviewApiEndpoint() (+2 more)
 
 ### Community 58 - "File Uploads"
 Cohesion: 0.40
 Nodes (8): agentBaseEnv(), bestInstalledMatch(), compareParts(), envWithProjectNode(), nvmNodeBinDir(), readNvmrc(), prepareProjectShell(), shellLiteral()
 
 ### Community 59 - "triageManager.ts"
-Cohesion: 0.19
-Nodes (18): buildContractConstraintsLines(), buildResponseFormatLines(), buildStrictRulesLines(), buildTicketLines(), buildTriageChannelPrompt(), buildTriagePlusChannelPrompt(), isEnglish(), readOnlyFramingLines() (+10 more)
+Cohesion: 0.24
+Nodes (15): buildContractConstraintsLines(), buildResponseFormatLines(), buildStrictRulesLines(), buildTicketLines(), buildTriageChannelPrompt(), buildTriagePlusChannelPrompt(), isEnglish(), readOnlyFramingLines() (+7 more)
 
 ### Community 60 - "Package Manifest"
 Cohesion: 0.11
@@ -439,8 +424,8 @@ Cohesion: 0.13
 Nodes (18): buildRepoInspection(), formatProjectLabel(), LOCKFILE_NAMES, LOCKFILE_RUNNERS, PackageManifest, packageManifestSchema, PROVIDER_HOST_MARKERS, RepoFacts (+10 more)
 
 ### Community 62 - "TicketCard.tsx"
-Cohesion: 0.08
-Nodes (22): AGENTS_SKILLS_DIR, CLAUDE_JSON_PATH, CLAUDE_SKILLS_DIR, commandOutputOrNull(), COMPOSER_BINARIES, DEFAULT_CODEX_HOME, GitRemoteFacts, INSTALL_COMMANDS (+14 more)
+Cohesion: 0.06
+Nodes (27): AGENTS_SKILLS_DIR, CLAUDE_JSON_PATH, CLAUDE_SKILLS_DIR, commandOutputOrNull(), COMPOSER_BINARIES, DEFAULT_CODEX_HOME, detectInstallCommand(), GitRemoteFacts (+19 more)
 
 ### Community 63 - "Community 63"
 Cohesion: 0.16
@@ -459,12 +444,12 @@ Cohesion: 0.18
 Nodes (3): AutomationManager, Automation, AutomationRun
 
 ### Community 67 - "TerminalView.tsx"
-Cohesion: 0.17
-Nodes (19): COLUMN_SORT_FIELD, BoardColumn(), compareFamilyMembers(), familyKeyOf(), groupTicketIds(), groupTicketsByFamily(), isSplitMother(), readCollapsed() (+11 more)
+Cohesion: 0.05
+Nodes (63): COLUMN_SORT_FIELD, AgentCard(), AgentCardProps, AgentsView(), AgentsViewProps, hasLiveAgent(), normalize(), AtelierView() (+55 more)
 
 ### Community 68 - "schema.test.ts"
-Cohesion: 0.23
-Nodes (17): projectMatches(), ProjectsSettings(), readShowHidden(), referenceCommitTimeout(), writeShowHidden(), mostCommonValue(), FilteredProjectGroup, filterProjectGroups() (+9 more)
+Cohesion: 0.06
+Nodes (55): ManagedProject, App(), dragKeys(), groupCountLabel(), groupSortId(), ListGroup, ProjectList(), ProjectListProps (+47 more)
 
 ### Community 69 - "reviewFindings.ts"
 Cohesion: 0.09
@@ -483,8 +468,8 @@ Cohesion: 0.23
 Nodes (10): artifactPath, assertPackageVersionInSync(), assertSdkVersionsInSync(), BUILT_DMG, ELECTROBUN_BIN, fail(), installedPackageVersion(), RELEASE_FOLDER (+2 more)
 
 ### Community 73 - "TerminalView.tsx"
-Cohesion: 0.11
-Nodes (43): AgentEffort, AgentModel, CodexEffort, CodexModel, Implementer, Orchestrator, AgentProfileConfig(), AgentProfileConfigProps (+35 more)
+Cohesion: 0.10
+Nodes (54): AgentEffort, AgentModel, CodexEffort, CodexModel, Implementer, Orchestrator, AgentProfileConfig(), AgentProfileConfigProps (+46 more)
 
 ### Community 74 - "button.tsx"
 Cohesion: 0.14
@@ -499,8 +484,8 @@ Cohesion: 0.20
 Nodes (9): ActionSystem, CapabilityCache, CodexRuntimeModel, codexRuntimeModelSchema, CodexRuntimeStatus, codexRuntimeStatusSchema, pairedRuntimeCodexEffort(), UNKNOWN_CODEX_RUNTIME_STATUS (+1 more)
 
 ### Community 78 - "csv.ts"
-Cohesion: 0.07
-Nodes (13): RecordingSystemAdapter, DoneGateResult, PublishReviewOptions, PublishReviewResult, ReviewHeadResult, FAKE_OPEN_PRS, FakeVcsClient, githubPrHeadRef() (+5 more)
+Cohesion: 0.08
+Nodes (10): DoneGateResult, ReviewHeadResult, FAKE_OPEN_PRS, FakeVcsClient, extractPrUrl(), githubPrHeadRef(), CreatePrResult, VcsClient (+2 more)
 
 ### Community 79 - "WorktreeSession"
 Cohesion: 0.33
@@ -523,24 +508,20 @@ Cohesion: 0.17
 Nodes (8): AZURE_COMMANDS, COMMANDS_BY_PROVIDER, GITHUB_COMMANDS, PrDiffContext, VcsCleanCommands, VcsCommandTable, AZ_SETTLED_THREAD_STATUSES, VCS_PROVIDER_LABELS
 
 ### Community 87 - "mcpSettings.ts"
-Cohesion: 0.05
-Nodes (49): AUTOMATION_TRIGGER_LABELS, AUTOMATION_TRIGGERS, AutomationRunStatus, AutomationTrigger, AutomationCard(), AutomationCardProps, AutomationFormProps, AutomationView() (+41 more)
+Cohesion: 0.28
+Nodes (4): confirmPrMerged(), unmergedReason(), PR_STATE_LABELS, PrState
 
 ### Community 89 - "usePrdSearch.ts"
-Cohesion: 0.31
-Nodes (10): AppSettingsState, flashSaved(), loadOnce(), patchAppSettings(), publish(), snapshot(), state, subscribe() (+2 more)
+Cohesion: 0.09
+Nodes (35): buildThread(), ConversationPanel(), researchSummary(), ThreadItem, NewConversationForm(), seedMessage(), McpSettings(), DashedAddButton() (+27 more)
 
 ### Community 90 - "PaneStream"
-Cohesion: 0.33
-Nodes (9): useTheme(), UseThemeResult, applyTheme(), getStoredTheme(), isTheme(), Theme, ThemeOption, THEMES (+1 more)
+Cohesion: 0.36
+Nodes (8): getSnapshot(), INITIAL_SNAPSHOT, loadReviewCounts(), publish(), refreshReviewCounts(), subscribe(), subscribers, useReviewCounts()
 
 ### Community 91 - "bootstrap.ts"
-Cohesion: 0.18
-Nodes (11): accountResponseSchema, hasExplicitCodexApiKey(), isProtocolIncompatibility(), listRuntimeModels(), modelListResponseSchema, modelSchema, probeCodexRuntime(), status() (+3 more)
-
-### Community 92 - "TerminalSessionManager"
-Cohesion: 0.26
-Nodes (8): Block, blockText(), compactChunks(), firstCharCode(), TranscriptBuffer, trimBlockStart(), AgentStreamBlock, TranscriptUpdate
+Cohesion: 0.15
+Nodes (14): accountResponseSchema, hasExplicitCodexApiKey(), isProtocolIncompatibility(), listRuntimeModels(), modelListResponseSchema, modelSchema, probeCodexRuntime(), status() (+6 more)
 
 ### Community 93 - "ColumnActionsMenu.tsx"
 Cohesion: 0.25
@@ -571,8 +552,8 @@ Cohesion: 0.08
 Nodes (25): $ref, $ref, enum, $ref, $ref, properties, designConsiderations, goals (+17 more)
 
 ### Community 101 - "codexProvider.test.ts"
-Cohesion: 0.09
-Nodes (45): Capabilities, AskPanel(), AtelierAgentFields(), CleanPrPanel(), CodexAgentFields(), CodexConnectionStatus(), STATUS_LABELS, ReviewPrPanel() (+37 more)
+Cohesion: 0.18
+Nodes (16): Capabilities, CodexConnectionStatus(), STATUS_LABELS, clearRetry(), loadCapabilities(), LoadOptions, publish(), refreshCapabilities() (+8 more)
 
 ### Community 102 - ".start"
 Cohesion: 0.29
@@ -583,8 +564,8 @@ Cohesion: 0.05
 Nodes (4): reviewPublicationState(), SystemAdapter, safeParse(), TerminalSessionManager
 
 ### Community 104 - "settings.tsx"
-Cohesion: 0.11
-Nodes (13): CodexAppServerInitializationError, CodexAppServerProtocolError, CodexAppServerRpcError, connectCodexAppServer(), incomingSchema, initializeResponseSchema, log, PendingRequest (+5 more)
+Cohesion: 0.13
+Nodes (12): CodexAppServerInitializationError, CodexAppServerProtocolError, connectCodexAppServer(), incomingSchema, initializeResponseSchema, log, PendingRequest, rpcErrorSchema (+4 more)
 
 ### Community 105 - "createMcpServer"
 Cohesion: 0.09
@@ -606,10 +587,6 @@ Nodes (22): axes, designConsiderations, goals, id, locale, openQuestions, outOfS
 Cohesion: 0.19
 Nodes (3): reviewKey(), verifiedFindings(), mergeAgentUsageByModel()
 
-### Community 110 - "Profile"
-Cohesion: 0.26
-Nodes (9): applyTranscriptUpdate(), TranscriptState, transcriptText(), transcriptUpdateSchema, FullscreenToggle(), FullscreenToggleProps, TerminalData, TerminalView() (+1 more)
-
 ### Community 111 - "FakePaneStream"
 Cohesion: 0.09
 Nodes (30): escapeHtml(), renderCollapsedDetails(), renderOutsideDiffComment(), renderOutsideDiffSection(), ReviewPublicationComment, ReviewPublicationEvent, azureChangeEntrySchema, azureCommentSchema (+22 more)
@@ -618,12 +595,8 @@ Nodes (30): escapeHtml(), renderCollapsedDetails(), renderOutsideDiffComment(), 
 Cohesion: 0.31
 Nodes (6): applyDesktopEnv(), DesktopRoots, ensureConfig(), ensureMcpToken(), regenerateMcpToken(), temporaryDirectories
 
-### Community 113 - "repairPath.ts"
-Cohesion: 0.26
-Nodes (9): isShortcutDetail(), ShortcutDetail, NOTE: Radix's dismissable layer registers its Escape listener on `document` in t, useCaptureEscape(), collectMatchRanges(), supportsHighlightApi(), usePrdSearch(), UsePrdSearchOptions (+1 more)
-
 ### Community 114 - "ApiDenyPatterns"
-Cohesion: 0.09
+Cohesion: 0.10
 Nodes (4): startFeasibilityTicket(), parsePersistedReviewFindings(), SqlUpdateBuilder, Store
 
 ### Community 115 - "relaunch.ts"
@@ -651,24 +624,20 @@ Cohesion: 0.11
 Nodes (17): Agent session (server), Architecture decisions, Atelier (conversation → PRD → cards) — implementation state, Contract injection, Follow-ups noticed in Lot A, Goal, Lot A public API (use these names in Lots B and C), Lot B public surface and deviations (read before Lot C/D) (+9 more)
 
 ### Community 121 - "VcsConnectionResult"
-Cohesion: 0.17
+Cohesion: 0.16
 Nodes (5): CodexAppServerConnection, CodexAppServerNotification, CodexAppServerOptions, AppServerFixture, CodexRuntimeDependencies
 
 ### Community 122 - "createMcpServer"
 Cohesion: 0.24
 Nodes (13): apiWriteDenyScript(), ConfigValue, extractCommandScript(), perSegmentScript(), prepareNoVerifyHook(), reviewPublishingGuardScript(), shellDeny(), shellDenyOnMatch() (+5 more)
 
-### Community 123 - "AutomationView.tsx"
-Cohesion: 0.18
-Nodes (5): detectInstallCommand(), realpathSafe(), resolveWorktreeScriptCommand(), setupOutputExcerpt(), shQuote()
-
 ### Community 124 - "useSavedFlash.ts"
-Cohesion: 0.15
-Nodes (9): canonicalJson(), CodexCommandHook, codexSessionPreToolUseHookHash(), JsonValue, createCodexProvider(), AppServerFixtureOptions, hookPathForSession(), RecordedRequest (+1 more)
+Cohesion: 0.13
+Nodes (10): CodexAppServerRpcError, canonicalJson(), CodexCommandHook, codexSessionPreToolUseHookHash(), JsonValue, createCodexProvider(), AppServerFixtureOptions, hookPathForSession() (+2 more)
 
 ### Community 126 - "TicketOperations"
-Cohesion: 0.10
-Nodes (25): AtelierPromptInput, SubmittedTurn, ClientSocket, attachment(), conversationTitle(), createAtelierRoutes(), prdExportName(), settingsChanged() (+17 more)
+Cohesion: 0.09
+Nodes (24): AtelierPromptInput, SubmittedTurn, ClientSocket, attachment(), conversationTitle(), createAtelierRoutes(), prdExportName(), settingsChanged() (+16 more)
 
 ### Community 127 - "TerminalSessionManager"
 Cohesion: 0.13
@@ -677,18 +646,6 @@ Nodes (16): nonEmptyStringArray, stringArray, items, type, uniqueItems, minLengt
 ### Community 130 - "renderPrdHtml.ts"
 Cohesion: 0.22
 Nodes (10): PROJECT_ROOT, PrdRenderError, RENDERER_RELATIVE_PATH, renderPrdHtml(), RenderPrdHtmlInput, resolvePrdRendererPath(), TEMPLATE_PATH, boundedCommandDetail() (+2 more)
-
-### Community 131 - "AgentsView.tsx"
-Cohesion: 0.20
-Nodes (11): TERMINAL_STAGES, AgentCardProps, AgentsView(), AgentsViewProps, hasLiveAgent(), normalize(), TerminalTab(), TerminalTabProps (+3 more)
-
-### Community 132 - "usePrdSearch.ts"
-Cohesion: 0.26
-Nodes (4): BoundedCommandResult, connectionFailure(), connectionResult(), VcsConnectionResult
-
-### Community 133 - "StageProgressBar.tsx"
-Cohesion: 0.29
-Nodes (9): FILLED_GLYPH_COLORS, StageProgressBar(), StageProgressBarProps, CardState, DEAD_STAGES, PROGRESS_STAGES, stageCardState(), stageLabel() (+1 more)
 
 ### Community 134 - "id"
 Cohesion: 0.15
@@ -706,25 +663,13 @@ Nodes (16): columnSchema, CostSummary(), MetaRow(), MetaRowProps, PrdOriginRowPr
 Cohesion: 0.22
 Nodes (3): childTranscriptPrefix(), implementationScopesOverlap(), normalizeImplementationScope()
 
-### Community 139 - "sessionHub.test.ts"
-Cohesion: 0.28
-Nodes (7): SessionExecutionContext, SessionExecutionFinish, SessionExecutionUsage, SessionHandlerError, SessionMessageStatus, SessionStartConfig, USAGE
-
-### Community 140 - "useProjects.ts"
-Cohesion: 0.36
-Nodes (8): App(), emit(), loadedSubscribers, loadOnce(), refreshProjects(), subscribers, useProjects(), useProjectsLoaded()
-
 ### Community 141 - "runRecordedAction"
-Cohesion: 0.25
-Nodes (5): nullableBooleanValue(), serializeErrorDetails(), runRecordedAction(), ExecutionRun, Profile
+Cohesion: 0.50
+Nodes (3): serializeErrorDetails(), runRecordedAction(), ExecutionRun
 
 ### Community 142 - "$defs"
 Cohesion: 0.17
 Nodes (12): pattern, type, $defs, axisId, requirement, task, additionalProperties, required (+4 more)
-
-### Community 143 - "useTickTimer.ts"
-Cohesion: 0.29
-Nodes (9): AtelierView(), findPrdConversation(), currentNow, getSnapshot(), startTicking(), stopTicking(), subscribe(), subscribers (+1 more)
 
 ### Community 144 - "title"
 Cohesion: 0.18
@@ -742,61 +687,41 @@ Nodes (20): ExecutionFinishStatus, LiveSession, log, previewToolInput(), renderS
 Cohesion: 0.33
 Nodes (5): CodexBinaryVersionError, require, resolveCodexBinary(), resolveCodexBinaryOverride(), TARGETS
 
-### Community 148 - "SlotPips.tsx"
-Cohesion: 0.22
-Nodes (4): PublicMcpManager, isActive(), isBlocked(), TicketOperations
-
 ### Community 149 - "uploads.ts"
 Cohesion: 0.40
 Nodes (4): MIME_EXTENSIONS, resolveExtension(), SavedUpload, saveUpload()
-
-### Community 150 - "settings.tsx"
-Cohesion: 0.40
-Nodes (5): DashedAddButton(), DashedAddButtonProps, footerMessage(), SettingsFooter(), SettingsFooterProps
 
 ### Community 151 - "prd.schema.json"
 Cohesion: 0.29
 Nodes (6): additionalProperties, $id, required, $schema, title, type
 
-### Community 153 - "sessionRolePolicy.ts"
-Cohesion: 0.60
-Nodes (3): settingSourcesForRole(), workerToolsForRole(), WORKER_TOOLS
-
 ### Community 154 - "useSavedFlash.ts"
-Cohesion: 0.50
-Nodes (4): SavedFlag, SavedFlash, useSavedFlag(), useSavedFlash()
-
-### Community 159 - ".createTodoTicket"
-Cohesion: 0.32
-Nodes (6): agentPairError(), normalizeCreateInput(), requestKeyConflictMessage(), ticketDependencyError(), isAllowedAgentPair(), deriveTitleFromDescription()
+Cohesion: 0.14
+Nodes (19): ProfileConfig, DragHandleAttributes, DragHandleListeners, ProfileRowHeader(), ProfileRowHeaderProps, ProfileRowProps, ProfilesSettings(), NOTE: the saved flag lives here because a saved row remounts (its key carries up (+11 more)
 
 ### Community 160 - "createMcpServer"
 Cohesion: 0.43
 Nodes (6): createMcpServer(), invalidInput(), listPublicProjects(), OutputValidator, toolError(), toolResult()
 
-### Community 162 - "performSplit"
-Cohesion: 0.47
-Nodes (4): createSplitChildren(), performSplit(), splitChildDefaults(), splitMotherBranch()
-
 ## Knowledge Gaps
-- **958 isolated node(s):** `ProjectSelectOption`, `ProjectSelectProps`, `Permission refusals are specific to a command and session`, `Two agent providers: implement every host integration for both`, `LIGHT_REVIEW_KINDS` (+953 more)
+- **959 isolated node(s):** `PrSelectRowProps`, `ProjectSelectOption`, `ProjectSelectProps`, `Permission refusals are specific to a command and session`, `Two agent providers: implement every host integration for both` (+954 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `SystemAdapter` connect `TerminalSession` to `prUrl.ts`, `usePrdSearch.ts`, `Fake System Adapter`, `CodexRuntimeStatus`, `split.ts`, `Settings & Profiles UI`, `Demo Pipeline Concepts`, `Session Hub Transcript`, `csv.ts`, `AgentMessage`, `TicketOperations`, `Community 51`, `StageProgressBar.tsx`, `Dev Dependencies`, `TicketCard.tsx`, `Cost & Pricing`, `Package Manifest`, `.addComment`?**
-  _High betweenness centrality (0.049) - this node is a cross-community bridge._
-- **Why does `Ticket` connect `NPM Scripts` to `Contract Building & Slots`, `AgentsView.tsx`, `Feasibility Batch Management`, `StageProgressBar.tsx`, `Shared Zod Schemas`, `split.ts`, `createAtelierRoutes`, `Real System Adapter`, `PR Selection & Slots Bar`, `Core Domain Concepts`, `Database Store Operations`, `API Routes & Reformulate`, `Stats Aggregation`, `AgentMessage`, `DB Row Schemas & Mappers`, `Client Hub & Watchdog`, `Session Hub & Agent Session`, `PRD Review & Markdown`, `.createTodoTicket`, `Agent Profile Config`, `Session Hub Transcript`, `Community 48`, `Slot State`, `CSV Parsing`, `triageManager.ts`, `Package Manifest`, `Community 63`, `TerminalView.tsx`, `CodexRuntimeStatus`, `TicketOperations`, `.addComment`, `TerminalSession`, `ApiDenyPatterns`?**
+- **Why does `Ticket` connect `NPM Scripts` to `Contract Building & Slots`, `Feasibility Batch Management`, `Shared Zod Schemas`, `split.ts`, `PR Selection & Slots Bar`, `createAtelierRoutes`, `Real System Adapter`, `Core Domain Concepts`, `Database Store Operations`, `API Routes & Reformulate`, `Stats Aggregation`, `AgentMessage`, `Client Hub & Watchdog`, `Session Hub & Agent Session`, `PRD Review & Markdown`, `Agent Profile Config`, `Session Hub Transcript`, `Community 48`, `Slot State`, `repairPath.ts`, `CSV Parsing`, `triageManager.ts`, `Package Manifest`, `Community 63`, `TerminalView.tsx`, `CodexRuntimeStatus`, `TerminalView.tsx`, `TicketOperations`, `.addComment`, `TerminalSession`, `ApiDenyPatterns`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+- **Why does `SystemAdapter` connect `TerminalSession` to `prUrl.ts`, `Fake System Adapter`, `CodexRuntimeStatus`, `split.ts`, `Settings & Profiles UI`, `Demo Pipeline Concepts`, `Session Hub Transcript`, `csv.ts`, `AgentMessage`, `TicketOperations`, `Community 51`, `StageProgressBar.tsx`, `Dev Dependencies`, `TicketCard.tsx`, `Community 54`, `Cost & Pricing`, `Package Manifest`, `.addComment`?**
   _High betweenness centrality (0.044) - this node is a cross-community bridge._
-- **Why does `Store` connect `ApiDenyPatterns` to `Contract Building & Slots`, `split.ts`, `runRecordedAction`, `API Routes & Reformulate`, `AgentMessage`, `Dev Dependencies`, `Client Hub & Watchdog`, `Cost & Pricing`, `Session Hub & Agent Session`, `Agents View & Ticket Cards`, `PRD Review & Markdown`, `performSplit`, `NPM Scripts`, `Agent Profile Config`, `Session Hub Transcript`, `Modal Dialogs`, `Community 48`, `Package Manifest`, `Community 63`, `prUrl.ts`, `CodexRuntimeStatus`, `TicketOperations`, `.addComment`, `RunningServer`, `TerminalSession`, `usePrdSearch.ts`, `relaunch.ts`, `TicketOperations`?**
-  _High betweenness centrality (0.029) - this node is a cross-community bridge._
-- **What connects `ProjectSelectOption`, `ProjectSelectProps`, `Permission refusals are specific to a command and session` to the rest of the system?**
-  _970 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `DelegationManager` connect `API Client Inputs` to `RunningServer`, `reviewFindings.ts`, `performSplit`, `projectDisplay.ts`, `AgentMessage`, `.addComment`, `Client Hub & Watchdog`, `Agents View & Ticket Cards`, `Community 63`?**
+  _High betweenness centrality (0.036) - this node is a cross-community bridge._
+- **What connects `PrSelectRowProps`, `ProjectSelectOption`, `ProjectSelectProps` to the rest of the system?**
+  _971 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Contract Building & Slots` be split into smaller, more focused modules?**
   _Cohesion score 0.024123683859789417 - nodes in this community are weakly interconnected._
 - **Should `Terminals UI & Notifications` be split into smaller, more focused modules?**
-  _Cohesion score 0.09113300492610837 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.0766488413547237 - nodes in this community are weakly interconnected._
 - **Should `Feasibility Batch Management` be split into smaller, more focused modules?**
-  _Cohesion score 0.07505827505827506 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06892010535557506 - nodes in this community are weakly interconnected._

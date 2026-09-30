@@ -82,7 +82,7 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
   );
 
   return (
-    <div className="grid grid-cols-1 items-start gap-x-4 gap-y-4 lg:grid-cols-2">
+    <div className="flex flex-col gap-4">
       {canEditTarget && (
         <>
           <ProjectSelect
@@ -122,7 +122,7 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
         </>
       )}
 
-      <div className="space-y-2 lg:col-span-2">
+      <div className="space-y-2">
         <SectionHeader>Agent d'implémentation</SectionHeader>
         <AgentProfileConfig
           orchestrator={ticket.orchestrator}
@@ -153,7 +153,7 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
         />
       </div>
 
-      <div className="lg:col-span-2">
+      <div className="min-w-0">
         <TicketOptionsToggleGroup
           key={ticket.id}
           title="Options de PR"

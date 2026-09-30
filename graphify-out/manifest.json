@@ -350,8 +350,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/TicketDetail.tsx": {
-    "mtime": 1790372977.1547232,
-    "ast_hash": "6ff2e1b56ec5be1c6027a88255479dc8",
+    "mtime": 1790770422.0397992,
+    "ast_hash": "a98fcab4932ea8d6f478607d552d9d09",
     "semantic_hash": ""
   },
   "src/web/src/components/TicketOptionsToggleGroup.tsx": {
@@ -1150,8 +1150,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/LaunchForm.tsx": {
-    "mtime": 1790151007.3434863,
-    "ast_hash": "32f1678faf48f425b0d44746736142a1",
+    "mtime": 1790770373.498726,
+    "ast_hash": "83186ceb8b18cab2eff7708eb135359e",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/MetaRow.tsx": {
@@ -1160,8 +1160,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/OverviewTab.tsx": {
-    "mtime": 1790349217.550302,
-    "ast_hash": "20523723e2f2259fb1e7667595f1576b",
+    "mtime": 1790770291.376118,
+    "ast_hash": "240fbaa6e83fade2076bd8e05a40698b",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/PrdTab.tsx": {

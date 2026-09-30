@@ -294,6 +294,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         if (!isOpen) onClose();
       }}
       size={activeTab === "terminal" ? "xl" : "lg"}
+      className={activeTab === "overview" ? "w-[1280px]" : undefined}
       pushedBy={prdOpen ? "lg" : null}
       breadcrumb={prdOpen ? ["Ticket"] : undefined}
       title={current.title}
@@ -312,7 +313,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         <TerminalTab ticket={current} />
       ) : (
         <>
-          <div className="min-w-0 flex-1 overflow-y-auto px-4 py-3">
+          <div className={cn("min-w-0 flex-1 overflow-y-auto px-4 py-3", activeTab === "overview" && "lg:overflow-hidden")}>
             {activeTab === "overview" && (
               <OverviewTab ticket={current} projects={projects} locked={locked} />
             )}

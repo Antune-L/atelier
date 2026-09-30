@@ -206,7 +206,7 @@ export function ProjectSelect({
   };
 
   const field = (
-    <Popover open={open} onOpenChange={changeOpen}>
+    <Popover open={open} onOpenChange={changeOpen} modal>
       <PopoverTrigger>
         <Button
           id={id}
@@ -237,13 +237,13 @@ export function ProjectSelect({
         role="dialog"
         aria-label="Choisir un projet"
         align="start"
-        className="w-[var(--radix-popover-trigger-width)] min-w-64 overflow-hidden p-0"
+        className="flex max-h-[var(--radix-popover-content-available-height)] w-[var(--radix-popover-trigger-width)] min-w-64 flex-col overflow-hidden p-0"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           searchRef.current?.focus();
         }}
       >
-        <div className="flex h-10 items-center gap-2 border-b px-3 focus-within:shadow-[inset_0_-2px_0_hsl(var(--ring))]">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b px-3 focus-within:shadow-[inset_0_-2px_0_hsl(var(--ring))]">
           <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
             ref={searchRef}
@@ -265,7 +265,7 @@ export function ProjectSelect({
         </div>
         <div
           ref={resultsRef}
-          className="max-h-72 overflow-y-auto p-1"
+          className="min-h-0 max-h-72 overflow-y-auto overscroll-contain p-1"
         >
           {filteredOptions.map((option) => projectOption(option.key, option.label))}
           {filteredGroups.map((group) => {

@@ -118,7 +118,7 @@ const VOTE_BY_EVENT: Record<ReviewPublicationEvent, string | null> = {
 
 const azureReviewerSchema = z.object({
   vote: z.number(),
-  isRequired: z.boolean().default(false),
+  isRequired: z.boolean().nullable().default(false),
 });
 const azureReviewerVoteSchema = azureReviewerSchema.extend({ id: z.string().min(1) });
 const azureIdentitySchema = z.object({

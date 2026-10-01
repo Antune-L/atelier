@@ -14,6 +14,7 @@ import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
+import { hostnameFromSshConfig, sshHostFromRemoteUrl } from "../repoInspection.ts";
 import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
@@ -29,13 +30,17 @@ import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
 import type { CreatePrResult, ReviewPublicationCheck, VcsClient } from "./types.ts";
 
 const GH_BINARY = "gh";
-/** `gh pr list --json` fields surfaced to the review picker. */
-const PR_LIST_FIELDS = "number,title,url,headRefName,baseRefName,isDraft,reviewDecision,updatedAt,author,additions,deletions";
-/** Cap the review picker to the most recent open PRs. */
-const PR_LIST_LIMIT = "50";
-const REVIEW_COUNT_PAGE_SIZE = 100;
-const REVIEW_COUNT_BATCH_SIZE = 10;
-const GIT_REMOTE_SCP_RE = /^(?:[^@/]+@)?([^@/:]+):(.+)$/;
+const OPEN_PR_FIELDS = `
+  number title url headRefName baseRefName isDraft reviewDecision updatedAt
+  author { login } additions deletions
+  commentedReviews: reviews(first:1,states:[COMMENTED]) { totalCount }
+`;
+const OPEN_PR_PAGE_SIZE = 100;
+const OPEN_PR_BATCH_SIZE = 10;
+const GIT_REMOTE_SCP_RE = /^(?:[^@/]+@)?([^@/:]+):(?!\/\/)(.+)$/;
+const GITHUB_API_HOST_BY_SSH_HOST: Record<string, string> = {
+  "ssh.github.com": "github.com",
+};
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
 /** GitHub PR state that proves the merge completed (vs. OPEN/CLOSED). */
@@ -60,7 +65,6 @@ const ghRestReviewSchema = z.object({
 const ghRestReviewsSchema = z.array(ghRestReviewSchema);
 const ghRestReviewPagesSchema = z.array(ghRestReviewsSchema);
 
-/** Shape of one `gh pr list --json` entry (mapped to the shared OpenPr). */
 const ghPrSchema = z.object({
   number: z.number(),
   title: z.string(),
@@ -68,19 +72,22 @@ const ghPrSchema = z.object({
   headRefName: z.string(),
   baseRefName: z.string(),
   isDraft: z.boolean(),
-  // gh returns "" for "no decision"; tolerate null too so one odd PR never 502s the list.
-  reviewDecision: z.string().nullable().default(""),
+  reviewDecision: z.string().nullable(),
+  commentedReviews: z.object({ totalCount: z.number().int().nonnegative() }),
   updatedAt: z.string(),
   author: z.object({ login: z.string() }).nullable(),
   additions: z.number(),
   deletions: z.number(),
 });
-const reviewCountPageSchema = z.object({
-  nodes: z.array(z.object({ isDraft: z.boolean(), reviewDecision: z.string().nullable() }).nullable()),
-  pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+const openPrRepositorySchema = z.object({
+  pullRequests: z.object({
+    nodes: z.array(ghPrSchema),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  }),
 });
-const reviewCountResponseSchema = z.object({
-  data: z.record(z.string(), z.object({ pullRequests: reviewCountPageSchema }).nullable()),
+const openPrResponseSchema = z.object({
+  data: z.record(z.string(), z.unknown()),
+  errors: z.array(z.unknown()).optional(),
 });
 
 interface GithubRepoRef {
@@ -89,9 +96,10 @@ interface GithubRepoRef {
   repository: string;
 }
 
-interface ReviewCountPageRequest {
+interface OpenPrPageRequest {
   ref: GithubRepoRef;
   cursor: string | null;
+  seenCursors: Set<string>;
 }
 
 function parseGithubRemote(remote: string): GithubRepoRef | null {
@@ -123,12 +131,117 @@ function githubRepoKey(ref: GithubRepoRef): string {
 /** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
 const ghPrStateSchema = z.object({ state: z.string() });
 
-/** GitHub's `reviewDecision` mapped onto the neutral review status ("" and anything else → none). */
 const PR_REVIEW_STATUS_BY_DECISION: Record<string, PrReviewStatus> = {
   REVIEW_REQUIRED: "needs_review",
   APPROVED: "approved",
   CHANGES_REQUESTED: "changes_requested",
 };
+
+function mapGithubPr(pr: z.infer<typeof ghPrSchema>): OpenPr {
+  let reviewStatus = PR_REVIEW_STATUS_BY_DECISION[pr.reviewDecision ?? ""] ?? "none";
+  if (reviewStatus !== "approved" && reviewStatus !== "changes_requested" && pr.commentedReviews.totalCount > 0) {
+    reviewStatus = "reviewed";
+  }
+  return {
+    number: pr.number,
+    title: pr.title,
+    url: pr.url,
+    headBranch: pr.headRefName,
+    baseBranch: pr.baseRefName,
+    isDraft: pr.isDraft,
+    reviewStatus,
+    updatedAt: pr.updatedAt,
+    author: pr.author?.login ?? "?",
+    additions: pr.additions,
+    deletions: pr.deletions,
+  };
+}
+
+async function readGithubRepoRef(repoPath: string): Promise<GithubRepoRef> {
+  const remote = await runBoundedCommand(["git", "-C", repoPath, "remote", "get-url", "origin"], repoPath);
+  if (remote.exitCode !== 0 || remote.timedOut) {
+    throw new Error(`lecture du remote GitHub impossible : ${boundedCommandDetail(remote)}`);
+  }
+  const ref = parseGithubRemote(remote.stdout);
+  if (ref === null) throw new Error("remote GitHub inattendu");
+  const sshHost = sshHostFromRemoteUrl(remote.stdout.trim());
+  if (sshHost === null) return ref;
+  const sshConfig = await runBoundedCommand(["ssh", "-G", sshHost], repoPath);
+  if (sshConfig.exitCode !== 0 || sshConfig.timedOut) {
+    throw new Error(`résolution de l'hôte SSH GitHub impossible : ${boundedCommandDetail(sshConfig)}`);
+  }
+  const host = hostnameFromSshConfig(sshConfig.stdout);
+  if (host === null) throw new Error("configuration de l'hôte SSH GitHub inattendue");
+  const sshHostname = host.toLowerCase();
+  return { ...ref, host: GITHUB_API_HOST_BY_SSH_HOST[sshHostname] ?? sshHostname };
+}
+
+async function fetchGithubOpenPrs(refs: GithubRepoRef[], cwd: string): Promise<Map<string, OpenPr[] | Error>> {
+  const results = new Map<string, OpenPr[] | Error>();
+  const repoPrs = new Map<string, OpenPr[]>();
+  let pending: OpenPrPageRequest[] = refs.map((ref) => ({ ref, cursor: null, seenCursors: new Set() }));
+  while (pending.length > 0) {
+    const next: OpenPrPageRequest[] = [];
+    const byHost = Map.groupBy(pending, (request) => request.ref.host);
+    for (const [host, requests] of byHost) {
+      for (let start = 0; start < requests.length; start += OPEN_PR_BATCH_SIZE) {
+        const batch = requests.slice(start, start + OPEN_PR_BATCH_SIZE);
+        const fields = batch.map(({ ref, cursor }, index) => {
+          const after = cursor === null ? "" : `,after:${JSON.stringify(cursor)}`;
+          return `r${index}: repository(owner:${JSON.stringify(ref.owner)},name:${JSON.stringify(ref.repository)}) { pullRequests(states:OPEN,first:${OPEN_PR_PAGE_SIZE},orderBy:{field:CREATED_AT,direction:DESC}${after}) { nodes { ${OPEN_PR_FIELDS} } pageInfo { hasNextPage endCursor } } }`;
+        });
+        const query = `query { ${fields.join(" ")} }`;
+        try {
+          const result = await withJsonRequestFile({ query }, (inputPath) => runBoundedCommand(
+            [GH_BINARY, "api", "graphql", "--hostname", host, "--input", inputPath],
+            cwd,
+          ));
+          if (result.exitCode !== 0 || result.timedOut) {
+            throw new Error(`gh api graphql a échoué : ${boundedCommandDetail(result)}`);
+          }
+          const parsed = openPrResponseSchema.safeParse(safeJsonParse(result.stdout));
+          if (!parsed.success || (parsed.data.errors?.length ?? 0) > 0) {
+            throw new Error("gh api graphql : réponse inattendue ou incomplète");
+          }
+          for (const [index, request] of batch.entries()) {
+            const key = githubRepoKey(request.ref);
+            const repository = openPrRepositorySchema.safeParse(parsed.data.data[`r${index}`]);
+            if (!repository.success) {
+              results.set(key, new Error("gh api graphql : page de PR inattendue ou incomplète"));
+              repoPrs.delete(key);
+              continue;
+            }
+            const page = repository.data.pullRequests;
+            const prs = [...(repoPrs.get(key) ?? []), ...page.nodes.map(mapGithubPr)];
+            if (!page.pageInfo.hasNextPage) {
+              results.set(key, prs);
+              repoPrs.delete(key);
+              continue;
+            }
+            const cursor = page.pageInfo.endCursor;
+            if (!cursor || request.seenCursors.has(cursor)) {
+              results.set(key, new Error("gh api graphql : curseur de pagination inattendu"));
+              repoPrs.delete(key);
+              continue;
+            }
+            repoPrs.set(key, prs);
+            request.seenCursors.add(cursor);
+            next.push({ ...request, cursor });
+          }
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error("lecture des PR GitHub échouée");
+          for (const { ref } of batch) {
+            const key = githubRepoKey(ref);
+            results.set(key, failure);
+            repoPrs.delete(key);
+          }
+        }
+      }
+    }
+    pending = next;
+  }
+  return results;
+}
 
 const PR_STATE_BY_GITHUB_STATE: Record<string, PrState> = {
   [PR_STATE_OPEN]: "open",
@@ -202,26 +315,12 @@ export class GithubVcsClient implements VcsClient {
   }
 
   async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
-    const res = await $`gh pr list --json ${PR_LIST_FIELDS} --limit ${PR_LIST_LIMIT}`.cwd(repoPath).nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      throw new Error(`gh pr list a échoué (code ${res.exitCode}) : ${detail}`);
-    }
-    const parsed = z.array(ghPrSchema).safeParse(JSON.parse(res.stdout.toString()));
-    if (!parsed.success) throw new Error(`gh pr list: sortie inattendue (${parsed.error.message})`);
-    return parsed.data.map((pr) => ({
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      headBranch: pr.headRefName,
-      baseBranch: pr.baseRefName,
-      isDraft: pr.isDraft,
-      reviewStatus: PR_REVIEW_STATUS_BY_DECISION[pr.reviewDecision ?? ""] ?? "none",
-      updatedAt: pr.updatedAt,
-      author: pr.author?.login ?? "?",
-      additions: pr.additions,
-      deletions: pr.deletions,
-    }));
+    const ref = await readGithubRepoRef(repoPath);
+    const results = await fetchGithubOpenPrs([ref], repoPath);
+    const prs = results.get(githubRepoKey(ref));
+    if (prs instanceof Error) throw prs;
+    if (prs === undefined) throw new Error("lecture des PR GitHub incomplète");
+    return prs;
   }
 
   async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
@@ -230,67 +329,21 @@ export class GithubVcsClient implements VcsClient {
     const refs = new Map<string, GithubRepoRef>();
     await Promise.all(repoPaths.map(async (repoPath) => {
       counts[repoPath] = null;
-      let remote;
+      let ref;
       try {
-        remote = await runBoundedCommand(["git", "-C", repoPath, "remote", "get-url", "origin"], repoPath);
+        ref = await readGithubRepoRef(repoPath);
       } catch {
         return;
       }
-      if (remote.exitCode !== 0 || remote.timedOut) return;
-      const ref = parseGithubRemote(remote.stdout);
-      if (!ref) return;
       const key = githubRepoKey(ref);
       refs.set(key, ref);
       pathsByRepo.set(key, [...(pathsByRepo.get(key) ?? []), repoPath]);
     }));
-
-    let pending: ReviewCountPageRequest[] = [...refs.values()].map((ref) => ({ ref, cursor: null }));
-    const repoCounts = new Map<string, number>();
-    while (pending.length > 0) {
-      const next: ReviewCountPageRequest[] = [];
-      const byHost = Map.groupBy(pending, (request) => request.ref.host);
-      for (const [host, requests] of byHost) {
-        for (let start = 0; start < requests.length; start += REVIEW_COUNT_BATCH_SIZE) {
-          const batch = requests.slice(start, start + REVIEW_COUNT_BATCH_SIZE);
-          const fields = batch.map(({ ref, cursor }, index) => {
-            const after = cursor === null ? "" : `,after:${JSON.stringify(cursor)}`;
-            return `r${index}: repository(owner:${JSON.stringify(ref.owner)},name:${JSON.stringify(ref.repository)}) { pullRequests(states:OPEN,first:${REVIEW_COUNT_PAGE_SIZE}${after}) { nodes { isDraft reviewDecision } pageInfo { hasNextPage endCursor } } }`;
-          });
-          const query = `query { ${fields.join(" ")} }`;
-          let result;
-          try {
-            result = await withJsonRequestFile({ query }, (inputPath) => runBoundedCommand(
-              [GH_BINARY, "api", "graphql", "--hostname", host, "--input", inputPath],
-              repoPaths[0] ?? ".",
-            ));
-          } catch {
-            continue;
-          }
-          if (result.timedOut) continue;
-          const parsed = reviewCountResponseSchema.safeParse(safeJsonParse(result.stdout));
-          if (!parsed.success) continue;
-          for (const [index, request] of batch.entries()) {
-            const page = parsed.data.data[`r${index}`]?.pullRequests;
-            if (!page) continue;
-            const key = githubRepoKey(request.ref);
-            const pageCount = page.nodes.filter((node) => node && isPrNeedsAttention({
-              isDraft: node.isDraft,
-              reviewStatus: PR_REVIEW_STATUS_BY_DECISION[node.reviewDecision ?? ""] ?? "none",
-            })).length;
-            repoCounts.set(key, (repoCounts.get(key) ?? 0) + pageCount);
-            if (page.pageInfo.hasNextPage) {
-              if (!page.pageInfo.endCursor) {
-                repoCounts.delete(key);
-                continue;
-              }
-              next.push({ ref: request.ref, cursor: page.pageInfo.endCursor });
-            } else {
-              for (const repoPath of pathsByRepo.get(key) ?? []) counts[repoPath] = repoCounts.get(key) ?? 0;
-            }
-          }
-        }
-      }
-      pending = next;
+    const results = await fetchGithubOpenPrs([...refs.values()], repoPaths[0] ?? ".");
+    for (const [key, prs] of results) {
+      if (prs instanceof Error) continue;
+      const count = prs.filter(isPrNeedsAttention).length;
+      for (const repoPath of pathsByRepo.get(key) ?? []) counts[repoPath] = count;
     }
     return counts;
   }
@@ -507,7 +560,8 @@ export class GithubVcsClient implements VcsClient {
         && review.commit_id === commitSha
         && review.body.includes(marker),
     );
-    return { ok: true, reason: "", reviewId: existing?.id ?? null };
+    if (existing === undefined) return { ok: true, reason: "", reviewId: null };
+    return { ok: true, reason: "", reviewId: existing.id, actualState: expectedState };
   }
 
   private async createPublishedReview(
@@ -528,7 +582,7 @@ export class GithubVcsClient implements VcsClient {
       if (!parsed.success || parsed.data.commit_id !== payload.commit_id || parsed.data.state !== expectedState) {
         return { ok: false, reason: "GitHub n'a pas confirmé la review sur le commit attendu", reviewId: null };
       }
-      return { ok: true, reason: "", reviewId: parsed.data.id };
+      return { ok: true, reason: "", reviewId: parsed.data.id, actualState: expectedState };
     });
   }
 

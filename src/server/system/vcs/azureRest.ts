@@ -8,7 +8,12 @@
 
 export const AZ_BINARY = "az";
 export const AZ_API_VERSION = "7.1";
+export const AZ_PREVIEW_API_VERSION = "7.1-preview";
 export const AZ_AREA_GIT = "git";
+export const AZ_AREA_POLICY = "policy";
+export const AZ_RESOURCE_POLICY_EVALUATIONS = "evaluations";
+export const AZ_RESOURCE_PRS = "pullrequests";
+export const AZ_RESOURCE_PR_REVIEWERS = "pullRequestReviewers";
 export const AZ_RESOURCE_PR_THREADS = "pullRequestThreads";
 export const AZ_RESOURCE_PR_ITERATIONS = "pullRequestIterations";
 export const AZ_RESOURCE_PR_ITERATION_CHANGES = "pullRequestIterationChanges";

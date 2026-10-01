@@ -730,15 +730,26 @@ export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
   let reviewCountsCache: { identity: string; counts: Record<string, number | null>; checkedAt: number } | null = null;
-  let pendingReviewCounts: { identity: string; result: Promise<{ counts: Record<string, number | null>; checkedAt: number }> } | null = null;
+  let pendingReviewCounts: {
+    identity: string;
+    result: Promise<{ counts: Record<string, number | null>; checkedAt: number }>;
+    refreshResult?: Promise<{ counts: Record<string, number | null>; checkedAt: number }>;
+  } | null = null;
   let reviewCountsSequence = 0;
   const projectPrCache = new Map<string, { identity: string; prs: OpenPr[]; checkedAt: number }>();
-  const projectPrPending = new Map<string, { identity: string; result: Promise<OpenPr[]> }>();
+  const projectPrPending = new Map<string, { identity: string; result: Promise<OpenPr[]>; refreshResult?: Promise<OpenPr[]> }>();
 
   function getProjectPrs(key: string, repoPath: string, provider: VcsProvider, refresh: boolean): Promise<OpenPr[]> {
     const identity = JSON.stringify([repoPath, provider, store.reviewCompletionVersion()]);
     const pending = projectPrPending.get(key);
-    if (pending?.identity === identity) return pending.result;
+    if (pending?.identity === identity) {
+      if (!refresh) return pending.result;
+      if (!pending.refreshResult) {
+        const reload = () => getProjectPrs(key, repoPath, provider, true);
+        pending.refreshResult = pending.result.then(reload, reload);
+      }
+      return pending.refreshResult;
+    }
     const cached = projectPrCache.get(key);
     if (!refresh && cached?.identity === identity && Date.now() - cached.checkedAt < REVIEW_COUNT_TTL_MS) {
       return Promise.resolve(cached.prs);
@@ -755,13 +766,20 @@ export function createApiRoutes(deps: RouteDeps) {
     return result;
   }
 
-  function getReviewCounts(refresh: boolean) {
+  function getReviewCounts(refresh: boolean): Promise<{ counts: Record<string, number | null>; checkedAt: number }> {
     const projects = store.listProjectKeys().flatMap((key) => {
       const project = store.getProjectRow(key);
       return project && !project.hidden ? [{ key, repoPath: project.repoPath, provider: project.vcsProvider }] : [];
     });
     const identity = JSON.stringify([projects.toSorted((left, right) => left.key.localeCompare(right.key)), store.reviewCompletionVersion()]);
-    if (pendingReviewCounts?.identity === identity) return pendingReviewCounts.result;
+    if (pendingReviewCounts?.identity === identity) {
+      if (!refresh) return pendingReviewCounts.result;
+      if (!pendingReviewCounts.refreshResult) {
+        const reload = () => getReviewCounts(true);
+        pendingReviewCounts.refreshResult = pendingReviewCounts.result.then(reload, reload);
+      }
+      return pendingReviewCounts.refreshResult;
+    }
     if (!refresh && reviewCountsCache?.identity === identity && Date.now() - reviewCountsCache.checkedAt < REVIEW_COUNT_TTL_MS) {
       return Promise.resolve(reviewCountsCache);
     }

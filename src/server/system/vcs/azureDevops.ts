@@ -20,6 +20,7 @@ import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
 import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
+import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
   DoneGateResult,
   PublishReviewOptions,
@@ -27,16 +28,22 @@ import type {
   ReviewHeadResult,
   ReviewPublicationComment,
   ReviewPublicationEvent,
+  ReviewPublicationState,
 } from "../types.ts";
 import { parseAzureRepoRef } from "./azureRemote.ts";
 import type { AzureRepoRef } from "./azureRemote.ts";
 import {
   AZ_API_VERSION,
   AZ_AREA_GIT,
+  AZ_AREA_POLICY,
   AZ_BINARY,
   AZ_COMMENT_TYPE_SYSTEM,
+  AZ_PREVIEW_API_VERSION,
+  AZ_RESOURCE_POLICY_EVALUATIONS,
+  AZ_RESOURCE_PRS,
   AZ_RESOURCE_PR_ITERATION_CHANGES,
   AZ_RESOURCE_PR_ITERATIONS,
+  AZ_RESOURCE_PR_REVIEWERS,
   AZ_RESOURCE_PR_THREADS,
   HTTP_GET,
   HTTP_POST,
@@ -47,9 +54,12 @@ import type { CreatePrResult, ReviewPublicationCheck, VcsClient } from "./types.
 
 const AZURE_LABEL = VCS_PROVIDER_LABELS.azureDevops;
 
-/** Cap the review picker to the most recent open PRs (mirrors the GitHub client). */
-const PR_LIST_LIMIT = "50";
-const REVIEW_COUNT_PAGE_SIZE = 100;
+const PR_PAGE_SIZE = 100;
+const POLICY_PAGE_SIZE = 100;
+const POLICY_LOOKUP_BATCH_SIZE = 5;
+const MINIMUM_APPROVAL_POLICY_TYPE = "fa4e907d-c16b-4a4c-9dfa-4906e5d171dd";
+const POLICY_APPROVED_STATUS = "approved";
+const POLICY_NOT_APPLICABLE_STATUS = "notApplicable";
 const HEADS_REF_PREFIX = "refs/heads/";
 const PR_URL_SEGMENT = "pullrequest";
 /** Path segment separating the project from the repository in an Azure PR web URL. */
@@ -61,6 +71,8 @@ const GIT_SEGMENT = "_git";
  */
 const VOTE_REJECTED_MAX = -1;
 const VOTE_APPROVED_MIN = 1;
+const VOTE_APPROVED = 10;
+const VOTE_WAIT_FOR_AUTHOR = -5;
 
 /**
  * Azure statuses of `az repos pr show/list`, mapped onto the neutral PR state. `notSet` never appears
@@ -104,7 +116,11 @@ const VOTE_BY_EVENT: Record<ReviewPublicationEvent, string | null> = {
   COMMENT: null,
 };
 
-const azureReviewerSchema = z.object({ vote: z.number() });
+const azureReviewerSchema = z.object({
+  vote: z.number(),
+  isRequired: z.boolean().default(false),
+});
+const azureReviewerVoteSchema = azureReviewerSchema.extend({ id: z.string().min(1) });
 const azureIdentitySchema = z.object({
   displayName: z.string().nullable().default(null),
   uniqueName: z.string().nullable().default(null),
@@ -120,7 +136,22 @@ const azurePrListEntrySchema = z.object({
   reviewers: z.array(azureReviewerSchema).default([]),
   creationDate: z.string(),
   createdBy: azureIdentitySchema.nullable().default(null),
-  repository: z.object({ name: z.string() }),
+  repository: z.object({
+    name: z.string(),
+    project: z.object({ id: z.string().min(1) }).nullable().default(null),
+  }),
+});
+const azurePrListSchema = z.object({ value: z.array(azurePrListEntrySchema) });
+const azurePolicyListSchema = z.object({
+  value: z.array(z.object({
+    status: z.string(),
+    configuration: z.object({
+      isEnabled: z.boolean(),
+      isBlocking: z.boolean(),
+      isDeleted: z.boolean().default(false),
+      type: z.object({ id: z.string() }),
+    }),
+  })),
 });
 
 /**
@@ -148,6 +179,7 @@ const azureCommentSchema = z.object({
   commentType: z.string().nullable().default(null),
   isDeleted: z.boolean().nullable().default(null),
   publishedDate: z.string().nullable().default(null),
+  author: z.object({ id: z.string().min(1) }).nullable().default(null),
 });
 
 const azureThreadSchema = z.object({
@@ -182,15 +214,11 @@ function prWebUrl(ref: AzureRepoRef, prNumber: number): string {
   return `${ref.orgUrl}/${ref.project}/${GIT_SEGMENT}/${ref.repository}/${PR_URL_SEGMENT}/${prNumber}`;
 }
 
-/**
- * Neutral review status from the reviewer votes: a single negative vote means changes requested, a
- * positive one means approved, and reviewers who have not voted yet mean the PR is still awaiting
- * review. No reviewer at all maps to "none" (nothing was ever requested).
- */
-function reviewStatusFromVotes(votes: number[]): PrReviewStatus {
-  if (votes.some((vote) => vote <= VOTE_REJECTED_MAX)) return "changes_requested";
-  if (votes.some((vote) => vote >= VOTE_APPROVED_MIN)) return "approved";
-  return votes.length > 0 ? "needs_review" : "none";
+function reviewStatusFromReviewers(reviewers: z.infer<typeof azureReviewerSchema>[]): PrReviewStatus {
+  if (reviewers.some((reviewer) => reviewer.vote <= VOTE_REJECTED_MAX)) return "changes_requested";
+  if (reviewers.some((reviewer) => reviewer.isRequired && reviewer.vote < VOTE_APPROVED_MIN)) return "needs_review";
+  if (reviewers.some((reviewer) => reviewer.vote >= VOTE_APPROVED_MIN)) return "approved";
+  return reviewers.length > 0 ? "needs_review" : "none";
 }
 
 /** Everything a review-publication call needs about the PR, resolved from a single `az repos pr show`. */
@@ -203,18 +231,13 @@ interface AzurePrContext {
 }
 
 type AzureThread = z.infer<typeof azureThreadSchema>;
+type AzurePrListEntry = z.infer<typeof azurePrListEntrySchema>;
 
-/**
- * Idempotency marker of ONE inline finding, derived from the pass marker the caller built. A retry
- * after a partial failure re-reads the threads and skips every finding whose marker is already on the
- * PR, so no inline thread is ever posted twice. An inline marker CONTAINS the bare pass marker, so
- * only `isCompletionThread` may be used to decide that a publication completed.
- */
+// NOTE(ali): Finding markers contain the pass marker; only a completion comment allows the vote retry.
 const FINDING_MARKER_PREFIX = "<!-- kanban-review-finding:";
 const FINDING_MARKER_SUFFIX = " -->";
 const COMPLETION_MARKER = "<!-- kanban-review-complete -->";
 
-/** Marker of the thread posted LAST by a pass: its presence alone proves the publication completed. */
 function completionMarker(passMarker: string): string {
   return `${passMarker}${COMPLETION_MARKER}`;
 }
@@ -243,14 +266,13 @@ function threadCarriesMarker(thread: AzureThread, marker: string): boolean {
   return reviewComment(thread)?.content?.includes(marker) === true;
 }
 
-/**
- * The completion thread of a pass: the thread posted LAST, which alone proves the whole publication
- * completed. It carries the pass's completion marker; a pass published before that marker existed is
- * recognised by its summary thread, which carries the bare pass marker without any finding marker.
- */
-function isCompletionThread(thread: AzureThread, passMarker: string): boolean {
-  if (threadCarriesMarker(thread, completionMarker(passMarker))) return true;
-  return threadCarriesMarker(thread, passMarker) && !threadCarriesMarker(thread, FINDING_MARKER_PREFIX);
+// NOTE(ali): Legacy summary threads carry the pass marker without a finding marker.
+function completionComment(thread: AzureThread, passMarker: string): z.infer<typeof azureCommentSchema> | null {
+  const comment = reviewComment(thread);
+  if (comment === null || comment.content === null) return null;
+  if (comment.content.includes(completionMarker(passMarker))) return comment;
+  if (comment.content.includes(passMarker) && !comment.content.includes(FINDING_MARKER_PREFIX)) return comment;
+  return null;
 }
 
 /** Repository path as Azure spells it in `threadContext.filePath` and in the iteration changes. */
@@ -315,23 +337,17 @@ export class AzureDevopsVcsClient implements VcsClient {
   async listOpenPrs(repoPath: string): Promise<OpenPr[]> {
     const ref = await repoRefFromRemote(repoPath);
     if (ref === null) throw new Error("listing des PR : remote origin Azure DevOps introuvable");
-    const res = await runBoundedCommand(
-      [...this.repoArgs(ref, ["repos", "pr", "list"]), "--status", "active", "--top", PR_LIST_LIMIT],
-      repoPath,
-    );
-    if (res.exitCode !== 0 || res.timedOut) {
-      throw new Error(`az repos pr list a échoué : ${boundedCommandDetail(res)}`);
-    }
-    const parsed = z.array(azurePrListEntrySchema).safeParse(safeJsonParse(res.stdout));
-    if (!parsed.success) throw new Error(`az repos pr list: sortie inattendue (${parsed.error.message})`);
-    return parsed.data.map((pr) => ({
+    const prs = await this.readOpenPrs(repoPath, ref);
+    if (prs === null) throw new Error("lecture des PR Azure DevOps échouée ou sortie inattendue");
+    const statuses = await this.reviewStatuses(repoPath, ref, prs);
+    return prs.map((pr, index) => ({
       number: pr.pullRequestId,
       title: pr.title,
       url: prWebUrl(ref, pr.pullRequestId),
       headBranch: stripHeadsPrefix(pr.sourceRefName),
       baseBranch: stripHeadsPrefix(pr.targetRefName),
       isDraft: pr.isDraft,
-      reviewStatus: reviewStatusFromVotes(pr.reviewers.map((reviewer) => reviewer.vote)),
+      reviewStatus: statuses[index] ?? "needs_review",
       // NOTE(ali): the Azure PR payload carries no "last updated" date — only creationDate — so the
       // picker orders by creation. A last-activity date would need one threads read per listed PR.
       updatedAt: pr.creationDate,
@@ -347,28 +363,15 @@ export class AzureDevopsVcsClient implements VcsClient {
       try {
         const ref = await repoRefFromRemote(repoPath);
         if (!ref) return [repoPath, null];
-        const repositoryName = ref.repository.toLowerCase();
-        let count = 0;
-        let offset = 0;
-        let pageLength = REVIEW_COUNT_PAGE_SIZE;
-        while (pageLength === REVIEW_COUNT_PAGE_SIZE) {
-          const res = await runBoundedCommand([
-            AZ_BINARY, "devops", "invoke", "--area", AZ_AREA_GIT, "--resource", "pullrequests",
-            "--route-parameters", `project=${ref.project}`, `repositoryId=${ref.repository}`,
-            "--query-parameters", "searchCriteria.status=active", `$top=${REVIEW_COUNT_PAGE_SIZE}`, `$skip=${offset}`,
-            "--org", ref.orgUrl, "--api-version", AZ_API_VERSION, "--http-method", "GET", "--detect", "false", "-o", "json",
-          ], repoPath);
-          if (res.exitCode !== 0 || res.timedOut) return [repoPath, null];
-          const parsed = z.object({ value: z.array(azurePrListEntrySchema) }).safeParse(safeJsonParse(res.stdout));
-          if (!parsed.success) return [repoPath, null];
-          count += parsed.data.value.filter((pr) => pr.repository.name.toLowerCase() === repositoryName && isPrNeedsAttention({
-            isDraft: pr.isDraft,
-            reviewStatus: reviewStatusFromVotes(pr.reviewers.map((reviewer) => reviewer.vote)),
-          })).length;
-          pageLength = parsed.data.value.length;
-          offset += REVIEW_COUNT_PAGE_SIZE;
-        }
-        return [repoPath, count];
+        const prs = await this.readOpenPrs(repoPath, ref);
+        if (prs === null) return [repoPath, null];
+        const eligible = prs.filter((pr) => !pr.isDraft);
+        const statuses = await this.reviewStatuses(repoPath, ref, eligible);
+        const attention = eligible.map((pr, index) => isPrNeedsAttention({
+          isDraft: pr.isDraft,
+          reviewStatus: statuses[index] ?? "needs_review",
+        }));
+        return [repoPath, attention.filter(Boolean).length];
       } catch {
         return [repoPath, null];
       }
@@ -466,8 +469,8 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (context === null) return { ok: false, reason: "URL de PR Azure DevOps invalide ou PR illisible", reviewId: null };
     const threads = await this.readThreads(cwd, context);
     if (threads === null) return { ok: false, reason: "lecture des fils Azure DevOps échouée", reviewId: null };
-    const already = threads.find((thread) => isCompletionThread(thread, opts.marker));
-    if (already !== undefined) return { ok: true, reason: "", reviewId: already.id };
+    const already = threads.find((thread) => completionComment(thread, opts.marker) !== null);
+    if (already !== undefined) return this.finishReviewPublication(cwd, context, opts.event, opts.marker, already);
 
     const anchors = await this.readChangeAnchors(cwd, context);
     const outsideDiff: ReviewPublicationComment[] = [];
@@ -500,7 +503,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     const completion = completionMarker(opts.marker);
     const visibleBody = `${opts.body}${renderOutsideDiffSection(outsideDiff)}`.trim();
     const completesInline = visibleBody === "" && pending.length > 0;
-    let lastInline: number | null = null;
+    let lastInline: AzureThread | null = null;
     for (const [index, { content, threadContext, pullRequestThreadContext }] of pending.entries()) {
       const carriesCompletion = completesInline && index === pending.length - 1;
       lastInline = await this.createThread(cwd, context, {
@@ -513,8 +516,8 @@ export class AzureDevopsVcsClient implements VcsClient {
         return { ok: false, reason: `publication d'un commentaire inline ${AZURE_LABEL} échouée`, reviewId: null };
       }
     }
-    if (completesInline) {
-      return { ok: true, reason: await this.castVote(cwd, context, opts.event), reviewId: lastInline };
+    if (completesInline && lastInline !== null) {
+      return this.finishReviewPublication(cwd, context, opts.event, opts.marker, lastInline);
     }
 
     const summary = await this.createThread(cwd, context, {
@@ -524,15 +527,9 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (summary === null) {
       return { ok: false, reason: `publication de la review ${AZURE_LABEL} échouée`, reviewId: null };
     }
-    return { ok: true, reason: await this.castVote(cwd, context, opts.event), reviewId: summary };
+    return this.finishReviewPublication(cwd, context, opts.event, opts.marker, summary);
   }
 
-  /**
-   * NOTE(ali): the vote is deliberately NOT re-checked here. Azure refuses a vote in cases the app
-   * cannot predict (author voting on their own PR, branch policy), and `publishReview` degrades
-   * instead of failing, so the reviewer vote is not proof of a published pass. The proof is the
-   * completion thread — present, not deleted, posted after the gate's cutoff — on the reviewed commit.
-   */
   async verifyReviewPublication(cwd: string, prUrl: string, check: ReviewPublicationCheck): Promise<DoneGateResult> {
     const context = await this.prContext(cwd, prUrl);
     if (context === null) return { ok: false, reason: "URL de PR Azure DevOps invalide ou PR illisible" };
@@ -541,13 +538,13 @@ export class AzureDevopsVcsClient implements VcsClient {
     }
     const threads = await this.readThreads(cwd, context);
     if (threads === null) return { ok: false, reason: "postage demandé mais lecture des fils échouée" };
-    const posted = threads.some((thread) => {
-      if (thread.id !== check.reviewId || !isCompletionThread(thread, check.marker)) return false;
-      const publishedDate = reviewComment(thread)?.publishedDate ?? null;
-      return publishedDate !== null && Date.parse(publishedDate) >= check.since;
-    });
-    if (!posted) return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
-    return { ok: true, reason: "" };
+    const thread = threads.find((candidate) => candidate.id === check.reviewId);
+    const posted = thread === undefined ? null : completionComment(thread, check.marker);
+    const publishedDate = posted?.publishedDate ?? null;
+    if (posted === null || publishedDate === null || !(Date.parse(publishedDate) >= check.since)) {
+      return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
+    }
+    return this.verifyVote(cwd, context, check.expectedState, posted.author?.id ?? null);
   }
 
   async mergePr(cwd: string, prUrl: string): Promise<DoneGateResult> {
@@ -574,6 +571,83 @@ export class AzureDevopsVcsClient implements VcsClient {
     const pr = await this.showPr(cwd, prUrl);
     if (!pr.ok) return "unknown";
     return PR_STATE_BY_AZURE_STATUS[pr.data.status] ?? "unknown";
+  }
+
+  private async readOpenPrs(cwd: string, ref: AzureRepoRef): Promise<AzurePrListEntry[] | null> {
+    const prs: AzurePrListEntry[] = [];
+    const repositoryName = ref.repository.toLowerCase();
+    for (let offset = 0; ; offset += PR_PAGE_SIZE) {
+      const res = await runBoundedCommand(this.resourceArgs(ref.orgUrl, AZ_AREA_GIT, AZ_RESOURCE_PRS, [
+        `project=${ref.project}`,
+        `repositoryId=${ref.repository}`,
+      ], {
+        method: HTTP_GET,
+        queryParameters: ["searchCriteria.status=active", `$top=${PR_PAGE_SIZE}`, `$skip=${offset}`],
+      }), cwd);
+      if (res.exitCode !== 0 || res.timedOut) return null;
+      const parsed = azurePrListSchema.safeParse(safeJsonParse(res.stdout));
+      if (!parsed.success) return null;
+      prs.push(...parsed.data.value.filter((pr) => pr.repository.name.toLowerCase() === repositoryName));
+      if (parsed.data.value.length < PR_PAGE_SIZE) return prs;
+    }
+  }
+
+  private async reviewStatuses(cwd: string, ref: AzureRepoRef, prs: AzurePrListEntry[]): Promise<PrReviewStatus[]> {
+    const statuses: PrReviewStatus[] = [];
+    for (let offset = 0; offset < prs.length; offset += POLICY_LOOKUP_BATCH_SIZE) {
+      const batch = prs.slice(offset, offset + POLICY_LOOKUP_BATCH_SIZE);
+      statuses.push(...await Promise.all(batch.map((pr) => this.reviewStatus(cwd, ref, pr))));
+    }
+    return statuses;
+  }
+
+  private async reviewStatus(cwd: string, ref: AzureRepoRef, pr: AzurePrListEntry): Promise<PrReviewStatus> {
+    const status = reviewStatusFromReviewers(pr.reviewers);
+    if (status !== "approved") return status;
+    const projectId = pr.repository.project?.id;
+    if (projectId === undefined) return "needs_review";
+    const artifactId = `vstfs:///CodeReview/CodeReviewId/${projectId}/${pr.pullRequestId}`;
+    for (let offset = 0; ; offset += POLICY_PAGE_SIZE) {
+      const res = await runBoundedCommand(this.resourceArgs(ref.orgUrl, AZ_AREA_POLICY, AZ_RESOURCE_POLICY_EVALUATIONS, [
+        `project=${projectId}`,
+      ], {
+        method: HTTP_GET,
+        apiVersion: AZ_PREVIEW_API_VERSION,
+        queryParameters: [`artifactId=${artifactId}`, `$top=${POLICY_PAGE_SIZE}`, `$skip=${offset}`],
+      }), cwd);
+      if (res.exitCode !== 0 || res.timedOut) return "needs_review";
+      const parsed = azurePolicyListSchema.safeParse(safeJsonParse(res.stdout));
+      if (!parsed.success) return "needs_review";
+      const pending = parsed.data.value.some(({ configuration, status: policyStatus }) => (
+        configuration.isEnabled && configuration.isBlocking && !configuration.isDeleted
+        && configuration.type.id.toLowerCase() === MINIMUM_APPROVAL_POLICY_TYPE
+        && policyStatus !== POLICY_APPROVED_STATUS && policyStatus !== POLICY_NOT_APPLICABLE_STATUS
+      ));
+      if (pending) return "needs_review";
+      if (parsed.data.value.length < POLICY_PAGE_SIZE) return "approved";
+    }
+  }
+
+  private resourceArgs(
+    orgUrl: string,
+    area: string,
+    resource: string,
+    routeParameters: string[],
+    opts: { method: string; inFile?: string; apiVersion?: string; queryParameters?: string[] },
+  ): string[] {
+    return [
+      AZ_BINARY, "devops", "invoke",
+      "--area", area,
+      "--resource", resource,
+      "--route-parameters", ...routeParameters,
+      ...(opts.queryParameters === undefined ? [] : ["--query-parameters", ...opts.queryParameters]),
+      "--org", orgUrl,
+      "--api-version", opts.apiVersion ?? AZ_API_VERSION,
+      "--http-method", opts.method,
+      ...(opts.inFile === undefined ? [] : ["--in-file", opts.inFile]),
+      "--detect", "false",
+      "-o", "json",
+    ];
   }
 
   /** Repo-scoped `az` invocation: the shared org/project/repository flags plus the JSON output mode. */
@@ -611,22 +685,12 @@ export class AzureDevopsVcsClient implements VcsClient {
     routeParameters: string[],
     opts: { method: string; inFile?: string },
   ): string[] {
-    return [
-      AZ_BINARY, "devops", "invoke",
-      "--area", AZ_AREA_GIT,
-      "--resource", resource,
-      "--route-parameters",
+    return this.resourceArgs(context.orgUrl, AZ_AREA_GIT, resource, [
       `project=${context.project}`,
       `repositoryId=${context.repositoryId}`,
       `pullRequestId=${String(context.prNumber)}`,
       ...routeParameters,
-      "--org", context.orgUrl,
-      "--api-version", AZ_API_VERSION,
-      "--http-method", opts.method,
-      ...(opts.inFile === undefined ? [] : ["--in-file", opts.inFile]),
-      "--detect", "false",
-      "-o", "json",
-    ];
+    ], opts);
   }
 
   /** The org/project/repositoryId triple plus the PR head, from one `az repos pr show`. */
@@ -691,31 +755,70 @@ export class AzureDevopsVcsClient implements VcsClient {
     return { iterationId: latest.id, byPath };
   }
 
-  /** POST one thread; returns its id, or null when the call failed or returned no id. */
+  // NOTE(ali): The create response supplies the publisher identity used to verify the review vote.
   private async createThread(
     cwd: string,
     context: AzurePrContext,
     payload: Record<string, unknown>,
-  ): Promise<number | null> {
+  ): Promise<AzureThread | null> {
     return withJsonRequestFile(payload, async (inFile) => {
       const res = await runBoundedCommand(
         this.invokeArgs(context, AZ_RESOURCE_PR_THREADS, [], { method: HTTP_POST, inFile }),
         cwd,
       );
       if (res.exitCode !== 0 || res.timedOut) return null;
-      const parsed = z.object({ id: z.number().int() }).safeParse(safeJsonParse(res.stdout));
-      return parsed.success ? parsed.data.id : null;
+      const parsed = azureThreadSchema.safeParse(safeJsonParse(res.stdout));
+      return parsed.success ? parsed.data : null;
     });
   }
 
-  /**
-   * Cast the verdict as a reviewer vote. A refused vote (author voting on their own PR, a branch
-   * policy) never fails the publication — the threads are already on the PR — so the reason is
-   * returned for the caller to surface instead.
-   */
-  private async castVote(cwd: string, context: AzurePrContext, event: ReviewPublicationEvent): Promise<string> {
+  private async finishReviewPublication(
+    cwd: string,
+    context: AzurePrContext,
+    event: ReviewPublicationEvent,
+    marker: string,
+    thread: AzureThread,
+  ): Promise<PublishReviewResult> {
+    const publisherId = completionComment(thread, marker)?.author?.id ?? null;
+    const voted = await this.castVote(cwd, context, event, publisherId);
+    if (!voted.ok) return { ok: false, reason: voted.reason, reviewId: null };
+    return { ok: true, reason: "", reviewId: thread.id, actualState: REVIEW_PUBLICATION_STATE_BY_EVENT[event] };
+  }
+
+  private async verifyVote(
+    cwd: string,
+    context: AzurePrContext,
+    state: ReviewPublicationState,
+    publisherId: string | null,
+  ): Promise<DoneGateResult> {
+    if (state === "COMMENTED") return { ok: true, reason: "" };
+    if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la vérification du vote` };
+    const reviewer = await runBoundedCommand(this.invokeArgs(
+      context, AZ_RESOURCE_PR_REVIEWERS, [`reviewerId=${publisherId}`], { method: HTTP_GET },
+    ), cwd);
+    if (reviewer.exitCode !== 0 || reviewer.timedOut) {
+      return { ok: false, reason: `lecture du vote ${AZURE_LABEL} échouée : ${boundedCommandDetail(reviewer)}` };
+    }
+    const parsedReviewer = azureReviewerVoteSchema.safeParse(safeJsonParse(reviewer.stdout));
+    if (!parsedReviewer.success || parsedReviewer.data.id.toLowerCase() !== publisherId.toLowerCase()) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} de l'auteur de la review introuvable` };
+    }
+    const expectedVote = state === "APPROVED" ? VOTE_APPROVED : VOTE_WAIT_FOR_AUTHOR;
+    if (parsedReviewer.data.vote !== expectedVote) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${expectedVote}, reçu ${parsedReviewer.data.vote}` };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  private async castVote(
+    cwd: string,
+    context: AzurePrContext,
+    event: ReviewPublicationEvent,
+    publisherId: string | null,
+  ): Promise<DoneGateResult> {
     const vote = VOTE_BY_EVENT[event];
-    if (vote === null) return "";
+    if (vote === null) return { ok: true, reason: "" };
+    if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la publication du vote` };
     const res = await runBoundedCommand(
       [
         AZ_BINARY, "repos", "pr", "set-vote",
@@ -727,8 +830,20 @@ export class AzureDevopsVcsClient implements VcsClient {
       ],
       cwd,
     );
-    if (res.exitCode === 0 && !res.timedOut) return "";
-    return `vote ${AZURE_LABEL} « ${vote} » refusé : ${boundedCommandDetail(res)}`;
+    if (res.exitCode !== 0 || res.timedOut) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} « ${vote} » refusé : ${boundedCommandDetail(res)}` };
+    }
+    const parsed = azureReviewerVoteSchema.safeParse(safeJsonParse(res.stdout));
+    if (!parsed.success) return { ok: false, reason: `réponse ${AZURE_LABEL} inattendue après la publication du vote` };
+    if (parsed.data.id.toLowerCase() !== publisherId.toLowerCase()) {
+      return { ok: false, reason: `le vote ${AZURE_LABEL} provient d'une identité différente de l'auteur de la review` };
+    }
+    const state = REVIEW_PUBLICATION_STATE_BY_EVENT[event];
+    const expectedVote = state === "APPROVED" ? VOTE_APPROVED : VOTE_WAIT_FOR_AUTHOR;
+    if (parsed.data.vote !== expectedVote) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${expectedVote}, reçu ${parsed.data.vote}` };
+    }
+    return this.verifyVote(cwd, context, state, publisherId);
   }
 
   /** `az repos pr show --id N --org URL` — the single read backing every PR-scoped gate. */

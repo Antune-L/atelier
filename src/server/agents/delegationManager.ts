@@ -19,6 +19,7 @@ import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
 import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
+import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 import type { ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
 import {
@@ -709,26 +710,38 @@ export class DelegationManager {
       comments,
       event,
     }, provider);
-    if (!published.ok || published.reviewId === null) return { ok: false, result: `Publication refusée : ${published.reason}` };
+    const publicationPayload = {
+      passId,
+      reviewId: published.reviewId,
+      commitSha: reviewedCommitSha,
+      event,
+      expectedState: REVIEW_PUBLICATION_STATE_BY_EVENT[event],
+      actualState: published.actualState ?? null,
+      result: published,
+      warnings: published.ok && published.reason !== "" ? [published.reason] : [],
+    };
+    if (!published.ok || published.reviewId === null) {
+      this.store.logEvent(ticket.id, "review_publication_failed", {
+        ...publicationPayload,
+        error: published.reason,
+      });
+      return { ok: false, result: `Publication refusée : ${published.reason}` };
+    }
     if (!this.store.recordReviewPublication({
       ticketId: ticket.id,
       passId,
       reviewId: published.reviewId,
       commitSha: reviewedCommitSha,
     })) {
-      return {
-        ok: false,
-        result: "La review a été publiée, mais son accusé n'a pas pu être persisté. Rappelle publish_review pour le récupérer.",
-      };
+      const result = "La review a été publiée, mais son accusé n'a pas pu être persisté. Rappelle publish_review pour le récupérer.";
+      this.store.logEvent(ticket.id, "review_publication_failed", {
+        ...publicationPayload,
+        error: result,
+      });
+      return { ok: false, result };
     }
-    this.store.logEvent(ticket.id, "review_published", {
-      passId,
-      reviewId: published.reviewId,
-      commitSha: reviewedCommitSha,
-    });
+    this.store.logEvent(ticket.id, "review_published", publicationPayload);
     const refutedNote = refutedCount === 0 ? "" : ` (${refutedCount} finding(s) auto-réfuté(s) ignoré(s))`;
-    // A client that degraded a capability rather than failing (GitHub self-approval, an Azure vote
-    // refused by a policy) reports it as a reason on an ok result: surface it to the session.
     const degradedNote = published.reason === "" ? "" : ` Note : ${published.reason}.`;
     return {
       ok: true,

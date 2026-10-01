@@ -1,9 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { OpenPr, ProjectInfo } from "@shared/schemas";
 
 import { api } from "@/lib/api";
 import { resolveProjectChoice } from "@/lib/projectSelection";
+
+import { useReviewCounts } from "./useReviewCounts";
 
 const LOAD_ERROR = "Échec du chargement des PRs";
 
@@ -34,16 +36,23 @@ export function useProjectPanel(projects: ProjectInfo[]): ProjectPanelState {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const project = resolveProjectChoice(projects, projectChoice);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadedCountsAt, setLoadedCountsAt] = useState<number | null>(null);
+  const { checkedAt } = useReviewCounts();
+  const latestRequest = useRef(0);
   const [prs, setPrs] = useState<OpenPr[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (key: string, refresh = false): Promise<void> => {
+    const request = ++latestRequest.current;
     try {
       const data = await api.projectPrs(key, refresh);
+      if (request !== latestRequest.current) return;
       setPrs(data);
+      setError(null);
     } catch (e) {
+      if (request !== latestRequest.current) return;
       setError(e instanceof Error ? e.message : LOAD_ERROR);
       setPrs([]);
     }
@@ -56,13 +65,17 @@ export function useProjectPanel(projects: ProjectInfo[]): ProjectPanelState {
     void load(project, true);
   };
 
-  // Load PRs for the active project on first render and on each project change (no useEffect).
-  if (project && project !== loadedKey) {
+  if (project !== loadedKey) {
     setLoadedKey(project);
+    setLoadedCountsAt(checkedAt);
     setPrs(null);
     setError(null);
     setSelected(new Set());
-    void load(project);
+    if (project) void load(project);
+    else latestRequest.current++;
+  } else if (checkedAt !== loadedCountsAt) {
+    setLoadedCountsAt(checkedAt);
+    if (project && loadedCountsAt !== null) void load(project, true);
   }
 
   const loading = prs === null && error === null;

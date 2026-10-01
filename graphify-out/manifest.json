@@ -150,8 +150,8 @@
     "semantic_hash": "1888cf6a2f7ebc34b9e3497cf1e355ad"
   },
   "src/server/routes.ts": {
-    "mtime": 1790372977.151441,
-    "ast_hash": "50a297a6b19ce5f94dd1caae32cb3bb7",
+    "mtime": 1790852021.5223877,
+    "ast_hash": "de092ac6a5478cc610f3fc14b4edb437",
     "semantic_hash": ""
   },
   "src/server/system/fake.ts": {
@@ -170,8 +170,8 @@
     "semantic_hash": ""
   },
   "src/server/system/types.ts": {
-    "mtime": 1790448839.7930884,
-    "ast_hash": "5cb971b54db602a629f34ac524bb0ecc",
+    "mtime": 1790851869.8419075,
+    "ast_hash": "3be0f3760747e437e03d83b99022765e",
     "semantic_hash": ""
   },
   "src/server/terminalManager.ts": {
@@ -185,8 +185,8 @@
     "semantic_hash": "77c4c7a6faf3bb69a8ec778d3af52cfb"
   },
   "src/shared/constants.ts": {
-    "mtime": 1790372977.1524484,
-    "ast_hash": "88ba4ffeae20f331733ce59a30d4777c",
+    "mtime": 1790851869.8057952,
+    "ast_hash": "3e7d98ec09953f91141b67381cc5f3c5",
     "semantic_hash": ""
   },
   "src/shared/errors.ts": {
@@ -280,8 +280,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/PrSelectRow.tsx": {
-    "mtime": 1790781903.1099775,
-    "ast_hash": "5acc496eeabd5cf21f670830d554d2ec",
+    "mtime": 1790851934.4084673,
+    "ast_hash": "ea32b9f19b50953e08863cae261978a3",
     "semantic_hash": ""
   },
   "src/web/src/components/PrdReviewDialog.tsx": {
@@ -455,8 +455,8 @@
     "semantic_hash": "9a49cbabdafa68b4e60f32fa0ecc279e"
   },
   "src/web/src/hooks/useProjectPanel.ts": {
-    "mtime": 1790346555.6553667,
-    "ast_hash": "eb22a72673fd4fa01e593bc367e8a7c3",
+    "mtime": 1790852001.4135497,
+    "ast_hash": "ebbddf1fff30fa5f7dbe85266a45ea71",
     "semantic_hash": ""
   },
   "src/web/src/hooks/useProjects.ts": {
@@ -785,8 +785,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/delegationManager.ts": {
-    "mtime": 1790773475.7741892,
-    "ast_hash": "8ca280a5ca5a3c5dc38583ef1347a6d1",
+    "mtime": 1790851934.3860714,
+    "ast_hash": "d21bddd481e3565cb3b455663dc9affe",
     "semantic_hash": ""
   },
   "src/server/agents/sessionConfig.test.ts": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureDevops.ts": {
-    "mtime": 1790347256.2691066,
-    "ast_hash": "02b1fb6bd97de91ad559ff5c3e1dc664",
+    "mtime": 1790853091.1887228,
+    "ast_hash": "e0e05846d884a4349ce385ce368934bc",
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureRemote.ts": {
@@ -1345,8 +1345,8 @@
     "semantic_hash": ""
   },
   "src/server/system/vcs/github.ts": {
-    "mtime": 1790346435.2325912,
-    "ast_hash": "9de96f97056f4a75612b2076497ff68a",
+    "mtime": 1790852165.8267472,
+    "ast_hash": "9b75dca00e0c6153fade5f788b6295b3",
     "semantic_hash": ""
   },
   "src/server/system/vcs/types.ts": {
@@ -1370,8 +1370,8 @@
     "semantic_hash": ""
   },
   "src/server/system/vcs/azureRest.ts": {
-    "mtime": 1790077557.1682422,
-    "ast_hash": "518c2a594da0abd29a14b20b7386b47a",
+    "mtime": 1790853016.7475557,
+    "ast_hash": "0939d014ce157e5afe37a34a658e97e3",
     "semantic_hash": ""
   },
   "src/web/src/lib/projectSelection.ts": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "src/web/src/hooks/useReviewCounts.ts": {
-    "mtime": 1790346302.00801,
-    "ast_hash": "470d3683ef9f273eb8b9c2af6ae53cb6",
+    "mtime": 1790852001.3930368,
+    "ast_hash": "41efb8470dffeda0b577791fef7a320c",
     "semantic_hash": ""
   },
   "src/web/src/hooks/desktopShortcut.ts": {
@@ -1455,8 +1455,8 @@
     "semantic_hash": ""
   },
   "MEMORY.md": {
-    "mtime": 1790773245.5336814,
-    "ast_hash": "ce6d787b359ce9bf47b795eb89ffec5e",
+    "mtime": 1790853209.0785525,
+    "ast_hash": "aa02eb38b6a3bde005ec2df49becb946",
     "semantic_hash": ""
   },
   "src/server/agents/atelier.ts": {
@@ -1602,6 +1602,11 @@
   "src/server/system/permissionDiagnostics.ts": {
     "mtime": 1790773192.3345168,
     "ast_hash": "1ce4d2ebee4c729052f1884f1364f973",
+    "semantic_hash": ""
+  },
+  "docs/pr-review-count-fixes-state.md": {
+    "mtime": 1790853324.4146597,
+    "ast_hash": "f05a9ce4a784e21555ffd8ae59b1253a",
     "semantic_hash": ""
   }
 }

@@ -46,6 +46,7 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
             {pr.additions !== null && <span className="text-success">+{pr.additions}</span>}
             {pr.deletions !== null && <span className="text-destructive">-{pr.deletions}</span>}
             {needsAttention && <Badge variant="warning">À reviewer</Badge>}
+            {pr.reviewStatus === "reviewed" && <Badge variant="secondary">Déjà revue</Badge>}
             {pr.isDraft && <Badge variant="secondary">Draft</Badge>}
           </div>
         </div>

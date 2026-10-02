@@ -29,7 +29,7 @@ import type {
   WorktreeSetupOptions,
 } from "./types.ts";
 import { FakeVcsClient } from "./vcs/fake.ts";
-import type { VcsClient } from "./vcs/types.ts";
+import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
 const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
@@ -354,6 +354,11 @@ export class FakeSystemAdapter implements SystemAdapter {
       requirePushedBranch: opts.requirePushedBranch,
     });
     return { ok: true, reason: "" };
+  }
+
+  async listReviewRequests(repoPath: string, provider: VcsProvider): Promise<ReviewRequestSnapshot> {
+    const snapshot = await this.vcs(provider).listReviewRequests(repoPath);
+    return { ...snapshot, identityKey: `${provider}:${snapshot.identityKey}` };
   }
 
   async listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]> {

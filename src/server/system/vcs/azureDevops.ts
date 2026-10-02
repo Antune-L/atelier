@@ -50,7 +50,19 @@ import {
 } from "./azureRest.ts";
 import { CONNECTION_TEST_PR_LIMIT, connectionFailure, connectionResult } from "./connection.ts";
 import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
-import type { CreatePrResult, ReviewPublicationCheck, VcsClient } from "./types.ts";
+import type { CreatePrResult, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
+
+const AZURE_PYTHON_LOCATION_RE = /^Python location '([^'\r\n]+)'$/m;
+const AZURE_PENDING_REVIEW_VOTE = 0;
+const AZURE_CURRENT_IDENTITY_SCRIPT = `
+import json, sys
+from azure.cli.core.extension import get_extension_path
+sys.path.insert(0, get_extension_path("azure-devops"))
+from azext_devops.dev.common.identities import get_current_identity
+identity = get_current_identity(sys.argv[1])
+print(json.dumps({"id": identity.id}))
+`;
+const azureCurrentIdentitySchema = z.object({ id: z.string().min(1) });
 
 const AZURE_LABEL = VCS_PROVIDER_LABELS.azureDevops;
 
@@ -117,6 +129,9 @@ const VOTE_BY_EVENT: Record<ReviewPublicationEvent, string | null> = {
 };
 
 const azureReviewerSchema = z.object({
+  id: z.string().optional(),
+  isFlagged: z.boolean().nullable().optional(),
+  hasDeclined: z.boolean().nullable().optional(),
   vote: z.number(),
   isRequired: z.boolean().nullable().default(false),
 });
@@ -332,6 +347,35 @@ export class AzureDevopsVcsClient implements VcsClient {
       repoPath,
     );
     return connectionResult(res, "az repos pr list", `Connexion Azure DevOps OK (${ref.project}/${ref.repository})`, checkedAt);
+  }
+
+  async listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot> {
+    const ref = await repoRefFromRemote(repoPath);
+    if (ref === null) throw new Error("Azure DevOps origin remote could not be read");
+    const runtime = await runBoundedCommand([AZ_BINARY, "--version"], repoPath);
+    if (runtime.exitCode !== 0 || runtime.timedOut) throw new Error("Azure CLI Python runtime could not be resolved");
+    const python = AZURE_PYTHON_LOCATION_RE.exec(runtime.stdout)?.[1];
+    if (!python || !Bun.which(python)) throw new Error("Azure CLI Python runtime response is invalid");
+    const result = await runBoundedCommand([python, "-c", AZURE_CURRENT_IDENTITY_SCRIPT, ref.orgUrl], repoPath);
+    if (result.exitCode !== 0 || result.timedOut) throw new Error("Azure DevOps authenticated identity could not be read");
+    const identity = azureCurrentIdentitySchema.safeParse(safeJsonParse(result.stdout));
+    if (!identity.success) throw new Error("Azure DevOps authenticated identity response is invalid");
+    const prs = await this.readOpenPrs(repoPath, ref);
+    if (prs === null) throw new Error("Azure DevOps review requests could not be read");
+    if (prs.some((pr) => pr.reviewers.some((reviewer) => !reviewer.id))) {
+      throw new Error("Azure DevOps reviewer identity response is invalid");
+    }
+    const userId = identity.data.id.toLowerCase();
+    const requested = prs.filter((pr) => !pr.isDraft && pr.reviewers.some((reviewer) => reviewer.id?.toLowerCase() === userId && reviewer.hasDeclined !== true && (reviewer.vote === AZURE_PENDING_REVIEW_VOTE || reviewer.isFlagged === true)));
+    return {
+      identityKey: `azureDevops:${ref.orgUrl.toLowerCase()}/${ref.project.toLowerCase()}/${ref.repository.toLowerCase()}:${userId}`,
+      prs: requested.map((pr) => ({
+        number: pr.pullRequestId, title: pr.title, url: prWebUrl(ref, pr.pullRequestId),
+        headBranch: stripHeadsPrefix(pr.sourceRefName), baseBranch: stripHeadsPrefix(pr.targetRefName), isDraft: pr.isDraft,
+        reviewStatus: "needs_review", updatedAt: pr.creationDate, author: pr.createdBy?.displayName ?? pr.createdBy?.uniqueName ?? "?",
+        additions: null, deletions: null,
+      })),
+    };
   }
 
   async listOpenPrs(repoPath: string): Promise<OpenPr[]> {

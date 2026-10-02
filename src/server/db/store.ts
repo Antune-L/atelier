@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import {
   AUTO_MERGE_RESOLVE_EVENT,
+  SUCCESS_COLUMNS,
+  TERMINAL_STAGES,
   AUTO_RECLAIM_EVENT,
   CLEANER_EFFORT,
   CLEANER_MODEL,
@@ -29,13 +31,13 @@ import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
-import type { AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -489,6 +491,108 @@ export class ProjectInUseError extends Error {
 
 export class Store {
   constructor(private readonly db: Database) {}
+
+  listPrNotifications(): PrNotification[] {
+    const contexts = new Map(this.listProjectKeys().flatMap((key) => {
+      const project = this.getProjectRow(key);
+      const state = this.getPrNotificationState(key);
+      if (!project || project.hidden || !state) return [];
+      return [[key, { repoPath: project.repoPath, identityKey: state.identity_key }] satisfies [string, { repoPath: string; identityKey: string }]];
+    }));
+    return this.db.query("SELECT payload FROM pr_notifications ORDER BY rowid DESC").all()
+      .map(mapPrNotificationRow)
+      .filter((notification) => {
+        const context = contexts.get(notification.project);
+        return context?.repoPath === notification.repoPath && context.identityKey === notification.identityKey;
+      });
+  }
+
+  getPrNotification(id: string): PrNotification | null {
+    const raw = this.db.query("SELECT payload FROM pr_notifications WHERE id = ?").get(id);
+    return raw === null ? null : mapPrNotificationRow(raw);
+  }
+
+  getPrNotificationState(project: string) {
+    const raw = this.db.query("SELECT * FROM pr_notification_sync WHERE project = ?").get(project);
+    return raw === null ? null : mapPrNotificationSyncRow(raw);
+  }
+
+  listPrNotificationSync(): PrNotificationSyncStatus[] {
+    return this.listProjectKeys().flatMap((project) => {
+      if (this.getProjectRow(project)?.hidden) return [];
+      const state = this.getPrNotificationState(project);
+      return [{ project, lastCheckedAt: state?.last_checked_at ?? null, error: state?.error ?? null }];
+    });
+  }
+
+  private savePrNotification(notification: PrNotification): void {
+    this.db.query("INSERT INTO pr_notifications (id, project, payload) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload")
+      .run(notification.id, notification.project, JSON.stringify(notification));
+  }
+
+  syncPrNotifications(project: string, repoPath: string, identityKey: string, prs: OpenPr[]): PrNotification[] {
+    return this.transaction(() => {
+      const now = Date.now();
+      const state = this.getPrNotificationState(project);
+      const baseline = state === null || state.repo_path !== repoPath || state.identity_key !== identityKey || state.last_checked_at === null;
+      const all = this.db.query("SELECT payload FROM pr_notifications WHERE project = ?").all(project).map(mapPrNotificationRow);
+      const current = new Map(prs.filter((pr) => !pr.isDraft).map((pr) => [pr.url, pr]));
+      const active = new Set<string>();
+      for (const notification of all) {
+        if (notification.resolvedAt !== null) continue;
+        const pr = current.get(notification.prUrl);
+        if (baseline || !pr || notification.repoPath !== repoPath || notification.identityKey !== identityKey) {
+          this.savePrNotification({ ...notification, resolvedAt: now });
+          continue;
+        }
+        active.add(notification.prUrl);
+        this.savePrNotification({ ...notification, title: pr.title, author: pr.author, headRefName: pr.headBranch, baseRefName: pr.baseBranch });
+      }
+      const detected: PrNotification[] = [];
+      for (const pr of current.values()) {
+        if (active.has(pr.url)) continue;
+        const notification: PrNotification = {
+          id: nanoid(), project, repoPath, identityKey, prNumber: pr.number, prUrl: pr.url,
+          title: pr.title, author: pr.author, headRefName: pr.headBranch, baseRefName: pr.baseBranch,
+          detectedAt: now, readAt: null, resolvedAt: null, ticketId: null,
+        };
+        this.savePrNotification(notification);
+        if (!baseline) detected.push(notification);
+      }
+      this.db.query("INSERT INTO pr_notification_sync (project, repo_path, identity_key, last_checked_at, error) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(project) DO UPDATE SET repo_path = excluded.repo_path, identity_key = excluded.identity_key, last_checked_at = excluded.last_checked_at, error = NULL")
+        .run(project, repoPath, identityKey, now);
+      return detected;
+    });
+  }
+
+  setPrNotificationError(project: string, repoPath: string, error: string): void {
+    this.db.query("INSERT INTO pr_notification_sync (project, repo_path, identity_key, error) VALUES (?, ?, '', ?) ON CONFLICT(project) DO UPDATE SET error = excluded.error")
+      .run(project, repoPath, error);
+  }
+
+  readPrNotification(id: string, ticketId?: string): PrNotification | null {
+    const notification = this.getPrNotification(id);
+    if (!notification) return null;
+    const updated = { ...notification, readAt: notification.readAt ?? Date.now(), ticketId: ticketId ?? notification.ticketId };
+    this.savePrNotification(updated);
+    return updated;
+  }
+
+  createPrNotificationReview(id: string, input: NewReview): { ticket: Ticket; created: boolean } {
+    return this.transaction(() => {
+      const notification = this.getPrNotification(id);
+      if (!notification) throw new Error("Review notification not found");
+      const linked = notification.ticketId === null ? null : this.getTicket(notification.ticketId);
+      const ongoing = this.db.query("SELECT * FROM tickets WHERE kind = 'review' AND project = ? AND pr_url = ? AND archived = 0 ORDER BY created_at DESC")
+        .all(input.project, input.prUrl).map((raw) => mapTicketRow(raw, 0))
+        .find((ticket) => ticket.stage !== null && !TERMINAL_STAGES.includes(ticket.stage) && !SUCCESS_COLUMNS.includes(ticket.column));
+      const existing = linked ?? ongoing;
+      if (notification.resolvedAt !== null && existing === undefined) throw new Error("This review request is no longer active");
+      const ticket = existing ?? this.createReview(input);
+      this.readPrNotification(id, ticket.id);
+      return { ticket, created: existing === undefined };
+    });
+  }
 
   /** Run `fn` inside a single SQLite transaction: commit on return, roll back if it throws. */
   transaction<T>(fn: () => T): T {
@@ -1228,6 +1332,9 @@ export class Store {
       this.db.query("DELETE FROM comments WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM events WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM tickets WHERE id = ?").run(ticketId);
+      for (const notification of this.db.query("SELECT payload FROM pr_notifications").all().map(mapPrNotificationRow)) {
+        if (notification.ticketId === ticketId) this.savePrNotification({ ...notification, ticketId: null });
+      }
     });
     tx();
   }
@@ -1505,6 +1612,7 @@ export class Store {
   }
 
   updateProject(key: string, patch: ProjectPatch): ProjectConfig {
+    const previous = this.getProjectRow(key);
     const builder = new SqlUpdateBuilder();
     if (patch.label !== undefined) builder.set("label", patch.label);
     if (patch.repoPath !== undefined) builder.set("repo_path", patch.repoPath);
@@ -1537,13 +1645,19 @@ export class Store {
     }
     const project = this.getProjectRow(key);
     if (!project) throw new Error(`updateProject: projet ${key} introuvable`);
+    if (previous?.repoPath !== project.repoPath || previous.vcsProvider !== project.vcsProvider) {
+      this.db.query("DELETE FROM pr_notification_sync WHERE project = ?").run(key);
+    }
     return project;
   }
 
   deleteProject(key: string): void {
     const count = this.scalar("SELECT COUNT(*) AS n FROM tickets WHERE project = ?", key);
     if (count > 0) throw new ProjectInUseError(key, count);
-    this.db.query("DELETE FROM projects WHERE key = ?").run(key);
+    this.transaction(() => {
+      this.db.query("DELETE FROM pr_notification_sync WHERE project = ?").run(key);
+      this.db.query("DELETE FROM projects WHERE key = ?").run(key);
+    });
   }
 
   // ---- Slots ----

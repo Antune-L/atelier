@@ -1,7 +1,8 @@
+import type { NotificationSoundKind } from "../shared/schemas.ts";
 import type { ClientHub } from "./hub.ts";
 
 /** Optional native-notification sink. The desktop wrapper wires this to Electrobun's showNotification. */
-export type NativeNotify = (title: string, body: string) => void;
+export type NativeNotify = (title: string, body: string, soundKind?: NotificationSoundKind) => void;
 
 /**
  * Fans a notification out to the UI, which raises a toast and (in a browser) a
@@ -15,9 +16,9 @@ export class Notifier {
     private readonly onNative?: NativeNotify,
   ) {}
 
-  notify(title: string, body: string, ticketId?: string, sound?: boolean): Promise<void> {
-    this.hub.pushNotification(title, body, ticketId, sound);
-    this.onNative?.(title, body);
+  notify(title: string, body: string, ticketId?: string, sound?: boolean, soundKind?: NotificationSoundKind): Promise<void> {
+    this.hub.pushNotification(title, body, ticketId, sound, soundKind ?? (sound ? "completion" : undefined));
+    this.onNative?.(title, body, soundKind);
     return Promise.resolve();
   }
 }

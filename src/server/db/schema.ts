@@ -10,6 +10,20 @@ export const CODEX_CATALOG_SNAPSHOT_SUFFIX = ".pre-codex-catalog-v4.sqlite";
 export const CODEX_DOWNGRADE_TARGET = "c513f9493271d0780be7861648d4789e4cdcfe4a";
 
 const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pr_notifications (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pr_notifications_project ON pr_notifications(project);
+CREATE TABLE IF NOT EXISTS pr_notification_sync (
+  project TEXT PRIMARY KEY,
+  repo_path TEXT NOT NULL,
+  identity_key TEXT NOT NULL,
+  last_checked_at INTEGER,
+  error TEXT
+);
+
 CREATE TABLE IF NOT EXISTS tickets (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,

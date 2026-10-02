@@ -4,6 +4,8 @@ import type {
   Conversation,
   ConversationMessage,
   PrdDocumentRecord,
+  PrNotification,
+  PrNotificationSyncStatus,
   Slot,
   Ticket,
   WorktreeSession,
@@ -13,6 +15,8 @@ import { wsClientEventSchema } from "@shared/schemas";
 
 import {
   ensureNotificationPermission,
+  getStoredSoundEnabled,
+  storeSoundEnabled,
   playNotificationSound,
   showDesktopNotification,
 } from "./notifications";
@@ -34,6 +38,10 @@ export interface BoardState {
   worktreeSessions: WorktreeSession[];
   automations: Automation[];
   conversations: Conversation[];
+  prNotifications: PrNotification[];
+  prNotificationSync: PrNotificationSyncStatus[];
+  soundEnabled: boolean;
+  notificationCenterOpen: boolean;
   connected: boolean;
   toasts: Toast[];
   openTicketId: string | null;
@@ -51,6 +59,10 @@ class BoardStore {
     worktreeSessions: [],
     automations: [],
     conversations: [],
+    prNotifications: [],
+    prNotificationSync: [],
+    soundEnabled: getStoredSoundEnabled(),
+    notificationCenterOpen: false,
     connected: false,
     toasts: [],
     openTicketId: null,
@@ -124,7 +136,12 @@ class BoardStore {
           worktreeSessions: event.worktreeSessions,
           automations: event.automations,
           conversations: event.conversations,
+          prNotifications: event.prNotifications,
+          prNotificationSync: event.prNotificationSync,
         });
+        break;
+      case "pr_notifications":
+        this.set({ prNotifications: event.notifications, prNotificationSync: event.sync });
         break;
       case "conversation":
         this.rememberConversation(event.conversation);
@@ -160,15 +177,11 @@ class BoardStore {
       case "notification": {
         const ticketId = event.ticketId;
         this.pushToast(event.title, event.body, ticketId);
-        // Pass a click callback rather than importing the store into notifications.ts to avoid a
-        // circular import (store imports notifications).
-        showDesktopNotification(
-          event.title,
-          event.body,
-          ticketId ? () => this.openTicket(ticketId) : undefined,
-        );
-        // Only completion notifications carry `sound`; other events stay silent.
-        if (event.sound) playNotificationSound();
+        let onClick: (() => void) | undefined;
+        if (ticketId) onClick = () => this.openTicket(ticketId);
+        else if (event.soundKind === "pr") onClick = () => this.openNotificationCenter();
+        showDesktopNotification(event.title, event.body, onClick);
+        if (event.sound && this.state.soundEnabled) playNotificationSound(event.soundKind);
         break;
       }
     }
@@ -215,6 +228,19 @@ class BoardStore {
   /** The currently open ticket detail; lives here since notifications can request opening a ticket. */
   openTicket(ticketId: string): void {
     this.set({ openTicketId: ticketId });
+  }
+
+  setSoundEnabled(enabled: boolean): void {
+    storeSoundEnabled(enabled);
+    this.set({ soundEnabled: enabled });
+  }
+
+  openNotificationCenter(): void {
+    this.set({ notificationCenterOpen: true });
+  }
+
+  closeNotificationCenter(): void {
+    this.set({ notificationCenterOpen: false });
   }
 
   closeTicket(): void {

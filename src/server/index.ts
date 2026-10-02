@@ -37,6 +37,7 @@ import { createLogger, initLogFile } from "./logger.ts";
 import { migrateConfigJsonIfPresent } from "./migration.ts";
 import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
+import { PrNotificationMonitor } from "./prNotificationMonitor.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
@@ -230,6 +231,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
   const sessionHub = new SessionHub(system);
   const notifier = new Notifier(clientHub, opts.onNotify);
+  const prNotificationMonitor = new PrNotificationMonitor(store, system, clientHub, notifier);
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
   const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier);
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
@@ -410,6 +412,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
+  prNotificationMonitor.start();
 
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
@@ -424,6 +427,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await feasibilityManager.teardownAll();
     },
     async stop() {
+      await prNotificationMonitor.stop();
       watchdog.stop();
       atelierManager.stop();
       automationManager.stop();

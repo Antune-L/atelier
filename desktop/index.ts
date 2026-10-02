@@ -208,7 +208,7 @@ async function boot(): Promise<void> {
     dataRoot: roots.dataRoot,
     // WKWebView has no web Notification API, so the front's desktop notifications are inert here.
     // Fire a native notification attributed to the app instead (clicking focuses the app window).
-    onNotify: (title, body) => Utils.showNotification({ title, body }),
+    onNotify: (title, body) => Utils.showNotification({ title, body, silent: true }),
     repoRoot: canSelfUpdate ? repoRoot : undefined,
     onRequestUpdate: canSelfUpdate ? () => requestUpdate?.() : undefined,
     onPickFolder: async () => {

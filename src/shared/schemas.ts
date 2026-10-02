@@ -1135,6 +1135,32 @@ export const createTicketsFromPrdSchema = z.object({
 });
 export type CreateTicketsFromPrdInput = z.infer<typeof createTicketsFromPrdSchema>;
 
+export const prNotificationSchema = z.object({
+  id: z.string().min(1),
+  project: z.string().min(1),
+  identityKey: z.string().min(1),
+  repoPath: z.string().min(1),
+  prNumber: z.number().int().positive(),
+  prUrl: z.url(),
+  title: z.string(),
+  author: z.string(),
+  headRefName: z.string(),
+  baseRefName: baseBranchSchema,
+  detectedAt: z.number().int(),
+  readAt: z.number().int().nullable(),
+  resolvedAt: z.number().int().nullable(),
+  ticketId: z.string().nullable(),
+});
+export type PrNotification = z.infer<typeof prNotificationSchema>;
+export const prNotificationSyncStatusSchema = z.object({
+  project: z.string(),
+  lastCheckedAt: z.number().int().nullable(),
+  error: z.string().nullable(),
+});
+export type PrNotificationSyncStatus = z.infer<typeof prNotificationSyncStatusSchema>;
+export const notificationSoundKindSchema = z.enum(["pr", "completion"]);
+export type NotificationSoundKind = z.infer<typeof notificationSoundKindSchema>;
+
 // ---- WebSocket (backend → client) ----
 
 export const wsClientEventSchema = z.discriminatedUnion("type", [
@@ -1145,7 +1171,10 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     worktreeSessions: z.array(worktreeSessionSchema),
     automations: z.array(automationSchema),
     conversations: z.array(conversationSchema),
+    prNotifications: z.array(prNotificationSchema).default([]),
+    prNotificationSync: z.array(prNotificationSyncStatusSchema).default([]),
   }),
+  z.object({ type: z.literal("pr_notifications"), notifications: z.array(prNotificationSchema), sync: z.array(prNotificationSyncStatusSchema) }),
   z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
   z.object({ type: z.literal("automations"), automations: z.array(automationSchema) }),
   z.object({ type: z.literal("ticket_removed"), ticketId: z.string() }),
@@ -1162,6 +1191,7 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     body: z.string(),
     ticketId: z.string().optional(),
     sound: z.boolean().optional(),
+    soundKind: notificationSoundKindSchema.optional(),
   }),
 ]);
 export type WsClientEvent = z.infer<typeof wsClientEventSchema>;

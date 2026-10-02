@@ -7,6 +7,7 @@ import { AgentsView } from "@/components/AgentsView";
 import { AtelierView } from "@/components/atelier/AtelierView";
 import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
+import { NotificationCenter } from "@/components/NotificationCenter";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
@@ -279,6 +280,7 @@ export function App() {
             </div>
           )}
           {view === "atelier" && <div className="ml-auto flex items-center">{projectFilterSelect}</div>}
+          <NotificationCenter projects={projects} />
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">

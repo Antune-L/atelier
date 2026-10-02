@@ -12,6 +12,7 @@ import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import type { ReviewRequestSnapshot } from "./vcs/types.ts";
 
 export interface GitWorktreeAddOptions {
   repoPath: string;
@@ -272,6 +273,7 @@ export interface SystemAdapter {
   fetchPrSummary(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
 
   // ---- PR listing (review entry point) ----
+  listReviewRequests(repoPath: string, provider: VcsProvider): Promise<ReviewRequestSnapshot>;
   /** Open PRs of the project repo, as surfaced by the provider. Throws on CLI failure. */
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;

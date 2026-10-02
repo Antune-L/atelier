@@ -22,6 +22,8 @@ import type {
   ManagedProject,
   OpenPr,
   PrdDocumentRecord,
+  PrNotification,
+  PrNotificationSyncStatus,
   Profile,
   ProjectInfo,
   RepoInspection,
@@ -146,6 +148,12 @@ export const api = {
     request(`/api/automations/${id}`, { method: "DELETE" }),
   runAutomation: (id: string): Promise<{ started: boolean }> =>
     request(`/api/automations/${id}/run`, { method: "POST" }),
+  prNotifications: (): Promise<{ notifications: PrNotification[]; sync: PrNotificationSyncStatus[] }> =>
+    request("/api/pr-notifications"),
+  markPrNotificationRead: (id: string): Promise<PrNotification> =>
+    request(`/api/pr-notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
+  createPrNotificationReview: (id: string): Promise<{ ticket: Ticket; created: boolean }> =>
+    request(`/api/pr-notifications/${encodeURIComponent(id)}/review`, { method: "POST" }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>

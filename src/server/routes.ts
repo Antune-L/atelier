@@ -38,7 +38,7 @@ import {
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { Conversation, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, PrdTask, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import type { Conversation, CreateReviewInput, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, PrdTask, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
 import { renderPrdAxisBrief, renderPrdMarkdown, renderPrdTaskBrief } from "../shared/prdMarkdown.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
@@ -54,7 +54,7 @@ import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
-import type { NewTicket, Store } from "./db/store.ts";
+import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -172,6 +172,29 @@ function prSummaryLines(pr: OpenPr): string[] {
 /** Markdown body shown on a review card, summarizing the target PR. */
 function reviewDescription(pr: OpenPr): string {
   return [`Revue autonome (argus) de [PR #${pr.number}](${pr.url})`, "", ...prSummaryLines(pr)].join("\n");
+}
+
+function reviewTicketInput(input: CreateReviewInput, pr: OpenPr, language: NewReview["reviewLanguage"]): NewReview {
+  return {
+    title: `Review PR #${pr.number} — ${pr.title}`,
+    description: reviewDescription(pr),
+    project: input.project,
+    prNumber: pr.number,
+    prHeadBranch: pr.headBranch,
+    prUrl: pr.url,
+    baseBranch: input.baseBranch ?? pr.baseBranch,
+    reviewDepth: input.depth,
+    postComments: input.postComments,
+    fixComments: input.fixComments,
+    reviewLanguage: input.language ?? language,
+    humanTone: input.humanTone,
+    model: input.model,
+    effort: input.effort,
+    orchestrator: input.orchestrator,
+    codexModel: input.codexModel,
+    codexEffort: input.codexEffort,
+    codexFast: input.codexFast,
+  };
 }
 
 /** Markdown body shown on a clean card, summarizing the target PR and the user-provided context. */
@@ -884,6 +907,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const resultingGroup = parsed.data.group === undefined ? project.group : parsed.data.group;
       if (resultingGroup && parsed.data.color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const updated = store.updateProject(params.key, parsed.data);
+      hub.pushPrNotifications();
       // NOTE(ali): WS project broadcast (hub.pushProjects) lands with the projects-frontend ticket;
       // the PATCH response returns the fresh project so a refetching client stays consistent.
       return toManagedProject(params.key, updated);
@@ -892,6 +916,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!store.getProjectRow(params.key)) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
       try {
         store.deleteProject(params.key);
+        hub.pushPrNotifications();
       } catch (error) {
         if (error instanceof ProjectInUseError) return jsonError(set, HTTP_CONFLICT, error.message);
         throw error;
@@ -1153,33 +1178,39 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       return ticketOperations.analyzeTickets(parsed.data.ids);
     })
+    .get("/pr-notifications", () => ({ notifications: store.listPrNotifications(), sync: store.listPrNotificationSync() }))
+    .post("/pr-notifications/:id/read", ({ params, set }) => {
+      if (!store.listPrNotifications().some((notification) => notification.id === params.id)) return jsonError(set, HTTP_NOT_FOUND, "Review notification not found");
+      const notification = store.readPrNotification(params.id);
+      hub.pushPrNotifications();
+      return notification;
+    })
+    .post("/pr-notifications/:id/review", ({ params, set }) => {
+      const notification = store.listPrNotifications().find((entry) => entry.id === params.id);
+      if (!notification) return jsonError(set, HTTP_NOT_FOUND, "Review notification not found");
+      if (notification.resolvedAt !== null && (notification.ticketId === null || store.getTicket(notification.ticketId) === null)) return jsonError(set, HTTP_CONFLICT, "This review request is no longer active");
+      const pr: OpenPr = {
+        number: notification.prNumber, title: notification.title, url: notification.prUrl,
+        headBranch: notification.headRefName, baseBranch: notification.baseRefName,
+        isDraft: false, reviewStatus: "needs_review", updatedAt: new Date(notification.detectedAt).toISOString(),
+        author: notification.author, additions: null, deletions: null,
+      };
+      const input = createReviewSchema.parse({ project: notification.project, prs: [pr] });
+      const result = store.createPrNotificationReview(params.id, reviewTicketInput(input, pr, store.getAppSettings().commitLanguage));
+      hub.pushTicket(result.ticket);
+      hub.pushPrNotifications();
+      if (result.created) void slots.startTicket(result.ticket.id).catch((error: unknown) => {
+        log.error("démarrage de la review échoué", { ticketId: result.ticket.id, error: getErrorMessage(error) });
+      });
+      return result;
+    })
     .post("/reviews", ({ body, set }) => {
       const parsed = createReviewSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
       const created: Ticket[] = [];
       for (const pr of parsed.data.prs) {
-        const ticket = store.createReview({
-          title: `Review PR #${pr.number} — ${pr.title}`,
-          description: reviewDescription(pr),
-          project: parsed.data.project,
-          prNumber: pr.number,
-          prHeadBranch: pr.headBranch,
-          prUrl: pr.url,
-          // Explicit user override wins; otherwise use the PR's own detected target branch.
-          baseBranch: parsed.data.baseBranch ?? pr.baseBranch,
-          reviewDepth: parsed.data.depth,
-          postComments: parsed.data.postComments,
-          fixComments: parsed.data.fixComments,
-          reviewLanguage: parsed.data.language ?? store.getAppSettings().commitLanguage,
-          humanTone: parsed.data.humanTone,
-          model: parsed.data.model,
-          effort: parsed.data.effort,
-          orchestrator: parsed.data.orchestrator,
-          codexModel: parsed.data.codexModel,
-          codexEffort: parsed.data.codexEffort,
-          codexFast: parsed.data.codexFast,
-        });
+        const ticket = store.createReview(reviewTicketInput(parsed.data, pr, store.getAppSettings().commitLanguage));
         hub.pushTicket(ticket);
         // Slot launch does slow git worktree setup; don't block the HTTP response on it
         // (it kept the dialog open). Kick it off in the background and let the board update live.

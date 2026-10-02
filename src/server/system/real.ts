@@ -59,7 +59,7 @@ import type {
 } from "./types.ts";
 import { AzureDevopsVcsClient } from "./vcs/azureDevops.ts";
 import { GithubVcsClient } from "./vcs/github.ts";
-import type { VcsClient } from "./vcs/types.ts";
+import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const log = createLogger("system");
 
@@ -900,6 +900,10 @@ export class RealSystemAdapter implements SystemAdapter {
       return { ok: false, reason: "la branche de la PR n'est pas poussée (commits en avance)" };
     }
     return { ok: true, reason: "" };
+  }
+
+  async listReviewRequests(repoPath: string, provider: VcsProvider): Promise<ReviewRequestSnapshot> {
+    return this.vcs(provider).listReviewRequests(repoPath);
   }
 
   async listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]> {

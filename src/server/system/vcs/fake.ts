@@ -9,7 +9,7 @@ import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
 import type { DoneGateResult, PublishReviewResult, ReviewHeadResult } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
-import type { CreatePrResult, VcsClient } from "./types.ts";
+import type { CreatePrResult, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 /** Base offset for the deterministic dry-run stealth PR number (createPr). */
 const FAKE_STEALTH_PR_BASE = 900;
@@ -63,6 +63,10 @@ export class FakeVcsClient implements VcsClient {
   async testConnection(_repoPath: string, checkedAt: number): Promise<VcsConnectionResult> {
     // Same dry-run stance as checkClaudeAvailable: the pipeline stays exerciseable end-to-end.
     return { ok: true, message: "Mode simulation", checkedAt };
+  }
+
+  async listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot> {
+    return { identityKey: `fake:${repoPath}:reviewer`, prs: FAKE_OPEN_PRS.filter((pr) => !pr.isDraft && pr.reviewStatus === "needs_review") };
   }
 
   async listOpenPrs(_repoPath: string): Promise<OpenPr[]> {

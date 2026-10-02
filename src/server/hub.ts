@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
 
-import type { Automation, Comment, Conversation, ConversationMessage, PrdDocumentRecord, Slot, Ticket, WorktreeSession, WsClientEvent } from "../shared/schemas.ts";
+import type { Automation, NotificationSoundKind, Comment, Conversation, ConversationMessage, PrdDocumentRecord, Slot, Ticket, WorktreeSession, WsClientEvent } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
 
@@ -36,6 +36,8 @@ export class ClientHub {
       worktreeSessions: this.store.listWorktreeSessions(),
       automations: this.store.listAutomations(),
       conversations: this.store.listConversations(),
+      prNotifications: this.store.listPrNotifications(),
+      prNotificationSync: this.store.listPrNotificationSync(),
     };
     ws.send(JSON.stringify(event));
   }
@@ -53,6 +55,7 @@ export class ClientHub {
 
   pushTicketRemoved(ticketId: string): void {
     this.broadcast({ type: "ticket_removed", ticketId });
+    this.pushPrNotifications();
   }
 
   pushComment(comment: Comment): void {
@@ -87,13 +90,18 @@ export class ClientHub {
     this.broadcast({ type: "prd_document", prd });
   }
 
-  pushNotification(title: string, body: string, ticketId?: string, sound?: boolean): void {
+  pushPrNotifications(): void {
+    this.broadcast({ type: "pr_notifications", notifications: this.store.listPrNotifications(), sync: this.store.listPrNotificationSync() });
+  }
+
+  pushNotification(title: string, body: string, ticketId?: string, sound?: boolean, soundKind?: NotificationSoundKind): void {
     this.broadcast({
       type: "notification",
       title,
       body,
       ...(ticketId ? { ticketId } : {}),
       ...(sound ? { sound } : {}),
+      ...(soundKind ? { soundKind } : {}),
     });
   }
 }

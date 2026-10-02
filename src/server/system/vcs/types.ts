@@ -33,7 +33,13 @@ export interface ReviewPublicationCheck {
   expectedState: ReviewPublicationState;
 }
 
+export interface ReviewRequestSnapshot {
+  identityKey: string;
+  prs: OpenPr[];
+}
+
 export interface VcsClient {
+  listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot>;
   /** Cheap read-only reachability check (list one PR). Never throws. */
   testConnection(repoPath: string, checkedAt: number): Promise<VcsConnectionResult>;
   /** Open PRs of the project repo. Throws on CLI failure. */

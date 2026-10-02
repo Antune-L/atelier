@@ -27,7 +27,7 @@ import type {
 } from "../types.ts";
 import { CONNECTION_TEST_PR_LIMIT, connectionFailure, connectionResult } from "./connection.ts";
 import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
-import type { CreatePrResult, ReviewPublicationCheck, VcsClient } from "./types.ts";
+import type { CreatePrResult, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 const GH_BINARY = "gh";
 const OPEN_PR_FIELDS = `
@@ -47,6 +47,15 @@ const PR_MERGE_STRATEGY = "--rebase";
 const PR_STATE_MERGED = "MERGED";
 const PR_STATE_CLOSED = "CLOSED";
 const PR_STATE_OPEN = "OPEN";
+
+const ghAuthenticatedUserSchema = z.object({ id: z.number().int(), login: z.string().min(1) });
+const ghRequestedPullSchema = z.object({
+  number: z.number().int(), title: z.string(), html_url: z.string(), draft: z.boolean(),
+  updated_at: z.string(), user: z.object({ login: z.string() }).nullable(),
+  head: z.object({ ref: z.string() }), base: z.object({ ref: z.string() }),
+  requested_reviewers: z.array(z.object({ id: z.number().int() })),
+});
+const ghRequestedPullPagesSchema = z.array(z.array(ghRequestedPullSchema));
 
 const ghPrHeadSchema = z.object({ url: z.string(), headRefOid: z.string().min(1) });
 const ghRestPullSchema = z.object({
@@ -312,6 +321,28 @@ export class GithubVcsClient implements VcsClient {
       repoPath,
     );
     return connectionResult(res, "gh pr list", "Connexion GitHub OK", checkedAt);
+  }
+
+  async listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot> {
+    const ref = await readGithubRepoRef(repoPath);
+    const userResult = await runBoundedCommand([GH_BINARY, "api", "user", "--hostname", ref.host], repoPath);
+    if (userResult.exitCode !== 0 || userResult.timedOut) throw new Error("GitHub authenticated identity could not be read");
+    const user = ghAuthenticatedUserSchema.safeParse(safeJsonParse(userResult.stdout));
+    if (!user.success) throw new Error("GitHub authenticated identity response is invalid");
+    const endpoint = `repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repository)}/pulls?state=open&per_page=${OPEN_PR_PAGE_SIZE}`;
+    const result = await runBoundedCommand([GH_BINARY, "api", endpoint, "--hostname", ref.host, "--paginate", "--slurp"], repoPath);
+    if (result.exitCode !== 0 || result.timedOut) throw new Error("GitHub review requests could not be read");
+    const pages = ghRequestedPullPagesSchema.safeParse(safeJsonParse(result.stdout));
+    if (!pages.success) throw new Error("GitHub review requests response is invalid");
+    const prs = pages.data.flat().filter((pr) => !pr.draft && pr.requested_reviewers.some((reviewer) => reviewer.id === user.data.id));
+    return {
+      identityKey: `github:${githubRepoKey(ref).toLowerCase()}:${user.data.id}`,
+      prs: prs.map((pr) => ({
+        number: pr.number, title: pr.title, url: pr.html_url, headBranch: pr.head.ref, baseBranch: pr.base.ref,
+        isDraft: pr.draft, reviewStatus: "needs_review", updatedAt: pr.updated_at, author: pr.user?.login ?? "?",
+        additions: null, deletions: null,
+      })),
+    };
   }
 
   async listOpenPrs(repoPath: string): Promise<OpenPr[]> {

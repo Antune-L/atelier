@@ -3,6 +3,7 @@ import { z } from "zod";
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import type { AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
+  prNotificationSchema,
   agentMessageChannelSchema,
   agentMessageStatusSchema,
   agentEffortSchema,
@@ -720,4 +721,20 @@ export function mapPrdDocumentRow(raw: unknown): PrdDocumentRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+const prNotificationRowSchema = z.object({ payload: z.string() });
+export function mapPrNotificationRow(raw: unknown) {
+  const row = prNotificationRowSchema.parse(raw);
+  return prNotificationSchema.parse(JSON.parse(row.payload));
+}
+const prNotificationSyncRowSchema = z.object({
+  project: z.string(),
+  repo_path: z.string(),
+  identity_key: z.string(),
+  last_checked_at: z.number().nullable(),
+  error: z.string().nullable(),
+});
+export function mapPrNotificationSyncRow(raw: unknown) {
+  return prNotificationSyncRowSchema.parse(raw);
 }

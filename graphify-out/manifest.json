@@ -220,8 +220,8 @@
     "semantic_hash": ""
   },
   "src/web/src/App.tsx": {
-    "mtime": 1790971968.2535849,
-    "ast_hash": "c78e59fff671d57d9a36e531cea7f9ff",
+    "mtime": 1790973408.4015665,
+    "ast_hash": "b4c32a5aa13f917b7ec96f7f6968fdc4",
     "semantic_hash": ""
   },
   "src/web/src/components/AgentProfileConfig.tsx": {
@@ -1615,8 +1615,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/NotificationCenter.tsx": {
-    "mtime": 1790972003.8302624,
-    "ast_hash": "2e772d271928614509aa6092fee15b63",
+    "mtime": 1790973408.4018414,
+    "ast_hash": "0c13ad553004828161d867da15f04043",
     "semantic_hash": ""
   }
 }

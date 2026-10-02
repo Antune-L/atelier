@@ -24,7 +24,7 @@ function isPending(notification: PrNotification): boolean {
   return notification.readAt === null && notification.resolvedAt === null;
 }
 
-export function NotificationCenter({ projects }: { projects: ProjectInfo[] }) {
+export function NotificationCenter({ projects, className }: { projects: ProjectInfo[]; className?: string }) {
   const { prNotifications, prNotificationSync, notificationCenterOpen, soundEnabled, connected } = useBoard();
   const [filter, setFilter] = useState<NotificationFilter>("active");
   const [pending, setPending] = useState<string[]>([]);
@@ -63,7 +63,7 @@ export function NotificationCenter({ projects }: { projects: ProjectInfo[] }) {
 
   return (
     <>
-      <div className="ml-auto flex shrink-0 items-center border-l pl-2">
+      <div className={cn("flex shrink-0 items-center border-l pl-2", className)}>
         <Button
           variant="ghost"
           size="icon"

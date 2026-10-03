@@ -1,8 +1,8 @@
-> Status: IMPLEMENTED / LOCAL VERIFICATION COMPLETE — commit pending. Earlier prototype and feasibility findings are retained below as historical evidence.
+> Status: IMPLEMENTED / LOCAL VERIFICATION COMPLETE — implementation committed as `771c4cfe713043186ed9e13b215cc99297675f0f`. Earlier prototype and feasibility findings are retained below as historical evidence.
 
 ## Current implementation state — 2026-10-03
 
-- Branch: `feat/workflow-quality-validation`, based on `feaa62969742859b548cbb50426bbee48e30f317`. Changes are not committed or deployed yet.
+- Branch: `feat/workflow-quality-validation`, based on `feaa62969742859b548cbb50426bbee48e30f317`. Verified implementation commit: `771c4cfe713043186ed9e13b215cc99297675f0f`. No deployment has been performed.
 - User authorized production implementation and real local validation of Claude and Codex against a disposable temporary project. The existing live app, database, and project configuration must stay untouched.
 - The five features are implemented: server-owned captured project checks; immutable acceptance criteria and append-only attributed observations; environment preflight; independent Claude/Codex behavioral validation; and persisted delivery reservations with automatic-merge restrictions.
 - Shared quality contracts are in `src/shared/quality.ts`; durable criteria, run, and evidence records are owned by the database store. `src/server/agents/qualityManager.ts` evaluates current evidence; `src/server/agents/qualityValidator.ts` runs the separate provider session; `src/server/qualityRoutes.ts` exposes the quality API. Project validation configuration is explicit and persisted.
@@ -16,7 +16,7 @@
 - Playwright interface verification passed against a copied database and a Fake-only server on an independent port. It covered preflight, captured logs, artifact retrieval, criteria versioning, human provenance that does not satisfy independent criteria, provider selection and run creation, stale and simulated results, blocked automatic merge, visible inline failures, and project validation configuration save/reload. Final verification confirmed neutral simulated-result labels, inline error alerts, and unavailable merge eligibility. The browser reported **zero console errors and zero warnings**. These interface checks used simulation; the separate provider fixtures above supplied the real execution evidence. Screenshot: `/private/tmp/atelier-quality-e2e/ui-browser-artifacts-final/validation-ui.png`.
 - Lifecycle and artifact safety smokes passed: deletion retained failed-cleanup state with a conflict response, successful cleanup permitted deletion, abandonment waited for cancellation, and artifact symlink requests returned not found. Disposable smoke sources are `/private/tmp/qualityRouteSafetySmoke.ts` and `/private/tmp/qualityArtifactSafetySmoke.ts`.
 - The knowledge graph was refreshed after implementation.
-- All temporary application servers are stopped; fixture evidence and browser artifacts are preserved. Next action: commit the verified implementation and report its delivery revision. No deployment is included.
+- All temporary application servers are stopped; fixture evidence and browser artifacts are preserved. The verified implementation is committed as `771c4cfe713043186ed9e13b215cc99297675f0f`. No deployment is included.
 
 ## Activation and use
 
@@ -149,7 +149,7 @@ Implementation can proceed in stages: shared schemas and persistent evidence fir
 
 ## History
 
-- 2026-10-03: Local verification completed: real Claude and Codex success/failure fixtures, stale-proof rejection, isolated interface checks, lifecycle/artifact safety smokes, and final typecheck/lint/build plus 279 tests / 1,125 assertions passed. The knowledge graph was refreshed and temporary application servers were stopped. Delivery commit remained pending at this final document update.
+- 2026-10-03: Local verification completed: real Claude and Codex success/failure fixtures, stale-proof rejection, isolated interface checks, lifecycle/artifact safety smokes, and final typecheck/lint/build plus 279 tests / 1,125 assertions passed. The knowledge graph was refreshed and temporary application servers were stopped. Verified implementation committed as `771c4cfe713043186ed9e13b215cc99297675f0f`.
 - 2026-10-03: Full real Claude and Codex negative-case runs passed. Codex success, history freshness, and changed-revision rejection also passed; Claude success, interface verification, cleanup review completion, and final repository gates remained in progress.
 - 2026-10-03: Production implementation written and local verification begun on `feat/workflow-quality-validation`. Initial repository gates and the real Codex negative case passed.
 - 2026-10-03: Initial feasibility state written from source inspection at clean base revision `feaa62969742859b548cbb50426bbee48e30f317`; no source code, tests, or migrations changed.

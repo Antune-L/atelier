@@ -6,8 +6,8 @@ import {
   codexSessionPreToolUseHookHash,
 } from "./codexHookTrust.ts";
 
-test("Codex 0.153.4 session hook trust matches the normalized upstream identity", () => {
-  expect(CODEX_HOOK_TRUST_VERSION).toBe("0.153.4");
+test("Codex 0.160.0 session hook trust matches the normalized upstream identity", () => {
+  expect(CODEX_HOOK_TRUST_VERSION).toBe("0.160.0");
   expect(CODEX_SESSION_PRE_TOOL_USE_HOOK_KEY).toBe("/<session-flags>/config.toml:pre_tool_use:0:0");
   expect(
     codexSessionPreToolUseHookHash({

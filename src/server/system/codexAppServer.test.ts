@@ -34,7 +34,7 @@ const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
-    process.stdout.write(JSON.stringify({ id: message.id, result: { userAgent: "fixture/0.153.4" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ id: message.id, result: { userAgent: "fixture/0.160.0" } }) + "\\n");
   } else if (message.method === "echo") {
     process.stdout.write(JSON.stringify({ method: "fixture/progress", params: { value: "seen" } }) + "\\n");
     process.stdout.write(JSON.stringify({ id: message.id, result: { value: message.params.value } }) + "\\n");

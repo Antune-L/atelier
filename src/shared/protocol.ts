@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
+import { implementationPlanLotDefinitionSchema, implementationPlanParallelSchema } from "./implementationPlan.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
 import { setQualityCriteriaSchema, validateQualitySchema } from "./quality.ts";
 
@@ -89,6 +90,13 @@ export const delegateImplementationArgsSchema = z.object({
   label: z.string().trim().min(1).max(LOT_LABEL_MAX_LENGTH).default(DEFAULT_IMPLEMENTATION_LOT),
   files: z.array(z.string().min(1)).optional(),
 });
+
+export const submitImplementationPlanArgsSchema = z.object({
+  lots: z.array(implementationPlanLotDefinitionSchema).min(1),
+  maxParallel: implementationPlanParallelSchema,
+});
+
+export const readImplementationPlanArgsSchema = z.object({});
 
 export const reviewKindSchema = z.enum([
   "quality",
@@ -254,6 +262,17 @@ export const WORKER_TOOLS = [
     argsSchema: delegateImplementationArgsSchema,
   },
   {
+    name: "submit_implementation_plan",
+    description:
+      "Enregistre un plan de lots d'implémentation avec leurs fichiers et dépendances. Le backend lance automatiquement les lots indépendants, persiste leur état et respecte les plafonds de concurrence. Réservé aux implémenteurs Claude et Codex. Termine ton tour et attends implementation_done.",
+    argsSchema: submitImplementationPlanArgsSchema,
+  },
+  {
+    name: "read_implementation_plan",
+    description: "Relit le plan d'implémentation persistant, les résultats des lots et ceux qui restent à exécuter après une interruption.",
+    argsSchema: readImplementationPlanArgsSchema,
+  },
+  {
     name: "delegate_review",
     description:
       "Lance un reviewer indépendant en lecture seule pour une dimension de review. Retourne immédiatement : termine le tour et attends review_done.",
@@ -322,6 +341,8 @@ const WORKER_TOOL_NAMES = [
   "ready_for_review",
   "fail",
   "delegate_implementation",
+  "submit_implementation_plan",
+  "read_implementation_plan",
   "delegate_review",
   "read_review_results",
   "publish_review",

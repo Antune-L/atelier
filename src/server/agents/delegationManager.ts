@@ -3,14 +3,15 @@ import { posix } from "node:path";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { DELEGATION_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS } from "../../shared/constants.ts";
+import { DELEGATION_SLOT_ID, MAX_GLOBAL_IMPLEMENTERS, MAX_PARALLEL_IMPLEMENTERS, TERMINAL_STAGES } from "../../shared/constants.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import type { CommitLanguage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
 import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/protocol.ts";
-import type { ReviewFinding, ReviewKind } from "../../shared/protocol.ts";
+import type { ReviewFinding, ReviewKind, submitImplementationPlanArgsSchema } from "../../shared/protocol.ts";
+import type { ImplementationPlan, ImplementationPlanLot } from "../../shared/implementationPlan.ts";
 
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
 import { getProject, isProjectKey, MODELS, projectVcsProvider } from "../config.ts";
@@ -20,7 +21,7 @@ import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
 import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
-import type { ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
+import type { CodeSnapshot, ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
 import {
   DEFAULT_FINDING_RENDER_STYLE,
@@ -56,6 +57,7 @@ const REVIEW_GATE_FINGERPRINT_TIMEOUT_MS = 30_000;
 /** Above this, a whole delegate_review start (queue wait included) is logged as a warning. */
 const SLOW_REVIEW_START_WARN_MS = 10_000;
 const GLOB_CHARACTERS = "*?[]{}";
+const MAX_CHANGED_PATHS = 30;
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string, provider: Orchestrator): string {
@@ -113,11 +115,15 @@ Consignes :
 const SETTLE_DELAY_MS = 50;
 
 interface ActiveDelegation {
+  reservationId: string;
+  planId: string | null;
+  durableWorkspace: boolean;
   label: string;
   provider: Orchestrator;
   files: readonly string[];
   lotOptions: ImplementationLotOptions | null;
   cancelled: boolean;
+  preserveWorkspace: boolean;
   childClosed: boolean;
   settlement: Promise<void> | null;
   handle: AgentSessionHandle | null;
@@ -128,6 +134,14 @@ interface ActiveDelegation {
   lastError: string;
   lastHeartbeatAt: number;
   settled: boolean;
+}
+
+interface QueuedImplementation {
+  ticket: Ticket;
+  slotId: number;
+  plan: string;
+  label: string;
+  files: readonly string[];
 }
 
 interface ReviewResult {
@@ -166,6 +180,7 @@ interface ActiveReview {
 interface ActiveReviewPass {
   passId: string;
   codeFingerprint: string;
+  fileHashes: Record<string, string> | null;
   reviewedCommitSha: string | null;
   fingerprintComputedAt: number;
   depth: "light" | "full";
@@ -176,7 +191,7 @@ type ReviewGateRequirement = "approved" | "approved_or_limit" | "completed";
 
 type ReviewGateResult =
   | { ok: true; passId: string; acceptedWithFindings: boolean }
-  | { ok: false; reason: string; reasonCode: "code_changed" | "fingerprint_error" | "fingerprint_timeout" | "incomplete_review" | "missing_review" };
+  | { ok: false; reason: string; reasonCode: "code_changed" | "fingerprint_error" | "fingerprint_timeout" | "incomplete_review" | "missing_review" | "incomplete_implementation" };
 
 interface ClosableExecution {
   handle: AgentSessionHandle | null;
@@ -368,6 +383,13 @@ export class DelegationManager {
   private readonly generations = new Map<string, number>();
   private readonly closingExecutions = new Set<Promise<void>>();
   private readonly closingByTicket = new Map<string, Set<Promise<void>>>();
+  private readonly implementationReservations = new Set<string>();
+  private readonly implementationPlans = new Map<string, number>();
+  private readonly recoveringImplementations = new Set<string>();
+  private readonly queuedImplementations = new Map<string, QueuedImplementation>();
+  private readonly implementationResumes = new Map<string, Promise<void>>();
+  private implementationScheduling = false;
+  private implementationScheduleQueued = false;
 
   constructor(
     private readonly store: Store,
@@ -380,13 +402,265 @@ export class DelegationManager {
 
   /** True while a child implementation session runs for this ticket (parent is parked, not stalled). */
   isActive(ticketId: string): boolean {
-    if (this.lotCount(ticketId) > 0) return true;
+    if (this.hasActiveImplementations(ticketId)) return true;
     return [...this.activeReviews.values()].some((review) => review.ticketId === ticketId);
   }
 
   /** True while at least one implementation lot of this ticket runs or is being prepared. */
   hasActiveImplementations(ticketId: string): boolean {
-    return this.lotCount(ticketId) > 0;
+    return this.lotCount(ticketId) > 0 || this.pendingPlanLots(ticketId) > 0;
+  }
+
+  async submitImplementationPlan(
+    ticket: Ticket,
+    slotId: number,
+    args: z.infer<typeof submitImplementationPlanArgsSchema>,
+  ): Promise<{ ok: boolean; result: string }> {
+    const lots: ImplementationPlanLot[] = [];
+    const labels = new Set<string>();
+    for (const lot of args.lots) {
+      const files = normalizeImplementationScope(lot.files);
+      if (files === null || files.length === 0) return { ok: false, result: `Périmètre invalide pour le lot «${lot.label}».` };
+      if (labels.has(lot.label)) return { ok: false, result: `Label dupliqué : «${lot.label}».` };
+      labels.add(lot.label);
+      lots.push({ ...lot, files, dependsOn: [...new Set(lot.dependsOn)], status: "pending", attempts: 0, summary: null, executionRunId: null });
+    }
+    const dependencies = new Map(lots.map((lot) => [lot.label, lot.dependsOn]));
+    const completed = new Set<string>();
+    while (completed.size < lots.length) {
+      const ready = lots.filter((lot) => !completed.has(lot.label) && lot.dependsOn.every((dependency) => completed.has(dependency)));
+      if (ready.length === 0) return { ok: false, result: "Les dépendances du plan sont inconnues ou forment un cycle." };
+      for (const lot of ready) completed.add(lot.label);
+    }
+    const dependsOn = (label: string, dependency: string): boolean => {
+      const direct = dependencies.get(label) ?? [];
+      return direct.includes(dependency) || direct.some((next) => dependsOn(next, dependency));
+    };
+    for (const lot of lots) {
+      for (const other of lots) {
+        if (lot.label === other.label || dependsOn(lot.label, other.label) || dependsOn(other.label, lot.label)) continue;
+        if (implementationScopesOverlap(lot.files, other.files)) {
+          return { ok: false, result: `Les lots indépendants «${lot.label}» et «${other.label}» ont des périmètres qui se chevauchent.` };
+        }
+      }
+    }
+    const existing = this.store.getImplementationPlan(ticket.id);
+    const definitions = (planLots: ImplementationPlanLot[]): string => JSON.stringify(planLots.map(({ label, plan, files, dependsOn: lotDependencies }) => ({ label, plan, files, dependsOn: lotDependencies })));
+    if (existing && definitions(existing.lots) === definitions(lots) && existing.maxParallel === args.maxParallel) {
+      if (existing.status === "interrupted" || existing.status === "cancelled") await this.resumeImplementationPlan(ticket, slotId);
+      else {
+        this.implementationPlans.set(ticket.id, slotId);
+        this.scheduleImplementationPlans();
+      }
+      return this.readImplementationPlan(ticket.id);
+    }
+    if (existing && existing.lots.some((lot) => lot.status !== "completed")) {
+      return { ok: false, result: "Un plan est déjà enregistré : relis read_implementation_plan et reprends ses lots avant de le remplacer." };
+    }
+    if (this.lotCount(ticket.id) > 0) return { ok: false, result: "Attends la fin des lots en cours avant d'enregistrer un nouveau plan." };
+    if (lots.some((lot) => this.store.implementationLotAttempts(ticket.id, lot.label).started > 0)) {
+      return { ok: false, result: "Utilise de nouveaux labels pour les lots d'un nouveau plan." };
+    }
+    const now = Date.now();
+    this.store.saveImplementationPlan(ticket.id, {
+      id: nanoid(16), ticketId: ticket.id, status: "pending", lots,
+      maxParallel: args.maxParallel, createdAt: now, updatedAt: now,
+    });
+    this.store.logEvent(ticket.id, "implementation_plan_submitted", { lots: lots.map((lot) => ({ label: lot.label, files: lot.files, dependsOn: lot.dependsOn })), maxParallel: args.maxParallel });
+    this.implementationPlans.set(ticket.id, slotId);
+    this.scheduleImplementationPlans();
+    return { ok: true, result: "Plan d'implémentation enregistré. Le backend lance les lots prêts selon leurs dépendances et la capacité disponible. Termine ton tour et attends implementation_done." };
+  }
+
+  readImplementationPlan(ticketId: string): { ok: boolean; result: string } {
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (!plan) return { ok: false, result: "Aucun plan d'implémentation enregistré pour ce ticket." };
+    return { ok: true, result: JSON.stringify(plan) };
+  }
+
+  refreshImplementationPlan(ticketId: string): void {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.slotId === null || !this.canScheduleImplementation(ticket)) return;
+    if ([...this.queuedImplementations.values()].some((queued) => queued.ticket.id === ticketId)) this.scheduleImplementationPlans();
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (plan?.status === "interrupted" || !this.implementationPlans.has(ticketId)) {
+      void this.resumeImplementationPlan(ticket, ticket.slotId).catch((error: unknown) => {
+        log.error("reprise du plan impossible", { ticketId, reason: getErrorMessage(error) });
+      });
+      return;
+    }
+    this.scheduleImplementationPlans();
+  }
+
+  resumeImplementationPlan(ticket: Ticket, slotId: number): Promise<void> {
+    const pending = this.implementationResumes.get(ticket.id);
+    if (pending) return pending;
+    const resumed = this.resumeImplementationPlanNow(ticket, slotId);
+    this.implementationResumes.set(ticket.id, resumed);
+    void resumed.finally(() => this.implementationResumes.delete(ticket.id)).catch(() => {});
+    return resumed;
+  }
+
+  private async resumeImplementationPlanNow(ticket: Ticket, slotId: number): Promise<void> {
+    if (!this.canScheduleImplementation(ticket)) return;
+    const plan = this.store.getImplementationPlan(ticket.id);
+    const queued = this.store.getImplementationQueue(ticket.id);
+    if ((!plan || plan.status === "completed" || plan.status === "failed") && queued.length === 0) return;
+    if (this.hasActiveImplementations(ticket.id) && this.implementationPlans.has(ticket.id)) return;
+    const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
+    await this.drainTicket(ticket.id);
+    const refreshedTicket = this.store.getTicket(ticket.id);
+    if (!refreshedTicket || refreshedTicket.slotId !== slotId || !this.canScheduleImplementation(refreshedTicket)
+      || (this.reviewEpochs.get(ticket.id) ?? 0) !== epoch || this.store.getSlot(slotId)?.ticketId !== ticket.id) return;
+    for (const lot of queued) {
+      if (lot.slotId !== slotId || this.hasLot(ticket.id, lot.label)) continue;
+      if (lot.started) this.recoveringImplementations.add(`${ticket.id}:${lot.label}`);
+      this.queuedImplementations.set(`${ticket.id}:${lot.label}`, { ticket: refreshedTicket, slotId, plan: lot.plan, label: lot.label, files: lot.files });
+    }
+    this.scheduleImplementationPlans();
+    const current = this.store.getImplementationPlan(ticket.id);
+    if (!current || !plan || current.id !== plan.id || !this.sessionHub.getExecutionConfig(ticket.id)) return;
+    const lots = current.lots.map((lot): ImplementationPlanLot => {
+      if (lot.status !== "running" && lot.status !== "interrupted" && lot.status !== "cancelled") return lot;
+      if (lot.attempts > 0) this.recoveringImplementations.add(`${ticket.id}:${lot.label}`);
+      return { ...lot, status: "pending", summary: "Lot repris après interruption." };
+    });
+    this.store.saveImplementationPlan(ticket.id, { ...current, status: "pending", lots, updatedAt: Date.now() });
+    this.implementationPlans.set(ticket.id, slotId);
+    this.scheduleImplementationPlans();
+  }
+
+  private pendingPlanLots(ticketId: string): number {
+    if (!this.implementationPlans.has(ticketId)) return 0;
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (!plan || plan.status === "interrupted" || plan.status === "cancelled") return 0;
+    return plan.lots.filter((lot) => lot.status === "pending").length;
+  }
+
+  private remainingImplementationLots(ticketId: string): number {
+    return this.lotCount(ticketId) + this.pendingPlanLots(ticketId);
+  }
+
+  private updatePlannedLot(ticketId: string, planId: string | null, label: string, patch: Partial<ImplementationPlanLot>): void {
+    if (planId === null) return;
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (!plan || plan.id !== planId || plan.status === "cancelled" || plan.status === "interrupted") return;
+    const lots = plan.lots.map((lot) => lot.label === label ? { ...lot, ...patch } : lot);
+    const byLabel = new Map(lots.map((lot) => [lot.label, lot]));
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const lot of lots) {
+        if (lot.status !== "pending" && lot.status !== "blocked") continue;
+        const blocked = lot.dependsOn.some((dependency) => {
+          const status = byLabel.get(dependency)?.status;
+          return status === "failed" || status === "blocked" || status === "cancelled";
+        });
+        const status = blocked ? "blocked" : "pending";
+        if (lot.status !== status) {
+          lot.status = status;
+          changed = true;
+        }
+      }
+    }
+    let status: ImplementationPlan["status"] = "completed";
+    if (lots.some((lot) => lot.status === "pending" || lot.status === "running")) status = "running";
+    else if (lots.some((lot) => lot.status !== "completed")) status = "failed";
+    this.store.saveImplementationPlan(ticketId, { ...plan, lots, status, updatedAt: Date.now() });
+  }
+
+  private releaseImplementationReservation(reservationId: string): void {
+    this.implementationReservations.delete(reservationId);
+    this.queueImplementationSchedule();
+  }
+
+  private removePersistedImplementationQueue(ticketId: string, label: string): void {
+    this.store.saveImplementationQueue(ticketId, this.store.getImplementationQueue(ticketId).filter((lot) => lot.label !== label));
+  }
+
+  private queueImplementationSchedule(): void {
+    if (this.implementationScheduleQueued) return;
+    this.implementationScheduleQueued = true;
+    queueMicrotask(() => {
+      this.implementationScheduleQueued = false;
+      this.scheduleImplementationPlans();
+    });
+  }
+
+  private scheduleImplementationPlans(): void {
+    if (this.implementationScheduling) return;
+    this.implementationScheduling = true;
+    try {
+      let launched = true;
+      while (launched && this.implementationReservations.size < MAX_GLOBAL_IMPLEMENTERS) {
+        launched = false;
+        for (const [key, queued] of this.queuedImplementations) {
+          if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) break;
+          const ticket = this.store.getTicket(queued.ticket.id);
+          if (!ticket || !this.sessionHub.getExecutionConfig(ticket.id)) {
+            this.queuedImplementations.delete(key);
+            continue;
+          }
+          if (!this.canScheduleImplementation(ticket)) continue;
+          this.queuedImplementations.delete(key);
+          launched = true;
+          const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
+          void this.launchImplementation(ticket, queued.slotId, queued.plan, queued.label, queued.files).then((result) => {
+            if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) return;
+            if (!result.ok) {
+              this.removePersistedImplementationQueue(ticket.id, queued.label);
+              this.sessionHub.sendEvent(ticket.id, { type: "implementation_done", ok: false, label: queued.label, summary: result.result, remaining: this.remainingImplementationLots(ticket.id) });
+            }
+          }).catch((error: unknown) => {
+            if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) return;
+            this.removePersistedImplementationQueue(ticket.id, queued.label);
+            log.error("lot en attente impossible à lancer", { ticketId: ticket.id, label: queued.label, reason: getErrorMessage(error) });
+            this.sessionHub.sendEvent(ticket.id, { type: "implementation_done", ok: false, label: queued.label, summary: getErrorMessage(error), remaining: this.remainingImplementationLots(ticket.id) });
+          });
+        }
+        for (const [ticketId, slotId] of [...this.implementationPlans]) {
+          if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) break;
+          const ticket = this.store.getTicket(ticketId);
+          const plan = this.store.getImplementationPlan(ticketId);
+          if (!ticket || !plan || plan.status === "interrupted" || plan.status === "cancelled" || !this.sessionHub.getExecutionConfig(ticketId)) {
+            this.implementationPlans.delete(ticketId);
+            continue;
+          }
+          if (!this.canScheduleImplementation(ticket)) continue;
+          if (this.lotCount(ticketId) >= plan.maxParallel) continue;
+          const ready = plan.lots.find((lot) => lot.status === "pending" && lot.dependsOn.every((dependency) => plan.lots.some((candidate) => candidate.label === dependency && candidate.status === "completed")));
+          if (!ready) continue;
+          const attempts = this.recoveringImplementations.has(`${ticketId}:${ready.label}`) ? ready.attempts : ready.attempts + 1;
+          this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "running", attempts, summary: null });
+          const started = this.launchImplementation(ticket, slotId, ready.plan, ready.label, ready.files);
+          const epoch = this.reviewEpochs.get(ticketId) ?? 0;
+          launched = true;
+          this.implementationPlans.delete(ticketId);
+          this.implementationPlans.set(ticketId, slotId);
+          void started.then((result) => {
+            if ((this.reviewEpochs.get(ticketId) ?? 0) !== epoch) return;
+            if (result.ok) return;
+            this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "failed", summary: result.result });
+            this.sessionHub.sendEvent(ticketId, { type: "implementation_done", ok: false, label: ready.label, summary: result.result, remaining: this.remainingImplementationLots(ticketId) });
+            this.queueImplementationSchedule();
+          }).catch((error: unknown) => {
+            if ((this.reviewEpochs.get(ticketId) ?? 0) !== epoch) return;
+            this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "failed", summary: getErrorMessage(error) });
+            log.error("plan d'implémentation impossible à lancer", { ticketId, label: ready.label, reason: getErrorMessage(error) });
+            this.queueImplementationSchedule();
+          });
+        }
+      }
+    } finally {
+      this.implementationScheduling = false;
+    }
+  }
+
+  private canScheduleImplementation(ticket: Ticket): boolean {
+    return !ticket.testing && ticket.stage !== "awaiting_answers" && ticket.stage !== "planning"
+      && ticket.stage !== "stalled" && ticket.stage !== "interrupted"
+      && (ticket.stage === null || !TERMINAL_STAGES.includes(ticket.stage))
+      && ticket.pendingQuestions === 0;
   }
 
   hasActiveReviews(ticketId: string): boolean {
@@ -397,9 +671,9 @@ export class DelegationManager {
     ticketId: string,
     slotId: number,
     correlationId: string,
-  ): Promise<{ ok: true; fingerprint: string } | { ok: false; reason: string; reasonCode: "fingerprint_error" | "fingerprint_timeout" }> {
+  ): Promise<({ ok: true } & CodeSnapshot) | { ok: false; reason: string; reasonCode: "fingerprint_error" | "fingerprint_timeout" }> {
     const startedAt = Date.now();
-    const fingerprint = this.system.codeFingerprint(slotPath(slotId));
+    const fingerprint = this.system.codeSnapshot(slotPath(slotId));
     return new Promise((resolve) => {
       let settled = false;
       const timer = setTimeout(() => {
@@ -429,7 +703,7 @@ export class DelegationManager {
           }
           settled = true;
           clearTimeout(timer);
-          resolve({ ok: true, fingerprint: value });
+          resolve({ ok: true, ...value });
         },
         (error: unknown) => {
           const reason = getErrorMessage(error);
@@ -470,6 +744,10 @@ export class DelegationManager {
   ): Promise<ReviewGateResult> {
     const startedAt = Date.now();
     log.info("gate de review démarrée", { ticketId, slotId, correlationId, requirement });
+    const implementationPlan = this.store.getImplementationPlan(ticketId);
+    if (implementationPlan?.lots.some((lot) => lot.status !== "completed") || this.store.getImplementationQueue(ticketId).length > 0) {
+      return { ok: false, reason: "Le plan d'implémentation contient encore des lots non terminés. Relis read_implementation_plan, reprends les lots en échec et termine chaque lot avant la validation finale.", reasonCode: "incomplete_implementation" };
+    }
     const reviewPass = this.store.getReviewPass(ticketId);
     if (!reviewPass) {
       return {
@@ -481,6 +759,17 @@ export class DelegationManager {
     const fingerprint = await this.boundedReviewGateFingerprint(ticketId, slotId, correlationId);
     if (!fingerprint.ok) return fingerprint;
     if (reviewPass.codeFingerprint !== fingerprint.fingerprint) {
+      const diagnosticsAvailable = reviewPass.fileHashes !== null;
+      const changedPaths = new Set([...Object.keys(reviewPass.fileHashes ?? {}), ...Object.keys(fingerprint.fileHashes)]);
+      const changed = [...changedPaths].filter((path) => reviewPass.fileHashes?.[path] !== fingerprint.fileHashes[path]).sort();
+      this.store.logEvent(ticketId, "review_code_changed", {
+        passId: reviewPass.passId,
+        correlationId,
+        diagnosticsAvailable,
+        changedPaths: diagnosticsAvailable ? changed.slice(0, MAX_CHANGED_PATHS) : [],
+        changedPathCount: diagnosticsAvailable ? changed.length : null,
+        truncated: diagnosticsAvailable && changed.length > MAX_CHANGED_PATHS,
+      });
       return {
         ok: false,
         reason: "Les fichiers ont changé depuis la passe de review. Relance tous les reviewers sur le code courant.",
@@ -757,16 +1046,50 @@ export class DelegationManager {
     for (const key of this.startingImplementations.keys()) {
       if (key.startsWith(prefix)) starting += 1;
     }
+    for (const queued of this.queuedImplementations.values()) {
+      if (queued.ticket.id === ticketId) starting += 1;
+    }
     return running + starting;
   }
 
   private hasLot(ticketId: string, label: string): boolean {
-    return this.active.get(ticketId)?.has(label) === true || this.startingImplementations.has(`${ticketId}:${label}`);
+    return this.active.get(ticketId)?.has(label) === true || this.startingImplementations.has(`${ticketId}:${label}`)
+      || this.queuedImplementations.has(`${ticketId}:${label}`);
   }
 
   /** Spawn one implementation child lot and hand it the plan. Non-blocking. */
   start(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[] = []): Promise<{ ok: boolean; result: string }> {
+    const storedPlan = this.store.getImplementationPlan(ticket.id);
+    const lot = storedPlan?.lots.find((candidate) => candidate.label === label);
+    if (lot?.status === "completed") {
+      return Promise.resolve({ ok: false, result: `Le lot «${label}» est déjà terminé. Utilise un nouveau label pour une nouvelle correction.` });
+    }
+    const normalizedFiles = normalizeImplementationScope(files);
+    if (lot && storedPlan && lot.plan === plan && JSON.stringify(lot.files) === JSON.stringify(normalizedFiles)) {
+      if (lot.status === "pending" || lot.status === "running") {
+        return Promise.resolve({ ok: true, result: `Le lot «${label}» est déjà enregistré : le backend gère son lancement. Attends implementation_done.` });
+      }
+      if (lot.status === "failed") {
+        const attempts = this.store.implementationLotAttempts(ticket.id, label);
+        if (attempts.started === 1 && attempts.failed === 1) {
+          this.updatePlannedLot(ticket.id, storedPlan.id, label, { status: "pending" });
+          this.implementationPlans.set(ticket.id, slotId);
+          this.scheduleImplementationPlans();
+          return Promise.resolve({ ok: true, result: `Relance du lot «${label}» enregistrée. Le backend attend ses dépendances et la capacité disponible. Termine ton tour et attends implementation_done.` });
+        }
+      }
+    }
+    return this.launchImplementation(ticket, slotId, plan, label, files);
+  }
+
+  private launchImplementation(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[]): Promise<{ ok: boolean; result: string }> {
     const started = this.startNow(ticket, slotId, plan, label, files);
+    const planId = this.store.getImplementationPlan(ticket.id)?.id ?? null;
+    void started.then((result) => {
+      if (!result.ok && !this.hasLot(ticket.id, label)) this.updatePlannedLot(ticket.id, planId, label, { status: "failed", summary: result.result });
+    }).catch((error: unknown) => {
+      this.updatePlannedLot(ticket.id, planId, label, { status: "failed", summary: getErrorMessage(error) });
+    });
     this.trackClosing(started.then(() => undefined), ticket.id);
     return started;
   }
@@ -780,7 +1103,8 @@ export class DelegationManager {
       return { ok: false, result: `Le lot «${label}» est déjà en cours : attends son événement implementation_done.` };
     }
     const attempts = this.store.implementationLotAttempts(ticket.id, label);
-    if (attempts.started > 0 && (attempts.started !== 1 || attempts.failed !== 1)) {
+    const recovering = attempts.started > 0 && this.recoveringImplementations.has(`${ticket.id}:${label}`);
+    if (!recovering && attempts.started > 0 && (attempts.started !== 1 || attempts.failed !== 1)) {
       return {
         ok: false,
         result: `Le lot «${label}» ne peut être relancé qu'une fois après son premier échec. Reprends l'implémentation toi-même ou appelle fail().`,
@@ -802,12 +1126,44 @@ export class DelegationManager {
         return { ok: false, result: `Le périmètre du lot «${label}» chevauche celui d'un lot en préparation.` };
       }
     }
+    for (const queued of this.queuedImplementations.values()) {
+      if (queued.ticket.id === ticket.id && implementationScopesOverlap(normalizedFiles, queued.files)) {
+        return { ok: false, result: `Le périmètre du lot «${label}» chevauche celui d'un lot en attente.` };
+      }
+    }
     if (this.lotCount(ticket.id) >= MAX_PARALLEL_IMPLEMENTERS) {
       return {
         ok: false,
         result: `Limite de ${MAX_PARALLEL_IMPLEMENTERS} lots d'implémentation en parallèle atteinte pour ce ticket : attends les événements implementation_done en cours avant d'en lancer un autre.`,
       };
     }
+    if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) {
+      this.store.saveImplementationQueue(ticket.id, [...this.store.getImplementationQueue(ticket.id), { label, plan, files: normalizedFiles, slotId, started: false, executionRunId: null }]);
+      this.queuedImplementations.set(`${ticket.id}:${label}`, { ticket, slotId, plan, label, files: normalizedFiles });
+      this.store.logEvent(ticket.id, "delegation_queued", { label, files: normalizedFiles });
+      return { ok: true, result: `Le lot «${label}» attend la capacité globale de ${MAX_GLOBAL_IMPLEMENTERS} implémenteurs. Le backend le lancera automatiquement. Termine ton tour et attends implementation_done.` };
+    }
+    const persistedPlan = this.store.getImplementationPlan(ticket.id);
+    const queuedLot = this.store.getImplementationQueue(ticket.id).find((lot) => lot.label === label);
+    const plannedLot = persistedPlan?.lots.find((lot) => lot.label === label);
+    if (plannedLot && persistedPlan && this.lotCount(ticket.id) >= persistedPlan.maxParallel) {
+      return { ok: false, result: "La capacité parallèle du plan est occupée." };
+    }
+    if (plannedLot && (plannedLot.plan !== plan || JSON.stringify(plannedLot.files) !== JSON.stringify(normalizedFiles))) {
+      return { ok: false, result: `Le lot «${label}» doit conserver le plan et le périmètre enregistrés.` };
+    }
+    const planId = plannedLot && persistedPlan ? persistedPlan.id : null;
+    const durableWorkspace = planId !== null || queuedLot !== undefined;
+    if (plannedLot && persistedPlan) {
+      const ready = plannedLot.dependsOn.every((dependency) => persistedPlan.lots.some((lot) => lot.label === dependency && lot.status === "completed"));
+      if (!ready) return { ok: false, result: `Les dépendances du lot «${label}» ne sont pas terminées.` };
+      if (plannedLot.status !== "running") {
+        this.updatePlannedLot(ticket.id, planId, label, { status: "running", attempts: plannedLot.attempts + 1, summary: null });
+      }
+    }
+    const reservationId = nanoid(16);
+    this.implementationReservations.add(reservationId);
+    this.recoveringImplementations.delete(`${ticket.id}:${label}`);
     const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
     const startingKey = `${ticket.id}:${label}`;
     this.startingImplementations.set(startingKey, normalizedFiles);
@@ -832,8 +1188,10 @@ export class DelegationManager {
       : fallbackKnobs;
     const lotOptions: ImplementationLotOptions | null = normalizedFiles.length === 0
       ? null
-      : { ticketId: ticket.id, slotPath: slotPath(slotId), label, files: normalizedFiles };
-    this.store.logEvent(ticket.id, "delegation_started", { provider, model: knobs.model, effort: knobs.effort, label, files: normalizedFiles });
+      : { ticketId: ticket.id, slotPath: slotPath(slotId), label, files: normalizedFiles, ...(planId === null ? {} : { cycleId: planId }) };
+    const eventType = recovering ? "delegation_resumed" : "delegation_started";
+    this.store.logEvent(ticket.id, eventType, { provider, model: knobs.model, effort: knobs.effort, label, files: normalizedFiles });
+    if (queuedLot) this.store.saveImplementationQueue(ticket.id, this.store.getImplementationQueue(ticket.id).map((lot) => lot.label === label ? { ...lot, started: true } : lot));
     let childCwd = slotPath(slotId);
     try {
       if (provider === "codex") {
@@ -847,16 +1205,47 @@ export class DelegationManager {
       if (lotOptions !== null) {
         const prepared = await this.system.prepareImplementationLot(lotOptions);
         childCwd = prepared.cwd;
+        if (prepared.integrated) {
+          this.startingImplementations.delete(startingKey);
+          if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
+            this.system.cancelImplementationLot(lotOptions);
+            this.releaseImplementationReservation(reservationId);
+            return { ok: false, result: "Délégation annulée pendant sa reprise." };
+          }
+          const summary = "Lot déjà intégré avant l'interruption : résultat conservé sans relancer l'implémentation.";
+          this.store.transaction(() => {
+            this.updatePlannedLot(ticket.id, planId, label, { status: "completed", summary });
+            const remaining = this.remainingImplementationLots(ticket.id);
+            const delivered = this.sessionHub.sendEvent(ticket.id, { type: "implementation_done", ok: true, summary, label, remaining });
+            this.store.logEvent(ticket.id, "delegation_done", { ok: true, delivered, label, remaining, recovered: true, summary });
+            this.removePersistedImplementationQueue(ticket.id, label);
+          });
+          await this.system.discardImplementationLot(lotOptions).catch((error: unknown) => {
+            log.warn("nettoyage du lot intégré impossible", { ticketId: ticket.id, label, reason: getErrorMessage(error) });
+          });
+          this.releaseImplementationReservation(reservationId);
+          return { ok: true, result: summary };
+        }
       }
     } catch (error) {
       this.startingImplementations.delete(startingKey);
+      if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions).catch((cleanupError: unknown) => {
+        log.warn("nettoyage de lot impossible", { ticketId: ticket.id, label, reason: getErrorMessage(cleanupError) });
+      });
+      if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
+      this.releaseImplementationReservation(reservationId);
       const message = error instanceof Error ? error.message : String(error);
       this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "launch" });
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
     this.startingImplementations.delete(startingKey);
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
-      if (lotOptions !== null) await this.system.discardImplementationLot(lotOptions);
+      try {
+        if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions);
+        if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
+      } finally {
+        this.releaseImplementationReservation(reservationId);
+      }
       this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "cancelled" });
       return { ok: false, result: "Délégation annulée pendant sa préparation." };
     }
@@ -864,12 +1253,24 @@ export class DelegationManager {
     const generation = (this.generations.get(generationKey) ?? 0) + 1;
     this.generations.set(generationKey, generation);
     const generationId = nanoid(16);
+    const previousExecutionId = plannedLot?.executionRunId ?? queuedLot?.executionRunId;
+    const previousExecution = recovering && previousExecutionId
+      ? this.store.listExecutionRuns("ticket", ticket.id).find((execution) => execution.generationId === previousExecutionId)
+      : undefined;
+    const resumeSessionId = provider === "codex" && previousExecution?.orchestrator === provider
+      && previousExecution.effectiveModel === knobs.model && previousExecution.effectiveEffort === knobs.effort
+      ? previousExecution.sessionId
+      : null;
     const state: ActiveDelegation = {
+      reservationId,
+      planId,
+      durableWorkspace,
       label,
       provider,
       files: normalizedFiles,
       lotOptions,
       cancelled: false,
+      preserveWorkspace: false,
       childClosed: false,
       settlement: null,
       handle: null,
@@ -899,6 +1300,8 @@ export class DelegationManager {
         codexFast: knobs.serviceTier === "fast",
       });
       executionStarted = true;
+      this.updatePlannedLot(ticket.id, planId, label, { executionRunId: generationId });
+      if (queuedLot) this.store.saveImplementationQueue(ticket.id, this.store.getImplementationQueue(ticket.id).map((lot) => lot.label === label ? { ...lot, executionRunId: generationId } : lot));
       const handle = this.system.startAgentSession({
         ticketId: ticket.id,
         slotId: DELEGATION_SLOT_ID,
@@ -908,6 +1311,7 @@ export class DelegationManager {
         effort: knobs.effort,
         serviceTier: knobs.serviceTier,
         generation,
+        ...(resumeSessionId ? { resumeSessionId } : {}),
         ...delegatedImplementerPermissions(projectVcsProvider(ticket.project)),
         onToolCall: async () => ({ ok: false, result: "Session d'implémentation déléguée : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleEvent(ticket.id, state, event),
@@ -916,12 +1320,21 @@ export class DelegationManager {
       const scopeDirective = normalizedFiles.length === 0
         ? ""
         : `\n- Périmètre déclaré de ce lot : ${normalizedFiles.join(", ")}. N'écris aucun autre fichier.\n`;
-      handle.send(`${CHILD_FRAMING}${scopeDirective}${plan}`);
+      const recoveryDirective = recovering
+        ? "\n- Ce lot reprend après interruption. Le worktree contient le travail partiel conservé : inspecte-le et complète le lot sans recommencer les modifications déjà présentes.\n"
+        : "";
+      const retryDirective = plannedLot?.summary ? `\n- Résultat de la tentative précédente : ${plannedLot.summary}\n` : "";
+      handle.send(`${CHILD_FRAMING}${scopeDirective}${recoveryDirective}${retryDirective}${plan}`);
     } catch (error) {
-      this.removeLot(ticket.id, label, state);
       const message = error instanceof Error ? error.message : String(error);
-      if (executionStarted) await this.closeAndFinalize(state, "failed", message);
-      if (lotOptions !== null) await this.system.discardImplementationLot(lotOptions);
+      try {
+        if (executionStarted) await this.closeAndFinalize(state, "failed", message);
+        if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions);
+        if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
+      } finally {
+        this.removeLot(ticket.id, label, state);
+        this.releaseImplementationReservation(reservationId);
+      }
       this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "launch" });
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
@@ -1000,7 +1413,7 @@ export class DelegationManager {
   }
 
   /** Hash the worktree for a review pass, logging how long it took (the call dominates a slow start). */
-  private async timedCodeFingerprint(cwd: string, ticketId: string, kind: ReviewKind, startId: string): Promise<string> {
+  private async timedCodeFingerprint(cwd: string, ticketId: string, kind: ReviewKind, startId: string): Promise<CodeSnapshot> {
     const startedAt = Date.now();
     log.info("calcul de l'empreinte démarré", { ticketId, kind, startId });
     const slowTimer = setTimeout(() => {
@@ -1012,7 +1425,7 @@ export class DelegationManager {
       });
     }, SLOW_FINGERPRINT_WARN_MS);
     try {
-      return await this.system.codeFingerprint(cwd);
+      return await this.system.codeSnapshot(cwd);
     } finally {
       clearTimeout(slowTimer);
       const elapsedMs = Date.now() - startedAt;
@@ -1096,12 +1509,13 @@ export class DelegationManager {
       }
       reviewedCommitSha = prepared.commitSha;
     }
-    let codeFingerprint: string;
+    let snapshot: CodeSnapshot;
     try {
-      codeFingerprint = await this.timedCodeFingerprint(cwd, ticket.id, kind, startId);
+      snapshot = await this.timedCodeFingerprint(cwd, ticket.id, kind, startId);
     } catch (error) {
       return { ok: false, result: `Impossible de lancer la review ${kind} : ${getErrorMessage(error)}` };
     }
+    const { fingerprint: codeFingerprint, fileHashes } = snapshot;
     const computedAt = Date.now();
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
       return { ok: false, result: "Passe de review annulée pendant sa préparation." };
@@ -1127,6 +1541,7 @@ export class DelegationManager {
       const restored: ActiveReviewPass = {
         passId: persisted.passId,
         codeFingerprint,
+        fileHashes: persisted.fileHashes,
         reviewedCommitSha,
         fingerprintComputedAt: computedAt,
         depth,
@@ -1148,6 +1563,7 @@ export class DelegationManager {
     const created: ActiveReviewPass = {
       passId: nanoid(16),
       codeFingerprint,
+      fileHashes,
       reviewedCommitSha,
       fingerprintComputedAt: computedAt,
       depth,
@@ -1160,6 +1576,7 @@ export class DelegationManager {
       ticketId: ticket.id,
       passId: created.passId,
       codeFingerprint,
+      fileHashes,
       reviewedCommitSha,
       reviewDepth: depth,
       requiresApproval,
@@ -1304,6 +1721,27 @@ export class DelegationManager {
   /** Kill an active child (parent released/relaunched/shutdown). Idempotent; stale events are dropped. */
   stop(ticketId: string): void {
     this.reviewEpochs.set(ticketId, (this.reviewEpochs.get(ticketId) ?? 0) + 1);
+    this.implementationPlans.delete(ticketId);
+    for (const [key, queued] of this.queuedImplementations) {
+      if (queued.ticket.id === ticketId) this.queuedImplementations.delete(key);
+    }
+    const ticket = this.store.getTicket(ticketId);
+    const terminal = !ticket || (ticket.stage !== null && TERMINAL_STAGES.includes(ticket.stage));
+    if (terminal) this.store.resetImplementationQueue(ticketId);
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (plan && (plan.status === "pending" || plan.status === "running")) {
+      this.store.saveImplementationPlan(ticketId, {
+        ...plan,
+        status: terminal ? "cancelled" : "interrupted",
+        lots: plan.lots.map((lot): ImplementationPlanLot => {
+          if (lot.status !== "running" && lot.status !== "pending") return lot;
+          if (terminal) return { ...lot, status: "cancelled" };
+          if (lot.status === "running") return { ...lot, status: "interrupted" };
+          return lot;
+        }),
+        updatedAt: Date.now(),
+      });
+    }
     // NOTE(ali): drop the lots still being prepared too, otherwise a relaunched session is refused
     // with "déjà en cours"; the in-flight start bails on its epoch check and its delete is a no-op.
     const startingPrefix = `${ticketId}:`;
@@ -1317,17 +1755,22 @@ export class DelegationManager {
       this.active.delete(ticketId);
       for (const state of lots.values()) {
         state.cancelled = true;
+        state.preserveWorkspace = !terminal && (state.planId !== null || this.store.getImplementationQueue(ticketId).some((lot) => lot.label === state.label));
         if (state.lotOptions !== null) this.system.cancelImplementationLot(state.lotOptions);
         void state.handle?.interrupt().catch((error: unknown) => {
           log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
         });
         if (state.settlement === null) {
           const cleanup = (async (): Promise<void> => {
-            await this.closeAndFinalize(state, "cancelled", null);
-            if (state.lotOptions !== null) await this.system.discardImplementationLot(state.lotOptions);
+            try {
+              await this.closeAndFinalize(state, "cancelled", null);
+              if (state.lotOptions !== null && !state.preserveWorkspace) await this.system.discardImplementationLot(state.lotOptions);
+            } finally {
+              this.releaseImplementationReservation(state.reservationId);
+            }
           })();
           this.trackClosing(cleanup, ticketId);
-        } else if (state.childClosed && state.lotOptions !== null) {
+        } else if (state.childClosed && state.lotOptions !== null && !state.preserveWorkspace) {
           this.trackClosing(this.system.discardImplementationLot(state.lotOptions), ticketId);
         }
         this.store.logEvent(ticketId, "delegation_killed", { label: state.label });
@@ -1704,6 +2147,15 @@ export class DelegationManager {
   /** One lot's single turn ended: tear it down and resume the parent via implementation_done. */
   private async settle(ticketId: string, state: ActiveDelegation, turnOk: boolean): Promise<void> {
     if (this.active.get(ticketId)?.get(state.label) !== state) return;
+    try {
+      await this.settleImplementation(ticketId, state, turnOk);
+    } finally {
+      this.removeLot(ticketId, state.label, state);
+      this.releaseImplementationReservation(state.reservationId);
+    }
+  }
+
+  private async settleImplementation(ticketId: string, state: ActiveDelegation, turnOk: boolean): Promise<void> {
     const closed = await this.closeHandle(state);
     state.childClosed = true;
     let ok = turnOk && closed;
@@ -1714,39 +2166,45 @@ export class DelegationManager {
     try {
       if (state.lotOptions !== null) {
         if (ok && !state.cancelled) await this.system.finishImplementationLot(state.lotOptions);
-        else await this.system.discardImplementationLot(state.lotOptions);
+        else if (!state.preserveWorkspace && !state.durableWorkspace) await this.system.discardImplementationLot(state.lotOptions);
+        else this.system.cancelImplementationLot(state.lotOptions);
       }
     } catch (error) {
       ok = false;
       summary = `Intégration du lot impossible : ${getErrorMessage(error)}`;
-      if (state.lotOptions !== null) {
+      if (state.lotOptions !== null && !state.preserveWorkspace && !state.durableWorkspace) {
         try {
           await this.system.discardImplementationLot(state.lotOptions);
         } catch (discardError) {
           summary += ` Nettoyage impossible : ${getErrorMessage(discardError)}`;
         }
       }
+      if (state.lotOptions !== null && state.durableWorkspace) this.system.cancelImplementationLot(state.lotOptions);
     }
     if (state.cancelled || this.active.get(ticketId)?.get(state.label) !== state) {
       this.store.finalizeExecution({ generationId: state.generationId, status: "cancelled", usageByModel: state.usageByModel });
       return;
     }
-    this.store.finalizeExecution({
-      generationId: state.generationId,
-      status: ok ? "completed" : "failed",
-      usageByModel: state.usageByModel,
-      error: ok ? null : summary,
+    const { delivered, remaining } = this.store.transaction(() => {
+      this.store.finalizeExecution({
+        generationId: state.generationId,
+        status: ok ? "completed" : "failed",
+        usageByModel: state.usageByModel,
+        error: ok ? null : summary,
+      });
+      this.updatePlannedLot(ticketId, state.planId, state.label, { status: ok ? "completed" : "failed", summary });
+      const remaining = this.remainingImplementationLots(ticketId) - 1;
+      const delivered = this.sessionHub.sendEvent(ticketId, { type: "implementation_done", ok, summary, label: state.label, remaining });
+      this.store.logEvent(ticketId, "delegation_done", { ok, delivered, label: state.label, remaining, summary });
+      this.removePersistedImplementationQueue(ticketId, state.label);
+      return { delivered, remaining };
     });
-    const remaining = this.lotCount(ticketId) - 1;
-    const delivered = this.sessionHub.sendEvent(ticketId, {
-      type: "implementation_done",
-      ok,
-      summary,
-      label: state.label,
-      remaining,
-    });
+    if (ok && state.durableWorkspace && state.lotOptions !== null) {
+      await this.system.discardImplementationLot(state.lotOptions).catch((error: unknown) => {
+        log.warn("nettoyage du lot intégré impossible", { ticketId, label: state.label, reason: getErrorMessage(error) });
+      });
+    }
     this.removeLot(ticketId, state.label, state);
-    this.store.logEvent(ticketId, "delegation_done", { ok, delivered, label: state.label, remaining });
     log.info("délégation terminée", { ticketId, ok, delivered, label: state.label, remaining });
     if (!delivered) log.warn("implementation_done non délivré : session parente absente", { ticketId });
   }

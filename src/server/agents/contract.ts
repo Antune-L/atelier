@@ -1,4 +1,4 @@
-import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
 import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
@@ -65,13 +65,13 @@ function buildImplementingSteps(
     else if (hasValidatedAtelierPrd(ticket)) planSource = "un plan concis et complet rédigé depuis la section « PRD validé » (limité à la part décrite dans la description)";
     return [
       `2. implementing (délégué à une session ${providerName} indépendante en arrière-plan) :`,
-      "   N'utilise JAMAIS le sous-agent natif `implementer` pour ce ticket : l'implémentation passe EXCLUSIVEMENT par le tool delegate_implementation.",
+      "   N'utilise JAMAIS le sous-agent natif `implementer` pour ce ticket : l'implémentation passe EXCLUSIVEMENT par les tools submit_implementation_plan ou delegate_implementation.",
       ...(ticket.prdEnabled
         ? [`   a. Dès réception de l'événement prd_validated, écris le PRD validé tel quel dans ${prdPath} : c'est la source de vérité de l'implémentation.`]
         : []),
-      `   ${ticket.prdEnabled ? "b" : "a"}. Décide d'ABORD du découpage. Si la fonctionnalité se découpe naturellement en lots indépendants à périmètres de fichiers DISJOINTS, appelle delegate_implementation une fois par lot DANS LE MÊME TOUR (${MAX_PARALLEL_IMPLEMENTERS} lots maximum, un \`label\` distinct par lot ; déclare les fichiers ou dossiers relatifs au dépôt dans \`files\`, sans glob, et explique ce périmètre dans chaque \`plan\`). SINON, fais UN SEUL appel avec ${planSource} entier dans \`plan\` et déclare son périmètre dans \`files\` quand il est connu. Sans \`files\`, le lot occupe tout le dépôt. Chaque session ${providerName} écrit le code et ne commit JAMAIS.`,
-      `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après ces appels (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras un événement implementation_done par lot.`,
-      `   ${ticket.prdEnabled ? "d" : "c"}. À chaque implementation_done reçu : si \`remaining\` > 0, TERMINE de nouveau ton tour et attends les suivants (ne boucle pas, ne surveille rien). Quand tu reçois l'événement dont \`remaining\` vaut 0, tous les lots sont terminés : relis le diff produit (git diff), comble les manques toi-même si l'implémentation est partielle, puis enchaîne sur la review. Si un lot signale un échec, relance delegate_implementation UNE seule fois pour CE lot (même label et mêmes \`files\`) ; sinon implémente-le toi-même ou appelle fail(). Une nouvelle correction après un lot réussi est un nouveau lot avec un nouveau label.`,
+      `   ${ticket.prdEnabled ? "b" : "a"}. Décide d'ABORD du découpage depuis ${planSource}. Pour plusieurs lots, appelle UNE fois submit_implementation_plan({lots:[{label,plan,files,dependsOn}],maxParallel:${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS}}). Chaque label est distinct, chaque plan est autonome et chaque files déclare des fichiers ou dossiers relatifs au dépôt déjà identifiés, sans glob et sans chevauchement. dependsOn liste les labels à intégrer AVANT ce lot. Le backend vérifie et persiste le plan, démarre automatiquement les lots indépendants puis débloque leurs dépendants après intégration réussie ; ${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS} lots concurrents par défaut, ${MAX_PARALLEL_IMPLEMENTERS} maximum seulement si le découpage le justifie, avec un plafond partagé entre tickets. Pour un petit changement indivisible, fais UN SEUL appel delegate_implementation avec le plan complet et le périmètre files quand il est connu ; sans files, ce lot réserve tout le dépôt. Chaque session ${providerName} écrit le code et ne commit JAMAIS.`,
+      `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après la soumission réussie (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras un événement implementation_done par lot.`,
+      `   ${ticket.prdEnabled ? "d" : "c"}. À chaque implementation_done reçu : si remaining > 0, TERMINE de nouveau ton tour et attends les suivants. Quand remaining vaut 0, relis read_implementation_plan() si un plan a été soumis : vérifie que tous ses lots ont réussi, aucun failed, blocked ou interrupted. Un événement manquant ou un redémarrage impose de relire cet état durable, jamais de resoumettre un plan ni de redéléguer un lot réussi. Sur échec, relance delegate_implementation UNE seule fois pour CE lot (même label et mêmes files) ; ses dépendants seront débloqués automatiquement après réussite. Si le retry échoue, appelle fail(). Quand tous les lots ont réussi, relis le diff intégré (git diff), comble les manques puis enchaîne sur la review. Une nouvelle correction après un lot réussi est un nouveau lot avec un nouveau label.`,
     ];
   }
   if (ticket.implementer === "composer") {
@@ -116,6 +116,9 @@ const READ_REVIEW_RESULTS_HINT =
 const FORMAT_BEFORE_REVIEW_HINT =
   "AVANT CHAQUE batch de reviewers (première passe et chaque relecture après correction), découvre le formatter déjà configuré via les instructions et scripts du dépôt, applique-le aux fichiers pertinents modifiés en respectant ses ignores et les consignes sur les fichiers générés, puis exécute son check avec un code de sortie réel (ne déduis pas le succès d'une sortie RTK résumée ou masquée). N'invente aucun script, ne lance aucun téléchargement global via npx et, si aucun formatter n'est configuré, suis les conventions documentées sans prétendre avoir exécuté un check. Si un formatter configuré échoue ou est indisponible, résous le problème ou appelle `fail()` AVANT `delegate_review` : ce préflight ne consomme jamais une boucle de correction.";
 
+const CHECKS_BEFORE_REVIEW_HINT =
+  "APRÈS le formatage et AVANT CHAQUE batch de reviewers, exécute les commandes lint et typecheck déjà configurées pour le projet, ou découvre leurs scripts et leur gestionnaire dans le dépôt. Vérifie que les commandes, scripts et binaires existent ; n'invente aucun script ni flag. Recueille le code de sortie réel de chaque commande et corrige les échecs avant delegate_review ; aucun batch ne démarre tant qu'un contrôle disponible échoue. Si aucun contrôle n'est configuré, signale-le sans prétendre l'avoir exécuté. Toute correction ou formatage ultérieur impose de refaire ces contrôles sur le nouveau code. Les tests complets de l'étape testing et la gate backend sur l'empreinte du code courant restent obligatoires.";
+
 function reviewCalls(depth: ReviewDepth): string {
   return reviewKinds(depth).map((kind) => `\`delegate_review(kind="${kind}", context=...)\``).join(", ");
 }
@@ -124,7 +127,7 @@ function reviewCalls(depth: ReviewDepth): string {
  * Builds the reviewing/anti-regression/fixing steps. Both providers delegate to two backend-owned,
  * read-only sessions with fresh and mutually independent contexts.
  */
-function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: string[] }): string[] {
+function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: string[]; scripts: ProjectConfig["scripts"] }): string[] {
   const figmaLines = opts.isUi
     ? [
         "   + comparaison aux maquettes Figma référencées (récupère TOUJOURS la frame parente de chaque node-id) :",
@@ -136,6 +139,9 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   const kinds = reviewKinds(depth);
   return [
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
+    `   ${CHECKS_BEFORE_REVIEW_HINT}`,
+    opts.scripts?.lint ? `   Commande lint configurée pour le projet : ${opts.scripts.lint}` : "",
+    opts.scripts?.typecheck ? `   Commande typecheck configurée pour le projet : ${opts.scripts.typecheck}` : "",
     `3. reviewing : récupère le diff complet et appelle EN PARALLÈLE les ${kinds.length} reviewers indépendants : ${reviewCalls(depth)}. Passe à chacun la description/PRD et le diff utile, sans leur transmettre le raisonnement privé ni le résultat d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
     ...figmaLines,
     `3a. ${READ_REVIEW_RESULTS_HINT}`,
@@ -189,10 +195,10 @@ function buildPrdBullet(ticket: Ticket): string {
   }
   if (!ticket.prdEnabled) return "- (Option PRD désactivée : implémente directement.)";
   if (ticket.orchestrator === "codex") {
-    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via `delegate_implementation` (ne l'implémente pas dans cette phase de planification).";
+    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de soumettre le plan d'implémentation via `submit_implementation_plan` (ou `delegate_implementation` pour un petit lot unique) (ne l'implémente pas dans cette phase de planification).";
   }
   if (ticket.implementer === "codex" || ticket.implementer === "claude") {
-    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation via le tool `delegate_implementation` (ne l'implémente pas dans cette session de planification).";
+    return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de soumettre le plan d'implémentation via `submit_implementation_plan` (ou le tool `delegate_implementation` pour un petit lot unique) (ne l'implémente pas dans cette session de planification).";
   }
   return "- `submit_prd(markdown)` une fois le plan prêt, PUIS attends l'événement `prd_validated` avant de déléguer l'implémentation à un sous-agent à contexte frais (ne l'implémente pas dans cette session de planification).";
 }
@@ -348,7 +354,7 @@ export function buildTicketContract(
     "## Étapes",
     buildPlanningStep(ticket),
     ...implementingSteps,
-    ...buildReviewSteps(ticket, { isUi, figmaUrls }),
+    ...buildReviewSteps(ticket, { isUi, figmaUrls, scripts: project.scripts }),
     [
       "5. testing : exécute typecheck, lint et tests du projet. Rouge après correction → fail().",
       `   Note serveur/DB : si tu dois lancer un serveur pour les tests, utilise un port libre (pas le port par défaut de l'app — trouve-en un avec \`lsof\`/\`ss\` ou laisse l'OS en assigner un) et une base de données isolée et vierge (ex. \`/tmp/test-${ticket.id}.db\` — jamais \`kanban.db\` ni \`kanban-real.db\`). Si le schéma DB a changé, initialise/migre la DB de test avant de lancer les tests.`,
@@ -429,6 +435,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     `2. \`git fetch origin ${baseBranch}\` puis rebase la branche courante sur la base : \`git rebase origin/${baseBranch}\`.`,
     "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
+    `   ${CHECKS_BEFORE_REVIEW_HINT}`,
     `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
@@ -666,6 +673,7 @@ function buildReviewFixLines(
 
   const reviewAndFixSteps = [
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
+    `   ${CHECKS_BEFORE_REVIEW_HINT}`,
     `2. Récupère le diff complet de la PR (\`${prDiffCmd}\`) puis lance EN PARALLÈLE les ${kinds.length} sessions indépendantes : ${reviewCalls(depth)}. Transmets la profondeur ${depth}, les dimensions (${reviewDimensions}) et le diff à chacune, sans résultat ni raisonnement d'une autre. Termine ton tour et attends leurs événements \`review_done\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     `3. \`update_stage("fixing")\` : si un reviewer demande revise, applique uniquement les corrections pertinentes. Ne relance pas les reviewers avant d'avoir testé, commité et poussé ces corrections.`,
@@ -774,6 +782,7 @@ export function buildCleanContract(ticket: Ticket, opts: { commitLanguage: Commi
     '1. `update_stage("implementing")`.',
     triageStep,
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
+    `   ${CHECKS_BEFORE_REVIEW_HINT}`,
     `3. \`update_stage("reviewing")\` : récupère le diff courant puis lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 événements \`review_done\` avec verdict approve sur le code courant ; corrige et relance les 4 si nécessaire. Un échec bloque \`done()\`.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge après correction → `fail()`.',

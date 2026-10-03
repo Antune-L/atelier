@@ -21,7 +21,7 @@ import { boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
-import { computeCodeFingerprint } from "./codeFingerprint.ts";
+import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
 import { DelegationWorkspace } from "./delegationWorkspace.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
@@ -41,6 +41,7 @@ import {
 } from "./repoInspection.ts";
 import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
 import type {
+  CodeSnapshot,
   DoneGateResult,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
@@ -227,7 +228,7 @@ export class RealSystemAdapter implements SystemAdapter {
     await $`rm -rf ${slotPath}`.nothrow().quiet();
   }
 
-  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
     return this.delegationWorkspace.prepare(opts);
   }
 
@@ -1038,6 +1039,10 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async codeFingerprint(slotPath: string): Promise<string> {
     return computeCodeFingerprint(slotPath);
+  }
+
+  async codeSnapshot(slotPath: string): Promise<CodeSnapshot> {
+    return computeCodeSnapshot(slotPath);
   }
 
   async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {

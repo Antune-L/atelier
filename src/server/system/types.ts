@@ -23,6 +23,7 @@ export interface GitWorktreeAddOptions {
 
 export interface ImplementationLotOptions {
   ticketId: string;
+  cycleId?: string;
   slotPath: string;
   label: string;
   files: string[];
@@ -39,6 +40,11 @@ export interface ValidationRevision {
   commitSha: string;
   fingerprint: string;
   clean: boolean;
+}
+
+export interface CodeSnapshot {
+  fingerprint: string;
+  fileHashes: Record<string, string>;
 }
 
 export interface ValidationWorkspaceOptions {
@@ -226,7 +232,7 @@ export interface SystemAdapter {
    * to start from — they differ for a clean ticket whose local branch is suffixed to avoid collisions.
    */
   worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
-  prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }>;
+  prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }>;
   finishImplementationLot(opts: ImplementationLotOptions): Promise<void>;
   cancelImplementationLot(opts: ImplementationLotOptions): void;
   discardImplementationLot(opts: ImplementationLotOptions): Promise<void>;
@@ -312,6 +318,7 @@ export interface SystemAdapter {
   verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult>;
   /** Hash current tracked and untracked worktree contents, independent from commit identity. */
   codeFingerprint(slotPath: string): Promise<string>;
+  codeSnapshot(slotPath: string): Promise<CodeSnapshot>;
   prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult>;
   readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult>;
   publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions, provider: VcsProvider): Promise<PublishReviewResult>;

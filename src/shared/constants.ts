@@ -582,6 +582,8 @@ export const DELEGATION_SLOT_ID = -4;
 export const ATELIER_SLOT_ID = -5;
 /** Max implementation lots an orchestrator may run in parallel on the same ticket worktree. */
 export const MAX_PARALLEL_IMPLEMENTERS = 4;
+export const DEFAULT_PLAN_PARALLEL_IMPLEMENTERS = 2;
+export const MAX_GLOBAL_IMPLEMENTERS = 4;
 /** Max chars of a lot `label` accepted by delegate_implementation. */
 export const LOT_LABEL_MAX_LENGTH = 60;
 /** Native Codex sub-agent thread cap for orchestrator sessions (unrelated to the implementation lots). */

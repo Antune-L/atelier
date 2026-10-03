@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import type { Stats } from "node:fs";
-import { chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, symlink } from "node:fs/promises";
+import { chmod, copyFile, cp, link, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, symlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+
+import { z } from "zod";
 
 import type { ImplementationLotOptions } from "./types.ts";
 
@@ -18,6 +20,10 @@ interface LotSnapshot {
   canonicalSlot: string;
   slotDevice: number;
   slotInode: number;
+  workspaceDevice: number;
+  workspaceInode: number;
+  phase: "prepared" | "integrating" | "integrated";
+  integratedStates: Map<string, FileState>;
 }
 
 const WORKSPACE_MARKER = "-implementation-";
@@ -28,9 +34,95 @@ const FILE_MODE_MASK = 0o777;
 const DEPENDENCIES_DIR = "node_modules";
 const ACTIVE_CLEANUP_WAIT_MS = 30_000;
 const ACTIVE_CLEANUP_POLL_MS = 50;
+const JOURNAL_SUFFIX = ".journal.json";
+const JOURNAL_VERSION = 1;
+const JOURNAL_FILE_MODE = 0o600;
+
+function isValidRelativePath(path: string): boolean {
+  return Boolean(path) && !isAbsolute(path) && !path.includes("\\")
+    && !path.split("/").some((part) => !part || part === "." || part === ".." || part === ".git");
+}
+
+const fileStateSchema = z.object({
+  kind: z.enum(["file", "symlink", "missing"]),
+  signature: z.string(),
+  mode: z.number().int().min(0).max(FILE_MODE_MASK),
+});
+const journalStatesSchema = z.array(z.tuple([z.string().refine(isValidRelativePath), fileStateSchema]))
+  .refine((entries) => new Set(entries.map(([path]) => path)).size === entries.length);
+const lotJournalSchema = z.object({
+  version: z.literal(JOURNAL_VERSION),
+  ticketId: z.string(),
+  label: z.string(),
+  cycleId: z.string().min(1).optional(),
+  files: z.array(z.string().refine(isValidRelativePath)),
+  head: z.string().regex(/^[a-f0-9]{40,64}$/),
+  canonicalSlot: z.string(),
+  slotDevice: z.number().int().nonnegative(),
+  slotInode: z.number().int().nonnegative(),
+  workspaceDevice: z.number().int().nonnegative(),
+  workspaceInode: z.number().int().nonnegative(),
+  phase: z.enum(["prepared", "integrating", "integrated"]),
+  baseline: journalStatesSchema,
+  integratedStates: journalStatesSchema,
+});
+
+async function writeJournal(opts: ImplementationLotOptions, lot: LotSnapshot): Promise<void> {
+  const cwd = workspacePath(opts);
+  const temporary = await mkdtemp(`${cwd}-journal-`);
+  const temporaryPath = join(temporary, "journal.json");
+  try {
+    const file = await open(temporaryPath, "wx", JOURNAL_FILE_MODE);
+    try {
+      await file.writeFile(JSON.stringify({
+        version: JOURNAL_VERSION,
+        ticketId: opts.ticketId,
+        label: opts.label,
+        cycleId: opts.cycleId,
+        files: opts.files,
+        ...lot,
+        baseline: [...lot.baseline],
+        integratedStates: [...lot.integratedStates],
+      }));
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    await rename(temporaryPath, `${cwd}${JOURNAL_SUFFIX}`);
+    const directory = await open(dirname(cwd), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function readJournal(opts: ImplementationLotOptions): Promise<LotSnapshot | null> {
+  const path = `${workspacePath(opts)}${JOURNAL_SUFFIX}`;
+  const info = await lstatIfExists(path);
+  if (!info) return null;
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error("Journal du lot invalide ; reprise refusée.");
+  const journal = lotJournalSchema.parse(JSON.parse(await readFile(path, "utf8")));
+  const scopes = [...opts.files].sort();
+  if (journal.ticketId !== opts.ticketId || journal.label !== opts.label || journal.cycleId !== opts.cycleId
+    || JSON.stringify([...journal.files].sort()) !== JSON.stringify(scopes)
+    || journal.integratedStates.some(([path]) => !isWithinScope(path, opts.files))) {
+    throw new Error("Le journal ne correspond pas au lot demandé ; reprise refusée.");
+  }
+  return {
+    ...journal,
+    baseline: new Map(journal.baseline),
+    integratedStates: new Map(journal.integratedStates),
+  };
+}
 
 function workspacePath(opts: ImplementationLotOptions): string {
-  const identity = createHash("sha256").update(`${opts.ticketId}\0${opts.label}`).digest("hex").slice(0, WORKSPACE_HASH_LENGTH);
+  let key = `${opts.ticketId}\0${opts.label}`;
+  if (opts.cycleId !== undefined) key += `\0${opts.cycleId}`;
+  const identity = createHash("sha256").update(key).digest("hex").slice(0, WORKSPACE_HASH_LENGTH);
   return join(dirname(opts.slotPath), `${basename(opts.slotPath)}${WORKSPACE_MARKER}${identity}`);
 }
 
@@ -40,7 +132,7 @@ function isWithinScope(path: string, scopes: string[]): boolean {
 
 function validateScope(scopes: string[]): void {
   if (scopes.length === 0 || scopes.some((scope) =>
-    !scope || scope.startsWith("/") || scope.includes("\\") || scope.split("/").some((part) => !part || part === "." || part === ".." || part === ".git")
+    !isValidRelativePath(scope)
   )) {
     throw new Error("Périmètre de fichiers invalide pour la délégation isolée.");
   }
@@ -63,7 +155,7 @@ async function listPaths(cwd: string): Promise<string[]> {
   const output = await git(cwd, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]);
   const paths = output.split("\0").filter(Boolean);
   for (const path of paths) {
-    if (isAbsolute(path) || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === ".." || part === ".git")) {
+    if (!isValidRelativePath(path)) {
       throw new Error(`Chemin Git invalide pour la délégation : ${path}`);
     }
   }
@@ -193,10 +285,14 @@ function validateScopedSymlink(root: string, path: string, state: FileState): vo
   }
 }
 
-async function installStagedPath(stageRoot: string, targetRoot: string, path: string, state: FileState): Promise<void> {
+async function installStagedPath(stageRoot: string, targetRoot: string, path: string, state: FileState, replaceExisting: boolean): Promise<void> {
   if (state.kind === "missing") return;
   await ensureParentDirectory(targetRoot, path, true);
   const target = join(targetRoot, path);
+  if (replaceExisting) {
+    await rename(join(stageRoot, path), target);
+    return;
+  }
   if (state.kind === "symlink") {
     await symlink(state.signature, target);
   } else {
@@ -207,7 +303,7 @@ async function installStagedPath(stageRoot: string, targetRoot: string, path: st
 interface AppliedPath {
   path: string;
   state: FileState;
-  hadOriginal: boolean;
+  previous: FileState;
 }
 
 async function integrateChanges(
@@ -243,31 +339,42 @@ async function integrateChanges(
       const previous = baseline.get(path) ?? { kind: "missing", signature: "", mode: 0 };
       const state = child.get(path);
       if (!state) throw new Error(`État du fichier ${path} introuvable.`);
-      if (!sameState(previous, await fileState(parent, path))) {
+      const current = await fileState(parent, path);
+      if (sameState(current, state)) continue;
+      if (!sameState(previous, current)) {
         throw new Error(`Le fichier ${path} a changé dans le worktree du ticket ; intégration refusée.`);
       }
       await ensureParentDirectory(parent, path, state.kind !== "missing");
       if (previous.kind !== "missing") {
         await ensureParentDirectory(backups, path, true);
-        await rename(join(parent, path), join(backups, path));
+        if (state.kind === "missing") {
+          await rename(join(parent, path), join(backups, path));
+        } else {
+          await copyPath(parent, backups, path, previous);
+        }
       }
-      applied.push({ path, state, hadOriginal: previous.kind !== "missing" });
+      applied.push({ path, state, previous });
       await assertActive();
-      await installStagedPath(staged, parent, path, state);
+      if (state.kind !== "missing" && !sameState(previous, await fileState(parent, path))) {
+        throw new Error(`Le fichier ${path} a changé dans le worktree du ticket ; intégration refusée.`);
+      }
+      await installStagedPath(staged, parent, path, state, previous.kind !== "missing");
       await assertActive();
     }
   } catch (error) {
     for (const item of applied.reverse()) {
       const current = await fileState(parent, item.path).catch(() => null);
+      if (current && sameState(current, item.previous)) continue;
       if (!current || (current.kind !== "missing" && !sameState(current, item.state))) {
         preserveBackups = true;
         continue;
       }
       try {
-        await rm(join(parent, item.path), { force: true, recursive: true });
-        if (item.hadOriginal) {
+        if (item.previous.kind !== "missing") {
           await ensureParentDirectory(parent, item.path, true);
           await rename(join(backups, item.path), join(parent, item.path));
+        } else {
+          await rm(join(parent, item.path), { force: true, recursive: true });
         }
       } catch {
         preserveBackups = true;
@@ -300,11 +407,11 @@ export class DelegationWorkspace {
     }
   }
 
-  async prepare(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+  async prepare(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
     return this.withSlotLock(opts.slotPath, () => this.prepareUnlocked(opts));
   }
 
-  private async prepareUnlocked(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+  private async prepareUnlocked(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
     validateScope(opts.files);
     this.cancelled.delete(workspacePath(opts));
     const canonicalSlot = await realpath(opts.slotPath);
@@ -312,7 +419,20 @@ export class DelegationWorkspace {
     if (await realpath(repoRoot) !== canonicalSlot) throw new Error("Le lot doit partir de la racine du worktree du ticket.");
     const cwd = workspacePath(opts);
     if (this.lots.has(cwd)) throw new Error("Ce lot possède déjà un espace de travail actif.");
-    await this.cleanup(opts);
+    const saved = await readJournal(opts);
+    if (saved) {
+      await this.assertParent(opts, saved);
+      if (saved.phase !== "prepared") {
+        await this.finishUnlocked(opts);
+        return { cwd, integrated: true };
+      }
+      await this.assertWorkspace(opts, saved);
+      this.lots.set(cwd, saved);
+      return { cwd };
+    }
+    if (await lstatIfExists(cwd)) {
+      throw new Error("Un espace de travail sans journal existe pour ce lot ; reprise refusée pour préserver ses modifications.");
+    }
     const head = (await git(canonicalSlot, ["rev-parse", "HEAD"])).trim();
     const slotInfo = await lstat(canonicalSlot);
     try {
@@ -342,7 +462,14 @@ export class DelegationWorkspace {
         throw new Error("Le code a changé pendant la préparation du lot.");
       }
       if (this.cancelled.has(cwd)) throw new Error("Lot annulé pendant sa préparation.");
-      this.lots.set(cwd, { head, baseline, canonicalSlot, slotDevice: slotInfo.dev, slotInode: slotInfo.ino });
+      const workspaceInfo = await lstat(cwd);
+      const lot: LotSnapshot = {
+        head, baseline, canonicalSlot, slotDevice: slotInfo.dev, slotInode: slotInfo.ino,
+        workspaceDevice: workspaceInfo.dev, workspaceInode: workspaceInfo.ino,
+        phase: "prepared", integratedStates: new Map(),
+      };
+      await writeJournal(opts, lot);
+      this.lots.set(cwd, lot);
       return { cwd };
     } catch (error) {
       await this.cleanup(opts);
@@ -354,27 +481,51 @@ export class DelegationWorkspace {
     return this.withSlotLock(opts.slotPath, () => this.finishUnlocked(opts));
   }
 
+  private async assertParent(opts: ImplementationLotOptions, lot: LotSnapshot): Promise<void> {
+    const cwd = workspacePath(opts);
+    if (this.cancelled.has(cwd)) throw new Error("Lot annulé pendant son intégration.");
+    const canonicalSlot = await realpath(opts.slotPath);
+    const info = await lstat(canonicalSlot);
+    if (canonicalSlot !== lot.canonicalSlot || info.dev !== lot.slotDevice || info.ino !== lot.slotInode) {
+      throw new Error("Le worktree du ticket a été remplacé ; intégration refusée.");
+    }
+    const head = (await git(canonicalSlot, ["rev-parse", "HEAD"])).trim();
+    if (head !== lot.head) throw new Error("Le commit du ticket a changé ; intégration refusée.");
+  }
+
+  private async assertWorkspace(opts: ImplementationLotOptions, lot: LotSnapshot): Promise<void> {
+    const cwd = workspacePath(opts);
+    const info = await lstat(cwd);
+    if (!info.isDirectory() || await realpath(cwd) !== resolve(cwd)
+      || info.dev !== lot.workspaceDevice || info.ino !== lot.workspaceInode) {
+      throw new Error("Le worktree du lot a été remplacé ; reprise refusée.");
+    }
+    const childHead = (await git(cwd, ["rev-parse", "HEAD"])).trim();
+    if (childHead !== lot.head) {
+      throw new Error("Le commit de base a changé pendant le lot ; intégration refusée.");
+    }
+  }
+
   private async finishUnlocked(opts: ImplementationLotOptions): Promise<void> {
     validateScope(opts.files);
     const cwd = workspacePath(opts);
-    const lot = this.lots.get(cwd);
+    const lot = await readJournal(opts);
     if (!lot) throw new Error("Espace de travail du lot introuvable.");
-    const assertActive = async (): Promise<void> => {
-      if (this.cancelled.has(cwd)) throw new Error("Lot annulé pendant son intégration.");
-      const canonicalSlot = await realpath(opts.slotPath);
-      const info = await lstat(canonicalSlot);
-      if (canonicalSlot !== lot.canonicalSlot || info.dev !== lot.slotDevice || info.ino !== lot.slotInode) {
-        throw new Error("Le worktree du ticket a été remplacé ; intégration refusée.");
-      }
-      const head = (await git(canonicalSlot, ["rev-parse", "HEAD"])).trim();
-      if (head !== lot.head) throw new Error("Le commit du ticket a changé ; intégration refusée.");
-    };
+    let completed = false;
     try {
-      await assertActive();
-      const childHead = (await git(cwd, ["rev-parse", "HEAD"])).trim();
-      if (childHead !== lot.head) {
-        throw new Error("Le commit de base a changé pendant le lot ; intégration refusée.");
+      await this.assertParent(opts, lot);
+      if (lot.phase === "integrated") {
+        if (await lstatIfExists(cwd)) await this.assertWorkspace(opts, lot);
+        for (const [path, state] of lot.integratedStates) {
+          await ensureParentDirectory(opts.slotPath, path, false);
+          if (!sameState(state, await fileState(opts.slotPath, path))) {
+            throw new Error(`Le fichier ${path} a changé après l'intégration du lot ; reprise refusée.`);
+          }
+        }
+        completed = true;
+        return;
       }
+      await this.assertWorkspace(opts, lot);
       const paths = new Set([...lot.baseline.keys(), ...await listPaths(cwd)]);
       const child = await snapshot(cwd, paths);
       const changed = [...paths].filter((path) => {
@@ -384,22 +535,37 @@ export class DelegationWorkspace {
       });
       const outside = changed.find((path) => !isWithinScope(path, opts.files));
       if (outside) throw new Error(`Le lot a modifié un fichier hors de son périmètre : ${outside}`);
-      if (changed.length === 0) return;
+      const intended = new Map<string, FileState>();
       for (const path of changed) {
         const state = child.get(path);
-        if (state) validateScopedSymlink(cwd, path, state);
+        if (!state) throw new Error(`État du fichier ${path} introuvable.`);
+        validateScopedSymlink(cwd, path, state);
+        intended.set(path, state);
       }
-      for (const path of changed) {
+      const recovering = lot.phase === "integrating";
+      if (recovering && !sameSnapshot(intended, lot.integratedStates)) {
+        throw new Error("Le lot a changé depuis le début de son intégration ; reprise refusée.");
+      }
+      for (const [path, state] of intended) {
         const previous = lot.baseline.get(path) ?? { kind: "missing", signature: "", mode: 0 };
         await ensureParentDirectory(opts.slotPath, path, false);
-        if (!sameState(previous, await fileState(opts.slotPath, path))) {
+        const current = await fileState(opts.slotPath, path);
+        if (!sameState(previous, current) && !(recovering && sameState(state, current))) {
           throw new Error(`Le fichier ${path} a changé dans le worktree du ticket ; intégration refusée.`);
         }
       }
-      await integrateChanges(opts.slotPath, cwd, lot.baseline, child, changed, assertActive);
+      lot.phase = "integrating";
+      lot.integratedStates = intended;
+      await writeJournal(opts, lot);
+      if (changed.length > 0) {
+        await integrateChanges(opts.slotPath, cwd, lot.baseline, child, changed, () => this.assertParent(opts, lot));
+      }
+      lot.phase = "integrated";
+      await writeJournal(opts, lot);
+      completed = true;
     } finally {
       this.lots.delete(cwd);
-      await this.cleanup(opts);
+      if (completed) await this.removeWorktree(opts.slotPath, cwd);
     }
   }
 
@@ -413,7 +579,9 @@ export class DelegationWorkspace {
   }
 
   cancel(opts: ImplementationLotOptions): void {
-    this.cancelled.add(workspacePath(opts));
+    const cwd = workspacePath(opts);
+    this.cancelled.add(cwd);
+    this.lots.delete(cwd);
   }
 
   async cleanupForSlot(slotPath: string, repoPath: string): Promise<void> {
@@ -433,18 +601,25 @@ export class DelegationWorkspace {
   private async cleanupSlotWorktrees(slotPath: string, repoPath: string): Promise<void> {
     const prefix = `${basename(slotPath)}${WORKSPACE_MARKER}`;
     const entries = await readdir(dirname(slotPath));
+    const visited = new Set<string>();
     for (const entry of entries) {
       if (!entry.startsWith(prefix)) continue;
       const hash = entry.slice(prefix.length);
-      if (!new RegExp(`^[a-f0-9]{${WORKSPACE_HASH_LENGTH}}$`).test(hash)) continue;
-      const cwd = join(dirname(slotPath), entry);
+      const identity = hash.endsWith(JOURNAL_SUFFIX) ? hash.slice(0, -JOURNAL_SUFFIX.length) : hash;
+      if (!new RegExp(`^[a-f0-9]{${WORKSPACE_HASH_LENGTH}}$`).test(identity)) continue;
+      if (visited.has(identity)) continue;
+      visited.add(identity);
+      const cwd = join(dirname(slotPath), `${prefix}${identity}`);
       this.lots.delete(cwd);
       await this.removeWorktree(slotPath, cwd, repoPath);
+      await rm(`${cwd}${JOURNAL_SUFFIX}`, { force: true });
     }
   }
 
   private async cleanup(opts: ImplementationLotOptions): Promise<void> {
-    await this.removeWorktree(opts.slotPath, workspacePath(opts));
+    const cwd = workspacePath(opts);
+    await this.removeWorktree(opts.slotPath, cwd);
+    await rm(`${cwd}${JOURNAL_SUFFIX}`, { force: true });
   }
 
   private async removeWorktree(slotPath: string, cwd: string, repoPath = slotPath): Promise<void> {

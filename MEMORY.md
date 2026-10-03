@@ -41,3 +41,7 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 - Browser request origin filtering is not full network isolation. It constrains the browser's app traffic, not provider processes, project commands, subprocesses, or external resources.
 
 - Quality UI messages are localized at the display boundary, including persisted historical errors. Keep the English wire contract and preserve user-authored criteria, agent evidence and raw diagnostics; translate only recognized application-owned text.
+
+## Delegated implementation recovery
+
+A child can finish integration before its parent records completion. Keep the successful integration journal after removing the child worktree so recovery can recognize that outcome without applying its changes twice, and bind journals to the execution cycle so a fresh run cannot reuse an old completion. Suspending a child must release its active workspace ownership while preserving the workspace and journal; otherwise cleanup can wait for a session that no longer exists or erase the changes needed for recovery.

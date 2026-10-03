@@ -11,6 +11,7 @@ import { createLogger } from "../logger.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
+  CodeSnapshot,
   DoneGateResult,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
@@ -343,6 +344,10 @@ export class FakeSystemAdapter implements SystemAdapter {
   async codeFingerprint(slotPath: string): Promise<string> {
     this.log("codeFingerprint", { slotPath });
     return "dry-run-code-fingerprint";
+  }
+
+  async codeSnapshot(slotPath: string): Promise<CodeSnapshot> {
+    return { fingerprint: await this.codeFingerprint(slotPath), fileHashes: {} };
   }
 
   async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {

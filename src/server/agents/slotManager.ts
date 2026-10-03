@@ -31,6 +31,7 @@ import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts"
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
+import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
 import { reviewPublicationEvent } from "./reviewFindings.ts";
 import { publishedReviewFindings } from "./reviewPass.ts";
 import { assertExecutionAvailable, resolveTicketExecution, type ResolvedExecution } from "./executionConfig.ts";
@@ -140,6 +141,7 @@ export class SlotManager {
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
   private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
+  private implementationPlanResume: ((ticket: Ticket, slotId: number) => Promise<void>) | null = null;
   private qualityGate: ((ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>) | null = null;
   private qualityCancel: ((ticketId: string) => Promise<void>) | null = null;
   private qualityIterationVerifier: ((ticketId: string, worktreePath: string, iterationId: string) => Promise<void>) | null = null;
@@ -191,6 +193,10 @@ export class SlotManager {
 
   setDelegationDrain(drain: (ticketId: string) => Promise<void>): void {
     this.delegationDrain = drain;
+  }
+
+  setImplementationPlanResume(resume: (ticket: Ticket, slotId: number) => Promise<void>): void {
+    this.implementationPlanResume = resume;
   }
 
   setQualityGate(gate: (ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>): void {
@@ -1773,6 +1779,7 @@ export class SlotManager {
     const ticket = parentTicket.orchestrator === "claude" && previousClaudeModel.success && previousClaudeEffort.success
       ? { ...parentTicket, model: previousClaudeModel.data, effort: previousClaudeEffort.data }
       : parentTicket;
+    const restoredStage = recoveryStage(ticket, this.store);
     const path = slotPath(slotId);
     const iteration = this.store.getActiveQualityIteration(ticketId);
     if (iteration?.mode === "correction") {
@@ -1796,6 +1803,7 @@ export class SlotManager {
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
     this.sessionHub.disconnect(ticketId);
     await this.delegationDrain?.(ticketId);
+    const recoveryContext = buildRecoveryContext(ticket, this.store, restoredStage);
     if (iteration?.mode === "correction" && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la reprise.");
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     this.startAgentSession(ticket, slotId, path, { resume: true });
@@ -1805,7 +1813,7 @@ export class SlotManager {
     this.touch(
       this.store.updateTicket(ticketId, {
         column: "implementing",
-        stage: "implementing",
+        stage: restoredStage,
         error: null,
         finishedAt: null,
         lastProgressAt: Date.now(),
@@ -1813,5 +1821,9 @@ export class SlotManager {
     );
     this.hub.pushSlots(this.store.listSlots());
     this.deliverContract(ticket);
+    const delivered = this.sessionHub.sendEvent(ticketId, { type: "nudge", message: recoveryContext });
+    this.store.logEvent(ticketId, "recovery_context_delivered", { provider: execution.provider, stage: restoredStage, delivered, resumedThread: execution.provider === "codex" && ticket.sessionId !== null });
+    const recoveredTicket = this.store.getTicket(ticketId);
+    if (recoveredTicket !== null) await this.implementationPlanResume?.(recoveredTicket, slotId);
   }
 }

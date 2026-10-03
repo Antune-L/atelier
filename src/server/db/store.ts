@@ -18,6 +18,7 @@ import {
   DEFAULT_CODEX_EFFORT,
   DEFAULT_CODEX_MODEL,
   DEFAULT_COMMIT_LANGUAGE,
+  DEFAULT_IMPLEMENTATION_LOT,
   DEFAULT_TRIAGE_LANGUAGE,
   DEFAULT_PROJECT_COLOR,
   IMPLEMENT_EFFORT_META_KEY,
@@ -29,8 +30,12 @@ import {
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
+import { implementationPlanSchema } from "../../shared/implementationPlan.ts";
+import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
+import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
+import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
-import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
@@ -40,7 +45,7 @@ import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -65,6 +70,30 @@ const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
 const reviewVerdictSchema = z.enum(["approve", "revise"]);
 const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
 const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
+const reviewFileHashesSchema = z.record(z.string(), z.string());
+const implementationLotEventRowSchema = z.object({ type: z.string(), payload: z.string() });
+const implementationLotEventSchema = z.object({
+  label: z.string().default(DEFAULT_IMPLEMENTATION_LOT),
+  files: z.array(z.string()).optional(),
+  ok: z.boolean().optional(),
+});
+
+function parseReviewFileHashes(value: string | null): Record<string, string> | null {
+  if (value === null) return null;
+  try {
+    const parsed = reviewFileHashesSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface ImplementationLotState {
+  label: string;
+  files: string[];
+  started: number;
+  status: "completed" | "failed" | "interrupted";
+}
 
 function parsePersistedReviewFindings(value: string): ReviewFinding[] {
   try {
@@ -90,6 +119,7 @@ export interface ReviewPass {
   ticketId: string;
   passId: string;
   codeFingerprint: string;
+  fileHashes: Record<string, string> | null;
   reviewedCommitSha: string | null;
   reviewDepth: ReviewDepth;
   requiresApproval: boolean;
@@ -735,9 +765,53 @@ export class Store {
     this.transaction(() => {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
+      this.resetImplementationPlan(ticketId);
+      this.resetImplementationQueue(ticketId);
       this.db.query("UPDATE tickets SET review_rounds = 0 WHERE id = ?").run(ticketId);
       this.logEvent(ticketId, "delegation_cycle_reset", null);
     });
+  }
+
+  getImplementationPlan(ticketId: string): ImplementationPlan | null {
+    const raw = this.db.query("SELECT * FROM implementation_plans WHERE ticket_id = ?").get(ticketId);
+    if (!raw) return null;
+    const row = mapImplementationPlanRow(raw);
+    return implementationPlanSchema.parse(JSON.parse(row.plan_json));
+  }
+
+  saveImplementationPlan(ticketId: string, plan: ImplementationPlan): ImplementationPlan {
+    const parsed = implementationPlanSchema.parse(plan);
+    if (parsed.ticketId !== ticketId) throw new Error("Implementation plan ticket does not match its owner");
+    this.db.query(
+      "INSERT OR REPLACE INTO implementation_plans (ticket_id, plan_json) VALUES (?, ?)",
+    ).run(ticketId, JSON.stringify(parsed));
+    return parsed;
+  }
+
+  resetImplementationPlan(ticketId: string): void {
+    this.db.query("DELETE FROM implementation_plans WHERE ticket_id = ?").run(ticketId);
+  }
+
+  getImplementationQueue(ticketId: string): ImplementationQueueLot[] {
+    const raw = this.db.query("SELECT * FROM implementation_queues WHERE ticket_id = ?").get(ticketId);
+    if (!raw) return [];
+    const row = mapImplementationQueueRow(raw);
+    return implementationQueueSchema.parse(JSON.parse(row.lots_json));
+  }
+
+  saveImplementationQueue(ticketId: string, lots: ImplementationQueueLot[]): void {
+    const parsed = implementationQueueSchema.parse(lots);
+    if (parsed.length === 0) {
+      this.resetImplementationQueue(ticketId);
+      return;
+    }
+    this.db.query(
+      "INSERT OR REPLACE INTO implementation_queues (ticket_id, lots_json) VALUES (?, ?)",
+    ).run(ticketId, JSON.stringify(parsed));
+  }
+
+  resetImplementationQueue(ticketId: string): void {
+    this.db.query("DELETE FROM implementation_queues WHERE ticket_id = ?").run(ticketId);
   }
 
   /** Replace the ticket's current review pass and invalidate every verdict from older code. */
@@ -745,6 +819,7 @@ export class Store {
     ticketId: string;
     passId: string;
     codeFingerprint: string;
+    fileHashes?: Record<string, string> | null;
     reviewedCommitSha: string | null;
     reviewDepth: ReviewDepth;
     requiresApproval: boolean;
@@ -758,12 +833,13 @@ export class Store {
       }
       this.db.query(
         `INSERT OR REPLACE INTO review_passes
-          (ticket_id, pass_id, code_fingerprint, reviewed_commit_sha, review_depth, requires_approval, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (ticket_id, pass_id, code_fingerprint, file_hashes_json, reviewed_commit_sha, review_depth, requires_approval, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         input.ticketId,
         input.passId,
         input.codeFingerprint,
+        input.fileHashes == null ? null : JSON.stringify(reviewFileHashesSchema.parse(input.fileHashes)),
         input.reviewedCommitSha,
         input.reviewDepth,
         input.requiresApproval ? 1 : 0,
@@ -870,6 +946,7 @@ export class Store {
       ticketId: row.ticket_id,
       passId: row.pass_id,
       codeFingerprint: row.code_fingerprint,
+      fileHashes: parseReviewFileHashes(row.file_hashes_json),
       reviewedCommitSha: row.reviewed_commit_sha,
       reviewDepth: reviewDepthSchema.parse(row.review_depth),
       requiresApproval: row.requires_approval === 1,
@@ -1344,6 +1421,8 @@ export class Store {
     const tx = this.db.transaction(() => {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
+      this.resetImplementationPlan(ticketId);
+      this.resetImplementationQueue(ticketId);
       this.db.query("DELETE FROM comments WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM events WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM tickets WHERE id = ?").run(ticketId);
@@ -1944,6 +2023,52 @@ export class Store {
     const parsed = z.object({ payload: z.string() }).parse(row);
     const event = z.object({ files: z.array(z.string()).optional() }).parse(JSON.parse(parsed.payload));
     return event.files ?? [];
+  }
+
+  listImplementationLotStates(ticketId: string): ImplementationLotState[] {
+    const rows = this.db.query(
+      `SELECT type, payload FROM events
+       WHERE ticket_id = ? AND type IN ('delegation_started', 'delegation_done', 'delegation_killed')
+         AND id > COALESCE((
+           SELECT MAX(id) FROM events WHERE ticket_id = ? AND type = 'delegation_cycle_reset'
+         ), 0)
+       ORDER BY id ASC`,
+    ).all(ticketId, ticketId);
+    const states = new Map<string, ImplementationLotState>();
+    for (const raw of rows) {
+      const row = implementationLotEventRowSchema.parse(raw);
+      const event = implementationLotEventSchema.parse(JSON.parse(row.payload));
+      const state = states.get(event.label) ?? {
+        label: event.label,
+        files: event.files ?? [],
+        started: 0,
+        status: "interrupted",
+      } satisfies ImplementationLotState;
+      if (row.type === "delegation_started") {
+        state.started += 1;
+        state.status = "interrupted";
+      } else if (row.type === "delegation_done") {
+        state.status = event.ok ? "completed" : "failed";
+      } else {
+        state.status = "interrupted";
+      }
+      states.set(event.label, state);
+    }
+    return [...states.values()];
+  }
+
+  getLastActiveStage(ticketId: string): Stage | null {
+    const row = this.db.query(
+      `SELECT json_extract(payload, '$.stage') AS stage FROM events
+       WHERE ticket_id = ? AND type = 'update_stage'
+         AND json_extract(payload, '$.stage') IN ('planning', 'awaiting_answers', 'implementing', 'reviewing', 'fixing', 'testing', 'opening_pr')
+         AND id > COALESCE((
+           SELECT MAX(id) FROM events WHERE ticket_id = ? AND type = 'delegation_cycle_reset'
+         ), 0)
+       ORDER BY id DESC LIMIT 1`,
+    ).get(ticketId, ticketId);
+    if (!row) return null;
+    return z.object({ stage: stageSchema }).parse(row).stage;
   }
 
   /**

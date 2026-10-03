@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 import { createLogger } from "../logger.ts";
 
+import type { CodeSnapshot } from "./types.ts";
+
 const log = createLogger("code-fingerprint");
 
 const CODE_FINGERPRINT_TIMEOUT_MS = 30_000;
@@ -132,8 +134,10 @@ async function hashFingerprintPaths(
   slotPath: string,
   paths: string[],
   signal: AbortSignal,
-): Promise<string> {
+  includeFileHashes: boolean,
+): Promise<CodeSnapshot> {
   const hash = createHash("sha256");
+  const fileHashes: Array<[string, string]> = [];
   const pending = new Map<number, Promise<FingerprintEntry>>();
   let nextIndex = 0;
 
@@ -154,14 +158,20 @@ async function hashFingerprintPaths(
     throwIfAborted(signal);
     const entry = pending.get(index);
     if (!entry) throw new Error("empreinte du code impossible : lecture de fichier interrompue");
-    updateFingerprint(hash, await waitForAbort(entry, signal));
+    const resolvedEntry = await waitForAbort(entry, signal);
+    updateFingerprint(hash, resolvedEntry);
+    if (includeFileHashes) {
+      const fileHash = createHash("sha256");
+      updateFingerprint(fileHash, resolvedEntry);
+      fileHashes.push([resolvedEntry.relativePath, fileHash.digest("hex")]);
+    }
     pending.delete(index);
     fillPending();
   }
-  return hash.digest("hex");
+  return { fingerprint: hash.digest("hex"), fileHashes: Object.fromEntries(fileHashes) };
 }
 
-export async function computeCodeFingerprint(slotPath: string): Promise<string> {
+async function computeSnapshot(slotPath: string, includeFileHashes: boolean): Promise<CodeSnapshot> {
   const fingerprintId = randomUUID();
   const startedAt = Date.now();
   const deadlineAt = startedAt + CODE_FINGERPRINT_TIMEOUT_MS;
@@ -174,7 +184,7 @@ export async function computeCodeFingerprint(slotPath: string): Promise<string> 
     const enumerationMs = Date.now() - startedAt;
     log.info("empreinte du code énumérée", { fingerprintId, fileCount: paths.length, enumerationMs });
     phase = "reading";
-    const fingerprint = await hashFingerprintPaths(slotPath, paths, abortController.signal);
+    const snapshot = await hashFingerprintPaths(slotPath, paths, abortController.signal, includeFileHashes);
     log.info("empreinte du code terminée", {
       fingerprintId,
       fileCount: paths.length,
@@ -182,7 +192,7 @@ export async function computeCodeFingerprint(slotPath: string): Promise<string> 
       readingMs: Date.now() - startedAt - enumerationMs,
       elapsedMs: Date.now() - startedAt,
     });
-    return fingerprint;
+    return snapshot;
   } catch (error) {
     log.warn("empreinte du code échouée", {
       fingerprintId,
@@ -195,4 +205,12 @@ export async function computeCodeFingerprint(slotPath: string): Promise<string> 
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function computeCodeFingerprint(slotPath: string): Promise<string> {
+  return (await computeSnapshot(slotPath, false)).fingerprint;
+}
+
+export async function computeCodeSnapshot(slotPath: string): Promise<CodeSnapshot> {
+  return computeSnapshot(slotPath, true);
 }

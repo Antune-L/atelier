@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
+import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorStack } from "../../shared/errors.ts";
 import { qualityArgsSchema } from "../../shared/protocol.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
@@ -11,6 +11,8 @@ import {
   doneArgsSchema,
   publishReviewArgsSchema,
   readReviewResultsArgsSchema,
+  readImplementationPlanArgsSchema,
+  submitImplementationPlanArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
   submitAnswerArgsSchema,
@@ -362,6 +364,8 @@ export class AgentCoordinator {
     ready_for_review: (ctx) => this.handleReadyForReview(ctx),
     fail: (ctx) => this.handleFail(ctx),
     delegate_implementation: (ctx) => this.handleDelegateImplementation(ctx),
+    submit_implementation_plan: (ctx) => this.handleSubmitImplementationPlan(ctx),
+    read_implementation_plan: (ctx) => this.handleReadImplementationPlan(ctx),
     delegate_review: (ctx) => this.handleDelegateReview(ctx),
     read_review_results: (ctx) => this.handleReadReviewResults(ctx),
     publish_review: (ctx) => this.handlePublishReview(ctx),
@@ -461,6 +465,7 @@ export class AgentCoordinator {
     const parsed = updateStageArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     this.lifecycle.setStage(ctx.ticketId, parsed.data.stage);
+    if (parsed.data.stage === "implementing") this.delegation.refreshImplementationPlan(ctx.ticketId);
     return { ok: true, result: `stage=${parsed.data.stage}` };
   }
 
@@ -616,6 +621,30 @@ export class AgentCoordinator {
     return this.delegation.start(ticket, ctx.slotId, parsed.data.plan, parsed.data.label, parsed.data.files);
   }
 
+  private async handleSubmitImplementationPlan(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = submitImplementationPlanArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    const execution = this.sessionHub.getExecutionConfig(ctx.ticketId);
+    if (!ticket || ticket.kind !== "feature" || (execution?.delegateProvider !== "codex" && execution?.delegateProvider !== "claude")) {
+      return { ok: false, result: "submit_implementation_plan réservé aux tickets feature avec implémenteur Codex ou Claude." };
+    }
+    if (ticket.resolvingConflicts) {
+      return { ok: false, result: "submit_implementation_plan indisponible en résolution de conflits : résous les conflits inline." };
+    }
+    return this.delegation.submitImplementationPlan(ticket, ctx.slotId, parsed.data);
+  }
+
+  private handleReadImplementationPlan(ctx: SessionToolCall): ToolResult {
+    const parsed = readImplementationPlanArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || ticket.kind !== "feature" || ticket.resolvingConflicts) {
+      return { ok: false, result: "read_implementation_plan indisponible pour cette session." };
+    }
+    return this.delegation.readImplementationPlan(ctx.ticketId);
+  }
+
   private async handleDelegateReview(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = delegateReviewArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
@@ -742,6 +771,7 @@ export class AgentCoordinator {
     if (ticket && ticket.pendingQuestions === 0 && ticket.stage === "awaiting_answers") {
       this.lifecycle.resumeImplementing(ticketId);
     }
+    if (ticket?.pendingQuestions === 0) this.delegation.refreshImplementationPlan(ticketId);
     this.markProgress(ticketId);
   }
 
@@ -756,6 +786,7 @@ export class AgentCoordinator {
     const resolvedNote = note || this.defaultPrdNote(existing);
     this.sessionHub.sendEvent(ticketId, { type: "prd_validated", note: resolvedNote });
     this.lifecycle.beginImplementing(ticketId, "prd_validated");
+    this.delegation.refreshImplementationPlan(ticketId);
     this.markProgress(ticketId);
   }
 
@@ -763,7 +794,7 @@ export class AgentCoordinator {
   private defaultPrdNote(ticket: ReturnType<Store["getTicket"]>): string {
     if (!ticket) return "";
     if (ticket.implementer === "codex" || ticket.implementer === "claude") {
-      return `Délègue l'implémentation via le tool delegate_implementation (passe le PRD validé comme plan) — un appel par lot indépendant avec des files disjoints, ${MAX_PARALLEL_IMPLEMENTERS} lots maximum et un label distinct par lot — puis termine ton tour et attends un événement implementation_done par lot ; ne poursuis pas l'implémentation dans cette session de planification.`;
+      return `Soumets un plan durable via submit_implementation_plan (reprends le PRD validé, avec label, plan, files disjoints et dependsOn par lot, maxParallel=${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS} par défaut, ${MAX_PARALLEL_IMPLEMENTERS} maximum) pour les lots distincts ; utilise delegate_implementation pour un unique petit lot. Termine ensuite ton tour et attends les événements implementation_done ; ne poursuis pas l'implémentation dans cette session de planification.`;
     }
     return "";
   }

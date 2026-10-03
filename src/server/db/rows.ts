@@ -258,6 +258,7 @@ const reviewPassRowSchema = z.object({
   ticket_id: z.string(),
   pass_id: z.string(),
   code_fingerprint: z.string(),
+  file_hashes_json: z.string().nullable(),
   reviewed_commit_sha: z.string().nullable(),
   review_depth: z.string(),
   requires_approval: z.number(),
@@ -571,6 +572,14 @@ export function mapAgentMessageRow(raw: unknown): AgentMessage {
 
 export function mapReviewPassRow(raw: unknown): ReviewPassRow {
   return reviewPassRowSchema.parse(raw);
+}
+
+export function mapImplementationPlanRow(raw: unknown): { ticket_id: string; plan_json: string } {
+  return z.object({ ticket_id: z.string(), plan_json: z.string() }).parse(raw);
+}
+
+export function mapImplementationQueueRow(raw: unknown): { ticket_id: string; lots_json: string } {
+  return z.object({ ticket_id: z.string(), lots_json: z.string() }).parse(raw);
 }
 
 export function mapReviewApprovalRow(raw: unknown): ReviewApprovalRow {

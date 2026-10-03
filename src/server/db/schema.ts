@@ -329,6 +329,24 @@ CREATE TABLE IF NOT EXISTS quality_evidence (
 CREATE INDEX IF NOT EXISTS quality_runs_ticket_idx ON quality_validation_runs(ticket_id, started_at);
 CREATE INDEX IF NOT EXISTS quality_evidence_run_idx ON quality_evidence(run_id, created_at);
 
+CREATE TABLE IF NOT EXISTS quality_iterations (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  project TEXT NOT NULL,
+  pr_url TEXT,
+  request_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(ticket_id, request_key)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS quality_iterations_active_ticket_idx ON quality_iterations(ticket_id)
+  WHERE status IN ('queued', 'correcting', 'verifying');
+CREATE UNIQUE INDEX IF NOT EXISTS quality_iterations_active_pr_idx ON quality_iterations(project, pr_url)
+  WHERE pr_url IS NOT NULL AND status IN ('queued', 'correcting', 'verifying');
+CREATE INDEX IF NOT EXISTS quality_iterations_ticket_idx ON quality_iterations(ticket_id, created_at);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   project TEXT NOT NULL,

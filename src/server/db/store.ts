@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
@@ -33,15 +34,25 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
-import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
-import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
+import { QUALITY_ITERATION_ACTIVE_STATUSES, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
+
+export interface CreateQualityIterationInput {
+  ticketId: string;
+  sourceRunId: string;
+  provider: Orchestrator;
+  mode: QualityIterationMode;
+  prUrl?: string | null;
+  headBranch?: string | null;
+  retryOfIterationId?: string;
+}
 
 export class TicketCreationRequestConflictError extends Error {
   constructor(requestId: string) {
@@ -1562,11 +1573,95 @@ export class Store {
     const criteriaSnapshots = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE ticket_id = ? ORDER BY version ASC").all(ticketId).map(mapQualityCriteriaSnapshotRow);
     const runs = this.db.query("SELECT * FROM quality_validation_runs WHERE ticket_id = ? ORDER BY started_at ASC, rowid ASC").all(ticketId).map(mapQualityValidationRunRow);
     const evidence = this.db.query("SELECT evidence.* FROM quality_evidence evidence JOIN quality_validation_runs runs ON runs.id = evidence.run_id WHERE runs.ticket_id = ? ORDER BY evidence.created_at ASC, evidence.rowid ASC").all(ticketId).map(mapQualityEvidenceRow);
-    return { ticketId, criteriaSnapshots, runs, evidence };
+    const iterations = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? ORDER BY created_at ASC, rowid ASC").all(ticketId).map(mapQualityIterationRow);
+    return { ticketId, criteriaSnapshots, runs, evidence, iterations, latestIteration: iterations.at(-1) ?? null };
+  }
+
+  createQualityIteration(input: CreateQualityIterationInput): QualityIteration {
+    return this.transaction(() => {
+      const requestKey = JSON.stringify([input.sourceRunId, input.mode, input.retryOfIterationId ?? null]);
+      const existing = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? AND request_key = ?").get(input.ticketId, requestKey);
+      if (existing) return mapQualityIterationRow(existing);
+      const ticket = this.getTicket(input.ticketId);
+      if (!ticket) throw new Error("Quality iteration ticket not found");
+      const source = this.getQualityRun(input.sourceRunId);
+      if (!source || source.ticketId !== ticket.id) throw new Error("Quality iteration source run does not belong to the ticket");
+      if (source.status === "queued" || source.status === "running") throw new Error("Quality iteration requires a completed source run");
+      const quality = this.getTicketQuality(ticket.id);
+      if (quality.runs.filter((run) => run.kind === "full").at(-1)?.id !== source.id) throw new Error("Quality iteration requires the latest full validation run");
+      const criteriaSnapshot = quality.criteriaSnapshots.find((snapshot) => snapshot.id === source.criteriaSnapshotId) ?? null;
+      if ((quality.criteriaSnapshots.at(-1)?.id ?? null) !== source.criteriaSnapshotId) throw new Error("Quality iteration source criteria are stale");
+      const sourceFingerprint = createHash("sha256").update(JSON.stringify([ticket.title, ticket.description, ticket.prdMarkdown])).digest("hex");
+      if (criteriaSnapshot && criteriaSnapshot.sourceFingerprint !== sourceFingerprint) throw new Error("Quality iteration source ticket or PRD changed");
+      if (criteriaSnapshot && source.mode !== criteriaSnapshot.mode) throw new Error("Quality iteration source validation mode does not match its criteria");
+      if (input.retryOfIterationId) {
+        const predecessor = this.getQualityIteration(input.retryOfIterationId);
+        if (!predecessor || predecessor.ticketId !== ticket.id || predecessor.sourceRunId !== source.id || predecessor.mode !== input.mode || QUALITY_ITERATION_ACTIVE_STATUSES.includes(predecessor.status)) throw new Error("Quality iteration retry requires a terminal predecessor for the same source and mode");
+      }
+      const prUrl = input.prUrl === undefined ? ticket.prUrl : input.prUrl;
+      const headBranch = input.headBranch === undefined ? ticket.branch : input.headBranch;
+      if (input.mode === "correction" && (!prUrl || !headBranch || !criteriaSnapshot)) throw new Error("Quality correction requires a PR branch and frozen acceptance criteria");
+      if (prUrl !== ticket.prUrl) throw new Error("Quality iteration PR does not match the ticket");
+      if (this.getActiveQualityIteration(ticket.id)) throw new Error("A quality iteration is already active for this ticket");
+      if (prUrl && this.db.query("SELECT id FROM quality_iterations WHERE project = ? AND pr_url = ? AND status IN ('queued', 'correcting', 'verifying')").get(ticket.project, prUrl)) throw new Error("A quality iteration is already active for this PR");
+      const now = Date.now();
+      const iteration = qualityIterationSchema.parse({ id: nanoid(), ticketId: ticket.id, project: ticket.project, prUrl, headBranch, sourceRunId: source.id, sourceRevision: source.revision, criteriaSnapshot, originalTicket: { title: ticket.title, description: ticket.description, prdMarkdown: ticket.prdMarkdown }, provider: input.provider, mode: input.mode, status: "queued", retryOfIterationId: input.retryOfIterationId ?? null, resultRunId: null, resultRevision: null, diagnostic: null, createdAt: now, updatedAt: now, completedAt: null });
+      this.db.query("INSERT INTO quality_iterations (id, ticket_id, project, pr_url, request_key, status, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(iteration.id, ticket.id, ticket.project, prUrl, requestKey, iteration.status, JSON.stringify(iteration), now);
+      return iteration;
+    });
+  }
+
+  getQualityIteration(iterationId: string): QualityIteration | null {
+    const row = this.db.query("SELECT * FROM quality_iterations WHERE id = ?").get(iterationId);
+    return row ? mapQualityIterationRow(row) : null;
+  }
+
+  getActiveQualityIteration(ticketId: string): QualityIteration | null {
+    const row = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? AND status IN ('queued', 'correcting', 'verifying')").get(ticketId);
+    return row ? mapQualityIterationRow(row) : null;
+  }
+
+  getLatestQualityIteration(ticketId: string): QualityIteration | null {
+    const row = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(ticketId);
+    return row ? mapQualityIterationRow(row) : null;
+  }
+
+  listActiveQualityIterations(): QualityIteration[] {
+    return this.db.query("SELECT * FROM quality_iterations WHERE status IN ('queued', 'correcting', 'verifying') ORDER BY created_at ASC, rowid ASC").all().map(mapQualityIterationRow);
+  }
+
+  updateQualityIteration(iterationId: string, patch: Partial<Pick<QualityIteration, "status" | "resultRunId" | "resultRevision" | "diagnostic" | "completedAt">>): QualityIteration | null {
+    return this.transaction(() => {
+      const previous = this.getQualityIteration(iterationId);
+      if (!previous) return null;
+      const candidate = qualityIterationSchema.parse({ ...previous, ...patch });
+      if (!QUALITY_ITERATION_ACTIVE_STATUSES.includes(previous.status)) {
+        if (JSON.stringify(candidate) !== JSON.stringify(previous)) throw new Error("Completed quality iterations are immutable");
+        return previous;
+      }
+      if (candidate.status === "queued" && previous.status !== "queued") throw new Error("Quality iterations cannot be requeued");
+      if (candidate.status === "correcting" && (previous.status === "verifying" || candidate.mode !== "correction")) throw new Error("Quality iterations cannot repeat correction");
+      if (previous.resultRunId !== null && candidate.resultRunId !== previous.resultRunId) throw new Error("Quality iteration verification run is immutable once selected");
+      if (candidate.resultRunId !== null) {
+        const run = this.getQualityRun(candidate.resultRunId);
+        if (!run || run.ticketId !== previous.ticketId || run.kind !== "full" || run.provider !== previous.provider || run.id === previous.sourceRunId) throw new Error("Quality iteration result requires a new full validation run for the same ticket and provider");
+        if (previous.criteriaSnapshot && run.criteriaSnapshotId !== previous.criteriaSnapshot.id) throw new Error("Quality iteration result must use frozen acceptance criteria");
+        if (candidate.resultRevision !== null && candidate.resultRevision !== run.revision) throw new Error("Quality iteration result revision does not match its validation run");
+        candidate.resultRevision = run.revision;
+        if (candidate.status === "completed" && run.status !== "passed") throw new Error("Completed quality iteration requires a passed validation run");
+      } else if (candidate.status === "completed") {
+        throw new Error("Completed quality iteration requires a validation result");
+      }
+      const now = Date.now();
+      const iteration = qualityIterationSchema.parse({ ...candidate, updatedAt: now, completedAt: QUALITY_ITERATION_ACTIVE_STATUSES.includes(candidate.status) ? null : candidate.completedAt ?? now });
+      this.db.query("UPDATE quality_iterations SET status = ?, payload_json = ? WHERE id = ?").run(iteration.status, JSON.stringify(iteration), iteration.id);
+      return iteration;
+    });
   }
 
   createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
     return this.transaction(() => {
+      if (this.getActiveQualityIteration(ticketId)?.mode === "correction") throw new Error("Quality criteria are frozen during a correction iteration");
       const version = this.scalar("SELECT COALESCE(MAX(version), 0) + 1 AS n FROM quality_criteria_snapshots WHERE ticket_id = ?", ticketId);
       const snapshot = qualityCriteriaSnapshotSchema.parse({ ...input, id: nanoid(), ticketId, version, createdAt: Date.now() });
       this.db.query("INSERT INTO quality_criteria_snapshots (id, ticket_id, version, payload_json, created_at) VALUES (?, ?, ?, ?, ?)").run(snapshot.id, ticketId, version, JSON.stringify(snapshot), snapshot.createdAt);
@@ -1602,12 +1697,12 @@ export class Store {
     return this.db.query("SELECT * FROM quality_validation_runs ORDER BY started_at ASC").all().map(mapQualityValidationRunRow).filter((run) => run.cleanupStatus !== "complete");
   }
 
-  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "evidenceAccepted" | "technicalEvidenceAccepted" | "criteriaSnapshotId" | "mode" | "phase" | "failurePhase">>): QualityValidationRun | null {
+  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "diagnostic" | "evidenceAccepted" | "technicalEvidenceAccepted" | "criteriaSnapshotId" | "mode" | "phase" | "failurePhase">>): QualityValidationRun | null {
     return this.transaction(() => {
       const previous = this.getQualityRun(runId);
       if (!previous) return null;
       const active = previous.status === "queued" || previous.status === "running";
-      if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.evidenceAccepted !== undefined || patch.technicalEvidenceAccepted !== undefined || patch.criteriaSnapshotId !== undefined || patch.mode !== undefined || patch.failurePhase !== undefined)) {
+      if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.diagnostic !== undefined || patch.evidenceAccepted !== undefined || patch.technicalEvidenceAccepted !== undefined || patch.criteriaSnapshotId !== undefined || patch.mode !== undefined || patch.failurePhase !== undefined)) {
         throw new Error("Completed quality run results are immutable");
       }
       if (patch.mode !== undefined && previous.mode !== null && patch.mode !== previous.mode) throw new Error("Quality validation mode is immutable once selected");

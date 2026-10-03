@@ -259,6 +259,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   slotManager.setDelegationDrain((ticketId) => delegationManager.drainTicket(ticketId));
   slotManager.setQualityGate((ticketId, mode) => qualityManager.gate(ticketId, mode));
   slotManager.setQualityCancel((ticketId) => qualityManager.cancel(ticketId));
+  slotManager.setQualityIterationVerifier((ticketId, worktreePath, iterationId) => qualityManager.verifyQualityIteration(ticketId, worktreePath, iterationId));
+  qualityManager.setQualityIterationCorrectionStarter((ticketId, iterationId) => slotManager.startQualityCorrection(ticketId, iterationId));
+  qualityManager.setQualityIterationSettled((ticketId, iterationId, runId, verdict) => slotManager.settleQualityIteration(ticketId, iterationId, runId, verdict));
+  qualityManager.setQualityIterationCancellation((ticketId, iterationId) => slotManager.cancelQualityCorrection(ticketId, iterationId));
   // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated child.
   sessionHub.onDisconnect((ticketId) => delegationManager.stop(ticketId));
   const coordinator = new AgentCoordinator(

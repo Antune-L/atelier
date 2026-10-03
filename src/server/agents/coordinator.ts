@@ -271,6 +271,8 @@ export class AgentCoordinator {
       generationId: context.generationId,
     });
     this.sessionHub.disconnect(ticketId, "failed");
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "interrupted", diagnostic: reason, completedAt: Date.now() });
     await this.lifecycle.stall(
       ticketId,
       { title: "Session agent interrompue", body: `${ticket.title}: ${reason}` },
@@ -316,6 +318,9 @@ export class AgentCoordinator {
     const testingTicket = this.store.getTicket(ctx.ticketId);
     if (testingTicket?.testing) {
       return { ok: false, result: "Session de test interactive : aucun tool de pipeline n'est disponible." };
+    }
+    if (this.store.getActiveQualityIteration(ctx.ticketId)?.status === "verifying" && ctx.name !== "quality") {
+      return { ok: false, result: "La correction est terminée ; la vérification indépendante est désormais pilotée par le backend." };
     }
     this.markProgress(ctx.ticketId);
     const startedAt = Date.now();
@@ -375,6 +380,9 @@ export class AgentCoordinator {
     const parsed = qualityArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const input = parsed.data;
+    if (this.store.getActiveQualityIteration(ctx.ticketId)?.mode === "correction" && input.action !== "get") {
+      return { ok: false, result: "Les critères sont figés et la vérification complète est pilotée par le backend pendant cette correction. Consulte quality.get uniquement." };
+    }
     switch (input.action) {
       case "set_criteria":
         if (!input.criteria) return { ok: false, result: "Les critères sont requis." };
@@ -471,6 +479,7 @@ export class AgentCoordinator {
   }
 
   private handleSubmitPrd(ctx: SessionToolCall): ToolResult {
+    if (this.store.getActiveQualityIteration(ctx.ticketId)) return { ok: false, result: "Le PRD initial est figé pendant cette itération qualité." };
     const parsed = submitPrdArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     this.lifecycle.submitPrd(ctx.ticketId, parsed.data.markdown);
@@ -559,7 +568,7 @@ export class AgentCoordinator {
       ok: true,
       result: outcome.slotReleased
         ? "Ticket clôturé, slot libéré."
-        : `Ticket clôturé. ${outcome.reason}`,
+        : outcome.reason,
     };
   }
 
@@ -638,6 +647,8 @@ export class AgentCoordinator {
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const iteration = this.store.getActiveQualityIteration(ctx.ticketId);
+    if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: parsed.data.reason, completedAt: Date.now() });
     await this.lifecycle.fail(ctx.ticketId, parsed.data.reason, parsed.data.findings);
     setTimeout(() => this.sessionHub.disconnect(ctx.ticketId, "failed"), 0);
     return { ok: true, result: "Échec enregistré. Slot conservé." };
@@ -668,6 +679,7 @@ export class AgentCoordinator {
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;
+    if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return;
     // Interactive test sessions run on a "done" card (stage stays "done", not active nor
     // awaiting_answers), so they exit just below at `needsResolution` and are never escalated/nudged.
 

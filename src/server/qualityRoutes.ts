@@ -4,7 +4,7 @@ import { basename, extname, isAbsolute, join, relative } from "node:path";
 import { Elysia } from "elysia";
 
 import { getErrorMessage } from "../shared/errors.ts";
-import { manualQualityEvidenceSchema, setQualityCriteriaSchema, validateQualitySchema } from "../shared/quality.ts";
+import { manualQualityEvidenceSchema, setQualityCriteriaSchema, startQualityIterationSchema, validateQualitySchema } from "../shared/quality.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
 import type { Store } from "./db/store.ts";
@@ -35,6 +35,7 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory }
   const response = async (ticketId: string) => ({
     quality: quality?.get(ticketId),
     gate: await quality?.gate(ticketId, "reservations"),
+    iterationActions: await quality?.iterationActions(ticketId),
   });
 
   return new Elysia({ prefix: "/tickets/:id/quality" })
@@ -108,6 +109,16 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory }
       return response(params.id);
     })
     .post("/preflight", ({ params }) => quality?.preflight(params.id))
+    .post("/iterations", async ({ params, body, set }) => {
+      const parsed = startQualityIterationSchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = HTTP_BAD_REQUEST;
+        return { error: parsed.error.message };
+      }
+      const iteration = await quality?.startQualityIteration(params.id, parsed.data);
+      set.status = HTTP_ACCEPTED;
+      return { iteration };
+    })
     .post("/checks", async ({ params, set }) => {
       const run = await quality?.runChecks(params.id);
       set.status = HTTP_ACCEPTED;

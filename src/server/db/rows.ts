@@ -38,8 +38,8 @@ import {
   triageVerdictSchema,
   vcsProviderSchema,
 } from "../../shared/schemas.ts";
-import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
-import type { QualityCriteriaSnapshot, QualityEvidence, QualityValidationRun } from "../../shared/quality.ts";
+import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import type { QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityValidationRun } from "../../shared/quality.ts";
 import type { ProjectConfig } from "../config.ts";
 import { isProjectKey } from "../config.ts";
 
@@ -495,6 +495,11 @@ export function mapQualityValidationRunRow(raw: unknown): QualityValidationRun {
 export function mapQualityEvidenceRow(raw: unknown): QualityEvidence {
   const row = qualityPayloadRowSchema.parse(raw);
   return qualityEvidenceSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityIterationRow(raw: unknown): QualityIteration {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityIterationSchema.parse(JSON.parse(row.payload_json));
 }
 
 export function mapSlotRow(raw: unknown): Slot {

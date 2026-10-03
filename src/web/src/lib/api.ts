@@ -46,7 +46,7 @@ import type {
 } from "@shared/schemas";
 import type { createConversationSchema, createTicketsFromPrdSchema } from "@shared/schemas";
 import type { Column, Orchestrator, PrState } from "@shared/constants";
-import type { ManualQualityEvidenceInput, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput } from "@shared/quality";
+import type { ManualQualityEvidenceInput, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -179,6 +179,8 @@ export const api = {
     request(`${ticketQualityPath(id)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
   verifyTicketQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
     request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
+  startQualityIteration: (id: string, input: StartQualityIterationInput): Promise<{ iteration: QualityIteration }> =>
+    request(`${ticketQualityPath(id)}/iterations`, { method: "POST", body: JSON.stringify(input) }),
   cancelQualityValidation: (id: string): Promise<QualityResponse> =>
     request(`${ticketQualityPath(id)}/cancel`, { method: "POST" }),
   addQualityEvidence: (id: string, input: ManualQualityEvidenceInput): Promise<QualityResponse> =>

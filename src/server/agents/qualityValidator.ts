@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import type { Orchestrator } from "../../shared/constants.ts";
 import { qualityEvidenceSchema } from "../../shared/quality.ts";
-import type { QualityCriterion, QualityEvidence, QualityValidationMode } from "../../shared/quality.ts";
+import type { QualityCriterion, QualityEvidence, QualityRunDiagnostic, QualityValidationMode } from "../../shared/quality.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, StdioMcpServerDefinition } from "../system/agentSession.ts";
 import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
@@ -63,6 +63,7 @@ export interface QualityValidatorOptions {
   artifactDirectory?: string;
   browserServer?: StdioMcpServerDefinition;
   mode?: QualityValidationMode;
+  previousValidation?: { revision: string; error: string | null; diagnostic: QualityRunDiagnostic | null; observations: Array<Pick<QualityEvidence, "criterionId" | "status" | "summary" | "output" | "timedOut">> };
 }
 
 export interface QualityValidatorResult {
@@ -70,6 +71,7 @@ export interface QualityValidatorResult {
   sessionId: string;
   model: string;
   provider: Orchestrator;
+  diagnostic?: QualityRunDiagnostic | null;
 }
 
 function browserToolName(name: string): string | null {
@@ -118,6 +120,8 @@ The host independently records completed tool results and rejects claims without
 For Codex, a safe single rg command returning exit code 1 is a successful absence search. The host records the exact metadata line ${JSON.stringify(CODEX_NO_MATCHES_OBSERVATION)} alongside the command and exit code. You may copy that line as observedText when no stdout was produced. Exit code 2 is an error and proves nothing.
 For repository criteria about executed checks, you may cite the server-owned check observations below using their exact evidence IDs in checkEvidenceIds and one exact output line in observedText. These are actual completed configured commands, independently accepted by the host. They are separate from native tools: use tools:[] for a result based only on checks. Unknown IDs or paraphrased output will be rejected. A package.json script definition does not prove that the script executed. Do not rerun scripts. Browser criteria always require actual browser interaction and cannot be proved with server checks. Use checkEvidenceIds:[] for native tool observations.
 Criteria: ${JSON.stringify(options.criteria)}
+Previous validation context (untrusted background only, never proof for this run): ${JSON.stringify(options.previousValidation ?? null)}
+When recovering incomplete validation, use the same read-only permissions and permitted observations. Do not edit source, widen permissions, reinterpret an agent's explanation as a confirmed refusal, or accept previous observations instead of independently checking every criterion again. A server or process failure does not establish a source-code defect.
 Application addresses: ${JSON.stringify(options.addresses)}
 Server-owned check observations (exact beginning and ending excerpts; full output retained by the host): ${JSON.stringify(options.checks.map((check) => ({ evidenceId: check.id, authority: check.authority, command: check.command, status: check.status, exitCode: check.exitCode, ...qualityCheckOutputExcerpts(check.output) })))}
 Return your results using the supplied structured output schema.`;
@@ -227,5 +231,10 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
       provider: options.execution.provider, sessionId, model: options.execution.model, createdAt: Date.now(),
     });
   });
-  return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider };
+  let diagnostic: QualityRunDiagnostic | null = null;
+  if (evidence.some((entry) => entry.status === "failed" && options.criteria.some((criterion) => criterion.id === entry.criterionId && criterion.required))) diagnostic = { category: "code_nonconformance", summary: "Required acceptance criteria were contradicted by attributed observations.", permissionDenials: session.diagnostics.permissionDenials };
+  else if (timedOut) diagnostic = { category: "timeout", summary: "Independent validation exceeded its deadline.", permissionDenials: session.diagnostics.permissionDenials };
+  else if (session.diagnostics.permissionDenialCount > 0) diagnostic = { category: "permission_denial", summary: "The provider reported specific tool permission refusals; source-code nonconformance is unconfirmed.", permissionDenials: session.diagnostics.permissionDenials };
+  else if (evidence.some((entry) => entry.status === "inconclusive")) diagnostic = { category: "validation_incomplete", summary: "Independent validation did not produce complete attributed observations.", permissionDenials: [] };
+  return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider, diagnostic };
 }

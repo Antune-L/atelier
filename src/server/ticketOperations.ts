@@ -359,6 +359,7 @@ export class TicketOperations {
   updateTicket(ticketId: string, input: unknown, options: UpdateTicketOptions = {}): Ticket {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
+    if (this.deps.store.getActiveQualityIteration(ticketId)) throw new TicketOperationError("CONFLICT", "The original requirements and execution settings are frozen during a quality iteration.");
     if (options.requireTodo && ticket.column !== "todo") {
       throw new TicketOperationError("CONFLICT", "only a TODO ticket can be updated through MCP");
     }
@@ -441,6 +442,7 @@ export class TicketOperations {
   async startTicket(ticketId: string): Promise<StartTicketResult> {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket) throw new TicketOperationError("NOT_FOUND", "ticket not found");
+    if (this.deps.store.getLatestQualityIteration(ticketId)?.mode === "correction") throw new TicketOperationError("CONFLICT", "Use the dedicated quality correction or verification recovery action for this ticket.");
     if (isActive(ticket)) return { status: "already_started", ticket: compactTicket(ticket) };
     if (ticket.column !== "todo") {
       throw new TicketOperationError("CONFLICT", "only a TODO ticket can be started");

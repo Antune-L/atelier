@@ -36,6 +36,7 @@ export class Watchdog {
     const now = Date.now();
     for (const ticket of this.store.listTickets(false)) {
       if (ticket.stage === null || !ACTIVE_STAGES.includes(ticket.stage)) continue;
+      if (this.store.getActiveQualityIteration(ticket.id)?.status === "verifying") continue;
       if (ticket.watchdogFlagged) continue;
       const last = this.store.getLastProgressAt(ticket.id);
       if (last > 0 && now - last >= WATCHDOG_TIMEOUT_MS) {

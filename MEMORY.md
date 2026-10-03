@@ -29,6 +29,8 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 
 ## Disposable quality verification
 
+- A real Claude correction session claimed that a connection error on its inherited public `kanban` HTTP MCP endpoint made session worker tools unavailable, before attempting any worker call. The same session successfully discovered and called the injected `mcp__kanban__fail` tool. Worker tools are registered in-process by the Claude provider; a public endpoint warning is not evidence that those tools failed. Keep the correction contract explicit about this distinction and require actual discovery/call evidence before changing permissions or host configuration.
+
 - Repository validator read policies restrict tools and paths; they do not semantically filter readable file contents. Do not describe scoped repository reads as guaranteed secret exclusion.
 - Snapshot SQLite databases using `VACUUM INTO` before isolated verification. Copying only the main file can omit committed changes still held in the write-ahead log (WAL). Use a separate database and server port for the copied app; temporary validation worktrees also need independent runtime data and application ports.
 - Preserve the actual application/provider startup error. A later readiness timeout is not the root cause: the real Claude smoke initially inherited a provider proxy URL pointing at an unavailable local endpoint, and the temporary harness succeeded after removing that override. Do not change the user's provider configuration to repair a disposable probe.

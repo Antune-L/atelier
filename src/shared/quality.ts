@@ -64,6 +64,20 @@ export type QualityEnvironment = z.infer<typeof qualityEnvironmentSchema>;
 export const qualityRunStatusSchema = z.enum(["queued", "running", "passed", "failed", "cancelled", "interrupted", "inconclusive"]);
 export type QualityRunStatus = z.infer<typeof qualityRunStatusSchema>;
 
+export const qualityRunDiagnosticSchema = z.object({
+  category: z.enum(["code_nonconformance", "permission_denial", "timeout", "validation_incomplete", "backend_checks_failed"]),
+  summary: nonEmptyTextSchema,
+  permissionDenials: z.array(z.object({
+    provider: z.enum(ORCHESTRATORS),
+    source: z.literal("provider_permission_denial"),
+    toolName: nonEmptyTextSchema,
+    commandShape: z.string().nullable(),
+    reason: z.string(),
+    reportedMs: z.number().nonnegative(),
+  })).default([]),
+});
+export type QualityRunDiagnostic = z.infer<typeof qualityRunDiagnosticSchema>;
+
 export const qualityValidationRunSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema,
@@ -85,6 +99,7 @@ export const qualityValidationRunSchema = z.object({
   environment: qualityEnvironmentSchema.nullable(),
   cleanupStatus: z.enum(["pending", "complete", "failed"]),
   error: z.string().nullable(),
+  diagnostic: qualityRunDiagnosticSchema.nullable().default(null),
 });
 export type QualityValidationRun = z.infer<typeof qualityValidationRunSchema>;
 
@@ -138,11 +153,44 @@ export const qualityEvidenceSchema = z.object({
 });
 export type QualityEvidence = z.infer<typeof qualityEvidenceSchema>;
 
+export const QUALITY_ITERATION_ACTIVE_STATUSES = ["queued", "correcting", "verifying"] satisfies string[];
+
+export const qualityIterationModeSchema = z.enum(["correction", "recovery"]);
+export type QualityIterationMode = z.infer<typeof qualityIterationModeSchema>;
+
+export const qualityIterationStatusSchema = z.enum(["queued", "correcting", "verifying", "completed", "failed", "cancelled", "interrupted"]);
+export type QualityIterationStatus = z.infer<typeof qualityIterationStatusSchema>;
+
+export const qualityIterationSchema = z.object({
+  id: nonEmptyTextSchema,
+  ticketId: nonEmptyTextSchema,
+  project: nonEmptyTextSchema,
+  prUrl: z.string().url().nullable(),
+  headBranch: nonEmptyTextSchema.nullable(),
+  sourceRunId: nonEmptyTextSchema,
+  sourceRevision: nonEmptyTextSchema,
+  criteriaSnapshot: qualityCriteriaSnapshotSchema.nullable(),
+  originalTicket: z.object({ title: z.string(), description: z.string(), prdMarkdown: z.string().nullable() }),
+  provider: z.enum(ORCHESTRATORS),
+  mode: qualityIterationModeSchema,
+  status: qualityIterationStatusSchema,
+  retryOfIterationId: nonEmptyTextSchema.nullable().default(null),
+  resultRunId: nonEmptyTextSchema.nullable(),
+  resultRevision: nonEmptyTextSchema.nullable(),
+  diagnostic: z.string().nullable(),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  completedAt: timestampSchema.nullable(),
+});
+export type QualityIteration = z.infer<typeof qualityIterationSchema>;
+
 export const ticketQualitySchema = z.object({
   ticketId: nonEmptyTextSchema,
   criteriaSnapshots: z.array(qualityCriteriaSnapshotSchema),
   runs: z.array(qualityValidationRunSchema),
   evidence: z.array(qualityEvidenceSchema),
+  iterations: z.array(qualityIterationSchema).default([]),
+  latestIteration: qualityIterationSchema.nullable().default(null),
 });
 export type TicketQuality = z.infer<typeof ticketQualitySchema>;
 
@@ -183,8 +231,24 @@ export type QualityPreflight = z.infer<typeof qualityPreflightSchema>;
 export const qualityResponseSchema = z.object({
   quality: ticketQualitySchema,
   gate: qualityGateSchema,
+  iterationActions: z.object({
+    sourceRunId: nonEmptyTextSchema.nullable(),
+    recommendedMode: z.enum(["correction", "recovery"]).nullable(),
+    retryOfIterationId: nonEmptyTextSchema.nullable(),
+    recovery: z.object({ available: z.boolean(), reason: z.string().nullable() }),
+    correction: z.object({ available: z.boolean(), reason: z.string().nullable() }),
+  }).optional(),
 });
 export type QualityResponse = z.infer<typeof qualityResponseSchema>;
+export type QualityIterationActions = NonNullable<QualityResponse["iterationActions"]>;
+
+export const startQualityIterationSchema = z.object({
+  sourceRunId: nonEmptyTextSchema,
+  provider: z.enum(ORCHESTRATORS),
+  mode: z.enum(["correction", "recovery"]),
+  retryOfIterationId: nonEmptyTextSchema.optional(),
+});
+export type StartQualityIterationInput = z.infer<typeof startQualityIterationSchema>;
 
 export const validateQualitySchema = z.object({ provider: z.enum(ORCHESTRATORS) });
 export type ValidateQualityInput = z.infer<typeof validateQualitySchema>;

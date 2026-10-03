@@ -50,19 +50,19 @@ function CriteriaEditor({ snapshot, busy, onSave, onClose }: { snapshot: Quality
       <div className="space-y-3">
         {criteria.map((criterion, index) => (
           <div key={criterion.id} className="space-y-2 rounded border border-border p-3">
-            <div className="flex items-center justify-between"><label htmlFor={`criterion-${criterion.id}`} className="text-xs font-medium">Critère {index + 1}</label><Button variant="ghost" size="sm" aria-label={`Supprimer le critère ${index + 1}`} onClick={() => setCriteria((current) => current.filter((item) => item.id !== criterion.id))}><Trash2 className="h-3.5 w-3.5" /></Button></div>
-            <Textarea id={`criterion-${criterion.id}`} value={criterion.text} onChange={(event) => setCriteria((current) => current.map((item) => item.id === criterion.id ? { ...item, text: event.target.value, source: "user" } : item))} />
-            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={criterion.required} onChange={(event) => setCriteria((current) => current.map((item) => item.id === criterion.id ? { ...item, required: event.target.checked } : item))} />Requis pour la livraison complète</label>
+            <div className="flex items-center justify-between"><label htmlFor={`criterion-${criterion.id}`} className="text-xs font-medium">Critère {index + 1}</label><Button variant="ghost" size="sm" disabled={busy || saving} aria-label={`Supprimer le critère ${index + 1}`} onClick={() => setCriteria((current) => current.filter((item) => item.id !== criterion.id))}><Trash2 className="h-3.5 w-3.5" /></Button></div>
+            <Textarea id={`criterion-${criterion.id}`} disabled={busy || saving} value={criterion.text} onChange={(event) => setCriteria((current) => current.map((item) => item.id === criterion.id ? { ...item, text: event.target.value, source: "user" } : item))} />
+            <label className="flex items-center gap-2 text-xs"><input type="checkbox" disabled={busy || saving} checked={criterion.required} onChange={(event) => setCriteria((current) => current.map((item) => item.id === criterion.id ? { ...item, required: event.target.checked } : item))} />Requis pour la livraison complète</label>
           </div>
         ))}
-        <Button variant="outline" size="sm" onClick={() => setCriteria((current) => [...current, newCriterion()])}><Plus className="h-3.5 w-3.5" />Ajouter un critère</Button>
+        <Button variant="outline" size="sm" disabled={busy || saving} onClick={() => setCriteria((current) => [...current, newCriterion()])}><Plus className="h-3.5 w-3.5" />Ajouter un critère</Button>
         {error !== null && <p role="alert" className="text-xs text-danger">{error}</p>}
       </div>
     </Dialog>
   );
 }
 
-function HumanEvidenceEditor({ criterion, onSave, onClose }: { criterion: QualityCriterion; onSave: QualityCriteriaPanelProps["onEvidence"]; onClose: () => void }) {
+function HumanEvidenceEditor({ criterion, busy, onSave, onClose }: { criterion: QualityCriterion; busy: boolean; onSave: QualityCriteriaPanelProps["onEvidence"]; onClose: () => void }) {
   const [observation, setObservation] = useState("");
   const [status, setStatus] = useState<ManualQualityEvidenceInput["status"]>("inconclusive");
   const [saving, setSaving] = useState(false);
@@ -80,11 +80,11 @@ function HumanEvidenceEditor({ criterion, onSave, onClose }: { criterion: Qualit
     }
   };
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} title="Ajouter une observation humaine" description={criterion.text} footer={<><Button variant="ghost" size="sm" onClick={onClose}>Annuler</Button><Button size="sm" disabled={saving || observation.trim() === ""} onClick={() => void save()}>Enregistrer l’observation</Button></>}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} title="Ajouter une observation humaine" description={criterion.text} footer={<><Button variant="ghost" size="sm" onClick={onClose}>Annuler</Button><Button size="sm" disabled={busy || saving || observation.trim() === ""} onClick={() => void save()}>Enregistrer l’observation</Button></>}>
       <label htmlFor="quality-human-observation" className="block text-xs font-medium">Vérifications effectuées et résultat observé</label>
-      <Textarea id="quality-human-observation" maxLength={QUALITY_MAX_OBSERVATION_LENGTH} value={observation} onChange={(event) => setObservation(event.target.value)} />
+      <Textarea id="quality-human-observation" disabled={busy || saving} maxLength={QUALITY_MAX_OBSERVATION_LENGTH} value={observation} onChange={(event) => setObservation(event.target.value)} />
       <label htmlFor="quality-human-result" className="block text-xs font-medium">Résultat de l’observation</label>
-      <Select id="quality-human-result" value={status} onChange={(event) => { if (event.target.value === "passed" || event.target.value === "failed" || event.target.value === "inconclusive") setStatus(event.target.value); }}><option value="inconclusive">Non concluant</option><option value="passed">Résultat observé conforme</option><option value="failed">Échec observé</option></Select>
+      <Select id="quality-human-result" disabled={busy || saving} value={status} onChange={(event) => { if (event.target.value === "passed" || event.target.value === "failed" || event.target.value === "inconclusive") setStatus(event.target.value); }}><option value="inconclusive">Non concluant</option><option value="passed">Résultat observé conforme</option><option value="failed">Échec observé</option></Select>
       <p className="text-xs text-muted-foreground">Cette observation est identifiée comme humaine. Elle ne remplace pas la validation par un agent indépendant.</p>
       {error !== null && <p role="alert" className="text-xs text-danger">{error}</p>}
     </Dialog>
@@ -134,7 +134,7 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
         </>
       )}
       {editing && <CriteriaEditor snapshot={snapshot} busy={busy} onSave={onSave} onClose={() => setEditing(false)} />}
-      {observing !== null && <HumanEvidenceEditor criterion={observing} onSave={onEvidence} onClose={() => setObserving(null)} />}
+      {observing !== null && <HumanEvidenceEditor criterion={observing} busy={busy} onSave={onEvidence} onClose={() => setObserving(null)} />}
     </QualitySection>
   );
 }

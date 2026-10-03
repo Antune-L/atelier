@@ -6,6 +6,7 @@ import {
   AUTO_MERGE_RESOLVE_MAX,
   AUTO_RECLAIM_EVENT,
   AUTO_RECLAIM_MAX,
+  isAllowedAgentPair,
   CLEANER_BRANCH_SUFFIX,
   DONE_GATE_FAILED_EVENT,
   DONE_GATE_MAX_FAILURES,
@@ -14,7 +15,7 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
-import type { QualityGate } from "../../shared/quality.ts";
+import type { QualityGate, QualityIteration, QualityRunStatus } from "../../shared/quality.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -141,6 +142,8 @@ export class SlotManager {
   private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
   private qualityGate: ((ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>) | null = null;
   private qualityCancel: ((ticketId: string) => Promise<void>) | null = null;
+  private qualityIterationVerifier: ((ticketId: string, worktreePath: string, iterationId: string) => Promise<void>) | null = null;
+  private readonly qualityCorrectionStarts = new Set<string>();
   /** Watches each active worktree session's `.wt-offset` to re-push addresses once the dev server writes it. */
   private readonly watcher = new WorktreeAddressWatcher(() =>
     this.hub.pushWorktreeSessions(this.store.listWorktreeSessions()),
@@ -198,6 +201,110 @@ export class SlotManager {
     this.qualityCancel = cancel;
   }
 
+  setQualityIterationVerifier(verify: (ticketId: string, worktreePath: string, iterationId: string) => Promise<void>): void {
+    this.qualityIterationVerifier = verify;
+  }
+
+  async startQualityCorrection(ticketId: string, iterationId: string): Promise<void> {
+    if (this.qualityCorrectionStarts.has(ticketId)) return;
+    this.qualityCorrectionStarts.add(ticketId);
+    try {
+      await this.launchQualityCorrection(ticketId, iterationId);
+    } finally {
+      this.qualityCorrectionStarts.delete(ticketId);
+    }
+  }
+
+  private async launchQualityCorrection(ticketId: string, iterationId: string): Promise<void> {
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || iteration?.id !== iterationId || iteration.mode !== "correction") throw new Error("Correction qualité introuvable.");
+    if (iteration.status !== "queued") return;
+    if (!this.qualityIterationVerifier) throw new Error("Vérification de correction qualité indisponible.");
+    if (ticket.kind !== "feature" || ticket.directPush || ticket.stealth) throw new Error("La correction requiert une carte feature avec une PR ouverte.");
+    await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
+    if (this.store.getActiveQualityIteration(ticketId)?.id !== iterationId) return;
+    if (ticket.slotId !== null) {
+      const previous = iteration.retryOfIterationId ? this.store.getQualityIteration(iteration.retryOfIterationId) : null;
+      const slot = this.store.getSlot(ticket.slotId);
+      if (!previous || previous.mode !== "correction" || previous.sourceRunId !== iteration.sourceRunId || previous.headBranch !== iteration.headBranch || slot?.ticketId !== ticketId || this.sessionHub.isConnected(ticketId)) throw new Error("Le slot de correction conservé ne peut être repris que par une relance explicite de la même passe.");
+    }
+    const executionTicket = this.qualityCorrectionTicket(ticket);
+    this.touch(this.store.updateTicket(ticketId, { orchestrator: executionTicket.orchestrator, implementer: executionTicket.implementer, autoMerge: false, resolvingConflicts: false, error: null, finishedAt: null }));
+    this.lifecycle.enqueue(ticketId);
+    if (ticket.slotId !== null) {
+      this.store.resetReviewCycle(ticketId);
+      this.store.updateQualityIteration(iteration.id, { status: "correcting" });
+      try {
+        await this.relaunchInPlace(ticket.slotId, ticketId);
+      } catch (error) {
+        if (this.store.getQualityIteration(iteration.id)?.status === "cancelled") return;
+        this.markFailed(ticketId, ticket.slotId, getErrorMessage(error), error);
+        throw error;
+      }
+      return;
+    }
+    await this.startTicket(ticketId);
+  }
+
+  private async assertQualityIterationPr(ticket: Ticket, iteration: QualityIteration, expectedRevision?: string): Promise<void> {
+    if (!isProjectKey(ticket.project) || !iteration.prUrl || !iteration.headBranch || ticket.prUrl !== iteration.prUrl) throw new Error("La PR de correction a changé ou n'est plus disponible.");
+    const project = getProject(ticket.project);
+    const state = await this.system.checkPrMerged(project.repoPath, iteration.prUrl, project.vcsProvider);
+    if (state.merged || state.state !== "open") throw new Error("La correction requiert une PR ouverte et non fusionnée.");
+    const open = (await this.system.listOpenPrs(project.repoPath, project.vcsProvider)).find((pr) => pr.url === iteration.prUrl);
+    if (!open || open.headBranch !== iteration.headBranch) throw new Error("La branche de la PR a changé depuis la vérification source.");
+    const competing = this.store.listTickets(true).find((candidate) => candidate.id !== ticket.id && candidate.project === ticket.project && candidate.prUrl === iteration.prUrl && (candidate.slotId !== null || candidate.column === "implementing"));
+    const competingIteration = this.store.listActiveQualityIterations().find((candidate) => candidate.id !== iteration.id && candidate.project === iteration.project && candidate.prUrl === iteration.prUrl);
+    if (competing || competingIteration) throw new Error("Une autre correction ou session occupe déjà cette PR.");
+    if (expectedRevision) {
+      const head = await this.system.readReviewHead(project.repoPath, iteration.prUrl, project.vcsProvider);
+      if (!head.ok || head.commitSha !== expectedRevision) throw new Error("La révision de la PR a changé ; relance une vérification avant de corriger.");
+    }
+  }
+
+  async settleQualityIteration(ticketId: string, iterationId: string, runId: string, verdict: QualityRunStatus): Promise<void> {
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.testing || iteration?.id !== iterationId || iteration.status !== "verifying" || ticket.slotId === null || iteration.resultRunId !== runId) return;
+    const slotId = ticket.slotId;
+    const run = this.store.getQualityRun(runId);
+    let complete = false;
+    let diagnostic = run?.error ?? "La nouvelle vérification complète reste non concluante.";
+    try {
+      await this.assertQualityIterationPr(ticket, iteration, iteration.resultRevision ?? undefined);
+      const gate = await this.qualityGate?.(ticketId, "strict");
+      complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && run.criteriaSnapshotId === iteration.criteriaSnapshot?.id && Boolean(gate?.complete);
+      if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
+    } catch (error) {
+      diagnostic = getErrorMessage(error);
+    }
+    if (this.store.getActiveQualityIteration(ticketId)?.id !== iterationId || this.store.getTicket(ticketId)?.slotId !== slotId) return;
+    this.store.updateQualityIteration(iterationId, { status: complete ? "completed" : "failed", diagnostic: complete ? null : diagnostic, completedAt: Date.now() });
+    this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, error: complete ? null : diagnostic, finishedAt: Date.now(), autoMerge: false }));
+    const operation = iteration.mode === "correction" ? "Correction terminée" : "Vérification reprise";
+    const body = complete ? `${operation} et nouvelle vérification indépendante complète réussie.` : `${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
+    this.hub.pushComment(this.store.addComment(ticketId, "system", body, null));
+    this.store.logEvent(ticketId, "quality_iteration_settled", { iterationId, runId, verdict, complete });
+    await this.cleanupTerminalSlot(slotId, ticket, complete ? "completed" : "failed", false);
+    await this.notifier.notify("Itération qualité terminée", body, ticketId, true);
+    this.pumpQueue();
+  }
+
+  async cancelQualityCorrection(ticketId: string, iterationId: string): Promise<void> {
+    const iteration = this.store.getQualityIteration(iterationId);
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || iteration?.ticketId !== ticketId || iteration.mode !== "correction") return;
+    const queued = this.queue.indexOf(ticketId);
+    if (queued !== -1) this.queue.splice(queued, 1);
+    this.sessionHub.disconnect(ticketId, "cancelled");
+    await this.delegationDrain?.(ticketId);
+    const retained = ticket.slotId !== null && this.store.getSlot(ticket.slotId)?.ticketId === ticketId;
+    if (retained && ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "interrupted" });
+    this.touch(this.store.updateTicket(ticketId, { column: "done", stage: retained ? "interrupted" : "done", autoMerge: false, error: retained ? "Correction qualité annulée ; le worktree est conservé pour une relance explicite." : "Correction qualité annulée.", finishedAt: Date.now() }));
+    this.pumpQueue();
+  }
+
   private async recordDeliveryQuality(ticketId: string): Promise<QualityGate | null> {
     if (!this.qualityGate || this.store.getTicket(ticketId)?.kind !== "feature") return null;
     const gate = await this.qualityGate(ticketId, "strict");
@@ -218,6 +325,13 @@ export class SlotManager {
   async startTicket(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration && (iteration.mode !== "correction" || iteration.status !== "queued")) return;
+    if (!iteration && this.store.getLatestQualityIteration(ticketId)?.mode === "correction") throw new Error("Utilise Corriger et revérifier pour relancer une correction qualité.");
+    if (ticket.prUrl && (ticket.kind === "clean" || (ticket.kind === "review" && ticket.fixComments))) {
+      const owner = this.store.listActiveQualityIterations().find((candidate) => candidate.project === ticket.project && candidate.prUrl === ticket.prUrl);
+      if (owner) throw new Error("Cette PR est réservée par une correction qualité.");
+    }
     let reusableSlotId: number | null;
     try {
       reusableSlotId = await this.findReusableFeatureSlot(ticket);
@@ -226,6 +340,7 @@ export class SlotManager {
       return;
     }
     const current = this.store.getTicket(ticketId);
+    if (iteration && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) return;
     if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticketId) || this.sessionHub.isConnected(ticketId)) {
       return;
     }
@@ -246,6 +361,7 @@ export class SlotManager {
   }
 
   private async findReusableFeatureSlot(ticket: Ticket): Promise<number | null> {
+    if (this.store.getActiveQualityIteration(ticket.id)?.mode === "correction") return null;
     if (ticket.kind !== "feature" || ticket.resolvingConflicts || !isProjectKey(ticket.project)) return null;
     const project = getProject(ticket.project);
     const branch = featureBranch(ticket);
@@ -390,6 +506,7 @@ export class SlotManager {
       ticket.branch === null ||
       ticket.slotId !== null ||
       ticket.testing ||
+      this.store.getActiveQualityIteration(ticketId) !== null ||
       !isProjectKey(ticket.project)
     ) {
       return;
@@ -671,6 +788,8 @@ export class SlotManager {
     const project = getProject(ticket.project);
     const baseBranch = resolveBaseBranch(ticket, project, this.store);
     const path = slotPath(slotId);
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    const qualityCorrection = iteration?.mode === "correction";
     if (!reuseWorktree) this.store.resetReviewCycle(ticketId);
     // Resolving merge conflicts reuses the EXISTING PR branch (its commits); a fresh feature run
     // forks a new branch off the base.
@@ -691,7 +810,10 @@ export class SlotManager {
     // A clean ticket's local branch is suffixed to avoid colliding with the PR head branch when it is
     // already checked out in another worktree; it still starts from and pushes back to the PR head.
     let startBranch: string | null = null;
-    if (resolving && ticket.branch !== null) {
+    if (qualityCorrection && iteration.headBranch !== null) {
+      branch = iteration.headBranch;
+      startBranch = iteration.headBranch;
+    } else if (resolving && ticket.branch !== null) {
       branch = ticket.branch;
       startBranch = ticket.branch;
     } else if (reviewFix && ticket.prHeadBranch !== null) {
@@ -724,12 +846,18 @@ export class SlotManager {
     log.info("lancement du ticket", { ticketId, slotId, project: ticket.project, branch });
 
     try {
-      const execution = resolveTicketExecution(ticket, "orchestrator", {
+      if (qualityCorrection) {
+        await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
+        if (this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant le lancement.");
+        this.store.updateQualityIteration(iteration.id, { status: "correcting" });
+      }
+      const executionTicket = this.qualityCorrectionTicket(ticket);
+      const execution = resolveTicketExecution(executionTicket, "orchestrator", {
         model: MODELS.implement,
         effort: MODELS.implementEffort,
       });
       await assertExecutionAvailable(this.system, execution);
-      await assertCodexImplementerAvailable(this.system, ticket, execution);
+      await assertCodexImplementerAvailable(this.system, executionTicket, execution);
       this.setPhase(ticketId, SETUP_PHASES.worktree);
       await this.repoMutex.run(project.repoPath, async () => {
         if (reuseWorktree) {
@@ -740,7 +868,7 @@ export class SlotManager {
           await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
           await this.system.fetch(project.repoPath, baseBranch);
         }
-        if (!reuseWorktree && (resolving || reviewFix || cleanFix)) {
+        if (!reuseWorktree && (resolving || reviewFix || cleanFix || qualityCorrection)) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
           // out so the session has the PR's commits. Conflict resolution rebases onto the (also
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
@@ -767,6 +895,12 @@ export class SlotManager {
         }
       });
 
+      if (qualityCorrection) {
+        await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
+        const revision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: path, branch });
+        if (!revision.clean || revision.commitSha !== iteration.sourceRevision) throw new Error("Le worktree de correction ne correspond pas à la révision figée.");
+      }
+
       if (!reuseWorktree) await this.system.copyEnvFiles(project.repoPath, path);
       // An ask ticket is read-only (explore + answer); the project setup script and dep install are
       // pure overhead, so skip both to start answering faster. Feature/review tickets need a built
@@ -787,6 +921,7 @@ export class SlotManager {
       }
 
       this.setPhase(ticketId, SETUP_PHASES.spawning);
+      if (qualityCorrection && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la préparation.");
       this.startAgentSession(ticket, slotId, path);
       this.touch(this.store.updateTicket(ticketId, { stage: "implementing", lastProgressAt: Date.now() }));
       this.store.logEvent(ticketId, "session_spawned", { slotId });
@@ -796,23 +931,32 @@ export class SlotManager {
       this.deliverContract(ticket);
     } catch (error) {
       this.clearPhase(ticketId);
+      if (qualityCorrection && this.store.getQualityIteration(iteration.id)?.status === "cancelled") return;
       this.markFailed(ticketId, slotId, getErrorMessage(error), error);
     }
   }
 
   /** Start the implementation SDK session for a ticket in its slot worktree. */
   private startAgentSession(ticket: Ticket, slotId: number, path: string, opts?: { resume?: boolean }): void {
+    const executionTicket = this.qualityCorrectionTicket(ticket);
     this.sessionHub.start(
       buildImplementSessionConfig({
-        ticket,
+        ticket: executionTicket,
         slotId,
         cwd: path,
         composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
         vcsProvider: projectVcsProvider(ticket.project),
         // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
-        ...(opts?.resume && ticket.sessionId ? { resumeSessionId: ticket.sessionId } : {}),
+        ...(opts?.resume && ticket.sessionId && executionTicket.orchestrator === ticket.orchestrator ? { resumeSessionId: ticket.sessionId } : {}),
       }),
     );
+  }
+
+  private qualityCorrectionTicket(ticket: Ticket): Ticket {
+    const iteration = this.store.getActiveQualityIteration(ticket.id);
+    if (iteration?.mode !== "correction") return ticket;
+    const implementer = isAllowedAgentPair(iteration.provider, ticket.implementer) ? ticket.implementer : iteration.provider;
+    return { ...ticket, orchestrator: iteration.provider, implementer };
   }
 
   /** Inject the ticket contract as the session's first user turn; idempotent marker + phase clear. */
@@ -835,6 +979,19 @@ export class SlotManager {
     const baseBranch = isProjectKey(ticket.project)
       ? resolveBaseBranch(ticket, getProject(ticket.project), this.store)
       : ticket.baseBranch ?? "";
+    const iteration = this.store.getActiveQualityIteration(ticket.id);
+    if (iteration?.mode === "correction") {
+      const quality = this.store.getTicketQuality(ticket.id);
+      const source = quality.runs.find((run) => run.id === iteration.sourceRunId);
+      const requiredCriteria = new Set(iteration.criteriaSnapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? []);
+      return buildTicketContract({ ...this.qualityCorrectionTicket(ticket), ...iteration.originalTicket, prdEnabled: false, autoMerge: false, stealth: false, directPush: false }, {
+        composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
+        commitLanguage,
+        baseBranch,
+        qualityIteration: iteration,
+        qualityFaults: quality.evidence.filter((evidence) => source?.evidenceAccepted && evidence.runId === iteration.sourceRunId && evidence.kind === "behavior" && evidence.authority === "agent" && evidence.status === "failed" && evidence.criterionId !== null && requiredCriteria.has(evidence.criterionId)),
+      });
+    }
     return buildTicketContract(ticket, {
       composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
       commitLanguage,
@@ -890,6 +1047,16 @@ export class SlotManager {
       return { ok: false, reason: "slot périmé ou détenu par un autre ticket", slotReleased: false };
     }
     const path = slotPath(slotId);
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration?.mode === "correction") {
+      if (iteration.status === "verifying") return { ok: true, reason: "Nouvelle vérification indépendante en cours.", slotReleased: false };
+      if (iteration.status !== "correcting" || prUrl !== iteration.prUrl || ticket.branch !== iteration.headBranch) return { ok: false, reason: "La correction doit conserver la PR et sa branche initiales.", slotReleased: false };
+      try {
+        await this.assertQualityIterationPr(ticket, iteration);
+      } catch (error) {
+        return { ok: false, reason: getErrorMessage(error), slotReleased: false };
+      }
+    }
 
     log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
     const gate = await this.doneGate(ticket, path, ticket.branch, prUrl);
@@ -916,6 +1083,23 @@ export class SlotManager {
         { error: gate.reason, errorDetails: this.lifecycle.errorDetailsFor(ticketId, gate.reason, "done_gate") },
       );
       return { ok: false, reason: gate.reason, slotReleased: false };
+    }
+    if (iteration?.mode === "correction") {
+      if (!this.qualityIterationVerifier || !isProjectKey(ticket.project)) return { ok: false, reason: "Vérification de correction qualité indisponible.", slotReleased: false };
+      try {
+        const project = getProject(ticket.project);
+        const revision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: path, branch: ticket.branch });
+        await this.assertQualityIterationPr(ticket, iteration, revision.commitSha);
+        if (!revision.clean || this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction modifiée ou annulée avant vérification.");
+        this.store.updateQualityIteration(iteration.id, { status: "verifying", resultRevision: revision.commitSha });
+        setTimeout(() => this.sessionHub.disconnect(ticketId, "completed"), 0);
+        await this.qualityIterationVerifier(ticketId, path, iteration.id);
+        return { ok: true, reason: "Correction poussée sur la PR existante ; nouvelle vérification indépendante complète en cours.", slotReleased: false };
+      } catch (error) {
+        if (this.store.getQualityIteration(iteration.id)?.status === "cancelled") return { ok: false, reason: "Correction qualité annulée.", slotReleased: false };
+        this.markFailed(ticketId, slotId, getErrorMessage(error), error);
+        return { ok: false, reason: getErrorMessage(error), slotReleased: false };
+      }
     }
     const quality = await this.recordDeliveryQuality(ticketId);
     const currentTicket = this.store.getTicket(ticketId);
@@ -1304,6 +1488,8 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     await this.qualityCancel?.(ticketId);
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration) this.store.updateQualityIteration(iteration.id, { status: "cancelled", diagnostic: "Itération annulée par abandon de la carte.", completedAt: Date.now() });
     if (ticket.slotId !== null) await this.releaseSlotIfOwned(ticket, ticket.slotId);
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -1321,6 +1507,8 @@ export class SlotManager {
 
   private markFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): void {
     this.clearPhase(ticketId);
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: reason, completedAt: Date.now() });
     this.lifecycle.markLaunchFailed(ticketId, slotId, reason, error, source);
     log.error("ticket en échec", { ticketId, slotId, reason });
   }
@@ -1363,6 +1551,13 @@ export class SlotManager {
       const ticketId = slot.ticketId;
       const recovered = this.store.getTicket(ticketId);
       if (!recovered) continue;
+      const iteration = this.store.getActiveQualityIteration(ticketId);
+      if (iteration?.mode === "correction" && iteration.status === "verifying") {
+        this.store.updateQualityIteration(iteration.id, { status: "interrupted", diagnostic: "Vérification interrompue au redémarrage ; reprends la vérification explicitement.", completedAt: Date.now() });
+        this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, autoMerge: false, error: "Vérification interrompue au redémarrage.", finishedAt: Date.now() }));
+        await this.cleanupTerminalSlot(slot.id, recovered, "failed", true);
+        continue;
+      }
 
       if (
         recovered.slotId === null
@@ -1406,6 +1601,17 @@ export class SlotManager {
       log.warn("session perdue à la reprise", { ticketId, slotId: slot.id });
       void this.notifier.notify("Ticket interrompu", `${ticket?.title ?? ticketId}: session perdue au redémarrage`, ticketId);
     }
+    for (const iteration of this.store.listActiveQualityIterations()) {
+      if (iteration.mode !== "correction" || iteration.status !== "queued") continue;
+      const ticket = this.store.getTicket(iteration.ticketId);
+      if (!ticket || ticket.slotId !== null) continue;
+      try {
+        await this.startQualityCorrection(ticket.id, iteration.id);
+      } catch (error) {
+        this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: getErrorMessage(error), completedAt: Date.now() });
+        this.touch(this.store.updateTicket(ticket.id, { column: "done", stage: "done", error: getErrorMessage(error), autoMerge: false, finishedAt: Date.now() }));
+      }
+    }
     this.hub.pushSlots(this.store.listSlots());
   }
 
@@ -1413,6 +1619,7 @@ export class SlotManager {
   async retry(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    if (this.store.getActiveQualityIteration(ticketId) || this.store.getLatestQualityIteration(ticketId)?.mode === "correction") throw new Error("Utilise Corriger et revérifier ou Reprendre la vérification pour cette carte.");
     try {
       if (await this.resumeAttachedFeatureWorktree(ticket)) return;
     } catch (error) {
@@ -1463,6 +1670,7 @@ export class SlotManager {
   async relaunch(ticketId: string): Promise<boolean> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return false;
+    if (this.store.getActiveQualityIteration(ticketId) || this.store.getLatestQualityIteration(ticketId)?.mode === "correction") return false;
     if (this.isLaunching(ticketId)) {
       log.warn("relance ignorée : lancement déjà en cours", { ticketId });
       return false;
@@ -1494,6 +1702,7 @@ export class SlotManager {
   async tryAutoReclaim(ticketId: string, reason: string): Promise<ReclaimOutcome> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.slotId === null) return "ignore";
+    if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return "ignore";
     // A test session is ephemeral and lives on a "done" card: never resurrect it as a pipeline run.
     if (ticket.testing) return "ignore";
     if (this.isLaunching(ticketId)) {
@@ -1501,7 +1710,10 @@ export class SlotManager {
       return "ignore";
     }
     const reclaims = this.store.getReclaimCount(ticketId);
-    if (reclaims >= AUTO_RECLAIM_MAX) return "escalate";
+    if (reclaims >= AUTO_RECLAIM_MAX) {
+      this.interruptQualityCorrection(ticketId, reason);
+      return "escalate";
+    }
 
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     this.store.logEvent(ticketId, AUTO_RECLAIM_EVENT, { attempt: reclaims + 1, reason });
@@ -1510,10 +1722,16 @@ export class SlotManager {
       await this.relaunchInPlace(ticket.slotId, ticketId);
     } catch (error) {
       this.clearPhase(ticketId);
+      this.interruptQualityCorrection(ticketId, getErrorMessage(error));
       log.error("auto-reclaim échoué", { ticketId, error: getErrorMessage(error) });
       return "escalate";
     }
     return "reclaimed";
+  }
+
+  private interruptQualityCorrection(ticketId: string, reason: string): void {
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "interrupted", diagnostic: reason, completedAt: Date.now() });
   }
 
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
@@ -1556,18 +1774,29 @@ export class SlotManager {
       ? { ...parentTicket, model: previousClaudeModel.data, effort: previousClaudeEffort.data }
       : parentTicket;
     const path = slotPath(slotId);
+    const iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration?.mode === "correction") {
+      await this.assertQualityIterationPr(ticket, iteration);
+      const project = getProject(ticket.project);
+      const revision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: path, ...(ticket.branch ? { branch: ticket.branch } : {}) });
+      if (!iteration.prUrl) throw new Error("La PR de correction n'est plus disponible.");
+      const head = await this.system.readReviewHead(project.repoPath, iteration.prUrl, project.vcsProvider);
+      if (!head.ok || head.commitSha !== iteration.sourceRevision && head.commitSha !== revision.commitSha) throw new Error("La PR a changé indépendamment des corrections conservées ; reprends la vérification avant de continuer.");
+    }
     log.info("relance en place", { ticketId, slotId });
 
-    const execution = resolveTicketExecution(ticket, "orchestrator", {
+    const executionTicket = this.qualityCorrectionTicket(ticket);
+    const execution = resolveTicketExecution(executionTicket, "orchestrator", {
       model: MODELS.implement,
       effort: MODELS.implementEffort,
     });
     await assertExecutionAvailable(this.system, execution);
-    await assertCodexImplementerAvailable(this.system, ticket, execution);
+    await assertCodexImplementerAvailable(this.system, executionTicket, execution);
 
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
     this.sessionHub.disconnect(ticketId);
     await this.delegationDrain?.(ticketId);
+    if (iteration?.mode === "correction" && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la reprise.");
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     this.startAgentSession(ticket, slotId, path, { resume: true });
     this.setPhase(ticketId, SETUP_PHASES.waiting);

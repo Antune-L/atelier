@@ -34,3 +34,5 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 - A completed Model Context Protocol (MCP) tool response with `isError` is a failed operation, not behavioral proof. Require successful browser operations and non-empty attributed observations before accepting criterion evidence.
 - Provider tool schemas must use a JSON Schema dialect supported by the actual CLI. The Claude probe rejected JSON Schema 2020-12 metadata; the validator output schema switched to draft-07 and the full real negative-case run then passed. Typecheck and Zod validation alone do not establish CLI compatibility; verify a real provider turn after changing schema conversion.
 - Browser request origin filtering is not full network isolation. It constrains the browser's app traffic, not provider processes, project commands, subprocesses, or external resources.
+
+- Quality UI messages are localized at the display boundary, including persisted historical errors. Keep the English wire contract and preserve user-authored criteria, agent evidence and raw diagnostics; translate only recognized application-owned text.

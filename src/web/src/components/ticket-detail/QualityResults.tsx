@@ -6,6 +6,7 @@ import type { QualityEvidence, QualityRunStatus, QualityValidationRun, TicketQua
 import { Dialog } from "@/components/ui/dialog";
 import { qualityEvidenceArtifactUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
+import { formatQualityEnvironmentLabel, formatQualityEvidenceSummary, formatQualityMessage } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
 type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated";
@@ -34,7 +35,7 @@ function QualityArtifact({ ticketId, evidence }: { ticketId: string; evidence: Q
   return (
     <div className="space-y-2">
       <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-info underline underline-offset-2">{image ? "Ouvrir la capture" : "Ouvrir la pièce jointe"}</a>
-      {image && !previewFailed && <img src={url} alt={`Capture associée à la preuve : ${evidence.summary}`} loading="lazy" className="max-h-96 w-full rounded border border-border object-contain" onError={() => setPreviewFailed(true)} />}
+      {image && !previewFailed && <img src={url} alt={`Capture associée à la preuve : ${formatQualityEvidenceSummary(evidence)}`} loading="lazy" className="max-h-96 w-full rounded border border-border object-contain" onError={() => setPreviewFailed(true)} />}
       {previewFailed && <p role="status" className="text-xs text-muted-foreground">L’aperçu de la capture n’est pas disponible.</p>}
     </div>
   );
@@ -86,7 +87,7 @@ export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClos
   const current = run !== undefined && currentRunIds.includes(run.id);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} size="lg" title={evidence.kind === "command" ? "Journal du contrôle" : "Preuve du parcours"} description={evidenceProvenance(evidence, run)}>
-      <div className="flex items-center justify-between gap-3"><p className="text-sm">{evidence.summary}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, run?.evidenceAccepted === true, run?.simulated === true)} /></div>
+      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, run?.evidenceAccepted === true, run?.simulated === true)} /></div>
       <p className={cn("text-xs", current ? "text-muted-foreground" : "text-warning")}>{current ? "Cette preuve correspond au code, aux critères et à la configuration actuels." : "Cette preuve est obsolète pour le code, les critères ou la configuration actuels."}</p>
       {current && run?.evidenceAccepted !== true && <p className="text-xs text-warning">Les observations de cette exécution ne sont pas acceptées comme preuves de livraison. Consultez le résultat de l’exécution dans l’historique.</p>}
       <dl className="flex flex-col gap-2 text-xs">
@@ -119,10 +120,10 @@ export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { 
               <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
               <p className="break-all font-mono text-2xs">{run.revision}</p>
               {run.environment && <p className="break-all text-muted-foreground">Copie séparée : {run.environment.directory} · port {run.environment.port}</p>}
-              {run.environment?.addresses?.map((address) => <p key={address.url} className="break-all text-muted-foreground">{address.label} : {address.url}</p>)}
+              {run.environment?.addresses?.map((address) => <p key={address.url} className="break-all text-muted-foreground">{formatQualityEnvironmentLabel(address.label)} : {address.url}</p>)}
               <p className="text-muted-foreground">Nettoyage : {CLEANUP_LABELS[run.cleanupStatus]}</p>
-              {run.error !== null && <p className="text-danger">{run.error}</p>}
-              {quality.evidence.filter((evidence) => evidence.runId === run.id).map((evidence) => <button key={evidence.id} type="button" className="block text-left text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>Voir la preuve : {evidence.summary}</button>)}
+              {run.error !== null && <p className="text-danger">{formatQualityMessage(run.error)}</p>}
+              {quality.evidence.filter((evidence) => evidence.runId === run.id).map((evidence) => <button key={evidence.id} type="button" className="block text-left text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>Voir la preuve : {formatQualityEvidenceSummary(evidence)}</button>)}
             </div>
           );
         })}

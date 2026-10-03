@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { formatDuration } from "@/lib/display";
-import { errorMessage } from "@/lib/errors";
+import { formatQualityMessage, qualityErrorMessage } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
 const QUALITY_RUNNING_POLL_MS = 3_000;
@@ -47,7 +47,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
           if (value.quality.runs.some((run) => QUALITY_ACTIVE_STATUSES.includes(run.status))) delay = QUALITY_RUNNING_POLL_MS;
         }
       } catch (failure) {
-        if (!controller.signal.aborted) setLoadError(errorMessage(failure));
+        if (!controller.signal.aborted) setLoadError(qualityErrorMessage(failure));
       }
       if (!controller.signal.aborted) timer = setTimeout(() => void poll(), delay);
     };
@@ -65,7 +65,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
       if (action !== undefined) await action();
       await refresh();
     } catch (failure) {
-      setError(errorMessage(failure));
+      setError(qualityErrorMessage(failure));
     } finally {
       setPending(false);
     }
@@ -84,10 +84,13 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const independentCurrent = independentRun !== undefined && gate.currentRunIds.includes(independentRun.id);
   const busy = pending || activeRun !== undefined;
   const latestRevision = quality.runs.at(-1)?.revision ?? preflight?.revision;
-  const reservations = [...new Set([...gate.reservations, ...gate.reasons])];
+  const reservations = [...new Set([...gate.reservations, ...gate.reasons].map(formatQualityMessage))];
   const simulated = quality.runs.some((run) => run.simulated);
   let deliveryLabel = "Validation à préparer";
   if (gate.enabled) deliveryLabel = gate.complete ? "Validation complète" : "Livraison avec réserves";
+  let deliveryNote = "Les vérifications manquantes, périmées ou en échec restent des réserves. Une observation humaine garde sa provenance.";
+  if (gate.enabled && gate.complete) deliveryNote = "Toutes les preuves requises correspondent à la version livrée.";
+  if (!gate.enabled) deliveryNote = "La validation de ce ticket reste à préparer.";
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 pb-4">
@@ -109,7 +112,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
       <QualitySection number={1} title="Prérequis de validation" action={<Button variant="ghost" size="sm" disabled={busy} onClick={() => void act(async () => setPreflight(await api.qualityPreflight(ticket.id)))}><RefreshCw className="h-3.5 w-3.5" />Vérifier</Button>}>
         <div className="rounded border border-border p-3">
           {preflight === null ? <p className="text-xs text-muted-foreground">Vérifiez la version du code, les commandes et la configuration de l’environnement de test.</p> : (
-            <div className="space-y-2"><div className="flex items-center justify-between gap-3"><p className="text-xs">Préparation de l’environnement</p><QualityResult status={preflight.ok ? "passed" : "inconclusive"} /></div>{preflight.revision !== null && <p className="break-all font-mono text-2xs text-muted-foreground">Version inspectée : {preflight.revision}</p>}{preflight.blockers.map((blocker) => <p key={blocker} className="text-xs text-danger">{blocker}</p>)}{preflight.reservations.map((reservation) => <p key={reservation} className="text-xs text-warning">{reservation}</p>)}<p className="text-2xs text-muted-foreground">Ce contrôle prépare l’exécution. Les parcours et les commandes conservent leurs propres résultats.</p></div>
+            <div className="space-y-2"><div className="flex items-center justify-between gap-3"><p className="text-xs">Préparation de l’environnement</p><QualityResult status={preflight.ok ? "passed" : "inconclusive"} /></div>{preflight.revision !== null && <p className="break-all font-mono text-2xs text-muted-foreground">Version inspectée : {preflight.revision}</p>}{preflight.blockers.map((blocker) => <p key={blocker} className="text-xs text-danger">{formatQualityMessage(blocker)}</p>)}{preflight.reservations.map((reservation) => <p key={reservation} className="text-xs text-warning">{formatQualityMessage(reservation)}</p>)}<p className="text-2xs text-muted-foreground">Ce contrôle prépare l’exécution. Les parcours et les commandes conservent leurs propres résultats.</p></div>
           )}
         </div>
       </QualitySection>
@@ -118,7 +121,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
         <div className="divide-y divide-border rounded border border-border">
           {checks.map((evidence) => <button key={evidence.id} type="button" className="flex w-full flex-wrap items-center gap-3 px-3 py-3 text-left hover:bg-muted/30" onClick={() => setSelectedEvidence(evidence)}><div className="min-w-0 flex-1"><p className="text-xs">{evidence.summary}</p><p className="mt-1 break-all font-mono text-2xs text-muted-foreground">{evidence.command}</p></div><span className="text-2xs text-muted-foreground">{checksRun?.simulated ? "Simulation" : "Serveur"} · {formatDuration(evidence.durationMs)}</span><QualityResult status={qualityEvidenceResult(evidence.status, checksCurrent, checksRun?.evidenceAccepted === true, checksRun?.simulated === true)} /><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>)}
           {checks.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">{checksRun === undefined ? "Aucune commande exécutée. Les contrôles utilisent les scripts du projet." : "Aucun journal disponible pour cette exécution."}</p>}
-          {checksRun !== undefined && <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-2xs text-muted-foreground"><span>Dernière exécution · {checksRun.simulated ? "simulée" : "réelle"} · {checksCurrent ? "version actuelle" : "résultats obsolètes"}</span><QualityResult status={qualityEvidenceResult(checksRun.status, checksCurrent, checksRun.evidenceAccepted, checksRun.simulated)} />{checksRun.error !== null && <p className="w-full text-danger">{checksRun.error}</p>}</div>}
+          {checksRun !== undefined && <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-2xs text-muted-foreground"><span>Dernière exécution · {checksRun.simulated ? "simulée" : "réelle"} · {checksCurrent ? "version actuelle" : "résultats obsolètes"}</span><QualityResult status={qualityEvidenceResult(checksRun.status, checksCurrent, checksRun.evidenceAccepted, checksRun.simulated)} />{checksRun.error !== null && <p className="w-full text-danger">{formatQualityMessage(checksRun.error)}</p>}</div>}
         </div>
       </QualitySection>
 
@@ -129,14 +132,14 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
         <div className="flex flex-wrap items-center gap-2"><Select aria-label="Agent de validation indépendant" value={provider} disabled={busy} className="w-auto" onChange={(event) => { if (event.target.value === "claude" || event.target.value === "codex") setProvider(event.target.value); }}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select><Button size="sm" disabled={busy || quality.criteriaSnapshots.length === 0} onClick={() => void act(() => api.startQualityValidation(ticket.id, provider))}><FlaskConical className="h-3.5 w-3.5" />Vérifier les parcours</Button></div>
       </div>
 
-      {independentRun !== undefined && <div className="space-y-2 rounded border border-border px-3 py-3"><div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>Dernière validation indépendante{independentRun.provider !== null && ` · ${ORCHESTRATOR_LABELS[independentRun.provider]}`}</span><QualityResult status={qualityEvidenceResult(independentRun.status, independentCurrent, independentRun.evidenceAccepted, independentRun.simulated)} /></div><p className="text-2xs text-muted-foreground">{independentRun.simulated ? "Simulation" : "Exécution réelle"} · {independentCurrent ? "version actuelle" : "résultats obsolètes"}</p>{independentRun.error !== null && <p role="alert" className="text-xs text-danger">{independentRun.error}</p>}</div>}
+      {independentRun !== undefined && <div className="space-y-2 rounded border border-border px-3 py-3"><div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>Dernière validation indépendante{independentRun.provider !== null && ` · ${ORCHESTRATOR_LABELS[independentRun.provider]}`}</span><QualityResult status={qualityEvidenceResult(independentRun.status, independentCurrent, independentRun.evidenceAccepted, independentRun.simulated)} /></div><p className="text-2xs text-muted-foreground">{independentRun.simulated ? "Simulation" : "Exécution réelle"} · {independentCurrent ? "version actuelle" : "résultats obsolètes"}</p>{independentRun.error !== null && <p role="alert" className="text-xs text-danger">{formatQualityMessage(independentRun.error)}</p>}</div>}
 
       {activeRun !== undefined && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-info/30 bg-info/5 px-3 py-2 text-xs"><span>{activeRun.kind === "checks" ? "Contrôles techniques" : "Validation des parcours"} en cours · {activeRun.simulated ? "simulation" : "exécution réelle"}</span><Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(async () => setResponse(await api.cancelQualityValidation(ticket.id)))}><Square className="h-3 w-3" />Annuler la validation</Button></div>}
 
       <QualityRunHistory quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
 
       <QualitySection number={4} title="Bilan avant livraison">
-        <div className="space-y-3 rounded border border-border p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium">{deliveryLabel}</p><span className={cn("text-2xs", gate.enabled && gate.complete ? "text-success" : "text-warning")}>Fusion automatique {gate.enabled && gate.complete ? "éligible" : "indisponible"}</span></div>{reservations.length > 0 && <ul className="space-y-1.5 text-xs text-muted-foreground">{reservations.map((reservation) => <li key={reservation} className="flex gap-2"><TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-warning" /><span>{reservation}</span></li>)}</ul>}<p className="text-xs text-muted-foreground">{gate.complete ? "Toutes les preuves requises correspondent à la version livrée." : "Les vérifications manquantes, périmées ou en échec restent des réserves. Une observation humaine garde sa provenance."}</p></div>
+        <div className="space-y-3 rounded border border-border p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium">{deliveryLabel}</p><span className={cn("text-2xs", gate.enabled && gate.complete ? "text-success" : "text-warning")}>Fusion automatique {gate.enabled && gate.complete ? "éligible" : "indisponible"}</span></div>{reservations.length > 0 && <ul className="space-y-1.5 text-xs text-muted-foreground">{reservations.map((reservation) => <li key={reservation} className="flex gap-2"><TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-warning" /><span>{reservation}</span></li>)}</ul>}<p className="text-xs text-muted-foreground">{deliveryNote}</p></div>
       </QualitySection>
 
       <p className="border-t border-border pt-3 text-2xs text-muted-foreground">Les preuves sont liées à la version du code, aux critères et à la configuration. Toute modification impose une nouvelle vérification.</p>

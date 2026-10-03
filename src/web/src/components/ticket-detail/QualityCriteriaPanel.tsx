@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { errorMessage } from "@/lib/errors";
+import { qualityErrorMessage } from "@/lib/qualityMessages";
 
 const SOURCE_LABELS: Record<QualityCriterion["source"], string> = { ticket: "Ticket", prd: "PRD", user: "Utilisateur" };
 
@@ -38,7 +38,7 @@ function CriteriaEditor({ snapshot, busy, onSave, onClose }: { snapshot: Quality
       await onSave(setQualityCriteriaSchema.parse({ criteria }).criteria);
       onClose();
     } catch (failure) {
-      setError(errorMessage(failure));
+      setError(qualityErrorMessage(failure));
     } finally {
       setSaving(false);
     }
@@ -72,7 +72,7 @@ function HumanEvidenceEditor({ criterion, onSave, onClose }: { criterion: Qualit
       await onSave({ criterionId: criterion.id, observation, status });
       onClose();
     } catch (failure) {
-      setError(errorMessage(failure));
+      setError(qualityErrorMessage(failure));
     } finally {
       setSaving(false);
     }

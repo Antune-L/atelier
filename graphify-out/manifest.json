@@ -1455,8 +1455,8 @@
     "semantic_hash": ""
   },
   "MEMORY.md": {
-    "mtime": 1791026021.5197647,
-    "ast_hash": "c0ec9af7a44c08c1986d69fbb4d926c0",
+    "mtime": 1791027295.2142665,
+    "ast_hash": "be28d6c7647fc261f34eee1894c3adfc",
     "semantic_hash": ""
   },
   "src/server/agents/atelier.ts": {
@@ -1650,28 +1650,33 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityCriteriaPanel.tsx": {
-    "mtime": 1791025643.8084664,
-    "ast_hash": "ca3495e3c6ab4f7cff1c10cebf214b38",
+    "mtime": 1791027066.9750657,
+    "ast_hash": "75536c093736d518f7cf8ce73bbea0b9",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityResults.tsx": {
-    "mtime": 1791026256.372616,
-    "ast_hash": "f70ff1e165ff59af5059de36dcc4fb20",
+    "mtime": 1791027066.9936612,
+    "ast_hash": "b6e51a000abcb2d4a9435aec2017ef96",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/ValidationTab.tsx": {
-    "mtime": 1791026272.5932004,
-    "ast_hash": "71a77e189d7ade3cbd93048d44f522fc",
+    "mtime": 1791027067.053585,
+    "ast_hash": "2c0e231976e538b75c857bc819f89c43",
     "semantic_hash": ""
   },
   "docs/multi-repository-project-analysis.md": {
-    "mtime": 1791026398.4404368,
-    "ast_hash": "a5f48ab302d8b0b44e3f139cd036ef62",
+    "mtime": 1791027223.032105,
+    "ast_hash": "4ab79bd6f4102033167ab9b5cb89c13c",
     "semantic_hash": ""
   },
   "docs/workflow-quality-feasibility-state.md": {
-    "mtime": 1791026584.2148633,
-    "ast_hash": "a8ed536efe569bd6094c04857db24829",
+    "mtime": 1791027295.1053836,
+    "ast_hash": "432695a741afec9b1ea00a16b28cccfb",
+    "semantic_hash": ""
+  },
+  "src/web/src/lib/qualityMessages.ts": {
+    "mtime": 1791027159.9917772,
+    "ast_hash": "f844d36abcb797c1d73bf5ce2e8b449a",
     "semantic_hash": ""
   }
 }

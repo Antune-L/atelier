@@ -2,6 +2,7 @@
 
 ## Current implementation state — 2026-10-03
 
+- Localization follow-up on `1c47857`: application-owned quality messages are now displayed in French, including persisted errors, preflight feedback, delivery reservations and human-observation labels. English API payloads, user criteria and raw diagnostics remain unchanged. Typecheck, lint, web build and focused formatter checks passed. Playwright verified the four screenshot messages (the missing-revision blocker was supplied as a controlled browser response because the fake adapter always supplies a revision), actual persisted errors and delivery reservations, with no console errors. The unprepared delivery summary no longer claims all evidence is current.
 - Branch: `feat/workflow-quality-validation`, based on `feaa62969742859b548cbb50426bbee48e30f317`. Verified implementation commit: `771c4cfe713043186ed9e13b215cc99297675f0f`. No deployment has been performed.
 - User authorized production implementation and real local validation of Claude and Codex against a disposable temporary project. The existing live app, database, and project configuration must stay untouched.
 - The five features are implemented: server-owned captured project checks; immutable acceptance criteria and append-only attributed observations; environment preflight; independent Claude/Codex behavioral validation; and persisted delivery reservations with automatic-merge restrictions.

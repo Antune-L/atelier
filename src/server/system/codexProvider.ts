@@ -499,6 +499,7 @@ try {
     toolName: request.tool_name,
     command: typeof command === "string" ? command : null,
     reason: JSON.parse(process.argv[3]),
+    blockReason: process.argv[4] || null,
     ...(typeof request.agent_id === "string" ? { sourceId: request.agent_id } : {}),
   }) + "\\n");
 } catch { process.exitCode = 0; }
@@ -518,7 +519,7 @@ try {
     path,
     `#!/bin/sh
 deny() {
-  printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(denialWriterPath)} ${shellQuote(denialJournalPath)} "$1"
+  printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(denialWriterPath)} ${shellQuote(denialJournalPath)} "$1" "$2"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$1"
   exit 0
 }
@@ -534,6 +535,7 @@ case "$policy" in
   scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
   nested) ${shellDeny(CODEX_DELEGATED_DENIAL_REASON)} ;;
   validator) ${shellDeny(CODEX_VALIDATOR_DENIAL_REASON)} ;;
+  deny:*) deny ${shellQuote(JSON.stringify(CODEX_BASH_DENIAL_REASON))} "\${policy#deny:}" ;;
   *) ${shellDeny(CODEX_BASH_DENIAL_REASON)} ;;
 esac
 ${reviewPublishingGuard}${typecheckGuard}if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then

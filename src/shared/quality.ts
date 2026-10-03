@@ -64,6 +64,9 @@ export type QualityEnvironment = z.infer<typeof qualityEnvironmentSchema>;
 export const qualityRunStatusSchema = z.enum(["queued", "running", "passed", "failed", "cancelled", "interrupted", "inconclusive"]);
 export type QualityRunStatus = z.infer<typeof qualityRunStatusSchema>;
 
+export const qualityPermissionBlockReasonSchema = z.enum(["invalid_tool_input", "unsupported_read_tool", "path_outside_workspace", "path_unresolvable", "home_expansion", "unsafe_read_option", "shell_expansion", "shell_syntax", "unquoted_glob", "working_directory_mismatch", "command_not_allowlisted"]);
+export type QualityPermissionBlockReason = z.infer<typeof qualityPermissionBlockReasonSchema>;
+
 export const qualityRunDiagnosticSchema = z.object({
   category: z.enum(["code_nonconformance", "permission_denial", "timeout", "validation_incomplete", "backend_checks_failed"]),
   summary: nonEmptyTextSchema,
@@ -73,6 +76,7 @@ export const qualityRunDiagnosticSchema = z.object({
     toolName: nonEmptyTextSchema,
     commandShape: z.string().nullable(),
     reason: z.string(),
+    blockReason: qualityPermissionBlockReasonSchema.nullable().default(null),
     reportedMs: z.number().nonnegative(),
   })).default([]),
 });

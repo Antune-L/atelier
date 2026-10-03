@@ -1,4 +1,4 @@
-import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
+import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityPermissionBlockReason, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { errorMessage } from "@/lib/errors";
 
@@ -142,6 +142,25 @@ const QUALITY_FAILURE_LABELS: Record<QualityRunPhase, string> = {
   validating: "Validation indépendante en échec",
   cleanup: "Nettoyage incomplet",
 };
+const QUALITY_PERMISSION_BLOCK_MESSAGES: Record<QualityPermissionBlockReason, { reason: string; nextStep: string }> = {
+  invalid_tool_input: { reason: "Les paramètres de l’outil de lecture sont invalides.", nextStep: "Corriger le format des paramètres de lecture avant une nouvelle tentative." },
+  unsupported_read_tool: { reason: "L’outil de lecture demandé n’est pas autorisé.", nextStep: "Utiliser une lecture directe ou une recherche simple prise en charge par le validateur." },
+  path_outside_workspace: { reason: "Un chemin demandé sort de la copie de validation.", nextStep: "Limiter la lecture aux fichiers de la copie de validation du projet." },
+  path_unresolvable: { reason: "Le chemin du fichier à lire ne peut pas être vérifié.", nextStep: "Utiliser un fichier existant avec un chemin explicite dans la copie de validation." },
+  home_expansion: { reason: "Le caractère « ~ » est refusé dans les arguments de lecture.", nextStep: "Utiliser les outils de lecture pris en charge sans ce caractère dans leurs arguments." },
+  unsafe_read_option: { reason: "Une option de lecture demandée n’est pas autorisée.", nextStep: "Retirer les options non autorisées et rechercher directement dans les fichiers du projet." },
+  shell_expansion: { reason: "La commande demande le remplacement automatique d’une partie de ses arguments.", nextStep: "Utiliser des arguments littéraux, sans substitution de commande ou de variable." },
+  shell_syntax: { reason: "La syntaxe de la commande n’est pas autorisée.", nextStep: "Vérifier les guillemets et utiliser une seule commande, sans rediriger son entrée ou sa sortie." },
+  unquoted_glob: { reason: "Le motif de fichiers n’est pas entouré de guillemets.", nextStep: "Entourer le motif de fichiers de guillemets avant de relancer la lecture." },
+  working_directory_mismatch: { reason: "La commande part d’un dossier non autorisé.", nextStep: "Exécuter la lecture depuis la copie de validation du projet." },
+  command_not_allowlisted: { reason: "La commande de lecture n’est pas autorisée.", nextStep: "Utiliser une lecture directe ou une recherche simple prévue par le validateur." },
+};
+const UNKNOWN_PERMISSION_BLOCK_MESSAGE = { reason: "Le motif précis de ce refus n’a pas été enregistré.", nextStep: "La cause exacte de ce refus n’est pas disponible. Une nouvelle vérification conserve les mêmes autorisations." };
+
+export function qualityPermissionBlockMessage(reason: QualityPermissionBlockReason | null): { reason: string; nextStep: string } {
+  if (reason === null) return UNKNOWN_PERMISSION_BLOCK_MESSAGE;
+  return QUALITY_PERMISSION_BLOCK_MESSAGES[reason];
+}
 
 export function formatQualityMessage(message: string): string {
   const translated = QUALITY_MESSAGES[message];

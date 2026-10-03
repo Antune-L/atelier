@@ -6,6 +6,8 @@ Durable lessons for agents working on this repo that cannot be derived from the 
 
 The 2026-09-30 retention ticket stalled after a delegated Claude session generalized one refused compound Bash command to all Bash commands. Its parent also tried `corepack pnpm format`, which was not covered by the existing `Bash(pnpm:*)` rule; direct `pnpm format` succeeded. Delegated sessions intentionally cannot commit, push or create PRs, but retain package-manager permissions. Keep their permission reports separate from the parent's permissions, use commands directly in the configured working directory, and inspect the exact refusal before requesting wider permissions. Claude reports authoritative denials in SDK results; Codex's local policy hook journals its denials for the session transcript and server log.
 
+Quality artifacts intentionally omit command operands, so a historical generic refusal cannot identify the rejecting guard afterward. Record a bounded reason code at the guard before redaction and keep unknown provider refusals unknown. Actual Claude and Codex probes confirmed that an observed refusal can coexist with subsequent successful reads and valid criterion results; a refusal is not itself the verdict for the whole run.
+
 ## Two agent providers: implement every host integration for both
 
 The app drives two agent providers: **Claude** (Claude Agent SDK) and **Codex** (Codex App Server). Every host-integration feature (skills detection, hooks, settings sources, binaries, install commands) must be implemented and tested for BOTH providers. A Claude-only implementation is a bug, not a first step. Reuse `ORCHESTRATORS` / `Orchestrator` from `src/shared/constants.ts` as the provider key.

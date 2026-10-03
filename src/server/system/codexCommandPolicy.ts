@@ -1,3 +1,5 @@
+import type { QualityPermissionBlockReason } from "../../shared/quality.ts";
+
 import { isQualityRepositoryPath, qualityReadScopeAllows, qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 
 export const CODEX_BASH_DENIAL_REASON = "Commande Bash non autorisée. Utilise une commande directe de la liste permise, sans expansion, redirection ni wrapper.";
@@ -9,7 +11,8 @@ export const CODEX_VALIDATOR_READ_ALLOW = [
   "Bash(pwd:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(rg:*)",
 ];
 
-export function matchesCodexBashAllowlist(command: string, patterns: readonly string[], restrictReadOnly = false, cwd?: string, singleCommand = false, inspectWords?: (words: readonly string[]) => boolean): boolean {
+export function matchesCodexBashAllowlist(command: string, patterns: readonly string[], restrictReadOnly = false, cwd?: string, singleCommand = false, inspectWords?: (words: readonly string[]) => boolean, onDenied?: (reason: QualityPermissionBlockReason) => void): boolean {
+  const deny = (reason: QualityPermissionBlockReason): false => { onDenied?.(reason); return false; };
   const UNSAFE_SHELL_CHARACTERS = new Set(["<", ">", "(", ")", "{", "}", "#"]);
   const segments: string[][] = [];
   let words: string[] = [];
@@ -27,19 +30,19 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
 
   function finishSegment(): boolean {
     finishWord();
-    if (words.length === 0) return false;
+    if (words.length === 0) return deny("shell_syntax");
     segments.push(words);
     words = [];
     return true;
   }
 
   const input = command.trim();
-  if (input === "") return false;
+  if (input === "") return deny("invalid_tool_input");
   for (let index = 0; index < input.length; index += 1) {
     const character = input[index];
-    if (character === undefined) return false;
+    if (character === undefined) return deny("shell_syntax");
     if (escaped) {
-      if (character === "\n") return false;
+      if (character === "\n") return deny("shell_syntax");
       word += character;
       hasWord = true;
       escaped = false;
@@ -55,7 +58,7 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
       else word += character;
       continue;
     }
-    if (character === "$" || character === "`") return false;
+    if (character === "$" || character === "`") return deny("shell_expansion");
     if (quote === '"') {
       if (character === '"') quote = null;
       else word += character;
@@ -66,11 +69,11 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
       hasWord = true;
       continue;
     }
-    if (restrictReadOnly && (character === "*" || character === "?" || character === "[" || character === "]")) return false;
-    if (UNSAFE_SHELL_CHARACTERS.has(character)) return false;
+    if (restrictReadOnly && (character === "*" || character === "?" || character === "[" || character === "]")) return deny("unquoted_glob");
+    if (UNSAFE_SHELL_CHARACTERS.has(character)) return deny("shell_syntax");
     if (character === ";" || character === "|" || character === "&" || character === "\n") {
-      if (character === "&" && input[index + 1] !== "&") return false;
-      if (character === "|" && input[index + 1] === "&") return false;
+      if (character === "&" && input[index + 1] !== "&") return deny("shell_syntax");
+      if (character === "|" && input[index + 1] === "&") return deny("shell_syntax");
       if (!finishSegment()) return false;
       if (character === "&" || (character === "|" && input[index + 1] === "|")) index += 1;
       continue;
@@ -82,18 +85,20 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
     word += character;
     hasWord = true;
   }
-  if (quote !== null || escaped || !finishSegment()) return false;
-  if (singleCommand && segments.length !== 1) return false;
+  if (quote !== null || escaped || !finishSegment()) return deny("shell_syntax");
+  if (singleCommand && segments.length !== 1) return deny("shell_syntax");
 
   return segments.every((segment) => {
-    if (inspectWords && !inspectWords(segment)) return false;
-    if (restrictReadOnly && (!cwd || !qualityReadScopeAllows(cwd, segment))) return false;
+    if (inspectWords && !inspectWords(segment)) return deny("command_not_allowlisted");
+    if (restrictReadOnly && !cwd) return deny("working_directory_mismatch");
+    if (restrictReadOnly && cwd && !qualityReadScopeAllows(cwd, segment, onDenied)) return false;
     const normalized = segment.join(" ");
-    return patterns.some((pattern) => {
+    const matched = patterns.some((pattern) => {
       if (!pattern.startsWith("Bash(") || !pattern.endsWith(":*)")) return false;
       const prefix = pattern.slice(5, -3);
       return normalized === prefix || normalized.startsWith(`${prefix} `);
     });
+    return matched || deny("command_not_allowlisted");
   });
 }
 
@@ -129,15 +134,17 @@ const restrictAllSubagents = ${JSON.stringify(restrictAllSubagents)};
 const restrictNestedAgents = ${JSON.stringify(restrictNestedAgents)};
 const restrictValidator = ${JSON.stringify(restrictValidator)};
 const cwd = ${JSON.stringify(cwd ?? null)};
+let blockReason = null;
+const onDenied = (reason) => { blockReason ??= reason; };
 let request;
-try { request = JSON.parse(await Bun.stdin.text()); } catch { process.stdout.write("deny"); process.exit(0); }
+try { request = JSON.parse(await Bun.stdin.text()); } catch { process.stdout.write("deny:invalid_tool_input"); process.exit(0); }
 const toolName = request?.tool_name;
 const isScout = (typeof request?.agent_type === "string" && scoutTypes.has(request.agent_type))
   || (restrictAllSubagents && typeof request?.agent_id === "string" && request.agent_id.length > 0);
 if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("validator");
 } else if (restrictValidator && (toolName === "Read" || toolName === "Glob" || toolName === "Grep")) {
-  process.stdout.write(typeof cwd === "string" && qualityReadToolAllowed(cwd, toolName, request?.tool_input) ? "allow" : "deny");
+  process.stdout.write(typeof cwd === "string" && qualityReadToolAllowed(cwd, toolName, request?.tool_input, onDenied) ? "allow" : "deny:" + (blockReason ?? "invalid_tool_input"));
 } else if (isScout && (toolName === "Bash" || toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("scout");
 } else if (restrictNestedAgents && toolName === "spawn_agent") {
@@ -149,7 +156,9 @@ if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agen
   if (restrictValidator && typeof requestedCwd === "string" && typeof cwd === "string") {
     try { scoped = realpathSync(requestedCwd) === realpathSync(cwd); } catch { scoped = false; }
   }
-  process.stdout.write(scoped && typeof command === "string" && matchesCodexBashAllowlist(command, patterns, restrictValidator, cwd) ? "allow" : "deny");
+  if (!scoped) onDenied("working_directory_mismatch");
+  else if (typeof command !== "string") onDenied("invalid_tool_input");
+  process.stdout.write(scoped && typeof command === "string" && matchesCodexBashAllowlist(command, patterns, restrictValidator, cwd, false, undefined, onDenied) ? "allow" : "deny:" + (blockReason ?? "command_not_allowlisted"));
 } else {
   process.stdout.write("allow");
 }

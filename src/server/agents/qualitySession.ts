@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
-import type { QualityValidationMode } from "../../shared/quality.ts";
+import type { QualityPermissionBlockReason, QualityValidationMode } from "../../shared/quality.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { CODEX_VALIDATOR_READ_ALLOW } from "../system/codexCommandPolicy.ts";
 
@@ -38,6 +38,7 @@ interface QualityPermissionDiagnostic {
   toolName: string;
   commandShape: string | null;
   reason: string;
+  blockReason: QualityPermissionBlockReason | null;
   reportedMs: number;
 }
 
@@ -163,6 +164,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
               toolName: qualityErrorMessage(denial.toolName).slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT),
               commandShape: deniedCommandShape(denial.command),
               reason: qualityErrorMessage(denial.reason).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT), reportedMs: lastEventMs,
+              blockReason: denial.blockReason,
             });
           }
         }

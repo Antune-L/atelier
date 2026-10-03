@@ -26,6 +26,7 @@ import { z } from "zod";
 
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
+import type { QualityPermissionBlockReason } from "../../shared/quality.ts";
 
 import { createLogger } from "../logger.ts";
 
@@ -54,14 +55,20 @@ const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
 
-function qualityReadScopeHook(cwd: string): HookCallback {
+function qualityReadScopeHook(options: AgentSessionOptions, reportedDenials: Set<string>): HookCallback {
   return async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
-    if (qualityReadToolAllowed(cwd, input.tool_name, input.tool_input)) return {};
+    let blockReason: QualityPermissionBlockReason | null = null;
+    if (qualityReadToolAllowed(options.cwd, input.tool_name, input.tool_input, (reason) => { blockReason ??= reason; })) return {};
+    const reason = "Quality inspection is restricted to repository files under the validation workspace.";
+    if (!reportedDenials.has(input.tool_use_id)) {
+      reportedDenials.add(input.tool_use_id);
+      reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason });
+    }
     return { hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Quality inspection is restricted to repository files under the validation workspace.",
+      permissionDecisionReason: reason,
     } };
   };
 }
@@ -138,6 +145,7 @@ function workerToolNames(names: readonly string[]): string[] {
 }
 
 export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+  const reportedDenials = new Set<string>();
   // ---- streaming input: a queue feeding a never-returning generator keeps the session alive ----
   const inbox: Array<{ id: string; prompt: SDKUserMessage }> = [];
   let notify: (() => void) | null = null;
@@ -251,7 +259,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     stderr: () => {},
     hooks: { PreToolUse: [
       { matcher: "Bash", hooks: preToolUseHooks },
-      ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts.cwd)] }] : []),
+      ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts, reportedDenials)] }] : []),
     ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     ...buildSettings(opts.permissionAllow, opts.permissionDeny),
@@ -278,7 +286,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
-  const pumping = pumpStream(sessionPromise, opts);
+  const pumping = pumpStream(sessionPromise, opts, reportedDenials);
 
   return {
     ticketId: opts.ticketId,
@@ -323,8 +331,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   };
 }
 
-async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions): Promise<void> {
-  const reportedDenials = new Set<string>();
+async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions, reportedDenials: Set<string>): Promise<void> {
   const denialReasons = new Map<string, { reason: string; sourceId?: string }>();
   try {
     const session = await sessionPromise;
@@ -336,7 +343,7 @@ async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionO
         });
       }
       safeDispatchClaudeMessage(message, options.onEvent, (denial) => {
-        if (reportedDenials.has(denial.tool_use_id)) return;
+        if (reportedDenials.has(denial.tool_use_id)) { denialReasons.delete(denial.tool_use_id); return; }
         reportedDenials.add(denial.tool_use_id);
         const details = denialReasons.get(denial.tool_use_id);
         const command = bashCommandSchema.safeParse(denial.tool_input);

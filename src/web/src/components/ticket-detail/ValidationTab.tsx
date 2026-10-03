@@ -98,7 +98,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const iterationAction = iterationMode === null ? null : iterationActions?.[iterationMode] ?? null;
   const iterationSourceRunId = iterationActions?.sourceRunId ?? null;
   const retryOfIterationId = iterationActions?.retryOfIterationId ?? null;
-  let iterationLabel = "Débloquer et revérifier";
+  let iterationLabel = "Relancer la vérification";
   let iterationNote = "Relance une vérification complète avec le diagnostic du blocage, sur le même code et avec les mêmes permissions.";
   if (iterationMode === "correction") {
     iterationLabel = "Corriger et revérifier";

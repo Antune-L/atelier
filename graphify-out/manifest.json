@@ -705,8 +705,8 @@
     "semantic_hash": ""
   },
   "src/server/system/claudeProvider.ts": {
-    "mtime": 1791029804.2811382,
-    "ast_hash": "908f1c09d3729f43ad2ad82d35c31854",
+    "mtime": 1791040212.6179042,
+    "ast_hash": "0a544617e484ab9226fa9711b0fae561",
     "semantic_hash": ""
   },
   "src/server/agents/split.ts": {
@@ -810,8 +810,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexProvider.ts": {
-    "mtime": 1791030209.392184,
-    "ast_hash": "1ba2b5ba7b93d3c701bb179c328d3341",
+    "mtime": 1791040189.5828533,
+    "ast_hash": "f24dd406868fbbb034a60781690ef571",
     "semantic_hash": ""
   },
   "src/server/testing/fixtures.ts": {
@@ -1455,8 +1455,8 @@
     "semantic_hash": ""
   },
   "MEMORY.md": {
-    "mtime": 1791038912.9827352,
-    "ast_hash": "059263e7881237b6bd558cbd5c8c083b",
+    "mtime": 1791040376.2108567,
+    "ast_hash": "8cff17b828f7e2171a09d804e7e4eb40",
     "semantic_hash": ""
   },
   "src/server/agents/atelier.ts": {
@@ -1590,8 +1590,8 @@
     "semantic_hash": ""
   },
   "src/server/system/codexCommandPolicy.ts": {
-    "mtime": 1791030209.3716156,
-    "ast_hash": "535ba09c2baa99c12c5f74e60fb24a28",
+    "mtime": 1791040189.5537674,
+    "ast_hash": "fd47c6b1491d364fc3db65599b5094a7",
     "semantic_hash": ""
   },
   "src/server/system/delegationWorkspace.ts": {
@@ -1600,8 +1600,8 @@
     "semantic_hash": ""
   },
   "src/server/system/permissionDiagnostics.ts": {
-    "mtime": 1791032313.7804134,
-    "ast_hash": "091dd08d987a6ca3c0653752f02157a1",
+    "mtime": 1791040159.9155092,
+    "ast_hash": "08df0115b1e168162958556ec73292ff",
     "semantic_hash": ""
   },
   "docs/pr-review-count-fixes-state.md": {
@@ -1625,8 +1625,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/qualityValidator.ts": {
-    "mtime": 1791038273.333706,
-    "ast_hash": "42939be416f2b4a21c0bb350f4c8ce12",
+    "mtime": 1791040287.6437354,
+    "ast_hash": "0c7e015ceeb89738377cb9695e56fdba",
     "semantic_hash": ""
   },
   "src/server/qualityRoutes.ts": {
@@ -1640,8 +1640,8 @@
     "semantic_hash": ""
   },
   "src/shared/quality.ts": {
-    "mtime": 1791038140.3188195,
-    "ast_hash": "54423f79c39661a568cb9333ad60da8e",
+    "mtime": 1791040159.8934903,
+    "ast_hash": "61d13d8dc33b34615717a2f422026e47",
     "semantic_hash": ""
   },
   "src/web/src/components/projects-settings/ValidationConfigFields.tsx": {
@@ -1655,13 +1655,13 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityResults.tsx": {
-    "mtime": 1791032737.3121614,
-    "ast_hash": "23ca6fe5808345de96d5152193d4fde3",
+    "mtime": 1791040491.4596252,
+    "ast_hash": "b15af5529bda87ba646fd1248b0eec8e",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/ValidationTab.tsx": {
-    "mtime": 1791039484.078816,
-    "ast_hash": "7e33c5b5a6317e27ae08afea06a5c91f",
+    "mtime": 1791040217.7576883,
+    "ast_hash": "f6e1ed0ceb1bf0d118c70cfe393907d4",
     "semantic_hash": ""
   },
   "docs/multi-repository-project-analysis.md": {
@@ -1670,13 +1670,13 @@
     "semantic_hash": ""
   },
   "docs/workflow-quality-feasibility-state.md": {
-    "mtime": 1791039787.5682116,
-    "ast_hash": "3e4b7f6bf3394a5c6d4313d22bff34e1",
+    "mtime": 1791040620.698491,
+    "ast_hash": "e9fbc6096da9208191dbf64ca1e9eb74",
     "semantic_hash": ""
   },
   "src/web/src/lib/qualityMessages.ts": {
-    "mtime": 1791038641.6750844,
-    "ast_hash": "23fcbdfbf0e062bff12c121034049e3c",
+    "mtime": 1791040560.6827028,
+    "ast_hash": "71d38ff482d2b31391aea79c4e9cc3ef",
     "semantic_hash": ""
   },
   "src/server/agents/qualityCriteriaPreparation.ts": {
@@ -1685,13 +1685,13 @@
     "semantic_hash": ""
   },
   "src/server/agents/qualitySession.ts": {
-    "mtime": 1791032360.8526402,
-    "ast_hash": "8b9590c241e60211732bb8f217e80a5a",
+    "mtime": 1791040212.639342,
+    "ast_hash": "4ce7bb5b10389682d5181ab3882baa5a",
     "semantic_hash": ""
   },
   "src/server/system/qualityReadPolicy.ts": {
-    "mtime": 1791029977.7724934,
-    "ast_hash": "4e40ccd089a329c3b6f419d27dbf9722",
+    "mtime": 1791040159.9373941,
+    "ast_hash": "a7dee4ccc1f889425bf593c8a2cef356",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityIterations.tsx": {

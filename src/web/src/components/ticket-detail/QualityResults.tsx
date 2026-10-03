@@ -2,12 +2,12 @@ import { useState, type ReactNode } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import { QUALITY_ACTIVE_STATUSES } from "@shared/quality";
-import type { QualityEvidence, QualityRunStatus, QualityValidationRun, TicketQuality } from "@shared/quality";
+import type { QualityEvidence, QualityPermissionBlockReason, QualityRunStatus, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { Dialog } from "@/components/ui/dialog";
 import { qualityEvidenceArtifactUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
-import { formatQualityCriterionText, formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
+import { formatQualityCriterionText, formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPermissionBlockMessage, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
 type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated" | "preparation";
@@ -78,6 +78,31 @@ function qualityRunCriterionResults(quality: TicketQuality, run: QualityValidati
   return snapshot?.criteria.map((criterion) => ({ criterion, creator: snapshot.createdBy, evidence: quality.evidence.filter((item) => item.runId === run.id && item.criterionId === criterion.id && item.kind === "behavior").at(-1) })) ?? [];
 }
 
+function QualityPermissionDiagnostics({ run }: { run: QualityValidationRun }) {
+  if (run.status === "passed" || QUALITY_ACTIVE_STATUSES.includes(run.status)) return null;
+  const diagnostic = run.diagnostic;
+  if (diagnostic === null) return null;
+  const counts = new Map<QualityPermissionBlockReason | null, number>();
+  for (const denial of diagnostic.permissionDenials) {
+    const reason = denial.blockReason ?? null;
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  if (counts.size === 0) {
+    if (diagnostic.category !== "permission_denial") return null;
+    return <div className="min-w-0 max-w-full break-words rounded border border-warning/25 bg-warning/5 p-3 text-xs"><p>L’agent rapporte un refus. Aucun refus confirmé n’est enregistré pour cette exécution.</p><p className="mt-1 text-2xs text-muted-foreground">Le motif précis reste inconnu. Une nouvelle tentative conserve les mêmes autorisations.</p></div>;
+  }
+  return (
+    <div className="min-w-0 max-w-full space-y-2 break-words rounded border border-warning/25 bg-warning/5 p-3">
+      <p className="text-xs font-medium">Refus confirmés pendant cette vérification</p>
+      {[...counts].map(([reason, count]) => {
+        const message = qualityPermissionBlockMessage(reason);
+        return <div key={reason ?? "unknown"} className="space-y-1 text-xs"><p>{message.reason} <span className="text-2xs text-muted-foreground">{count} {count === 1 ? "appel refusé" : "appels refusés"}</span></p><p className="text-2xs text-muted-foreground">{message.nextStep}</p></div>;
+      })}
+      <p className="text-2xs text-muted-foreground">Ces refus concernent des appels d’outils. Ils ne déterminent pas le résultat de chaque critère.</p>
+    </div>
+  );
+}
+
 export function QualityRunStatus({ run, current, quality, children }: { run: QualityValidationRun; current: boolean; quality: TicketQuality; children?: ReactNode }) {
   const accepted = run.evidenceAccepted || (run.kind === "checks" && run.technicalEvidenceAccepted);
   const requiredResults = qualityRunCriterionResults(quality, run).filter(({ criterion }) => criterion.required);
@@ -99,6 +124,7 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(status, current, accepted, run.simulated)} /></div>
+      <QualityPermissionDiagnostics run={run} />
       {children}
       <p className="text-2xs text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {qualityModeLabel(run.mode)}</p>
       {phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(phase)}</p>}
@@ -129,7 +155,7 @@ export function QualityRunExplanation({ run, quality, current, onOpenEvidence }:
           <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium">Critère {criterion.id} · requis</p><QualityResult status={evidence?.status ?? "unverified"} /></div>
           <p className="text-xs text-muted-foreground">{formatQualityCriterionText(criterion, creator).slice(0, CRITERION_EXCERPT_LIMIT)}{criterion.text.length > CRITERION_EXCERPT_LIMIT && "…"}</p>
           {evidence === undefined ? <p className="text-xs text-muted-foreground">Aucun résultat enregistré pour ce critère dans cette exécution.</p> : <>
-            <p className="text-2xs text-muted-foreground">Motif indiqué par {run.provider === null ? "le validateur" : ORCHESTRATOR_LABELS[run.provider]}</p>
+            <p className="text-2xs text-muted-foreground">Compte rendu de {run.provider === null ? "l’agent de validation" : ORCHESTRATOR_LABELS[run.provider]}</p>
             <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-sans text-xs">{(evidence.output.trim() === "" ? formatQualityEvidenceSummary(evidence, run.simulated) : formatQualityEvidenceOutput(evidence, run.simulated)).slice(0, EXPLANATION_TEXT_LIMIT)}</pre>
             {evidence.output.length > EXPLANATION_TEXT_LIMIT && <p className="text-2xs text-muted-foreground">Extrait du compte rendu ; la preuve conserve le texte complet.</p>}
             <button type="button" className="text-xs text-info underline underline-offset-2" onClick={() => onOpenEvidence(evidence)}>Voir la preuve du critère {criterion.id}</button>

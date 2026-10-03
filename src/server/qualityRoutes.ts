@@ -4,10 +4,12 @@ import { basename, extname, isAbsolute, join, relative } from "node:path";
 import { Elysia } from "elysia";
 
 import { getErrorMessage } from "../shared/errors.ts";
-import { manualQualityEvidenceSchema, setQualityCriteriaSchema, startQualityIterationSchema, validateQualitySchema } from "../shared/quality.ts";
+import { createQualityFollowUpSchema, manualQualityEvidenceSchema, setQualityCriteriaSchema, startQualityIterationSchema, validateQualitySchema } from "../shared/quality.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
 import type { Store } from "./db/store.ts";
+import { TicketOperationError } from "./ticketOperations.ts";
+import type { TicketOperations } from "./ticketOperations.ts";
 
 const HTTP_ACCEPTED = 202;
 const HTTP_BAD_REQUEST = 400;
@@ -29,9 +31,10 @@ interface QualityRouteDeps {
   store: Store;
   quality?: QualityManager;
   qualityArtifactDirectory?: string;
+  ticketOperations?: TicketOperations;
 }
 
-export function createQualityRoutes({ store, quality, qualityArtifactDirectory }: QualityRouteDeps) {
+export function createQualityRoutes({ store, quality, qualityArtifactDirectory, ticketOperations }: QualityRouteDeps) {
   const response = async (ticketId: string) => ({
     quality: quality?.get(ticketId),
     gate: await quality?.gate(ticketId, "reservations"),
@@ -118,6 +121,33 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory }
       const iteration = await quality?.startQualityIteration(params.id, parsed.data);
       set.status = HTTP_ACCEPTED;
       return { iteration };
+    })
+    .post("/follow-ups", async ({ params, body, set }) => {
+      const parsed = createQualityFollowUpSchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = HTTP_BAD_REQUEST;
+        return { error: parsed.error.message };
+      }
+      if (!quality) return;
+      const draft = quality.followUpDraft(params.id, parsed.data);
+      let followUp = draft.existing ? { created: false, ticketId: draft.existing.ticketId, title: draft.existing.title, project: draft.existing.project } : null;
+      if (!followUp) {
+        if (!ticketOperations) {
+          set.status = HTTP_UNAVAILABLE;
+          return { error: "Correction card creation is unavailable." };
+        }
+        try {
+          const result = ticketOperations.createTodoTicket({ requestId: draft.requestId, title: draft.title, description: draft.description, project: draft.project });
+          followUp = { created: result.created, ticketId: result.ticket.id, title: result.ticket.title, project: result.ticket.project };
+        } catch (error) {
+          if (error instanceof TicketOperationError && error.code !== "CONFLICT") {
+            set.status = error.code === "NOT_FOUND" ? HTTP_NOT_FOUND : HTTP_BAD_REQUEST;
+            return { error: error.message };
+          }
+          throw error;
+        }
+      }
+      return { ...await response(params.id), followUp };
     })
     .post("/checks", async ({ params, set }) => {
       const run = await quality?.runChecks(params.id);

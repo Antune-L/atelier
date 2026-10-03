@@ -112,6 +112,16 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Quality validation is available for feature tickets only.": "La validation est disponible uniquement pour les tickets de fonctionnalité.",
   "Evidence artifact is unavailable.": "La pièce jointe de la preuve est indisponible.",
   "Evidence artifact exceeds the download limit.": "La pièce jointe de la preuve dépasse la taille maximale de téléchargement.",
+  "No completed real technical check failure is available for correction.": "Aucun échec réel et terminé des contrôles techniques n’est disponible pour une correction.",
+  "The same technical checks still fail after a correction attempt; inspect the evidence or create a correction card.": "Les mêmes contrôles échouent encore après une tentative de correction ; consultez les preuves ou créez une carte de correction.",
+  "The same read blocker persisted after a recovery attempt with the same code and permissions; inspect the evidence or create a correction card.": "Le même blocage persiste après une reprise sur le même code avec les mêmes permissions ; consultez les preuves ou créez une carte de correction.",
+  "The source technical run is no longer the latest technical run.": "Les contrôles source ne sont plus les plus récents.",
+  "The source run has no recorded technical check failure.": "Cette exécution n’a enregistré aucun échec des contrôles techniques.",
+  "The source run has no recorded read blocker.": "Cette exécution n’a enregistré aucun blocage de lecture.",
+  "Unknown target project for the correction card.": "Projet cible inconnu pour la carte de correction.",
+  "Simulated runs cannot create correction cards.": "Une simulation ne peut pas créer de carte de correction.",
+  "The source run is still running or does not belong to this ticket.": "L’exécution source est encore en cours ou n’appartient pas à ce ticket.",
+  "The source run is no longer the latest run for this issue; refresh the validation before creating a correction card.": "L’exécution source n’est plus la plus récente pour ce problème ; actualisez la validation avant de créer une carte de correction.",
 };
 
 const QUALITY_MESSAGE_PREFIXES = [
@@ -146,7 +156,7 @@ const QUALITY_PERMISSION_BLOCK_MESSAGES: Record<QualityPermissionBlockReason, { 
   invalid_tool_input: { reason: "Les paramètres de l’outil de lecture sont invalides.", nextStep: "Corriger le format des paramètres de lecture avant une nouvelle tentative." },
   unsupported_read_tool: { reason: "L’outil de lecture demandé n’est pas autorisé.", nextStep: "Utiliser une lecture directe ou une recherche simple prise en charge par le validateur." },
   path_outside_workspace: { reason: "Un chemin demandé sort de la copie de validation.", nextStep: "Limiter la lecture aux fichiers de la copie de validation du projet." },
-  path_unresolvable: { reason: "Le chemin du fichier à lire ne peut pas être vérifié.", nextStep: "Utiliser un fichier existant avec un chemin explicite dans la copie de validation." },
+  path_unresolvable: { reason: "Le chemin ciblé n’a pas pu être résolu dans la copie de validation.", nextStep: "Utiliser un fichier existant avec un chemin explicite dans la copie de validation." },
   home_expansion: { reason: "Le caractère « ~ » est refusé dans les arguments de lecture.", nextStep: "Utiliser les outils de lecture pris en charge sans ce caractère dans leurs arguments." },
   unsafe_read_option: { reason: "Une option de lecture demandée n’est pas autorisée.", nextStep: "Retirer les options non autorisées et rechercher directement dans les fichiers du projet." },
   shell_expansion: { reason: "La commande demande le remplacement automatique d’une partie de ses arguments.", nextStep: "Utiliser des arguments littéraux, sans substitution de commande ou de variable." },
@@ -154,6 +164,7 @@ const QUALITY_PERMISSION_BLOCK_MESSAGES: Record<QualityPermissionBlockReason, { 
   unquoted_glob: { reason: "Le motif de fichiers n’est pas entouré de guillemets.", nextStep: "Entourer le motif de fichiers de guillemets avant de relancer la lecture." },
   working_directory_mismatch: { reason: "La commande part d’un dossier non autorisé.", nextStep: "Exécuter la lecture depuis la copie de validation du projet." },
   command_not_allowlisted: { reason: "La commande de lecture n’est pas autorisée.", nextStep: "Utiliser une lecture directe ou une recherche simple prévue par le validateur." },
+  workspace_unresolvable: { reason: "La racine de la copie de validation est introuvable ou illisible.", nextStep: "Vérifier le cycle de vie de la copie de validation avant de relancer." },
 };
 const UNKNOWN_PERMISSION_BLOCK_MESSAGE = { reason: "Le motif précis de ce refus n’a pas été enregistré.", nextStep: "La cause exacte de ce refus n’est pas disponible. Une nouvelle vérification conserve les mêmes autorisations." };
 

@@ -64,21 +64,49 @@ export type QualityEnvironment = z.infer<typeof qualityEnvironmentSchema>;
 export const qualityRunStatusSchema = z.enum(["queued", "running", "passed", "failed", "cancelled", "interrupted", "inconclusive"]);
 export type QualityRunStatus = z.infer<typeof qualityRunStatusSchema>;
 
-export const qualityPermissionBlockReasonSchema = z.enum(["invalid_tool_input", "unsupported_read_tool", "path_outside_workspace", "path_unresolvable", "home_expansion", "unsafe_read_option", "shell_expansion", "shell_syntax", "unquoted_glob", "working_directory_mismatch", "command_not_allowlisted"]);
+export const qualityPermissionBlockReasonSchema = z.enum(["invalid_tool_input", "unsupported_read_tool", "path_outside_workspace", "path_unresolvable", "home_expansion", "unsafe_read_option", "shell_expansion", "shell_syntax", "unquoted_glob", "working_directory_mismatch", "command_not_allowlisted", "workspace_unresolvable"]);
 export type QualityPermissionBlockReason = z.infer<typeof qualityPermissionBlockReasonSchema>;
+
+export const qualityBlockerCategorySchema = z.enum(["unsupported_operation", "path_or_directory", "workspace_unavailable", "filesystem_error", "access_restriction", "unknown"]);
+export type QualityBlockerCategory = z.infer<typeof qualityBlockerCategorySchema>;
+
+const QUALITY_BLOCKER_CATEGORIES = {
+  invalid_tool_input: "unsupported_operation",
+  unsupported_read_tool: "unsupported_operation",
+  path_outside_workspace: "access_restriction",
+  path_unresolvable: "filesystem_error",
+  home_expansion: "access_restriction",
+  unsafe_read_option: "unsupported_operation",
+  shell_expansion: "unsupported_operation",
+  shell_syntax: "unsupported_operation",
+  unquoted_glob: "unsupported_operation",
+  working_directory_mismatch: "path_or_directory",
+  command_not_allowlisted: "unsupported_operation",
+  workspace_unresolvable: "workspace_unavailable",
+} satisfies Record<QualityPermissionBlockReason, QualityBlockerCategory>;
+
+export function qualityBlockerCategory(reason: QualityPermissionBlockReason | null): QualityBlockerCategory {
+  if (reason === null) return "unknown";
+  return QUALITY_BLOCKER_CATEGORIES[reason];
+}
+
+export const qualityPermissionDenialSchema = z.object({
+  provider: z.enum(ORCHESTRATORS),
+  source: z.literal("provider_permission_denial"),
+  toolName: nonEmptyTextSchema,
+  commandShape: z.string().nullable(),
+  reason: z.string(),
+  blockReason: qualityPermissionBlockReasonSchema.nullable().default(null),
+  signature: z.string().nullable().default(null),
+  workspaceAvailable: z.boolean().nullable().default(null),
+  reportedMs: z.number().nonnegative(),
+});
+export type QualityPermissionDenial = z.infer<typeof qualityPermissionDenialSchema>;
 
 export const qualityRunDiagnosticSchema = z.object({
   category: z.enum(["code_nonconformance", "permission_denial", "timeout", "validation_incomplete", "backend_checks_failed"]),
   summary: nonEmptyTextSchema,
-  permissionDenials: z.array(z.object({
-    provider: z.enum(ORCHESTRATORS),
-    source: z.literal("provider_permission_denial"),
-    toolName: nonEmptyTextSchema,
-    commandShape: z.string().nullable(),
-    reason: z.string(),
-    blockReason: qualityPermissionBlockReasonSchema.nullable().default(null),
-    reportedMs: z.number().nonnegative(),
-  })).default([]),
+  permissionDenials: z.array(qualityPermissionDenialSchema).default([]),
 });
 export type QualityRunDiagnostic = z.infer<typeof qualityRunDiagnosticSchema>;
 
@@ -165,6 +193,9 @@ export type QualityIterationMode = z.infer<typeof qualityIterationModeSchema>;
 export const qualityIterationStatusSchema = z.enum(["queued", "correcting", "verifying", "completed", "failed", "cancelled", "interrupted"]);
 export type QualityIterationStatus = z.infer<typeof qualityIterationStatusSchema>;
 
+export const qualityIterationTriggerSchema = z.enum(["criteria", "checks", "incomplete"]);
+export type QualityIterationTrigger = z.infer<typeof qualityIterationTriggerSchema>;
+
 export const qualityIterationSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema,
@@ -179,6 +210,8 @@ export const qualityIterationSchema = z.object({
   mode: qualityIterationModeSchema,
   status: qualityIterationStatusSchema,
   retryOfIterationId: nonEmptyTextSchema.nullable().default(null),
+  trigger: qualityIterationTriggerSchema.nullable().default(null),
+  evidenceIds: z.array(nonEmptyTextSchema).default([]),
   resultRunId: nonEmptyTextSchema.nullable(),
   resultRevision: nonEmptyTextSchema.nullable(),
   diagnostic: z.string().nullable(),
@@ -232,6 +265,37 @@ export const qualityPreflightSchema = z.object({
 });
 export type QualityPreflight = z.infer<typeof qualityPreflightSchema>;
 
+export const qualityFollowUpIssueSchema = z.enum(["checks", "blocker"]);
+export type QualityFollowUpIssue = z.infer<typeof qualityFollowUpIssueSchema>;
+
+export const qualityProblemSchema = z.object({
+  id: nonEmptyTextSchema,
+  kind: z.enum(["technical_check", "read_blocker", "criterion_failed", "criterion_unverified"]),
+  authority: z.enum(["server", "agent"]),
+  runId: nonEmptyTextSchema,
+  summary: nonEmptyTextSchema,
+  evidenceId: nonEmptyTextSchema.nullable(),
+  criterionId: nonEmptyTextSchema.nullable(),
+  blockReason: qualityPermissionBlockReasonSchema.nullable(),
+  category: qualityBlockerCategorySchema.nullable(),
+  toolName: z.string().nullable(),
+  commandShape: z.string().nullable(),
+  occurrences: z.number().int().positive(),
+  repeated: z.boolean(),
+});
+export type QualityProblem = z.infer<typeof qualityProblemSchema>;
+
+export const qualityFollowUpSchema = z.object({
+  issue: qualityFollowUpIssueSchema,
+  sourceRunId: nonEmptyTextSchema,
+  ticketId: nonEmptyTextSchema,
+  title: z.string(),
+  project: nonEmptyTextSchema,
+});
+export type QualityFollowUp = z.infer<typeof qualityFollowUpSchema>;
+
+const qualityActionAvailabilitySchema = z.object({ available: z.boolean(), reason: z.string().nullable() });
+
 export const qualityResponseSchema = z.object({
   quality: ticketQualitySchema,
   gate: qualityGateSchema,
@@ -239,18 +303,46 @@ export const qualityResponseSchema = z.object({
     sourceRunId: nonEmptyTextSchema.nullable(),
     recommendedMode: z.enum(["correction", "recovery"]).nullable(),
     retryOfIterationId: nonEmptyTextSchema.nullable(),
-    recovery: z.object({ available: z.boolean(), reason: z.string().nullable() }),
-    correction: z.object({ available: z.boolean(), reason: z.string().nullable() }),
+    recovery: qualityActionAvailabilitySchema,
+    correction: qualityActionAvailabilitySchema,
+    checksCorrection: qualityActionAvailabilitySchema.extend({
+      sourceRunId: nonEmptyTextSchema.nullable(),
+      retryOfIterationId: nonEmptyTextSchema.nullable(),
+    }).default({ available: false, reason: null, sourceRunId: null, retryOfIterationId: null }),
+    followUp: z.object({
+      checks: qualityActionAvailabilitySchema.extend({ sourceRunId: nonEmptyTextSchema.nullable() }),
+      blocker: qualityActionAvailabilitySchema.extend({ sourceRunId: nonEmptyTextSchema.nullable() }),
+    }).default({ checks: { available: false, reason: null, sourceRunId: null }, blocker: { available: false, reason: null, sourceRunId: null } }),
+    problems: z.array(qualityProblemSchema).default([]),
+    followUps: z.array(qualityFollowUpSchema).default([]),
   }).optional(),
 });
 export type QualityResponse = z.infer<typeof qualityResponseSchema>;
 export type QualityIterationActions = NonNullable<QualityResponse["iterationActions"]>;
+
+export const createQualityFollowUpSchema = z.object({
+  sourceRunId: nonEmptyTextSchema,
+  issue: qualityFollowUpIssueSchema,
+  project: nonEmptyTextSchema,
+});
+export type CreateQualityFollowUpInput = z.infer<typeof createQualityFollowUpSchema>;
+
+export const qualityFollowUpResponseSchema = qualityResponseSchema.extend({
+  followUp: z.object({
+    created: z.boolean(),
+    ticketId: nonEmptyTextSchema,
+    title: z.string(),
+    project: nonEmptyTextSchema,
+  }),
+});
+export type QualityFollowUpResponse = z.infer<typeof qualityFollowUpResponseSchema>;
 
 export const startQualityIterationSchema = z.object({
   sourceRunId: nonEmptyTextSchema,
   provider: z.enum(ORCHESTRATORS),
   mode: z.enum(["correction", "recovery"]),
   retryOfIterationId: nonEmptyTextSchema.optional(),
+  trigger: qualityIterationTriggerSchema.optional(),
 });
 export type StartQualityIterationInput = z.infer<typeof startQualityIterationSchema>;
 

@@ -5,7 +5,7 @@ import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from ".
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
-import type { Orchestrator, PrState, VcsProvider } from "../../shared/constants.ts";
+import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -442,6 +442,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("checkPrMerged", { repoPath, prUrl });
     const state = await this.vcs(provider).readPrState(repoPath, prUrl);
     return { merged: state === "merged", state };
+  }
+
+  async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {
+    this.log("readPrMergeability", { repoPath, prUrl });
+    return this.vcs(provider).readPrMergeability(repoPath, prUrl);
   }
 
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {

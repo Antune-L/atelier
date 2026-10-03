@@ -14,6 +14,7 @@ import { useState } from "react";
 
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
+import { canMergePr, canResolveConflicts } from "@shared/ticketMerge";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -63,8 +64,16 @@ export function TicketActions({ ticket, onRefresh, onClose, onError }: TicketAct
   const [busyId, setBusyId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pending, setPending] = useState<TicketAction | null>(null);
+  const [conflictTicketId, setConflictTicketId] = useState<string | null>(null);
 
-  const actions = buildActions(ticket, { onRefresh, onClose, onError });
+  const hasConflicts = conflictTicketId === ticket.id;
+  const actions = buildActions(ticket, {
+    onRefresh,
+    onClose,
+    onError,
+    hasConflicts,
+    onConflicts: () => setConflictTicketId(ticket.id),
+  });
   if (actions.length === 0) return null;
 
   // A destructive action is never the primary button: it stays behind the menu.
@@ -118,6 +127,11 @@ export function TicketActions({ ticket, onRefresh, onClose, onError }: TicketAct
 
   return (
     <div className="space-y-2">
+      {hasConflicts && (
+        <p className="text-sm text-warning">
+          Conflits détectés avec la branche de base : la PR ne peut pas être mergée.
+        </p>
+      )}
       {primary?.confirm !== undefined && pending?.id === primary.id && !pendingDialog ? (
         <ConfirmPopover
           open
@@ -196,7 +210,14 @@ interface ActionContext {
   onRefresh: () => void;
   onClose: () => void;
   onError: (message: string) => void;
+  hasConflicts: boolean;
+  onConflicts: () => void;
 }
+
+const RESOLVE_CONFLICTS_FAILED_TITLE =
+  "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto";
+const RESOLVE_CONFLICTS_DONE_TITLE =
+  "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits, repousse la PR puis relance le merge";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -226,27 +247,24 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
     });
   }
 
-  // Auto-merge failed after the PR was opened: a one-click session rebases, resolves and re-pushes.
-  const canResolveConflicts =
-    ticket.column === "failed" &&
-    ticket.autoMerge &&
-    ticket.kind !== "review" &&
-    ticket.slotId === null &&
-    ticket.prUrl !== null &&
-    ticket.branch !== null;
-  if (canResolveConflicts) {
-    actions.push({
+  const resolveConflictsAction: TicketAction | null = canResolveConflicts(ticket)
+    ? {
       id: "resolve-conflicts",
       label: "Résoudre les conflits",
       Icon: GitMerge,
-      title:
-        "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto",
+      title: ticket.column === "done" ? RESOLVE_CONFLICTS_DONE_TITLE : RESOLVE_CONFLICTS_FAILED_TITLE,
       run: async () => {
-        await api.resolveConflicts(ticket.id);
-        ctx.onRefresh();
+        try {
+          await api.resolveConflicts(ticket.id);
+          ctx.onRefresh();
+        } catch (error) {
+          ctx.onError(errorMessage(error, "Résolution des conflits refusée"));
+        }
       },
-    });
-  }
+    }
+    : null;
+  const resolveConflictsFirst = resolveConflictsAction !== null && (ticket.column !== "done" || ctx.hasConflicts);
+  if (resolveConflictsFirst) actions.push(resolveConflictsAction);
 
   // A retry on an already-pushed PR would re-spawn a session for an existing PR: hide it there.
   const canRetry =
@@ -312,6 +330,32 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
 
   const isFinishedFeature = ticket.column === "done" && ticket.kind === "feature";
   if (isFinishedFeature) {
+    if (canMergePr(ticket) && !ctx.hasConflicts) {
+      actions.push({
+        id: "merge",
+        label: "Merger la PR",
+        Icon: GitMerge,
+        confirm: {
+          title: "Merger la PR",
+          description: "La PR sera mergée dans la branche de base et la carte archivée.",
+          confirmLabel: "Merger",
+        },
+        run: async () => {
+          try {
+            const result = await api.mergePr(ticket.id);
+            if (result.merged) {
+              ctx.onClose();
+              return;
+            }
+            if (result.conflicts) ctx.onConflicts();
+            ctx.onError(result.reason ?? "Merge de la PR échoué");
+          } catch (error) {
+            ctx.onError(errorMessage(error, "Merge de la PR échoué"));
+          }
+        },
+      });
+    }
+    if (resolveConflictsAction !== null && !resolveConflictsFirst) actions.push(resolveConflictsAction);
     actions.push({
       id: "check-merge",
       label: "Vérifier le merge",

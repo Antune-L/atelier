@@ -454,10 +454,10 @@ export class SlotManager {
   }
 
   /**
-   * Auto-merge failed (conflicts / branch behind base): spawn an opus-low session on the EXISTING
-   * PR branch to rebase onto the base, resolve conflicts, force-push, then re-trigger the auto-merge
-   * via done(). Unlike startTicket it never queues — with no free slot it surfaces a hint and bails,
-   * leaving the card in its failed state so the user can retry once a slot frees up.
+   * Merge failed or conflicts detected before a manual merge: spawn an opus-low session on the
+   * EXISTING PR branch to rebase onto the base, resolve conflicts, force-push, then re-trigger the
+   * merge via done(). Unlike startTicket it never queues — with no free slot it surfaces a hint and
+   * bails, leaving the card in its current column so the user can retry once a slot frees up.
    */
   async resolveMergeConflicts(ticketId: string): Promise<boolean> {
     const ticket = this.store.getTicket(ticketId);
@@ -1115,7 +1115,7 @@ export class SlotManager {
     let column: Column = "done";
     if (ticket.kind === "review" || ticket.kind === "clean") column = "reviewed";
     let mergeError: string | null = null;
-    if (currentTicket.autoMerge && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
+    if ((currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {

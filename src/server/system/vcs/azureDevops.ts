@@ -13,7 +13,7 @@
 import { z } from "zod";
 
 import { VCS_PROVIDER_LABELS } from "../../../shared/constants.ts";
-import type { PrReviewStatus, PrState } from "../../../shared/constants.ts";
+import type { PrMergeability, PrReviewStatus, PrState } from "../../../shared/constants.ts";
 import { parsePrUrl } from "../../../shared/prUrl.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
@@ -94,6 +94,11 @@ const PR_STATE_BY_AZURE_STATUS: Record<string, PrState> = {
   active: "open",
   completed: "merged",
   abandoned: "closed",
+};
+
+const PR_MERGEABILITY_BY_AZURE_MERGE_STATUS: Record<string, PrMergeability> = {
+  succeeded: "mergeable",
+  conflicts: "conflicting",
 };
 
 /**
@@ -177,6 +182,7 @@ const azurePolicyListSchema = z.object({
 const azurePrShowSchema = z.object({
   pullRequestId: z.number().int(),
   status: z.string(),
+  mergeStatus: z.string().nullable().default(null),
   sourceRefName: z.string(),
   description: z.string().nullable().default(null),
   lastMergeSourceCommit: z.object({ commitId: z.string().min(1) }).nullable().default(null),
@@ -615,6 +621,12 @@ export class AzureDevopsVcsClient implements VcsClient {
     const pr = await this.showPr(cwd, prUrl);
     if (!pr.ok) return "unknown";
     return PR_STATE_BY_AZURE_STATUS[pr.data.status] ?? "unknown";
+  }
+
+  async readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability> {
+    const pr = await this.showPr(cwd, prUrl);
+    if (!pr.ok || pr.data.mergeStatus === null) return "unknown";
+    return PR_MERGEABILITY_BY_AZURE_MERGE_STATUS[pr.data.mergeStatus] ?? "unknown";
   }
 
   private async readOpenPrs(cwd: string, ref: AzureRepoRef): Promise<AzurePrListEntry[] | null> {

@@ -149,6 +149,9 @@ export const PR_STATE_LABELS: Record<PrState, string> = {
   unknown: "",
 };
 
+export const PR_MERGEABILITIES = ["mergeable", "conflicting", "unknown"] as const;
+export type PrMergeability = (typeof PR_MERGEABILITIES)[number];
+
 /** Provider-neutral review status of an open PR; drives the "needs attention" highlight in the picker. */
 export const PR_REVIEW_STATUSES = ["none", "needs_review", "reviewed", "approved", "changes_requested"] as const;
 export type PrReviewStatus = (typeof PR_REVIEW_STATUSES)[number];

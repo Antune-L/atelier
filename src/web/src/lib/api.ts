@@ -47,6 +47,7 @@ import type {
 import type { createConversationSchema, createTicketsFromPrdSchema } from "@shared/schemas";
 import type { Column, Orchestrator, PrState } from "@shared/constants";
 import type { ManualQualityEvidenceInput, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
+import type { MergePrResult } from "@shared/ticketMerge";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -218,6 +219,8 @@ export const api = {
     request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
     request("/api/internal/update", { method: "POST" }),
+  mergePr: (id: string): Promise<MergePrResult> =>
+    request(`/api/tickets/${id}/merge`, { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),

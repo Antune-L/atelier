@@ -2,11 +2,13 @@ import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
-import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrState, Stage, VcsProvider } from "../shared/constants.ts";
+import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
 import { runRecordedAction } from "./recordedAction.ts";
 import { getErrorMessage } from "../shared/errors.ts";
+import { canMergePr, canResolveConflicts } from "../shared/ticketMerge.ts";
+import type { MergePrResult } from "../shared/ticketMerge.ts";
 import {
   analyzeTicketsSchema,
   consolidatePrdSchema,
@@ -60,7 +62,7 @@ import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
-import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
+import type { DoneGateResult, ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
 import { createQualityRoutes } from "./qualityRoutes.ts";
@@ -85,6 +87,8 @@ interface PaneReader {
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
   inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
+  readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
+  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -274,6 +278,9 @@ function isProcessing(stage: Stage | null): boolean {
   if (stage === "awaiting_answers") return true;
   return ACTIVE_STAGES.includes(stage);
 }
+
+const MANUAL_MERGED_EVENT = "manual_merged";
+const mergesInFlight = new Set<string>();
 
 /** A split mother lands in "done" with its integration branch (split/…) set but no PR. */
 function isSplitMother(ticket: Ticket): boolean {
@@ -1408,6 +1415,37 @@ export function createApiRoutes(deps: RouteDeps) {
       const merged = lifecycle.markMerged(params.id);
       return { merged: true, state: result.state, ticket: merged };
     })
+    .post("/tickets/:id/merge", async ({ params, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (!canMergePr(ticket) || ticket.prUrl === null || ticket.branch === null) {
+        return jsonError(set, HTTP_CONFLICT, "merge réservé aux features terminées avec une PR ouverte");
+      }
+      if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+      if (mergesInFlight.has(params.id)) return jsonError(set, HTTP_CONFLICT, "un merge est déjà en cours pour cette carte");
+      const project = getProject(ticket.project);
+      const { prUrl, branch } = ticket;
+      const conflictReason = `La PR a des conflits avec ${ticket.baseBranch ?? project.baseBranch}`;
+      mergesInFlight.add(params.id);
+      try {
+        const mergeability = await deps.system.readPrMergeability(project.repoPath, prUrl, project.vcsProvider);
+        if (mergeability === "conflicting") {
+          return { merged: false, conflicts: true, reason: conflictReason } satisfies MergePrResult;
+        }
+        const merge = await deps.system.mergePr(project.repoPath, branch, prUrl, project.vcsProvider);
+        if (merge.ok) {
+          store.logEvent(params.id, MANUAL_MERGED_EVENT, { prUrl });
+          const merged = lifecycle.markMerged(params.id);
+          return { merged: true, conflicts: false, ticket: merged } satisfies MergePrResult;
+        }
+        const after = await deps.system.readPrMergeability(project.repoPath, prUrl, project.vcsProvider);
+        return { merged: false, conflicts: after === "conflicting", reason: merge.reason } satisfies MergePrResult;
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec du merge de la PR"));
+      } finally {
+        mergesInFlight.delete(params.id);
+      }
+    })
     .post("/tickets/:id/retry", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
@@ -1419,17 +1457,15 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours.");
-      // Only meaningful for an auto-merge that failed after opening the PR: the PR exists, the slot
-      // is released, and a fresh session can rebase the branch and re-trigger the merge.
-      const eligible =
-        ticket.column === "failed" &&
-        ticket.autoMerge &&
-        ticket.kind !== "review" &&
-        ticket.slotId === null &&
-        ticket.prUrl !== null &&
-        ticket.branch !== null;
-      if (!eligible) {
-        return jsonError(set, HTTP_CONFLICT, "résolution de conflits réservée aux PR dont le merge auto a échoué");
+      // Only meaningful once the PR exists and the slot is released (failed merge or finished feature):
+      // a fresh session can rebase the branch and re-trigger the merge.
+      if (mergesInFlight.has(params.id)) return jsonError(set, HTTP_CONFLICT, "un merge est déjà en cours pour cette carte");
+      if (!canResolveConflicts(ticket)) {
+        return jsonError(
+          set,
+          HTTP_CONFLICT,
+          "résolution de conflits réservée aux PR dont le merge a échoué ou aux features terminées avec une PR ouverte",
+        );
       }
       // Slow git worktree setup runs in the background; the board updates live over WS.
       void slots.resolveMergeConflicts(params.id).catch((e) => {

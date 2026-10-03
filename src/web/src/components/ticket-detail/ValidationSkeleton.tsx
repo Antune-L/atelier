@@ -4,7 +4,7 @@ export function ValidationSkeleton() {
   return (
     <div role="status" aria-busy="true" className="mx-auto w-full min-w-0 max-w-4xl pb-4">
       <span className="sr-only">Chargement de la validation…</span>
-      <div aria-hidden="true" className="min-w-0 space-y-6">
+      <div aria-hidden="true" className="min-w-0 animate-pulse space-y-6 motion-reduce:animate-none">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-2">
             <div className="h-2 w-28 max-w-full rounded bg-muted" />

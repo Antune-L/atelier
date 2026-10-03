@@ -1,5 +1,11 @@
 > Status: VERIFIED IMPLEMENTATION — bounded correction and recovery iterations on `feat/workflow-quality-validation`, baseline `897d5c488bee5f71ac34f54e360626aa40cbd95e`. The changes and evidence below belong to this follow-up commit. No installed application update or deployment is included.
 
+## Validation skeleton pulse — 2026-10-03
+
+- **Verified:** the decorative loading skeleton now pulses gently using existing animation utilities. Starting revision is `901b4e1` on `feat/workflow-quality-validation`. The accessible loading label and layout remain unchanged; reduced motion disables the pulse.
+- **Checks:** typecheck, lint, scoped simplifier/regression review and diff checks passed. An isolated browser check observed the running two-second pulse and changing opacity; reduced motion produced no animations and constant opacity. Releasing the delayed request replaced the skeleton with loaded content, with no console or page errors. Evidence: `/private/tmp/atelier-quality-iteration-ui-pxdmyx/pulse-artifacts/proof.json` and `/private/tmp/atelier-quality-iteration-ui-pxdmyx/pulse-artifacts/pulse-loading-desktop.png`. No dependencies or repository tests were added. The graph was refreshed, with the same three configuration JSON files outside its coverage.
+- **Next action:** rebuild/relaunch the desktop application to use the updated loading state. No live data or installed application was modified by verification.
+
 ## Precise refusal identification — 2026-10-03
 
 - **Verified implementation:** user approved identifying the actual reason for validator read refusals. Starting revision is `aaa9f65` on `feat/workflow-quality-validation`; the unrelated untracked analysis document remains untouched. No installed application update or deployment is included.

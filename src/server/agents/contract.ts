@@ -1,5 +1,6 @@
 import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
 import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
+import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
@@ -232,12 +233,13 @@ function buildFeasibilityContextSection(ticket: Ticket): string {
 
 export function buildTicketContract(
   ticket: Ticket,
-  opts: { composerScriptPath: string; commitLanguage: CommitLanguage; baseBranch: string },
+  opts: { composerScriptPath: string; commitLanguage: CommitLanguage; baseBranch: string; qualityIteration?: QualityIteration; qualityFaults?: QualityEvidence[] },
 ): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
   const project = getProject(ticket.project);
+  const iteration = opts.qualityIteration;
   const baseBranch = opts.baseBranch;
   const figmaUrls = extractFigmaUrls(ticket.description);
   const isUi = figmaUrls.length > 0;
@@ -266,7 +268,9 @@ export function buildTicketContract(
   // The completion directive, the finalisation step and the signalling step each have three variants
   // (directPush → stealth → standard PR). Resolved here as plain branches to avoid nested ternaries.
   let toolDirective: string;
-  if (directPush) {
+  if (iteration) {
+    toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite une nouvelle vérification indépendante complète.`;
+  } else if (directPush) {
     toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
   } else if (stealth) {
     toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé la branche (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
@@ -275,7 +279,9 @@ export function buildTicketContract(
   }
 
   let finalizationStep: string;
-  if (directPush) {
+  if (iteration) {
+    finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse normalement la branche existante \`${iteration.headBranch}\`. Si le push est rejeté, appelle fail() et signale le changement externe ; ne force pas le push et ne recrée aucune PR.`;
+  } else if (directPush) {
     finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` : \`git push origin HEAD:refs/heads/${baseBranch}\`. N'ouvre AUCUNE PR. Si le push est rejeté (non-fast-forward parce que \`${baseBranch}\` a avancé), rebase sur \`origin/${baseBranch}\` puis re-pousse.`;
   } else if (stealth) {
     finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse la branche (\`git push -u origin HEAD\`). N'ouvre AUCUNE PR (\`${vcs.bannedCreatePr}\` est INTERDIT).`;
@@ -284,12 +290,21 @@ export function buildTicketContract(
   }
 
   let signalStep: string;
-  if (directPush) {
+  if (iteration) {
+    signalStep = `7. done(pr_url="${iteration.prUrl}"). Termine ton tour : le backend conserve le worktree jusqu'à la fin de la nouvelle vérification de tous les critères. Une vérification échouée ou non concluante termine cette passe ; aucun cycle automatique supplémentaire.`;
+  } else if (directPush) {
     signalStep = `7. \`ready_for_review()\` — tes commits sont sur \`${baseBranch}\` ; le worktree sera fermé et la carte passera en « Fini » (aucune PR).`;
   } else if (stealth) {
     signalStep = "7. `ready_for_review()` — le worktree restera disponible pour que l'utilisateur teste ; la PR sera créée plus tard par l'utilisateur.";
   } else {
     signalStep = "7. done(pr_url).";
+  }
+
+  let qualityDirective = '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.';
+  if (iteration) {
+    qualityDirective = '- Consulte uniquement `quality({action:"get"})` pour lire les preuves initiales. Corrige les défauts observés tout en préservant tous les critères requis ; la nouvelle vérification indépendante complète est obligatoire après done().';
+  } else if (project.validation?.enabled) {
+    qualityDirective = '- Validation qualité activée : appelle `quality({action:"set_criteria",mode:"repository",criteria:[{id:"C01",text:"comportement et résultat attendu",source:"ticket",required:true,independent:true}]})` avec les vrais critères du ticket ou du PRD. Choisis le mode "repository" pour les changements vérifiables dans le dépôt ; choisis "browser" seulement si les critères nécessitent un navigateur. Après un commit propre, `quality({action:"verify",provider:"' + ticket.orchestrator + '"})` prépare les critères et dépendances dans un worktree isolé, exécute les commandes configurées et lance une vérification indépendante. Consulte `quality({action:"get"})` pour attendre la fin et lire les preuves ; ne déclare jamais une exécution réussie à partir de ton propre résumé. Toute modification impose un nouveau commit et une nouvelle vérification.';
   }
 
   const lines: string[] = [
@@ -300,6 +315,7 @@ export function buildTicketContract(
     "",
     "## Description",
     ticket.description || "(vide)",
+    iteration ? `## Correction qualité ${iteration.id}\nPR existante : ${iteration.prUrl}\nRévision initiale : ${iteration.sourceRevision}\nVérification source : ${iteration.sourceRunId}\nLe titre, la description, le PRD et les critères suivants sont figés. Conserve les besoins initiaux intégralement. Une seule passe de correction est autorisée pour ce clic. Ne redéfinis aucun critère et n'appelle jamais quality.set_criteria, submit_prd, ni quality.verify : la vérification finale est pilotée par le backend.\n\nCritères complets :\n${JSON.stringify(iteration.criteriaSnapshot?.criteria ?? [], null, 2)}\n\nDéfauts observés à corriger :\n${JSON.stringify(opts.qualityFaults ?? [], null, 2)}` : "",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
     ticket.orchestrator === "claude"
       ? "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé."
@@ -309,11 +325,18 @@ export function buildTicketContract(
     buildFeasibilityContextSection(ticket),
     "## Contrat de pipeline",
     buildSessionFramingLine(ticket),
+    iteration && ticket.orchestrator === "claude"
+      ? '- Les tools de pipeline `mcp__kanban__update_stage`, `mcp__kanban__delegate_implementation` et les autres workers sont injectés directement dans cette session. Ils sont distincts du point d’entrée MCP public éventuellement hérité de la configuration utilisateur : un avertissement de connexion à ce point d’entrée ne prouve pas que les workers sont indisponibles. Si les tools sont différés, découvre `update_stage` avec `ToolSearch` (`query: "select:mcp__kanban__update_stage"`) et `delegate_implementation` avec `ToolSearch` (`query: "select:mcp__kanban__delegate_implementation"`), puis appelle réellement `update_stage("implementing")` et la délégation prévue. Ne conclus à une indisponibilité qu’à partir d’un échec réel de découverte ou d’appel du worker concerné, en rapportant son résultat exact. Ne modifie jamais la configuration MCP utilisateur, les permissions ou les services pour contourner ce problème.'
+      : "",
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` dès qu'une décision te dépasse (ne devine jamais une exigence critique).",
-    buildPrdBullet(ticket),
+    iteration ? "- Le PRD initial est figé ; aucune nouvelle soumission ni validation du PRD." : buildPrdBullet(ticket),
     toolDirective,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    qualityDirective,
+    !iteration && project.validation?.enabled && !noPr
+      ? `- Avant la livraison, relis \`quality({action:"get"})\`. Si gate.complete est faux, les réserves empêchent la fusion automatique et la PR doit rester en brouillon : utilise \`${vcs.createPr({ draft: true, baseBranch })}\`. Cette règle prime sur la consigne auto-merge ci-dessous.`
+      : "",
     commitLanguageDirective(opts.commitLanguage),
     "",
     "## Événements de channel",
@@ -333,16 +356,16 @@ export function buildTicketContract(
     wantsVerify ? buildVerifyStep(ticket) : "",
     buildMockupReviewStep(ticket, verifyWithMockups),
     finalizationStep,
-    noPr
+    noPr || iteration
       ? ""
       : `   Si la branche cible \`${baseBranch}\` n'existe pas encore sur origin, crée-la d'abord : \`git ls-remote --heads origin ${baseBranch} | grep -q . || git push origin HEAD:refs/heads/${baseBranch}\``,
-    noPr ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
-    noPr ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
+    noPr || iteration ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
+    noPr || iteration ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
     wantsScreenshots
       ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
       : "",
     signalStep,
-    !noPr && ticket.autoMerge
+    !iteration && !noPr && ticket.autoMerge
       ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
       : "",
     "",

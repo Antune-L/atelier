@@ -27,6 +27,13 @@ import type {
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
+  ValidationCommandOptions,
+  ValidationCommandResult,
+  ValidationDependencyResult,
+  ValidationRevision,
+  ValidationRevisionOptions,
+  ValidationServiceHandle,
+  ValidationWorkspaceOptions,
 } from "./types.ts";
 import { FakeVcsClient } from "./vcs/fake.ts";
 import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
@@ -111,6 +118,37 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async discardImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     this.log("discardImplementationLot", { ...opts });
+  }
+
+  async captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision> {
+    this.log("captureValidationRevision", { ...opts });
+    return { commitSha: "simulated-revision", fingerprint: "simulated-revision", clean: true };
+  }
+
+  async prepareValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }> {
+    this.log("prepareValidationWorkspace", { ...opts });
+    return { cwd: join("/simulated-validation", opts.runId), dataDirectory: join("/simulated-validation", `${opts.runId}-data`), port: 52819, databaseNamespace: `simulated_${opts.runId}` };
+  }
+
+  async cleanupValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<void> {
+    this.log("cleanupValidationWorkspace", { ...opts });
+  }
+
+  async runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult> {
+    this.log("runValidationCommand", { cwd: opts.cwd, command: opts.command });
+    return { exitCode: 0, timedOut: false, cancelled: opts.signal?.aborted === true, stdout: "Simulated command; no real check was executed.", stderr: "", durationMs: 0 };
+  }
+
+  async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
+    this.log("installValidationDeps", { cwd: opts.cwd });
+    const command = "bun install --frozen-lockfile";
+    return { command, result: await this.runValidationCommand({ ...opts, command }) };
+  }
+
+  startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle {
+    this.log("startValidationService", { cwd: opts.cwd, command: opts.command });
+    const result = this.runValidationCommand(opts);
+    return { result, output: () => "Simulated service; no real application was started.", stop: async () => { await result; } };
   }
 
   async fetch(repoPath: string, baseBranch: string): Promise<void> {

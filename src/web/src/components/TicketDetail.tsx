@@ -14,6 +14,7 @@ import { TicketActions } from "@/components/ticket-detail/TicketActions";
 import { TicketMeta } from "@/components/ticket-detail/TicketMeta";
 import { TicketTabs, type TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { TriageSection } from "@/components/ticket-detail/TriageSection";
+import { ValidationTab } from "@/components/ticket-detail/ValidationTab";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
@@ -82,6 +83,7 @@ function hasSessionPane(ticket: Ticket): boolean {
 function availableTabs(ticket: Ticket): TicketTab[] {
   const tabs: TicketTab[] = ["overview", "activity", "description"];
   if (ticket.prdMarkdown !== null || ticket.column === "prd") tabs.push("prd");
+  if (ticket.kind === "feature") tabs.push("validation");
   if (hasSessionPane(ticket)) tabs.push("terminal");
   return tabs;
 }
@@ -294,7 +296,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         if (!isOpen) onClose();
       }}
       size={activeTab === "terminal" ? "xl" : "lg"}
-      className={activeTab === "overview" ? "w-[1280px]" : undefined}
+      className={activeTab === "overview" || activeTab === "validation" ? "w-[1280px]" : undefined}
       pushedBy={prdOpen ? "lg" : null}
       breadcrumb={prdOpen ? ["Ticket"] : undefined}
       title={current.title}
@@ -337,6 +339,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
                 onValidate={() => validatePrd()}
               />
             )}
+            {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} />}
           </div>
           <aside className="w-56 shrink-0 space-y-4 overflow-y-auto border-l border-border px-3 py-3">
             <TicketMeta

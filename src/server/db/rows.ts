@@ -38,6 +38,8 @@ import {
   triageVerdictSchema,
   vcsProviderSchema,
 } from "../../shared/schemas.ts";
+import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import type { QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityValidationRun } from "../../shared/quality.ts";
 import type { ProjectConfig } from "../config.ts";
 import { isProjectKey } from "../config.ts";
 
@@ -177,6 +179,7 @@ const projectRowSchema = z.object({
   instructions: z.string().nullable(),
   worktree_script: z.string().nullable(),
   run_script: z.string().nullable(),
+  validation_json: z.string().nullable().default(null),
   worktree_teardown_script: z.string().nullable(),
   scripts_typecheck: z.string().nullable(),
   scripts_lint: z.string().nullable(),
@@ -465,6 +468,7 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
   if (scripts !== undefined) project.scripts = scripts;
   if (row.worktree_script !== null) project.worktreeScript = row.worktree_script;
   if (row.run_script !== null) project.runScript = row.run_script;
+  if (row.validation_json !== null) project.validation = projectValidationSchema.parse(JSON.parse(row.validation_json));
   if (row.worktree_teardown_script !== null) project.worktreeTeardownScript = row.worktree_teardown_script;
   if (row.instructions !== null) project.instructions = row.instructions;
   if (row.color !== null) project.color = row.color;
@@ -472,6 +476,30 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
   const worktreePorts = parseWorktreePorts(row.worktree_ports);
   if (worktreePorts !== undefined) project.worktreePorts = worktreePorts;
   return project;
+}
+
+const qualityPayloadRowSchema = z.object({ payload_json: z.string() });
+const qualityValidationRunRowSchema = qualityPayloadRowSchema.extend({ evidence_accepted: z.number().int().min(0).max(1).default(0) });
+
+export function mapQualityCriteriaSnapshotRow(raw: unknown): QualityCriteriaSnapshot {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityCriteriaSnapshotSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityValidationRunRow(raw: unknown): QualityValidationRun {
+  const row = qualityValidationRunRowSchema.parse(raw);
+  const run = qualityValidationRunSchema.parse(JSON.parse(row.payload_json));
+  return { ...run, evidenceAccepted: row.evidence_accepted === 1 };
+}
+
+export function mapQualityEvidenceRow(raw: unknown): QualityEvidence {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityEvidenceSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityIterationRow(raw: unknown): QualityIteration {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityIterationSchema.parse(JSON.parse(row.payload_json));
 }
 
 export function mapSlotRow(raw: unknown): Slot {

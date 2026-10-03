@@ -45,7 +45,8 @@ import type {
   WorktreeSession,
 } from "@shared/schemas";
 import type { createConversationSchema, createTicketsFromPrdSchema } from "@shared/schemas";
-import type { Column, PrState } from "@shared/constants";
+import type { Column, Orchestrator, PrState } from "@shared/constants";
+import type { ManualQualityEvidenceInput, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -59,6 +60,14 @@ export interface ConversationDetail {
   conversation: Conversation;
   messages: ConversationMessage[];
   prds: PrdDocumentRecord[];
+}
+
+function ticketQualityPath(id: string): string {
+  return `/api/tickets/${encodeURIComponent(id)}/quality`;
+}
+
+export function qualityEvidenceArtifactUrl(ticketId: string, evidenceId: string): string {
+  return `${ticketQualityPath(ticketId)}/evidence/${encodeURIComponent(evidenceId)}/artifact`;
 }
 
 function atelierConversationPath(id: string): string {
@@ -158,6 +167,24 @@ export const api = {
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),
+  ticketQuality: (id: string, signal?: AbortSignal): Promise<QualityResponse> =>
+    request(ticketQualityPath(id), { signal }),
+  setQualityCriteria: (id: string, input: SetQualityCriteriaInput): Promise<QualityResponse> =>
+    request(`${ticketQualityPath(id)}/criteria`, { method: "POST", body: JSON.stringify(input) }),
+  qualityPreflight: (id: string): Promise<QualityPreflight> =>
+    request(`${ticketQualityPath(id)}/preflight`, { method: "POST" }),
+  startQualityChecks: (id: string): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/checks`, { method: "POST" }),
+  startQualityValidation: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
+  verifyTicketQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
+  startQualityIteration: (id: string, input: StartQualityIterationInput): Promise<{ iteration: QualityIteration }> =>
+    request(`${ticketQualityPath(id)}/iterations`, { method: "POST", body: JSON.stringify(input) }),
+  cancelQualityValidation: (id: string): Promise<QualityResponse> =>
+    request(`${ticketQualityPath(id)}/cancel`, { method: "POST" }),
+  addQualityEvidence: (id: string, input: ManualQualityEvidenceInput): Promise<QualityResponse> =>
+    request(`${ticketQualityPath(id)}/evidence`, { method: "POST", body: JSON.stringify(input) }),
   createTicket: (input: CreateTicketInput): Promise<Ticket> =>
     request("/api/tickets", { method: "POST", body: JSON.stringify(input) }),
   importTickets: (input: ImportTicketsInput): Promise<{ created: Ticket[]; feasibilityStarted: boolean }> =>

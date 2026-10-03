@@ -34,8 +34,11 @@ import { resolveCodexBinary } from "./codexBinary.ts";
 import {
   CODEX_BASH_DENIAL_REASON,
   CODEX_DELEGATED_DENIAL_REASON,
+  CODEX_NO_MATCHES_OBSERVATION,
   CODEX_SCOUT_DENIAL_REASON,
+  CODEX_VALIDATOR_DENIAL_REASON,
   codexCommandPolicyScript,
+  isCodexReadOnlyRgNoMatchCommand,
 } from "./codexCommandPolicy.ts";
 import {
   CODEX_SESSION_PRE_TOOL_USE_HOOK_KEY,
@@ -47,7 +50,7 @@ import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
-import { workerToolsForRole } from "./sessionRolePolicy.ts";
+import { QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 /** Concurrency the feasibility scout runs its per-ticket threads at (independent of implementer lots). */
@@ -140,7 +143,7 @@ const itemLifecycleSchema = z.object({
     }),
     z.object({ type: z.literal("reasoning"), id: z.string(), summary: z.array(z.string()), content: z.array(z.string()) }),
     z.object({ type: z.literal("plan"), id: z.string(), text: z.string() }),
-    z.object({ type: z.literal("commandExecution"), id: z.string(), command: z.string(), status: z.string(), aggregatedOutput: z.string().nullable().optional() }),
+    z.object({ type: z.literal("commandExecution"), id: z.string(), command: z.string(), status: z.string(), aggregatedOutput: z.string().nullable().optional(), exitCode: z.number().int().nullable().optional() }),
     z.object({ type: z.literal("fileChange"), id: z.string(), changes: z.array(z.unknown()), status: z.string() }),
     z.object({
       type: z.literal("mcpToolCall"),
@@ -149,6 +152,8 @@ const itemLifecycleSchema = z.object({
       tool: z.string(),
       arguments: z.unknown(),
       status: z.string(),
+      result: z.unknown().optional(),
+      error: z.unknown().optional(),
     }),
     z.object({
       type: z.literal("collabAgentToolCall"),
@@ -160,6 +165,7 @@ const itemLifecycleSchema = z.object({
   ]),
 });
 const mcpProgressSchema = z.object({ threadId: z.string(), message: z.string() });
+const mcpToolResultStatusSchema = z.object({ isError: z.boolean().optional() });
 
 interface SkillInput {
   type: "skill";
@@ -493,6 +499,7 @@ try {
     toolName: request.tool_name,
     command: typeof command === "string" ? command : null,
     reason: JSON.parse(process.argv[3]),
+    blockReason: process.argv[4] || null,
     ...(typeof request.agent_id === "string" ? { sourceId: request.agent_id } : {}),
   }) + "\\n");
 } catch { process.exitCode = 0; }
@@ -502,7 +509,7 @@ try {
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
   const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility");
-  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer"), {
+  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator", options.cwd), {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -512,7 +519,7 @@ try {
     path,
     `#!/bin/sh
 deny() {
-  printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(denialWriterPath)} ${shellQuote(denialJournalPath)} "$1"
+  printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(denialWriterPath)} ${shellQuote(denialJournalPath)} "$1" "$2"
   printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":%s}}\\n' "$1"
   exit 0
 }
@@ -527,6 +534,8 @@ case "$policy" in
   allow) ;;
   scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
   nested) ${shellDeny(CODEX_DELEGATED_DENIAL_REASON)} ;;
+  validator) ${shellDeny(CODEX_VALIDATOR_DENIAL_REASON)} ;;
+  deny:*) deny ${shellQuote(JSON.stringify(CODEX_BASH_DENIAL_REASON))} "\${policy#deny:}" ;;
   *) ${shellDeny(CODEX_BASH_DENIAL_REASON)} ;;
 esac
 ${reviewPublishingGuard}${typecheckGuard}if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then
@@ -609,7 +618,7 @@ function threadConfig(
 ): ConfigObject {
   const config: ConfigObject = {
     allow_login_shell: false,
-    web_search: "live",
+    web_search: options.role === "quality-validator" ? "disabled" : "live",
     sandbox_workspace_write: {
       network_access: options.readOnly !== true,
       ...(gitWritableRoots.length > 0 ? { writable_roots: gitWritableRoots } : {}),
@@ -811,7 +820,14 @@ function createCodexAgentSession(
       return;
     }
     if (item.type === "commandExecution") {
-      if (!completed) emit({ type: "tool_use", name: "command_execution", input: { command: item.command } });
+      if (!completed) emit({ type: "tool_use", name: "command_execution", input: { command: item.command }, toolCallId: item.id });
+      if (completed) {
+        const noMatches = options.role === "quality-validator" && item.exitCode === 1
+          && isCodexReadOnlyRgNoMatchCommand(item.command, options.cwd);
+        const finished = item.status === "completed" || noMatches && item.status === "failed";
+        const output = [`Command: ${item.command}`, `Exit code: ${item.exitCode ?? "unknown"}`, noMatches ? CODEX_NO_MATCHES_OBSERVATION : "", item.aggregatedOutput ?? ""].filter(Boolean).join("\n");
+        emit({ type: "tool_result", toolCallId: item.id, output, ok: finished && (item.exitCode === 0 || noMatches) });
+      }
       if (completed && item.aggregatedOutput != null) emit({ type: "progress", kind: "command", message: item.aggregatedOutput,
         stream: { itemId: `${parsed.data.turnId}:${item.id}:output`, mode: "snapshot" } });
       emit({ type: "progress", kind: "command", message: `${item.status}: ${item.command}` });
@@ -823,7 +839,12 @@ function createCodexAgentSession(
       return;
     }
     if (item.type === "mcpToolCall") {
-      if (!completed) emit({ type: "tool_use", name: `${item.server}__${item.tool}`, input: item.arguments });
+      if (!completed) emit({ type: "tool_use", name: `${item.server}__${item.tool}`, input: item.arguments, toolCallId: item.id });
+      else {
+        const resultStatus = mcpToolResultStatusSchema.safeParse(item.result);
+        const toolFailed = resultStatus.success && resultStatus.data.isError === true;
+        emit({ type: "tool_result", toolCallId: item.id, output: item.result ?? item.error ?? null, ok: item.status === "completed" && item.error == null && !toolFailed });
+      }
       emit({ type: "progress", kind: "mcp", message: `${item.server}/${item.tool} : ${item.status}` });
       return;
     }
@@ -1176,7 +1197,7 @@ function createCodexAgentSession(
     try {
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
       preparedHook = prepareNoVerifyHook(options);
-      const environment = (dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd);
+      const environment = { ...(dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd), ...options.environment };
       // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
@@ -1251,6 +1272,10 @@ function createCodexAgentSession(
               sandbox: options.readOnly ? "read-only" : "workspace-write",
               config,
               threadSource: "appServer",
+              ...(options.role === "quality-validator" ? {
+                ephemeral: true,
+                developerInstructions: QUALITY_VALIDATOR_INSTRUCTIONS,
+              } : {}),
             },
             threadResponseSchema,
           );

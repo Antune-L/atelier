@@ -26,6 +26,7 @@ import { z } from "zod";
 
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { WORKER_TOOLS } from "../../shared/protocol.ts";
+import type { QualityPermissionBlockReason } from "../../shared/quality.ts";
 
 import { createLogger } from "../logger.ts";
 
@@ -40,8 +41,9 @@ import type {
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
+import { qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
-import { settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 const log = createLogger("claude-provider");
@@ -52,6 +54,24 @@ const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
+
+function qualityReadScopeHook(options: AgentSessionOptions, reportedDenials: Set<string>): HookCallback {
+  return async (input) => {
+    if (input.hook_event_name !== "PreToolUse") return {};
+    let blockReason: QualityPermissionBlockReason | null = null;
+    if (qualityReadToolAllowed(options.cwd, input.tool_name, input.tool_input, (reason) => { blockReason ??= reason; })) return {};
+    const reason = "Quality inspection is restricted to repository files under the validation workspace.";
+    if (!reportedDenials.has(input.tool_use_id)) {
+      reportedDenials.add(input.tool_use_id);
+      reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason });
+    }
+    return { hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    } };
+  };
+}
 
 /** In-process PreToolUse hook denying every Bash command matched by `isDenied`; `{}` allows it. */
 function denyBashHook(isDenied: (command: string) => boolean, reason: string): HookCallback {
@@ -125,6 +145,7 @@ function workerToolNames(names: readonly string[]): string[] {
 }
 
 export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+  const reportedDenials = new Set<string>();
   // ---- streaming input: a queue feeding a never-returning generator keeps the session alive ----
   const inbox: Array<{ id: string; prompt: SDKUserMessage }> = [];
   let notify: (() => void) | null = null;
@@ -208,6 +229,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
         command: def.command,
         ...(def.args ? { args: def.args } : {}),
         ...(def.env ? { env: def.env } : {}),
+        ...(def.alwaysLoad ? { alwaysLoad: true } : {}),
       };
     }
   }
@@ -233,15 +255,23 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
-    env: envWithProjectNode(opts.cwd),
+    env: { ...envWithProjectNode(opts.cwd), ...opts.environment },
     stderr: () => {},
-    hooks: { PreToolUse: [{ matcher: "Bash", hooks: preToolUseHooks }] },
+    hooks: { PreToolUse: [
+      { matcher: "Bash", hooks: preToolUseHooks },
+      ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts, reportedDenials)] }] : []),
+    ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     ...buildSettings(opts.permissionAllow, opts.permissionDeny),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
     ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.outputSchema ? { outputFormat: { type: "json_schema", schema: opts.outputSchema } } : {}),
+    ...(opts.role === "quality-validator" ? {
+      tools: ["Read", "Glob", "Grep"],
+      strictMcpConfig: true,
+      systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: QUALITY_VALIDATOR_INSTRUCTIONS },
+    } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };
 
@@ -256,7 +286,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
-  const pumping = pumpStream(sessionPromise, opts);
+  const pumping = pumpStream(sessionPromise, opts, reportedDenials);
 
   return {
     ticketId: opts.ticketId,
@@ -301,8 +331,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   };
 }
 
-async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions): Promise<void> {
-  const reportedDenials = new Set<string>();
+async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions, reportedDenials: Set<string>): Promise<void> {
   const denialReasons = new Map<string, { reason: string; sourceId?: string }>();
   try {
     const session = await sessionPromise;
@@ -314,7 +343,7 @@ async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionO
         });
       }
       safeDispatchClaudeMessage(message, options.onEvent, (denial) => {
-        if (reportedDenials.has(denial.tool_use_id)) return;
+        if (reportedDenials.has(denial.tool_use_id)) { denialReasons.delete(denial.tool_use_id); return; }
         reportedDenials.add(denial.tool_use_id);
         const details = denialReasons.get(denial.tool_use_id);
         const command = bashCommandSchema.safeParse(denial.tool_input);
@@ -361,7 +390,15 @@ export function dispatchClaudeMessage(
       for (const block of message.message.content) {
         if (block.type === "text") onEvent({ type: "assistant_text", text: block.text });
         else if (block.type === "thinking") onEvent({ type: "thinking", text: block.thinking });
-        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input });
+        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input, toolCallId: block.id });
+      }
+      return;
+    case "user":
+      if (typeof message.message.content === "string") return;
+      for (const block of message.message.content) {
+        if (block.type === "tool_result") {
+          onEvent({ type: "tool_result", toolCallId: block.tool_use_id, output: block.content, ok: block.is_error !== true });
+        }
       }
       return;
     case "result": {

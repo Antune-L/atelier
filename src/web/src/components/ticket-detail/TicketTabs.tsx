@@ -1,12 +1,13 @@
 import { cn } from "@/lib/utils";
 
-export type TicketTab = "overview" | "activity" | "description" | "prd" | "terminal";
+export type TicketTab = "overview" | "activity" | "description" | "prd" | "validation" | "terminal";
 
 export const TICKET_TAB_LABELS: Record<TicketTab, string> = {
   overview: "Aperçu",
   activity: "Activité",
   description: "Description",
   prd: "PRD",
+  validation: "Validation",
   terminal: "Terminal",
 };
 

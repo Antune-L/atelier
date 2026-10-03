@@ -44,6 +44,7 @@ import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
 import type { AtelierManager } from "./agents/atelierManager.ts";
+import type { QualityManager } from "./agents/qualityManager.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
@@ -62,6 +63,7 @@ import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
+import { createQualityRoutes } from "./qualityRoutes.ts";
 import {
   createTicketOperations,
   ticketDependencyError,
@@ -97,6 +99,8 @@ interface PaneReader {
 }
 
 interface RouteDeps {
+  quality?: QualityManager;
+  qualityArtifactDirectory?: string;
   store: Store;
   hub: ClientHub;
   lifecycle: TicketLifecycle;
@@ -222,6 +226,7 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     sortOrder: p.sortOrder ?? 0,
     ...(p.group !== undefined ? { group: p.group } : {}),
     ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
+    ...(p.validation !== undefined ? { validation: p.validation } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };
 }
@@ -825,6 +830,7 @@ export function createApiRoutes(deps: RouteDeps) {
   }
 
   return new Elysia({ prefix: "/api" })
+    .use(createQualityRoutes(deps))
     .use(createAtelierRoutes(deps))
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
@@ -852,7 +858,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, color, group } = parsed.data;
+      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, validation, color, group } = parsed.data;
       if (group !== undefined && color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
@@ -864,6 +870,7 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultAutoMerge: false,
         defaultAddScreenshots: false,
         ...(runScript !== undefined ? { runScript } : {}),
+        ...(validation !== undefined ? { validation } : {}),
         ...(color !== undefined ? { color } : {}),
         ...(group !== undefined ? { group } : {}),
       });
@@ -1208,6 +1215,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createReviewSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      if (parsed.data.fixComments && store.listActiveQualityIterations().some((iteration) => iteration.project === parsed.data.project && parsed.data.prs.some((pr) => pr.url === iteration.prUrl))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const created: Ticket[] = [];
       for (const pr of parsed.data.prs) {
         const ticket = store.createReview(reviewTicketInput(parsed.data, pr, store.getAppSettings().commitLanguage));
@@ -1228,6 +1236,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = createCleanSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      if (store.listActiveQualityIterations().some((iteration) => iteration.project === parsed.data.project && parsed.data.prs.some((pr) => pr.url === iteration.prUrl))) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const created: Ticket[] = [];
       for (const pr of parsed.data.prs) {
         const ticket = store.createClean({
@@ -1295,6 +1304,9 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = moveTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const target = parsed.data.column;
+
+      if (store.getActiveQualityIteration(params.id) && target !== "abandoned") return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours : utilise son action dédiée ou annule-la.");
+      if (target === "implementing" && store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise Corriger et revérifier ou Reprendre la vérification pour cette carte.");
 
       if (isProcessing(ticket.stage) && target !== "abandoned") {
         return jsonError(set, HTTP_CONFLICT, "ticket en traitement : seul Abandonnés est autorisé");
@@ -1399,12 +1411,14 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/retry", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/resolve-conflicts", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours.");
       // Only meaningful for an auto-merge that failed after opening the PR: the PR exists, the slot
       // is released, and a fresh session can rebase the branch and re-trigger the merge.
       const eligible =
@@ -1429,6 +1443,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/test", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Une itération qualité occupe cette carte ; attends sa fin avant de lancer un test interactif.");
       const eligible =
         ticket.kind === "feature" &&
         ticket.column === "done" &&
@@ -1468,6 +1483,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
       if (ticket.column !== "implementing" || ticket.slotId === null) {
         return jsonError(set, HTTP_CONFLICT, "relance réservée aux cartes en cours d'implémentation dans un slot");
       }
@@ -1562,11 +1578,15 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de l'import Notion"));
       }
     })
-    .delete("/tickets/:id", ({ params, set }) => {
+    .delete("/tickets/:id", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.slotId !== null) {
         return jsonError(set, HTTP_CONFLICT, "ticket occupe un slot : abandonne-le d'abord");
+      }
+      await deps.quality?.cancel(params.id);
+      if (ticket.kind === "feature" && deps.quality?.get(params.id).runs.some((run) => run.cleanupStatus !== "complete")) {
+        return jsonError(set, HTTP_CONFLICT, "Quality cleanup is incomplete. The ticket cannot be deleted yet.");
       }
       store.deleteTicket(params.id);
       hub.pushTicketRemoved(params.id);

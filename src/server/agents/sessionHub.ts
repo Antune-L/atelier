@@ -270,6 +270,7 @@ function previewToolInput(input: unknown): string {
 export function renderSessionEvent(event: AgentSessionEvent, messageChannel?: ChannelEvent["type"]): string | null {
   switch (event.type) {
     case "init":
+    case "tool_result":
       return null;
     case "assistant_text":
       return event.text.trim() ? event.text.trimEnd() : null;

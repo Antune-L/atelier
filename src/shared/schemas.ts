@@ -8,6 +8,7 @@ import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
 import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
+import { projectValidationSchema } from "./quality.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -527,6 +528,7 @@ export const managedProjectSchema = z.object({
   commitTimeoutMs: z.number().int().positive(),
   vcsProvider: vcsProviderSchema,
   runScript: z.string().optional(),
+  validation: projectValidationSchema.optional(),
   color: z.string().optional(),
   group: z.string().optional(),
   hidden: z.boolean(),
@@ -542,6 +544,7 @@ export const createProjectSchema = z.object({
   commitTimeoutMs: z.number().int().positive(),
   vcsProvider: vcsProviderSchema.default(DEFAULT_VCS_PROVIDER),
   runScript: z.string().optional(),
+  validation: projectValidationSchema.optional(),
   color: z.string().optional(),
   group: z.string().transform((value) => value.trim() || undefined).optional(),
 });
@@ -555,6 +558,7 @@ export const updateProjectSchema = z.object({
   commitTimeoutMs: z.number().int().positive().optional(),
   vcsProvider: vcsProviderSchema.optional(),
   runScript: z.string().nullable().optional(),
+  validation: projectValidationSchema.nullable().optional(),
   color: z.string().optional(),
   group: z.union([z.string().transform((value) => value.trim() || null), z.null()]).optional(),
   hidden: z.boolean().optional(),

@@ -28,6 +28,7 @@ import { CapabilityCache } from "./capabilityCache.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
+import { captureValidationRevision, cleanupValidationWorkspace, prepareValidationWorkspace, runValidationCommand, startValidationService } from "./validationWorkspace.ts";
 import {
   buildRepoInspection,
   LOCKFILE_NAMES,
@@ -56,6 +57,13 @@ import type {
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
+  ValidationCommandOptions,
+  ValidationCommandResult,
+  ValidationDependencyResult,
+  ValidationRevision,
+  ValidationRevisionOptions,
+  ValidationServiceHandle,
+  ValidationWorkspaceOptions,
 } from "./types.ts";
 import { AzureDevopsVcsClient } from "./vcs/azureDevops.ts";
 import { GithubVcsClient } from "./vcs/github.ts";
@@ -233,6 +241,32 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async discardImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     await this.delegationWorkspace.discard(opts);
+  }
+
+  captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision> {
+    return captureValidationRevision(opts);
+  }
+
+  prepareValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }> {
+    return prepareValidationWorkspace(opts);
+  }
+
+  cleanupValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<void> {
+    return cleanupValidationWorkspace(opts);
+  }
+
+  runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult> {
+    return runValidationCommand(opts);
+  }
+
+  async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
+    if (!(await Bun.file(join(opts.cwd, PACKAGE_MANIFEST_FILE)).exists())) return null;
+    const command = await detectInstallCommand(opts.cwd, true);
+    return { command, result: await this.runValidationCommand({ ...opts, command }) };
+  }
+
+  startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle {
+    return startValidationService(opts);
   }
 
   async fetch(repoPath: string, baseBranch: string): Promise<void> {
@@ -1127,11 +1161,12 @@ class RealPaneStream implements PaneStream {
 }
 
 /** Lockfile → install command. Installing with the wrong manager would diverge from the lockfile. */
-const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
-  { lockfile: "pnpm-lock.yaml", command: "pnpm install" },
-  { lockfile: "yarn.lock", command: "yarn install" },
-  { lockfile: "package-lock.json", command: "npm install" },
-  { lockfile: "bun.lock", command: "bun install" },
+const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string; validationCommand: string }> = [
+  { lockfile: "pnpm-lock.yaml", command: "pnpm install", validationCommand: "pnpm install --frozen-lockfile" },
+  { lockfile: "yarn.lock", command: "yarn install", validationCommand: "yarn install --frozen-lockfile" },
+  { lockfile: "package-lock.json", command: "npm install", validationCommand: "npm ci" },
+  { lockfile: "bun.lock", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
+  { lockfile: "bun.lockb", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
 ];
 
 /**
@@ -1162,11 +1197,11 @@ async function resolveWorktreeScriptCommand(
   return null;
 }
 
-async function detectInstallCommand(slotPath: string): Promise<string> {
-  for (const { lockfile, command } of INSTALL_COMMANDS) {
-    if (await Bun.file(join(slotPath, lockfile)).exists()) return command;
+async function detectInstallCommand(slotPath: string, validation = false): Promise<string> {
+  for (const { lockfile, command, validationCommand } of INSTALL_COMMANDS) {
+    if (await Bun.file(join(slotPath, lockfile)).exists()) return validation ? validationCommand : command;
   }
-  return "bun install";
+  return validation ? "bun install --no-save" : "bun install";
 }
 
 /**

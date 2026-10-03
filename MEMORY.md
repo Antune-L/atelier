@@ -10,7 +10,7 @@ Quality artifacts intentionally omit command operands, so a historical generic r
 
 ## Two agent providers: implement every host integration for both
 
-The app drives two agent providers: **Claude** (Claude Agent SDK) and **Codex** (Codex App Server). Every host-integration feature (skills detection, hooks, settings sources, binaries, install commands) must be implemented and tested for BOTH providers. A Claude-only implementation is a bug, not a first step. Reuse `ORCHESTRATORS` / `Orchestrator` from `src/shared/constants.ts` as the provider key.
+The app drives two agent providers: **Claude** (Claude Agent SDK) and **Codex** (Codex App Server). Follow the [project's provider compatibility rule](./AGENTS.md#provider-compatibility-when-developing-kanban-agents) for implementation and verification requirements. The provider-specific details below complement that rule. Reuse `ORCHESTRATORS` / `Orchestrator` from `src/shared/constants.ts` as the provider key.
 
 Host (user-level) skill roots, each holding `<name>/SKILL.md`:
 

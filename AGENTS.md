@@ -10,6 +10,17 @@ Local single-user kanban where autonomous Claude or Codex sessions implement tic
 
 Runtime is **Bun** throughout (server, build, tests). **Documentation is English** — Markdown, code comments, CI step labels, example-config metadata, and the whole public MCP surface (`publicMcp.ts` / `ticketOperations.ts` — tool and schema descriptions plus the errors returned to clients), which is the API contract an external MCP client reads. Internal runtime strings are a separate axis and are still largely French (product UI under `src/web`, agent prompts under `src/server/agents`, log/error messages elsewhere in `src/server` and `desktop`); leave them alone unless a ticket asks for them — some are asserted verbatim by tests.
 
+## Provider compatibility when developing Kanban Agents
+
+This rule applies to changes to Kanban Agents itself, whether made directly in this repository or through a ticket targeting it. It does not impose Kanban Agents integrations on other projects managed by the application.
+
+- Before implementation, identify the affected agent providers (Claude and Codex), PR hosts (GitHub and Azure DevOps), and shared or provider-specific paths. Preserve the behavior of every affected supported integration; the provider selected for the current session or project does not define the compatibility scope.
+- Every agent host-integration feature (skills detection, hooks, settings sources, binaries, install commands) must be implemented and tested for both Claude and Codex. A Claude-only or Codex-only implementation is incomplete.
+- Carry the affected providers and their expected behavior into delegated implementation tasks and review criteria. Review both shared code and affected provider-specific implementations.
+- Before declaring completion, run the relevant existing checks and report verification evidence for each affected provider, including anything not verified. Explain why a provider is unaffected when excluding it from the verification scope. Purely visual or provider-independent changes do not require unrelated provider combinations.
+- Typechecking, fake-system tests, and successful PR delivery alone do not establish compatibility with the real providers. Distinguish simulated checks from live validation.
+- Apply the same policy to additional providers, including Bitbucket, when support is introduced.
+
 ## Commands
 
 ```bash

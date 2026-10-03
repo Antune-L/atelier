@@ -21,6 +21,7 @@ const ITERATION_STATUS_LABELS: Record<QualityIteration["status"], string> = {
 };
 
 function iterationTitle(iteration: QualityIteration): string {
+  if (iteration.trigger === "checks") return "Correction des contrôles techniques";
   return iteration.mode === "correction" ? "Correction et nouvelle vérification" : "Déblocage et nouvelle vérification";
 }
 

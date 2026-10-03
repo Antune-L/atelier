@@ -2,6 +2,7 @@
 
 ## Pull request publication — 2026-10-03
 
+- **Published:** [PR #175](https://github.com/Antune-L/atelier/pull/175) is open against `main`. GitHub reported it mergeable with no registered status checks at publication; local verification remains the evidence described below. All feature commits are pushed, and no PR merge or deployment was requested.
 - The user requested publication of the complete feature branch. No existing pull request was found for `feat/workflow-quality-validation`.
 - The remote base advanced to `c613767`, which merged the intentional Graphify removal. Integrating that base preserves all upstream graph deletions and the updated repository instructions; generated graph artifacts are not reintroduced by this feature. The earlier graph verification notes below describe historical steps.
 - This integration changes only the upstream instructions, ignore rules and generated artifacts. The verified application code remains unchanged from `0866a12`; existing typecheck, lint, test, real-provider and browser results remain applicable. The unrelated untracked analysis document stays outside the publication.

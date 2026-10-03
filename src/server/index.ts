@@ -257,6 +257,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   }, repoMutex);
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
   slotManager.setDelegationDrain((ticketId) => delegationManager.drainTicket(ticketId));
+  slotManager.setImplementationPlanResume(async (ticket, slotId) => {
+    const current = store.getTicket(ticket.id);
+    if (current) await delegationManager.resumeImplementationPlan(current, slotId);
+  });
   slotManager.setQualityGate((ticketId, mode) => qualityManager.gate(ticketId, mode));
   slotManager.setQualityCancel((ticketId) => qualityManager.cancel(ticketId));
   slotManager.setQualityIterationVerifier((ticketId, worktreePath, iterationId) => qualityManager.verifyQualityIteration(ticketId, worktreePath, iterationId));

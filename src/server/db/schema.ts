@@ -258,10 +258,21 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   error TEXT
 );
 
+CREATE TABLE IF NOT EXISTS implementation_plans (
+  ticket_id TEXT PRIMARY KEY REFERENCES tickets(id),
+  plan_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS implementation_queues (
+  ticket_id TEXT PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+  lots_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS review_passes (
   ticket_id TEXT PRIMARY KEY REFERENCES tickets(id),
   pass_id TEXT NOT NULL UNIQUE,
   code_fingerprint TEXT NOT NULL,
+  file_hashes_json TEXT,
   reviewed_commit_sha TEXT,
   review_depth TEXT NOT NULL,
   requires_approval INTEGER NOT NULL DEFAULT 1,
@@ -502,6 +513,7 @@ const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
 ];
 
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "file_hashes_json", ddl: "ALTER TABLE review_passes ADD COLUMN file_hashes_json TEXT" },
   { column: "requires_approval", ddl: "ALTER TABLE review_passes ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 1" },
   { column: "reviewed_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN reviewed_commit_sha TEXT" },
   { column: "published_review_id", ddl: "ALTER TABLE review_passes ADD COLUMN published_review_id INTEGER" },

@@ -1,4 +1,4 @@
-import { ChevronDown, GitBranch, LayoutGrid, MonitorPlay, Network, Plus, RefreshCw } from "lucide-react";
+import { ChevronDown, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
@@ -18,7 +18,6 @@ import { SlotPips } from "@/components/SlotPips";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
-import { WorkflowView } from "@/components/WorkflowView";
 import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
 import { Button } from "@/components/ui/button";
@@ -39,8 +38,8 @@ import type { AtelierSeed, AtelierTarget } from "@/lib/atelier";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-/** Home sub-view: the Board/Agents/Workflow toggle (Stats moved to the sidebar). */
-type HomeView = "kanban" | "agents" | "workflow" | "worktree";
+/** Home sub-view: the Board/Agents/Worktree toggle (Stats moved to the sidebar). */
+type HomeView = "kanban" | "agents" | "worktree";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
@@ -53,7 +52,6 @@ const NOOP_OPEN_CHANGE = (): void => {};
 const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGrid }[] = [
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
-  { value: "workflow", label: "Workflow", Icon: Network },
   { value: "worktree", label: "Worktree", Icon: GitBranch },
 ];
 
@@ -163,15 +161,7 @@ export function App() {
         />
       );
     }
-    if (homeView === "worktree") {
-      return <WorktreeSessionsView projects={projects} />;
-    }
-    return (
-      <WorkflowView
-        projectFilter={effectiveFilter}
-        onOpenTicket={(t) => boardStore.openTicket(t.id)}
-      />
-    );
+    return <WorktreeSessionsView projects={projects} />;
   };
 
   const renderView = (): ReactNode => {

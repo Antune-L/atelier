@@ -68,6 +68,8 @@ async function assertCodexImplementerAvailable(
   });
 }
 
+const QUALITY_TECHNICAL_CHECK_NAMES: string[] = ["typecheck", "lint", "test"];
+const QUALITY_TECHNICAL_OUTPUT_LIMIT = 4_000;
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
 
@@ -280,7 +282,9 @@ export class SlotManager {
     try {
       await this.assertQualityIterationPr(ticket, iteration, iteration.resultRevision ?? undefined);
       const gate = await this.qualityGate?.(ticketId, "strict");
-      complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && run.criteriaSnapshotId === iteration.criteriaSnapshot?.id && Boolean(gate?.complete);
+      let criteriaMatch = run?.criteriaSnapshotId === iteration.criteriaSnapshot?.id;
+      if (!iteration.criteriaSnapshot && iteration.trigger === "checks") criteriaMatch = Boolean(run?.criteriaSnapshotId);
+      complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && criteriaMatch && Boolean(gate?.complete);
       if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
     } catch (error) {
       diagnostic = getErrorMessage(error);
@@ -990,12 +994,20 @@ export class SlotManager {
       const quality = this.store.getTicketQuality(ticket.id);
       const source = quality.runs.find((run) => run.id === iteration.sourceRunId);
       const requiredCriteria = new Set(iteration.criteriaSnapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? []);
+      const technical = iteration.trigger === "checks";
+      const qualityFaults = technical ? [] : quality.evidence.filter((evidence) => source?.evidenceAccepted && evidence.runId === iteration.sourceRunId && evidence.kind === "behavior" && evidence.authority === "agent" && evidence.status === "failed" && evidence.criterionId !== null && requiredCriteria.has(evidence.criterionId));
+      const qualityTechnicalFaults = technical
+        ? quality.evidence
+          .filter((evidence) => evidence.runId === iteration.sourceRunId && evidence.kind === "command" && evidence.authority === "server" && evidence.status === "failed" && QUALITY_TECHNICAL_CHECK_NAMES.includes(evidence.summary))
+          .map((evidence) => ({ ...evidence, output: evidence.output.slice(-QUALITY_TECHNICAL_OUTPUT_LIMIT) }))
+        : [];
       return buildTicketContract({ ...this.qualityCorrectionTicket(ticket), ...iteration.originalTicket, prdEnabled: false, autoMerge: false, stealth: false, directPush: false }, {
         composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
         commitLanguage,
         baseBranch,
         qualityIteration: iteration,
-        qualityFaults: quality.evidence.filter((evidence) => source?.evidenceAccepted && evidence.runId === iteration.sourceRunId && evidence.kind === "behavior" && evidence.authority === "agent" && evidence.status === "failed" && evidence.criterionId !== null && requiredCriteria.has(evidence.criterionId)),
+        qualityFaults,
+        qualityTechnicalFaults,
       });
     }
     return buildTicketContract(ticket, {

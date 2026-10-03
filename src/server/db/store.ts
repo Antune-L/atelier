@@ -40,7 +40,7 @@ import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
-import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
+import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
@@ -57,6 +57,8 @@ export interface CreateQualityIterationInput {
   prUrl?: string | null;
   headBranch?: string | null;
   retryOfIterationId?: string;
+  trigger?: QualityIterationTrigger;
+  evidenceIds?: string[];
 }
 
 export class TicketCreationRequestConflictError extends Error {
@@ -1197,6 +1199,15 @@ export class Store {
     });
   }
 
+  listTicketCreationRequestsByPrefix(prefix: string): Array<{ requestId: string; ticketId: string }> {
+    const pattern = `${prefix.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+    return this.db
+      .query("SELECT * FROM ticket_creation_requests WHERE request_id LIKE ? ESCAPE '\\' ORDER BY created_at ASC")
+      .all(pattern)
+      .map(mapTicketCreationRequestRow)
+      .map((row) => ({ requestId: row.request_id, ticketId: row.ticket_id }));
+  }
+
   /** Create a review ticket: straight into "À implémenter", carrying the target PR + argus knobs. */
   createReview(input: NewReview): Ticket {
     const id = nanoid(10);
@@ -1658,7 +1669,8 @@ export class Store {
 
   createQualityIteration(input: CreateQualityIterationInput): QualityIteration {
     return this.transaction(() => {
-      const requestKey = JSON.stringify([input.sourceRunId, input.mode, input.retryOfIterationId ?? null]);
+      const trigger = input.trigger ?? (input.mode === "correction" ? "criteria" : "incomplete");
+      const requestKey = JSON.stringify([input.sourceRunId, input.mode, input.retryOfIterationId ?? null, trigger]);
       const existing = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? AND request_key = ?").get(input.ticketId, requestKey);
       if (existing) return mapQualityIterationRow(existing);
       const ticket = this.getTicket(input.ticketId);
@@ -1667,7 +1679,8 @@ export class Store {
       if (!source || source.ticketId !== ticket.id) throw new Error("Quality iteration source run does not belong to the ticket");
       if (source.status === "queued" || source.status === "running") throw new Error("Quality iteration requires a completed source run");
       const quality = this.getTicketQuality(ticket.id);
-      if (quality.runs.filter((run) => run.kind === "full").at(-1)?.id !== source.id) throw new Error("Quality iteration requires the latest full validation run");
+      const sourceKinds: Array<QualityValidationRun["kind"]> = trigger === "checks" ? ["checks", "full"] : ["full"];
+      if (quality.runs.filter((run) => sourceKinds.includes(run.kind)).at(-1)?.id !== source.id) throw new Error(trigger === "checks" ? "Quality iteration requires the latest technical validation run" : "Quality iteration requires the latest full validation run");
       const criteriaSnapshot = quality.criteriaSnapshots.find((snapshot) => snapshot.id === source.criteriaSnapshotId) ?? null;
       if ((quality.criteriaSnapshots.at(-1)?.id ?? null) !== source.criteriaSnapshotId) throw new Error("Quality iteration source criteria are stale");
       const sourceFingerprint = createHash("sha256").update(JSON.stringify([ticket.title, ticket.description, ticket.prdMarkdown])).digest("hex");
@@ -1675,16 +1688,16 @@ export class Store {
       if (criteriaSnapshot && source.mode !== criteriaSnapshot.mode) throw new Error("Quality iteration source validation mode does not match its criteria");
       if (input.retryOfIterationId) {
         const predecessor = this.getQualityIteration(input.retryOfIterationId);
-        if (!predecessor || predecessor.ticketId !== ticket.id || predecessor.sourceRunId !== source.id || predecessor.mode !== input.mode || QUALITY_ITERATION_ACTIVE_STATUSES.includes(predecessor.status)) throw new Error("Quality iteration retry requires a terminal predecessor for the same source and mode");
+        if (!predecessor || predecessor.ticketId !== ticket.id || predecessor.sourceRunId !== source.id || predecessor.mode !== input.mode || (predecessor.trigger ?? (predecessor.mode === "correction" ? "criteria" : "incomplete")) !== trigger || QUALITY_ITERATION_ACTIVE_STATUSES.includes(predecessor.status)) throw new Error("Quality iteration retry requires a terminal predecessor for the same source and mode");
       }
       const prUrl = input.prUrl === undefined ? ticket.prUrl : input.prUrl;
       const headBranch = input.headBranch === undefined ? ticket.branch : input.headBranch;
-      if (input.mode === "correction" && (!prUrl || !headBranch || !criteriaSnapshot)) throw new Error("Quality correction requires a PR branch and frozen acceptance criteria");
+      if (input.mode === "correction" && (!prUrl || !headBranch || (!criteriaSnapshot && trigger !== "checks"))) throw new Error("Quality correction requires a PR branch and frozen acceptance criteria");
       if (prUrl !== ticket.prUrl) throw new Error("Quality iteration PR does not match the ticket");
       if (this.getActiveQualityIteration(ticket.id)) throw new Error("A quality iteration is already active for this ticket");
       if (prUrl && this.db.query("SELECT id FROM quality_iterations WHERE project = ? AND pr_url = ? AND status IN ('queued', 'correcting', 'verifying')").get(ticket.project, prUrl)) throw new Error("A quality iteration is already active for this PR");
       const now = Date.now();
-      const iteration = qualityIterationSchema.parse({ id: nanoid(), ticketId: ticket.id, project: ticket.project, prUrl, headBranch, sourceRunId: source.id, sourceRevision: source.revision, criteriaSnapshot, originalTicket: { title: ticket.title, description: ticket.description, prdMarkdown: ticket.prdMarkdown }, provider: input.provider, mode: input.mode, status: "queued", retryOfIterationId: input.retryOfIterationId ?? null, resultRunId: null, resultRevision: null, diagnostic: null, createdAt: now, updatedAt: now, completedAt: null });
+      const iteration = qualityIterationSchema.parse({ id: nanoid(), ticketId: ticket.id, project: ticket.project, prUrl, headBranch, sourceRunId: source.id, sourceRevision: source.revision, criteriaSnapshot, originalTicket: { title: ticket.title, description: ticket.description, prdMarkdown: ticket.prdMarkdown }, provider: input.provider, mode: input.mode, status: "queued", retryOfIterationId: input.retryOfIterationId ?? null, trigger, evidenceIds: input.evidenceIds ?? [], resultRunId: null, resultRevision: null, diagnostic: null, createdAt: now, updatedAt: now, completedAt: null });
       this.db.query("INSERT INTO quality_iterations (id, ticket_id, project, pr_url, request_key, status, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(iteration.id, ticket.id, ticket.project, prUrl, requestKey, iteration.status, JSON.stringify(iteration), now);
       return iteration;
     });

@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
+
 import { z } from "zod";
 
 import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
@@ -15,6 +18,7 @@ const QUALITY_DIAGNOSTIC_TOOL_LIMIT = 64;
 const QUALITY_DIAGNOSTIC_PATH_LIMIT = 500;
 const QUALITY_DIAGNOSTIC_DENIAL_LIMIT = 16;
 const QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT = 80;
+const QUALITY_DENIAL_SIGNATURE_LENGTH = 16;
 const QUALITY_NATIVE_DENIED_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch"];
 const toolTextSchema = z.array(z.object({ type: z.string(), text: z.string().optional() }));
 const toolResponseSchema = z.object({ content: toolTextSchema });
@@ -39,6 +43,8 @@ interface QualityPermissionDiagnostic {
   commandShape: string | null;
   reason: string;
   blockReason: QualityPermissionBlockReason | null;
+  signature: string;
+  workspaceAvailable: boolean;
   reportedMs: number;
 }
 
@@ -159,12 +165,16 @@ export async function runQualitySession(options: QualitySessionOptions) {
           permissionDenialCount += 1;
           if (permissionDenials.length < QUALITY_DIAGNOSTIC_DENIAL_LIMIT) {
             const denial = event.permissionDenial;
+            const toolName = qualityErrorMessage(denial.toolName).slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT);
+            const commandShape = deniedCommandShape(denial.command);
             permissionDenials.push({
               provider: options.execution.provider, source: "provider_permission_denial",
-              toolName: qualityErrorMessage(denial.toolName).slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT),
-              commandShape: deniedCommandShape(denial.command),
+              toolName,
+              commandShape,
               reason: qualityErrorMessage(denial.reason).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT), reportedMs: lastEventMs,
               blockReason: denial.blockReason,
+              signature: createHash("sha256").update(JSON.stringify([options.execution.provider, toolName, denial.blockReason, commandShape])).digest("hex").slice(0, QUALITY_DENIAL_SIGNATURE_LENGTH),
+              workspaceAvailable: existsSync(options.cwd),
             });
           }
         }

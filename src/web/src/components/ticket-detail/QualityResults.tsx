@@ -98,6 +98,7 @@ function QualityPermissionDiagnostics({ run }: { run: QualityValidationRun }) {
         const message = qualityPermissionBlockMessage(reason);
         return <div key={reason ?? "unknown"} className="space-y-1 text-xs"><p>{message.reason} <span className="text-2xs text-muted-foreground">{count} {count === 1 ? "appel refusé" : "appels refusés"}</span></p><p className="text-2xs text-muted-foreground">{message.nextStep}</p></div>;
       })}
+      {diagnostic.permissionDenials.some((denial) => denial.workspaceAvailable === false) && <p className="text-2xs text-warning">Copie de validation absente au moment du refus</p>}
       <p className="text-2xs text-muted-foreground">Ces refus concernent des appels d’outils. Ils ne déterminent pas le résultat de chaque critère.</p>
     </div>
   );

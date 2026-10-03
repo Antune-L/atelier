@@ -237,9 +237,26 @@ function buildFeasibilityContextSection(ticket: Ticket): string {
   return lines.filter((line) => line !== "").join("\n");
 }
 
+function technicalFaultsSection(faults: QualityEvidence[]): string {
+  if (faults.length === 0) return "";
+  return [
+    "",
+    "",
+    "Contrôles techniques en échec (preuves serveur) :",
+    JSON.stringify(faults, null, 2),
+    "",
+    "- Diagnostique d'abord si l'échec vient du code de la PR, d'un prérequis manquant, de l'environnement de validation ou d'une condition préexistante ou sans rapport (compare avec la branche de base si utile).",
+    "- Un code de sortie non nul ne prouve pas à lui seul un défaut du code.",
+    "- Ne modifie le code que si la cause est attribuée au code, et explique dans le message de commit quelles preuves justifient la modification.",
+    "- Si aucune modification du code n'est justifiée, n'effectue aucun commit vide et appelle fail() avec le diagnostic et les prérequis restants.",
+    "- N'élargis aucune permission.",
+    "- Aucun critère n'a échoué : n'en invente pas.",
+  ].join("\n");
+}
+
 export function buildTicketContract(
   ticket: Ticket,
-  opts: { composerScriptPath: string; commitLanguage: CommitLanguage; baseBranch: string; qualityIteration?: QualityIteration; qualityFaults?: QualityEvidence[] },
+  opts: { composerScriptPath: string; commitLanguage: CommitLanguage; baseBranch: string; qualityIteration?: QualityIteration; qualityFaults?: QualityEvidence[]; qualityTechnicalFaults?: QualityEvidence[] },
 ): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
@@ -321,7 +338,7 @@ export function buildTicketContract(
     "",
     "## Description",
     ticket.description || "(vide)",
-    iteration ? `## Correction qualité ${iteration.id}\nPR existante : ${iteration.prUrl}\nRévision initiale : ${iteration.sourceRevision}\nVérification source : ${iteration.sourceRunId}\nLe titre, la description, le PRD et les critères suivants sont figés. Conserve les besoins initiaux intégralement. Une seule passe de correction est autorisée pour ce clic. Ne redéfinis aucun critère et n'appelle jamais quality.set_criteria, submit_prd, ni quality.verify : la vérification finale est pilotée par le backend.\n\nCritères complets :\n${JSON.stringify(iteration.criteriaSnapshot?.criteria ?? [], null, 2)}\n\nDéfauts observés à corriger :\n${JSON.stringify(opts.qualityFaults ?? [], null, 2)}` : "",
+    iteration ? `## Correction qualité ${iteration.id}\nPR existante : ${iteration.prUrl}\nRévision initiale : ${iteration.sourceRevision}\nVérification source : ${iteration.sourceRunId}\nLe titre, la description, le PRD et les critères suivants sont figés. Conserve les besoins initiaux intégralement. Une seule passe de correction est autorisée pour ce clic. Ne redéfinis aucun critère et n'appelle jamais quality.set_criteria, submit_prd, ni quality.verify : la vérification finale est pilotée par le backend.\n\nCritères complets :\n${JSON.stringify(iteration.criteriaSnapshot?.criteria ?? [], null, 2)}\n\nDéfauts observés à corriger :\n${JSON.stringify(opts.qualityFaults ?? [], null, 2)}${technicalFaultsSection(opts.qualityTechnicalFaults ?? [])}` : "",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
     ticket.orchestrator === "claude"
       ? "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé."

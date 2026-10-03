@@ -837,7 +837,7 @@ export function createApiRoutes(deps: RouteDeps) {
   }
 
   return new Elysia({ prefix: "/api" })
-    .use(createQualityRoutes(deps))
+    .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {

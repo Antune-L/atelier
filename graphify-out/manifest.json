@@ -1660,8 +1660,8 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/ValidationTab.tsx": {
-    "mtime": 1791038760.8441694,
-    "ast_hash": "3b206ee8d74979fdce369e750bd90124",
+    "mtime": 1791039484.078816,
+    "ast_hash": "7e33c5b5a6317e27ae08afea06a5c91f",
     "semantic_hash": ""
   },
   "docs/multi-repository-project-analysis.md": {
@@ -1670,8 +1670,8 @@
     "semantic_hash": ""
   },
   "docs/workflow-quality-feasibility-state.md": {
-    "mtime": 1791039077.848548,
-    "ast_hash": "5a93b3953e49e051f90997b0c7928d46",
+    "mtime": 1791039787.5682116,
+    "ast_hash": "3e4b7f6bf3394a5c6d4313d22bff34e1",
     "semantic_hash": ""
   },
   "src/web/src/lib/qualityMessages.ts": {
@@ -1697,6 +1697,11 @@
   "src/web/src/components/ticket-detail/QualityIterations.tsx": {
     "mtime": 1791038128.1194186,
     "ast_hash": "455b7fd76c862e915cfc3f8186571853",
+    "semantic_hash": ""
+  },
+  "src/web/src/components/ticket-detail/ValidationSkeleton.tsx": {
+    "mtime": 1791039625.4412212,
+    "ast_hash": "9d5db8ff9be1473220ff4a8133e76654",
     "semantic_hash": ""
   }
 }

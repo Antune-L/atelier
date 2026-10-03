@@ -10,6 +10,7 @@ import type { Ticket } from "@shared/schemas";
 import { QualityCriteriaPanel } from "@/components/ticket-detail/QualityCriteriaPanel";
 import { QualityIterations } from "@/components/ticket-detail/QualityIterations";
 import { QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunExplanation, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
+import { ValidationSkeleton } from "@/components/ticket-detail/ValidationSkeleton";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -76,7 +77,8 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   };
 
   if (response === null) {
-    return <div className="space-y-3"><p role="status" className="text-sm text-muted-foreground">Chargement de la validation…</p>{loadError !== null && <p role="alert" className="text-xs text-danger">{loadError}</p>}<Button variant="outline" size="sm" disabled={pending} onClick={() => void act()}>Réessayer</Button></div>;
+    if (loadError === null || pending) return <ValidationSkeleton />;
+    return <div className="mx-auto max-w-4xl space-y-3"><p role="alert" className="text-xs text-danger">{error ?? loadError}</p><Button variant="outline" size="sm" onClick={() => void act()}>Réessayer</Button></div>;
   }
 
   const { quality, gate, iterationActions } = response;

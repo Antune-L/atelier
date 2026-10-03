@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
-import type { PrState, VcsProvider } from "../../shared/constants.ts";
+import type { PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
@@ -1014,6 +1014,10 @@ export class RealSystemAdapter implements SystemAdapter {
     // read lag to absorb as in the auto-merge path.
     const state = await this.vcs(provider).readPrState(repoPath, prUrl);
     return { merged: state === "merged", state };
+  }
+
+  async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {
+    return this.vcs(provider).readPrMergeability(repoPath, prUrl);
   }
 
   async runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }> {

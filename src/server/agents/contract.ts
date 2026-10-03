@@ -394,6 +394,14 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
   const project = getProject(ticket.project);
   const baseBranch = ticket.baseBranch ?? project.baseBranch;
 
+  const context: string[] = ticket.autoMerge || ticket.error
+    ? [
+      `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
+      "Motif rapporté par le système :",
+      ticket.error ? `> ${ticket.error}` : "> (non précisé)",
+    ]
+    : [`Cette PR a des conflits avec \`${baseBranch}\` (détectés avant un merge manuel demandé par l'utilisateur).`];
+
   const lines: string[] = [
     `# Résolution de conflits de merge — Ticket ${ticket.id} — ${ticket.title}`,
     "",
@@ -402,9 +410,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     `Branche de la PR : ${ticket.branch}`,
     "",
     "## Contexte",
-    `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
-    "Motif rapporté par le système :",
-    ticket.error ? `> ${ticket.error}` : "> (non précisé)",
+    ...context,
     "Le worktree courant est déjà sur la branche de la PR (avec ses commits). Ton objectif : rendre la PR mergeable, puis relancer le merge.",
     "",
     "## Contrat de pipeline",

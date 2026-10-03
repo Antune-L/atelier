@@ -8,7 +8,7 @@ import { $ } from "bun";
 import { z } from "zod";
 
 import { VCS_PROVIDER_LABELS } from "../../../shared/constants.ts";
-import type { PrReviewStatus, PrState } from "../../../shared/constants.ts";
+import type { PrMergeability, PrReviewStatus, PrState } from "../../../shared/constants.ts";
 import { parsePrUrl } from "../../../shared/prUrl.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
@@ -139,6 +139,12 @@ function githubRepoKey(ref: GithubRepoRef): string {
 
 /** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
 const ghPrStateSchema = z.object({ state: z.string() });
+const ghPrMergeableSchema = z.object({ mergeable: z.string() });
+
+const PR_MERGEABILITY_BY_GITHUB_MERGEABLE: Record<string, PrMergeability> = {
+  MERGEABLE: "mergeable",
+  CONFLICTING: "conflicting",
+};
 
 const PR_REVIEW_STATUS_BY_DECISION: Record<string, PrReviewStatus> = {
   REVIEW_REQUIRED: "needs_review",
@@ -503,6 +509,14 @@ export class GithubVcsClient implements VcsClient {
     } catch {
       return "unknown";
     }
+  }
+
+  async readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability> {
+    const res = await $`gh pr view ${prUrl} --json mergeable`.cwd(cwd).nothrow().quiet();
+    if (res.exitCode !== 0) return "unknown";
+    const parsed = ghPrMergeableSchema.safeParse(safeJsonParse(res.stdout.toString()));
+    if (!parsed.success) return "unknown";
+    return PR_MERGEABILITY_BY_GITHUB_MERGEABLE[parsed.data.mergeable] ?? "unknown";
   }
 
   /**

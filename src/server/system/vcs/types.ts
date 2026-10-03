@@ -6,7 +6,7 @@
  * Named `VcsClient` because `VcsProvider` is already the project-setting string union.
  */
 
-import type { PrState } from "../../../shared/constants.ts";
+import type { PrMergeability, PrState } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import type {
@@ -70,4 +70,5 @@ export interface VcsClient {
   /** Mark the PR ready (no-op if already) and merge it; the caller deletes the remote branch. */
   mergePr(cwd: string, prUrl: string): Promise<DoneGateResult>;
   readPrState(cwd: string, prUrl: string): Promise<PrState>;
+  readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability>;
 }

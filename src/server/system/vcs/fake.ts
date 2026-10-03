@@ -3,7 +3,7 @@
  * whatever the project's provider is. Zero external side effects.
  */
 
-import type { PrState } from "../../../shared/constants.ts";
+import type { PrMergeability, PrState } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
@@ -118,5 +118,9 @@ export class FakeVcsClient implements VcsClient {
 
   async readPrState(_cwd: string, _prUrl: string): Promise<PrState> {
     return "merged";
+  }
+
+  async readPrMergeability(_cwd: string, _prUrl: string): Promise<PrMergeability> {
+    return "mergeable";
   }
 }

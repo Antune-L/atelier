@@ -1459,7 +1459,6 @@ export function createApiRoutes(deps: RouteDeps) {
       if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours.");
       // Only meaningful once the PR exists and the slot is released (failed merge or finished feature):
       // a fresh session can rebase the branch and re-trigger the merge.
-      if (mergesInFlight.has(params.id)) return jsonError(set, HTTP_CONFLICT, "un merge est déjà en cours pour cette carte");
       if (!canResolveConflicts(ticket)) {
         return jsonError(
           set,

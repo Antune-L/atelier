@@ -394,13 +394,13 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
   const project = getProject(ticket.project);
   const baseBranch = ticket.baseBranch ?? project.baseBranch;
 
-  const context: string[] = ticket.autoMerge
+  const context: string[] = ticket.autoMerge || ticket.error
     ? [
       `Cette PR a été ouverte puis le merge automatique dans \`${baseBranch}\` a échoué (conflits ou branche en retard sur la base).`,
       "Motif rapporté par le système :",
       ticket.error ? `> ${ticket.error}` : "> (non précisé)",
     ]
-    : [`Le merge de cette PR dans \`${baseBranch}\` demandé par l'utilisateur est bloqué (conflits ou branche en retard sur la base).`];
+    : [`Cette PR a des conflits avec \`${baseBranch}\` (détectés avant un merge manuel demandé par l'utilisateur).`];
 
   const lines: string[] = [
     `# Résolution de conflits de merge — Ticket ${ticket.id} — ${ticket.title}`,

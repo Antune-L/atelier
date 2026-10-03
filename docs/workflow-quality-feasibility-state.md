@@ -1,5 +1,11 @@
 > Status: VERIFIED IMPLEMENTATION — bounded correction and recovery iterations on `feat/workflow-quality-validation`, baseline `897d5c488bee5f71ac34f54e360626aa40cbd95e`. The changes and evidence below belong to this follow-up commit. No installed application update or deployment is included.
 
+## Pull request publication — 2026-10-03
+
+- The user requested publication of the complete feature branch. No existing pull request was found for `feat/workflow-quality-validation`.
+- The remote base advanced to `c613767`, which merged the intentional Graphify removal. Integrating that base preserves all upstream graph deletions and the updated repository instructions; generated graph artifacts are not reintroduced by this feature. The earlier graph verification notes below describe historical steps.
+- This integration changes only the upstream instructions, ignore rules and generated artifacts. The verified application code remains unchanged from `0866a12`; existing typecheck, lint, test, real-provider and browser results remain applicable. The unrelated untracked analysis document stays outside the publication.
+
 ## Validation skeleton pulse — 2026-10-03
 
 - **Verified:** the decorative loading skeleton now pulses gently using existing animation utilities. Starting revision is `901b4e1` on `feat/workflow-quality-validation`. The accessible loading label and layout remain unchanged; reduced motion disables the pulse.

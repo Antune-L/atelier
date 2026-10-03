@@ -45,7 +45,7 @@ The agent sessions run in-process via the Agent SDK — there are no agent bundl
 
 Run `typecheck` + `lint` after edits. There is no `format` script; eslint is the gate.
 
-**Codex provider.** `AgentProvider` also supports Codex with SDK and bundled CLI pinned to `0.153.4`. Interactive sessions use that CLI's App Server protocol (streaming, `turn/steer`, interrupt and thread resume); do not replace it with a blocking SDK `Thread.run()` loop. Claude remains on the Claude Agent SDK. Product model IDs are `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra`; intersect reasoning levels with the authenticated runtime catalog. Preserve Terra/medium defaults and historical execution metadata. Capability probes must stay read-only, refreshable, and must never expose credentials.
+**Codex provider.** `AgentProvider` also supports Codex with SDK and bundled CLI pinned to `0.160.0`. Interactive sessions use that CLI's App Server protocol (streaming, `turn/steer`, interrupt and thread resume); do not replace it with a blocking SDK `Thread.run()` loop. Claude remains on the Claude Agent SDK. Product model IDs are `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, and `gpt-5.6-terra`; intersect reasoning levels with the authenticated runtime catalog. Preserve Terra/medium defaults and historical execution metadata. Capability probes must stay read-only, refreshable, and must never expose credentials.
 
 **Project Node.** `envWithProjectNode` applies the installed numeric `.nvmrc` version to setup, installation, agents and project scripts. `projectShell.ts` preserves user zsh startup files while restoring that Node on PATH. Missing versions and unsupported aliases are explicit errors, never silent use of another Node version.
 

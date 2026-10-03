@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { CODEX_SDK_VERSION } from "./codexBinary.ts";
 
-export const CODEX_HOOK_TRUST_VERSION: typeof CODEX_SDK_VERSION = "0.153.4";
+export const CODEX_HOOK_TRUST_VERSION: typeof CODEX_SDK_VERSION = "0.160.0";
 export const CODEX_SESSION_PRE_TOOL_USE_HOOK_KEY = "/<session-flags>/config.toml:pre_tool_use:0:0";
 
 export type CodexCommandHook = {
@@ -21,7 +21,7 @@ function canonicalJson(value: JsonValue): string {
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
 }
 
-/** Mirrors hook_hash() + version_for_toml() from codex-rs 0.153.4. */
+/** Mirrors hook_hash() + version_for_toml() from codex-rs 0.160.0. */
 export function codexSessionPreToolUseHookHash(handler: CodexCommandHook): string {
   const normalizedIdentity: JsonValue = {
     event_name: "pre_tool_use",

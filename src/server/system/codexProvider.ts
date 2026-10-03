@@ -35,6 +35,7 @@ import {
   CODEX_BASH_DENIAL_REASON,
   CODEX_DELEGATED_DENIAL_REASON,
   CODEX_SCOUT_DENIAL_REASON,
+  CODEX_VALIDATOR_DENIAL_REASON,
   codexCommandPolicyScript,
 } from "./codexCommandPolicy.ts";
 import {
@@ -47,7 +48,7 @@ import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
-import { workerToolsForRole } from "./sessionRolePolicy.ts";
+import { QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 /** Concurrency the feasibility scout runs its per-ticket threads at (independent of implementer lots). */
@@ -149,6 +150,8 @@ const itemLifecycleSchema = z.object({
       tool: z.string(),
       arguments: z.unknown(),
       status: z.string(),
+      result: z.unknown().optional(),
+      error: z.unknown().optional(),
     }),
     z.object({
       type: z.literal("collabAgentToolCall"),
@@ -160,6 +163,7 @@ const itemLifecycleSchema = z.object({
   ]),
 });
 const mcpProgressSchema = z.object({ threadId: z.string(), message: z.string() });
+const mcpToolResultStatusSchema = z.object({ isError: z.boolean().optional() });
 
 interface SkillInput {
   type: "skill";
@@ -502,7 +506,7 @@ try {
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
   const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility");
-  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer"), {
+  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator"), {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -527,6 +531,7 @@ case "$policy" in
   allow) ;;
   scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
   nested) ${shellDeny(CODEX_DELEGATED_DENIAL_REASON)} ;;
+  validator) ${shellDeny(CODEX_VALIDATOR_DENIAL_REASON)} ;;
   *) ${shellDeny(CODEX_BASH_DENIAL_REASON)} ;;
 esac
 ${reviewPublishingGuard}${typecheckGuard}if printf '%s' "$input" | grep -q '"agent_id"' && printf '%s' "$input" | grep -Eq 'git[[:space:]]+(commit|push)'; then
@@ -823,7 +828,12 @@ function createCodexAgentSession(
       return;
     }
     if (item.type === "mcpToolCall") {
-      if (!completed) emit({ type: "tool_use", name: `${item.server}__${item.tool}`, input: item.arguments });
+      if (!completed) emit({ type: "tool_use", name: `${item.server}__${item.tool}`, input: item.arguments, toolCallId: item.id });
+      else {
+        const resultStatus = mcpToolResultStatusSchema.safeParse(item.result);
+        const toolFailed = resultStatus.success && resultStatus.data.isError === true;
+        emit({ type: "tool_result", toolCallId: item.id, output: item.result ?? item.error ?? null, ok: item.status === "completed" && item.error == null && !toolFailed });
+      }
       emit({ type: "progress", kind: "mcp", message: `${item.server}/${item.tool} : ${item.status}` });
       return;
     }
@@ -1176,7 +1186,7 @@ function createCodexAgentSession(
     try {
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
       preparedHook = prepareNoVerifyHook(options);
-      const environment = (dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd);
+      const environment = { ...(dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd), ...options.environment };
       // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
@@ -1251,6 +1261,10 @@ function createCodexAgentSession(
               sandbox: options.readOnly ? "read-only" : "workspace-write",
               config,
               threadSource: "appServer",
+              ...(options.role === "quality-validator" ? {
+                ephemeral: true,
+                developerInstructions: QUALITY_VALIDATOR_INSTRUCTIONS,
+              } : {}),
             },
             threadResponseSchema,
           );

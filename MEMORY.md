@@ -26,3 +26,11 @@ Install for both at once with `npx skills add <source> -g -a claude-code,codex -
 ## Azure reviewer response nullability
 
 Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas nullable for this field; a Zod default handles a missing field but does not accept explicit null. Vote publication must still validate the publisher identity and numeric vote before confirming success.
+
+## Disposable quality verification
+
+- Snapshot SQLite databases using `VACUUM INTO` before isolated verification. Copying only the main file can omit committed changes still held in the write-ahead log (WAL). Use a separate database and server port for the copied app; temporary validation worktrees also need independent runtime data and application ports.
+- Preserve the actual application/provider startup error. A later readiness timeout is not the root cause: the real Claude smoke initially inherited a provider proxy URL pointing at an unavailable local endpoint, and the temporary harness succeeded after removing that override. Do not change the user's provider configuration to repair a disposable probe.
+- A completed Model Context Protocol (MCP) tool response with `isError` is a failed operation, not behavioral proof. Require successful browser operations and non-empty attributed observations before accepting criterion evidence.
+- Provider tool schemas must use a JSON Schema dialect supported by the actual CLI. The Claude probe rejected JSON Schema 2020-12 metadata; the validator output schema switched to draft-07 and the full real negative-case run then passed. Typecheck and Zod validation alone do not establish CLI compatibility; verify a real provider turn after changing schema conversion.
+- Browser request origin filtering is not full network isolation. It constrains the browser's app traffic, not provider processes, project commands, subprocesses, or external resources.

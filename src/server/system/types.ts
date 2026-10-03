@@ -28,6 +28,49 @@ export interface ImplementationLotOptions {
   files: string[];
 }
 
+export interface ValidationRevisionOptions {
+  repoPath: string;
+  sourcePath?: string;
+  branch?: string;
+  revision?: string;
+}
+
+export interface ValidationRevision {
+  commitSha: string;
+  fingerprint: string;
+  clean: boolean;
+}
+
+export interface ValidationWorkspaceOptions {
+  ticketId: string;
+  runId: string;
+  repoPath: string;
+  commitSha: string;
+}
+
+export interface ValidationCommandOptions {
+  cwd: string;
+  command: string;
+  timeoutMs: number;
+  environment: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+export interface ValidationCommandResult {
+  exitCode: number | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+}
+
+export interface ValidationServiceHandle {
+  result: Promise<ValidationCommandResult>;
+  output(): string;
+  stop(): Promise<void>;
+}
+
 export interface ReformulateOptions {
   provider?: Orchestrator;
   onEvent?: (event: AgentSessionEvent) => void;
@@ -182,6 +225,11 @@ export interface SystemAdapter {
   finishImplementationLot(opts: ImplementationLotOptions): Promise<void>;
   cancelImplementationLot(opts: ImplementationLotOptions): void;
   discardImplementationLot(opts: ImplementationLotOptions): Promise<void>;
+  captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision>;
+  prepareValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }>;
+  cleanupValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<void>;
+  runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult>;
+  startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
   /** Create <branch> on origin at origin/<baseBranch> without a worktree (split mother integration branch). */
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;

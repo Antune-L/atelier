@@ -44,6 +44,7 @@ import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
 import type { AtelierManager } from "./agents/atelierManager.ts";
+import type { QualityManager } from "./agents/qualityManager.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
 import type { SessionHub } from "./agents/sessionHub.ts";
@@ -62,6 +63,7 @@ import { buildNotionImportPrompt } from "./agents/notionImport.ts";
 import type { ImportNotionOptions, ReformulateOptions } from "./system/types.ts";
 import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
+import { createQualityRoutes } from "./qualityRoutes.ts";
 import {
   createTicketOperations,
   ticketDependencyError,
@@ -97,6 +99,8 @@ interface PaneReader {
 }
 
 interface RouteDeps {
+  quality?: QualityManager;
+  qualityArtifactDirectory?: string;
   store: Store;
   hub: ClientHub;
   lifecycle: TicketLifecycle;
@@ -222,6 +226,7 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     sortOrder: p.sortOrder ?? 0,
     ...(p.group !== undefined ? { group: p.group } : {}),
     ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
+    ...(p.validation !== undefined ? { validation: p.validation } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };
 }
@@ -825,6 +830,7 @@ export function createApiRoutes(deps: RouteDeps) {
   }
 
   return new Elysia({ prefix: "/api" })
+    .use(createQualityRoutes(deps))
     .use(createAtelierRoutes(deps))
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
@@ -852,7 +858,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects", ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, color, group } = parsed.data;
+      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, validation, color, group } = parsed.data;
       if (group !== undefined && color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
@@ -864,6 +870,7 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultAutoMerge: false,
         defaultAddScreenshots: false,
         ...(runScript !== undefined ? { runScript } : {}),
+        ...(validation !== undefined ? { validation } : {}),
         ...(color !== undefined ? { color } : {}),
         ...(group !== undefined ? { group } : {}),
       });
@@ -1562,11 +1569,15 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de l'import Notion"));
       }
     })
-    .delete("/tickets/:id", ({ params, set }) => {
+    .delete("/tickets/:id", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.slotId !== null) {
         return jsonError(set, HTTP_CONFLICT, "ticket occupe un slot : abandonne-le d'abord");
+      }
+      await deps.quality?.cancel(params.id);
+      if (ticket.kind === "feature" && deps.quality?.get(params.id).runs.some((run) => run.cleanupStatus !== "complete")) {
+        return jsonError(set, HTTP_CONFLICT, "Quality cleanup is incomplete. The ticket cannot be deleted yet.");
       }
       store.deleteTicket(params.id);
       hub.pushTicketRemoved(params.id);

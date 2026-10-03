@@ -41,7 +41,7 @@ import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
-import { settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 const log = createLogger("claude-provider");
@@ -208,6 +208,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
         command: def.command,
         ...(def.args ? { args: def.args } : {}),
         ...(def.env ? { env: def.env } : {}),
+        ...(def.alwaysLoad ? { alwaysLoad: true } : {}),
       };
     }
   }
@@ -233,7 +234,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
-    env: envWithProjectNode(opts.cwd),
+    env: { ...envWithProjectNode(opts.cwd), ...opts.environment },
     stderr: () => {},
     hooks: { PreToolUse: [{ matcher: "Bash", hooks: preToolUseHooks }] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
@@ -242,6 +243,11 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.outputSchema ? { outputFormat: { type: "json_schema", schema: opts.outputSchema } } : {}),
+    ...(opts.role === "quality-validator" ? {
+      tools: ["Read", "Glob", "Grep"],
+      strictMcpConfig: true,
+      systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: QUALITY_VALIDATOR_INSTRUCTIONS },
+    } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };
 
@@ -361,7 +367,15 @@ export function dispatchClaudeMessage(
       for (const block of message.message.content) {
         if (block.type === "text") onEvent({ type: "assistant_text", text: block.text });
         else if (block.type === "thinking") onEvent({ type: "thinking", text: block.thinking });
-        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input });
+        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input, toolCallId: block.id });
+      }
+      return;
+    case "user":
+      if (typeof message.message.content === "string") return;
+      for (const block of message.message.content) {
+        if (block.type === "tool_result") {
+          onEvent({ type: "tool_result", toolCallId: block.tool_use_id, output: block.content, ok: block.is_error !== true });
+        }
       }
       return;
     case "result": {

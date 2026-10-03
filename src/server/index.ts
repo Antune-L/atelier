@@ -23,6 +23,7 @@ import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { QualityManager } from "./agents/qualityManager.ts";
 import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
@@ -241,11 +242,23 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const repoMutex = new KeyedMutex();
+  const qualityManager = new QualityManager({
+    store,
+    system,
+    repoMutex,
+    artifactDirectory: join(dataRoot, "quality-artifacts"),
+    onChange: (ticketId) => {
+      const ticket = store.getTicket(ticketId);
+      if (ticket) clientHub.pushTicket(ticket);
+    },
+  });
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
   }, repoMutex);
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
   slotManager.setDelegationDrain((ticketId) => delegationManager.drainTicket(ticketId));
+  slotManager.setQualityGate((ticketId, mode) => qualityManager.gate(ticketId, mode));
+  slotManager.setQualityCancel((ticketId) => qualityManager.cancel(ticketId));
   // Any parent-session teardown (slot release, relaunch, shutdown) kills its delegated child.
   sessionHub.onDisconnect((ticketId) => delegationManager.stop(ticketId));
   const coordinator = new AgentCoordinator(
@@ -260,6 +273,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     splitManager,
     delegationManager,
     atelierManager,
+    qualityManager,
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
@@ -280,6 +294,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     );
 
   await runFirstBootSetup(store, system);
+  await qualityManager.recover();
   await slotManager.recover();
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
@@ -295,6 +310,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   });
 
   const api = createApiRoutes({
+    quality: qualityManager,
+    qualityArtifactDirectory: join(dataRoot, "quality-artifacts"),
     store,
     hub: clientHub,
     lifecycle,
@@ -421,12 +438,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       publicMcpManager?.setToken(token);
     },
     async teardownSessions() {
+      await qualityManager.shutdown();
       await slotManager.teardownSessions();
       await delegationManager.drainClosingSessions();
       await triageManager.teardownAll();
       await feasibilityManager.teardownAll();
     },
     async stop() {
+      await qualityManager.shutdown();
       await prNotificationMonitor.stop();
       watchdog.stop();
       atelierManager.stop();

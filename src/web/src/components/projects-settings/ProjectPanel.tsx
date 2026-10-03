@@ -24,6 +24,7 @@ import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SettingsFooter } from "@/components/ui/settings";
+import { ValidationConfigFields, validationDraft, validationDraftConfig } from "@/components/projects-settings/ValidationConfigFields";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -113,10 +114,13 @@ export function ProjectPanel({
   const [inspection, setInspection] = useState<RepoInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [validation, setValidation] = useState(() => validationDraft(project?.validation));
   const { saved: savedVisible, flashSaved } = useSavedFlag();
 
   const commitTimeoutMs = String(Number(timeoutValue) * timeoutUnitMs(unit));
-  const valid = isValidDraft(label, repoPath, baseBranch, timeoutValue);
+  const validationConfig = validationDraftConfig(validation);
+  const validationDirty = JSON.stringify(validation) !== JSON.stringify(validationDraft(project?.validation));
+  const valid = isValidDraft(label, repoPath, baseBranch, timeoutValue) && (!validation.enabled || validationConfig !== null);
   const normalizedGroup = group.trim();
   const grouped = normalizedGroup !== "";
   const inheritedColor = projects.find((managedProject) => managedProject.group?.trim() === normalizedGroup)?.color
@@ -134,6 +138,7 @@ export function ProjectPanel({
     baseBranch !== project.baseBranch ||
     runScript !== (project.runScript ?? "") ||
     vcsProvider !== project.vcsProvider ||
+    validationDirty ||
     (!grouped && color !== (project.color ?? DEFAULT_PROJECT_COLOR));
 
   const creating = project === null;
@@ -231,6 +236,7 @@ export function ProjectPanel({
     if (vcsProvider !== current.vcsProvider) patch.vcsProvider = vcsProvider;
     if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
     if (!grouped && color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
+    if (validationDirty) patch.validation = validationConfig;
     return patch;
   };
 
@@ -243,6 +249,7 @@ export function ProjectPanel({
       vcsProvider,
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
+      ...(validationConfig !== null ? { validation: validationConfig } : {}),
     };
     if (!grouped) input.color = color;
     const created = await api.createProject(input);
@@ -258,6 +265,7 @@ export function ProjectPanel({
     setRunScript(saved.runScript ?? "");
     setVcsProvider(saved.vcsProvider);
     setColor(saved.color ?? DEFAULT_PROJECT_COLOR);
+    setValidation(validationDraft(saved.validation));
     setConnection(null);
     await onSaved();
     flashSaved();
@@ -467,6 +475,7 @@ export function ProjectPanel({
         ) : (
           advancedFields
         )}
+        <ValidationConfigFields value={validation} onChange={setValidation} />
       </div>
 
       <SettingsFooter dirty={dirty && !creating} justSaved={savedVisible}>

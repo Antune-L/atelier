@@ -36,6 +36,7 @@ export type AgentSessionRole =
   | "split"
   | "scout"
   | "reviewer"
+  | "quality-validator"
   | "one-shot"
   | "atelier";
 
@@ -49,7 +50,8 @@ export type AgentSessionEvent = (
   | { type: "init"; sessionId: string; configuredServiceTier?: string | null }
   | { type: "assistant_text"; text: string; stream?: AgentStreamBlock }
   | { type: "thinking"; text: string; stream?: AgentStreamBlock }
-  | { type: "tool_use"; name: string; input: unknown }
+  | { type: "tool_use"; name: string; input: unknown; toolCallId?: string }
+  | { type: "tool_result"; toolCallId: string; output: unknown; ok: boolean }
   | { type: "progress"; kind: "command" | "file_change" | "mcp" | "plan" | "subagent"; message: string; stream?: AgentStreamBlock }
   | {
       type: "message_status";
@@ -98,6 +100,7 @@ export interface StdioMcpServerDefinition {
   env?: Record<string, string>;
   enabledTools?: string[];
   disabledTools?: string[];
+  alwaysLoad?: boolean;
 }
 
 /** Streamable-HTTP MCP server attached to one session. Secret values come from the process env. */
@@ -116,6 +119,7 @@ export interface AgentSessionOptions {
   ticketId: string;
   slotId: number;
   cwd: string;
+  environment?: Record<string, string | undefined>;
   provider: Extract<Implementer, "claude" | "codex">;
   /** Runtime role used to scope tools and credentials. */
   role?: AgentSessionRole;

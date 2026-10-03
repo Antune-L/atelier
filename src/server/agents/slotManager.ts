@@ -14,6 +14,7 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
+import type { QualityGate } from "../../shared/quality.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -138,6 +139,8 @@ export class SlotManager {
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
   private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
+  private qualityGate: ((ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>) | null = null;
+  private qualityCancel: ((ticketId: string) => Promise<void>) | null = null;
   /** Watches each active worktree session's `.wt-offset` to re-push addresses once the dev server writes it. */
   private readonly watcher = new WorktreeAddressWatcher(() =>
     this.hub.pushWorktreeSessions(this.store.listWorktreeSessions()),
@@ -185,6 +188,30 @@ export class SlotManager {
 
   setDelegationDrain(drain: (ticketId: string) => Promise<void>): void {
     this.delegationDrain = drain;
+  }
+
+  setQualityGate(gate: (ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>): void {
+    this.qualityGate = gate;
+  }
+
+  setQualityCancel(cancel: (ticketId: string) => Promise<void>): void {
+    this.qualityCancel = cancel;
+  }
+
+  private async recordDeliveryQuality(ticketId: string): Promise<QualityGate | null> {
+    if (!this.qualityGate || this.store.getTicket(ticketId)?.kind !== "feature") return null;
+    const gate = await this.qualityGate(ticketId, "strict");
+    if (!gate.enabled) return gate;
+    this.store.logEvent(ticketId, "quality_delivery", {
+      complete: gate.complete,
+      reservations: gate.reservations,
+    });
+    if (!gate.complete) {
+      this.touch(this.store.updateTicket(ticketId, { autoMerge: false }));
+      const body = ["Livraison avec réserves — fusion automatique désactivée.", ...gate.reservations.map((reason) => `- ${reason}`)].join("\n");
+      this.hub.pushComment(this.store.addComment(ticketId, "system", body, null));
+    }
+    return gate;
   }
 
   /** Entry point when a ticket is dragged into "À implémenter". */
@@ -890,6 +917,7 @@ export class SlotManager {
       );
       return { ok: false, reason: gate.reason, slotReleased: false };
     }
+    const quality = await this.recordDeliveryQuality(ticketId);
     const currentTicket = this.store.getTicket(ticketId);
     const currentSlot = this.store.getSlot(slotId);
     if (currentTicket?.slotId !== slotId || currentSlot?.ticketId !== ticketId) {
@@ -903,7 +931,7 @@ export class SlotManager {
     let column: Column = "done";
     if (ticket.kind === "review" || ticket.kind === "clean") column = "reviewed";
     let mergeError: string | null = null;
-    if (ticket.autoMerge && ticket.kind === "feature") {
+    if (currentTicket.autoMerge && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {
@@ -1054,6 +1082,7 @@ export class SlotManager {
       return { ok: false, reason: gate.reason };
     }
 
+    await this.recordDeliveryQuality(ticketId);
     // Stop the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
     // still owns its slot so the user can test locally and queued tickets won't grab it.
     this.sessionHub.disconnect(ticketId, "completed");
@@ -1084,6 +1113,10 @@ export class SlotManager {
       return { ok: false, reason: "ticket, branche ou projet introuvable" };
     }
     const path = slotPath(slotId);
+    const quality = await this.recordDeliveryQuality(ticketId);
+    if (quality?.enabled && !quality.complete) {
+      return { ok: false, reason: `Validation qualité incomplète : ${quality.reservations.join(" ; ")}` };
+    }
     const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
     log.info("vérification de la gate push direct", { ticketId, slotId, baseBranch });
     const gate = await this.system.verifyDirectPushed(path, baseBranch);
@@ -1150,7 +1183,9 @@ export class SlotManager {
     this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
     const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
     const provider = getProject(ticket.project).vcsProvider;
-    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft: ticket.prDraft }, provider);
+    const quality = await this.recordDeliveryQuality(ticketId);
+    const draft = ticket.prDraft || Boolean(quality?.enabled && !quality.complete);
+    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft }, provider);
     if (!result.ok) {
       // Roll the stage back to the resting "done" so the card stays in "À review" and a retry is allowed.
       this.touch(this.store.updateTicket(ticketId, { stage: "done", error: result.reason }));
@@ -1268,6 +1303,7 @@ export class SlotManager {
   async abandonTicket(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    await this.qualityCancel?.(ticketId);
     if (ticket.slotId !== null) await this.releaseSlotIfOwned(ticket, ticket.slotId);
     this.touch(
       this.store.updateTicket(ticketId, {

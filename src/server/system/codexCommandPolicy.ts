@@ -1,6 +1,7 @@
 export const CODEX_BASH_DENIAL_REASON = "Commande Bash non autorisée. Utilise une commande directe de la liste permise, sans expansion, redirection ni wrapper.";
 export const CODEX_SCOUT_DENIAL_REASON = "Les sous-agents de recherche ne peuvent utiliser ni Bash, ni apply_patch, ni spawn_agent.";
 export const CODEX_DELEGATED_DENIAL_REASON = "Une session d'implémentation déléguée ne peut pas créer de sous-agent natif.";
+export const CODEX_VALIDATOR_DENIAL_REASON = "Une session de validation ne peut ni modifier les fichiers ni créer de sous-agent.";
 
 export function matchesCodexBashAllowlist(command: string, patterns: readonly string[]): boolean {
   const UNSAFE_SHELL_CHARACTERS = new Set(["<", ">", "(", ")", "{", "}", "#"]);
@@ -91,18 +92,22 @@ export function codexCommandPolicyScript(
   scoutTypes: readonly string[],
   restrictAllSubagents: boolean,
   restrictNestedAgents: boolean,
+  restrictValidator = false,
 ): string {
   return `const matchesCodexBashAllowlist = ${matchesCodexBashAllowlist.toString()};
 const patterns = ${JSON.stringify(patterns ?? null)};
 const scoutTypes = new Set(${JSON.stringify(scoutTypes)});
 const restrictAllSubagents = ${JSON.stringify(restrictAllSubagents)};
 const restrictNestedAgents = ${JSON.stringify(restrictNestedAgents)};
+const restrictValidator = ${JSON.stringify(restrictValidator)};
 let request;
 try { request = JSON.parse(await Bun.stdin.text()); } catch { process.stdout.write("deny"); process.exit(0); }
 const toolName = request?.tool_name;
 const isScout = (typeof request?.agent_type === "string" && scoutTypes.has(request.agent_type))
   || (restrictAllSubagents && typeof request?.agent_id === "string" && request.agent_id.length > 0);
-if (isScout && (toolName === "Bash" || toolName === "apply_patch" || toolName === "spawn_agent")) {
+if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agent")) {
+  process.stdout.write("validator");
+} else if (isScout && (toolName === "Bash" || toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("scout");
 } else if (restrictNestedAgents && toolName === "spawn_agent") {
   process.stdout.write("nested");

@@ -314,6 +314,12 @@ export function buildTicketContract(
     buildPrdBullet(ticket),
     toolDirective,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
+    project.validation?.enabled
+      ? '- Validation qualité activée : appelle `quality({action:"set_criteria",criteria:[{id:"C01",text:"parcours et résultat attendu",source:"ticket",required:true,independent:true}]})` avec les vrais critères du ticket ou du PRD. Après un commit propre, `quality({action:"preflight"})` vérifie les prérequis isolés, `quality({action:"checks"})` lance les commandes du projet et `quality({action:"validate",provider:"' + ticket.orchestrator + '"})` lance un validateur distinct. Consulte `quality({action:"get"})` pour attendre la fin et lire les preuves ; ne déclare jamais une exécution réussie à partir de ton propre résumé. Toute modification impose un nouveau commit et une nouvelle validation.'
+      : '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.',
+    project.validation?.enabled && !noPr
+      ? `- Avant la livraison, relis \`quality({action:"get"})\`. Si gate.complete est faux, les réserves empêchent la fusion automatique et la PR doit rester en brouillon : utilise \`${vcs.createPr({ draft: true, baseBranch })}\`. Cette règle prime sur la consigne auto-merge ci-dessous.`
+      : "",
     commitLanguageDirective(opts.commitLanguage),
     "",
     "## Événements de channel",

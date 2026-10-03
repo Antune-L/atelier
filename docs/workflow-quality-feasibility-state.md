@@ -1,0 +1,155 @@
+> Status: IMPLEMENTED / LOCAL VERIFICATION COMPLETE — commit pending. Earlier prototype and feasibility findings are retained below as historical evidence.
+
+## Current implementation state — 2026-10-03
+
+- Branch: `feat/workflow-quality-validation`, based on `feaa62969742859b548cbb50426bbee48e30f317`. Changes are not committed or deployed yet.
+- User authorized production implementation and real local validation of Claude and Codex against a disposable temporary project. The existing live app, database, and project configuration must stay untouched.
+- The five features are implemented: server-owned captured project checks; immutable acceptance criteria and append-only attributed observations; environment preflight; independent Claude/Codex behavioral validation; and persisted delivery reservations with automatic-merge restrictions.
+- Shared quality contracts are in `src/shared/quality.ts`; durable criteria, run, and evidence records are owned by the database store. `src/server/agents/qualityManager.ts` evaluates current evidence; `src/server/agents/qualityValidator.ts` runs the separate provider session; `src/server/qualityRoutes.ts` exposes the quality API. Project validation configuration is explicit and persisted.
+- Validation uses a dedicated detached worktree at a clean committed revision. Application services, ports, and test data require explicit isolated project configuration; implementation environment files must not be copied implicitly.
+- Final repository checks passed after the lifecycle and interface corrections: typecheck, lint, web build, and **279 tests / 1,125 assertions**.
+- Disposable persistence and route/gate/delivery smokes passed. They exercised legacy migration defaults, immutable terminal outcomes, restart history, manual observations, source-change staleness, preservation of partial verified results, and delivery with reservations that never called merge.
+- A real Codex negative-case run completed against a disposable local project with actual browser interaction: one criterion passed and an intentionally absent behavior failed. Source identity stayed unchanged and cleanup completed. This confirms failure handling and partial evidence, not a fully validated delivery.
+- A full real Claude negative-case run also passed: actual browser observations verified one criterion and rejected the intentionally absent behavior; evidence was accepted, the delivery gate retained reservations, parent source identity stayed unchanged, and cleanup completed. The disposable harness first removed an inherited provider proxy override pointing at an unavailable local endpoint. The validator output schema now targets the CLI-compatible JSON Schema draft-07 dialect.
+- A real Codex all-pass run passed with a complete delivery gate and no current staleness despite older history. Cleanup stopped the temporary app port. A later temporary commit invalidated the prior checks and behavioral proof. Evidence report: `/private/tmp/atelier-quality-e2e/codex-positive-rr8grD/report.json`.
+- A real Claude all-pass run passed with Sonnet: technical checks and actual browser validation produced accepted evidence; the delivery gate was complete and allowed with no current staleness. Changing the criteria version invalidated the earlier proof. Parent source identity remained unchanged and cleanup completed.
+- Playwright interface verification passed against a copied database and a Fake-only server on an independent port. It covered preflight, captured logs, artifact retrieval, criteria versioning, human provenance that does not satisfy independent criteria, provider selection and run creation, stale and simulated results, blocked automatic merge, visible inline failures, and project validation configuration save/reload. Final verification confirmed neutral simulated-result labels, inline error alerts, and unavailable merge eligibility. The browser reported **zero console errors and zero warnings**. These interface checks used simulation; the separate provider fixtures above supplied the real execution evidence. Screenshot: `/private/tmp/atelier-quality-e2e/ui-browser-artifacts-final/validation-ui.png`.
+- Lifecycle and artifact safety smokes passed: deletion retained failed-cleanup state with a conflict response, successful cleanup permitted deletion, abandonment waited for cancellation, and artifact symlink requests returned not found. Disposable smoke sources are `/private/tmp/qualityRouteSafetySmoke.ts` and `/private/tmp/qualityArtifactSafetySmoke.ts`.
+- The knowledge graph was refreshed after implementation.
+- All temporary application servers are stopped; fixture evidence and browser artifacts are preserved. Next action: commit the verified implementation and report its delivery revision. No deployment is included.
+
+## Activation and use
+
+1. Open the project's settings and enable **Validation indépendante**. Configure the isolated setup/start/cleanup commands, availability path, timeout, and environment values for that project. Use the supplied validation port, runtime directory, and database placeholders to keep this environment separate from the working app. Project settings alone cannot infer how an arbitrary application isolates its database or external services.
+2. Open a feature ticket's **Validation** tab. Check the prerequisites, run the technical checks, and define observable acceptance criteria. Criteria are versioned; a change requires fresh evidence. Missing setup or browser prerequisites remain visible instead of being treated as successful validation.
+3. Select Claude or Codex and use **Vérifier les parcours**. Review each criterion's evidence, provider provenance, logs, artifacts, and delivery reservations. Human observations remain labeled and cannot satisfy criteria requiring an independent validator. Required unsuccessful or missing evidence prevents automatic merge.
+
+Behavioral validation requires the official Playwright MCP (Model Context Protocol browser server) version **0.0.83** and its browser to be available locally. Automatic downloads are disabled during validation; an unavailable prerequisite produces an actionable startup error. The real successful fixture runs prove this workflow for the disposable test application, while another project still needs its own correct isolated runtime configuration.
+
+## Current guarantees and limitations
+
+- Only real, integrity-accepted results for the current revision, content fingerprint, project validation configuration, and criteria version qualify for delivery. Simulated results and obsolete observations remain visible as history.
+- Passing evidence for one criterion remains readable when another criterion fails. Newer failed observations supersede older passing observations; required missing or failed evidence retains reservations and prevents automatic merge.
+- Validation uses its own detached code worktree, application port, and runtime data directory. It does not copy the implementation project's environment files or reuse its database. These controls isolate the temporary app state; they do not constitute an operating-system security sandbox.
+- Browser request origin filtering limits browser traffic to the configured local app. It is not full network isolation for provider processes, commands, subprocesses, or external resources.
+- Standard delivery can record reservations on an already-open PR without converting that PR to draft. Stealth PR creation forces a draft for incomplete quality. Direct-push completion is refused when quality is incomplete, but this does not undo or prevent a push that already happened upstream.
+- No deployment, live project configuration change, or production application/database mutation is part of this verification.
+
+## Earlier design and feasibility history
+
+## Historical prototype status — interactive prototype published
+
+- Date: 2026-10-03. The owner-private Sites prototype is published at https://atelier-workflow-qualite-20261003.ant-liu14.chatgpt.site.
+- Site source revision: `840a34a716d2ac42cecf52389020d9edd7f54cf3`. Kanban Agents runtime source was unchanged during this prototype phase.
+- The prototype covers environment prerequisites, technical check results, versioned acceptance evidence, independent Claude/Codex validation, and complete or draft delivery with reservations.
+- Browser checks passed for the three scenarios, failure and correction, missing access, setup blockers, cancellation, evidence history and staleness, manual provenance, provider selection, and merge restrictions. Desktop dark and mobile light layouts were inspected; no console errors or warnings were reported.
+- All executions and outputs are simulated. No live Claude/Codex integration, real project checks, or real PR delivery was exercised by the mockup. Optional WebMCP was unavailable in the preview browser.
+- Next action: review the interaction design before selecting the production implementation scope.
+
+## Historical feasibility findings
+
+The following sections describe the clean base revision inspected before implementation. Their statements about missing runtime behavior, gaps, defaults, and next actions are historical analysis; they do not describe the current working tree.
+
+# Workflow quality feasibility state
+
+Updated: 2026-10-03
+Source revision: `feaa62969742859b548cbb50426bbee48e30f317` (clean when this audit began)
+
+Five capability areas have been accepted for analysis: captured project checks, ticket acceptance criteria and evidence, runtime readiness preflight, independent functional validation, and a persisted delivery gate. No feature code, migration, or feature-specific runtime validation has been implemented. The existing test results below are baseline coverage only.
+
+## Historical feasibility summary
+
+The design is feasible on the existing server-owned ticket pipeline and can keep Claude and Codex on a shared evidence contract. Existing seams cover worktree setup, provider sessions, code fingerprints, reviews, and GitHub/Azure DevOps PR operations, but they do not yet record fresh check runs or acceptance evidence.
+
+The largest correctness risks are simulated success being mistaken for proof, validation running against changing or ignored state, setup state being lost on restart, and auto-merge using only a mutable ticket option. Normal feature PRs can be gated centrally. Direct-push must remain outside a strict pre-publication guarantee until the push itself is behind the gate.
+
+## Capability and provider matrix
+
+| Capability | Claude path | Codex path | Feasibility and current gap |
+| --- | --- | --- | --- |
+| Project check runs | Backend-owned; no Claude-specific check runner needed. | Backend-owned; no Codex-specific check runner needed. | Feasible through one `SystemAdapter` runner. Project `typecheck`, `lint`, and `test` overrides are configured and persisted, but a source search found no runtime consumer. |
+| Acceptance criteria and evidence | Shared worker-tool contract routes through the session hub and coordinator. | Same shared contract and backend handler. | Feasible without duplicating schemas or result logic. PRD strings have no criterion IDs or outcomes today; add exact source references and per-ticket observations. |
+| Runtime readiness preflight | Runs before starting the provider session. | Runs before starting the provider session. | Existing setup, environment copy, and dependency install are provider-neutral. Port URLs are calculated, but are not health checks; there is no configured readiness probe or port reservation. |
+| Independent functional validation | Existing `verifyFeature` flow can attach Playwright MCP to the pipeline session. | Same feature toggle and Playwright MCP surface. | Feasible with a separate validator role and stable app fixture. Tool permission mapping differs: Codex forwards enabled/disabled tool names for stdio MCP servers; Claude's stdio mapping forwards command, args, and env only. Apply equivalent exact tool restrictions through each provider's policy and test both. |
+| Finalization and merge policy | Shared coordinator and VCS abstraction. | Same shared coordinator and VCS abstraction. | Feasible for standard PR features. Required missing/failed evidence should prevent “fully validated” and auto-merge while allowing a draft with durable reservations. Direct-push currently publishes to the base branch before its completion gate. |
+
+## Behavior observed at the base revision
+
+### Checks and evidence
+
+- Project config accepts optional `scripts.typecheck`, `scripts.lint`, and `scripts.test` commands (`src/server/config.ts:39-46`). The store and row mapper persist them (`src/server/db/store.ts:1579-1598`; `src/server/db/rows.ts:441-448`), but no current runtime path invokes those fields.
+- `SystemAdapter` exposes environment copy, worktree setup/teardown, and dependency installation (`src/server/system/types.ts:189-199`). Real setup/teardown use a private `sh -c` runner with project Node, timeout, and captured stdout/stderr (`src/server/system/real.ts:326-359,377-404,433-461`). `runScript` starts an interactive tmux shell (`src/server/config.ts:54-62`; `src/server/system/real.ts:588-606`), not a recorded verification run.
+- The generic `runBoundedCommand` is argv-only with a fixed 30-second timeout, no caller cancellation, and no output-size limit (`src/server/system/boundedCommand.ts:12-39`). It is not enough by itself for long project checks or browser runs.
+- The fake adapter reports setup/install as successful after a short delay (`src/server/system/fake.ts:149-161`) and returns the constant `dry-run-code-fingerprint` (`src/server/system/fake.ts:305-308`). Fake results must be recorded as simulated and must never count as real verification.
+- `codeFingerprint` hashes tracked and untracked files while excluding standard ignored paths (`src/server/system/codeFingerprint.ts:57-88,114-128`; `src/server/system/types.ts:259-260`). This identifies code contents, not ignored environment files or dependency state. Do not put environment secrets in fingerprints or evidence metadata.
+- Setup phase display is held in an in-memory map (`src/server/agents/slotManager.ts:137-169`). Setup activity events provide some observability, but there is no durable check-run lifecycle, cancellation/result record, or captured run output for configured project checks.
+
+### Worktree and readiness lifecycle
+
+- A feature slot is prepared by creating or reusing a worktree, copying environment files, running setup, installing dependencies, then starting the agent (`src/server/agents/slotManager.ts:706-765`). Setup and dependency installation already have a shared provider-neutral seam.
+- Worktree addresses are computed from configured port bases plus the slot's `.wt-offset` (`src/server/agents/worktreeAddresses.ts:7-31`). The watcher republishes addresses when the file changes (`src/server/agents/worktreeAddressWatcher.ts:21-42`); neither path checks whether an app is responding.
+- Test-shell state is explicitly ephemeral: recovery releases a testing slot on backend restart (`src/server/agents/slotManager.ts:1340-1345`). Active pipeline sessions are relaunched in place (`src/server/agents/slotManager.ts:1349-1352,1483-1502`); setup/install state is not persisted as a resumable readiness result. A new preflight needs durable interrupted state or safe idempotent rerun behavior.
+- Completing a normal ticket cleans up and removes its worktree before freeing the slot (`src/server/agents/slotManager.ts:1238-1265`, with terminal cleanup at `src/server/agents/slotManager.ts:934-953`). Any proof tied to the worktree must be captured and persisted before release.
+
+### Criteria, providers, and delivery
+
+- PRD v2 acceptance values are non-empty strings on requirements and tasks, with unique task/requirement IDs but no identity for an individual acceptance string (`src/shared/prdDocument.ts:38-58,92-147`). Atelier stores separate records per revision (`src/server/db/schema.ts:331-347`; `src/server/db/store.ts:1935-1957`). Ticket creation pins `sourcePrdId` to that record and stores `sourcePrdTask` plus rendered PRD Markdown (`src/server/routes.ts:712-748`). Task and axis briefs include the applicable same-axis requirements (`src/shared/prdMarkdown.ts:162-198`).
+- Conversation deletion cascades PRD rows (`src/server/db/schema.ts:331-334`; covered by `src/server/db/store.atelier.test.ts:93-101`), while tickets keep a loose PRD ID and Markdown snapshot. A shared criterion reference therefore needs a small frozen definition/source snapshot to stay readable after its Atelier source is deleted.
+- `Ticket.testing` is only the interactive test-session flag. `verifyFeature` asks the pipeline to use Playwright, but does not persist per-criterion outcomes (`src/shared/schemas.ts:287-302,331-332`; `src/server/agents/sessionConfig.ts:87-96,559-564`). Review-finding verification has separate semantics and statuses (`src/shared/protocol.ts:108-120`) and should not be reused.
+- Claude and Codex consume the central `WORKER_TOOLS` registry through `workerToolsForRole` (`src/server/system/sessionRolePolicy.ts:8-15`; `src/server/system/claudeProvider.ts:165-177`; `src/server/system/codexProvider.ts:281-304,653-655`). A new worker operation should use this registry, its explicit name tuple (`src/shared/protocol.ts:198-330`), and one coordinator/store handler. Reviewers and other read-only roles should not receive it.
+- Standard feature completion waits for the persisted review gate; normal PR features use `approved_or_limit`, and accepted findings can disable the mutable `autoMerge` flag (`src/server/agents/coordinator.ts:468-504`). A separate durable validation outcome is needed, and every automatic merge decision must read a fresh persisted outcome before slot release.
+- `VcsClient` supports draft creation and merge, but has no standalone draft-to-ready method (`src/server/system/vcs/types.ts:60-72`). Draft conversion is optional for this scope. Manual `/merged` only updates board state (`src/server/routes.ts:1360-1365`) and must never create verified evidence.
+- `ready_for_review` runs after code has been pushed. Direct-push completion verifies that the branch is already on the base branch and then releases the slot (`src/server/system/types.ts:255-258`; `src/server/agents/coordinator.ts:530-548`; `src/server/agents/slotManager.ts:1077-1109`). Move publication behind the gate or keep direct-push outside the strict guarantee initially. Stealth delivery is also a pushed branch and should retain an explicit reservation until separately validated.
+- PR review completion records the reviewed head, but final merge still needs a head readback immediately before merge. A remote push can race that readback unless the merge adapter enforces the expected head; the current `mergePr` contract has no expected-head argument (`src/server/system/vcs/types.ts:50-53,70-72`).
+
+## Recommended architecture and rollout
+
+1. **Define one shared evidence contract.** Keep check-run status separate from criterion status. Criterion outcomes are `verified`, `failed`, `blocked`, and `not_executed`. Record provenance as `server`, `simulation`, `human`, or `agent`; include provider and session/generation for agent reports. A model's report is agent-originated evidence, not proof that the backend ran the check. Human verification may count when explicitly allowed by policy and must remain labeled as human.
+2. **Reference criteria from immutable sources.** For PRD criteria, identify the definition by `(prdDocumentId, revision, sourceKind, sourceId, acceptanceIndex)`, then associate it with each ticket that uses it. Keep one shared definition with a frozen text/source snapshot for retention, and store observations against the ticket-criterion association so tickets can have separate outcomes. Manual tickets can add criteria. Existing and imported tickets begin with no checklist; an empty list is not a pass. A later PRD revision creates new references and never silently inherits old observations.
+3. **Add append-only observations.** Each observation stores status, evidence/log or artifact reference, provenance, timestamp, code identity, and provider session identity where relevant. Prefer a committed isolated revision or immutable content snapshot for strong validation. A start/end fingerprint alone cannot rule out edit-and-revert during a run. Show older evidence as history when code identity changes; derive the current checklist as `not_executed` until it is rechecked. Exclude raw secrets and record only safe environment/setup identifiers.
+4. **Add one server-owned captured runner.** Extend the `SystemAdapter` real/fake seam rather than invoking project scripts from provider-specific Claude or Codex code. Persist queued/running/completed/failed/timed-out/cancelled/interrupted runs, argv or approved command identity, timestamps, code/environment identifiers, bounded output or a protected log reference, and the resulting exit state. Real execution can produce server evidence; Fake execution produces simulation evidence only. Recovery must make an interrupted run explicit and safe to retry.
+5. **Add explicit readiness probes.** Use project-owned configured probes and bounded polling after setup/install. If no probe is configured, readiness is unknown; do not infer health from a generated URL or invent an endpoint. Persist setup/preflight lifecycle through backend restarts, rerun idempotent setup where needed, and redact environment values from logs and reports.
+6. **Add a separate functional validator last.** Reuse the installed Playwright MCP only after the configured app is ready. Give the validator a stable isolated workspace and a narrow exact tool list; do not reuse the PR reviewer role as runtime validation. Claude's current stdio MCP mapping does not forward per-tool enabled/disabled lists (`src/server/system/claudeProvider.ts:179-212`), while Codex forwards them (`src/server/system/codexProvider.ts:256-269`). Enforce equivalent restrictions with Claude's exact tool allow/deny configuration and Codex's tool lists, then prove parity in tests. No new dependency has been established as necessary.
+7. **Make delivery read persisted proof.** For normal PR features, missing or failed required checks prevent fully validated status and automatic merge, but may still allow draft delivery with a durable reservation listing what remains. Before any automatic merge or slot release, re-read the persisted outcome and confirm it matches the validated code and PR head. A mutable `autoMerge=false` is not a durable validation decision. Preserve GitHub and Azure DevOps behavior through the shared coordinator/VCS seam. Keep direct-push outside the strict guarantee until its push is moved behind the gate.
+
+## Required invariants
+
+- Simulation, human observation, agent report, and server execution stay distinguishable in storage, UI, APIs, and exports. Fake success never qualifies as real verification.
+- A criterion references the exact PRD revision and criterion source; its text remains readable if the Atelier conversation is deleted.
+- Every proof identifies the code contents and, when committed, the commit SHA. Runtime setup/dependency identity is recorded separately without secret values. A changed code or external PR head makes earlier evidence historical until revalidated.
+- `not_executed` is never treated as `verified`; failed or blocked required evidence prevents fully validated state and auto-merge.
+- Criterion definitions and observations are not overwritten through generic ticket edits. Preserve an append-only observation history and a clear deletion/retention policy tied to the ticket.
+- The coordinator and shared schema remain provider-neutral. Claude and Codex tests must exercise the same outcomes, role authorization, browser tool restrictions, and fake-versus-real provenance.
+- Manual board merge bookkeeping does not create verification evidence. Draft delivery with reservations remains visible and cannot trigger automatic merge.
+
+## Baseline evidence and future acceptance needs
+
+At the clean source revision, six selected existing test commands passed: `workerMcp` 4, `codexProvider` 33, `sessionConfig` 15, `sessionHub` 9, `routes.codex` 1, and `mcp.e2e` 11. Total: **73 tests, 356 assertions, 0 failures**. The MCP end-to-end retry used temporary data, dry-run mode, and an ephemeral local port; the initial sandbox bind denial was resolved by the approved retry. No live Claude/Codex provider or browser session was exercised. These tests do not validate the five proposed features. Typecheck and lint were not run because this was a read-only analysis and documentation-only update.
+
+Feature implementation should add acceptance coverage for:
+
+- Configured typecheck/lint/test execution, timeout, cancellation, bounded evidence output, restart recovery, and Fake results that remain simulated.
+- Correct task/axis/single PRD criterion selection; revision changes and source deletion; manual criteria; legacy empty state; append-only human/agent/server/simulation observations; code-fingerprint and PR-head staleness.
+- Matching Claude and Codex worker-tool routing and role limits, including the Playwright exact-tool policy for both providers. Existing Codex tests do not provide symmetric Claude Playwright-attachment coverage.
+- Readiness success, failure, unknown when no probe exists, port conflicts, setup retry after restart, and secret redaction.
+- Missing/failed/blocked checks preventing fully validated state and auto-merge; draft delivery retaining a reservation; expected-head change blocking merge; manual merge bookkeeping leaving verification unchanged; direct-push excluded or gated before publication.
+
+## Historical implementation prerequisites and defaults
+
+1. Decide which project checks are required by default. Recommended default: run configured typecheck/lint/test entries only; mark absent commands as not configured rather than passing. Any change to package-script defaults needs its own repository-wide compatibility review.
+2. Decide whether all PRD acceptance entries are required. Recommended default: yes, unless explicitly marked optional; mirror the acceptance text already shown for the selected task, axis, or full PRD.
+3. Configure readiness probes per project. Until then, a service-dependent criterion remains unknown or not executed; a port URL alone is not readiness proof.
+4. Decide which provenance can satisfy a required criterion. Recommended default: explicit human verification may satisfy policy with human attribution; agent-submitted status stays an agent report; only real backend execution is server evidence; simulation never qualifies.
+5. Decide whether direct-push is excluded from strict validation or its push operation is moved behind the gate. Recommended default: exclude it from the first strict rollout.
+6. Define ticket deletion/export behavior for evidence and the provider-level expected-PR-head merge guard. Draft conversion is not a prerequisite.
+
+## Historical proposed next action
+
+Implementation can proceed in stages: shared schemas and persistent evidence first; the captured runner and criteria UI/API next; readiness and provider parity after that; then the fresh persisted finalization gate; independent functional validation last. Resolve the policy choices above before the corresponding stage. This note does not claim the runtime behavior exists yet.
+
+## History
+
+- 2026-10-03: Local verification completed: real Claude and Codex success/failure fixtures, stale-proof rejection, isolated interface checks, lifecycle/artifact safety smokes, and final typecheck/lint/build plus 279 tests / 1,125 assertions passed. The knowledge graph was refreshed and temporary application servers were stopped. Delivery commit remained pending at this final document update.
+- 2026-10-03: Full real Claude and Codex negative-case runs passed. Codex success, history freshness, and changed-revision rejection also passed; Claude success, interface verification, cleanup review completion, and final repository gates remained in progress.
+- 2026-10-03: Production implementation written and local verification begun on `feat/workflow-quality-validation`. Initial repository gates and the real Codex negative case passed.
+- 2026-10-03: Initial feasibility state written from source inspection at clean base revision `feaa62969742859b548cbb50426bbee48e30f317`; no source code, tests, or migrations changed.

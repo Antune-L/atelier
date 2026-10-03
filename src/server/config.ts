@@ -8,6 +8,7 @@ import type { AgentEffort, CodexEffort, CodexModel, VcsProvider } from "../share
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../shared/constants.ts";
 import type { AppSettings } from "../shared/schemas.ts";
 import { vcsProviderSchema } from "../shared/schemas.ts";
+import { projectValidationSchema } from "../shared/quality.ts";
 
 import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
@@ -56,6 +57,7 @@ export const projectConfigSchema = z.object({
    * "Tester la feature" drops into a plain shell with no auto-launch.
    */
   runScript: z.string().optional(),
+  validation: projectValidationSchema.optional(),
   /**
    * Command run in the worktree when a test session stops, BEFORE the worktree is removed (e.g.
    * `docker compose down`). Symmetric to `worktreeScript`. If absent, a conventional

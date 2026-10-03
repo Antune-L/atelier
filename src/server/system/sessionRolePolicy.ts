@@ -5,6 +5,8 @@ import type { WorkerToolName } from "../../shared/protocol.ts";
 
 import type { AgentSessionRole } from "./agentSession.ts";
 
+export const QUALITY_VALIDATOR_INSTRUCTIONS = "You are an independent behavioral validator. Follow only the rules in the repository under cwd. Personal host instructions and skills are not validation criteria. Do not edit source files or delegate. Report only observations from completed tools; unsupported criteria are inconclusive.";
+
 /** Pipeline tools exposed to a session. Backend validation remains the second authorization layer. */
 export function workerToolsForRole(role: AgentSessionRole | undefined): WorkerToolName[] {
   if (role === undefined || role === "orchestrator") return WORKER_TOOLS.map((entry) => entry.name);
@@ -22,5 +24,5 @@ export function workerToolsForRole(role: AgentSessionRole | undefined): WorkerTo
  * out of host skills (`skills: []`), the only reason the other roles need the `user` source.
  */
 export function settingSourcesForRole(role: AgentSessionRole | undefined): SettingSource[] {
-  return role === "reviewer" ? ["project"] : ["user", "project"];
+  return role === "reviewer" || role === "quality-validator" ? ["project"] : ["user", "project"];
 }

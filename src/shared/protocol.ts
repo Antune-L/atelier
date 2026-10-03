@@ -20,6 +20,7 @@ import { z } from "zod";
 import { DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
+import { setQualityCriteriaSchema, validateQualitySchema } from "./quality.ts";
 
 // ---- Stage subset (agent-settable vs full) ----
 
@@ -65,6 +66,12 @@ export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 export const doneArgsSchema = z.object({ pr_url: z.url() });
 
 export const readyForReviewArgsSchema = z.object({});
+
+export const qualityArgsSchema = z.object({
+  action: z.enum(["get", "set_criteria", "preflight", "checks", "validate", "cancel"]),
+  criteria: setQualityCriteriaSchema.shape.criteria.optional(),
+  provider: validateQualitySchema.shape.provider.optional(),
+});
 
 export const failArgsSchema = z.object({
   reason: z.string().min(1),
@@ -197,6 +204,11 @@ const submitSplitMcpArgsSchema = z.object({
  */
 export const WORKER_TOOLS = [
   {
+    name: "quality",
+    description: "Manage ticket quality: read persisted evidence, define observable criteria, check prerequisites, start server-owned checks or an isolated Claude/Codex validation, and cancel. Runs are asynchronous; read get for progress. Missing or stale evidence prevents automatic merge.",
+    argsSchema: qualityArgsSchema,
+  },
+  {
     name: "update_stage",
     description: "Met à jour le badge d'étape de la carte du ticket.",
     argsSchema: updateStageMcpArgsSchema,
@@ -300,6 +312,7 @@ export type WorkerToolName = WorkerTool["name"];
  * stray name here — is a compile error.
  */
 const WORKER_TOOL_NAMES = [
+  "quality",
   "update_stage",
   "ask_user",
   "submit_prd",

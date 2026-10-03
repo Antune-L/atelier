@@ -33,11 +33,13 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
+import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -242,6 +244,7 @@ export interface NewProject {
   instructions?: string;
   worktreeScript?: string;
   runScript?: string;
+  validation?: ProjectValidation;
   worktreeTeardownScript?: string;
   scripts?: { typecheck?: string; lint?: string; test?: string };
   worktreePorts?: { label: string; base: number }[];
@@ -260,6 +263,7 @@ export interface ProjectPatch {
   instructions?: string | null;
   worktreeScript?: string | null;
   runScript?: string | null;
+  validation?: ProjectValidation | null;
   worktreeTeardownScript?: string | null;
   scripts?: { typecheck?: string; lint?: string; test?: string } | null;
   worktreePorts?: { label: string; base: number }[] | null;
@@ -1554,6 +1558,80 @@ export class Store {
     return raw ? this.withEffectiveProjectColor(mapProjectRow(raw)) : undefined;
   }
 
+  getTicketQuality(ticketId: string): TicketQuality {
+    const criteriaSnapshots = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE ticket_id = ? ORDER BY version ASC").all(ticketId).map(mapQualityCriteriaSnapshotRow);
+    const runs = this.db.query("SELECT * FROM quality_validation_runs WHERE ticket_id = ? ORDER BY started_at ASC, rowid ASC").all(ticketId).map(mapQualityValidationRunRow);
+    const evidence = this.db.query("SELECT evidence.* FROM quality_evidence evidence JOIN quality_validation_runs runs ON runs.id = evidence.run_id WHERE runs.ticket_id = ? ORDER BY evidence.created_at ASC, evidence.rowid ASC").all(ticketId).map(mapQualityEvidenceRow);
+    return { ticketId, criteriaSnapshots, runs, evidence };
+  }
+
+  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy">): QualityCriteriaSnapshot {
+    return this.transaction(() => {
+      const version = this.scalar("SELECT COALESCE(MAX(version), 0) + 1 AS n FROM quality_criteria_snapshots WHERE ticket_id = ?", ticketId);
+      const snapshot = qualityCriteriaSnapshotSchema.parse({ ...input, id: nanoid(), ticketId, version, createdAt: Date.now() });
+      this.db.query("INSERT INTO quality_criteria_snapshots (id, ticket_id, version, payload_json, created_at) VALUES (?, ?, ?, ?, ?)").run(snapshot.id, ticketId, version, JSON.stringify(snapshot), snapshot.createdAt);
+      return snapshot;
+    });
+  }
+
+  createQualityRun(input: Omit<QualityValidationRun, "id" | "evidenceAccepted"> & { evidenceAccepted?: boolean }): QualityValidationRun {
+    return this.transaction(() => {
+      const run = qualityValidationRunSchema.parse({ ...input, id: nanoid() });
+      if (run.criteriaSnapshotId !== null) {
+        const snapshot = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ? AND ticket_id = ?").get(run.criteriaSnapshotId, run.ticketId);
+        if (!snapshot) throw new Error("Quality criteria snapshot does not belong to the ticket");
+      }
+      this.db.query("INSERT INTO quality_validation_runs (id, ticket_id, criteria_snapshot_id, status, evidence_accepted, payload_json, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(run.id, run.ticketId, run.criteriaSnapshotId, run.status, run.evidenceAccepted ? 1 : 0, JSON.stringify(run), run.startedAt);
+      return run;
+    });
+  }
+
+  getQualityRun(runId: string): QualityValidationRun | null {
+    const row = this.db.query("SELECT * FROM quality_validation_runs WHERE id = ?").get(runId);
+    return row ? mapQualityValidationRunRow(row) : null;
+  }
+
+  listActiveQualityRuns(): QualityValidationRun[] {
+    return this.db.query("SELECT * FROM quality_validation_runs WHERE status IN ('queued', 'running') ORDER BY started_at ASC").all().map(mapQualityValidationRunRow);
+  }
+
+  listQualityRunsPendingCleanup(): QualityValidationRun[] {
+    return this.db.query("SELECT * FROM quality_validation_runs ORDER BY started_at ASC").all().map(mapQualityValidationRunRow).filter((run) => run.cleanupStatus !== "complete");
+  }
+
+  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "evidenceAccepted">>): QualityValidationRun | null {
+    return this.transaction(() => {
+      const previous = this.getQualityRun(runId);
+      if (!previous) return null;
+      const active = previous.status === "queued" || previous.status === "running";
+      if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.evidenceAccepted !== undefined)) {
+        throw new Error("Completed quality run results are immutable");
+      }
+      const run = qualityValidationRunSchema.parse({ ...previous, ...patch });
+      this.db.query("UPDATE quality_validation_runs SET status = ?, evidence_accepted = ?, payload_json = ? WHERE id = ?").run(run.status, run.evidenceAccepted ? 1 : 0, JSON.stringify(run), runId);
+      return run;
+    });
+  }
+
+  appendQualityEvidence(input: Omit<QualityEvidence, "id" | "createdAt">): QualityEvidence {
+    return this.transaction(() => {
+      const evidence = qualityEvidenceSchema.parse({ ...input, id: nanoid(), createdAt: Date.now() });
+      const run = this.getQualityRun(evidence.runId);
+      if (!run) throw new Error("Quality run not found");
+      if (run.status !== "queued" && run.status !== "running") throw new Error("Cannot append evidence to a completed quality run");
+      if (evidence.kind === "behavior" && (run.kind !== "behavior" || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
+        throw new Error("Behavioral evidence must match the validation run provider");
+      }
+      if (evidence.criterionId !== null) {
+        const row = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ?").get(run.criteriaSnapshotId);
+        const snapshot = row ? mapQualityCriteriaSnapshotRow(row) : null;
+        if (!snapshot?.criteria.some((criterion) => criterion.id === evidence.criterionId)) throw new Error("Evidence criterion does not belong to the run snapshot");
+      }
+      this.db.query("INSERT INTO quality_evidence (id, run_id, payload_json, created_at) VALUES (?, ?, ?, ?)").run(evidence.id, evidence.runId, JSON.stringify(evidence), evidence.createdAt);
+      return evidence;
+    });
+  }
+
   private withEffectiveProjectColor(project: ProjectConfig): ProjectConfig {
     if (!project.group) return project;
     const row = this.db.query("SELECT color FROM project_groups WHERE name = ?").get(project.group);
@@ -1576,8 +1654,8 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
     this.db
       .query(
-        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider, validation_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         key,
@@ -1601,6 +1679,7 @@ export class Store {
         now,
         now,
         data.vcsProvider ?? DEFAULT_VCS_PROVIDER,
+        data.validation ? JSON.stringify(projectValidationSchema.parse(data.validation)) : null,
       );
     if (data.group?.trim()) {
       this.db.query("INSERT OR IGNORE INTO project_groups (name, color) VALUES (?, ?)")
@@ -1626,6 +1705,7 @@ export class Store {
     if (patch.instructions !== undefined) builder.set("instructions", patch.instructions);
     if (patch.worktreeScript !== undefined) builder.set("worktree_script", patch.worktreeScript);
     if (patch.runScript !== undefined) builder.set("run_script", patch.runScript);
+    if (patch.validation !== undefined) builder.set("validation_json", patch.validation === null ? null : JSON.stringify(projectValidationSchema.parse(patch.validation)));
     if (patch.worktreeTeardownScript !== undefined) builder.set("worktree_teardown_script", patch.worktreeTeardownScript);
     if (patch.scripts !== undefined) {
       builder.set("scripts_typecheck", patch.scripts === null ? null : patch.scripts.typecheck ?? null);

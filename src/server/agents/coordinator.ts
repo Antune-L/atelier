@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorStack } from "../../shared/errors.ts";
+import { qualityArgsSchema } from "../../shared/protocol.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -31,6 +32,7 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
+import type { QualityManager } from "./qualityManager.ts";
 import type {
   PendingSessionMessage,
   SessionExecutionContext,
@@ -98,6 +100,7 @@ export class AgentCoordinator {
     private readonly split: SplitManager,
     private readonly delegation: DelegationManager,
     private readonly atelier: AtelierManager,
+    private readonly quality?: QualityManager,
   ) {
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
@@ -345,6 +348,7 @@ export class AgentCoordinator {
   }
 
   private readonly pipelineHandlers: Record<WorkerToolName, ToolHandler> = {
+    quality: (ctx) => this.handleQuality(ctx),
     update_stage: (ctx) => this.handleUpdateStage(ctx),
     ask_user: (ctx) => this.handleAskUser(ctx),
     submit_prd: (ctx) => this.handleSubmitPrd(ctx),
@@ -362,6 +366,38 @@ export class AgentCoordinator {
     submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
   };
+
+  private async handleQuality(ctx: SessionToolCall): Promise<ToolResult> {
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!this.quality || ticket?.kind !== "feature") {
+      return { ok: false, result: "Validation qualité indisponible pour cette session." };
+    }
+    const parsed = qualityArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const input = parsed.data;
+    switch (input.action) {
+      case "set_criteria":
+        if (!input.criteria) return { ok: false, result: "Les critères sont requis." };
+        this.quality.setCriteria(ctx.ticketId, input.criteria, "agent");
+        break;
+      case "preflight":
+        return { ok: true, result: JSON.stringify(await this.quality.preflight(ctx.ticketId)) };
+      case "checks":
+        return { ok: true, result: JSON.stringify({ run: await this.quality.runChecks(ctx.ticketId) }) };
+      case "validate":
+        if (!input.provider) return { ok: false, result: "Le fournisseur du validateur est requis." };
+        return { ok: true, result: JSON.stringify({ run: await this.quality.validate(ctx.ticketId, input.provider) }) };
+      case "cancel":
+        await this.quality.cancel(ctx.ticketId);
+        break;
+      case "get":
+        break;
+    }
+    return {
+      ok: true,
+      result: JSON.stringify({ quality: this.quality.get(ctx.ticketId), gate: await this.quality.gate(ctx.ticketId, "reservations") }),
+    };
+  }
 
   private async handleSubmitSplit(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = submitSplitArgsSchema.safeParse(ctx.args);

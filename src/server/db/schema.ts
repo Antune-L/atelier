@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS projects (
   instructions TEXT,
   worktree_script TEXT,
   run_script TEXT,
+  validation_json TEXT,
   worktree_teardown_script TEXT,
   scripts_typecheck TEXT,
   scripts_lint TEXT,
@@ -298,6 +299,35 @@ CREATE TABLE IF NOT EXISTS configuration_migrations (
   migrated_at INTEGER NOT NULL,
   UNIQUE(migration_id, direction, scope, record_id, field, previous_value)
 );
+
+CREATE TABLE IF NOT EXISTS quality_criteria_snapshots (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(ticket_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS quality_validation_runs (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  criteria_snapshot_id TEXT REFERENCES quality_criteria_snapshots(id),
+  status TEXT NOT NULL,
+  evidence_accepted INTEGER NOT NULL DEFAULT 0,
+  payload_json TEXT NOT NULL,
+  started_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS quality_evidence (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES quality_validation_runs(id) ON DELETE CASCADE,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS quality_runs_ticket_idx ON quality_validation_runs(ticket_id, started_at);
+CREATE INDEX IF NOT EXISTS quality_evidence_run_idx ON quality_evidence(run_id, created_at);
 
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
@@ -447,6 +477,7 @@ const REVIEW_RESULT_MIGRATIONS: { column: string; ddl: string }[] = [
 
 /** Columns added to `projects` after the original schema; applied idempotently to existing DBs. */
 const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "validation_json", ddl: "ALTER TABLE projects ADD COLUMN validation_json TEXT" },
   { column: "vcs_provider", ddl: `ALTER TABLE projects ADD COLUMN vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}'` },
   { column: "hidden", ddl: "ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0" },
   { column: "group_name", ddl: "ALTER TABLE projects ADD COLUMN group_name TEXT" },
@@ -458,6 +489,10 @@ const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "published_review_id", ddl: "ALTER TABLE review_passes ADD COLUMN published_review_id INTEGER" },
   { column: "published_commit_sha", ddl: "ALTER TABLE review_passes ADD COLUMN published_commit_sha TEXT" },
   { column: "published_at", ddl: "ALTER TABLE review_passes ADD COLUMN published_at INTEGER" },
+];
+
+const QUALITY_RUN_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "evidence_accepted", ddl: "ALTER TABLE quality_validation_runs ADD COLUMN evidence_accepted INTEGER NOT NULL DEFAULT 0" },
 ];
 
 /** SQLite lock wait before a concurrent write fails with SQLITE_BUSY (several sessions write usage at once). */
@@ -481,6 +516,7 @@ export function createDatabase(path: string): Database {
   migrate(db, "execution_runs", EXECUTION_MIGRATIONS);
   migrate(db, "review_passes", REVIEW_PASS_MIGRATIONS);
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);
+  migrate(db, "quality_validation_runs", QUALITY_RUN_MIGRATIONS);
   if (!reviewPassPolicyExisted) {
     db.exec(`UPDATE review_passes SET requires_approval = 0
       WHERE ticket_id IN (

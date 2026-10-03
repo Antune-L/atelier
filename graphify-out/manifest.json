@@ -690,8 +690,8 @@
     "semantic_hash": ""
   },
   "src/server/system/agentSession.ts": {
-    "mtime": 1791025677.6430023,
-    "ast_hash": "3294a6de227a5b2bb8ec1c27f3201bd5",
+    "mtime": 1791032328.6499465,
+    "ast_hash": "cd5aa73c6c15eb5e48ef6645ec583139",
     "semantic_hash": ""
   },
   "src/server/system/claudeBinary.ts": {
@@ -1600,8 +1600,8 @@
     "semantic_hash": ""
   },
   "src/server/system/permissionDiagnostics.ts": {
-    "mtime": 1790773192.3345168,
-    "ast_hash": "1ce4d2ebee4c729052f1884f1364f973",
+    "mtime": 1791032313.7804134,
+    "ast_hash": "091dd08d987a6ca3c0653752f02157a1",
     "semantic_hash": ""
   },
   "docs/pr-review-count-fixes-state.md": {
@@ -1650,28 +1650,28 @@
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityCriteriaPanel.tsx": {
-    "mtime": 1791030488.789149,
-    "ast_hash": "c257f2b91d035632cb4e0a78bbc4b902",
+    "mtime": 1791032544.9521148,
+    "ast_hash": "32c80ae9c1996e58688bb65197e11d78",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/QualityResults.tsx": {
-    "mtime": 1791030488.7900534,
-    "ast_hash": "559e6fa27e9564c9c87b3257214731f5",
+    "mtime": 1791032737.3121614,
+    "ast_hash": "23ca6fe5808345de96d5152193d4fde3",
     "semantic_hash": ""
   },
   "src/web/src/components/ticket-detail/ValidationTab.tsx": {
-    "mtime": 1791030488.7886858,
-    "ast_hash": "a1510c4b1342c07d9872e7025b148d39",
+    "mtime": 1791032660.9907272,
+    "ast_hash": "ff66d663b90f08afbb04d06b64369aa4",
     "semantic_hash": ""
   },
   "docs/multi-repository-project-analysis.md": {
-    "mtime": 1791030372.7560508,
-    "ast_hash": "180f8cc963e7d468bdde38fced4dd516",
+    "mtime": 1791032409.1571178,
+    "ast_hash": "09c921bc7980b4000fe638084a5cecb5",
     "semantic_hash": ""
   },
   "docs/workflow-quality-feasibility-state.md": {
-    "mtime": 1791030968.7759886,
-    "ast_hash": "a24385de8814ebf62fdddce613d2c9eb",
+    "mtime": 1791032897.2242265,
+    "ast_hash": "517cb5c5b5c4784f45f804b0053b2374",
     "semantic_hash": ""
   },
   "src/web/src/lib/qualityMessages.ts": {
@@ -1685,8 +1685,8 @@
     "semantic_hash": ""
   },
   "src/server/agents/qualitySession.ts": {
-    "mtime": 1791030812.6098838,
-    "ast_hash": "b43278b2751b06f4abe6e6e78e686246",
+    "mtime": 1791032360.8526402,
+    "ast_hash": "8b9590c241e60211732bb8f217e80a5a",
     "semantic_hash": ""
   },
   "src/server/system/qualityReadPolicy.ts": {

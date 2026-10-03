@@ -7,7 +7,7 @@ import type { QualityEvidence, QualityRunStatus, QualityValidationRun, TicketQua
 import { Dialog } from "@/components/ui/dialog";
 import { qualityEvidenceArtifactUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
-import { formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
+import { formatQualityCriterionText, formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
 type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated" | "preparation";
@@ -28,6 +28,11 @@ const RESULT_LABELS: Record<ResultStatus, string> = {
 };
 const CLEANUP_LABELS: Record<QualityValidationRun["cleanupStatus"], string> = { complete: "terminé", pending: "en attente", failed: "échec" };
 const IMAGE_ARTIFACT_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
+const EXPLANATION_TEXT_LIMIT = 2_000;
+const EXPLANATION_CRITERIA_LIMIT = 3;
+const CRITERION_EXCERPT_LIMIT = 160;
+const PREPARATION_COMMAND_SUMMARIES = ["Environment setup", "Dependency installation"];
+const GENERIC_CRITERIA_FAILURE = "Some required acceptance criteria were not independently verified.";
 
 function QualityArtifact({ ticketId, evidence }: { ticketId: string; evidence: QualityEvidence }) {
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -68,19 +73,70 @@ export function qualityChecksStatus(run: QualityValidationRun, checks: QualityEv
   return run.status;
 }
 
-export function QualityRunStatus({ run, current }: { run: QualityValidationRun; current: boolean }) {
+function qualityRunCriterionResults(quality: TicketQuality, run: QualityValidationRun) {
+  const snapshot = quality.criteriaSnapshots.find((item) => item.id === run.criteriaSnapshotId);
+  return snapshot?.criteria.map((criterion) => ({ criterion, creator: snapshot.createdBy, evidence: quality.evidence.filter((item) => item.runId === run.id && item.criterionId === criterion.id && item.kind === "behavior").at(-1) })) ?? [];
+}
+
+export function QualityRunStatus({ run, current, quality, children }: { run: QualityValidationRun; current: boolean; quality: TicketQuality; children?: ReactNode }) {
   const accepted = run.evidenceAccepted || (run.kind === "checks" && run.technicalEvidenceAccepted);
+  const requiredResults = qualityRunCriterionResults(quality, run).filter(({ criterion }) => criterion.required);
+  const incomplete = run.status === "inconclusive" || (run.status === "failed" && run.failurePhase === "validating" && requiredResults.some(({ evidence }) => evidence?.status === "inconclusive") && !requiredResults.some(({ evidence }) => evidence?.status === "failed"));
+  let status = run.status;
   let title = qualityRunTitle(run);
   if (run.status === "failed" && run.failurePhase !== null) title = qualityFailureLabel(run.failurePhase);
+  if (incomplete) {
+    title = "Vérification incomplète";
+    status = "inconclusive";
+  }
+  const phase = run.failurePhase ?? run.phase;
+  const detailedExplanation = children !== undefined && requiredResults.some(({ evidence }) => evidence !== undefined && evidence.status !== "passed");
+  const showError = run.error !== null && !(detailedExplanation && run.error === GENERIC_CRITERIA_FAILURE);
   let phasePrefix = "Dernière étape";
   if (run.status === "queued") phasePrefix = "Prochaine étape";
   if (run.status === "running") phasePrefix = "Étape en cours";
+  if (run.failurePhase !== null) phasePrefix = "Étape concernée";
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(run.status, current, accepted, run.simulated)} /></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(status, current, accepted, run.simulated)} /></div>
+      {children}
       <p className="text-2xs text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {qualityModeLabel(run.mode)}</p>
-      {run.phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(run.phase)}</p>}
-      {run.error !== null && <p role="alert" className="text-xs text-danger">{formatQualityMessage(run.error)}</p>}
+      {phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(phase)}</p>}
+      {showError && run.error !== null && <p role="alert" className={cn("text-xs", incomplete ? "text-warning" : "text-danger")}>{formatQualityMessage(run.error)}</p>}
+    </div>
+  );
+}
+
+export function QualityRunExplanation({ run, quality, current, onOpenEvidence }: { run: QualityValidationRun; quality: TicketQuality; current: boolean; onOpenEvidence: (evidence: QualityEvidence) => void }) {
+  if (QUALITY_ACTIVE_STATUSES.includes(run.status)) return null;
+  const unresolved = qualityRunCriterionResults(quality, run).filter(({ criterion, evidence }) => criterion.required && evidence?.status !== "passed");
+  if (unresolved.length === 0) return null;
+  const checks = quality.evidence.filter((evidence) => evidence.runId === run.id && evidence.kind === "command" && !PREPARATION_COMMAND_SUMMARIES.includes(evidence.summary));
+  const checksPassed = !run.simulated && run.technicalEvidenceAccepted && checks.length > 0 && checks.every((evidence) => evidence.status === "passed");
+  let explanation = "Des critères requis restent à vérifier avant la livraison.";
+  if (checksPassed) explanation = "Contrôles techniques réussis. La validation indépendante de ces critères reste incomplète.";
+  if (checksPassed && unresolved.length === 1) explanation = "Contrôles techniques réussis. Ce critère n’a pas pu être vérifié.";
+  if (unresolved.some(({ evidence }) => evidence?.status === "failed")) {
+    explanation = "Un critère requis est signalé en échec dans le compte rendu.";
+    if (checksPassed) explanation = "Contrôles techniques réussis. Un critère requis est signalé en échec dans le compte rendu.";
+  }
+  return (
+    <div className="space-y-3 border-t border-border pt-3">
+      <p className="text-xs font-medium">{explanation}</p>
+      {!current && <p className="text-xs text-warning">Ce résultat appartient à une version antérieure du code, des critères ou de la configuration.</p>}
+      {unresolved.slice(0, EXPLANATION_CRITERIA_LIMIT).map(({ criterion, creator, evidence }) => (
+        <div key={criterion.id} className="space-y-2 rounded border border-warning/25 bg-warning/5 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-medium">Critère {criterion.id} · requis</p><QualityResult status={evidence?.status ?? "unverified"} /></div>
+          <p className="text-xs text-muted-foreground">{formatQualityCriterionText(criterion, creator).slice(0, CRITERION_EXCERPT_LIMIT)}{criterion.text.length > CRITERION_EXCERPT_LIMIT && "…"}</p>
+          {evidence === undefined ? <p className="text-xs text-muted-foreground">Aucun résultat enregistré pour ce critère dans cette exécution.</p> : <>
+            <p className="text-2xs text-muted-foreground">Motif indiqué par {run.provider === null ? "le validateur" : ORCHESTRATOR_LABELS[run.provider]}</p>
+            <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-words font-sans text-xs">{(evidence.output.trim() === "" ? formatQualityEvidenceSummary(evidence, run.simulated) : formatQualityEvidenceOutput(evidence, run.simulated)).slice(0, EXPLANATION_TEXT_LIMIT)}</pre>
+            {evidence.output.length > EXPLANATION_TEXT_LIMIT && <p className="text-2xs text-muted-foreground">Extrait du compte rendu ; la preuve conserve le texte complet.</p>}
+            <button type="button" className="text-xs text-info underline underline-offset-2" onClick={() => onOpenEvidence(evidence)}>Voir la preuve du critère {criterion.id}</button>
+          </>}
+        </div>
+      ))}
+      {unresolved.length > EXPLANATION_CRITERIA_LIMIT && <p className="text-xs text-muted-foreground">Les autres critères non vérifiés sont détaillés ci-dessous.</p>}
     </div>
   );
 }
@@ -147,7 +203,7 @@ export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { 
           const current = currentRunIds.includes(run.id);
           return (
             <div key={run.id} className="space-y-2 px-3 py-3 text-xs">
-              <QualityRunStatus run={run} current={current} />
+              <QualityRunStatus run={run} current={current} quality={quality} />
               <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
               <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
               <p className="break-all font-mono text-2xs">{run.revision}</p>

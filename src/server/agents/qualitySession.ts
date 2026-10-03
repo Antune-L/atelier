@@ -13,6 +13,8 @@ const QUALITY_OBSERVATION_LIMIT = 120_000;
 const QUALITY_ERROR_LIMIT = 2_000;
 const QUALITY_DIAGNOSTIC_TOOL_LIMIT = 64;
 const QUALITY_DIAGNOSTIC_PATH_LIMIT = 500;
+const QUALITY_DIAGNOSTIC_DENIAL_LIMIT = 16;
+const QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT = 80;
 const QUALITY_NATIVE_DENIED_TOOLS = ["Bash", "Edit", "Write", "NotebookEdit", "Agent", "Task", "WebFetch", "WebSearch"];
 const toolTextSchema = z.array(z.object({ type: z.string(), text: z.string().optional() }));
 const toolResponseSchema = z.object({ content: toolTextSchema });
@@ -28,6 +30,15 @@ interface QualityToolDiagnostic {
   patternLength: number | null;
   ok: boolean | null;
   outputLength: number | null;
+}
+
+interface QualityPermissionDiagnostic {
+  provider: QualitySessionOptions["execution"]["provider"];
+  source: "provider_permission_denial";
+  toolName: string;
+  commandShape: string | null;
+  reason: string;
+  reportedMs: number;
 }
 
 export interface QualityObservation {
@@ -71,12 +82,25 @@ function toolOutputText(output: unknown): string {
   return (blocks ?? []).flatMap((block) => block.text ? [block.text] : []).join("\n").slice(0, QUALITY_OBSERVATION_LIMIT);
 }
 
+function deniedCommandShape(command: string | null): string | null {
+  if (command === null) return null;
+  const knownCommands = new Set(["rg", "grep", "sed", "find", "cat", "ls", "pwd", "head", "tail", "wc", "git", "bun", "node", "python", "python3", "sh", "bash", "zsh", "npx", "npm", "curl", "wget", "echo", "printf", "cp", "mv", "rm", "chmod", "touch", "awk", "sort", "uniq", "cut", "tee"]);
+  const firstWord = command.trim().split(/\s+/, 1)[0] ?? "";
+  const executable = firstWord.split("/").at(-1) ?? "";
+  if (!knownCommands.has(executable)) return "[unrecognized command; arguments omitted]";
+  const knownOptions = new Set(["--files", "--glob", "--hidden", "--no-ignore", "--follow", "--pre", "--file", "--files0-from", "--line-number", "--ignore-case", "-n", "-i", "-g", "-f", "-F", "-L", "-c"]);
+  const options = [...new Set(command.match(/--?[A-Za-z]+(?:-[A-Za-z]+)*/g) ?? [])].filter((option) => knownOptions.has(option));
+  return [executable, ...options, "[arguments omitted]"].join(" ");
+}
+
 export async function runQualitySession(options: QualitySessionOptions) {
   if (options.signal.aborted) throw new Error("Validation cancelled before session startup");
   const startedAt = Date.now();
   const observations: QualityObservation[] = [];
   const pendingTools = new Map<string, string>();
   const toolDiagnostics: QualityToolDiagnostic[] = [];
+  const permissionDenials: QualityPermissionDiagnostic[] = [];
+  let permissionDenialCount = 0;
   const eventCounts: Partial<Record<AgentSessionEvent["type"], number>> = {};
   let lastEventType: AgentSessionEvent["type"] | null = null;
   let lastEventMs = 0;
@@ -130,6 +154,18 @@ export async function runQualitySession(options: QualitySessionOptions) {
         eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
         lastEventType = event.type;
         lastEventMs = Date.now() - startedAt;
+        if (event.type === "progress" && event.permissionDenial) {
+          permissionDenialCount += 1;
+          if (permissionDenials.length < QUALITY_DIAGNOSTIC_DENIAL_LIMIT) {
+            const denial = event.permissionDenial;
+            permissionDenials.push({
+              provider: options.execution.provider, source: "provider_permission_denial",
+              toolName: qualityErrorMessage(denial.toolName).slice(0, QUALITY_DIAGNOSTIC_TOOL_NAME_LIMIT),
+              commandShape: deniedCommandShape(denial.command),
+              reason: qualityErrorMessage(denial.reason).slice(0, QUALITY_DIAGNOSTIC_PATH_LIMIT), reportedMs: lastEventMs,
+            });
+          }
+        }
         options.onEvent?.(event);
         if (event.type === "init") sessionId = event.sessionId;
         if (event.type === "tool_use" && event.toolCallId) {
@@ -190,6 +226,6 @@ export async function runQualitySession(options: QualitySessionOptions) {
     throw new Error("Validator session did not initialize");
   }
   return { completed, sessionId, observations, timedOut, cancelled, cleanupFailed, durationMs: Date.now() - startedAt,
-    diagnostics: { eventCounts, lastEventType, lastEventMs, tools: toolDiagnostics },
+    diagnostics: { eventCounts, lastEventType, lastEventMs, tools: toolDiagnostics, permissionDenialCount, permissionDenials },
   };
 }

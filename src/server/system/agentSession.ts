@@ -12,6 +12,8 @@
 import type { Implementer } from "../../shared/constants.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 
+import type { PermissionDenial } from "./permissionDiagnostics.ts";
+
 /** What a worker tool call resolves to — mirrors the coordinator's tool-call return shape. */
 export interface AgentSessionToolResult {
   ok: boolean;
@@ -52,7 +54,7 @@ export type AgentSessionEvent = (
   | { type: "thinking"; text: string; stream?: AgentStreamBlock }
   | { type: "tool_use"; name: string; input: unknown; toolCallId?: string }
   | { type: "tool_result"; toolCallId: string; output: unknown; ok: boolean }
-  | { type: "progress"; kind: "command" | "file_change" | "mcp" | "plan" | "subagent"; message: string; stream?: AgentStreamBlock }
+  | { type: "progress"; kind: "command" | "file_change" | "mcp" | "plan" | "subagent"; message: string; stream?: AgentStreamBlock; permissionDenial?: PermissionDenial }
   | {
       type: "message_status";
       messageId: string;

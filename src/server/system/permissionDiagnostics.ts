@@ -14,6 +14,7 @@ export const permissionDenialSchema = z.object({
   reason: z.string(),
   sourceId: z.string().optional(),
 });
+export type PermissionDenial = z.infer<typeof permissionDenialSchema>;
 
 export function reportPermissionDenial(
   options: Pick<AgentSessionOptions, "provider" | "role" | "ticketId" | "onEvent">,
@@ -25,6 +26,7 @@ export function reportPermissionDenial(
     options.onEvent({
       type: "progress",
       kind: "command",
+      permissionDenial: denial,
       message: `Permission refusée [${options.provider}/${role}] ${denial.toolName}: ${denial.command ?? MISSING_COMMAND}\nMotif : ${denial.reason}`,
       ...(denial.sourceId ? { sourceId: denial.sourceId } : {}),
     });

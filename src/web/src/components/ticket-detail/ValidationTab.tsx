@@ -8,7 +8,7 @@ import type { QualityEvidence, QualityPreflight, QualityResponse } from "@shared
 import type { Ticket } from "@shared/schemas";
 
 import { QualityCriteriaPanel } from "@/components/ticket-detail/QualityCriteriaPanel";
-import { QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
+import { QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunExplanation, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
@@ -83,7 +83,8 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const checks = technicalEvidence.filter((evidence) => evidence.runId === checksRun?.id);
   const checksCurrent = checksRun !== undefined && gate.currentRunIds.includes(checksRun.id);
   const checksAccepted = checksRun?.technicalEvidenceAccepted === true || (checksRun?.kind === "checks" && checksRun.evidenceAccepted);
-  const independentRun = [...quality.runs].reverse().find((run) => (run.kind === "behavior" || run.kind === "full") && run.provider !== null);
+  const independentRuns = [...quality.runs].reverse().filter((run) => (run.kind === "behavior" || run.kind === "full") && run.provider !== null);
+  const independentRun = independentRuns.find((run) => gate.currentRunIds.includes(run.id)) ?? independentRuns[0];
   const independentCurrent = independentRun !== undefined && gate.currentRunIds.includes(independentRun.id);
   const busy = pending || activeRun !== undefined;
   const latestRevision = quality.runs.at(-1)?.revision ?? preflight?.revision;
@@ -114,7 +115,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
         <div><h3 className="text-sm font-medium">Vérifier le ticket</h3><p className="mt-1 text-xs text-muted-foreground">Le validateur prépare les critères depuis le ticket, installe le projet dans une copie séparée, puis exécute les contrôles et vérifie les résultats attendus.</p></div>
         <div className="flex flex-wrap items-center gap-2"><Select aria-label="Agent de validation indépendant" value={provider} disabled={busy} className="w-auto" onChange={(event) => { if (event.target.value === "claude" || event.target.value === "codex") setProvider(event.target.value); }}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select><Button size="sm" disabled={busy} onClick={() => void act(() => api.verifyTicketQuality(ticket.id, provider))}><FlaskConical className="h-3.5 w-3.5" />Vérifier le ticket</Button></div>
         <p className="text-2xs text-muted-foreground">Aucune saisie manuelle de critères n’est nécessaire. Vous pouvez consulter et ajuster les critères préparés.</p>
-        {independentRun !== undefined && <div className="rounded border border-border px-3 py-3"><QualityRunStatus run={independentRun} current={independentCurrent} /></div>}
+        {independentRun !== undefined && <div className="space-y-3 rounded border border-border px-3 py-3"><QualityRunStatus run={independentRun} current={independentCurrent} quality={quality}><QualityRunExplanation run={independentRun} quality={quality} current={independentCurrent} onOpenEvidence={setSelectedEvidence} /></QualityRunStatus></div>}
         {activeRun !== undefined && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-info/30 bg-info/5 px-3 py-2 text-xs"><span>{activeRun.phase === null ? qualityRunTitle(activeRun) : qualityPhaseLabel(activeRun.phase)} · {activeRun.simulated ? "simulation" : "exécution réelle"}</span><Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(async () => setResponse(await api.cancelQualityValidation(ticket.id)))}><Square className="h-3 w-3" />Annuler la vérification</Button></div>}
       </div>
 

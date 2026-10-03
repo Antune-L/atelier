@@ -40,6 +40,7 @@ import type {
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
+import { qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
 import { QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
@@ -52,6 +53,18 @@ const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
+
+function qualityReadScopeHook(cwd: string): HookCallback {
+  return async (input) => {
+    if (input.hook_event_name !== "PreToolUse") return {};
+    if (qualityReadToolAllowed(cwd, input.tool_name, input.tool_input)) return {};
+    return { hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Quality inspection is restricted to repository files under the validation workspace.",
+    } };
+  };
+}
 
 /** In-process PreToolUse hook denying every Bash command matched by `isDenied`; `{}` allows it. */
 function denyBashHook(isDenied: (command: string) => boolean, reason: string): HookCallback {
@@ -236,7 +249,10 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
     env: { ...envWithProjectNode(opts.cwd), ...opts.environment },
     stderr: () => {},
-    hooks: { PreToolUse: [{ matcher: "Bash", hooks: preToolUseHooks }] },
+    hooks: { PreToolUse: [
+      { matcher: "Bash", hooks: preToolUseHooks },
+      ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts.cwd)] }] : []),
+    ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     ...buildSettings(opts.permissionAllow, opts.permissionDeny),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),

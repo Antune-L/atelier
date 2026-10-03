@@ -1,9 +1,15 @@
+import { isQualityRepositoryPath, qualityReadScopeAllows, qualityReadToolAllowed } from "./qualityReadPolicy.ts";
+
 export const CODEX_BASH_DENIAL_REASON = "Commande Bash non autorisée. Utilise une commande directe de la liste permise, sans expansion, redirection ni wrapper.";
 export const CODEX_SCOUT_DENIAL_REASON = "Les sous-agents de recherche ne peuvent utiliser ni Bash, ni apply_patch, ni spawn_agent.";
 export const CODEX_DELEGATED_DENIAL_REASON = "Une session d'implémentation déléguée ne peut pas créer de sous-agent natif.";
 export const CODEX_VALIDATOR_DENIAL_REASON = "Une session de validation ne peut ni modifier les fichiers ni créer de sous-agent.";
+export const CODEX_NO_MATCHES_OBSERVATION = "No matches (rg exit code 1).";
+export const CODEX_VALIDATOR_READ_ALLOW = [
+  "Bash(pwd:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(rg:*)",
+];
 
-export function matchesCodexBashAllowlist(command: string, patterns: readonly string[]): boolean {
+export function matchesCodexBashAllowlist(command: string, patterns: readonly string[], restrictReadOnly = false, cwd?: string, singleCommand = false, inspectWords?: (words: readonly string[]) => boolean): boolean {
   const UNSAFE_SHELL_CHARACTERS = new Set(["<", ">", "(", ")", "{", "}", "#"]);
   const segments: string[][] = [];
   let words: string[] = [];
@@ -60,6 +66,7 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
       hasWord = true;
       continue;
     }
+    if (restrictReadOnly && (character === "*" || character === "?" || character === "[" || character === "]")) return false;
     if (UNSAFE_SHELL_CHARACTERS.has(character)) return false;
     if (character === ";" || character === "|" || character === "&" || character === "\n") {
       if (character === "&" && input[index + 1] !== "&") return false;
@@ -76,8 +83,11 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
     hasWord = true;
   }
   if (quote !== null || escaped || !finishSegment()) return false;
+  if (singleCommand && segments.length !== 1) return false;
 
   return segments.every((segment) => {
+    if (inspectWords && !inspectWords(segment)) return false;
+    if (restrictReadOnly && (!cwd || !qualityReadScopeAllows(cwd, segment))) return false;
     const normalized = segment.join(" ");
     return patterns.some((pattern) => {
       if (!pattern.startsWith("Bash(") || !pattern.endsWith(":*)")) return false;
@@ -87,19 +97,38 @@ export function matchesCodexBashAllowlist(command: string, patterns: readonly st
   });
 }
 
+export function isCodexReadOnlyRgNoMatchCommand(command: string, cwd: string): boolean {
+  const patterns = ["Bash(rg:*)"];
+  if (matchesCodexBashAllowlist(command, patterns, true, cwd, true)) return true;
+  let innerCommand: string | undefined;
+  const shellEnvelope = matchesCodexBashAllowlist(command, ["Bash(/bin/zsh:*)", "Bash(/bin/bash:*)", "Bash(/bin/sh:*)"], false, undefined, true, (words) => {
+    if (words.length !== 3 || words[1] !== "-c") return false;
+    innerCommand = words[2];
+    return typeof innerCommand === "string";
+  });
+  return shellEnvelope && typeof innerCommand === "string" && matchesCodexBashAllowlist(innerCommand, patterns, true, cwd, true);
+}
+
 export function codexCommandPolicyScript(
   patterns: readonly string[] | undefined,
   scoutTypes: readonly string[],
   restrictAllSubagents: boolean,
   restrictNestedAgents: boolean,
   restrictValidator = false,
+  cwd?: string,
 ): string {
-  return `const matchesCodexBashAllowlist = ${matchesCodexBashAllowlist.toString()};
+  return `import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+const isQualityRepositoryPath = ${isQualityRepositoryPath.toString()};
+const qualityReadToolAllowed = ${qualityReadToolAllowed.toString()};
+const qualityReadScopeAllows = ${qualityReadScopeAllows.toString()};
+const matchesCodexBashAllowlist = ${matchesCodexBashAllowlist.toString()};
 const patterns = ${JSON.stringify(patterns ?? null)};
 const scoutTypes = new Set(${JSON.stringify(scoutTypes)});
 const restrictAllSubagents = ${JSON.stringify(restrictAllSubagents)};
 const restrictNestedAgents = ${JSON.stringify(restrictNestedAgents)};
 const restrictValidator = ${JSON.stringify(restrictValidator)};
+const cwd = ${JSON.stringify(cwd ?? null)};
 let request;
 try { request = JSON.parse(await Bun.stdin.text()); } catch { process.stdout.write("deny"); process.exit(0); }
 const toolName = request?.tool_name;
@@ -107,13 +136,20 @@ const isScout = (typeof request?.agent_type === "string" && scoutTypes.has(reque
   || (restrictAllSubagents && typeof request?.agent_id === "string" && request.agent_id.length > 0);
 if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("validator");
+} else if (restrictValidator && (toolName === "Read" || toolName === "Glob" || toolName === "Grep")) {
+  process.stdout.write(typeof cwd === "string" && qualityReadToolAllowed(cwd, toolName, request?.tool_input) ? "allow" : "deny");
 } else if (isScout && (toolName === "Bash" || toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("scout");
 } else if (restrictNestedAgents && toolName === "spawn_agent") {
   process.stdout.write("nested");
 } else if (toolName === "Bash" && patterns !== null) {
   const command = request?.tool_input?.command ?? request?.tool_input?.cmd;
-  process.stdout.write(typeof command === "string" && matchesCodexBashAllowlist(command, patterns) ? "allow" : "deny");
+  const requestedCwd = request?.tool_input?.cwd ?? request?.tool_input?.workdir ?? cwd;
+  let scoped = !restrictValidator;
+  if (restrictValidator && typeof requestedCwd === "string" && typeof cwd === "string") {
+    try { scoped = realpathSync(requestedCwd) === realpathSync(cwd); } catch { scoped = false; }
+  }
+  process.stdout.write(scoped && typeof command === "string" && matchesCodexBashAllowlist(command, patterns, restrictValidator, cwd) ? "allow" : "deny");
 } else {
   process.stdout.write("allow");
 }

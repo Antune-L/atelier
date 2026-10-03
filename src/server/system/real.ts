@@ -59,6 +59,7 @@ import type {
   WorktreeSetupOptions,
   ValidationCommandOptions,
   ValidationCommandResult,
+  ValidationDependencyResult,
   ValidationRevision,
   ValidationRevisionOptions,
   ValidationServiceHandle,
@@ -256,6 +257,12 @@ export class RealSystemAdapter implements SystemAdapter {
 
   runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult> {
     return runValidationCommand(opts);
+  }
+
+  async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
+    if (!(await Bun.file(join(opts.cwd, PACKAGE_MANIFEST_FILE)).exists())) return null;
+    const command = await detectInstallCommand(opts.cwd, true);
+    return { command, result: await this.runValidationCommand({ ...opts, command }) };
   }
 
   startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle {
@@ -1154,11 +1161,12 @@ class RealPaneStream implements PaneStream {
 }
 
 /** Lockfile → install command. Installing with the wrong manager would diverge from the lockfile. */
-const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string }> = [
-  { lockfile: "pnpm-lock.yaml", command: "pnpm install" },
-  { lockfile: "yarn.lock", command: "yarn install" },
-  { lockfile: "package-lock.json", command: "npm install" },
-  { lockfile: "bun.lock", command: "bun install" },
+const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string; validationCommand: string }> = [
+  { lockfile: "pnpm-lock.yaml", command: "pnpm install", validationCommand: "pnpm install --frozen-lockfile" },
+  { lockfile: "yarn.lock", command: "yarn install", validationCommand: "yarn install --frozen-lockfile" },
+  { lockfile: "package-lock.json", command: "npm install", validationCommand: "npm ci" },
+  { lockfile: "bun.lock", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
+  { lockfile: "bun.lockb", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
 ];
 
 /**
@@ -1189,11 +1197,11 @@ async function resolveWorktreeScriptCommand(
   return null;
 }
 
-async function detectInstallCommand(slotPath: string): Promise<string> {
-  for (const { lockfile, command } of INSTALL_COMMANDS) {
-    if (await Bun.file(join(slotPath, lockfile)).exists()) return command;
+async function detectInstallCommand(slotPath: string, validation = false): Promise<string> {
+  for (const { lockfile, command, validationCommand } of INSTALL_COMMANDS) {
+    if (await Bun.file(join(slotPath, lockfile)).exists()) return validation ? validationCommand : command;
   }
-  return "bun install";
+  return validation ? "bun install --no-save" : "bun install";
 }
 
 /**

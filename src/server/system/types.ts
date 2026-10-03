@@ -71,6 +71,11 @@ export interface ValidationServiceHandle {
   stop(): Promise<void>;
 }
 
+export interface ValidationDependencyResult {
+  command: string;
+  result: ValidationCommandResult;
+}
+
 export interface ReformulateOptions {
   provider?: Orchestrator;
   onEvent?: (event: AgentSessionEvent) => void;
@@ -229,6 +234,7 @@ export interface SystemAdapter {
   prepareValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }>;
   cleanupValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<void>;
   runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult>;
+  installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null>;
   startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle;
   deleteLocalBranch(repoPath: string, branch: string): Promise<void>;
   /** Create <branch> on origin at origin/<baseBranch> without a worktree (split mother integration branch). */

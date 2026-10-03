@@ -29,6 +29,7 @@ import type {
   WorktreeSetupOptions,
   ValidationCommandOptions,
   ValidationCommandResult,
+  ValidationDependencyResult,
   ValidationRevision,
   ValidationRevisionOptions,
   ValidationServiceHandle,
@@ -136,6 +137,12 @@ export class FakeSystemAdapter implements SystemAdapter {
   async runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult> {
     this.log("runValidationCommand", { cwd: opts.cwd, command: opts.command });
     return { exitCode: 0, timedOut: false, cancelled: opts.signal?.aborted === true, stdout: "Simulated command; no real check was executed.", stderr: "", durationMs: 0 };
+  }
+
+  async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
+    this.log("installValidationDeps", { cwd: opts.cwd });
+    const command = "bun install --frozen-lockfile";
+    return { command, result: await this.runValidationCommand({ ...opts, command }) };
   }
 
   startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle {

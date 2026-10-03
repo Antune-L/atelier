@@ -10,6 +10,12 @@ export const QUALITY_MAX_OBSERVATION_LENGTH = 20_000;
 const nonEmptyTextSchema = z.string().trim().min(1);
 const timestampSchema = z.number().int().nonnegative();
 
+export const qualityValidationModeSchema = z.enum(["repository", "browser"]);
+export type QualityValidationMode = z.infer<typeof qualityValidationModeSchema>;
+
+export const qualityRunPhaseSchema = z.enum(["planning", "preparing", "checks", "validating", "cleanup"]);
+export type QualityRunPhase = z.infer<typeof qualityRunPhaseSchema>;
+
 export const projectValidationSchema = z.object({
   enabled: z.boolean().default(true),
   requireBehavioral: z.boolean().default(true),
@@ -38,6 +44,7 @@ export const qualityCriteriaSnapshotSchema = z.object({
   version: z.number().int().positive(),
   criteria: z.array(qualityCriterionSchema).min(1),
   sourceFingerprint: nonEmptyTextSchema,
+  mode: qualityValidationModeSchema.default("browser"),
   createdBy: z.enum(["user", "agent", "system"]),
   createdAt: timestampSchema,
 }).refine((snapshot) => new Set(snapshot.criteria.map((criterion) => criterion.id)).size === snapshot.criteria.length, "Criterion ids must be unique");
@@ -61,7 +68,10 @@ export const qualityValidationRunSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema,
   criteriaSnapshotId: nonEmptyTextSchema.nullable(),
-  kind: z.enum(["checks", "behavior"]),
+  kind: z.enum(["checks", "behavior", "full"]),
+  mode: qualityValidationModeSchema.nullable().default("browser"),
+  phase: qualityRunPhaseSchema.nullable().default(null),
+  failurePhase: qualityRunPhaseSchema.nullable().default(null),
   revision: nonEmptyTextSchema,
   fingerprint: nonEmptyTextSchema,
   configFingerprint: nonEmptyTextSchema,
@@ -69,6 +79,7 @@ export const qualityValidationRunSchema = z.object({
   provider: z.enum(ORCHESTRATORS).nullable(),
   simulated: z.boolean(),
   evidenceAccepted: z.boolean().default(false),
+  technicalEvidenceAccepted: z.boolean().default(false),
   startedAt: timestampSchema,
   completedAt: timestampSchema.nullable(),
   environment: qualityEnvironmentSchema.nullable(),
@@ -150,8 +161,15 @@ export type QualityGate = z.infer<typeof qualityGateSchema>;
 
 export const setQualityCriteriaSchema = z.object({
   criteria: z.array(qualityCriterionSchema).min(1),
+  mode: qualityValidationModeSchema.optional(),
 });
 export type SetQualityCriteriaInput = z.infer<typeof setQualityCriteriaSchema>;
+
+export const qualityCriteriaPlanSchema = z.object({
+  mode: qualityValidationModeSchema,
+  criteria: z.array(qualityCriterionSchema).min(1),
+}).refine((plan) => new Set(plan.criteria.map((criterion) => criterion.id)).size === plan.criteria.length, "Criterion ids must be unique");
+export type QualityCriteriaPlan = z.infer<typeof qualityCriteriaPlanSchema>;
 
 export const qualityPreflightSchema = z.object({
   ok: z.boolean(),

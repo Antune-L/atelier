@@ -1,15 +1,16 @@
 import { useState, type ReactNode } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
+import { QUALITY_ACTIVE_STATUSES } from "@shared/quality";
 import type { QualityEvidence, QualityRunStatus, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { Dialog } from "@/components/ui/dialog";
 import { qualityEvidenceArtifactUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
-import { formatQualityEnvironmentLabel, formatQualityEvidenceSummary, formatQualityMessage } from "@/lib/qualityMessages";
+import { formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
-type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated";
+type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated" | "preparation";
 
 const RESULT_LABELS: Record<ResultStatus, string> = {
   queued: "En attente",
@@ -23,6 +24,7 @@ const RESULT_LABELS: Record<ResultStatus, string> = {
   stale: "Obsolète",
   unaccepted: "Preuve non acceptée",
   simulated: "Simulé",
+  preparation: "À préparer",
 };
 const CLEANUP_LABELS: Record<QualityValidationRun["cleanupStatus"], string> = { complete: "terminé", pending: "en attente", failed: "échec" };
 const IMAGE_ARTIFACT_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
@@ -58,6 +60,31 @@ export function qualityEvidenceResult(status: QualityRunStatus, current: boolean
   return status;
 }
 
+export function qualityChecksStatus(run: QualityValidationRun, checks: QualityEvidence[]): QualityRunStatus {
+  if (run.kind !== "full" || (run.phase === "checks" && QUALITY_ACTIVE_STATUSES.includes(run.status))) return run.status;
+  if (checks.some((evidence) => evidence.status === "failed")) return "failed";
+  if (checks.some((evidence) => evidence.status === "inconclusive")) return "inconclusive";
+  if (checks.length > 0 && checks.every((evidence) => evidence.status === "passed")) return "passed";
+  return run.status;
+}
+
+export function QualityRunStatus({ run, current }: { run: QualityValidationRun; current: boolean }) {
+  const accepted = run.evidenceAccepted || (run.kind === "checks" && run.technicalEvidenceAccepted);
+  let title = qualityRunTitle(run);
+  if (run.status === "failed" && run.failurePhase !== null) title = qualityFailureLabel(run.failurePhase);
+  let phasePrefix = "Dernière étape";
+  if (run.status === "queued") phasePrefix = "Prochaine étape";
+  if (run.status === "running") phasePrefix = "Étape en cours";
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(run.status, current, accepted, run.simulated)} /></div>
+      <p className="text-2xs text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {qualityModeLabel(run.mode)}</p>
+      {run.phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(run.phase)}</p>}
+      {run.error !== null && <p role="alert" className="text-xs text-danger">{formatQualityMessage(run.error)}</p>}
+    </div>
+  );
+}
+
 export function QualitySection({ number, title, action, children }: { number: number; title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="space-y-2.5">
@@ -85,11 +112,16 @@ export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClos
   const run = quality.runs.find((item) => item.id === evidence.runId);
   const snapshot = quality.criteriaSnapshots.find((item) => item.id === run?.criteriaSnapshotId);
   const current = run !== undefined && currentRunIds.includes(run.id);
+  let accepted = run?.evidenceAccepted === true;
+  if (evidence.kind === "command") accepted = run?.technicalEvidenceAccepted === true || (run?.kind === "checks" && run.evidenceAccepted);
+  let title = "Preuve du critère";
+  if (evidence.kind === "command") title = "Journal du contrôle";
+  else if ((run?.mode ?? snapshot?.mode) === "browser") title = "Preuve du parcours";
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} size="lg" title={evidence.kind === "command" ? "Journal du contrôle" : "Preuve du parcours"} description={evidenceProvenance(evidence, run)}>
-      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, run?.evidenceAccepted === true, run?.simulated === true)} /></div>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} size="lg" title={title} description={evidenceProvenance(evidence, run)}>
+      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence, run?.simulated === true)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, accepted, run?.simulated === true)} /></div>
       <p className={cn("text-xs", current ? "text-muted-foreground" : "text-warning")}>{current ? "Cette preuve correspond au code, aux critères et à la configuration actuels." : "Cette preuve est obsolète pour le code, les critères ou la configuration actuels."}</p>
-      {current && run?.evidenceAccepted !== true && <p className="text-xs text-warning">Les observations de cette exécution ne sont pas acceptées comme preuves de livraison. Consultez le résultat de l’exécution dans l’historique.</p>}
+      {current && !accepted && <p className="text-xs text-warning">Les observations de cette exécution ne sont pas acceptées comme preuves de livraison. Consultez le résultat de l’exécution dans l’historique.</p>}
       <dl className="flex flex-col gap-2 text-xs">
         <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Version du code</dt><dd className="break-all font-mono">{run?.revision ?? "Non renseignée"}</dd></div>
         {snapshot && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Critères</dt><dd>Version {snapshot.version}</dd></div>}
@@ -98,7 +130,7 @@ export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClos
         {evidence.command !== null && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Commande</dt><dd className="break-all font-mono">{evidence.command}</dd></div>}
         {evidence.kind === "command" && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Résultat serveur</dt><dd>Code de sortie {evidence.exitCode ?? "inconnu"} · {formatDuration(evidence.durationMs)}{evidence.timedOut && " · délai dépassé"}</dd></div>}
       </dl>
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 font-mono text-xs">{evidence.output || "Aucune sortie observée."}</pre>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 font-mono text-xs">{formatQualityEvidenceOutput(evidence, run?.simulated === true) || "Aucune sortie observée."}</pre>
       <QualityArtifact key={evidence.id} ticketId={quality.ticketId} evidence={evidence} />
       <p className="text-xs text-muted-foreground">Cette preuve conserve sa version et sa provenance. Les réserves de livraison déterminent si elle valide le code actuel.</p>
     </Dialog>
@@ -115,15 +147,14 @@ export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { 
           const current = currentRunIds.includes(run.id);
           return (
             <div key={run.id} className="space-y-2 px-3 py-3 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2"><span>{run.kind === "checks" ? "Contrôles serveur" : "Parcours indépendants"}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(run.status, current, run.evidenceAccepted, run.simulated)} /></div>
+              <QualityRunStatus run={run} current={current} />
               <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
               <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
               <p className="break-all font-mono text-2xs">{run.revision}</p>
               {run.environment && <p className="break-all text-muted-foreground">Copie séparée : {run.environment.directory} · port {run.environment.port}</p>}
               {run.environment?.addresses?.map((address) => <p key={address.url} className="break-all text-muted-foreground">{formatQualityEnvironmentLabel(address.label)} : {address.url}</p>)}
               <p className="text-muted-foreground">Nettoyage : {CLEANUP_LABELS[run.cleanupStatus]}</p>
-              {run.error !== null && <p className="text-danger">{formatQualityMessage(run.error)}</p>}
-              {quality.evidence.filter((evidence) => evidence.runId === run.id).map((evidence) => <button key={evidence.id} type="button" className="block text-left text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>Voir la preuve : {formatQualityEvidenceSummary(evidence)}</button>)}
+              {quality.evidence.filter((evidence) => evidence.runId === run.id).map((evidence) => <button key={evidence.id} type="button" className="block text-left text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>Voir la preuve : {formatQualityEvidenceSummary(evidence, run.simulated)}</button>)}
             </div>
           );
         })}

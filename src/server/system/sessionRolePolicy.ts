@@ -5,7 +5,7 @@ import type { WorkerToolName } from "../../shared/protocol.ts";
 
 import type { AgentSessionRole } from "./agentSession.ts";
 
-export const QUALITY_VALIDATOR_INSTRUCTIONS = "You are an independent behavioral validator. Follow only the rules in the repository under cwd. Personal host instructions and skills are not validation criteria. Do not edit source files or delegate. Report only observations from completed tools; unsupported criteria are inconclusive.";
+export const QUALITY_VALIDATOR_INSTRUCTIONS = "You are an independent quality agent. Follow only the rules in the repository under cwd. Personal host instructions and skills are not validation criteria. Do not edit source files, access external services, or delegate. Report only observations from completed tools; unsupported criteria are inconclusive. Repository inspection commands are restricted to pwd, ls, cat, head, tail, wc and rg, without shell expansion or redirection. Never use rg preprocessors, file inputs or symlink following. Read only repository files and inspect at most ten files, eighty lines each.";
 
 /** Pipeline tools exposed to a session. Backend validation remains the second authorization layer. */
 export function workerToolsForRole(role: AgentSessionRole | undefined): WorkerToolName[] {

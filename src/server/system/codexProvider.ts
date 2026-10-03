@@ -34,9 +34,11 @@ import { resolveCodexBinary } from "./codexBinary.ts";
 import {
   CODEX_BASH_DENIAL_REASON,
   CODEX_DELEGATED_DENIAL_REASON,
+  CODEX_NO_MATCHES_OBSERVATION,
   CODEX_SCOUT_DENIAL_REASON,
   CODEX_VALIDATOR_DENIAL_REASON,
   codexCommandPolicyScript,
+  isCodexReadOnlyRgNoMatchCommand,
 } from "./codexCommandPolicy.ts";
 import {
   CODEX_SESSION_PRE_TOOL_USE_HOOK_KEY,
@@ -141,7 +143,7 @@ const itemLifecycleSchema = z.object({
     }),
     z.object({ type: z.literal("reasoning"), id: z.string(), summary: z.array(z.string()), content: z.array(z.string()) }),
     z.object({ type: z.literal("plan"), id: z.string(), text: z.string() }),
-    z.object({ type: z.literal("commandExecution"), id: z.string(), command: z.string(), status: z.string(), aggregatedOutput: z.string().nullable().optional() }),
+    z.object({ type: z.literal("commandExecution"), id: z.string(), command: z.string(), status: z.string(), aggregatedOutput: z.string().nullable().optional(), exitCode: z.number().int().nullable().optional() }),
     z.object({ type: z.literal("fileChange"), id: z.string(), changes: z.array(z.unknown()), status: z.string() }),
     z.object({
       type: z.literal("mcpToolCall"),
@@ -506,7 +508,7 @@ try {
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
   const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility");
-  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator"), {
+  writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator", options.cwd), {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -614,7 +616,7 @@ function threadConfig(
 ): ConfigObject {
   const config: ConfigObject = {
     allow_login_shell: false,
-    web_search: "live",
+    web_search: options.role === "quality-validator" ? "disabled" : "live",
     sandbox_workspace_write: {
       network_access: options.readOnly !== true,
       ...(gitWritableRoots.length > 0 ? { writable_roots: gitWritableRoots } : {}),
@@ -816,7 +818,14 @@ function createCodexAgentSession(
       return;
     }
     if (item.type === "commandExecution") {
-      if (!completed) emit({ type: "tool_use", name: "command_execution", input: { command: item.command } });
+      if (!completed) emit({ type: "tool_use", name: "command_execution", input: { command: item.command }, toolCallId: item.id });
+      if (completed) {
+        const noMatches = options.role === "quality-validator" && item.exitCode === 1
+          && isCodexReadOnlyRgNoMatchCommand(item.command, options.cwd);
+        const finished = item.status === "completed" || noMatches && item.status === "failed";
+        const output = [`Command: ${item.command}`, `Exit code: ${item.exitCode ?? "unknown"}`, noMatches ? CODEX_NO_MATCHES_OBSERVATION : "", item.aggregatedOutput ?? ""].filter(Boolean).join("\n");
+        emit({ type: "tool_result", toolCallId: item.id, output, ok: finished && (item.exitCode === 0 || noMatches) });
+      }
       if (completed && item.aggregatedOutput != null) emit({ type: "progress", kind: "command", message: item.aggregatedOutput,
         stream: { itemId: `${parsed.data.turnId}:${item.id}:output`, mode: "snapshot" } });
       emit({ type: "progress", kind: "command", message: `${item.status}: ${item.command}` });

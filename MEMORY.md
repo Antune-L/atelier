@@ -29,6 +29,7 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 
 ## Disposable quality verification
 
+- Repository validator read policies restrict tools and paths; they do not semantically filter readable file contents. Do not describe scoped repository reads as guaranteed secret exclusion.
 - Snapshot SQLite databases using `VACUUM INTO` before isolated verification. Copying only the main file can omit committed changes still held in the write-ahead log (WAL). Use a separate database and server port for the copied app; temporary validation worktrees also need independent runtime data and application ports.
 - Preserve the actual application/provider startup error. A later readiness timeout is not the root cause: the real Claude smoke initially inherited a provider proxy URL pointing at an unavailable local endpoint, and the temporary harness succeeded after removing that override. Do not change the user's provider configuration to repair a disposable probe.
 - A completed Model Context Protocol (MCP) tool response with `isError` is a failed operation, not behavioral proof. Require successful browser operations and non-empty attributed observations before accepting criterion evidence.

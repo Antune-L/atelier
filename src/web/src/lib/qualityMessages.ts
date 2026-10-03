@@ -1,10 +1,20 @@
-import type { QualityEvidence } from "@shared/quality";
+import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { errorMessage } from "@/lib/errors";
 
 const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Validation DATABASE_URL must contain a run-specific database namespace, path, directory, or port placeholder.": "La variable DATABASE_URL de validation doit contenir un marqueur propre à l’exécution pour la base de données, le chemin, le dossier ou le port.",
   "No versioned acceptance criteria are defined.": "Aucune version des critères d’acceptation n’est définie.",
+  "Acceptance criteria will be prepared automatically during verification.": "Les critères d’acceptation seront préparés automatiquement pendant la vérification.",
+  "Dependency installation failed.": "L’installation des dépendances du projet a échoué.",
+  "Validation setup requires an isolated environment.": "La préparation de la validation nécessite un environnement isolé.",
+  "Ticket changed while acceptance criteria were being prepared.": "Le ticket a changé pendant la préparation des critères d’acceptation.",
+  "Criteria preparation modified the committed validation source.": "La préparation des critères a modifié la version du code à valider.",
+  "Configure isolated services and an application start command before browser validation.": "Configurez les services isolés et une commande de démarrage de l’application avant la validation dans le navigateur.",
+  "An isolated browser validation environment is not configured.": "Aucun environnement isolé n’est configuré pour la validation dans le navigateur.",
+  "Environment preparation modified the committed validation source.": "La préparation de l’environnement a modifié la version du code à valider.",
+  "Independent validation has no criteria or provider.": "La validation indépendante ne dispose pas de critères ou d’agent.",
+  "Simulation does not produce independent validation evidence.": "Une simulation ne produit pas de preuve indépendante de validation.",
   "The ticket or PRD changed after the acceptance criteria were recorded.": "Le ticket ou le PRD a changé depuis l’enregistrement des critères d’acceptation.",
   "An isolated behavioral validation environment is not configured.": "Aucun environnement isolé n’est configuré pour la validation des parcours.",
   "No isolated application start command is configured.": "Aucune commande de démarrage de l’application isolée n’est configurée.",
@@ -30,7 +40,7 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Current server-run technical checks are missing or unsuccessful.": "Les contrôles techniques exécutés par le serveur pour la version actuelle sont manquants ou en échec.",
   "Versioned acceptance criteria are required.": "Une version des critères d’acceptation est requise.",
   "Acceptance criteria must be reconfirmed after ticket or PRD changes.": "Les critères d’acceptation doivent être confirmés à nouveau après une modification du ticket ou du PRD.",
-  "Current independent behavioral validation is missing or unsuccessful.": "La validation indépendante des parcours pour la version actuelle est manquante ou en échec.",
+  "Current independent behavioral validation is missing or unsuccessful.": "La validation indépendante du ticket pour la version actuelle est manquante ou en échec.",
   "Quality validation is still running.": "La validation est toujours en cours.",
   "A validation environment still requires cleanup.": "Un environnement de validation doit encore être nettoyé.",
   "Acceptance criterion does not exist in the current version.": "Ce critère d’acceptation n’existe pas dans la version actuelle.",
@@ -68,12 +78,35 @@ const QUALITY_MESSAGE_PREFIXES = [
   { source: "Acceptance criterion is unverified: ", target: "Critère d’acceptation non vérifié : " },
   { source: "Required browser tools are unavailable: ", target: "Les outils de navigateur requis sont indisponibles : " },
   { source: "Isolated application did not become healthy. ", target: "L’application isolée n’est pas devenue disponible. " },
+  { source: "Dependency installation failed. ", target: "L’installation des dépendances du projet a échoué. " },
 ];
 const PLAYWRIGHT_STARTUP_MESSAGE = /^Playwright MCP (\S+) must be installed locally before behavioral validation\.( Automatic downloads are disabled\.)?(?: ([\s\S]*))?$/;
+const PREPARATION_FAILURE_PREFIX = "Validation environment preparation failed: ";
+const SIMULATED_CRITERION_ID = "SIMULATED";
+const SIMULATED_CRITERION_TEXT = "Simulation only: independent acceptance has not been verified.";
+const SIMULATED_CRITERION_LABEL = "Simulation uniquement : les critères d’acceptation n’ont pas été vérifiés indépendamment.";
+const UNVERIFIED_CRITERION_PREFIX = "Acceptance criterion is unverified: ";
+const SIMULATED_VALIDATION_MESSAGE = "Simulation does not produce independent validation evidence.";
+const SIMULATED_VALIDATION_OUTPUT = "This simulated run did not inspect committed source or execute independent validation.";
+const QUALITY_PHASE_LABELS: Record<QualityRunPhase, string> = {
+  planning: "Préparation des critères",
+  preparing: "Préparation et installation du projet",
+  checks: "Contrôles techniques",
+  validating: "Validation indépendante des résultats",
+  cleanup: "Nettoyage de la copie de validation",
+};
+const QUALITY_FAILURE_LABELS: Record<QualityRunPhase, string> = {
+  planning: "Préparation des critères bloquée",
+  preparing: "Préparation du projet bloquée",
+  checks: "Échec des contrôles techniques",
+  validating: "Validation indépendante en échec",
+  cleanup: "Nettoyage incomplet",
+};
 
 export function formatQualityMessage(message: string): string {
   const translated = QUALITY_MESSAGES[message];
   if (typeof translated === "string") return translated;
+  if (message.startsWith(PREPARATION_FAILURE_PREFIX)) return `La préparation de l’environnement de validation a échoué : ${formatQualityMessage(message.slice(PREPARATION_FAILURE_PREFIX.length))}`;
   for (const prefix of QUALITY_MESSAGE_PREFIXES) {
     if (message.startsWith(prefix.source)) return prefix.target + message.slice(prefix.source.length);
   }
@@ -90,11 +123,52 @@ export function qualityErrorMessage(error: unknown): string {
   return formatQualityMessage(errorMessage(error));
 }
 
-export function formatQualityEvidenceSummary(evidence: Pick<QualityEvidence, "authority" | "summary">): string {
+export function formatQualityEvidenceSummary(evidence: Pick<QualityEvidence, "authority" | "summary">, simulated = false): string {
   if (evidence.authority === "human" && evidence.summary === "User observation") return "Observation de l’utilisateur";
+  if (evidence.authority === "server" && evidence.summary === "Environment setup") return "Préparation de l’environnement";
+  if (evidence.authority === "server" && evidence.summary === "Dependency installation") return "Installation des dépendances";
+  if (simulated && evidence.authority === "agent" && evidence.summary === SIMULATED_VALIDATION_MESSAGE) return formatQualityMessage(evidence.summary);
   return evidence.summary;
+}
+
+export function formatQualityEvidenceOutput(evidence: Pick<QualityEvidence, "authority" | "kind" | "output">, simulated: boolean): string {
+  if (simulated && evidence.authority === "agent" && evidence.kind === "behavior" && evidence.output === SIMULATED_VALIDATION_OUTPUT) return "Cette simulation n’a pas inspecté la version du code ni exécuté de validation indépendante.";
+  return evidence.output;
+}
+
+export function formatQualityCriterionText(criterion: Pick<QualityCriterion, "id" | "text">, creator: QualityCriteriaSnapshot["createdBy"]): string {
+  if (creator === "system" && criterion.id === SIMULATED_CRITERION_ID && criterion.text === SIMULATED_CRITERION_TEXT) return SIMULATED_CRITERION_LABEL;
+  return criterion.text;
+}
+
+export function formatQualityGateMessage(message: string, quality: Pick<TicketQuality, "criteriaSnapshots">): string {
+  const snapshot = quality.criteriaSnapshots.at(-1);
+  const criterion = snapshot?.criteria.find((item) => message === UNVERIFIED_CRITERION_PREFIX + item.text);
+  if (snapshot !== undefined && criterion !== undefined) return `Critère d’acceptation non vérifié : ${formatQualityCriterionText(criterion, snapshot.createdBy)}`;
+  return formatQualityMessage(message);
 }
 
 export function formatQualityEnvironmentLabel(label: string): string {
   return label === "Validation application" ? "Application à valider" : label;
+}
+
+export function qualityModeLabel(mode: QualityValidationMode | null): string {
+  if (mode === "repository") return "Dépôt du projet";
+  if (mode === "browser") return "Application dans le navigateur";
+  return "Périmètre à déterminer";
+}
+
+export function qualityRunTitle(run: Pick<QualityValidationRun, "kind" | "mode">): string {
+  if (run.kind === "checks") return "Contrôles techniques";
+  if (run.kind === "full") return "Vérification complète du ticket";
+  if (run.mode === "repository") return "Validation du dépôt";
+  return "Validation des parcours";
+}
+
+export function qualityPhaseLabel(phase: QualityRunPhase): string {
+  return QUALITY_PHASE_LABELS[phase];
+}
+
+export function qualityFailureLabel(phase: QualityRunPhase): string {
+  return QUALITY_FAILURE_LABELS[phase];
 }

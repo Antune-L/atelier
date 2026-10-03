@@ -378,7 +378,7 @@ export class AgentCoordinator {
     switch (input.action) {
       case "set_criteria":
         if (!input.criteria) return { ok: false, result: "Les critères sont requis." };
-        this.quality.setCriteria(ctx.ticketId, input.criteria, "agent");
+        this.quality.setCriteria(ctx.ticketId, input.criteria, "agent", input.mode);
         break;
       case "preflight":
         return { ok: true, result: JSON.stringify(await this.quality.preflight(ctx.ticketId)) };
@@ -387,6 +387,9 @@ export class AgentCoordinator {
       case "validate":
         if (!input.provider) return { ok: false, result: "Le fournisseur du validateur est requis." };
         return { ok: true, result: JSON.stringify({ run: await this.quality.validate(ctx.ticketId, input.provider) }) };
+      case "verify":
+        if (!input.provider) return { ok: false, result: "Le fournisseur du validateur est requis." };
+        return { ok: true, result: JSON.stringify({ run: await this.quality.verify(ctx.ticketId, input.provider) }) };
       case "cancel":
         await this.quality.cancel(ctx.ticketId);
         break;

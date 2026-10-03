@@ -104,7 +104,7 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory }
         set.status = HTTP_BAD_REQUEST;
         return { error: parsed.error.message };
       }
-      quality?.setCriteria(params.id, parsed.data.criteria);
+      quality?.setCriteria(params.id, parsed.data.criteria, "user", parsed.data.mode);
       return response(params.id);
     })
     .post("/preflight", ({ params }) => quality?.preflight(params.id))
@@ -120,6 +120,16 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory }
         return { error: parsed.error.message };
       }
       const run = await quality?.validate(params.id, parsed.data.provider);
+      set.status = HTTP_ACCEPTED;
+      return { run };
+    })
+    .post("/verify", async ({ params, body, set }) => {
+      const parsed = validateQualitySchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = HTTP_BAD_REQUEST;
+        return { error: parsed.error.message };
+      }
+      const run = await quality?.verify(params.id, parsed.data.provider);
       set.status = HTTP_ACCEPTED;
       return { run };
     })

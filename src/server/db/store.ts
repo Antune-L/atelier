@@ -34,7 +34,7 @@ import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
-import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
+import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
@@ -1565,7 +1565,7 @@ export class Store {
     return { ticketId, criteriaSnapshots, runs, evidence };
   }
 
-  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy">): QualityCriteriaSnapshot {
+  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
     return this.transaction(() => {
       const version = this.scalar("SELECT COALESCE(MAX(version), 0) + 1 AS n FROM quality_criteria_snapshots WHERE ticket_id = ?", ticketId);
       const snapshot = qualityCriteriaSnapshotSchema.parse({ ...input, id: nanoid(), ticketId, version, createdAt: Date.now() });
@@ -1574,12 +1574,15 @@ export class Store {
     });
   }
 
-  createQualityRun(input: Omit<QualityValidationRun, "id" | "evidenceAccepted"> & { evidenceAccepted?: boolean }): QualityValidationRun {
+  createQualityRun(input: Omit<z.input<typeof qualityValidationRunSchema>, "id">): QualityValidationRun {
     return this.transaction(() => {
       const run = qualityValidationRunSchema.parse({ ...input, id: nanoid() });
       if (run.criteriaSnapshotId !== null) {
-        const snapshot = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ? AND ticket_id = ?").get(run.criteriaSnapshotId, run.ticketId);
-        if (!snapshot) throw new Error("Quality criteria snapshot does not belong to the ticket");
+        const row = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ? AND ticket_id = ?").get(run.criteriaSnapshotId, run.ticketId);
+        if (!row) throw new Error("Quality criteria snapshot does not belong to the ticket");
+        const snapshot = mapQualityCriteriaSnapshotRow(row);
+        if (input.mode === undefined) run.mode = snapshot.mode;
+        if (run.mode !== null && run.mode !== snapshot.mode) throw new Error("Quality validation mode must match the criteria snapshot");
       }
       this.db.query("INSERT INTO quality_validation_runs (id, ticket_id, criteria_snapshot_id, status, evidence_accepted, payload_json, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(run.id, run.ticketId, run.criteriaSnapshotId, run.status, run.evidenceAccepted ? 1 : 0, JSON.stringify(run), run.startedAt);
       return run;
@@ -1599,15 +1602,26 @@ export class Store {
     return this.db.query("SELECT * FROM quality_validation_runs ORDER BY started_at ASC").all().map(mapQualityValidationRunRow).filter((run) => run.cleanupStatus !== "complete");
   }
 
-  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "evidenceAccepted">>): QualityValidationRun | null {
+  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "evidenceAccepted" | "technicalEvidenceAccepted" | "criteriaSnapshotId" | "mode" | "phase" | "failurePhase">>): QualityValidationRun | null {
     return this.transaction(() => {
       const previous = this.getQualityRun(runId);
       if (!previous) return null;
       const active = previous.status === "queued" || previous.status === "running";
-      if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.evidenceAccepted !== undefined)) {
+      if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.evidenceAccepted !== undefined || patch.technicalEvidenceAccepted !== undefined || patch.criteriaSnapshotId !== undefined || patch.mode !== undefined || patch.failurePhase !== undefined)) {
         throw new Error("Completed quality run results are immutable");
       }
+      if (patch.mode !== undefined && previous.mode !== null && patch.mode !== previous.mode) throw new Error("Quality validation mode is immutable once selected");
+      if (patch.criteriaSnapshotId !== undefined && previous.criteriaSnapshotId !== null && patch.criteriaSnapshotId !== previous.criteriaSnapshotId) throw new Error("Quality run criteria snapshot is immutable once selected");
+      if ((patch.mode !== undefined && patch.mode !== previous.mode) || (patch.criteriaSnapshotId !== undefined && patch.criteriaSnapshotId !== previous.criteriaSnapshotId)) {
+        if (this.scalar("SELECT COUNT(*) AS n FROM quality_evidence WHERE run_id = ?", runId) > 0) throw new Error("Quality run planning cannot change after evidence is recorded");
+      }
       const run = qualityValidationRunSchema.parse({ ...previous, ...patch });
+      if (run.criteriaSnapshotId !== null) {
+        const row = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ? AND ticket_id = ?").get(run.criteriaSnapshotId, run.ticketId);
+        if (!row) throw new Error("Quality criteria snapshot does not belong to the ticket");
+        const snapshot = mapQualityCriteriaSnapshotRow(row);
+        if (run.mode !== null && run.mode !== snapshot.mode) throw new Error("Quality validation mode must match the criteria snapshot");
+      }
       this.db.query("UPDATE quality_validation_runs SET status = ?, evidence_accepted = ?, payload_json = ? WHERE id = ?").run(run.status, run.evidenceAccepted ? 1 : 0, JSON.stringify(run), runId);
       return run;
     });
@@ -1619,7 +1633,8 @@ export class Store {
       const run = this.getQualityRun(evidence.runId);
       if (!run) throw new Error("Quality run not found");
       if (run.status !== "queued" && run.status !== "running") throw new Error("Cannot append evidence to a completed quality run");
-      if (evidence.kind === "behavior" && (run.kind !== "behavior" || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
+      if (run.kind !== "checks" && (run.mode === null || run.criteriaSnapshotId === null)) throw new Error("Quality validation evidence requires planned criteria and mode");
+      if (evidence.kind === "behavior" && ((run.kind !== "behavior" && run.kind !== "full") || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
         throw new Error("Behavioral evidence must match the validation run provider");
       }
       if (evidence.criterionId !== null) {

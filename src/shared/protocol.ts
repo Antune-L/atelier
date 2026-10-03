@@ -68,8 +68,9 @@ export const doneArgsSchema = z.object({ pr_url: z.url() });
 export const readyForReviewArgsSchema = z.object({});
 
 export const qualityArgsSchema = z.object({
-  action: z.enum(["get", "set_criteria", "preflight", "checks", "validate", "cancel"]),
+  action: z.enum(["get", "set_criteria", "preflight", "checks", "validate", "verify", "cancel"]),
   criteria: setQualityCriteriaSchema.shape.criteria.optional(),
+  mode: setQualityCriteriaSchema.shape.mode,
   provider: validateQualitySchema.shape.provider.optional(),
 });
 
@@ -205,7 +206,7 @@ const submitSplitMcpArgsSchema = z.object({
 export const WORKER_TOOLS = [
   {
     name: "quality",
-    description: "Manage ticket quality: read persisted evidence, define observable criteria, check prerequisites, start server-owned checks or an isolated Claude/Codex validation, and cancel. Runs are asynchronous; read get for progress. Missing or stale evidence prevents automatic merge.",
+    description: "Manage ticket quality: read persisted evidence, define observable criteria with repository or browser mode, and start verify for a complete isolated run that prepares criteria and dependencies, executes configured checks, and verifies independently with Claude or Codex. Legacy preflight, checks, and validate actions remain available. Cancel stops an active run. Runs are asynchronous; read get for progress. Missing or stale evidence prevents automatic merge.",
     argsSchema: qualityArgsSchema,
   },
   {

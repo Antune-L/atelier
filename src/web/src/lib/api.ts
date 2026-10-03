@@ -177,6 +177,8 @@ export const api = {
     request(`${ticketQualityPath(id)}/checks`, { method: "POST" }),
   startQualityValidation: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
     request(`${ticketQualityPath(id)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
+  verifyTicketQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
   cancelQualityValidation: (id: string): Promise<QualityResponse> =>
     request(`${ticketQualityPath(id)}/cancel`, { method: "POST" }),
   addQualityEvidence: (id: string, input: ManualQualityEvidenceInput): Promise<QualityResponse> =>

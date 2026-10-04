@@ -290,9 +290,13 @@ export function buildTicketContract(
 
   // The completion directive, the finalisation step and the signalling step each have three variants
   // (directPush → stealth → standard PR). Resolved here as plain branches to avoid nested ternaries.
+  const functionalIteration = iteration?.trigger === "functional";
+  const iterationVerification = functionalIteration
+    ? "un nouveau test fonctionnel dans le navigateur isolé avec les mêmes scénarios figés (pas une vérification complète)"
+    : "une nouvelle vérification indépendante complète";
   let toolDirective: string;
   if (iteration) {
-    toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite une nouvelle vérification indépendante complète.`;
+    toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite ${iterationVerification}.`;
   } else if (directPush) {
     toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
   } else if (stealth) {
@@ -314,7 +318,7 @@ export function buildTicketContract(
 
   let signalStep: string;
   if (iteration) {
-    signalStep = `7. done(pr_url="${iteration.prUrl}"). Termine ton tour : le backend conserve le worktree jusqu'à la fin de la nouvelle vérification de tous les critères. Une vérification échouée ou non concluante termine cette passe ; aucun cycle automatique supplémentaire.`;
+    signalStep = `7. done(pr_url="${iteration.prUrl}"). Termine ton tour : le backend conserve le worktree jusqu'à la fin ${functionalIteration ? "du nouveau test fonctionnel de tous les scénarios" : "de la nouvelle vérification de tous les critères"}. Une vérification échouée ou non concluante termine cette passe ; aucun cycle automatique supplémentaire.`;
   } else if (directPush) {
     signalStep = `7. \`ready_for_review()\` — tes commits sont sur \`${baseBranch}\` ; le worktree sera fermé et la carte passera en « Fini » (aucune PR).`;
   } else if (stealth) {
@@ -326,6 +330,7 @@ export function buildTicketContract(
   let qualityDirective = '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.';
   if (iteration) {
     qualityDirective = '- Consulte uniquement `quality({action:"get"})` pour lire les preuves initiales. Corrige les défauts observés tout en préservant tous les critères requis ; la nouvelle vérification indépendante complète est obligatoire après done().';
+    if (functionalIteration) qualityDirective = '- Consulte uniquement `quality({action:"get"})` pour lire les preuves initiales. Les défauts proviennent de scénarios exécutés dans le navigateur (interaction, résultat attendu, état observé, actions réalisées). Corrige-les tout en préservant tous les critères d’acceptation et scénarios requis ; le backend relance le test fonctionnel dans le navigateur après done(), pas une vérification complète.';
   } else if (project.validation?.enabled) {
     qualityDirective = '- Validation qualité activée : appelle `quality({action:"set_criteria",mode:"repository",criteria:[{id:"C01",text:"comportement et résultat attendu",source:"ticket",required:true,independent:true}]})` avec les vrais critères du ticket ou du PRD. Choisis le mode "repository" pour les changements vérifiables dans le dépôt ; choisis "browser" seulement si les critères nécessitent un navigateur. Après un commit propre, `quality({action:"verify",provider:"' + ticket.orchestrator + '"})` prépare les critères et dépendances dans un worktree isolé, exécute les commandes configurées et lance une vérification indépendante. Consulte `quality({action:"get"})` pour attendre la fin et lire les preuves ; ne déclare jamais une exécution réussie à partir de ton propre résumé. Toute modification impose un nouveau commit et une nouvelle vérification.';
   }
@@ -338,7 +343,7 @@ export function buildTicketContract(
     "",
     "## Description",
     ticket.description || "(vide)",
-    iteration ? `## Correction qualité ${iteration.id}\nPR existante : ${iteration.prUrl}\nRévision initiale : ${iteration.sourceRevision}\nVérification source : ${iteration.sourceRunId}\nLe titre, la description, le PRD et les critères suivants sont figés. Conserve les besoins initiaux intégralement. Une seule passe de correction est autorisée pour ce clic. Ne redéfinis aucun critère et n'appelle jamais quality.set_criteria, submit_prd, ni quality.verify : la vérification finale est pilotée par le backend.\n\nCritères complets :\n${JSON.stringify(iteration.criteriaSnapshot?.criteria ?? [], null, 2)}\n\nDéfauts observés à corriger :\n${JSON.stringify(opts.qualityFaults ?? [], null, 2)}${technicalFaultsSection(opts.qualityTechnicalFaults ?? [])}` : "",
+    iteration ? `## Correction qualité ${iteration.id}\nPR existante : ${iteration.prUrl}\nRévision initiale : ${iteration.sourceRevision}\nVérification source : ${iteration.sourceRunId}\nLe titre, la description, le PRD et les critères suivants sont figés. Conserve les besoins initiaux intégralement. Une seule passe de correction est autorisée pour ce clic. Ne redéfinis aucun critère et n'appelle jamais quality.set_criteria, submit_prd, ni quality.verify : la vérification finale est pilotée par le backend.${functionalIteration ? "\nLes défauts viennent de scénarios fonctionnels exécutés dans le navigateur isolé ; après correction, le backend relance le même test fonctionnel dans le navigateur (et non une vérification complète)." : ""}\n\n${functionalIteration ? "Scénarios fonctionnels complets" : "Critères complets"} :\n${JSON.stringify(iteration.criteriaSnapshot?.criteria ?? [], null, 2)}\n\nDéfauts observés à corriger :\n${JSON.stringify(opts.qualityFaults ?? [], null, 2)}${technicalFaultsSection(opts.qualityTechnicalFaults ?? [])}` : "",
     "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png) que tu peux lire avec l'outil Read.",
     ticket.orchestrator === "claude"
       ? "Si la description référence un lien slack.com, consulte le thread via les outils MCP Slack de LECTURE (namespace `mcp__claude_ai_Slack` : slack_read_thread, slack_read_channel… — différés, charge-les via ToolSearch). Aucun envoi de message Slack n'est possible ni autorisé."

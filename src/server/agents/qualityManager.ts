@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import type { Orchestrator } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import { QUALITY_DEFAULT_TIMEOUT_MS, qualityBlockerCategory, qualityFollowUpIssueSchema } from "../../shared/quality.ts";
+import { QUALITY_DEFAULT_TIMEOUT_MS, latestAcceptanceSnapshot, latestFunctionalSnapshot, qualityBlockerCategory, qualityFollowUpIssueSchema } from "../../shared/quality.ts";
 import type { CreateQualityFollowUpInput, QualityCriteriaPlan, QualityCriteriaSnapshot, QualityCriterion, QualityEnvironment, QualityEvidence, QualityFollowUp, QualityFollowUpIssue, QualityGate, QualityIteration, QualityIterationActions, QualityIterationTrigger, QualityPermissionDenial, QualityPreflight, QualityProblem, QualityRunPhase, StartQualityIterationInput, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { getProject, isProjectKey, MODELS, SLOTS_ROOT } from "../config.ts";
@@ -17,7 +17,10 @@ import type { SystemAdapter, ValidationCommandResult, ValidationRevision, Valida
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
 
 import { resolveExecution } from "./executionConfig.ts";
-import { prepareQualityCriteria } from "./qualityCriteriaPreparation.ts";
+import { QualityBlockerError } from "./qualityBlocker.ts";
+import { prepareFunctionalScenarios, prepareQualityCriteria } from "./qualityCriteriaPreparation.ts";
+import type { FunctionalScenarioPlan } from "./qualityCriteriaPreparation.ts";
+import { qualityErrorMessage } from "./qualitySession.ts";
 import { runQualityValidator } from "./qualityValidator.ts";
 
 const log = createLogger("quality");
@@ -37,6 +40,11 @@ const SIMULATED_VALIDATION_OUTPUT = "Cette simulation n’a pas inspecté le cod
 const SIMULATED_CHECKS_MESSAGE = "Une simulation ne peut pas détecter les commandes de vérification du dépôt.";
 const FULL_KINDS: Array<QualityValidationRun["kind"]> = ["full"];
 const TECHNICAL_KINDS: Array<QualityValidationRun["kind"]> = ["checks", "full"];
+const FUNCTIONAL_KINDS: Array<QualityValidationRun["kind"]> = ["functional"];
+const BROWSER_CONFIGURATION_MESSAGE = "Configure isolated services and an application start command before browser validation.";
+const FUNCTIONAL_STALLED_MESSAGE = "The same browser scenarios still fail after a functional correction; inspect the evidence or create a correction card.";
+const FUNCTIONAL_SOURCE_MISSING = "No completed real functional test with a failed required scenario is available for correction.";
+const FOLLOW_UP_FUNCTIONAL_MISSING = "The source run has no failed or unverified functional scenario nor environment blocker.";
 const INCOMPLETE_RUN_STATUSES: Array<QualityValidationRun["status"]> = ["queued", "running", "cancelled", "interrupted"];
 const ACTIVE_ITERATION_MESSAGE = "A quality run or iteration is already active for this ticket.";
 const ITERATION_MISMATCH_MESSAGE = "The requested iteration does not match the source validation diagnostic.";
@@ -45,6 +53,9 @@ const RECOVERY_STALLED_MESSAGE = "The same read blocker persisted after a recove
 const FOLLOW_UP_CHECKS_MISSING = "The source run has no recorded technical check failure.";
 const FOLLOW_UP_BLOCKER_MISSING = "The source run has no recorded read blocker.";
 const FOLLOW_UP_STALE_SOURCE = "The source run is no longer the latest run for this issue; refresh the validation before creating a correction card.";
+const CORRECTION_KINDS = { checks: TECHNICAL_KINDS, functional: FUNCTIONAL_KINDS } satisfies Record<CorrectionTarget, Array<QualityValidationRun["kind"]>>;
+const CORRECTION_STALLED_MESSAGES = { checks: CHECKS_STALLED_MESSAGE, functional: FUNCTIONAL_STALLED_MESSAGE } satisfies Record<CorrectionTarget, string>;
+const CORRECTION_SOURCE_MISSING_MESSAGES = { checks: "No completed real technical check failure is available for correction.", functional: FUNCTIONAL_SOURCE_MISSING } satisfies Record<CorrectionTarget, string>;
 const FOLLOW_UP_TITLE_LIMIT = 160;
 const FOLLOW_UP_OUTPUT_LIMIT = 2_000;
 const FOLLOW_UP_INLINE_LIMIT = 300;
@@ -57,6 +68,8 @@ export interface QualityManagerDependencies {
   onChange?: (ticketId: string) => void;
   artifactDirectory?: string;
 }
+
+type CorrectionTarget = Extract<QualityIterationTrigger, "checks" | "functional">;
 
 interface ActiveQualityRun {
   controller: AbortController;
@@ -185,7 +198,7 @@ export class QualityManager {
   setCriteria(ticketId: string, criteria: QualityCriterion[], createdBy: "user" | "agent" | "system" = "user", mode?: QualityValidationMode): QualityCriteriaSnapshot {
     const ticket = this.ticket(ticketId);
     this.requireNoIteration(ticketId);
-    const selectedMode = mode ?? this.get(ticketId).criteriaSnapshots.at(-1)?.mode ?? "repository";
+    const selectedMode = mode ?? latestAcceptanceSnapshot(this.get(ticketId))?.mode ?? "repository";
     const snapshot = this.dependencies.store.createQualityCriteriaSnapshot(ticketId, { criteria, mode: selectedMode, sourceFingerprint: sourceFingerprint(ticket), createdBy });
     this.changed(ticketId);
     return snapshot;
@@ -201,7 +214,7 @@ export class QualityManager {
     if (project.validation?.setupCommand && !project.validation.isolated) blockers.push("Validation setup requires an isolated environment.");
     let revision: string | null = null;
     try { revision = (await this.revision(ticket)).commitSha; } catch (error) { blockers.push(getErrorMessage(error)); }
-    const criteria = this.get(ticketId).criteriaSnapshots.at(-1);
+    const criteria = latestAcceptanceSnapshot(this.get(ticketId));
     if (!criteria) reservations.push("Acceptance criteria will be prepared automatically during verification.");
     else if (criteria.sourceFingerprint !== sourceFingerprint(ticket)) reservations.push("The ticket or PRD changed after the acceptance criteria were recorded.");
     if (criteria?.mode === "browser") {
@@ -222,6 +235,10 @@ export class QualityManager {
 
   verify(ticketId: string, provider: Orchestrator): Promise<QualityValidationRun> {
     return this.start(ticketId, "full", provider);
+  }
+
+  testFeature(ticketId: string, provider: Orchestrator): Promise<QualityValidationRun> {
+    return this.start(ticketId, "functional", provider);
   }
 
   private requireNoIteration(ticketId: string): void {
@@ -255,20 +272,26 @@ export class QualityManager {
     return quality.evidence.filter((entry) => entry.runId === run.id && entry.kind === "command" && entry.authority === "server" && entry.status === "failed" && CHECK_NAMES.some((name) => name === entry.summary));
   }
 
-  private checksCandidate(quality: TicketQuality): QualityValidationRun | undefined {
-    const run = latestRun(quality, TECHNICAL_KINDS);
-    if (!run || run.simulated || INCOMPLETE_RUN_STATUSES.includes(run.status) || !technicalRunAccepted(run) || run.cleanupStatus !== "complete") return undefined;
-    return this.failingChecks(run, quality).length > 0 ? run : undefined;
+  private correctionFailures(target: CorrectionTarget, run: QualityValidationRun, quality: TicketQuality): string[] {
+    if (target === "checks") return this.failingChecks(run, quality).map((entry) => entry.summary);
+    return this.failingScenarios(run, quality).map((entry) => entry.criterionId ?? entry.id);
   }
 
-  private checksStalled(source: QualityValidationRun, quality: TicketQuality): boolean {
-    const names = new Set(this.failingChecks(source, quality).map((entry) => entry.summary));
+  private correctionCandidate(target: CorrectionTarget, quality: TicketQuality): QualityValidationRun | undefined {
+    const run = latestRun(quality, CORRECTION_KINDS[target]);
+    if (!run || run.simulated || INCOMPLETE_RUN_STATUSES.includes(run.status) || run.cleanupStatus !== "complete") return undefined;
+    const accepted = target === "checks" ? technicalRunAccepted(run) : run.evidenceAccepted;
+    return accepted && this.correctionFailures(target, run, quality).length > 0 ? run : undefined;
+  }
+
+  private correctionStalled(target: CorrectionTarget, source: QualityValidationRun, quality: TicketQuality): boolean {
+    const failures = new Set(this.correctionFailures(target, source, quality));
     return quality.iterations.some((iteration) => {
-      if (iteration.resultRunId !== source.id || iteration.mode !== "correction" || iteration.trigger !== "checks") return false;
+      if (iteration.resultRunId !== source.id || iteration.mode !== "correction" || iteration.trigger !== target) return false;
       const previous = quality.runs.find((run) => run.id === iteration.sourceRunId);
       if (!previous) return false;
-      const previousNames = new Set(this.failingChecks(previous, quality).map((entry) => entry.summary));
-      return [...names].every((name) => previousNames.has(name));
+      const previousFailures = new Set(this.correctionFailures(target, previous, quality));
+      return [...failures].every((failure) => previousFailures.has(failure));
     });
   }
 
@@ -282,20 +305,75 @@ export class QualityManager {
     return signatures.every((signature) => previousSignatures.has(signature)) ? new Set(signatures) : new Set();
   }
 
-  private async checksCorrectionPullRequest(ticket: Ticket, source: QualityValidationRun, quality: TicketQuality, retryOfIterationId?: string): Promise<{ prUrl: string; headBranch: string }> {
-    await this.requireFreshSource(ticket, source, quality, retryOfIterationId, TECHNICAL_KINDS);
+  private async targetedCorrectionPullRequest(target: CorrectionTarget, ticket: Ticket, source: QualityValidationRun, quality: TicketQuality, retryOfIterationId?: string): Promise<{ prUrl: string; headBranch: string }> {
+    await this.requireFreshSource(ticket, source, quality, retryOfIterationId, CORRECTION_KINDS[target]);
     const linked = await this.correctionPullRequest(ticket, source);
     if (!this.correctionStarter) throw new Error("Quality correction is unavailable.");
-    if (this.checksStalled(source, quality)) throw new Error(CHECKS_STALLED_MESSAGE);
+    if (this.correctionStalled(target, source, quality)) throw new Error(CORRECTION_STALLED_MESSAGES[target]);
     return linked;
   }
 
-  private problems(quality: TicketQuality, repeated: Set<string>): QualityProblem[] {
+  private async targetedCorrectionAction(target: CorrectionTarget, ticket: Ticket, quality: TicketQuality, busy: boolean): Promise<QualityIterationActions["checksCorrection"]> {
+    const source = this.correctionCandidate(target, quality);
+    const retryOfIterationId = source ? quality.iterations.filter((entry) => entry.sourceRunId === source.id && entry.mode === "correction" && entry.trigger === target && entry.status !== "completed").at(-1)?.id ?? null : null;
+    let reason: string | null = null;
+    if (!source) reason = CORRECTION_SOURCE_MISSING_MESSAGES[target];
+    else if (busy) reason = ACTIVE_ITERATION_MESSAGE;
+    else {
+      try { await this.targetedCorrectionPullRequest(target, ticket, source, quality, retryOfIterationId ?? undefined); } catch (error) { reason = getErrorMessage(error); }
+    }
+    return { available: reason === null, reason, sourceRunId: source?.id ?? null, retryOfIterationId };
+  }
+
+  private freshFunctionalSnapshot(ticket: Ticket): QualityCriteriaSnapshot | undefined {
+    const quality = this.get(ticket.id);
+    const snapshot = latestFunctionalSnapshot(quality);
+    if (!snapshot || snapshot.sourceFingerprint !== sourceFingerprint(ticket)) return undefined;
+    return snapshot.baseSnapshotId === (latestAcceptanceSnapshot(quality)?.id ?? null) ? snapshot : undefined;
+  }
+
+  private requiredScenarios(run: QualityValidationRun, quality: TicketQuality): QualityCriterion[] {
+    return quality.criteriaSnapshots.find((entry) => entry.id === run.criteriaSnapshotId)?.criteria.filter((criterion) => criterion.required) ?? [];
+  }
+
+  private scenarioEvidence(run: QualityValidationRun, quality: TicketQuality, criterionId: string): QualityEvidence | undefined {
+    return quality.evidence.filter((entry) => entry.runId === run.id && entry.criterionId === criterionId && entry.authority === "agent").at(-1);
+  }
+
+  private failingScenarios(run: QualityValidationRun, quality: TicketQuality): QualityEvidence[] {
+    return this.requiredScenarios(run, quality).flatMap((criterion) => {
+      const evidence = this.scenarioEvidence(run, quality, criterion.id);
+      return evidence?.status === "failed" ? [evidence] : [];
+    });
+  }
+
+  private functionalProblems(quality: TicketQuality): QualityProblem[] {
+    const run = latestRun(quality, FUNCTIONAL_KINDS);
+    if (!run || run.simulated || INCOMPLETE_RUN_STATUSES.includes(run.status)) return [];
     const problems: QualityProblem[] = [];
+    for (const criterion of this.requiredScenarios(run, quality)) {
+      const evidence = this.scenarioEvidence(run, quality, criterion.id);
+      if (evidence?.status === "passed") continue;
+      problems.push({ id: `scenario:${run.id}:${criterion.id}`, kind: evidence?.status === "failed" ? "scenario_failed" : "scenario_unverified", authority: "agent", runId: run.id, summary: criterion.text, evidenceId: evidence?.id ?? null, criterionId: criterion.id, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false, blockerCode: null });
+    }
+    (run.diagnostic?.blockers ?? []).forEach((blocker, index) => {
+      problems.push({ id: `functional-blocker:${run.id}:${index}`, kind: "functional_blocker", authority: "server", runId: run.id, summary: blocker.summary.trim() || blocker.code, evidenceId: null, criterionId: blocker.scenarioId, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false, blockerCode: blocker.code });
+    });
+    return problems;
+  }
+
+  private functionalFollowUpAvailable(run: QualityValidationRun, quality: TicketQuality): boolean {
+    if (run.simulated || INCOMPLETE_RUN_STATUSES.includes(run.status)) return false;
+    if ((run.diagnostic?.blockers.length ?? 0) > 0) return true;
+    return this.requiredScenarios(run, quality).some((criterion) => this.scenarioEvidence(run, quality, criterion.id)?.status !== "passed");
+  }
+
+  private problems(quality: TicketQuality, repeated: Set<string>): QualityProblem[] {
+    const problems: QualityProblem[] = this.functionalProblems(quality);
     const technical = latestRun(quality, TECHNICAL_KINDS);
     if (technical && !technical.simulated && !INCOMPLETE_RUN_STATUSES.includes(technical.status)) {
       for (const entry of this.failingChecks(technical, quality)) {
-        problems.push({ id: `check:${entry.id}`, kind: "technical_check", authority: "server", runId: technical.id, summary: entry.summary, evidenceId: entry.id, criterionId: null, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false });
+        problems.push({ id: `check:${entry.id}`, kind: "technical_check", authority: "server", runId: technical.id, summary: entry.summary, evidenceId: entry.id, criterionId: null, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false, blockerCode: null });
       }
     }
     const full = latestRun(quality, FULL_KINDS);
@@ -303,19 +381,23 @@ export class QualityManager {
     for (const [key, group] of groupDenials(full.diagnostic?.permissionDenials ?? [])) {
       const [denial] = group;
       if (!denial) continue;
-      problems.push({ id: `blocker:${full.id}:${key}`, kind: "read_blocker", authority: "server", runId: full.id, summary: denial.toolName, evidenceId: null, criterionId: null, blockReason: denial.blockReason, category: qualityBlockerCategory(denial.blockReason), toolName: denial.toolName, commandShape: denial.commandShape, occurrences: group.length, repeated: denial.signature !== null && repeated.has(denial.signature) });
+      problems.push({ id: `blocker:${full.id}:${key}`, kind: "read_blocker", authority: "server", runId: full.id, summary: denial.toolName, evidenceId: null, criterionId: null, blockReason: denial.blockReason, category: qualityBlockerCategory(denial.blockReason), toolName: denial.toolName, commandShape: denial.commandShape, occurrences: group.length, repeated: denial.signature !== null && repeated.has(denial.signature), blockerCode: null });
     }
     const snapshot = quality.criteriaSnapshots.find((entry) => entry.id === full.criteriaSnapshotId);
     for (const criterion of snapshot?.criteria ?? []) {
       if (!criterion.required) continue;
       const evidence = quality.evidence.filter((entry) => entry.runId === full.id && entry.criterionId === criterion.id && entry.authority === "agent").at(-1);
       if (evidence?.status === "passed") continue;
-      problems.push({ id: `criterion:${full.id}:${criterion.id}`, kind: evidence?.status === "failed" ? "criterion_failed" : "criterion_unverified", authority: "agent", runId: full.id, summary: criterion.text, evidenceId: evidence?.id ?? null, criterionId: criterion.id, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false });
+      problems.push({ id: `criterion:${full.id}:${criterion.id}`, kind: evidence?.status === "failed" ? "criterion_failed" : "criterion_unverified", authority: "agent", runId: full.id, summary: criterion.text, evidenceId: evidence?.id ?? null, criterionId: criterion.id, blockReason: null, category: null, toolName: null, commandShape: null, occurrences: 1, repeated: false, blockerCode: null });
     }
     return problems;
   }
 
   private followUpSource(quality: TicketQuality, issue: QualityFollowUpIssue): { run: QualityValidationRun | undefined; reason: string | null } {
+    if (issue === "functional") {
+      const run = latestRun(quality, FUNCTIONAL_KINDS);
+      return { run, reason: run && this.functionalFollowUpAvailable(run, quality) ? null : FOLLOW_UP_FUNCTIONAL_MISSING };
+    }
     if (issue === "checks") {
       const run = latestRun(quality, TECHNICAL_KINDS);
       const available = run && !run.simulated && !INCOMPLETE_RUN_STATUSES.includes(run.status) && this.failingChecks(run, quality).length > 0;
@@ -351,10 +433,13 @@ export class QualityManager {
     const denials = run.diagnostic?.permissionDenials ?? [];
     if (input.issue === "checks" && failing.length === 0) throw new Error(FOLLOW_UP_CHECKS_MISSING);
     if (input.issue === "blocker" && denials.length === 0) throw new Error(FOLLOW_UP_BLOCKER_MISSING);
+    if (input.issue === "functional" && !this.functionalFollowUpAvailable(run, quality)) throw new Error(FOLLOW_UP_FUNCTIONAL_MISSING);
     const requestId = `${followUpPrefix(ticketId)}${run.id}:${input.issue}`;
     const request = this.dependencies.store.listTicketCreationRequestsByPrefix(requestId).find((entry) => entry.requestId === requestId);
     const existingTicket = request ? this.dependencies.store.getTicket(request.ticketId) : null;
-    const prefix = input.issue === "checks" ? "Corriger les contrôles en échec" : "Diagnostiquer le blocage de validation";
+    let prefix = "Diagnostiquer le blocage de validation";
+    if (input.issue === "checks") prefix = "Corriger les contrôles en échec";
+    else if (input.issue === "functional") prefix = "Corriger le test fonctionnel en échec";
     const title = `${prefix} — ${ticket.title}`.slice(0, FOLLOW_UP_TITLE_LIMIT).trim();
     const lines = [
       "## Origine",
@@ -371,6 +456,33 @@ export class QualityManager {
       lines.push("## Contrôles en échec", "");
       for (const entry of failing) {
         lines.push(`### ${entry.summary}`, "", `- Commande : \`${sanitizeInline(entry.command ?? "")}\``, `- Code de sortie : ${entry.exitCode ?? "signal"}`, `- Délai dépassé : ${entry.timedOut ? "oui" : "non"}`, "", "```text", entry.output.slice(-FOLLOW_UP_OUTPUT_LIMIT).replaceAll("```", "'''"), "```", "");
+      }
+    } else if (input.issue === "functional") {
+      const snapshot = quality.criteriaSnapshots.find((entry) => entry.id === run.criteriaSnapshotId);
+      lines.push("## Scénarios du test fonctionnel", "");
+      for (const criterion of snapshot?.criteria ?? []) {
+        const evidence = this.scenarioEvidence(run, quality, criterion.id);
+        const actions = evidence?.scenario?.actions.map((action) => `${sanitizeInline(action.tool)}${action.ok ? "" : " (non observé)"}`).join(", ");
+        lines.push(
+          `### ${sanitizeInline(criterion.id)} — ${sanitizeInline(criterion.text)}`, "",
+          `- Requis : ${criterion.required ? "oui" : "non"}`,
+          `- Attendu : ${sanitizeInline(criterion.expected ?? criterion.text)}`,
+          `- Statut : ${evidence?.status ?? "non vérifié"}`,
+          `- Observé : ${sanitizeInline(evidence?.scenario?.observed || evidence?.summary || "aucune observation")}`,
+          `- Actions : ${actions || "aucune"}`,
+          "",
+        );
+      }
+      const blockers = run.diagnostic?.blockers ?? [];
+      if (blockers.length > 0) {
+        lines.push("## Blocages d’environnement", "");
+        for (const blocker of blockers) lines.push(`- ${blocker.code}${blocker.scenarioId ? ` (scénario ${sanitizeInline(blocker.scenarioId)})` : ""} : ${sanitizeInline(blocker.summary)}`);
+        lines.push("");
+      }
+      if ((snapshot?.uncovered.length ?? 0) > 0) {
+        lines.push("## Critères non vérifiables dans le navigateur", "");
+        for (const entry of snapshot?.uncovered ?? []) lines.push(`- ${sanitizeInline(entry.criterionId)} : ${sanitizeInline(entry.reason)}`);
+        lines.push("");
       }
     } else {
       lines.push("## Blocages de lecture", "");
@@ -420,24 +532,21 @@ export class QualityManager {
     const repeated = this.repeatedBlockers(source, quality);
     let recoveryReason = reason;
     if (!recoveryReason && recommendedMode === "recovery" && repeated.size > 0) recoveryReason = RECOVERY_STALLED_MESSAGE;
-    const checksSource = this.checksCandidate(quality);
-    const checksRetry = checksSource ? quality.iterations.filter((entry) => entry.sourceRunId === checksSource.id && entry.mode === "correction" && entry.trigger === "checks" && entry.status !== "completed").at(-1)?.id ?? null : null;
-    let checksReason: string | null = null;
-    if (!checksSource) checksReason = "No completed real technical check failure is available for correction.";
-    else if (busy) checksReason = ACTIVE_ITERATION_MESSAGE;
-    else {
-      try { await this.checksCorrectionPullRequest(ticket, checksSource, quality, checksRetry ?? undefined); } catch (error) { checksReason = getErrorMessage(error); }
-    }
+    const checksCorrection = await this.targetedCorrectionAction("checks", ticket, quality, busy);
+    const functional = await this.targetedCorrectionAction("functional", ticket, quality, busy);
     const checksFollowUp = this.followUpSource(quality, "checks");
     const blockerFollowUp = this.followUpSource(quality, "blocker");
+    const functionalFollowUp = this.followUpSource(quality, "functional");
     return {
       sourceRunId: source?.id ?? null, recommendedMode, retryOfIterationId,
       recovery: { available: recoveryReason === null && recommendedMode === "recovery", reason: recoveryReason ?? (recommendedMode === "recovery" ? null : "Observed code nonconformance requires correction before full verification.") },
       correction: { available: correctionReason === null && recommendedMode === "correction", reason: correctionReason ?? (recommendedMode === "correction" ? null : "No required criterion has an attributed code nonconformance.") },
-      checksCorrection: { available: checksReason === null, reason: checksReason, sourceRunId: checksSource?.id ?? null, retryOfIterationId: checksRetry },
+      checksCorrection,
+      functional,
       followUp: {
         checks: { available: checksFollowUp.reason === null, reason: checksFollowUp.reason, sourceRunId: checksFollowUp.run?.id ?? null },
         blocker: { available: blockerFollowUp.reason === null, reason: blockerFollowUp.reason, sourceRunId: blockerFollowUp.run?.id ?? null },
+        functional: { available: functionalFollowUp.reason === null, reason: functionalFollowUp.reason, sourceRunId: functionalFollowUp.run?.id ?? null },
       },
       problems: this.problems(quality, repeated),
       followUps: this.followUps(ticketId),
@@ -447,9 +556,14 @@ export class QualityManager {
   private async requireFreshSource(ticket: Ticket, source: QualityValidationRun, quality: TicketQuality, retryOfIterationId: string | undefined, kinds: Array<QualityValidationRun["kind"]>): Promise<void> {
     if (ticket.testing) throw new Error("Finish the interactive test session before starting a quality iteration.");
     const latest = latestRun(quality, kinds);
-    if (latest?.id !== source.id) throw new Error(kinds.includes("checks") ? "The source technical run is no longer the latest technical run." : "The source validation is no longer the latest full run.");
-    const snapshot = quality.criteriaSnapshots.at(-1);
-    if ((snapshot?.id ?? null) !== source.criteriaSnapshotId || snapshot && snapshot.sourceFingerprint !== sourceFingerprint(ticket)) throw new Error("The ticket or acceptance criteria changed after the source validation.");
+    const functional = kinds.includes("functional");
+    let staleMessage = "The source validation is no longer the latest full run.";
+    if (kinds.includes("checks")) staleMessage = "The source technical run is no longer the latest technical run.";
+    else if (functional) staleMessage = "The source functional test is no longer the latest functional test.";
+    if (latest?.id !== source.id) throw new Error(staleMessage);
+    const snapshot = functional ? latestFunctionalSnapshot(quality) : latestAcceptanceSnapshot(quality);
+    const baseChanged = functional && snapshot?.baseSnapshotId !== (latestAcceptanceSnapshot(quality)?.id ?? null);
+    if ((snapshot?.id ?? null) !== source.criteriaSnapshotId || snapshot && snapshot.sourceFingerprint !== sourceFingerprint(ticket) || baseChanged) throw new Error("The ticket or acceptance criteria changed after the source validation.");
     if (source.configFingerprint !== configFingerprint(getProject(ticket.project))) throw new Error("Validation configuration changed after the source validation.");
     const revision = await this.revision(ticket, true);
     const predecessor = quality.iterations.find((entry) => entry.id === retryOfIterationId);
@@ -485,9 +599,13 @@ export class QualityManager {
       let linked = { prUrl: ticket.prUrl, headBranch: ticket.branch };
       let evidenceIds: string[] = [];
       if (input.mode === "correction" && trigger === "checks") {
-        if (this.checksCandidate(quality)?.id !== source.id) throw new Error(ITERATION_MISMATCH_MESSAGE);
-        linked = await this.checksCorrectionPullRequest(ticket, source, quality, input.retryOfIterationId);
+        if (this.correctionCandidate("checks", quality)?.id !== source.id) throw new Error(ITERATION_MISMATCH_MESSAGE);
+        linked = await this.targetedCorrectionPullRequest("checks", ticket, source, quality, input.retryOfIterationId);
         evidenceIds = this.failingChecks(source, quality).map((entry) => entry.id);
+      } else if (input.mode === "correction" && trigger === "functional") {
+        if (this.correctionCandidate("functional", quality)?.id !== source.id) throw new Error(ITERATION_MISMATCH_MESSAGE);
+        linked = await this.targetedCorrectionPullRequest("functional", ticket, source, quality, input.retryOfIterationId);
+        evidenceIds = this.failingScenarios(source, quality).map((entry) => entry.id);
       } else if (input.mode === "correction" && trigger === "criteria") {
         if (this.iterationMode(source, quality) !== "correction") throw new Error(ITERATION_MISMATCH_MESSAGE);
         await this.requireFreshSource(ticket, source, quality, input.retryOfIterationId, FULL_KINDS);
@@ -527,7 +645,7 @@ export class QualityManager {
       const ticket = this.ticket(ticketId);
       const slot = ticket.slotId === null ? null : this.dependencies.store.getSlot(ticket.slotId);
       if (!slot || slot.ticketId !== ticketId || worktreePath !== join(SLOTS_ROOT, `slot-${slot.id}`)) throw new Error("Independent correction verification must use the ticket's assigned worktree.");
-      await this.launch(ticketId, "full", iteration.provider, iteration, worktreePath);
+      await this.launch(ticketId, iteration.trigger === "functional" ? "functional" : "full", iteration.provider, iteration, worktreePath);
     });
   }
 
@@ -545,7 +663,8 @@ export class QualityManager {
     const project = getProject(ticket.project);
     const databaseProblem = databaseIsolationProblem(project);
     if (databaseProblem) throw new Error(databaseProblem);
-    const criteria = iteration ? iteration.criteriaSnapshot ?? undefined : this.get(ticketId).criteriaSnapshots.at(-1);
+    let criteria = iteration ? iteration.criteriaSnapshot ?? undefined : latestAcceptanceSnapshot(this.get(ticketId));
+    if (kind === "functional" && !iteration) criteria = this.freshFunctionalSnapshot(ticket);
     const source = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
     if (iteration && (!source || source.configFingerprint !== configFingerprint(project) || sourceFingerprint(ticket) !== fingerprint([iteration.originalTicket.title, iteration.originalTicket.description, iteration.originalTicket.prdMarkdown]))) throw new Error("The ticket or validation configuration changed during the quality iteration.");
     if (kind === "behavior" && !criteria) throw new Error("Define acceptance criteria before starting behavioral validation.");
@@ -557,7 +676,8 @@ export class QualityManager {
     }
     if (iteration?.mode === "correction" && (!revision.clean || revision.commitSha !== iteration.resultRevision)) throw new Error("The corrected revision changed before independent verification started.");
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
-    const selectedMode = criteria?.mode ?? (kind === "checks" ? "repository" : null);
+    let selectedMode = criteria?.mode ?? (kind === "checks" ? "repository" : null);
+    if (kind === "functional") selectedMode = "browser";
     const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null });
     const controller = new AbortController();
     if (iteration) this.dependencies.store.updateQualityIteration(iteration.id, { status: "verifying", resultRunId: run.id, resultRevision: run.revision });
@@ -568,9 +688,10 @@ export class QualityManager {
         const result = this.dependencies.store.getQualityRun(run.id);
         if (result) {
           let status: QualityIteration["status"] = "failed";
-          const accepted = result.status === "passed" && !result.simulated && result.evidenceAccepted && result.technicalEvidenceAccepted && result.cleanupStatus === "complete";
-          const gate = accepted ? await this.gate(ticketId, "strict") : null;
-          if (gate?.complete) status = "completed";
+          const functionalTrigger = iteration.trigger === "functional";
+          const accepted = result.status === "passed" && !result.simulated && result.evidenceAccepted && (functionalTrigger || result.technicalEvidenceAccepted) && result.cleanupStatus === "complete";
+          const gate = accepted && !functionalTrigger ? await this.gate(ticketId, "strict") : null;
+          if (functionalTrigger ? accepted : gate?.complete) status = "completed";
           else if (result.status === "cancelled") status = "cancelled";
           if (iteration.mode === "correction" || settleRetainedSlot) await this.iterationSettled?.(ticketId, iteration.id, run.id, result.status);
           else this.dependencies.store.updateQualityIteration(iteration.id, { status, diagnostic: result.error ?? gate?.reservations.join("; ") ?? null, completedAt: Date.now() });
@@ -595,6 +716,7 @@ export class QualityManager {
     try {
       this.update(run.id, { status: "running", phase });
       if (signal.aborted) throw new Error("Quality run cancelled.");
+      if (run.kind === "functional" && !this.dependencies.system.dryRun && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
       const prepared = await this.repoMutex.run(project.repoPath, () => this.dependencies.system.prepareValidationWorkspace(options));
       environment = { directory: prepared.cwd, dataDirectory: prepared.dataDirectory, port: prepared.port, databaseNamespace: prepared.databaseNamespace, addresses: [], timeoutMs: project.validation?.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS };
       this.update(run.id, { environment });
@@ -612,23 +734,45 @@ export class QualityManager {
         if (originalFingerprint !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Criteria preparation modified the committed validation source.");
         const currentTicket = this.ticket(ticket.id);
         if (sourceFingerprint(currentTicket) !== sourceFingerprint(ticket)) throw new Error("Ticket changed while acceptance criteria were being prepared.");
-        activeCriteria = this.get(ticket.id).criteriaSnapshots.at(-1) ?? this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: plan.criteria, mode: plan.mode, sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent" });
+        activeCriteria = latestAcceptanceSnapshot(this.get(ticket.id)) ?? this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: plan.criteria, mode: plan.mode, sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent" });
+        this.update(run.id, { criteriaSnapshotId: activeCriteria.id, mode: activeCriteria.mode });
+      }
+      if (run.kind === "functional" && !activeCriteria) {
+        phase = "planning";
+        this.update(run.id, { phase });
+        const planningQuality = this.get(ticket.id);
+        const acceptance = latestAcceptanceSnapshot(planningQuality);
+        const previous = latestFunctionalSnapshot(planningQuality);
+        const plan: FunctionalScenarioPlan = this.dependencies.system.dryRun
+          ? { scenarios: [{ id: SIMULATED_CRITERION_ID, text: SIMULATED_CRITERION_TEXT, source: "ticket", required: true, independent: true, interaction: "display", expected: SIMULATED_CRITERION_TEXT, covers: [] }], uncovered: [] }
+          : await prepareFunctionalScenarios({ ticketId: ticket.id, cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", acceptanceCriteria: acceptance?.criteria ?? [], previousScenarios: previous?.criteria ?? [], environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+        if (signal.aborted) throw new Error("Quality run cancelled.");
+        if (originalFingerprint !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Scenario preparation modified the committed validation source.");
+        const currentTicket = this.ticket(ticket.id);
+        if (sourceFingerprint(currentTicket) !== sourceFingerprint(ticket)) throw new Error("Ticket changed while functional scenarios were being prepared.");
+        if ((latestAcceptanceSnapshot(this.get(ticket.id))?.id ?? null) !== (acceptance?.id ?? null)) throw new Error("Acceptance criteria changed while functional scenarios were being prepared.");
+        const userScenarios = previous?.criteria.filter((criterion) => criterion.source === "user") ?? [];
+        const scenarios = [
+          ...plan.scenarios.map((scenario) => userScenarios.find((criterion) => criterion.id === scenario.id) ?? scenario),
+          ...userScenarios.filter((criterion) => !plan.scenarios.some((scenario) => scenario.id === criterion.id)),
+        ];
+        activeCriteria = this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: scenarios, mode: "browser", sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent", purpose: "functional", baseSnapshotId: acceptance?.id ?? null, uncovered: plan.uncovered });
         this.update(run.id, { criteriaSnapshotId: activeCriteria.id, mode: activeCriteria.mode });
       }
       phase = "preparing";
       this.update(run.id, { phase });
-      if (!this.dependencies.system.dryRun && activeCriteria?.mode === "browser" && run.kind !== "checks" && (!project.validation?.isolated || !project.validation.startCommand)) throw new Error("Configure isolated services and an application start command before browser validation.");
+      if (!this.dependencies.system.dryRun && activeCriteria?.mode === "browser" && run.kind !== "checks" && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
       if (project.validation?.setupCommand) {
-        if (!project.validation.isolated) throw new Error("Validation setup requires an isolated environment.");
+        if (!project.validation.isolated) throw new QualityBlockerError("start_configuration_missing", "Validation setup requires an isolated environment.");
         environment = { ...environment, ...(project.validation.teardownCommand ? { teardownCommand: project.validation.teardownCommand } : {}) };
         this.update(run.id, { environment });
         const setup = await this.command(run, "Environment setup", project.validation.setupCommand, environment, variables, timeoutMs, signal);
-        if (!commandSucceeded(setup)) throw new Error("Validation environment setup failed.");
+        if (!commandSucceeded(setup)) throw new QualityBlockerError("environment_setup_failed", "Validation environment setup failed.");
       }
       const installation = await this.dependencies.system.installValidationDeps({ cwd: environment.directory, environment: variables, timeoutMs: Math.max(timeoutMs, project.commitTimeoutMs), signal });
       if (installation) {
         this.recordCommand(run, "Dependency installation", installation.command, installation.result);
-        if (!commandSucceeded(installation.result)) throw new Error(`Dependency installation failed. ${outputFor(installation.result)}`);
+        if (!commandSucceeded(installation.result)) throw new QualityBlockerError("dependency_installation_failed", `Dependency installation failed. ${outputFor(installation.result)}`);
       }
       const baseline = await this.dependencies.system.codeFingerprint(environment.directory);
       if (baseline !== originalFingerprint) throw new Error("Environment preparation modified the committed validation source.");
@@ -669,7 +813,7 @@ export class QualityManager {
           return;
         }
         if (activeCriteria.mode === "browser") {
-          if (!project.validation?.isolated || !project.validation.startCommand) throw new Error("Configure isolated services and an application start command before browser validation.");
+          if (!project.validation?.isolated || !project.validation.startCommand) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
           environment = { ...environment, addresses: [{ label: "Validation application", url: `http://127.0.0.1:${environment.port}` }], ...(project.validation.teardownCommand ? { teardownCommand: project.validation.teardownCommand } : {}) };
           this.update(run.id, { environment });
           service = this.dependencies.system.startValidationService({ cwd: environment.directory, command: project.validation.startCommand, environment: variables, timeoutMs, signal });
@@ -679,13 +823,14 @@ export class QualityManager {
         const quality = this.get(ticket.id);
         const criteriaSnapshotId = activeCriteria.id;
         const acceptedChecks = quality.runs.filter((candidate) => (candidate.kind === "checks" || candidate.kind === "full") && !candidate.simulated && candidate.revision === run.revision && candidate.fingerprint === run.fingerprint && candidate.configFingerprint === run.configFingerprint && candidate.criteriaSnapshotId === criteriaSnapshotId && technicalRunAccepted(candidate) && (candidate.id === run.id || !iteration && candidate.cleanupStatus === "complete")).at(-1);
-        const checks = quality.evidence.filter((entry) => entry.runId === acceptedChecks?.id && entry.kind === "command" && entry.authority === "server" && entry.status !== "inconclusive" && CHECK_NAMES.some((name) => name === entry.summary));
+        const functional = run.kind === "functional";
+        const checks = functional ? [] : quality.evidence.filter((entry) => entry.runId === acceptedChecks?.id && entry.kind === "command" && entry.authority === "server" && entry.status !== "inconclusive" && CHECK_NAMES.some((name) => name === entry.summary));
         const sourceRun = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
         const previousValidation = sourceRun ? {
           revision: sourceRun.revision, error: sourceRun.error, diagnostic: sourceRun.diagnostic,
           observations: quality.evidence.filter((entry) => entry.runId === sourceRun.id).map(({ criterionId, status, summary, output, timedOut }) => ({ criterionId, status, summary, output: output.slice(-PREVIOUS_OBSERVATION_LIMIT), timedOut })),
         } : undefined;
-        const result = await runQualityValidator({ previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: activeCriteria.mode, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+        const result = await runQualityValidator({ previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
         if (!result.sessionId) throw new Error("Validator returned no independently attributable session identity.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
         const criterionIds = result.evidence.map((evidence) => evidence.criterionId);
@@ -696,7 +841,7 @@ export class QualityManager {
         if (baseline !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Validator modified the validated source; its evidence cannot be accepted.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
         for (const evidence of result.evidence) {
-          this.dependencies.store.appendQualityEvidence({ runId: run.id, criterionId: evidence.criterionId, kind: "behavior", authority: "agent", author: "agent", status: evidence.status, summary: evidence.summary, output: evidence.output, command: null, exitCode: null, timedOut: evidence.timedOut, durationMs: evidence.durationMs, artifactPath: evidence.artifactPath, provider: run.provider, sessionId: result.sessionId, model: execution.model });
+          this.dependencies.store.appendQualityEvidence({ runId: run.id, criterionId: evidence.criterionId, kind: "behavior", authority: "agent", author: "agent", status: evidence.status, summary: evidence.summary, output: evidence.output, command: null, exitCode: null, timedOut: evidence.timedOut, durationMs: evidence.durationMs, artifactPath: evidence.artifactPath, provider: run.provider, sessionId: result.sessionId, model: execution.model, ...(evidence.scenario ? { scenario: evidence.scenario } : {}) });
         }
         const behavioralPassed = knownCriteria.filter((criterion) => criterion.required).every((criterion) => result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "passed"));
         const behavioralFailed = knownCriteria.some((criterion) => criterion.required && result.evidence.some((evidence) => evidence.criterionId === criterion.id && evidence.status === "failed"));
@@ -705,18 +850,22 @@ export class QualityManager {
         else if (!technicalPassed || behavioralFailed) status = "failed";
         let error: string | null = null;
         if (!technicalPassed) error = "One or more technical checks failed.";
-        else if (!behavioralPassed) error = "Some required acceptance criteria were not independently verified.";
+        else if (!behavioralPassed) error = functional ? "Some required functional scenarios were not verified in the browser." : "Some required acceptance criteria were not independently verified.";
         let failurePhase: QualityRunPhase | null = null;
         if (!technicalPassed) failurePhase = "checks";
         else if (!behavioralPassed) failurePhase = "validating";
         let diagnostic = result.diagnostic ?? null;
-        if (!diagnostic && !technicalPassed) diagnostic = { category: "backend_checks_failed", summary: "One or more server-run checks failed; source-code nonconformance is unconfirmed.", permissionDenials: [] };
+        if (!diagnostic && !technicalPassed) diagnostic = { category: "backend_checks_failed", summary: "One or more server-run checks failed; source-code nonconformance is unconfirmed.", permissionDenials: [], blockers: [] };
         outcome = { status, evidenceAccepted: true, failurePhase, error, diagnostic };
       }
     } catch (error) {
       let reason = getErrorMessage(error);
       if (phase === "preparing" && !signal.aborted) reason = `Validation environment preparation failed: ${reason}`;
-      outcome = { status: signal.aborted ? "cancelled" : "failed", evidenceAccepted: false, failurePhase: phase, error: reason, diagnostic: { category: "validation_incomplete", summary: reason, permissionDenials: [] } };
+      const blocker = error instanceof QualityBlockerError && run.kind === "functional" && !signal.aborted ? error : null;
+      if (blocker) {
+        const summary = qualityErrorMessage(reason);
+        outcome = { status: "inconclusive", evidenceAccepted: false, failurePhase: phase, error: summary, diagnostic: { category: "environment_blocker", summary, permissionDenials: [], blockers: [{ code: blocker.code, scenarioId: null, summary }] } };
+      } else outcome = { status: signal.aborted ? "cancelled" : "failed", evidenceAccepted: false, failurePhase: phase, error: reason, diagnostic: { category: "validation_incomplete", summary: reason, permissionDenials: [], blockers: [] } };
       log.warn("quality run ended without acceptance", { ticketId: ticket.id, runId: run.id, phase, error: reason });
     } finally {
       this.update(run.id, { phase: "cleanup" });
@@ -796,7 +945,8 @@ export class QualityManager {
       } catch { /* NOTE(ali): the application may still be starting. */ }
       await new Promise<void>((resolveWait) => setTimeout(resolveWait, HEALTH_POLL_MS));
     }
-    throw new Error(signal.aborted ? "Quality run cancelled." : `Isolated application did not become healthy. ${service.output()}`);
+    if (signal.aborted) throw new Error("Quality run cancelled.");
+    throw new QualityBlockerError("application_unavailable", `Isolated application did not become healthy. ${service.output()}`);
   }
 
   async cancel(ticketId: string): Promise<void> {
@@ -815,7 +965,7 @@ export class QualityManager {
     const ticket = this.ticket(ticketId);
     const project = getProject(ticket.project);
     const quality = this.get(ticketId);
-    const snapshot = quality.criteriaSnapshots.at(-1);
+    const snapshot = latestAcceptanceSnapshot(quality);
     const enabled = ticket.kind === "feature" && (project.validation?.enabled === true || quality.runs.length > 0 || !!snapshot);
     const reservations: string[] = [];
     const requiredCriteria = snapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? [];
@@ -827,6 +977,8 @@ export class QualityManager {
       try { current = await this.revision(ticket, mode === "strict"); } catch (error) { reservations.push(getErrorMessage(error)); }
       const currentRuns = quality.runs.filter((run) => run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project) && run.criteriaSnapshotId === (snapshot?.id ?? null));
       currentRunIds.push(...currentRuns.map((run) => run.id));
+      const functionalSnapshot = this.freshFunctionalSnapshot(ticket);
+      currentRunIds.push(...quality.runs.filter((run) => run.kind === "functional" && functionalSnapshot !== undefined && run.criteriaSnapshotId === functionalSnapshot.id && run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project)).map((run) => run.id));
       const relevant = currentRuns.filter((run) => !run.simulated && run.cleanupStatus === "complete");
       const technical = relevant.filter((run) => run.kind === "checks" || run.kind === "full").at(-1);
       const technicalEvidence = quality.evidence.filter((evidence) => evidence.runId === technical?.id && evidence.kind === "command" && CHECK_NAMES.some((name) => name === evidence.summary));
@@ -857,7 +1009,7 @@ export class QualityManager {
       if (this.active.has(ticketId)) reservations.push("Quality validation is still running.");
       const activeIteration = this.dependencies.store.getActiveQualityIteration(ticketId);
       if (activeIteration?.status === "queued" || activeIteration?.status === "correcting") reservations.push("Quality correction is still running.");
-      if (quality.iterations.length > 0) {
+      if (quality.iterations.some((iteration) => iteration.trigger !== "functional")) {
         const latestFull = quality.runs.filter((run) => run.kind === "full").at(-1);
         const fullAccepted = latestFull && currentRunIds.includes(latestFull.id) && !latestFull.simulated && latestFull.status === "passed" && latestFull.evidenceAccepted && latestFull.technicalEvidenceAccepted && latestFull.cleanupStatus === "complete";
         verifiedCriteria.splice(0, verifiedCriteria.length);
@@ -878,7 +1030,7 @@ export class QualityManager {
     const ticket = this.ticket(ticketId);
     this.requireNoIteration(ticketId);
     const project = getProject(ticket.project);
-    const snapshot = this.get(ticketId).criteriaSnapshots.at(-1);
+    const snapshot = latestAcceptanceSnapshot(this.get(ticketId));
     if (!snapshot?.criteria.some((criterion) => criterion.id === input.criterionId)) throw new Error("Acceptance criterion does not exist in the current version.");
     const revision = await this.revision(ticket, true);
     const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: snapshot.id, kind: "behavior", revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "running", provider: null, simulated: false, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "complete", error: null });

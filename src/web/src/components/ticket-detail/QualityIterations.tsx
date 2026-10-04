@@ -22,6 +22,7 @@ const ITERATION_STATUS_LABELS: Record<QualityIteration["status"], string> = {
 
 function iterationTitle(iteration: QualityIteration): string {
   if (iteration.trigger === "checks") return "Correction des contrôles techniques";
+  if (iteration.trigger === "functional") return "Correction du test fonctionnel";
   return iteration.mode === "correction" ? "Correction et nouvelle vérification" : "Déblocage et nouvelle vérification";
 }
 
@@ -34,7 +35,7 @@ function QualityIterationSummary({ iteration, quality, currentRunIds, onOpenEvid
   const steps = [
     { label: "Diagnostic conservé", complete: true, current: false },
     { label: iteration.mode === "correction" ? "Correction de la PR" : "Reprise de la validation", complete: iteration.status === "verifying" || verified, current: preparing },
-    { label: "Vérification complète indépendante", complete: verified, current: iteration.status === "verifying" },
+    { label: iteration.trigger === "functional" ? "Nouveau test dans le navigateur" : "Vérification complète indépendante", complete: verified, current: iteration.status === "verifying" },
   ];
   return (
     <div className="space-y-3">

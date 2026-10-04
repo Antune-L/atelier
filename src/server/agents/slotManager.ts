@@ -278,14 +278,19 @@ export class SlotManager {
     const slotId = ticket.slotId;
     const run = this.store.getQualityRun(runId);
     let complete = false;
-    let diagnostic = run?.error ?? "La nouvelle vérification complète reste non concluante.";
+    const functional = iteration.trigger === "functional";
+    let diagnostic = run?.error ?? (functional ? "Le nouveau test fonctionnel reste non concluant." : "La nouvelle vérification complète reste non concluante.");
     try {
       await this.assertQualityIterationPr(ticket, iteration, iteration.resultRevision ?? undefined);
-      const gate = await this.qualityGate?.(ticketId, "strict");
       let criteriaMatch = run?.criteriaSnapshotId === iteration.criteriaSnapshot?.id;
-      if (!iteration.criteriaSnapshot && iteration.trigger === "checks") criteriaMatch = Boolean(run?.criteriaSnapshotId);
-      complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && criteriaMatch && Boolean(gate?.complete);
-      if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
+      if (functional) {
+        complete = verdict === "passed" && run?.kind === "functional" && run.revision === iteration.resultRevision && criteriaMatch && run.evidenceAccepted;
+      } else {
+        const gate = await this.qualityGate?.(ticketId, "strict");
+        if (!iteration.criteriaSnapshot && iteration.trigger === "checks") criteriaMatch = Boolean(run?.criteriaSnapshotId);
+        complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && criteriaMatch && Boolean(gate?.complete);
+        if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
+      }
     } catch (error) {
       diagnostic = getErrorMessage(error);
     }
@@ -293,7 +298,8 @@ export class SlotManager {
     this.store.updateQualityIteration(iterationId, { status: complete ? "completed" : "failed", diagnostic: complete ? null : diagnostic, completedAt: Date.now() });
     this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, error: complete ? null : diagnostic, finishedAt: Date.now(), autoMerge: false }));
     const operation = iteration.mode === "correction" ? "Correction terminée" : "Vérification reprise";
-    const body = complete ? `${operation} et nouvelle vérification indépendante complète réussie.` : `${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
+    const verification = functional ? "nouveau test fonctionnel réussi dans le navigateur" : "nouvelle vérification indépendante complète réussie";
+    const body = complete ? `${operation} et ${verification}.` :`${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
     this.hub.pushComment(this.store.addComment(ticketId, "system", body, null));
     this.store.logEvent(ticketId, "quality_iteration_settled", { iterationId, runId, verdict, complete });
     await this.cleanupTerminalSlot(slotId, ticket, complete ? "completed" : "failed", false);

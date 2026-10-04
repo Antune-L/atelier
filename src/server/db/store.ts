@@ -39,7 +39,7 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
-import { QUALITY_ITERATION_ACTIVE_STATUSES, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
@@ -1679,10 +1679,14 @@ export class Store {
       if (!source || source.ticketId !== ticket.id) throw new Error("Quality iteration source run does not belong to the ticket");
       if (source.status === "queued" || source.status === "running") throw new Error("Quality iteration requires a completed source run");
       const quality = this.getTicketQuality(ticket.id);
-      const sourceKinds: Array<QualityValidationRun["kind"]> = trigger === "checks" ? ["checks", "full"] : ["full"];
-      if (quality.runs.filter((run) => sourceKinds.includes(run.kind)).at(-1)?.id !== source.id) throw new Error(trigger === "checks" ? "Quality iteration requires the latest technical validation run" : "Quality iteration requires the latest full validation run");
+      let sourceKinds: Array<QualityValidationRun["kind"]> = ["full"];
+      if (trigger === "checks") sourceKinds = ["checks", "full"];
+      else if (trigger === "functional") sourceKinds = ["functional"];
+      if (quality.runs.filter((run) => sourceKinds.includes(run.kind)).at(-1)?.id !== source.id) throw new Error(trigger === "checks" ? "Quality iteration requires the latest technical validation run" : `Quality iteration requires the latest ${trigger === "functional" ? "functional" : "full"} validation run`);
       const criteriaSnapshot = quality.criteriaSnapshots.find((snapshot) => snapshot.id === source.criteriaSnapshotId) ?? null;
-      if ((quality.criteriaSnapshots.at(-1)?.id ?? null) !== source.criteriaSnapshotId) throw new Error("Quality iteration source criteria are stale");
+      const currentSnapshot = trigger === "functional" ? latestFunctionalSnapshot(quality) : latestAcceptanceSnapshot(quality);
+      if ((currentSnapshot?.id ?? null) !== source.criteriaSnapshotId) throw new Error("Quality iteration source criteria are stale");
+      if (trigger === "functional" && currentSnapshot?.baseSnapshotId !== (latestAcceptanceSnapshot(quality)?.id ?? null)) throw new Error("Quality iteration source criteria are stale");
       const sourceFingerprint = createHash("sha256").update(JSON.stringify([ticket.title, ticket.description, ticket.prdMarkdown])).digest("hex");
       if (criteriaSnapshot && criteriaSnapshot.sourceFingerprint !== sourceFingerprint) throw new Error("Quality iteration source ticket or PRD changed");
       if (criteriaSnapshot && source.mode !== criteriaSnapshot.mode) throw new Error("Quality iteration source validation mode does not match its criteria");
@@ -1736,7 +1740,7 @@ export class Store {
       if (previous.resultRunId !== null && candidate.resultRunId !== previous.resultRunId) throw new Error("Quality iteration verification run is immutable once selected");
       if (candidate.resultRunId !== null) {
         const run = this.getQualityRun(candidate.resultRunId);
-        if (!run || run.ticketId !== previous.ticketId || run.kind !== "full" || run.provider !== previous.provider || run.id === previous.sourceRunId) throw new Error("Quality iteration result requires a new full validation run for the same ticket and provider");
+        if (!run || run.ticketId !== previous.ticketId || run.kind !== (previous.trigger === "functional" ? "functional" : "full") || run.provider !== previous.provider || run.id === previous.sourceRunId) throw new Error("Quality iteration result requires a new full validation run for the same ticket and provider");
         if (previous.criteriaSnapshot && run.criteriaSnapshotId !== previous.criteriaSnapshot.id) throw new Error("Quality iteration result must use frozen acceptance criteria");
         if (candidate.resultRevision !== null && candidate.resultRevision !== run.revision) throw new Error("Quality iteration result revision does not match its validation run");
         candidate.resultRevision = run.revision;
@@ -1751,7 +1755,7 @@ export class Store {
     });
   }
 
-  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
+  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & Partial<Pick<QualityCriteriaSnapshot, "purpose" | "baseSnapshotId" | "uncovered">> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
     return this.transaction(() => {
       if (this.getActiveQualityIteration(ticketId)?.mode === "correction") throw new Error("Quality criteria are frozen during a correction iteration");
       const version = this.scalar("SELECT COALESCE(MAX(version), 0) + 1 AS n FROM quality_criteria_snapshots WHERE ticket_id = ?", ticketId);
@@ -1821,7 +1825,7 @@ export class Store {
       if (!run) throw new Error("Quality run not found");
       if (run.status !== "queued" && run.status !== "running") throw new Error("Cannot append evidence to a completed quality run");
       if (run.kind !== "checks" && (run.mode === null || run.criteriaSnapshotId === null)) throw new Error("Quality validation evidence requires planned criteria and mode");
-      if (evidence.kind === "behavior" && ((run.kind !== "behavior" && run.kind !== "full") || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
+      if (evidence.kind === "behavior" && ((run.kind !== "behavior" && run.kind !== "full" && run.kind !== "functional") || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
         throw new Error("Behavioral evidence must match the validation run provider");
       }
       if (evidence.criterionId !== null) {

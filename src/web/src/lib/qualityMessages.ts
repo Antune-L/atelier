@@ -1,4 +1,5 @@
-import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityPermissionBlockReason, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
+import { latestAcceptanceSnapshot } from "@shared/quality";
+import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityFunctionalBlockerCode, QualityPermissionBlockReason, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { errorMessage } from "@/lib/errors";
 
@@ -122,6 +123,29 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Simulated runs cannot create correction cards.": "Une simulation ne peut pas créer de carte de correction.",
   "The source run is still running or does not belong to this ticket.": "L’exécution source est encore en cours ou n’appartient pas à ce ticket.",
   "The source run is no longer the latest run for this issue; refresh the validation before creating a correction card.": "L’exécution source n’est plus la plus récente pour ce problème ; actualisez la validation avant de créer une carte de correction.",
+  "The same browser scenarios still fail after a functional correction; inspect the evidence or create a correction card.": "Les mêmes scénarios échouent encore dans le navigateur après une correction ; consultez les preuves ou créez une carte de correction.",
+  "No completed real functional test with a failed required scenario is available for correction.": "Aucun test fonctionnel réel et terminé avec un scénario requis en échec n’est disponible pour une correction.",
+  "The source run has no failed or unverified functional scenario nor environment blocker.": "Cette exécution n’a enregistré aucun scénario en échec ou non vérifié, ni blocage d’environnement.",
+  "The source functional test is no longer the latest functional test.": "Le test fonctionnel source n’est plus le plus récent.",
+  "Ticket changed while functional scenarios were being prepared.": "Le ticket a changé pendant la préparation des scénarios du test fonctionnel.",
+  "Acceptance criteria changed while functional scenarios were being prepared.": "Les critères d’acceptation ont changé pendant la préparation des scénarios du test fonctionnel.",
+  "Some required functional scenarios were not verified in the browser.": "Certains scénarios requis n’ont pas été vérifiés dans le navigateur.",
+  "Required browser scenarios were contradicted by attributed observations.": "Des observations attribuées contredisent des scénarios requis dans le navigateur.",
+  "Some browser scenarios could not be exercised in the validation environment.": "Certains scénarios n’ont pas pu être exécutés dans le navigateur de l’environnement de validation.",
+  "Functional scenarios cannot cite server check evidence": "Un scénario fonctionnel ne peut pas s’appuyer sur les contrôles du serveur.",
+  "No recorded user interaction supports this interactive scenario": "Aucune interaction enregistrée ne justifie ce scénario interactif.",
+  "Validation cancelled before scenario preparation": "La validation a été annulée avant la préparation des scénarios.",
+  "Scenario preparation did not return valid scenarios": "La préparation des scénarios n’a pas renvoyé de scénarios valides.",
+};
+
+const QUALITY_FUNCTIONAL_BLOCKER_LABELS: Record<QualityFunctionalBlockerCode, string> = {
+  start_configuration_missing: "Configuration de démarrage manquante",
+  environment_setup_failed: "Préparation de l’environnement en échec",
+  dependency_installation_failed: "Installation des dépendances en échec",
+  application_unavailable: "Application indisponible",
+  browser_unavailable: "Navigateur indisponible",
+  authentication_required: "Connexion requise",
+  test_data_missing: "Données de test manquantes",
 };
 
 const QUALITY_MESSAGE_PREFIXES = [
@@ -212,7 +236,7 @@ export function formatQualityCriterionText(criterion: Pick<QualityCriterion, "id
 }
 
 export function formatQualityGateMessage(message: string, quality: Pick<TicketQuality, "criteriaSnapshots">): string {
-  const snapshot = quality.criteriaSnapshots.at(-1);
+  const snapshot = latestAcceptanceSnapshot(quality);
   const criterion = snapshot?.criteria.find((item) => message === UNVERIFIED_CRITERION_PREFIX + item.text);
   if (snapshot !== undefined && criterion !== undefined) return `Critère d’acceptation non vérifié : ${formatQualityCriterionText(criterion, snapshot.createdBy)}`;
   return formatQualityMessage(message);
@@ -231,8 +255,13 @@ export function qualityModeLabel(mode: QualityValidationMode | null): string {
 export function qualityRunTitle(run: Pick<QualityValidationRun, "kind" | "mode">): string {
   if (run.kind === "checks") return "Contrôles techniques";
   if (run.kind === "full") return "Vérification complète du ticket";
+  if (run.kind === "functional") return "Test fonctionnel dans le navigateur";
   if (run.mode === "repository") return "Validation du dépôt";
   return "Validation des parcours";
+}
+
+export function qualityFunctionalBlockerLabel(code: QualityFunctionalBlockerCode): string {
+  return QUALITY_FUNCTIONAL_BLOCKER_LABELS[code];
 }
 
 export function qualityPhaseLabel(phase: QualityRunPhase): string {

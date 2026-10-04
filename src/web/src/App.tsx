@@ -1,5 +1,5 @@
-import { ChevronDown, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { ChevronDown, Cloud, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { Ticket } from "@shared/schemas";
 
@@ -9,6 +9,7 @@ import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NotificationCenter } from "@/components/NotificationCenter";
 import { NewTicketSheet } from "@/components/NewTicketSheet";
+import { PreviewsView } from "@/components/PreviewsView";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
@@ -39,7 +40,7 @@ import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /** Home sub-view: the Board/Agents/Worktree toggle (Stats moved to the sidebar). */
-type HomeView = "kanban" | "agents" | "worktree";
+type HomeView = "kanban" | "agents" | "worktree" | "previews";
 
 /** If the relaunch hasn't replaced the window after this long, release the update overlay. */
 const UPDATE_WATCHDOG_MS = 60_000;
@@ -53,6 +54,7 @@ const HOME_VIEW_OPTIONS: { value: HomeView; label: string; Icon: typeof LayoutGr
   { value: "kanban", label: "Kanban", Icon: LayoutGrid },
   { value: "agents", label: "Agents", Icon: MonitorPlay },
   { value: "worktree", label: "Worktree", Icon: GitBranch },
+  { value: "previews", label: "Prévisualisations", Icon: Cloud },
 ];
 
 export function App() {
@@ -76,9 +78,21 @@ export function App() {
   const { canUpdate } = useCapabilities();
 
   const { tickets } = useBoard();
-  const openTicket: Ticket | null = openTicketId
-    ? (tickets.find((t) => t.id === openTicketId) ?? null)
-    : null;
+  const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
+  const knownTicket = tickets.find((ticket) => ticket.id === openTicketId);
+  const knownTicketId = knownTicket?.id ?? null;
+  const openTicket = knownTicket ?? (fetchedTicket?.id === openTicketId ? fetchedTicket : null);
+
+  useEffect(() => {
+    if (openTicketId === null || knownTicketId !== null) return;
+    let active = true;
+    void api.ticketDetail(openTicketId).then(({ ticket }) => {
+      if (active) setFetchedTicket(ticket);
+    }).catch((cause: unknown) => {
+      if (active) boardStore.notify("Carte indisponible", cause instanceof Error ? cause.message : "Impossible de charger cette carte.");
+    });
+    return () => { active = false; };
+  }, [openTicketId, knownTicketId]);
 
   // Dev desktop self-update: git pull + rebuild, then either soft-reload (frontend-only diff) or
   // full relaunch (backend/shared/worker changes). Guard failures (dirty tree, wrong branch) toast.
@@ -161,6 +175,7 @@ export function App() {
         />
       );
     }
+    if (homeView === "previews") return <PreviewsView projects={selectableProjects} projectFilter={effectiveFilter} searchQuery={search} />;
     return <WorktreeSessionsView projects={projects} />;
   };
 

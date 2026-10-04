@@ -138,11 +138,14 @@ export const previewStatusSchema = z.enum(["queued", "provisioning", "building",
 export const previewDesiredStateSchema = z.enum(["running", "stopped"]);
 export const previewCleanupStatusSchema = z.enum(["pending", "complete", "failed"]);
 
-export const previewRecordSchema = z.object({
+const previewRecordBaseSchema = z.object({
   id: nonEmptyTextSchema,
-  ticketId: nonEmptyTextSchema,
+  ticketId: nonEmptyTextSchema.nullable(),
   project: nonEmptyTextSchema,
-  prUrl: httpUrlSchema,
+  prUrl: httpUrlSchema.nullable(),
+  repository: nonEmptyTextSchema.nullable().default(null),
+  repositoryHost: nonEmptyTextSchema.nullable().default(null),
+  replacesPreviewId: nonEmptyTextSchema.nullable().default(null),
   revision: nonEmptyTextSchema,
   deployedRevision: nonEmptyTextSchema.nullable().default(null),
   branch: nonEmptyTextSchema,
@@ -178,8 +181,10 @@ export const previewRecordSchema = z.object({
   cleanupRequestedAt: timestampSchema.nullable().default(null),
   recipe: previewRecipeSchema.nullable().default(null),
 });
+const hasPairedPreviewOwnership = (preview: { ticketId: string | null; prUrl: string | null }) => (preview.ticketId === null) === (preview.prUrl === null);
+export const previewRecordSchema = previewRecordBaseSchema.refine(hasPairedPreviewOwnership, "Ticket and pull request ownership must be present together.");
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
-export const createPreviewSchema = previewRecordSchema.omit({ id: true, createdAt: true, updatedAt: true });
+export const createPreviewSchema = previewRecordBaseSchema.omit({ id: true, createdAt: true, updatedAt: true }).refine(hasPairedPreviewOwnership, "Ticket and pull request ownership must be present together.");
 export type CreatePreviewInput = z.input<typeof createPreviewSchema>;
 export const updatePreviewSchema = z.object({
   prUrl: previewRecordSchema.shape.prUrl.optional(),
@@ -215,3 +220,16 @@ export const updatePreviewSchema = z.object({
   recipe: previewRecordSchema.shape.recipe.removeDefault().optional(),
 }).strict();
 export type UpdatePreviewInput = z.infer<typeof updatePreviewSchema>;
+
+export const previewBranchSchema = nonEmptyTextSchema.refine((branch) => !branch.startsWith("-") && !branch.startsWith("refs/") && !/[\s~^:?*[\\]/.test(branch) && !branch.includes("..") && !branch.includes("@{") && !branch.endsWith("/") && !branch.endsWith(".") && !branch.endsWith(".lock") && branch.split("/").every((part) => part.length > 0 && !part.startsWith(".") && !part.endsWith(".lock")) && branch !== "@", "A remote branch name is required.");
+export const createBranchPreviewSchema = z.object({ branch: previewBranchSchema }).strict();
+export const preparePreviewSchema = z.object({ branch: previewBranchSchema.optional(), retry: z.boolean().optional() }).strict();
+export const previewReadinessSchema = z.object({
+  status: z.enum(["ready", "not_ready", "check_error"]),
+  branch: previewBranchSchema,
+  revision: nonEmptyTextSchema.nullable(),
+  diagnostics: z.array(z.string()),
+  preparationTicketId: nonEmptyTextSchema.nullable(),
+  preparationRetryAvailable: z.boolean().default(false),
+});
+export type PreviewReadiness = z.infer<typeof previewReadinessSchema>;

@@ -37,6 +37,7 @@ interface BranchComboboxProps {
   value: string;
   onChange: (value: string) => void;
   options: string[];
+  placeholder?: string;
   disabled?: boolean;
   className?: string;
 }
@@ -45,7 +46,7 @@ interface BranchComboboxProps {
  * Free-text branch input with a custom suggestion list (remote branches).
  * Allows typing any branch name (including ones not yet on origin).
  */
-export function BranchCombobox({ id, value, onChange, options, disabled, className }: BranchComboboxProps) {
+export function BranchCombobox({ id, value, onChange, options, placeholder = "Branche (existante ou nouvelle)", disabled, className }: BranchComboboxProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = id ? `${id}-listbox` : undefined;
@@ -90,7 +91,7 @@ export function BranchCombobox({ id, value, onChange, options, disabled, classNa
           "h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
-        placeholder={disabled ? "Chargement…" : "Branche (existante ou nouvelle)"}
+        placeholder={disabled ? "Chargement…" : placeholder}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="none"

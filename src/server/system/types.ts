@@ -14,7 +14,7 @@ import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type { ReviewRequestSnapshot } from "./vcs/types.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
-import type { PreviewRecord } from "../../shared/preview.ts";
+import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 
 export interface GitWorktreeAddOptions {
   repoPath: string;
@@ -246,6 +246,8 @@ export interface SystemAdapter {
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;
   readPreviewRepository?(repoPath: string): Promise<{ repository: string; host: string; visibility: "public" | "private" }>;
   readPreviewSource?(repoPath: string, prUrl: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; host?: string; visibility?: "public" | "private"; recipe: unknown }>;
+  readPreviewBranchSource?(repoPath: string, branch: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; host?: string; visibility?: "public" | "private"; recipe: unknown }>;
+  inspectPreviewReadiness?(repoPath: string, branch: string, recipePath: string): Promise<PreviewReadiness>;
   confirmPreviewCleanup?(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<{ complete: boolean; reason: string | null; retryable?: boolean }>;
   probePreviewHealth?(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean>;
 

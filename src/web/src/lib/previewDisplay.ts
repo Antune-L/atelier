@@ -1,4 +1,4 @@
-import type { PreviewGithubSourceResolution, PreviewRecord } from "@shared/preview";
+import type { PreviewGithubSourceResolution, PreviewReadiness, PreviewRecord, PreviewSettings } from "@shared/preview";
 
 export const PREVIEW_POLL_INTERVAL_MS = 5_000;
 export const PREVIEW_CLEANUP_WATCH_LABEL = "Ressources supprimées · surveillance d’arrêt en cours";
@@ -29,3 +29,16 @@ export const PREVIEW_CLEANUP_LABELS: Record<PreviewRecord['cleanupStatus'], stri
   complete: "Nettoyage terminé",
   failed: "Nettoyage incomplet",
 };
+
+export const PREVIEW_REVISION_LABEL_LENGTH = 8;
+export const PREVIEW_READINESS_LABELS: Record<PreviewReadiness["status"], string> = {
+  ready: "Projet prêt pour Coolify",
+  not_ready: "Préparation du projet nécessaire",
+  check_error: "Vérification du projet indisponible",
+};
+
+export function previewConnectionReady(settings: PreviewSettings | null): boolean {
+  return settings !== null && settings.tokenConfigured && settings.previewAuthConfigured &&
+    settings.baseUrl !== null && settings.serverUuid !== null && settings.projectUuid !== null &&
+    settings.domainBase !== null;
+}

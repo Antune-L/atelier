@@ -23,7 +23,7 @@ import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProv
 import { createCodexProvider } from "./codexProvider.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
-import { readPreviewRepository, readPreviewSource } from "./previewSource.ts";
+import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
 import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
@@ -177,6 +177,14 @@ export class RealSystemAdapter implements SystemAdapter {
   coolifyRequest(request: CoolifyRequest): Promise<CoolifyResponse> {
     return requestCoolify(request);
   }
+  readPreviewBranchSource(repoPath: string, branch: string, recipePath: string) {
+    return readPreviewBranchSource(repoPath, branch, recipePath);
+  }
+
+  inspectPreviewReadiness(repoPath: string, branch: string, recipePath: string) {
+    return inspectPreviewReadiness(repoPath, branch, recipePath);
+  }
+
   readPreviewSource(repoPath: string, prUrl: string, recipePath: string) {
     return readPreviewSource(repoPath, prUrl, recipePath);
   }

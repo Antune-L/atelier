@@ -3,8 +3,9 @@ import { join } from "node:path";
 
 import type { Orchestrator } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
-import { coolifyInventorySchema, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewGithubRepositorySchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
-import type { PreviewGithubSourceResolution, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
+import { coolifyInventorySchema, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewBranchSchema, previewGithubRepositorySchema, previewReadinessSchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
+import type { PreviewGithubSourceResolution, PreviewReadiness, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
+import type { Ticket } from "../shared/schemas.ts";
 import { COOLIFY_PREPARATION_MARKER } from "../shared/skills.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
@@ -29,6 +30,7 @@ const REQUIRED_EMPTY_CLEANUP_AUDITS = 2;
 const SECONDS_TO_MS = 1_000;
 const HTTP_VALIDATION_FAILED = 422;
 const MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES = 31;
+const TERMINAL_PREPARATION_COLUMNS = ["merged", "failed", "abandoned", "reviewed", "answered"];
 
 function validateNativePreviewPassword(password: string): void {
   if (Buffer.byteLength(password, "utf8") > MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES) throw new Error(`Coolify native preview authentication requires a password of at most ${MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES} UTF-8 bytes. Update the private preview password before starting this Dockerfile preview.`);
@@ -115,22 +117,74 @@ export class PreviewManager {
     }
   }
 
-  async prepare(project: string) {
+  private preparationTickets(project: string, branch: string, recipePath: string): Ticket[] {
+    const prefix = this.preparationRequestPrefix(project, branch, recipePath);
+    const requests = this.deps.store.listTicketCreationRequestsByPrefix(prefix);
+    const legacyKey = `coolify-preview-setup:${project}:${recipePath}`;
+    const legacy = this.deps.store.listTicketCreationRequestsByPrefix(legacyKey).filter((request) => request.requestId === legacyKey);
+    const ids = [...requests, ...legacy].map((request) => request.ticketId);
+    const configuredId = this.projectSettings(project).preparationTicketId;
+    if (configuredId) {
+      const configured = this.deps.store.getTicket(configuredId);
+      if (configured?.description.includes(COOLIFY_PREPARATION_MARKER) && configured.description.includes(recipePath)) ids.push(configuredId);
+    }
+    return [...new Set(ids)].flatMap((id) => {
+      const ticket = this.deps.store.getTicket(id);
+      if (!ticket || ticket.project !== project || (ticket.baseBranch ?? getProject(project).baseBranch) !== branch) return [];
+      return [ticket];
+    }).sort((left, right) => right.createdAt - left.createdAt);
+  }
+
+  private preparationRequestPrefix(project: string, branch: string, recipePath: string): string {
+    return `coolify-preview-setup:v2:${JSON.stringify([project, branch, recipePath])}:`;
+  }
+
+  async readiness(project: string, requestedBranch?: string): Promise<PreviewReadiness> {
+    const settings = this.projectSettings(project);
+    const projectConfig = getProject(project);
+    const branch = previewBranchSchema.parse(requestedBranch ?? projectConfig.baseBranch);
+    const preparationTickets = this.preparationTickets(project, branch, settings.recipePath);
+    const active = preparationTickets.find((ticket) => !TERMINAL_PREPARATION_COLUMNS.includes(ticket.column));
+    const result: PreviewReadiness = { status: "check_error", branch, revision: null, diagnostics: [], preparationTicketId: active?.id ?? null, preparationRetryAvailable: !active && preparationTickets.length > 0 };
+    if (projectConfig.vcsProvider !== "github") return { ...result, diagnostics: ["Coolify previews currently support GitHub projects only."] };
+    if (!this.deps.system.inspectPreviewReadiness) return { ...result, diagnostics: ["Preview preparation inspection is unavailable."] };
+    try {
+      const inspected = previewReadinessSchema.parse(await this.deps.system.inspectPreviewReadiness(projectConfig.repoPath, branch, settings.recipePath));
+      if (inspected.branch !== branch) throw new Error("The inspected branch does not match the selected branch.");
+      return { ...inspected, preparationTicketId: active?.id ?? null, preparationRetryAvailable: result.preparationRetryAvailable };
+    } catch (error) {
+      return { ...result, diagnostics: [this.deps.config.redactError(getErrorMessage(error))] };
+    }
+  }
+
+  async prepare(project: string, input: { branch?: string; retry?: boolean } = {}) {
     return this.trackRequest(this.operations.run(`prepare:${project}`, async () => {
       if (this.shuttingDown) throw new Error("Preview service is shutting down.");
       const settings = this.projectSettings(project);
-      if (settings.preparationTicketId) {
-        const existing = this.deps.store.getTicket(settings.preparationTicketId);
-        if (existing) return { created: false, ticket: existing };
-      }
+      const readiness = await this.readiness(project, input.branch);
+      if (readiness.status === "check_error") throw new Error(readiness.diagnostics.join("\n"));
+      if (readiness.status === "ready") return { created: false, ticket: null, readiness };
+      const previous = this.preparationTickets(project, readiness.branch, settings.recipePath);
+      const active = previous.find((ticket) => !TERMINAL_PREPARATION_COLUMNS.includes(ticket.column));
+      if (active) return { created: false, ticket: active, readiness: { ...readiness, preparationTicketId: active.id } };
+      if (previous.length > 0 && !input.retry) throw new Error("The previous preparation ticket is finished. Recheck the selected branch and explicitly retry preparation if it still needs changes.");
       const skill = await readFile(join(this.deps.resourcesRoot, "skills", "coolify-preview-setup", "SKILL.md"), "utf8");
-      const description = `${COOLIFY_PREPARATION_MARKER}\n\nPrepare the repository for isolated Coolify previews using the bundled skill below. Write the version 1 recipe at ${settings.recipePath}. Verify local build, health and cleanup by invoking the bundled helper directly without arguments: '${join(this.deps.resourcesRoot, "templates", "verify_coolify_preview.sh").replaceAll("'", "'\\''")}'. Open a draft pull request for human review. Do not deploy or merge automatically. Do not read or copy production secrets or connect to production services.\n\n${skill}`;
-      const result = this.deps.ticketOperations.createTodoTicket({
-        project, requestId: `coolify-preview-setup:${project}:${settings.recipePath}`, title: "Prepare isolated Coolify previews", description,
-        prDraft: true, autoMerge: false, directPush: false, stealth: false,
+      const description = `${COOLIFY_PREPARATION_MARKER}\n\nPrepare branch ${readiness.branch} for isolated Coolify previews using the bundled skill below. Write the version 1 recipe at ${settings.recipePath}. Verify local build, health and cleanup by invoking the bundled helper directly without arguments: '${join(this.deps.resourcesRoot, "templates", "verify_coolify_preview.sh").replaceAll("'", "'\\''")}'. Open a draft pull request targeting ${readiness.branch} for human review. Do not deploy or merge automatically. Do not read or copy production secrets or connect to production services.\n\n${skill}`;
+      return this.deps.store.transaction(() => {
+        const latest = this.preparationTickets(project, readiness.branch, settings.recipePath);
+        const active = latest.find((ticket) => !TERMINAL_PREPARATION_COLUMNS.includes(ticket.column));
+        if (active) return { created: false, ticket: active, readiness: { ...readiness, preparationTicketId: active.id } };
+        if (latest.length > 0 && !input.retry) throw new Error("The previous preparation ticket is finished. Recheck the selected branch and explicitly retry preparation if it still needs changes.");
+        const prefix = this.preparationRequestPrefix(project, readiness.branch, settings.recipePath);
+        const generations = this.deps.store.listTicketCreationRequestsByPrefix(prefix).map((request) => Number(request.requestId.slice(prefix.length))).filter((generation) => Number.isSafeInteger(generation) && generation > 0);
+        const generation = Math.max(0, ...generations) + 1;
+        const result = this.deps.ticketOperations.createTodoTicket({
+          project, requestId: `${prefix}${generation}`, title: "Prepare isolated Coolify previews", description, baseBranch: readiness.branch,
+          prDraft: true, autoMerge: false, directPush: false, stealth: false,
+        });
+        this.deps.store.updatePreviewProjectSettings(project, { preparationTicketId: result.ticket.id });
+        return { ...result, readiness: { ...readiness, preparationTicketId: result.ticket.id } };
       });
-      this.deps.store.updatePreviewProjectSettings(project, { preparationTicketId: result.ticket.id });
-      return result;
     }));
   }
 
@@ -147,38 +201,72 @@ export class PreviewManager {
         if (previous.desiredState === "running" && !["failed", "interrupted"].includes(previous.status)) return previous;
         throw new Error("Clean the previous preview before starting another attempt.");
       }
-      const projectSettings = this.projectSettings(ticket.project);
-      if (!projectSettings.enabled) throw new Error("Enable previews for this project before starting a preview.");
-      const settings = this.settings;
-      this.client();
-      if (!settings.serverUuid || !settings.projectUuid || !settings.domainBase || !this.deps.config.getPreviewAuth()) throw new Error("Configure the preview server, Coolify project, HTTPS domain and authentication first.");
-      if (!this.deps.system.readPreviewSource) throw new Error("Preview source inspection is unavailable.");
-      const source = await this.deps.system.readPreviewSource(project.repoPath, ticket.prUrl, projectSettings.recipePath);
-      const repositoryMetadata = previewGithubRepositorySchema.safeParse(source);
-      const repository = repositoryMetadata.success ? repositoryMetadata.data : previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository?.(project.repoPath));
-      const prHost = new URL(ticket.prUrl).hostname;
-      if (repository.repository.toLowerCase() !== source.repository.toLowerCase() || repository.host.toLowerCase() !== prHost.toLowerCase()) throw new Error("The preview source does not match the verified GitHub repository.");
-      const resolution = await resolvePreviewGithubSource(this.client(), repository, projectSettings.githubAppUuid, settings.githubAppUuid);
-      if (resolution.status !== "resolved") throw new Error(resolution.message ?? "Impossible de sélectionner une connexion GitHub Coolify pour ce dépôt.");
-      const githubSource = resolution.source === "github_app" && resolution.githubAppUuid ? { type: "github_app", uuid: resolution.githubAppUuid } satisfies NonNullable<PreviewRecord["githubSource"]> : { type: "public" } satisfies NonNullable<PreviewRecord["githubSource"]>;
-      const recipe = previewRecipeSchema.parse(source.recipe);
-      const auth = this.deps.config.getPreviewAuth();
-      if (!auth) throw new Error("Preview authentication is unavailable.");
-      if (recipe.buildPack === "dockerfile") validateNativePreviewPassword(auth.password);
-      const inventory = await this.testConnection();
-      const environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
-      const generation = (previous?.generation ?? 0) + 1;
-      const ownershipMarker = `kanban-preview-${crypto.randomUUID()}`;
-      const preview = this.deps.store.createPreview({
-        ticketId, project: ticket.project, prUrl: ticket.prUrl, revision: source.revision, branch: source.branch,
-        generation, recipe, ownershipMarker, coolifyBaseUrl: settings.baseUrl, serverUuid: settings.serverUuid,
-        coolifyProjectUuid: settings.projectUuid, githubSource,
-        environmentUuid: environment.uuid, expiresAt: Date.now() + projectSettings.ttlHours * HOURS_TO_MS,
-      });
-      this.deps.onChange?.(ticketId);
-      this.schedule(preview.id);
-      return preview;
+      return this.launch(ticket.project, { ticketId, prUrl: ticket.prUrl }, previous);
     }));
+  }
+
+  async createBranch(project: string, requestedBranch: string) {
+    const branch = previewBranchSchema.parse(requestedBranch);
+    return this.trackRequest(this.operations.run(`branch:${project}:${branch}`, async () => {
+      if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+      this.projectSettings(project);
+      if (getProject(project).vcsProvider !== "github") throw new Error("Coolify previews currently support GitHub projects only.");
+      return this.launch(project, { ticketId: null, prUrl: null, branch });
+    }));
+  }
+
+  async redeploy(id: string) {
+    return this.trackRequest(this.operations.run(`redeploy:${id}`, async () => {
+      if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+      const previous = this.get(id);
+      if (previous.cleanupStatus !== "complete" || previous.cleanupWatch) throw new Error("Stop and finish cleanup before redeploying this preview.");
+      const replacement = this.list().find((preview) => preview.replacesPreviewId === id);
+      if (replacement) return replacement;
+      if (previous.ticketId) return this.create(previous.ticketId);
+      return this.launch(previous.project, { ticketId: null, prUrl: null, branch: previous.branch }, previous);
+    }));
+  }
+
+  private async launch(projectKey: string, ownership: { ticketId: string | null; prUrl: string | null; branch?: string }, previous?: PreviewRecord | null) {
+    const projectSettings = this.projectSettings(projectKey);
+    if (!projectSettings.enabled) throw new Error("Enable previews for this project before starting a preview.");
+    const settings = this.settings;
+    this.client();
+    if (!settings.serverUuid || !settings.projectUuid || !settings.domainBase || !this.deps.config.getPreviewAuth()) throw new Error("Configure the preview server, Coolify project, HTTPS domain and authentication first.");
+    const project = getProject(projectKey);
+    let source;
+    if (ownership.prUrl) {
+      if (!this.deps.system.readPreviewSource) throw new Error("Preview source inspection is unavailable.");
+      source = await this.deps.system.readPreviewSource(project.repoPath, ownership.prUrl, projectSettings.recipePath);
+    } else {
+      if (!this.deps.system.readPreviewBranchSource || !ownership.branch) throw new Error("Branch preview source inspection is unavailable.");
+      source = await this.deps.system.readPreviewBranchSource(project.repoPath, ownership.branch, projectSettings.recipePath);
+      if (source.branch !== ownership.branch) throw new Error("The preview source does not match the selected branch.");
+    }
+    const repositoryMetadata = previewGithubRepositorySchema.safeParse(source);
+    const repository = repositoryMetadata.success ? repositoryMetadata.data : previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository?.(project.repoPath));
+    const prHost = ownership.prUrl ? new URL(ownership.prUrl).hostname : repository.host;
+    if (repository.repository.toLowerCase() !== source.repository.toLowerCase() || repository.host.toLowerCase() !== prHost.toLowerCase()) throw new Error("The preview source does not match the verified GitHub repository.");
+    const resolution = await resolvePreviewGithubSource(this.client(), repository, projectSettings.githubAppUuid, settings.githubAppUuid);
+    if (resolution.status !== "resolved") throw new Error(resolution.message ?? "Impossible de sélectionner une connexion GitHub Coolify pour ce dépôt.");
+    const githubSource = resolution.source === "github_app" && resolution.githubAppUuid ? { type: "github_app", uuid: resolution.githubAppUuid } satisfies NonNullable<PreviewRecord["githubSource"]> : { type: "public" } satisfies NonNullable<PreviewRecord["githubSource"]>;
+    const recipe = previewRecipeSchema.parse(source.recipe);
+    const auth = this.deps.config.getPreviewAuth();
+    if (!auth) throw new Error("Preview authentication is unavailable.");
+    if (recipe.buildPack === "dockerfile") validateNativePreviewPassword(auth.password);
+    const inventory = await this.testConnection();
+    const environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
+    const generation = (previous?.generation ?? 0) + 1;
+    const ownershipMarker = `kanban-preview-${crypto.randomUUID()}`;
+    const preview = this.deps.store.createPreview({
+      ticketId: ownership.ticketId, project: projectKey, prUrl: ownership.prUrl, repository: source.repository, repositoryHost: repository.host, revision: source.revision, branch: source.branch,
+      generation, recipe, ownershipMarker, replacesPreviewId: previous?.id ?? null, coolifyBaseUrl: settings.baseUrl, serverUuid: settings.serverUuid,
+      coolifyProjectUuid: settings.projectUuid, githubSource,
+      environmentUuid: environment.uuid, expiresAt: Date.now() + projectSettings.ttlHours * HOURS_TO_MS,
+    });
+    if (ownership.ticketId) this.deps.onChange?.(ownership.ticketId);
+    this.schedule(preview.id);
+    return preview;
   }
 
   async stop(id: string) {
@@ -190,7 +278,7 @@ export class PreviewManager {
     const preview = this.get(id);
     if (preview.cleanupStatus === "complete") return preview;
     this.update(id, { desiredState: "stopped", status: "stopping", cleanupStatus: "pending", error: null });
-    await this.deps.quality?.cancelPreview(preview.ticketId, id);
+    if (preview.ticketId) await this.deps.quality?.cancelPreview(preview.ticketId, id);
     this.schedule(id);
     return this.get(id);
   }
@@ -224,14 +312,16 @@ export class PreviewManager {
     if (this.shuttingDown) throw new Error("Preview service is shutting down.");
     const preview = this.get(id);
     if (preview.status !== "ready" || preview.desiredState !== "running" || !preview.url || preview.deployedRevision !== preview.revision) throw new Error("Wait for the exact preview revision to be ready before validation.");
+    const ticketId = preview.ticketId;
+    if (!ticketId) throw new Error("Quality validation requires a ticket with acceptance criteria. Standalone branch previews do not have ticket criteria.");
     if (!this.deps.quality) throw new Error("Preview validation is unavailable.");
     const auth = this.deps.config.getPreviewAuth();
     if (!auth) throw new Error("Preview authentication is unavailable.");
-    const run = await this.deps.quality.testPreview(preview.ticketId, provider, {
+    const run = await this.deps.quality.testPreview(ticketId, provider, {
       previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth,
       assertCurrent: async () => {
         const current = this.get(id);
-        const latest = this.deps.store.getTicketPreview(preview.ticketId);
+        const latest = this.deps.store.getTicketPreview(ticketId);
         if (latest?.id !== id || current.status !== "ready" || current.desiredState !== "running" || current.revision !== preview.revision || current.deployedRevision !== preview.revision || current.url !== preview.url) throw new Error("The preview changed or stopped during validation.");
       },
     });
@@ -290,7 +380,7 @@ export class PreviewManager {
 
   private update(id: string, patch: UpdatePreviewInput) {
     const preview = this.deps.store.updatePreview(id, patch);
-    this.deps.onChange?.(preview.ticketId);
+    if (preview.ticketId) this.deps.onChange?.(preview.ticketId);
     return preview;
   }
 
@@ -325,8 +415,14 @@ export class PreviewManager {
         if (!preview.githubSource || !preview.coolifyProjectUuid) throw new Error("This queued preview has no recorded GitHub source. Stop and clean this attempt before starting a new preview.");
         const auth = this.deps.config.getPreviewAuth();
         if (!auth) throw new Error("Preview authentication is unavailable.");
-        const url = new URL(preview.prUrl);
-        const repository = url.pathname.split("/").slice(1, 3).join("/");
+        const repository = preview.repository ?? (preview.prUrl ? new URL(preview.prUrl).pathname.split("/").slice(1, 3).join("/") : null);
+        if (!repository) throw new Error("The queued preview repository identity is missing.");
+        let gitRepository = repository;
+        if (preview.githubSource.type === "public") {
+          const host = preview.repositoryHost ?? (preview.prUrl ? new URL(preview.prUrl).hostname : null);
+          if (!host) throw new Error("The queued public preview repository host is missing. Stop and clean this attempt before retrying.");
+          gitRepository = new URL(`/${repository}`, `https://${host}`).href;
+        }
         const recipe = preview.recipe;
         if (!recipe) throw new Error("Preview recipe is missing.");
         const domain = settings.domainBase;
@@ -335,7 +431,7 @@ export class PreviewManager {
         const payload: Record<string, unknown> = {
           name: preview.ownershipMarker, description: preview.ownershipMarker, tags: [preview.ownershipMarker],
           server_uuid: preview.serverUuid, project_uuid: preview.coolifyProjectUuid, environment_uuid: preview.environmentUuid,
-          git_repository: repository, git_branch: preview.branch, git_commit_sha: preview.revision,
+          git_repository: gitRepository, git_branch: preview.branch, git_commit_sha: preview.revision,
           build_pack: recipe.buildPack, ports_exposes: String(recipe.port), base_directory: recipe.buildContext === "." ? "/" : `/${recipe.buildContext}`,
           instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false,
           autogenerate_domain: false,
@@ -421,7 +517,7 @@ export class PreviewManager {
   }
 
   private async cleanup(preview: PreviewRecord, client: CoolifyClient): Promise<void> {
-    await this.deps.quality?.cancelPreview(preview.ticketId, preview.id);
+    if (preview.ticketId) await this.deps.quality?.cancelPreview(preview.ticketId, preview.id);
     if (preview.cleanupWatch && preview.cleanupWatchUntil !== null && Date.now() >= preview.cleanupWatchUntil) {
       this.update(preview.id, { cleanupStatus: "failed", cleanupWatch: false, status: "stopping", error: "Interrupted deployment cleanup did not settle within the recorded server timeout and grace period. Inspect remote workers and retry cleanup." });
       return;

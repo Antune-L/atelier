@@ -1,6 +1,6 @@
 ---
 name: coolify-preview-setup
-description: Prepare a project's actual application for isolated Coolify pull-request previews, including requests such as "Préparer pour Coolify". Produce container files, a versioned recipe and local validation evidence through either Claude or Codex.
+description: Prepare a project's actual application for isolated Coolify branch and pull-request previews, including requests such as "Préparer pour Coolify". Produce container files, a versioned recipe and local validation evidence through either Claude or Codex.
 metadata:
   version: "1"
 ---
@@ -12,6 +12,8 @@ Prepare a reviewable repository change for the selected project. Keep implementa
 This skill prepares repository files and validates local disposable resources. Deployment, DNS, source permissions, remote resource creation and publication require authorization from the current task. The recipe is an application contract, not a Coolify-native configuration file.
 
 ## Inspect the actual application
+
+Kanban checks the saved recipe and referenced container inputs on the selected remote branch before offering preparation. A `ready` result is repository readiness at the displayed commit, not a successful image build or live deployment. A lookup error is `check_error`, not evidence of missing preparation. Open the existing active matching preparation card instead of creating another one; after its reviewed changes reach the target branch, recheck readiness. If an earlier card is finished and the branch still needs preparation, a new card requires the explicit **Relancer la préparation** action. A standalone branch preview has no ticket acceptance-validation contract.
 
 Read the project's instructions and durable lessons. Verify every path, package script and binary before citing it. Identify runtime versions, lockfiles, build output, server entry point, listening interface, internal ports, API/static routing, WebSockets, databases, uploads, migrations, authentication, background jobs and external integrations.
 
@@ -88,6 +90,11 @@ Read current documentation relevant to the project's selected build method and i
 - [Caddy authentication](https://caddyserver.com/docs/caddyfile/directives/basic_auth), when preparing the Compose gateway
 
 ## Gotchas
+
+- The [public application API](https://coolify.io/docs/api/endpoints/applications/create-public-application) requires a full `git_repository` URL. Preserve the repository host in the queued attempt and format that public URL at the deployment boundary. The verified installed GitHub App integration retains its `owner/repo` identifier; do not reuse that abbreviated payload for public creation.
+
+- A preparation card's completed state does not prove its changes exist on the target remote branch. Readiness resolves and checks that branch's actual commit; recheck after merge and keep the existing card when work is still pending.
+- The checked branch commit can advance before launch. Deployment resolves again and freezes its own revision; report that actual attempt revision rather than the earlier readiness result.
 
 - Missing, ambiguous or incomplete GitHub connection resolution is a project/Coolify repository-access issue. Keep **Automatique selon le dépôt** or save a verified explicit project selection; the global default is only a preference among verified matches. Do not change recipes, embed credentials or change the global source to bypass this check.
 - Coolify 4.3.23 runs Compose with `--project-directory` set to the recipe's `buildContext`. Resolve service build contexts and relative file paths from that directory, even when the Compose file lives in `.coolify`; reproduce this working-directory contract during local verification.

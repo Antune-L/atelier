@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
-import type { PreviewRecord } from "../../shared/preview.ts";
+import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
 import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
@@ -87,6 +87,14 @@ export class FakeSystemAdapter implements SystemAdapter {
   readonly coolifyRequest = createFakeCoolifyTransport();
   async readPreviewRepository(_repoPath: string) {
     return { repository: "example/preview-demo", host: "github.com", visibility: "public" } satisfies { repository: string; host: string; visibility: "public" | "private" };
+  }
+  async readPreviewBranchSource(repoPath: string, branch: string, recipePath: string) {
+    const source = await this.readPreviewSource(repoPath, "https://github.com/example/preview-demo/pull/1", recipePath);
+    return { ...source, branch };
+  }
+  async inspectPreviewReadiness(repoPath: string, branch: string, recipePath: string) {
+    const source = await this.readPreviewBranchSource(repoPath, branch, recipePath);
+    return { status: "ready", branch, revision: source.revision, diagnostics: [], preparationTicketId: null, preparationRetryAvailable: false } satisfies PreviewReadiness;
   }
   async readPreviewSource(_repoPath: string, prUrl: string, _recipePath: string) {
     const url = new URL(prUrl);

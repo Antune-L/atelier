@@ -2,7 +2,7 @@ import { ChevronRight, FileText, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
-import { QUALITY_MAX_OBSERVATION_LENGTH, setQualityCriteriaSchema } from "@shared/quality";
+import { QUALITY_MAX_OBSERVATION_LENGTH, latestAcceptanceSnapshot, setQualityCriteriaSchema } from "@shared/quality";
 import type { ManualQualityEvidenceInput, QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityGate, TicketQuality } from "@shared/quality";
 
 import { QualityResult, QualitySection, evidenceProvenance, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
@@ -92,7 +92,7 @@ function HumanEvidenceEditor({ criterion, busy, onSave, onClose }: { criterion: 
 }
 
 export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, onOpenEvidence }: QualityCriteriaPanelProps) {
-  const snapshot = quality.criteriaSnapshots.at(-1);
+  const snapshot = latestAcceptanceSnapshot(quality);
   const [editing, setEditing] = useState(false);
   const [observing, setObserving] = useState<QualityCriterion | null>(null);
   const planner = quality.runs.find((run) => run.criteriaSnapshotId === snapshot?.id && run.kind === "full" && run.provider !== null);

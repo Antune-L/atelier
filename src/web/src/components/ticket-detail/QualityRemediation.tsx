@@ -2,12 +2,12 @@ import { FilePlus2, LoaderCircle, Stethoscope, TriangleAlert, Wrench } from "luc
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import type { CreateQualityFollowUpInput, QualityBlockerCategory, QualityEvidence, QualityFollowUpIssue, QualityIterationActions, QualityProblem, StartQualityIterationInput, TicketQuality } from "@shared/quality";
+import type { CreateQualityFollowUpInput, QualityBlockerCategory, QualityCriteriaSnapshot, QualityEvidence, QualityFollowUpIssue, QualityIterationActions, QualityProblem, StartQualityIterationInput, TicketQuality } from "@shared/quality";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useProjects } from "@/hooks/useProjects";
-import { formatQualityCriterionText, formatQualityMessage, qualityPermissionBlockMessage } from "@/lib/qualityMessages";
+import { formatQualityCriterionText, formatQualityMessage, qualityFunctionalBlockerLabel, qualityPermissionBlockMessage } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
 type IterationRequest = Omit<StartQualityIterationInput, "provider">;
@@ -28,7 +28,19 @@ const CRITERIA_CORRECTION_NOTE = "Corrige les écarts démontrés dans cette PR,
 const CRITERIA_RECOVERY_NOTE = "Relance une vérification complète avec le diagnostic du blocage, sur le même code et avec les mêmes permissions.";
 const FOLLOW_UP_NOTE = "Crée une carte passive en « À faire » avec le contexte nécessaire. Elle ne lance aucune implémentation et ne prouve pas que la validation a réussi.";
 const BLOCKER_PROJECT_HINT = "Choisissez le dépôt propriétaire du défaut ; la carte ne sera pas affectée implicitement.";
+const FUNCTIONAL_NOTE = "Corrige la PR à partir des scénarios en échec, puis relance le test dans le navigateur. Les contrôles techniques restent à vérifier séparément.";
 const PANEL_CLASS = "space-y-2 rounded border border-warning/30 bg-warning/5 p-3";
+const FUNCTIONAL_PROBLEM_KINDS: Array<QualityProblem["kind"]> = ["scenario_failed", "scenario_unverified", "functional_blocker"];
+const FOLLOW_UP_TITLES: Record<QualityFollowUpIssue, string> = {
+  checks: "Carte de correction des contrôles",
+  blocker: "Carte de correction du blocage",
+  functional: "Carte de correction du test fonctionnel",
+};
+const FOLLOW_UP_DIRECT_AVAILABLE: Record<QualityFollowUpIssue, (actions: QualityIterationActions) => boolean> = {
+  checks: (actions) => actions.checksCorrection.available,
+  blocker: (actions) => actions.recovery.available,
+  functional: (actions) => actions.functional.available,
+};
 
 interface RemediationProps {
   quality: TicketQuality;
@@ -56,7 +68,7 @@ function UnavailableReason({ available, reason }: { available: boolean; reason: 
 
 function FollowUpCard({ issue, actions, ticketProject, busy, onCreate }: { issue: QualityFollowUpIssue; actions: QualityIterationActions; ticketProject: string; busy: boolean; onCreate: (input: CreateQualityFollowUpInput) => void }) {
   const projects = useProjects();
-  const [project, setProject] = useState(issue === "checks" ? ticketProject : "");
+  const [project, setProject] = useState(issue === "blocker" ? "" : ticketProject);
   const availability = actions.followUp[issue];
   const existing = actions.followUps.find((followUp) => followUp.issue === issue && followUp.sourceRunId === availability.sourceRunId);
   if (existing !== undefined) return <p className="text-xs text-success">Carte de correction créée : {existing.title} ({existing.ticketId})</p>;
@@ -121,11 +133,38 @@ function BlockersGroup({ problems, actions, busy, starting, onStartIteration }: 
   );
 }
 
+function problemSnapshot(problem: QualityProblem, quality: TicketQuality): QualityCriteriaSnapshot | undefined {
+  const snapshotId = quality.runs.find((run) => run.id === problem.runId)?.criteriaSnapshotId;
+  return quality.criteriaSnapshots.find((snapshot) => snapshot.id === snapshotId);
+}
+
 function criterionLabel(problem: QualityProblem, quality: TicketQuality): string {
-  const snapshot = quality.criteriaSnapshots.at(-1);
+  const snapshot = problemSnapshot(problem, quality);
   const criterion = snapshot?.criteria.find((item) => item.id === problem.criterionId);
   if (snapshot === undefined || criterion === undefined) return problem.summary;
   return formatQualityCriterionText(criterion, snapshot.createdBy);
+}
+
+function FunctionalGroup({ problems, quality, actions, busy, starting, onStartIteration }: RemediationProps & { problems: QualityProblem[] }) {
+  const action = actions.functional;
+  const sourceRunId = action.sourceRunId;
+  return (
+    <div className={PANEL_CLASS}>
+      <p className="text-xs font-medium">Test fonctionnel</p>
+      {problems.map((problem) => {
+        if (problem.kind === "functional_blocker") {
+          const blocker = problem.blockerCode === null ? null : qualityFunctionalBlockerLabel(problem.blockerCode);
+          return <div key={problem.id} className="flex items-center gap-2"><div className="min-w-0 flex-1"><ProblemHeader problem={problem}>{formatQualityMessage(problem.summary)}</ProblemHeader></div><span className="shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-2xs text-warning">{blocker ?? "Blocage d’environnement"}</span></div>;
+        }
+        const failed = problem.kind === "scenario_failed";
+        return <div key={problem.id} className="flex items-center gap-2"><div className="min-w-0 flex-1"><ProblemHeader problem={problem}>{criterionLabel(problem, quality)}</ProblemHeader></div><span className={cn("shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-2xs", failed ? "text-danger" : "text-warning")}>{failed ? "Scénario en échec" : "Scénario non vérifié"}</span></div>;
+      })}
+      {sourceRunId !== null && <ActionButton label="Corriger et retester" icon={<Wrench className="h-3.5 w-3.5" />} disabled={busy || !action.available} starting={starting} onClick={() => onStartIteration({ mode: "correction", trigger: "functional", sourceRunId, retryOfIterationId: action.retryOfIterationId ?? undefined })} />}
+      <p className="text-xs text-muted-foreground">{FUNCTIONAL_NOTE}</p>
+      {action.retryOfIterationId !== null && <p className="text-2xs text-muted-foreground">{RETRY_HINT}</p>}
+      <UnavailableReason available={action.available} reason={action.reason} />
+    </div>
+  );
 }
 
 function CriteriaGroup({ problems, hasBlockers, quality, actions, busy, starting, onStartIteration }: RemediationProps & { problems: QualityProblem[]; hasBlockers: boolean }) {
@@ -157,8 +196,9 @@ export function QualityRemediation(props: RemediationProps) {
   const checks = actions.problems.filter((problem) => problem.kind === "technical_check");
   const blockers = actions.problems.filter((problem) => problem.kind === "read_blocker");
   const criteria = actions.problems.filter((problem) => problem.kind === "criterion_failed" || problem.kind === "criterion_unverified");
-  const followUpIssues = (["checks", "blocker"] satisfies QualityFollowUpIssue[]).filter((issue) => actions.followUp[issue].available || actions.followUps.some((followUp) => followUp.issue === issue));
-  const anyAction = actions.checksCorrection.available || actions.recovery.available || actions.correction.available;
+  const functional = actions.problems.filter((problem) => FUNCTIONAL_PROBLEM_KINDS.includes(problem.kind));
+  const followUpIssues = (["checks", "blocker", "functional"] satisfies QualityFollowUpIssue[]).filter((issue) => actions.followUp[issue].available || actions.followUps.some((followUp) => followUp.issue === issue));
+  const anyAction = actions.checksCorrection.available || actions.recovery.available || actions.correction.available || actions.functional.available;
   if (actions.problems.length === 0 && !anyAction && followUpIssues.length === 0) return null;
   return (
     <div className="space-y-3">
@@ -166,11 +206,12 @@ export function QualityRemediation(props: RemediationProps) {
       {checks.length > 0 && <ChecksGroup {...props} problems={checks} />}
       {blockers.length > 0 && <BlockersGroup {...props} problems={blockers} />}
       {criteria.length > 0 && <CriteriaGroup {...props} problems={criteria} hasBlockers={blockers.length > 0} />}
+      {functional.length > 0 && <FunctionalGroup {...props} problems={functional} />}
       {followUpIssues.map((issue) => {
-        const directAvailable = issue === "checks" ? actions.checksCorrection.available : actions.recovery.available;
+        const directAvailable = FOLLOW_UP_DIRECT_AVAILABLE[issue](actions);
         return (
           <div key={issue} className={cn("space-y-2", !directAvailable && "rounded border border-warning/30 bg-warning/5 p-3")}>
-            <p className="text-xs font-medium">{issue === "checks" ? "Carte de correction des contrôles" : "Carte de correction du blocage"}</p>
+            <p className="text-xs font-medium">{FOLLOW_UP_TITLES[issue]}</p>
             <FollowUpCard issue={issue} actions={actions} ticketProject={ticketProject} busy={busy} onCreate={onCreateFollowUp} />
           </div>
         );

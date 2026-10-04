@@ -31,7 +31,7 @@ const IMAGE_ARTIFACT_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
 const EXPLANATION_TEXT_LIMIT = 2_000;
 const EXPLANATION_CRITERIA_LIMIT = 3;
 const CRITERION_EXCERPT_LIMIT = 160;
-const PREPARATION_COMMAND_SUMMARIES = ["Environment setup", "Dependency installation"];
+export const PREPARATION_COMMAND_SUMMARIES =["Environment setup", "Dependency installation"];
 const GENERIC_CRITERIA_FAILURE = "Some required acceptance criteria were not independently verified.";
 
 function QualityArtifact({ ticketId, evidence }: { ticketId: string; evidence: QualityEvidence }) {
@@ -110,7 +110,7 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
   const incomplete = run.status === "inconclusive" || (run.status === "failed" && run.failurePhase === "validating" && requiredResults.some(({ evidence }) => evidence?.status === "inconclusive") && !requiredResults.some(({ evidence }) => evidence?.status === "failed"));
   let status = run.status;
   let title = qualityRunTitle(run);
-  if (run.status === "failed" && run.failurePhase !== null) title = qualityFailureLabel(run.failurePhase);
+  if (run.status === "failed" && run.failurePhase !== null && run.kind !== "functional") title = qualityFailureLabel(run.failurePhase);
   if (incomplete) {
     title = "Vérification incomplète";
     status = "inconclusive";

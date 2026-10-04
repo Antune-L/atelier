@@ -85,7 +85,7 @@ function hasSessionPane(ticket: Ticket): boolean {
 function availableTabs(ticket: Ticket): TicketTab[] {
   const tabs: TicketTab[] = ["overview", "activity", "description"];
   if (ticket.prdMarkdown !== null || ticket.column === "prd") tabs.push("prd");
-  if (ticket.kind === "feature") tabs.push("validation");
+  if (ticket.kind === "feature" && ticket.column !== "todo") tabs.push("validation");
   if (hasSessionPane(ticket)) tabs.push("terminal");
   return tabs;
 }

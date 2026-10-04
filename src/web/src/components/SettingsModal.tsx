@@ -22,6 +22,7 @@ import { availableSkillProviders } from "@shared/skills";
 
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
+import { CoolifySettings } from "@/components/CoolifySettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SkillsStatusList } from "@/components/SkillsStatusList";
@@ -67,6 +68,7 @@ type SettingsSectionId =
   | "projects"
   | "providers"
   | "skills"
+  | "coolify"
   | "mcp";
 
 interface SettingsSection {
@@ -140,6 +142,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     group: "Connexions",
     keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur"],
   },
+  {
+    id: "coolify",
+    label: "Coolify",
+    group: "Connexions",
+    keywords: ["prévisualisation", "preview", "déploiement", "serveur", "github", "jeton", "mot de passe"],
+  },
 ];
 
 function sectionMatches(section: SettingsSection, query: string): boolean {
@@ -183,7 +191,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
       className="w-[calc(100vw-2rem)] max-w-[1152px]"
       title="Réglages"
     >
-      <div className="flex gap-5">
+    <div className="flex flex-col gap-5 md:flex-row">
         <SettingsNav
           sectionId={sectionId}
           onSelect={setSectionId}
@@ -218,7 +226,7 @@ function SettingsNav({
   onSearchChange,
 }: SettingsNavProps) {
   return (
-    <nav aria-label="Sections des réglages" className="flex w-48 shrink-0 flex-col gap-3">
+    <nav aria-label="Sections des réglages" className="flex w-full shrink-0 flex-col gap-3 md:w-48">
       <div className="relative">
         <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -231,8 +239,8 @@ function SettingsNav({
         />
       </div>
       {SETTINGS_GROUPS.map((group) => (
-        <div key={group} className="flex flex-col items-stretch">
-          <p className={cn("px-1 pb-1", FIELD_LABEL_CLASSES)}>
+        <div key={group} className="flex flex-wrap items-stretch gap-1 md:flex-col md:gap-0">
+          <p className={cn("hidden px-1 pb-1 md:block", FIELD_LABEL_CLASSES)}>
             {group}
           </p>
           {SETTINGS_SECTIONS.filter((section) => section.group === group).map((section) => {
@@ -286,6 +294,7 @@ function SettingsSectionPanel({
   if (sectionId === "projects") return <ProjectsSettings />;
   if (sectionId === "providers") return <ProvidersSettings />;
   if (sectionId === "skills") return <SkillsSettings />;
+  if (sectionId === "coolify") return <CoolifySettings />;
   return <McpSettings />;
 }
 

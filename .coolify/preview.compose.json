@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "buildPack": "dockercompose",
+  "composeFile": ".coolify/docker-compose.preview.yml",
+  "buildContext": ".",
+  "serviceName": "preview-gateway",
+  "authentication": "gateway",
+  "port": 8080,
+  "healthPath": "/health",
+  "environment": {
+    "PORT": "52817",
+    "KANBAN_DRY_RUN": "1",
+    "KANBAN_SETUP": "0"
+  },
+  "websocketPaths": ["/ws", "/ws/terminal"]
+}

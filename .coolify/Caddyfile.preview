@@ -1,0 +1,12 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:8080 {
+	basic_auth {
+		{env.KANBAN_PREVIEW_AUTH_USERNAME} {env.KANBAN_PREVIEW_AUTH_HASH}
+	}
+	reverse_proxy app:52817
+}

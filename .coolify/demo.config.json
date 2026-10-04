@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "demo": {
+      "label": "Preview demo",
+      "repoPath": "/app/demo-project",
+      "baseBranch": "main",
+      "vcsProvider": "github",
+      "defaultAutoMerge": false,
+      "commitTimeoutMs": 30000
+    }
+  }
+}

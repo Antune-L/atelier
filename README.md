@@ -66,4 +66,5 @@ The board routes work, the backend verifies gates, and the agents do the reasoni
 | --- | --- |
 | [docs/development.md](docs/development.md) | Run from source, dry-run vs real mode, env vars, desktop app, releases, required Claude Code skills |
 | [docs/architecture.md](docs/architecture.md) | Source layout, agent runtime (Agent SDK), ticket flow |
+| [docs/coolify-previews.md](docs/coolify-previews.md) | Configure, prepare, validate and clean up GitHub previews with Coolify |
 | [AGENTS.md](AGENTS.md) | Guidance for coding agents working on this repository |

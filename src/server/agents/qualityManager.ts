@@ -4,8 +4,8 @@ import { join } from "node:path";
 
 import type { Orchestrator } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
-import { QUALITY_DEFAULT_TIMEOUT_MS, latestAcceptanceSnapshot, latestFunctionalSnapshot, qualityBlockerCategory, qualityFollowUpIssueSchema } from "../../shared/quality.ts";
-import type { CreateQualityFollowUpInput, QualityCriteriaPlan, QualityCriteriaSnapshot, QualityCriterion, QualityEnvironment, QualityEvidence, QualityFollowUp, QualityFollowUpIssue, QualityGate, QualityIteration, QualityIterationActions, QualityIterationTrigger, QualityPermissionDenial, QualityPreflight, QualityProblem, QualityRunPhase, StartQualityIterationInput, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
+import { QUALITY_DEFAULT_TIMEOUT_MS, latestAcceptanceSnapshot, latestFunctionalSnapshot, qualityBlockerCategory, qualityFollowUpIssueSchema, qualityPreviewBindingSchema } from "../../shared/quality.ts";
+import type { CreateQualityFollowUpInput, QualityCriteriaPlan, QualityCriteriaSnapshot, QualityCriterion, QualityEnvironment, QualityEvidence, QualityFollowUp, QualityFollowUpIssue, QualityGate, QualityIteration, QualityIterationActions, QualityIterationTrigger, QualityPermissionDenial, QualityPreflight, QualityPreviewTarget, QualityProblem, QualityRunPhase, StartQualityIterationInput, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { getProject, isProjectKey, MODELS, SLOTS_ROOT } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -60,6 +60,8 @@ const FOLLOW_UP_TITLE_LIMIT = 160;
 const FOLLOW_UP_OUTPUT_LIMIT = 2_000;
 const FOLLOW_UP_INLINE_LIMIT = 300;
 const FOLLOW_UP_DESCRIPTION_LIMIT = 20_000;
+const PREVIEW_STALE_MESSAGE = "The preview no longer matches the current pull request head; its validation cannot be accepted.";
+const PREVIEW_PROTOCOLS = new Set(["http:", "https:"]);
 
 export interface QualityManagerDependencies {
   store: Store;
@@ -74,6 +76,7 @@ type CorrectionTarget = Extract<QualityIterationTrigger, "checks" | "functional"
 interface ActiveQualityRun {
   controller: AbortController;
   completion: Promise<void>;
+  previewId?: string;
 }
 
 interface CheckCommand {
@@ -102,7 +105,7 @@ function technicalRunAccepted(run: QualityValidationRun): boolean {
 }
 
 function latestRun(quality: TicketQuality, kinds: Array<QualityValidationRun["kind"]>): QualityValidationRun | undefined {
-  return quality.runs.filter((run) => kinds.includes(run.kind)).at(-1);
+  return quality.runs.filter((run) => !run.preview && kinds.includes(run.kind)).at(-1);
 }
 
 function defaultTrigger(mode: QualityIteration["mode"]): QualityIterationTrigger {
@@ -239,6 +242,38 @@ export class QualityManager {
 
   testFeature(ticketId: string, provider: Orchestrator): Promise<QualityValidationRun> {
     return this.start(ticketId, "functional", provider);
+  }
+
+  testPreview(ticketId: string, provider: Orchestrator, target: QualityPreviewTarget): Promise<QualityValidationRun> {
+    return this.starts.run(ticketId, async () => {
+      this.requireNoIteration(ticketId);
+      const binding = qualityPreviewBindingSchema.parse(target);
+      const url = new URL(binding.url);
+      if (!PREVIEW_PROTOCOLS.has(url.protocol) || url.username || url.password) throw new Error("Preview validation requires an HTTP(S) address without embedded credentials.");
+      const ticket = this.ticket(ticketId);
+      if (ticket.column !== "done" || !ticket.prUrl || ticket.testing || ticket.slotId !== null) throw new Error("Preview validation requires a completed ticket with a pull request and no active worktree session.");
+      await this.requirePreviewHead(ticket, target);
+      return this.launch(ticketId, "functional", provider, undefined, undefined, target);
+    });
+  }
+
+  private async requirePreviewHead(ticket: Ticket, target: QualityPreviewTarget): Promise<void> {
+    const current = this.ticket(ticket.id);
+    if (current.project !== ticket.project || current.prUrl !== ticket.prUrl || current.column !== "done" || current.testing || current.slotId !== null || sourceFingerprint(current) !== sourceFingerprint(ticket)) throw new Error(PREVIEW_STALE_MESSAGE);
+    const project = getProject(ticket.project);
+    if (project.vcsProvider !== "github" || !ticket.prUrl) throw new Error("Preview validation requires a GitHub pull request.");
+    await target.assertCurrent?.();
+    const head = await this.dependencies.system.readPullRequestHead(project.repoPath, ticket.prUrl, project.vcsProvider);
+    if (!head.ok || head.commitSha !== target.revision) throw new Error(PREVIEW_STALE_MESSAGE);
+  }
+
+  private async requirePreviewRun(run: QualityValidationRun, ticket: Ticket, target: QualityPreviewTarget): Promise<void> {
+    if (run.configFingerprint !== configFingerprint(getProject(ticket.project))) throw new Error(PREVIEW_STALE_MESSAGE);
+    const quality = this.get(ticket.id);
+    const currentRun = quality.runs.find((entry) => entry.id === run.id);
+    const snapshot = quality.criteriaSnapshots.find((entry) => entry.id === currentRun?.criteriaSnapshotId);
+    if (snapshot && snapshot.baseSnapshotId !== (latestAcceptanceSnapshot(quality)?.id ?? null)) throw new Error(PREVIEW_STALE_MESSAGE);
+    await this.requirePreviewHead(ticket, target);
   }
 
   private requireNoIteration(ticketId: string): void {
@@ -657,21 +692,29 @@ export class QualityManager {
     });
   }
 
-  private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string): Promise<QualityValidationRun> {
+  private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget): Promise<QualityValidationRun> {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     if (this.active.has(ticketId)) throw new Error("A quality run is already active for this ticket.");
     const ticket = this.ticket(ticketId);
     const project = getProject(ticket.project);
-    const databaseProblem = databaseIsolationProblem(project);
+    const databaseProblem = preview ? null : databaseIsolationProblem(project);
     if (databaseProblem) throw new Error(databaseProblem);
     let criteria = iteration ? iteration.criteriaSnapshot ?? undefined : latestAcceptanceSnapshot(this.get(ticketId));
-    if (kind === "functional" && !iteration) criteria = this.freshFunctionalSnapshot(ticket);
+    if (kind === "functional" && !iteration) criteria = preview ? undefined : this.freshFunctionalSnapshot(ticket);
     const source = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
     if (iteration && (!source || source.configFingerprint !== configFingerprint(project) || sourceFingerprint(ticket) !== fingerprint([iteration.originalTicket.title, iteration.originalTicket.description, iteration.originalTicket.prdMarkdown]))) throw new Error("The ticket or validation configuration changed during the quality iteration.");
     if (kind === "behavior" && !criteria) throw new Error("Define acceptance criteria before starting behavioral validation.");
-    const revision = sourcePath
-      ? await this.repoMutex.run(project.repoPath, () => this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath, ...(iteration?.headBranch ? { branch: iteration.headBranch } : {}) }))
-      : await this.revision(ticket, true);
+    let revision: ValidationRevision;
+    if (preview) {
+      revision = await this.repoMutex.run(project.repoPath, async () => {
+        await this.dependencies.system.fetch(project.repoPath, preview.revision);
+        return this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, revision: preview.revision });
+      });
+      if (!this.dependencies.system.dryRun && revision.commitSha !== preview.revision) throw new Error(PREVIEW_STALE_MESSAGE);
+      revision = { ...revision, commitSha: preview.revision, fingerprint: preview.revision };
+    }
+    else if (sourcePath) revision = await this.repoMutex.run(project.repoPath, () => this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath, ...(iteration?.headBranch ? { branch: iteration.headBranch } : {}) }));
+    else revision = await this.revision(ticket, true);
     if (iteration?.mode === "recovery") {
       if (!source || revision.commitSha !== source.revision || revision.fingerprint !== source.fingerprint || !revision.clean) throw new Error("The validated revision changed before recovery started.");
     }
@@ -679,11 +722,11 @@ export class QualityManager {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     let selectedMode = criteria?.mode ?? (kind === "checks" ? "repository" : null);
     if (kind === "functional") selectedMode = "browser";
-    const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null });
+    const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null, ...(preview ? { preview: qualityPreviewBindingSchema.parse(preview) } : {}) });
     const controller = new AbortController();
     if (iteration) this.dependencies.store.updateQualityIteration(iteration.id, { status: "verifying", resultRunId: run.id, resultRevision: run.revision });
     const settleRetainedSlot = iteration?.mode === "recovery" && this.parkedCorrection(ticket, iteration.sourceRunId, this.get(ticketId)) !== undefined;
-    const completion = this.execute(run, ticket, project, criteria, controller.signal, iteration).finally(async () => {
+    const completion = this.execute(run, ticket, project, criteria, controller.signal, iteration, preview).finally(async () => {
       if (this.active.get(ticketId)?.controller === controller) this.active.delete(ticketId);
       if (iteration && this.dependencies.store.getActiveQualityIteration(ticketId)?.id === iteration.id) {
         const result = this.dependencies.store.getQualityRun(run.id);
@@ -700,12 +743,12 @@ export class QualityManager {
       }
       this.changed(ticketId);
     }).catch((error: unknown) => { log.warn("quality iteration settlement failed", { ticketId, runId: run.id, error: getErrorMessage(error) }); });
-    this.active.set(ticketId, { controller, completion });
+    this.active.set(ticketId, { controller, completion, ...(preview ? { previewId: preview.previewId } : {}) });
     this.changed(ticketId);
     return run;
   }
 
-  private async execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration): Promise<void> {
+  private async execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget): Promise<void> {
     const options: ValidationWorkspaceOptions = { ticketId: ticket.id, runId: run.id, repoPath: project.repoPath, commitSha: run.revision };
     let environment: QualityEnvironment | null = null;
     let service: ValidationServiceHandle | null = null;
@@ -717,11 +760,11 @@ export class QualityManager {
     try {
       this.update(run.id, { status: "running", phase });
       if (signal.aborted) throw new Error("Quality run cancelled.");
-      if (run.kind === "functional" && !this.dependencies.system.dryRun && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
+      if (!preview && run.kind === "functional" && !this.dependencies.system.dryRun && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
       const prepared = await this.repoMutex.run(project.repoPath, () => this.dependencies.system.prepareValidationWorkspace(options));
       environment = { directory: prepared.cwd, dataDirectory: prepared.dataDirectory, port: prepared.port, databaseNamespace: prepared.databaseNamespace, addresses: [], timeoutMs: project.validation?.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS };
       this.update(run.id, { environment });
-      const variables = environmentFor(environment, project);
+      const variables = preview ? { VALIDATION_BASE_URL: preview.url } : environmentFor(environment, project);
       const timeoutMs = project.validation?.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS;
       const originalFingerprint = await this.dependencies.system.codeFingerprint(environment.directory);
       const execution = resolveExecution("quality-validator", { orchestrator: run.provider ?? ticket.orchestrator, model: ticket.model, effort: ticket.effort, codexModel: ticket.codexModel, codexEffort: ticket.codexEffort, codexFast: ticket.codexFast }, { model: MODELS.triage, effort: MODELS.triageEffort });
@@ -743,7 +786,7 @@ export class QualityManager {
         this.update(run.id, { phase });
         const planningQuality = this.get(ticket.id);
         const acceptance = latestAcceptanceSnapshot(planningQuality);
-        const previous = latestFunctionalSnapshot(planningQuality);
+        const previous = preview ? planningQuality.criteriaSnapshots.filter((snapshot) => snapshot.purpose === "functional" && snapshot.previewId === preview.previewId).at(-1) : latestFunctionalSnapshot(planningQuality);
         const plan: FunctionalScenarioPlan = this.dependencies.system.dryRun
           ? { scenarios: [{ id: SIMULATED_CRITERION_ID, text: SIMULATED_CRITERION_TEXT, source: "ticket", required: true, independent: true, interaction: "display", expected: SIMULATED_CRITERION_TEXT, covers: [] }], uncovered: [] }
           : await prepareFunctionalScenarios({ ticketId: ticket.id, cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", acceptanceCriteria: acceptance?.criteria ?? [], previousScenarios: previous?.criteria ?? [], environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
@@ -757,20 +800,20 @@ export class QualityManager {
           ...plan.scenarios.map((scenario) => userScenarios.find((criterion) => criterion.id === scenario.id) ?? scenario),
           ...userScenarios.filter((criterion) => !plan.scenarios.some((scenario) => scenario.id === criterion.id)),
         ];
-        activeCriteria = this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: scenarios, mode: "browser", sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent", purpose: "functional", baseSnapshotId: acceptance?.id ?? null, uncovered: plan.uncovered });
+        activeCriteria = this.dependencies.store.createQualityCriteriaSnapshot(ticket.id, { criteria: scenarios, mode: "browser", sourceFingerprint: sourceFingerprint(currentTicket), createdBy: this.dependencies.system.dryRun ? "system" : "agent", purpose: "functional", baseSnapshotId: acceptance?.id ?? null, uncovered: plan.uncovered, ...(preview ? { previewId: preview.previewId } : {}) });
         this.update(run.id, { criteriaSnapshotId: activeCriteria.id, mode: activeCriteria.mode });
       }
       phase = "preparing";
       this.update(run.id, { phase });
-      if (!this.dependencies.system.dryRun && activeCriteria?.mode === "browser" && run.kind !== "checks" && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
-      if (project.validation?.setupCommand) {
+      if (!preview && !this.dependencies.system.dryRun && activeCriteria?.mode === "browser" && run.kind !== "checks" && (!project.validation?.isolated || !project.validation.startCommand)) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
+      if (!preview && project.validation?.setupCommand) {
         if (!project.validation.isolated) throw new QualityBlockerError("start_configuration_missing", "Validation setup requires an isolated environment.");
         environment = { ...environment, ...(project.validation.teardownCommand ? { teardownCommand: project.validation.teardownCommand } : {}) };
         this.update(run.id, { environment });
         const setup = await this.command(run, "Environment setup", project.validation.setupCommand, environment, variables, timeoutMs, signal);
         if (!commandSucceeded(setup)) throw new QualityBlockerError("environment_setup_failed", "Validation environment setup failed.");
       }
-      const installation = await this.dependencies.system.installValidationDeps({ cwd: environment.directory, environment: variables, timeoutMs: Math.max(timeoutMs, project.commitTimeoutMs), signal });
+      const installation = preview ? null : await this.dependencies.system.installValidationDeps({ cwd: environment.directory, environment: variables, timeoutMs: Math.max(timeoutMs, project.commitTimeoutMs), signal });
       if (installation) {
         this.recordCommand(run, "Dependency installation", installation.command, installation.result);
         if (!commandSucceeded(installation.result)) throw new QualityBlockerError("dependency_installation_failed", `Dependency installation failed. ${outputFor(installation.result)}`);
@@ -813,7 +856,12 @@ export class QualityManager {
           outcome = { status: "inconclusive", evidenceAccepted: false, failurePhase: "validating", error: SIMULATED_VALIDATION_MESSAGE };
           return;
         }
-        if (activeCriteria.mode === "browser") {
+        if (preview) {
+          await this.requirePreviewHead(ticket, preview);
+          environment = { ...environment, addresses: [{ label: "Remote preview application", url: preview.url }] };
+          this.update(run.id, { environment });
+          await this.waitForPreviewHealth(preview, timeoutMs, signal);
+        } else if (activeCriteria.mode === "browser") {
           if (!project.validation?.isolated || !project.validation.startCommand) throw new QualityBlockerError("start_configuration_missing", BROWSER_CONFIGURATION_MESSAGE);
           environment = { ...environment, addresses: [{ label: "Validation application", url: `http://127.0.0.1:${environment.port}` }], ...(project.validation.teardownCommand ? { teardownCommand: project.validation.teardownCommand } : {}) };
           this.update(run.id, { environment });
@@ -823,7 +871,7 @@ export class QualityManager {
         const artifactDirectory = join(this.dependencies.artifactDirectory ?? join(tmpdir(), "kanban-quality-artifacts"), run.id);
         const quality = this.get(ticket.id);
         const criteriaSnapshotId = activeCriteria.id;
-        const acceptedChecks = quality.runs.filter((candidate) => (candidate.kind === "checks" || candidate.kind === "full") && !candidate.simulated && candidate.revision === run.revision && candidate.fingerprint === run.fingerprint && candidate.configFingerprint === run.configFingerprint && candidate.criteriaSnapshotId === criteriaSnapshotId && technicalRunAccepted(candidate) && (candidate.id === run.id || !iteration && candidate.cleanupStatus === "complete")).at(-1);
+        const acceptedChecks = quality.runs.filter((candidate) => !candidate.preview && (candidate.kind === "checks" || candidate.kind === "full") && !candidate.simulated && candidate.revision === run.revision && candidate.fingerprint === run.fingerprint && candidate.configFingerprint === run.configFingerprint && candidate.criteriaSnapshotId === criteriaSnapshotId && technicalRunAccepted(candidate) && (candidate.id === run.id || !iteration && candidate.cleanupStatus === "complete")).at(-1);
         const functional = run.kind === "functional";
         const checks = functional ? [] : quality.evidence.filter((entry) => entry.runId === acceptedChecks?.id && entry.kind === "command" && entry.authority === "server" && entry.status !== "inconclusive" && CHECK_NAMES.some((name) => name === entry.summary));
         const sourceRun = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
@@ -831,7 +879,7 @@ export class QualityManager {
           revision: sourceRun.revision, error: sourceRun.error, diagnostic: sourceRun.diagnostic,
           observations: quality.evidence.filter((entry) => entry.runId === sourceRun.id).map(({ criterionId, status, summary, output, timedOut }) => ({ criterionId, status, summary, output: output.slice(-PREVIOUS_OBSERVATION_LIMIT), timedOut })),
         } : undefined;
-        const result = await runQualityValidator({ previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+        const result = await runQualityValidator({ previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, ...(preview?.auth ? { browserAuth: preview.auth } : {}), startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
         if (!result.sessionId) throw new Error("Validator returned no independently attributable session identity.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
         const criterionIds = result.evidence.map((evidence) => evidence.criterionId);
@@ -841,6 +889,7 @@ export class QualityManager {
         if (result.evidence.some((evidence) => evidence.sessionId !== result.sessionId || evidence.provider !== run.provider || evidence.authority !== "agent")) throw new Error("Validator evidence has inconsistent session provenance.");
         if (baseline !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Validator modified the validated source; its evidence cannot be accepted.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
+        if (preview) await this.requirePreviewRun(run, ticket, preview);
         for (const evidence of result.evidence) {
           this.dependencies.store.appendQualityEvidence({ runId: run.id, criterionId: evidence.criterionId, kind: "behavior", authority: "agent", author: "agent", status: evidence.status, summary: evidence.summary, output: evidence.output, command: null, exitCode: null, timedOut: evidence.timedOut, durationMs: evidence.durationMs, artifactPath: evidence.artifactPath, provider: run.provider, sessionId: result.sessionId, model: execution.model, ...(evidence.scenario ? { scenario: evidence.scenario } : {}) });
         }
@@ -866,7 +915,11 @@ export class QualityManager {
       if (blocker) {
         const summary = qualityErrorMessage(reason);
         outcome = { status: "inconclusive", evidenceAccepted: false, failurePhase: phase, error: summary, diagnostic: { category: "environment_blocker", summary, permissionDenials: [], blockers: [{ code: blocker.code, scenarioId: null, summary }] } };
-      } else outcome = { status: signal.aborted ? "cancelled" : "failed", evidenceAccepted: false, failurePhase: phase, error: reason, diagnostic: { category: "validation_incomplete", summary: reason, permissionDenials: [], blockers: [] } };
+      } else {
+        let status: QualityValidationRun["status"] = signal.aborted ? "cancelled" : "failed";
+        if (preview && !signal.aborted) status = "inconclusive";
+        outcome = { status, evidenceAccepted: false, failurePhase: phase, error: reason, diagnostic: { category: "validation_incomplete", summary: reason, permissionDenials: [], blockers: [] } };
+      }
       log.warn("quality run ended without acceptance", { ticketId: ticket.id, runId: run.id, phase, error: reason });
     } finally {
       this.update(run.id, { phase: "cleanup" });
@@ -895,6 +948,13 @@ export class QualityManager {
       if (signal.aborted) {
         technicalEvidenceAccepted = false;
         outcome = { ...outcome, status: "cancelled", evidenceAccepted: false, error: "Quality run cancelled." };
+      }
+      if (preview && !signal.aborted && outcome?.evidenceAccepted) {
+        try {
+          await this.requirePreviewRun(run, ticket, preview);
+        } catch (error) {
+          outcome = { ...outcome, status: "inconclusive", evidenceAccepted: false, error: getErrorMessage(error) };
+        }
       }
       this.update(run.id, { ...outcome, technicalEvidenceAccepted, completedAt: Date.now(), cleanupStatus: cleanupError ? "failed" : "complete", ...(cleanupError ? { error: cleanupError } : {}) });
     }
@@ -950,6 +1010,34 @@ export class QualityManager {
     throw new QualityBlockerError("application_unavailable", `Isolated application did not become healthy. ${service.output()}`);
   }
 
+  private async waitForPreviewHealth(target: QualityPreviewTarget, timeoutMs: number, signal: AbortSignal): Promise<void> {
+    const address = new URL(target.url);
+    const url = new URL(target.healthPath ?? "/", address);
+    if (url.origin !== address.origin) throw new Error("Preview health checks must use the preview origin.");
+    const headers: Record<string, string> = {};
+    if (target.auth) headers.Authorization = `Basic ${Buffer.from(`${target.auth.username}:${target.auth.password}`).toString("base64")}`;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline && !signal.aborted) {
+      try {
+        const response = await fetch(url, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS)]), redirect: "error" });
+        await response.body?.cancel();
+        if (response.ok) return;
+      } catch { /* NOTE(ali): the remote preview may still be becoming available. */ }
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, HEALTH_POLL_MS));
+    }
+    if (signal.aborted) throw new Error("Quality run cancelled.");
+    throw new QualityBlockerError("application_unavailable", "The remote preview did not become healthy.");
+  }
+
+  async cancelPreview(ticketId: string, previewId: string): Promise<void> {
+    await this.starts.run(ticketId, async () => {
+      const active = this.active.get(ticketId);
+      if (active?.previewId !== previewId) return;
+      active.controller.abort();
+      await active.completion;
+    });
+  }
+
   async cancel(ticketId: string): Promise<void> {
     await this.starts.run(ticketId, async () => {
       const iteration = this.dependencies.store.getActiveQualityIteration(ticketId);
@@ -967,7 +1055,8 @@ export class QualityManager {
     const project = getProject(ticket.project);
     const quality = this.get(ticketId);
     const snapshot = latestAcceptanceSnapshot(quality);
-    const enabled = ticket.kind === "feature" && (project.validation?.enabled === true || quality.runs.length > 0 || !!snapshot);
+    const localRuns = quality.runs.filter((run) => !run.preview);
+    const enabled = ticket.kind === "feature" && (project.validation?.enabled === true || localRuns.length > 0 || !!snapshot);
     const reservations: string[] = [];
     const requiredCriteria = snapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? [];
     const verifiedCriteria: string[] = [];
@@ -976,18 +1065,18 @@ export class QualityManager {
     if (enabled) {
       let current: ValidationRevision | null = null;
       try { current = await this.revision(ticket, mode === "strict"); } catch (error) { reservations.push(getErrorMessage(error)); }
-      const currentRuns = quality.runs.filter((run) => run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project) && run.criteriaSnapshotId === (snapshot?.id ?? null));
+      const currentRuns = localRuns.filter((run) => run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project) && run.criteriaSnapshotId === (snapshot?.id ?? null));
       currentRunIds.push(...currentRuns.map((run) => run.id));
       const functionalSnapshot = this.freshFunctionalSnapshot(ticket);
-      currentRunIds.push(...quality.runs.filter((run) => run.kind === "functional" && functionalSnapshot !== undefined && run.criteriaSnapshotId === functionalSnapshot.id && run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project)).map((run) => run.id));
+      currentRunIds.push(...localRuns.filter((run) => run.kind === "functional" && functionalSnapshot !== undefined && run.criteriaSnapshotId === functionalSnapshot.id && run.revision === current?.commitSha && run.fingerprint === current?.fingerprint && run.configFingerprint === configFingerprint(project)).map((run) => run.id));
       const relevant = currentRuns.filter((run) => !run.simulated && run.cleanupStatus === "complete");
       const technical = relevant.filter((run) => run.kind === "checks" || run.kind === "full").at(-1);
       const technicalEvidence = quality.evidence.filter((evidence) => evidence.runId === technical?.id && evidence.kind === "command" && CHECK_NAMES.some((name) => name === evidence.summary));
       const acceptedTechnical = technical && technicalRunAccepted(technical);
       if (!acceptedTechnical || technicalEvidence.length === 0 || technicalEvidence.some((evidence) => evidence.authority !== "server" || evidence.status !== "passed" || evidence.exitCode !== 0 || evidence.timedOut)) reservations.push("Current server-run technical checks are missing or unsuccessful.");
       const requireBehavioral = project.validation?.requireBehavioral ?? !!snapshot;
-      const latestChecks = quality.runs.filter((run) => run.kind === "checks" || run.kind === "full").at(-1);
-      const latestBehavior = quality.runs.filter((run) => (run.kind === "behavior" || run.kind === "full") && (!requireBehavioral || run.provider !== null)).at(-1);
+      const latestChecks = localRuns.filter((run) => run.kind === "checks" || run.kind === "full").at(-1);
+      const latestBehavior = localRuns.filter((run) => (run.kind === "behavior" || run.kind === "full") && (!requireBehavioral || run.provider !== null)).at(-1);
       stale = !!latestChecks && !currentRunIds.includes(latestChecks.id);
       if ((requireBehavioral || snapshot) && latestBehavior && !currentRunIds.includes(latestBehavior.id)) stale = true;
       if (snapshot && snapshot.sourceFingerprint !== sourceFingerprint(ticket)) stale = true;
@@ -1007,11 +1096,11 @@ export class QualityManager {
           else if (criterion.required) reservations.push(`Acceptance criterion is unverified: ${criterion.text}`);
         }
       }
-      if (this.active.has(ticketId)) reservations.push("Quality validation is still running.");
+      if (this.active.has(ticketId) && !this.active.get(ticketId)?.previewId) reservations.push("Quality validation is still running.");
       const activeIteration = this.dependencies.store.getActiveQualityIteration(ticketId);
       if (activeIteration?.status === "queued" || activeIteration?.status === "correcting") reservations.push("Quality correction is still running.");
       if (quality.iterations.some((iteration) => iteration.trigger !== "functional")) {
-        const latestFull = quality.runs.filter((run) => run.kind === "full").at(-1);
+        const latestFull = localRuns.filter((run) => run.kind === "full").at(-1);
         const fullAccepted = latestFull && currentRunIds.includes(latestFull.id) && !latestFull.simulated && latestFull.status === "passed" && latestFull.evidenceAccepted && latestFull.technicalEvidenceAccepted && latestFull.cleanupStatus === "complete";
         verifiedCriteria.splice(0, verifiedCriteria.length);
         if (fullAccepted) {
@@ -1021,7 +1110,7 @@ export class QualityManager {
         }
         if (!fullAccepted || requiredCriteria.some((criterionId) => !verifiedCriteria.includes(criterionId))) reservations.push("The latest full independent verification has not accepted every required criterion.");
       }
-      if (quality.runs.some((run) => run.cleanupStatus === "failed")) reservations.push("A validation environment still requires cleanup.");
+      if (localRuns.some((run) => run.cleanupStatus === "failed")) reservations.push("A validation environment still requires cleanup.");
     }
     const complete = reservations.length === 0;
     return { enabled, complete, reservations, allowed: !enabled || complete || mode === "reservations", stale, reasons: reservations, requiredCriteria, verifiedCriteria, currentRunIds };
@@ -1076,7 +1165,7 @@ export class QualityManager {
     const project = getProject(ticket.project);
     const slot = ticket.slotId === null ? null : this.dependencies.store.getSlot(ticket.slotId);
     const sourcePath = slot?.ticketId === ticket.id ? join(SLOTS_ROOT, `slot-${slot.id}`) : undefined;
-    const recorded = this.get(ticket.id).runs.at(-1)?.revision;
+    const recorded = this.get(ticket.id).runs.filter((run) => !run.preview).at(-1)?.revision;
     const key = fingerprint([project.repoPath, ticket.branch, recorded]);
     const cached = this.revisions.get(ticket.id);
     if (!sourcePath && !refresh && cached?.key === key && Date.now() - cached.at < REVISION_CACHE_MS) return cached.revision;

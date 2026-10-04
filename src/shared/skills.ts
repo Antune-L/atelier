@@ -4,6 +4,8 @@ import type { Orchestrator } from "./constants.ts";
 export const SKILLZER_REPO_URL = "https://github.com/Antune-L/skillzer";
 
 export const SKILL_MANIFEST_FILE = "SKILL.md";
+export const COOLIFY_PREPARATION_MARKER = "[coolify-preview-setup:v1]";
+export const COOLIFY_PREPARATION_SKILL = "coolify-preview-setup";
 
 export const HOST_SKILL_ROOTS: Record<Orchestrator, readonly string[]> = {
   claude: ["~/.claude/skills"],

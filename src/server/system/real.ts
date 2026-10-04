@@ -21,6 +21,11 @@ import { boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
+import { requestCoolify } from "./coolifyClient.ts";
+import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
+import { readPreviewSource } from "./previewSource.ts";
+import { verifyPreviewCleanup } from "./previewCleanup.ts";
+import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
 import { DelegationWorkspace } from "./delegationWorkspace.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
@@ -169,6 +174,26 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
  */
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
+  coolifyRequest(request: CoolifyRequest): Promise<CoolifyResponse> {
+    return requestCoolify(request);
+  }
+  readPreviewSource(repoPath: string, prUrl: string, recipePath: string) {
+    return readPreviewSource(repoPath, prUrl, recipePath);
+  }
+  async confirmPreviewCleanup(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }) {
+    if (!preview.appUuid || !options.sshHostAlias || !options.expectedServerAddress) return { complete: false, reason: "Configure a verified SSH target to confirm remote resource cleanup." };
+    return verifyPreviewCleanup({ appUuid: preview.appUuid, serverUuid: preview.serverUuid, ownershipMarker: preview.ownershipMarker, coolifyBaseUrl: preview.coolifyBaseUrl, sshHostAlias: options.sshHostAlias, expectedServerAddress: options.expectedServerAddress, removeOwnedResources: options.removeOwnedResources, deploymentUuids: options.deploymentUuids });
+  }
+  async probePreviewHealth(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean> {
+    const target = new URL(healthPath, url);
+    if (target.origin !== new URL(url).origin || target.protocol !== "https:") throw new Error("Preview health checks must stay on the preview HTTPS origin.");
+    const unauthenticated = await fetch(target, { signal: AbortSignal.timeout(5_000), redirect: "manual" }).catch(() => null);
+    if (!unauthenticated || unauthenticated.status === 404 || unauthenticated.status >= 500) return false;
+    if (unauthenticated.status !== 401) throw new Error("The preview does not enforce HTTP Basic authentication.");
+    const response = await fetch(target, { headers: { authorization: `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}` }, signal: AbortSignal.timeout(5_000), redirect: "manual" }).catch(() => null);
+    if (!response) return false;
+    return response.ok;
+  }
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
@@ -896,6 +921,10 @@ export class RealSystemAdapter implements SystemAdapter {
       };
     }
     return { ok: true, reason: "", commitSha: local };
+  }
+
+  readPullRequestHead(repoPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult> {
+    return this.vcs(provider).readPrHead(repoPath, prUrl);
   }
 
   async publishReview(

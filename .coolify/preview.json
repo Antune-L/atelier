@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "buildPack": "dockerfile",
+  "dockerfile": "Dockerfile.preview",
+  "buildContext": ".",
+  "port": 52817,
+  "healthPath": "/health",
+  "environment": {
+    "PORT": "52817",
+    "KANBAN_DRY_RUN": "1",
+    "KANBAN_SETUP": "0"
+  },
+  "websocketPaths": ["/ws", "/ws/terminal"]
+}

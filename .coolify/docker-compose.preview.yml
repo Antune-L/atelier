@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.preview
+    environment:
+      PORT: "52817"
+      KANBAN_DRY_RUN: "1"
+      KANBAN_SETUP: "0"
+      KANBAN_PREVIEW_AUTH_USERNAME: disabled
+      KANBAN_PREVIEW_AUTH_HASH: disabled
+    expose:
+      - "52817"
+  preview-gateway:
+    build:
+      context: .
+      dockerfile: .coolify/Dockerfile.gateway
+    environment:
+      KANBAN_PREVIEW_AUTH_USERNAME: ${KANBAN_PREVIEW_AUTH_USERNAME}
+      KANBAN_PREVIEW_AUTH_HASH: ${KANBAN_PREVIEW_AUTH_HASH}
+    expose:
+      - "8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp

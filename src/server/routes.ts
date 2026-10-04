@@ -67,6 +67,8 @@ import type { DoneGateResult, ImportNotionOptions, ReformulateOptions } from "./
 import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
 import { createQualityRoutes } from "./qualityRoutes.ts";
+import { createPreviewRoutes } from "./previewRoutes.ts";
+import type { PreviewManager } from "./previewManager.ts";
 import {
   createTicketOperations,
   ticketDependencyError,
@@ -104,6 +106,7 @@ interface PaneReader {
 }
 
 interface RouteDeps {
+  previews?: PreviewManager;
   quality?: QualityManager;
   qualityArtifactDirectory?: string;
   store: Store;
@@ -838,6 +841,7 @@ export function createApiRoutes(deps: RouteDeps) {
   }
 
   return new Elysia({ prefix: "/api" })
+    .use(deps.previews ? createPreviewRoutes({ previews: deps.previews }) : new Elysia())
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     .get("/projects", () => ticketOperations.listProjects())
@@ -1634,6 +1638,11 @@ export function createApiRoutes(deps: RouteDeps) {
         return jsonError(set, HTTP_CONFLICT, "ticket occupe un slot : abandonne-le d'abord");
       }
       await deps.quality?.cancel(params.id);
+      const preview = store.getTicketPreview(params.id);
+      if (preview && preview.cleanupStatus !== "complete") {
+        await deps.previews?.stop(preview.id);
+        return jsonError(set, HTTP_CONFLICT, "Preview cleanup is incomplete. The ticket cannot be deleted yet.");
+      }
       if (ticket.kind === "feature" && deps.quality?.get(params.id).runs.some((run) => run.cleanupStatus !== "complete")) {
         return jsonError(set, HTTP_CONFLICT, "Quality cleanup is incomplete. The ticket cannot be deleted yet.");
       }

@@ -2,10 +2,10 @@ import { useState, type ReactNode } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import { QUALITY_ACTIVE_STATUSES } from "@shared/quality";
-import type { QualityEvidence, QualityPermissionBlockReason, QualityRunStatus, QualityValidationRun, TicketQuality } from "@shared/quality";
+import type { QualityEnvironmentBlocker, QualityEvidence, QualityPermissionBlockReason, QualityRunStatus, QualityScenario, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { Dialog } from "@/components/ui/dialog";
-import { qualityEvidenceArtifactUrl } from "@/lib/api";
+import { qualityEvidenceArtifactUrl, qualityEvidenceScreenshotUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
 import { formatQualityCriterionText, formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPermissionBlockMessage, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,14 @@ const EXPLANATION_CRITERIA_LIMIT = 3;
 const CRITERION_EXCERPT_LIMIT = 160;
 const PREPARATION_COMMAND_SUMMARIES = ["Environment setup", "Dependency installation"];
 const GENERIC_CRITERIA_FAILURE = "Some required acceptance criteria were not independently verified.";
+const FUNCTIONAL_INTERACTION_LABELS: Record<QualityScenario["interaction"], string> = { required: "interaction requise, état vérifié après l’action", none: "affichage uniquement" };
+export const FUNCTIONAL_BLOCKER_LABELS: Record<QualityEnvironmentBlocker, string> = {
+  startup_configuration: "Configuration de démarrage manquante : configurez un environnement isolé et une commande de démarrage de l’application pour ce projet.",
+  application_startup: "L’application n’a pas pu être préparée ou démarrée dans la copie de test : consultez les journaux d’installation et de démarrage.",
+  browser_unavailable: "Le navigateur de test est indisponible : installez localement l’outil Playwright MCP attendu, sans téléchargement automatique.",
+  authentication: "Connexion requise : l’environnement isolé ne fournit pas d’accès de test pour ce parcours.",
+  test_data: "Données de test manquantes : l’environnement isolé ne contient pas les données nécessaires à ce parcours.",
+};
 
 function QualityArtifact({ ticketId, evidence }: { ticketId: string; evidence: QualityEvidence }) {
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -74,6 +82,7 @@ export function qualityChecksStatus(run: QualityValidationRun, checks: QualityEv
 }
 
 function qualityRunCriterionResults(quality: TicketQuality, run: QualityValidationRun) {
+  if (run.kind === "functional") return [];
   const snapshot = quality.criteriaSnapshots.find((item) => item.id === run.criteriaSnapshotId);
   return snapshot?.criteria.map((criterion) => ({ criterion, creator: snapshot.createdBy, evidence: quality.evidence.filter((item) => item.runId === run.id && item.criterionId === criterion.id && item.kind === "behavior").at(-1) })) ?? [];
 }
@@ -110,9 +119,9 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
   const incomplete = run.status === "inconclusive" || (run.status === "failed" && run.failurePhase === "validating" && requiredResults.some(({ evidence }) => evidence?.status === "inconclusive") && !requiredResults.some(({ evidence }) => evidence?.status === "failed"));
   let status = run.status;
   let title = qualityRunTitle(run);
-  if (run.status === "failed" && run.failurePhase !== null) title = qualityFailureLabel(run.failurePhase);
+  if (run.status === "failed" && run.failurePhase !== null) title = qualityFailureLabel(run.failurePhase, run.kind);
   if (incomplete) {
-    title = "Vérification incomplète";
+    title = run.kind === "functional" ? "Test fonctionnel non concluant" : "Vérification incomplète";
     status = "inconclusive";
   }
   const phase = run.failurePhase ?? run.phase;
@@ -128,7 +137,7 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
       <QualityPermissionDiagnostics run={run} />
       {children}
       <p className="text-2xs text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {qualityModeLabel(run.mode)}</p>
-      {phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(phase)}</p>}
+      {phase !== null && <p className="text-xs text-muted-foreground">{phasePrefix} : {qualityPhaseLabel(phase, run.kind)}</p>}
       {showError && run.error !== null && <p role="alert" className={cn("text-xs", incomplete ? "text-warning" : "text-danger")}>{formatQualityMessage(run.error)}</p>}
     </div>
   );
@@ -190,30 +199,55 @@ export function evidenceProvenance(evidence: QualityEvidence, run: QualityValida
   return parts.join(" · ");
 }
 
+export function QualityFunctionalEvidenceDetails({ ticketId, evidence, scenario }: { ticketId: string; evidence: QualityEvidence; scenario: QualityScenario | undefined }) {
+  const functional = evidence.functional;
+  if (functional === null) return null;
+  return (
+    <div className="space-y-2 text-xs">
+      <p><span className="text-muted-foreground">Interaction : </span>{FUNCTIONAL_INTERACTION_LABELS[functional.interaction]}</p>
+      <p><span className="text-muted-foreground">Résultat attendu : </span>{functional.expected}</p>
+      {scenario !== undefined && <ol className="list-inside list-decimal space-y-0.5 text-muted-foreground">{scenario.steps.map((step) => <li key={step}>{step}</li>)}</ol>}
+      <div><p className="text-muted-foreground">Actions enregistrées dans le navigateur</p>{functional.actions.length === 0 ? <p>Aucune action vérifiée.</p> : <ul className="mt-1 space-y-0.5">{functional.actions.map((action, index) => <li key={`${action.tool}-${index}`}><span className="font-mono text-2xs">{action.tool}</span> · {action.description}</li>)}</ul>}</div>
+      <p><span className="text-muted-foreground">Résultat observé : </span>{functional.observed.trim() === "" ? "Aucun résultat observé." : functional.observed}</p>
+      {functional.blocker !== null && <p className="text-warning">{FUNCTIONAL_BLOCKER_LABELS[functional.blocker]}</p>}
+      {functional.screenshotPaths.length > 0 && <div className="flex flex-wrap gap-2">{functional.screenshotPaths.map((path, index) => {
+        const url = qualityEvidenceScreenshotUrl(ticketId, evidence.id, index);
+        return <a key={path} href={url} target="_blank" rel="noopener noreferrer" className="block w-40"><img src={url} alt={`Capture ${index + 1} du scénario ${functional.scenarioId}`} loading="lazy" className="h-24 w-40 rounded border border-border object-cover" /></a>;
+      })}</div>}
+      {functional.screenshotPaths.length > 0 && <p className="text-2xs text-muted-foreground">Une capture illustre le parcours ; elle ne prouve pas à elle seule la réussite.</p>}
+    </div>
+  );
+}
+
 export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClose }: { evidence: QualityEvidence | null; quality: TicketQuality; currentRunIds: string[]; onClose: () => void }) {
   if (evidence === null) return null;
   const run = quality.runs.find((item) => item.id === evidence.runId);
   const snapshot = quality.criteriaSnapshots.find((item) => item.id === run?.criteriaSnapshotId);
+  const scenarios = quality.scenarioSnapshots.find((item) => item.id === run?.scenarioSnapshotId);
+  const scenario = scenarios?.scenarios.find((item) => item.id === evidence.functional?.scenarioId);
   const current = run !== undefined && currentRunIds.includes(run.id);
   let accepted = run?.evidenceAccepted === true;
   if (evidence.kind === "command") accepted = run?.technicalEvidenceAccepted === true || (run?.kind === "checks" && run.evidenceAccepted);
   let title = "Preuve du critère";
   if (evidence.kind === "command") title = "Journal du contrôle";
+  else if (scenario !== undefined) title = `Scénario ${scenario.id} · ${scenario.title}`;
   else if ((run?.mode ?? snapshot?.mode) === "browser") title = "Preuve du parcours";
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} size="lg" title={title} description={evidenceProvenance(evidence, run)}>
-      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence, run?.simulated === true)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, accepted, run?.simulated === true)} /></div>
+      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityMessage(formatQualityEvidenceSummary(evidence, run?.simulated === true))}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, accepted, run?.simulated === true)} /></div>
       <p className={cn("text-xs", current ? "text-muted-foreground" : "text-warning")}>{current ? "Cette preuve correspond au code, aux critères et à la configuration actuels." : "Cette preuve est obsolète pour le code, les critères ou la configuration actuels."}</p>
       {current && !accepted && <p className="text-xs text-warning">Les observations de cette exécution ne sont pas acceptées comme preuves de livraison. Consultez le résultat de l’exécution dans l’historique.</p>}
       <dl className="flex flex-col gap-2 text-xs">
         <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Version du code</dt><dd className="break-all font-mono">{run?.revision ?? "Non renseignée"}</dd></div>
         {snapshot && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Critères</dt><dd>Version {snapshot.version}</dd></div>}
+        {scenarios && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Scénarios</dt><dd>Version {scenarios.version}</dd></div>}
         {evidence.model !== null && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Modèle</dt><dd>{evidence.model}</dd></div>}
         {evidence.sessionId !== null && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Session distincte</dt><dd className="break-all font-mono">{evidence.sessionId}</dd></div>}
         {evidence.command !== null && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Commande</dt><dd className="break-all font-mono">{evidence.command}</dd></div>}
         {evidence.kind === "command" && <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Résultat serveur</dt><dd>Code de sortie {evidence.exitCode ?? "inconnu"} · {formatDuration(evidence.durationMs)}{evidence.timedOut && " · délai dépassé"}</dd></div>}
       </dl>
-      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 font-mono text-xs">{formatQualityEvidenceOutput(evidence, run?.simulated === true) || "Aucune sortie observée."}</pre>
+      <QualityFunctionalEvidenceDetails ticketId={quality.ticketId} evidence={evidence} scenario={scenario} />
+      {evidence.functional === null && <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-muted/30 p-3 font-mono text-xs">{formatQualityEvidenceOutput(evidence, run?.simulated === true) || "Aucune sortie observée."}</pre>}
       <QualityArtifact key={evidence.id} ticketId={quality.ticketId} evidence={evidence} />
       <p className="text-xs text-muted-foreground">Cette preuve conserve sa version et sa provenance. Les réserves de livraison déterminent si elle valide le code actuel.</p>
     </Dialog>
@@ -227,12 +261,13 @@ export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { 
       <div className="divide-y divide-border border-t border-border">
         {[...quality.runs].reverse().map((run) => {
           const snapshot = quality.criteriaSnapshots.find((item) => item.id === run.criteriaSnapshotId);
+          const scenarios = quality.scenarioSnapshots.find((item) => item.id === run.scenarioSnapshotId);
           const current = currentRunIds.includes(run.id);
           return (
             <div key={run.id} className="space-y-2 px-3 py-3 text-xs">
               <QualityRunStatus run={run} current={current} quality={quality} />
               <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
-              <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
+              <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}{scenarios && ` · scénarios v${scenarios.version}`}</p>
               <p className="break-all font-mono text-2xs">{run.revision}</p>
               {run.environment && <p className="break-all text-muted-foreground">Copie séparée : {run.environment.directory} · port {run.environment.port}</p>}
               {run.environment?.addresses?.map((address) => <p key={address.url} className="break-all text-muted-foreground">{formatQualityEnvironmentLabel(address.label)} : {address.url}</p>)}

@@ -72,6 +72,10 @@ export function qualityEvidenceArtifactUrl(ticketId: string, evidenceId: string)
   return `${ticketQualityPath(ticketId)}/evidence/${encodeURIComponent(evidenceId)}/artifact`;
 }
 
+export function qualityEvidenceScreenshotUrl(ticketId: string, evidenceId: string, index: number): string {
+  return `${ticketQualityPath(ticketId)}/evidence/${encodeURIComponent(evidenceId)}/screenshots/${index}`;
+}
+
 function atelierConversationPath(id: string): string {
   return `${ATELIER_BASE}/conversations/${encodeURIComponent(id)}`;
 }
@@ -181,6 +185,8 @@ export const api = {
     request(`${ticketQualityPath(id)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
   verifyTicketQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
     request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
+  testTicketFunctionality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/functional`, { method: "POST", body: JSON.stringify({ provider }) }),
   startQualityIteration: (id: string, input: StartQualityIterationInput): Promise<{ iteration: QualityIteration }> =>
     request(`${ticketQualityPath(id)}/iterations`, { method: "POST", body: JSON.stringify(input) }),
   createQualityFollowUp: async (id: string, input: CreateQualityFollowUpInput): Promise<QualityFollowUpResponse> =>

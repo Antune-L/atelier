@@ -1,4 +1,4 @@
-import { ChevronRight, FlaskConical, GitCommitHorizontal, Play, RefreshCw, ShieldCheck, Square, TriangleAlert } from "lucide-react";
+import { ChevronRight, FlaskConical, GitCommitHorizontal, MousePointerClick, Play, RefreshCw, ShieldCheck, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { ORCHESTRATORS, ORCHESTRATOR_LABELS } from "@shared/constants";
@@ -8,6 +8,7 @@ import type { CreateQualityFollowUpInput, QualityEvidence, QualityPreflight, Qua
 import type { Ticket } from "@shared/schemas";
 
 import { QualityCriteriaPanel } from "@/components/ticket-detail/QualityCriteriaPanel";
+import { QualityFunctionalRun } from "@/components/ticket-detail/QualityFunctionalRun";
 import { QualityIterations } from "@/components/ticket-detail/QualityIterations";
 import { QualityRemediation } from "@/components/ticket-detail/QualityRemediation";
 import { QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunExplanation, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
@@ -23,6 +24,7 @@ const QUALITY_RUNNING_POLL_MS = 3_000;
 const QUALITY_IDLE_POLL_MS = 10_000;
 const REVISION_DISPLAY_LENGTH = 12;
 const PREPARATION_COMMAND_SUMMARIES = ["Environment setup", "Dependency installation"];
+const FUNCTIONAL_TEST_HINT = "Parcours dans le navigateur, sans contrôles techniques";
 
 export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const [response, setResponse] = useState<QualityResponse | null>(null);
@@ -134,11 +136,13 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
 
       <div className="space-y-3 rounded border border-border bg-muted/20 p-4">
         <div><h3 className="text-sm font-medium">Vérifier le ticket</h3><p className="mt-1 text-xs text-muted-foreground">Le validateur prépare les critères depuis le ticket, installe le projet dans une copie séparée, puis exécute les contrôles et vérifie les résultats attendus.</p></div>
-        <div className="flex flex-wrap items-center gap-2"><Select aria-label="Agent de validation indépendant" value={iterationActive && latestIteration !== null ? latestIteration.provider : provider} disabled={busy} className="w-auto" onChange={(event) => { if (event.target.value === "claude" || event.target.value === "codex") setProvider(event.target.value); }}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select><Button size="sm" disabled={busy} onClick={() => void act(() => api.verifyTicketQuality(ticket.id, provider))}><FlaskConical className="h-3.5 w-3.5" />Vérifier le ticket</Button></div>
-        <p className="text-2xs text-muted-foreground">Aucune saisie manuelle de critères n’est nécessaire. Vous pouvez consulter et ajuster les critères préparés.</p>
+        <div className="flex flex-wrap items-center gap-2"><Select aria-label="Agent de validation indépendant" value={iterationActive && latestIteration !== null ? latestIteration.provider : provider} disabled={busy} className="w-auto" onChange={(event) => { if (event.target.value === "claude" || event.target.value === "codex") setProvider(event.target.value); }}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select><Button size="sm" disabled={busy} onClick={() => void act(() => api.verifyTicketQuality(ticket.id, provider))}><FlaskConical className="h-3.5 w-3.5" />Vérifier le ticket</Button><Button size="sm" variant="outline" disabled={busy} title={FUNCTIONAL_TEST_HINT} onClick={() => void act(() => api.testTicketFunctionality(ticket.id, provider))}><MousePointerClick className="h-3.5 w-3.5" />Tester la fonctionnalité</Button></div>
+        <p className="text-2xs text-muted-foreground">Aucune saisie manuelle de critères n’est nécessaire. Vous pouvez consulter et ajuster les critères préparés. « Tester la fonctionnalité » : {FUNCTIONAL_TEST_HINT.toLowerCase()}.</p>
+        {busy && !pending && <p className="text-2xs text-muted-foreground">{iterationActive ? "Actions indisponibles pendant le cycle de correction ou de reprise en cours." : "Actions indisponibles pendant la validation en cours ; annulez-la pour en lancer une autre."}</p>}
         {independentRun !== undefined && latestIteration?.resultRunId !== independentRun.id && <div className="space-y-3 rounded border border-border px-3 py-3"><QualityRunStatus run={independentRun} current={independentCurrent} quality={quality}><QualityRunExplanation run={independentRun} quality={quality} current={independentCurrent} onOpenEvidence={setSelectedEvidence} /></QualityRunStatus></div>}
+        <QualityFunctionalRun quality={quality} currentRunIds={gate.currentRunIds} hiddenRunId={latestIteration?.resultRunId ?? null} onOpenEvidence={setSelectedEvidence} />
         {iterationActions !== undefined && !iterationActive && <QualityRemediation quality={quality} actions={iterationActions} ticketProject={ticket.project} busy={busy} starting={startingIteration} onOpenEvidence={setSelectedEvidence} onStartIteration={(request) => void startIteration(request)} onCreateFollowUp={createFollowUp} />}
-        {(activeRun !== undefined || iterationActive) && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-info/30 bg-info/5 px-3 py-2 text-xs"><span>{activeRun !== undefined ? `${activeRun.phase === null ? qualityRunTitle(activeRun) : qualityPhaseLabel(activeRun.phase)} · ${activeRun.simulated ? "simulation" : "exécution réelle"}` : "Le cycle prépare une nouvelle vérification indépendante."}</span><Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(async () => setResponse(await api.cancelQualityValidation(ticket.id)))}><Square className="h-3 w-3" />{iterationActive ? "Annuler le cycle" : "Annuler la vérification"}</Button></div>}
+        {(activeRun !== undefined || iterationActive) && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-info/30 bg-info/5 px-3 py-2 text-xs"><span>{activeRun !== undefined ? `${activeRun.phase === null ? qualityRunTitle(activeRun) : qualityPhaseLabel(activeRun.phase, activeRun.kind)} ·${activeRun.simulated ? "simulation" : "exécution réelle"}` : "Le cycle prépare une nouvelle vérification indépendante."}</span><Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(async () => setResponse(await api.cancelQualityValidation(ticket.id)))}><Square className="h-3 w-3" />{iterationActive ? "Annuler le cycle" : "Annuler la vérification"}</Button></div>}
         <QualityIterations quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
       </div>
 

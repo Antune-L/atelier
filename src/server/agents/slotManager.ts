@@ -70,6 +70,7 @@ async function assertCodexImplementerAvailable(
 
 const QUALITY_TECHNICAL_CHECK_NAMES: string[] = ["typecheck", "lint", "test"];
 const QUALITY_TECHNICAL_OUTPUT_LIMIT = 4_000;
+const QUALITY_FUNCTIONAL_DELIVERY_NOTICE = "Ce test fonctionnel ne remplace pas les contrôles techniques ni la vérification complète : relance-les sur la révision corrigée avant toute livraison.";
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
 
@@ -279,13 +280,18 @@ export class SlotManager {
     const run = this.store.getQualityRun(runId);
     let complete = false;
     let diagnostic = run?.error ?? "La nouvelle vérification complète reste non concluante.";
+    const functional = iteration.trigger === "functional";
     try {
       await this.assertQualityIterationPr(ticket, iteration, iteration.resultRevision ?? undefined);
-      const gate = await this.qualityGate?.(ticketId, "strict");
-      let criteriaMatch = run?.criteriaSnapshotId === iteration.criteriaSnapshot?.id;
-      if (!iteration.criteriaSnapshot && iteration.trigger === "checks") criteriaMatch = Boolean(run?.criteriaSnapshotId);
-      complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && criteriaMatch && Boolean(gate?.complete);
-      if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
+      if (functional) {
+        complete = verdict === "passed" && run?.kind === "functional" && run.revision === iteration.resultRevision && run.scenarioSnapshotId === iteration.scenarioSnapshot?.id && run.evidenceAccepted && !run.simulated;
+      } else {
+        const gate = await this.qualityGate?.(ticketId, "strict");
+        let criteriaMatch = run?.criteriaSnapshotId === iteration.criteriaSnapshot?.id;
+        if (!iteration.criteriaSnapshot && iteration.trigger === "checks") criteriaMatch = Boolean(run?.criteriaSnapshotId);
+        complete = verdict === "passed" && run?.kind === "full" && run.revision === iteration.resultRevision && criteriaMatch && Boolean(gate?.complete);
+        if (!complete && gate?.reservations.length) diagnostic = gate.reservations.join(" ; ");
+      }
     } catch (error) {
       diagnostic = getErrorMessage(error);
     }
@@ -293,7 +299,8 @@ export class SlotManager {
     this.store.updateQualityIteration(iterationId, { status: complete ? "completed" : "failed", diagnostic: complete ? null : diagnostic, completedAt: Date.now() });
     this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, error: complete ? null : diagnostic, finishedAt: Date.now(), autoMerge: false }));
     const operation = iteration.mode === "correction" ? "Correction terminée" : "Vérification reprise";
-    const body = complete ? `${operation} et nouvelle vérification indépendante complète réussie.` : `${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
+    let body = complete ? `${operation} et nouvelle vérification indépendante complète réussie.` : `${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
+    if (functional) body = complete ? `${operation} et nouveau test fonctionnel réussi dans le navigateur. ${QUALITY_FUNCTIONAL_DELIVERY_NOTICE}` : `${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée. ${QUALITY_FUNCTIONAL_DELIVERY_NOTICE}`;
     this.hub.pushComment(this.store.addComment(ticketId, "system", body, null));
     this.store.logEvent(ticketId, "quality_iteration_settled", { iterationId, runId, verdict, complete });
     await this.cleanupTerminalSlot(slotId, ticket, complete ? "completed" : "failed", false);
@@ -995,7 +1002,10 @@ export class SlotManager {
       const source = quality.runs.find((run) => run.id === iteration.sourceRunId);
       const requiredCriteria = new Set(iteration.criteriaSnapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? []);
       const technical = iteration.trigger === "checks";
-      const qualityFaults = technical ? [] : quality.evidence.filter((evidence) => source?.evidenceAccepted && evidence.runId === iteration.sourceRunId && evidence.kind === "behavior" && evidence.authority === "agent" && evidence.status === "failed" && evidence.criterionId !== null && requiredCriteria.has(evidence.criterionId));
+      const requiredTargets = iteration.trigger === "functional"
+        ? new Set(iteration.scenarioSnapshot?.scenarios.filter((scenario) => scenario.required).map((scenario) => scenario.id) ?? [])
+        : requiredCriteria;
+      const qualityFaults = technical ? [] : quality.evidence.filter((evidence) => source?.evidenceAccepted && evidence.runId === iteration.sourceRunId && evidence.kind === "behavior" && evidence.authority === "agent" && evidence.status === "failed" && evidence.criterionId !== null && requiredTargets.has(evidence.criterionId));
       const qualityTechnicalFaults = technical
         ? quality.evidence
           .filter((evidence) => evidence.runId === iteration.sourceRunId && evidence.kind === "command" && evidence.authority === "server" && evidence.status === "failed" && QUALITY_TECHNICAL_CHECK_NAMES.includes(evidence.summary))

@@ -34,6 +34,40 @@ interface QualityRouteDeps {
   ticketOperations?: TicketOperations;
 }
 
+async function artifactResponse(qualityArtifactDirectory: string | undefined, runId: string | undefined, artifactPath: string | null | undefined, set: { status?: number | string }): Promise<Response | { error: string }> {
+  const unavailable = (): { error: string } => {
+    set.status = HTTP_NOT_FOUND;
+    return { error: "Evidence artifact is unavailable." };
+  };
+  if (!runId || !artifactPath || !qualityArtifactDirectory) return unavailable();
+  try {
+    const qualityRoot = await realpath(qualityArtifactDirectory);
+    const artifactRoot = await realpath(join(qualityArtifactDirectory, runId));
+    const runWithinRoot = relative(qualityRoot, artifactRoot);
+    if (runWithinRoot.startsWith("..") || isAbsolute(runWithinRoot) || !runWithinRoot) return unavailable();
+    const filePath = await realpath(artifactPath);
+    const pathWithinRun = relative(artifactRoot, filePath);
+    if (pathWithinRun.startsWith("..") || isAbsolute(pathWithinRun) || !pathWithinRun) return unavailable();
+    const file = Bun.file(filePath);
+    if (file.size > MAX_ARTIFACT_BYTES) {
+      set.status = HTTP_BAD_REQUEST;
+      return { error: "Evidence artifact exceeds the download limit." };
+    }
+    const contentType = ARTIFACT_CONTENT_TYPES[extname(filePath).toLowerCase()];
+    const disposition = contentType ? "inline" : "attachment";
+    return new Response(file, {
+      headers: {
+        "content-type": contentType ?? "application/octet-stream",
+        "content-disposition": `${disposition}; filename="${basename(filePath).replace(/[^a-zA-Z0-9._-]/g, "_")}"`,
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      },
+    });
+  } catch {
+    return unavailable();
+  }
+}
+
 export function createQualityRoutes({ store, quality, qualityArtifactDirectory, ticketOperations }: QualityRouteDeps) {
   const response = async (ticketId: string) => ({
     quality: quality?.get(ticketId),
@@ -62,45 +96,15 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
       return { error: getErrorMessage(error) };
     })
     .get("", ({ params }) => response(params.id))
-    .get("/evidence/:evidenceId/artifact", async ({ params, set }) => {
+    .get("/evidence/:evidenceId/artifact", ({ params, set }) => {
       const evidence = quality?.get(params.id).evidence.find((item) => item.id === params.evidenceId);
-      if (!evidence?.artifactPath || !qualityArtifactDirectory) {
-        set.status = HTTP_NOT_FOUND;
-        return { error: "Evidence artifact is unavailable." };
-      }
-      try {
-        const qualityRoot = await realpath(qualityArtifactDirectory);
-        const artifactRoot = await realpath(join(qualityArtifactDirectory, evidence.runId));
-        const runWithinRoot = relative(qualityRoot, artifactRoot);
-        if (runWithinRoot.startsWith("..") || isAbsolute(runWithinRoot) || !runWithinRoot) {
-          set.status = HTTP_NOT_FOUND;
-          return { error: "Evidence artifact is unavailable." };
-        }
-        const filePath = await realpath(evidence.artifactPath);
-        const pathWithinRun = relative(artifactRoot, filePath);
-        if (pathWithinRun.startsWith("..") || isAbsolute(pathWithinRun) || !pathWithinRun) {
-          set.status = HTTP_NOT_FOUND;
-          return { error: "Evidence artifact is unavailable." };
-        }
-        const file = Bun.file(filePath);
-        if (file.size > MAX_ARTIFACT_BYTES) {
-          set.status = HTTP_BAD_REQUEST;
-          return { error: "Evidence artifact exceeds the download limit." };
-        }
-        const contentType = ARTIFACT_CONTENT_TYPES[extname(filePath).toLowerCase()];
-        const disposition = contentType ? "inline" : "attachment";
-        return new Response(file, {
-          headers: {
-            "content-type": contentType ?? "application/octet-stream",
-            "content-disposition": `${disposition}; filename="${basename(filePath).replace(/[^a-zA-Z0-9._-]/g, "_")}"`,
-            "x-content-type-options": "nosniff",
-            "cache-control": "no-store",
-          },
-        });
-      } catch {
-        set.status = HTTP_NOT_FOUND;
-        return { error: "Evidence artifact is unavailable." };
-      }
+      return artifactResponse(qualityArtifactDirectory, evidence?.runId, evidence?.artifactPath, set);
+    })
+    .get("/evidence/:evidenceId/screenshots/:index", ({ params, set }) => {
+      const evidence = quality?.get(params.id).evidence.find((item) => item.id === params.evidenceId);
+      const index = Number(params.index);
+      const screenshotPath = Number.isInteger(index) ? evidence?.functional?.screenshotPaths[index] : undefined;
+      return artifactResponse(qualityArtifactDirectory, evidence?.runId, screenshotPath, set);
     })
     .post("/criteria", async ({ params, body, set }) => {
       const parsed = setQualityCriteriaSchema.safeParse(body);
@@ -171,6 +175,16 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
         return { error: parsed.error.message };
       }
       const run = await quality?.verify(params.id, parsed.data.provider);
+      set.status = HTTP_ACCEPTED;
+      return { run };
+    })
+    .post("/functional", async ({ params, body, set }) => {
+      const parsed = validateQualitySchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = HTTP_BAD_REQUEST;
+        return { error: parsed.error.message };
+      }
+      const run = await quality?.testFunctionality(params.id, parsed.data.provider);
       set.status = HTTP_ACCEPTED;
       return { run };
     })

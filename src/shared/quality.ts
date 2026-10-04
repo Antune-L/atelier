@@ -103,18 +103,57 @@ export const qualityPermissionDenialSchema = z.object({
 });
 export type QualityPermissionDenial = z.infer<typeof qualityPermissionDenialSchema>;
 
+export const qualityEnvironmentBlockerSchema = z.enum(["startup_configuration", "application_startup", "browser_unavailable", "authentication", "test_data"]);
+export type QualityEnvironmentBlocker = z.infer<typeof qualityEnvironmentBlockerSchema>;
+
 export const qualityRunDiagnosticSchema = z.object({
-  category: z.enum(["code_nonconformance", "permission_denial", "timeout", "validation_incomplete", "backend_checks_failed"]),
+  category: z.enum(["code_nonconformance", "permission_denial", "timeout", "validation_incomplete", "backend_checks_failed", "environment_blocker"]),
   summary: nonEmptyTextSchema,
   permissionDenials: z.array(qualityPermissionDenialSchema).default([]),
+  blocker: qualityEnvironmentBlockerSchema.optional(),
 });
 export type QualityRunDiagnostic = z.infer<typeof qualityRunDiagnosticSchema>;
+
+export const QUALITY_FUNCTIONAL_INTERACTION_TOOLS = ["browser_click", "browser_type", "browser_fill_form", "browser_press_key", "browser_select_option", "browser_drag", "browser_hover", "browser_handle_dialog"];
+
+export const qualityScenarioSchema = z.object({
+  id: nonEmptyTextSchema,
+  title: nonEmptyTextSchema,
+  criterionIds: z.array(nonEmptyTextSchema).default([]),
+  steps: z.array(nonEmptyTextSchema).min(1),
+  expected: nonEmptyTextSchema,
+  interaction: z.enum(["required", "none"]),
+  required: z.boolean().default(true),
+});
+export type QualityScenario = z.infer<typeof qualityScenarioSchema>;
+
+const qualityUncoveredCriterionSchema = z.object({ criterionId: nonEmptyTextSchema, reason: nonEmptyTextSchema });
+
+export const qualityScenarioPlanSchema = z.object({
+  scenarios: z.array(qualityScenarioSchema).min(1),
+  uncovered: z.array(qualityUncoveredCriterionSchema).default([]),
+}).refine((plan) => new Set(plan.scenarios.map((scenario) => scenario.id)).size === plan.scenarios.length, "Scenario ids must be unique");
+export type QualityScenarioPlan = z.infer<typeof qualityScenarioPlanSchema>;
+
+export const qualityScenarioSnapshotSchema = z.object({
+  id: nonEmptyTextSchema,
+  ticketId: nonEmptyTextSchema,
+  version: z.number().int().positive(),
+  scenarios: z.array(qualityScenarioSchema).min(1),
+  uncovered: z.array(qualityUncoveredCriterionSchema).default([]),
+  criteriaSnapshotId: nonEmptyTextSchema.nullable(),
+  sourceFingerprint: nonEmptyTextSchema,
+  createdBy: z.enum(["agent", "system"]),
+  createdAt: timestampSchema,
+}).refine((snapshot) => new Set(snapshot.scenarios.map((scenario) => scenario.id)).size === snapshot.scenarios.length, "Scenario ids must be unique");
+export type QualityScenarioSnapshot = z.infer<typeof qualityScenarioSnapshotSchema>;
 
 export const qualityValidationRunSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema,
   criteriaSnapshotId: nonEmptyTextSchema.nullable(),
-  kind: z.enum(["checks", "behavior", "full"]),
+  scenarioSnapshotId: nonEmptyTextSchema.nullable().default(null),
+  kind: z.enum(["checks", "behavior", "full", "functional"]),
   mode: qualityValidationModeSchema.nullable().default("browser"),
   phase: qualityRunPhaseSchema.nullable().default(null),
   failurePhase: qualityRunPhaseSchema.nullable().default(null),
@@ -153,6 +192,15 @@ export const qualityEvidenceSchema = z.object({
   provider: z.enum(ORCHESTRATORS).nullable(),
   sessionId: nonEmptyTextSchema.nullable(),
   model: nonEmptyTextSchema.nullable(),
+  functional: z.object({
+    scenarioId: nonEmptyTextSchema,
+    expected: z.string(),
+    interaction: qualityScenarioSchema.shape.interaction,
+    actions: z.array(z.object({ tool: nonEmptyTextSchema, description: z.string() })),
+    observed: z.string(),
+    screenshotPaths: z.array(nonEmptyTextSchema).default([]),
+    blocker: qualityEnvironmentBlockerSchema.nullable().default(null),
+  }).nullable().default(null),
   createdAt: timestampSchema,
 }).superRefine((evidence, context) => {
   if (evidence.status === "passed" && !evidence.output.trim()) {
@@ -193,7 +241,7 @@ export type QualityIterationMode = z.infer<typeof qualityIterationModeSchema>;
 export const qualityIterationStatusSchema = z.enum(["queued", "correcting", "verifying", "completed", "failed", "cancelled", "interrupted"]);
 export type QualityIterationStatus = z.infer<typeof qualityIterationStatusSchema>;
 
-export const qualityIterationTriggerSchema = z.enum(["criteria", "checks", "incomplete"]);
+export const qualityIterationTriggerSchema = z.enum(["criteria", "checks", "incomplete", "functional"]);
 export type QualityIterationTrigger = z.infer<typeof qualityIterationTriggerSchema>;
 
 export const qualityIterationSchema = z.object({
@@ -205,6 +253,7 @@ export const qualityIterationSchema = z.object({
   sourceRunId: nonEmptyTextSchema,
   sourceRevision: nonEmptyTextSchema,
   criteriaSnapshot: qualityCriteriaSnapshotSchema.nullable(),
+  scenarioSnapshot: qualityScenarioSnapshotSchema.nullable().default(null),
   originalTicket: z.object({ title: z.string(), description: z.string(), prdMarkdown: z.string().nullable() }),
   provider: z.enum(ORCHESTRATORS),
   mode: qualityIterationModeSchema,
@@ -224,6 +273,7 @@ export type QualityIteration = z.infer<typeof qualityIterationSchema>;
 export const ticketQualitySchema = z.object({
   ticketId: nonEmptyTextSchema,
   criteriaSnapshots: z.array(qualityCriteriaSnapshotSchema),
+  scenarioSnapshots: z.array(qualityScenarioSnapshotSchema).default([]),
   runs: z.array(qualityValidationRunSchema),
   evidence: z.array(qualityEvidenceSchema),
   iterations: z.array(qualityIterationSchema).default([]),
@@ -265,12 +315,13 @@ export const qualityPreflightSchema = z.object({
 });
 export type QualityPreflight = z.infer<typeof qualityPreflightSchema>;
 
-export const qualityFollowUpIssueSchema = z.enum(["checks", "blocker"]);
+export const qualityFollowUpIssueSchema = z.enum(["checks", "blocker", "functional"]);
 export type QualityFollowUpIssue = z.infer<typeof qualityFollowUpIssueSchema>;
 
 export const qualityProblemSchema = z.object({
   id: nonEmptyTextSchema,
-  kind: z.enum(["technical_check", "read_blocker", "criterion_failed", "criterion_unverified"]),
+  kind: z.enum(["technical_check", "read_blocker", "criterion_failed", "criterion_unverified", "scenario_failed", "scenario_unverified", "functional_blocker"]),
+  blocker: qualityEnvironmentBlockerSchema.optional(),
   authority: z.enum(["server", "agent"]),
   runId: nonEmptyTextSchema,
   summary: nonEmptyTextSchema,
@@ -295,6 +346,13 @@ export const qualityFollowUpSchema = z.object({
 export type QualityFollowUp = z.infer<typeof qualityFollowUpSchema>;
 
 const qualityActionAvailabilitySchema = z.object({ available: z.boolean(), reason: z.string().nullable() });
+const qualityRunCorrectionSchema = qualityActionAvailabilitySchema.extend({
+  sourceRunId: nonEmptyTextSchema.nullable(),
+  retryOfIterationId: nonEmptyTextSchema.nullable(),
+});
+const qualityFollowUpAvailabilitySchema = qualityActionAvailabilitySchema.extend({ sourceRunId: nonEmptyTextSchema.nullable() });
+const UNAVAILABLE_RUN_CORRECTION = { available: false, reason: null, sourceRunId: null, retryOfIterationId: null };
+const UNAVAILABLE_FOLLOW_UP = { available: false, reason: null, sourceRunId: null };
 
 export const qualityResponseSchema = z.object({
   quality: ticketQualitySchema,
@@ -305,14 +363,13 @@ export const qualityResponseSchema = z.object({
     retryOfIterationId: nonEmptyTextSchema.nullable(),
     recovery: qualityActionAvailabilitySchema,
     correction: qualityActionAvailabilitySchema,
-    checksCorrection: qualityActionAvailabilitySchema.extend({
-      sourceRunId: nonEmptyTextSchema.nullable(),
-      retryOfIterationId: nonEmptyTextSchema.nullable(),
-    }).default({ available: false, reason: null, sourceRunId: null, retryOfIterationId: null }),
+    checksCorrection: qualityRunCorrectionSchema.default(UNAVAILABLE_RUN_CORRECTION),
+    functionalCorrection: qualityRunCorrectionSchema.default(UNAVAILABLE_RUN_CORRECTION),
     followUp: z.object({
-      checks: qualityActionAvailabilitySchema.extend({ sourceRunId: nonEmptyTextSchema.nullable() }),
-      blocker: qualityActionAvailabilitySchema.extend({ sourceRunId: nonEmptyTextSchema.nullable() }),
-    }).default({ checks: { available: false, reason: null, sourceRunId: null }, blocker: { available: false, reason: null, sourceRunId: null } }),
+      checks: qualityFollowUpAvailabilitySchema,
+      blocker: qualityFollowUpAvailabilitySchema,
+      functional: qualityFollowUpAvailabilitySchema.default(UNAVAILABLE_FOLLOW_UP),
+    }).default({ checks: UNAVAILABLE_FOLLOW_UP, blocker: UNAVAILABLE_FOLLOW_UP, functional: UNAVAILABLE_FOLLOW_UP }),
     problems: z.array(qualityProblemSchema).default([]),
     followUps: z.array(qualityFollowUpSchema).default([]),
   }).optional(),

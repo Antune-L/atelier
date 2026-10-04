@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import type { CreateQualityFollowUpInput, QualityBlockerCategory, QualityEvidence, QualityFollowUpIssue, QualityIterationActions, QualityProblem, StartQualityIterationInput, TicketQuality } from "@shared/quality";
 
+import { FUNCTIONAL_BLOCKER_LABELS } from "@/components/ticket-detail/QualityResults";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { useProjects } from "@/hooks/useProjects";
@@ -26,9 +27,12 @@ const CHECKS_NOTE = "Diagnostique l’échec à partir des résultats du serveur
 const BLOCKER_NOTE = "Analyse le refus en lecture seule et relance une vérification complète sur le même code, sans élargir les permissions. Ne modifie pas le code ; les critères restent à vérifier.";
 const CRITERIA_CORRECTION_NOTE = "Corrige les écarts démontrés dans cette PR, puis lance une nouvelle vérification complète indépendante sur les mêmes critères.";
 const CRITERIA_RECOVERY_NOTE = "Relance une vérification complète avec le diagnostic du blocage, sur le même code et avec les mêmes permissions.";
+const FUNCTIONAL_CORRECTION_NOTE = "Corrige dans la PR les écarts observés dans le navigateur, puis rejoue les mêmes scénarios. Les contrôles techniques et la vérification complète restent à relancer avant la livraison.";
+const FUNCTIONAL_BLOCKER_NOTE = "Un blocage n’est pas un défaut du produit : résolvez le prérequis puis relancez « Tester la fonctionnalité ». Les permissions ne sont jamais élargies.";
 const FOLLOW_UP_NOTE = "Crée une carte passive en « À faire » avec le contexte nécessaire. Elle ne lance aucune implémentation et ne prouve pas que la validation a réussi.";
 const BLOCKER_PROJECT_HINT = "Choisissez le dépôt propriétaire du défaut ; la carte ne sera pas affectée implicitement.";
 const PANEL_CLASS = "space-y-2 rounded border border-warning/30 bg-warning/5 p-3";
+const FOLLOW_UP_TITLES: Record<QualityFollowUpIssue, string> = { checks: "Carte de correction des contrôles", blocker: "Carte de correction du blocage", functional: "Carte de correction du parcours" };
 
 interface RemediationProps {
   quality: TicketQuality;
@@ -56,7 +60,7 @@ function UnavailableReason({ available, reason }: { available: boolean; reason: 
 
 function FollowUpCard({ issue, actions, ticketProject, busy, onCreate }: { issue: QualityFollowUpIssue; actions: QualityIterationActions; ticketProject: string; busy: boolean; onCreate: (input: CreateQualityFollowUpInput) => void }) {
   const projects = useProjects();
-  const [project, setProject] = useState(issue === "checks" ? ticketProject : "");
+  const [project, setProject] = useState(issue === "blocker" ? "" : ticketProject);
   const availability = actions.followUp[issue];
   const existing = actions.followUps.find((followUp) => followUp.issue === issue && followUp.sourceRunId === availability.sourceRunId);
   if (existing !== undefined) return <p className="text-xs text-success">Carte de correction créée : {existing.title} ({existing.ticketId})</p>;
@@ -152,25 +156,51 @@ function CriteriaGroup({ problems, hasBlockers, quality, actions, busy, starting
   );
 }
 
+function FunctionalGroup({ problems, quality, actions, busy, starting, onOpenEvidence, onStartIteration }: RemediationProps & { problems: QualityProblem[] }) {
+  const action = actions.functionalCorrection;
+  const sourceRunId = action.sourceRunId;
+  return (
+    <div className={PANEL_CLASS}>
+      <p className="text-xs font-medium">Test fonctionnel dans le navigateur</p>
+      {problems.map((problem) => {
+        if (problem.kind === "functional_blocker") {
+          return <div key={problem.id} className="space-y-1"><ProblemHeader problem={problem}>Blocage de l’environnement</ProblemHeader><p className="text-xs">{problem.blocker === undefined ? formatQualityMessage(problem.summary) : FUNCTIONAL_BLOCKER_LABELS[problem.blocker]}</p><p className="text-2xs text-muted-foreground">{FUNCTIONAL_BLOCKER_NOTE}</p></div>;
+        }
+        const failed = problem.kind === "scenario_failed";
+        const evidence = quality.evidence.find((item) => item.id === problem.evidenceId);
+        const label = `${problem.criterionId ?? ""} · ${problem.summary}`;
+        return <div key={problem.id} className="flex items-center gap-2"><div className="min-w-0 flex-1"><ProblemHeader problem={problem}>{evidence === undefined ? label : <button type="button" className="text-left underline underline-offset-2" onClick={() => onOpenEvidence(evidence)}>{label}</button>}</ProblemHeader></div><span className={cn("shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-2xs", failed ? "text-danger" : "text-warning")}>{failed ? "Échec observé" : "Non vérifié"}</span></div>;
+      })}
+      {sourceRunId !== null && <ActionButton label="Corriger le parcours et retester" icon={<Wrench className="h-3.5 w-3.5" />} disabled={busy || !action.available} starting={starting} onClick={() => onStartIteration({ mode: "correction", trigger: "functional", sourceRunId, retryOfIterationId: action.retryOfIterationId ?? undefined })} />}
+      {sourceRunId !== null && <p className="text-xs text-muted-foreground">{FUNCTIONAL_CORRECTION_NOTE}</p>}
+      {action.retryOfIterationId !== null && <p className="text-2xs text-muted-foreground">{RETRY_HINT}</p>}
+      {sourceRunId !== null && <UnavailableReason available={action.available} reason={action.reason} />}
+    </div>
+  );
+}
+
 export function QualityRemediation(props: RemediationProps) {
   const { actions, ticketProject, busy, onCreateFollowUp } = props;
   const checks = actions.problems.filter((problem) => problem.kind === "technical_check");
   const blockers = actions.problems.filter((problem) => problem.kind === "read_blocker");
   const criteria = actions.problems.filter((problem) => problem.kind === "criterion_failed" || problem.kind === "criterion_unverified");
-  const followUpIssues = (["checks", "blocker"] satisfies QualityFollowUpIssue[]).filter((issue) => actions.followUp[issue].available || actions.followUps.some((followUp) => followUp.issue === issue));
-  const anyAction = actions.checksCorrection.available || actions.recovery.available || actions.correction.available;
+  const functional = actions.problems.filter((problem) => problem.kind === "scenario_failed" || problem.kind === "scenario_unverified" || problem.kind === "functional_blocker");
+  const followUpIssues = (["checks", "blocker", "functional"] satisfies QualityFollowUpIssue[]).filter((issue) => actions.followUp[issue].available || actions.followUps.some((followUp) => followUp.issue === issue));
+  const anyAction = actions.checksCorrection.available || actions.functionalCorrection.available || actions.recovery.available || actions.correction.available;
   if (actions.problems.length === 0 && !anyAction && followUpIssues.length === 0) return null;
+  const directActions: Record<QualityFollowUpIssue, boolean> = { checks: actions.checksCorrection.available, blocker: actions.recovery.available, functional: actions.functionalCorrection.available };
   return (
     <div className="space-y-3">
       <p className="text-xs font-medium">Problèmes à résoudre</p>
       {checks.length > 0 && <ChecksGroup {...props} problems={checks} />}
       {blockers.length > 0 && <BlockersGroup {...props} problems={blockers} />}
       {criteria.length > 0 && <CriteriaGroup {...props} problems={criteria} hasBlockers={blockers.length > 0} />}
+      {functional.length > 0 && <FunctionalGroup {...props} problems={functional} />}
       {followUpIssues.map((issue) => {
-        const directAvailable = issue === "checks" ? actions.checksCorrection.available : actions.recovery.available;
+        const directAvailable = directActions[issue];
         return (
           <div key={issue} className={cn("space-y-2", !directAvailable && "rounded border border-warning/30 bg-warning/5 p-3")}>
-            <p className="text-xs font-medium">{issue === "checks" ? "Carte de correction des contrôles" : "Carte de correction du blocage"}</p>
+            <p className="text-xs font-medium">{FOLLOW_UP_TITLES[issue]}</p>
             <FollowUpCard issue={issue} actions={actions} ticketProject={ticketProject} busy={busy} onCreate={onCreateFollowUp} />
           </div>
         );

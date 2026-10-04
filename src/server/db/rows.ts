@@ -38,8 +38,8 @@ import {
   triageVerdictSchema,
   vcsProviderSchema,
 } from "../../shared/schemas.ts";
-import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
-import type { QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityValidationRun } from "../../shared/quality.ts";
+import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityScenarioSnapshotSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
+import type { QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityScenarioSnapshot, QualityValidationRun } from "../../shared/quality.ts";
 import type { ProjectConfig } from "../config.ts";
 import { isProjectKey } from "../config.ts";
 
@@ -485,6 +485,11 @@ const qualityValidationRunRowSchema = qualityPayloadRowSchema.extend({ evidence_
 export function mapQualityCriteriaSnapshotRow(raw: unknown): QualityCriteriaSnapshot {
   const row = qualityPayloadRowSchema.parse(raw);
   return qualityCriteriaSnapshotSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityScenarioSnapshotRow(raw: unknown): QualityScenarioSnapshot {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityScenarioSnapshotSchema.parse(JSON.parse(row.payload_json));
 }
 
 export function mapQualityValidationRunRow(raw: unknown): QualityValidationRun {

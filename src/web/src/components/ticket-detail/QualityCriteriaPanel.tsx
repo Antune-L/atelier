@@ -107,7 +107,7 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
             <div className="flex items-center justify-between border-b border-border px-3 py-2 font-mono text-2xs text-muted-foreground"><span>CRITÈRE · PREUVE · VERSION {snapshot.version}</span><span>{gate.verifiedCriteria.length} / {gate.requiredCriteria.length} requis vérifiés</span></div>
             <div className="divide-y divide-border">
               {snapshot.criteria.map((criterion, index) => {
-                const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.criteriaSnapshotId === snapshot.id));
+                const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.kind !== "functional" && run.criteriaSnapshotId === snapshot.id));
                 const evidence = matchingEvidence.filter((item) => gate.currentRunIds.includes(item.runId)).at(-1) ?? matchingEvidence.at(-1);
                 const run = quality.runs.find((item) => item.id === evidence?.runId);
                 const evidenceCurrent = run !== undefined && gate.currentRunIds.includes(run.id);

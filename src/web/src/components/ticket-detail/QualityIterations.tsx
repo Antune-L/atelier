@@ -4,6 +4,7 @@ import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import { QUALITY_ITERATION_ACTIVE_STATUSES } from "@shared/quality";
 import type { QualityEvidence, QualityIteration, TicketQuality } from "@shared/quality";
 
+import { QualityFunctionalRunDetails } from "@/components/ticket-detail/QualityFunctionalRun";
 import { QualityRunExplanation, QualityRunStatus } from "@/components/ticket-detail/QualityResults";
 import { formatDateTime } from "@/lib/display";
 import { formatQualityMessage } from "@/lib/qualityMessages";
@@ -22,6 +23,7 @@ const ITERATION_STATUS_LABELS: Record<QualityIteration["status"], string> = {
 
 function iterationTitle(iteration: QualityIteration): string {
   if (iteration.trigger === "checks") return "Correction des contrôles techniques";
+  if (iteration.trigger === "functional") return "Correction du parcours et nouveau test fonctionnel";
   return iteration.mode === "correction" ? "Correction et nouvelle vérification" : "Déblocage et nouvelle vérification";
 }
 
@@ -31,10 +33,11 @@ function QualityIterationSummary({ iteration, quality, currentRunIds, onOpenEvid
   const active = QUALITY_ITERATION_ACTIVE_STATUSES.includes(iteration.status);
   const preparing = iteration.status === "queued" || iteration.status === "correcting";
   const verified = iteration.status === "completed";
+  const functional = iteration.trigger === "functional";
   const steps = [
     { label: "Diagnostic conservé", complete: true, current: false },
     { label: iteration.mode === "correction" ? "Correction de la PR" : "Reprise de la validation", complete: iteration.status === "verifying" || verified, current: preparing },
-    { label: "Vérification complète indépendante", complete: verified, current: iteration.status === "verifying" },
+    { label: functional ? "Nouveau test dans le navigateur" : "Vérification complète indépendante", complete: verified, current: iteration.status === "verifying" },
   ];
   return (
     <div className="space-y-3">
@@ -44,9 +47,10 @@ function QualityIterationSummary({ iteration, quality, currentRunIds, onOpenEvid
       </ol>
       <p className="text-2xs text-muted-foreground">Même ticket{iteration.prUrl !== null && " et même PR"} · {ORCHESTRATOR_LABELS[iteration.provider]} · {iteration.criteriaSnapshot === null ? "critères à préparer" : `critères v${iteration.criteriaSnapshot.version}`} · {formatDateTime(iteration.createdAt)}</p>
       <p className="text-2xs text-muted-foreground">Version de départ : <span className="font-mono" title={iteration.sourceRevision}>{iteration.sourceRevision.slice(0, REVISION_DISPLAY_LENGTH)}</span>{iteration.mode === "recovery" && " · code conservé"}</p>
-      {active && <p className="text-xs text-muted-foreground">Les critères sont verrouillés pendant ce cycle. La nouvelle vérification porte sur tous les critères.</p>}
+      {active && <p className="text-xs text-muted-foreground">{functional ? "Les critères et les scénarios sont verrouillés pendant ce cycle. Le nouveau test rejoue tous les scénarios dans le navigateur ; les contrôles techniques et la vérification complète restent à relancer." : "Les critères sont verrouillés pendant ce cycle. La nouvelle vérification porte sur tous les critères."}</p>}
       {iteration.diagnostic !== null && <p className="whitespace-pre-wrap break-words text-xs text-warning">{formatQualityMessage(iteration.diagnostic)}</p>}
-      {resultRun !== undefined && <div className="space-y-3 border-t border-border pt-3"><QualityRunStatus run={resultRun} current={current} quality={quality}><QualityRunExplanation run={resultRun} quality={quality} current={current} onOpenEvidence={onOpenEvidence} /></QualityRunStatus></div>}
+      {resultRun !== undefined && resultRun.kind === "functional" && <div className="border-t border-border pt-3"><QualityFunctionalRunDetails run={resultRun} quality={quality} current={current} onOpenEvidence={onOpenEvidence} /></div>}
+      {resultRun !== undefined && resultRun.kind !== "functional" && <div className="space-y-3 border-t border-border pt-3"><QualityRunStatus run={resultRun} current={current} quality={quality}><QualityRunExplanation run={resultRun} quality={quality} current={current} onOpenEvidence={onOpenEvidence} /></QualityRunStatus></div>}
     </div>
   );
 }

@@ -320,6 +320,15 @@ CREATE TABLE IF NOT EXISTS quality_criteria_snapshots (
   UNIQUE(ticket_id, version)
 );
 
+CREATE TABLE IF NOT EXISTS quality_scenario_snapshots (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(ticket_id, version)
+);
+
 CREATE TABLE IF NOT EXISTS quality_validation_runs (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

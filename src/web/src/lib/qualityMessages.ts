@@ -122,14 +122,46 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Simulated runs cannot create correction cards.": "Une simulation ne peut pas créer de carte de correction.",
   "The source run is still running or does not belong to this ticket.": "L’exécution source est encore en cours ou n’appartient pas à ce ticket.",
   "The source run is no longer the latest run for this issue; refresh the validation before creating a correction card.": "L’exécution source n’est plus la plus récente pour ce problème ; actualisez la validation avant de créer une carte de correction.",
+  "Browser testing requires a validator provider.": "Le test dans le navigateur nécessite un agent de validation.",
+  "The correction iteration has no frozen browser scenarios.": "La correction ne dispose pas de scénarios de navigateur verrouillés.",
+  "Scenario preparation modified the committed validation source.": "La préparation des scénarios a modifié la version du code à tester.",
+  "Ticket changed while browser scenarios were being prepared.": "Le ticket a changé pendant la préparation des scénarios de navigateur.",
+  "Acceptance criteria changed while browser scenarios were being prepared.": "Les critères d’acceptation ont changé pendant la préparation des scénarios de navigateur.",
+  "Independent validation has no criteria or browser scenarios.": "La validation indépendante ne dispose ni de critères ni de scénarios de navigateur.",
+  "Independent validation has no provider.": "La validation indépendante ne dispose pas d’agent.",
+  "One or more required browser scenarios failed.": "Un ou plusieurs scénarios requis ont échoué dans le navigateur.",
+  "Some required browser scenarios were not verified in the browser.": "Certains scénarios requis n’ont pas pu être vérifiés dans le navigateur.",
+  "No completed real browser scenario failure is available for correction.": "Aucun échec réel et terminé d’un scénario de navigateur n’est disponible pour une correction.",
+  "The same browser scenarios still fail after a correction attempt; inspect the evidence or create a correction card.": "Les mêmes scénarios échouent encore après une tentative de correction ; consultez les preuves ou créez une carte de correction.",
+  "The source run has no recorded failed, unverified or blocked browser scenario.": "Cette exécution n’a enregistré aucun scénario de navigateur en échec, non vérifié ou bloqué.",
+  "The source browser test is no longer the latest functional run.": "Un test fonctionnel plus récent existe. Actualisez les résultats avant de lancer une correction.",
+  "The ticket or browser scenarios changed after the source browser test.": "Le ticket ou les scénarios de navigateur ont changé. Relancez « Tester la fonctionnalité » avant de demander une correction.",
+  "Quality iteration requires the latest functional validation run": "Un test fonctionnel plus récent existe. Actualisez les résultats avant de lancer une correction.",
+  "Quality iteration requires the latest technical validation run": "Des contrôles techniques plus récents existent. Actualisez les résultats avant de lancer une correction.",
+  "Quality iteration source scenarios are missing or stale": "Les scénarios de navigateur ont changé. Relancez « Tester la fonctionnalité ».",
+  "Quality scenarios are frozen during a correction iteration": "Les scénarios de navigateur sont verrouillés pendant la correction.",
+  "Required browser scenarios were contradicted by attributed browser observations.": "Des observations attribuées dans le navigateur contredisent des scénarios requis.",
+  "The browser test could not proceed without access or test data that the isolated environment does not provide.": "Le test dans le navigateur ne peut pas avancer sans un accès ou des données de test que l’environnement isolé ne fournit pas.",
+  "The browser test exceeded its deadline.": "Le test dans le navigateur a dépassé son délai.",
+  "The browser test did not produce complete attributed observations.": "Le test dans le navigateur n’a pas produit d’observations attribuées complètes.",
+  "Scenario preparation did not complete successfully": "La préparation des scénarios ne s’est pas terminée correctement.",
+  "Scenario preparation lacks completed repository observations": "La préparation des scénarios n’a pas lu le dépôt du projet.",
+  "Scenario preparation did not return valid browser scenarios": "La préparation n’a pas renvoyé de scénarios de navigateur valides.",
+  "Validation cancelled before scenario preparation": "La validation a été annulée avant la préparation des scénarios.",
+  "Functional validation requires the validation application address": "Le test fonctionnel nécessite l’adresse de l’application à tester.",
+  "Functional validation requires browser mode": "Le test fonctionnel doit s’exécuter dans le navigateur.",
+  "The validator did not return a unique observed result for this scenario": "Le validateur n’a pas renvoyé un résultat observé unique pour ce scénario.",
+  "An interaction was claimed without a recorded browser execution": "Une interaction est annoncée sans exécution enregistrée dans le navigateur.",
+  "The reported result lacks matching browser observations of the validation application": "Le résultat annoncé ne correspond à aucune observation enregistrée dans l’application testée.",
+  "Navigation alone cannot pass a scenario that requires a user interaction": "Une simple navigation ne suffit pas pour un scénario qui exige une interaction.",
+  "The resulting state after the interaction was not observed": "L’état obtenu après l’interaction n’a pas été observé.",
 };
 
 const QUALITY_MESSAGE_PREFIXES = [
   { source: "Acceptance criterion is unverified: ", target: "Critère d’acceptation non vérifié : " },
   { source: "Required browser tools are unavailable: ", target: "Les outils de navigateur requis sont indisponibles : " },
   { source: "Isolated application did not become healthy. ", target: "L’application isolée n’est pas devenue disponible. " },
-  { source: "Dependency installation failed. ", target: "L’installation des dépendances du projet a échoué. " },
-];
+  { source: "Dependency installation failed. ", target: "L’installation des dépendances du projet a échoué. " },];
 const PLAYWRIGHT_STARTUP_MESSAGE = /^Playwright MCP (\S+) must be installed locally before behavioral validation\.( Automatic downloads are disabled\.)?(?: ([\s\S]*))?$/;
 const PREPARATION_FAILURE_PREFIX = "Validation environment preparation failed: ";
 const SIMULATED_CRITERION_ID = "SIMULATED";
@@ -150,6 +182,20 @@ const QUALITY_FAILURE_LABELS: Record<QualityRunPhase, string> = {
   preparing: "Préparation du projet bloquée",
   checks: "Échec des contrôles techniques",
   validating: "Validation indépendante en échec",
+  cleanup: "Nettoyage incomplet",
+};
+const FUNCTIONAL_PHASE_LABELS: Record<QualityRunPhase, string> = {
+  planning: "Préparation des scénarios",
+  preparing: "Installation et démarrage de l’application",
+  checks: "Contrôles techniques",
+  validating: "Parcours dans le navigateur",
+  cleanup: "Nettoyage de la copie de test",
+};
+const FUNCTIONAL_FAILURE_LABELS: Record<QualityRunPhase, string> = {
+  planning: "Préparation des scénarios bloquée",
+  preparing: "Démarrage de l’application bloqué",
+  checks: "Échec des contrôles techniques",
+  validating: "Parcours en échec dans le navigateur",
   cleanup: "Nettoyage incomplet",
 };
 const QUALITY_PERMISSION_BLOCK_MESSAGES: Record<QualityPermissionBlockReason, { reason: string; nextStep: string }> = {
@@ -231,14 +277,15 @@ export function qualityModeLabel(mode: QualityValidationMode | null): string {
 export function qualityRunTitle(run: Pick<QualityValidationRun, "kind" | "mode">): string {
   if (run.kind === "checks") return "Contrôles techniques";
   if (run.kind === "full") return "Vérification complète du ticket";
+  if (run.kind === "functional") return "Test fonctionnel dans le navigateur";
   if (run.mode === "repository") return "Validation du dépôt";
   return "Validation des parcours";
 }
 
-export function qualityPhaseLabel(phase: QualityRunPhase): string {
-  return QUALITY_PHASE_LABELS[phase];
+export function qualityPhaseLabel(phase: QualityRunPhase, kind?: QualityValidationRun["kind"]): string {
+  return kind === "functional" ? FUNCTIONAL_PHASE_LABELS[phase] : QUALITY_PHASE_LABELS[phase];
 }
 
-export function qualityFailureLabel(phase: QualityRunPhase): string {
-  return QUALITY_FAILURE_LABELS[phase];
+export function qualityFailureLabel(phase: QualityRunPhase, kind?: QualityValidationRun["kind"]): string {
+  return kind === "functional" ? FUNCTIONAL_FAILURE_LABELS[phase] : QUALITY_FAILURE_LABELS[phase];
 }

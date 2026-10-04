@@ -37,6 +37,22 @@ export const PREVIEW_READINESS_LABELS: Record<PreviewReadiness["status"], string
   check_error: "Vérification du projet indisponible",
 };
 
+export const PREVIEW_HISTORY_LIMIT = 10;
+const PREVIEW_INACTIVE_STATUSES: ReadonlySet<PreviewRecord['status']> = new Set(["failed", "interrupted", "stopping", "stopped"]);
+
+function previewIsLive(preview: PreviewRecord): boolean {
+  return preview.desiredState === "running" && !PREVIEW_INACTIVE_STATUSES.has(preview.status);
+}
+
+export function sortPreviewHistory(previews: PreviewRecord[]): PreviewRecord[] {
+  return [...previews].sort((left, right) => {
+    const leftLive = previewIsLive(left);
+    if (leftLive !== previewIsLive(right)) return leftLive ? -1 : 1;
+    if (left.createdAt !== right.createdAt) return right.createdAt - left.createdAt;
+    return right.updatedAt - left.updatedAt;
+  });
+}
+
 export function previewConnectionReady(settings: PreviewSettings | null): boolean {
   return settings !== null && settings.tokenConfigured && settings.previewAuthConfigured &&
     settings.baseUrl !== null && settings.serverUuid !== null && settings.projectUuid !== null &&

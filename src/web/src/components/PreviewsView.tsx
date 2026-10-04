@@ -10,7 +10,7 @@ import { useBusyAction } from "@/hooks/useBusyAction";
 import { formatDateTime } from "@/lib/display";
 import { errorMessage } from "@/lib/errors";
 import { previewApi } from "@/lib/previewApi";
-import { PREVIEW_CLEANUP_LABELS, PREVIEW_CLEANUP_WATCH_LABEL, PREVIEW_POLL_INTERVAL_MS, PREVIEW_REVISION_LABEL_LENGTH, PREVIEW_STATUS_LABELS } from "@/lib/previewDisplay";
+import { PREVIEW_CLEANUP_LABELS, PREVIEW_CLEANUP_WATCH_LABEL, PREVIEW_HISTORY_LIMIT, PREVIEW_POLL_INTERVAL_MS, PREVIEW_REVISION_LABEL_LENGTH, PREVIEW_STATUS_LABELS, sortPreviewHistory } from "@/lib/previewDisplay";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
 import { boardStore } from "@/lib/store";
 
@@ -104,6 +104,8 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
   const query = normalizeSearch(searchQuery);
   const visiblePreviews = previews.filter((preview) => (projectFilter === "all" || preview.project === projectFilter) &&
     matchesQuery(query, preview.branch, preview.project, projects.find((project) => project.key === preview.project)?.label ?? "", PREVIEW_STATUS_LABELS[preview.status]));
+  const sortedPreviews = sortPreviewHistory(visiblePreviews);
+  const displayedPreviews = sortedPreviews.slice(0, PREVIEW_HISTORY_LIMIT);
 
   return <div className="flex flex-col gap-4">
     <BranchPreviewForm projects={projects} projectFilter={projectFilter} onCreated={accept} />
@@ -111,9 +113,10 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
       <h2 className="text-sm font-semibold">Prévisualisations · {visiblePreviews.length}</h2>
       <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}><RefreshCw className="size-3.5" />Actualiser la liste</Button>
     </div>
+    {visiblePreviews.length > PREVIEW_HISTORY_LIMIT && <p className="text-xs text-muted-foreground">Affichage des {PREVIEW_HISTORY_LIMIT} plus récentes sur {visiblePreviews.length}.</p>}
     {(error || readError) && <p role="alert" className="text-sm text-danger">{error || readError}</p>}
     {loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Chargement des prévisualisations…</p>}
     {!loading && visiblePreviews.length === 0 && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Aucune prévisualisation pour cette sélection.</p>}
-    {visiblePreviews.map((preview) => <PreviewRow key={preview.id} preview={preview} projectLabel={projects.find((project) => project.key === preview.project)?.label ?? preview.project} onAction={act} />)}
+    {displayedPreviews.map((preview) => <PreviewRow key={preview.id} preview={preview} projectLabel={projects.find((project) => project.key === preview.project)?.label ?? preview.project} onAction={act} />)}
   </div>;
 }

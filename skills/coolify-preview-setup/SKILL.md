@@ -89,6 +89,8 @@ Read current documentation relevant to the project's selected build method and i
 
 ## Gotchas
 
+- Keep recipe paths repository-relative. Coolify 4.3.23 requires leading slashes for API `base_directory` and `dockerfile_location` values (root `/`); translate paths at the API boundary instead of changing recipe examples.
+- Coolify 4.3.23's native Dockerfile HTTP authentication stores encrypted passwords in a 255-character column. Keep passwords within 31 UTF-8 bytes: a 32-byte input produces 256 ciphertext characters and fails before application creation. The Compose gateway is unaffected.
 - A fake system adapter may not cover startup provisioning or probes. Inspect initialization paths rather than assuming dry-run isolates them all.
 - Coolify may inject one runtime environment file into every Compose service. Explicitly blank gateway authentication variables in upstream services rather than assuming service.environment prevents inheritance.
 - Kanban Agents' legacy configuration migration removes its input after importing it. Only copy a disposable non-secret fixture into the fresh data root.

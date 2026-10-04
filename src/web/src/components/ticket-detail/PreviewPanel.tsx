@@ -9,7 +9,7 @@ import { useBusyAction } from "@/hooks/useBusyAction";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/display";
 import { previewApi } from "@/lib/previewApi";
-import { PREVIEW_CLEANUP_LABELS, PREVIEW_POLL_INTERVAL_MS, PREVIEW_STATUS_LABELS } from "@/lib/previewDisplay";
+import { PREVIEW_CLEANUP_LABELS, PREVIEW_CLEANUP_WATCH_LABEL, PREVIEW_POLL_INTERVAL_MS, PREVIEW_STATUS_LABELS } from "@/lib/previewDisplay";
 
 const REVISION_LABEL_LENGTH = 8;
 const PENDING_PREVIEW_STATUSES: PreviewRecord["status"][] = ["queued", "provisioning", "building", "deploying"];
@@ -21,6 +21,7 @@ function newerPreview(current: PreviewRecord | null, incoming: PreviewRecord | n
 
 export function PreviewPanel({ ticket }: { ticket: Ticket }) {
   const [preview, setPreview] = useState<PreviewRecord | null>(null);
+  const [cleanupWatchCount, setCleanupWatchCount] = useState(0);
   const [projectSettings, setProjectSettings] = useState<PreviewProjectSettings | null>(null);
   const [settings, setSettings] = useState<PreviewSettings | null>(null);
   const [provider, setProvider] = useState<"github" | "azureDevops" | null>(null);
@@ -42,6 +43,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
         const snapshot = await previewApi.ticketPreview(ticket.id);
         if (!active || version !== requestVersion.current) return;
         setPreview((current) => newerPreview(current, snapshot.preview));
+        setCleanupWatchCount(snapshot.cleanupWatchCount ?? 0);
         setProjectSettings(snapshot.projectSettings);
         setProvider(snapshot.vcsProvider);
         setReadError(null);
@@ -71,6 +73,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
   const canDeploy = eligible && supported && setupReady && projectSettings?.enabled === true && !deploying && preview?.status !== "stopping" && previewCanDeploy;
   const canStop = preview !== null && preview.desiredState !== "stopped";
   const ready = preview?.status === "ready" && preview.desiredState === "running";
+  const showWatchCount = cleanupWatchCount > 0 && (preview === null || !preview.cleanupWatch || cleanupWatchCount > 1);
 
   async function refresh() {
     await run(async () => {
@@ -78,6 +81,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
       const [snapshot, connection] = await Promise.all([previewApi.ticketPreview(ticket.id), previewApi.settings()]);
       requestVersion.current += 1;
       setPreview((current) => newerPreview(current, snapshot.preview));
+      setCleanupWatchCount(snapshot.cleanupWatchCount ?? 0);
       setProjectSettings(snapshot.projectSettings);
       setProvider(snapshot.vcsProvider);
       setSettings(connection.settings);
@@ -153,7 +157,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
               <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck className="size-3.5 shrink-0" />Utilisez les identifiants définis dans Paramètres · Coolify.</p>
             </div>
           )}
-          {preview.desiredState === "stopped" && <p role="status" className={preview.cleanupStatus === "failed" ? "text-sm text-danger" : "text-sm text-muted-foreground"}>{PREVIEW_CLEANUP_LABELS[preview.cleanupStatus]}</p>}
+          {preview.desiredState === "stopped" && <p role="status" className={preview.cleanupStatus === "failed" ? "text-sm text-danger" : "text-sm text-muted-foreground"}>{preview.cleanupStatus === "complete" && preview.cleanupWatch ? PREVIEW_CLEANUP_WATCH_LABEL : PREVIEW_CLEANUP_LABELS[preview.cleanupStatus]}</p>}
           <div className="flex flex-wrap gap-2">
             {ready && preview.url !== null && <a className={buttonVariants({ size: "sm" })} href={preview.url} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />Ouvrir</a>}
             {canDeploy && <Button size="sm" variant="outline" disabled={busy} onClick={() => void deploy()}><RefreshCw className="size-3.5" />Créer une prévisualisation</Button>}
@@ -174,6 +178,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
           )}
         </>
       )}
+      {showWatchCount && <p role="status" className="text-xs text-muted-foreground">{cleanupWatchCount === 1 ? "Un arrêt reste surveillé." : `${cleanupWatchCount} arrêts restent surveillés.`}</p>}
       {!loading && preview === null && supported && (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Déployez le dernier commit de la pull request pour essayer cette fonctionnalité. La suppression reste disponible pendant la construction.</p>

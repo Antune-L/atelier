@@ -12,7 +12,7 @@ import { getProject, isProjectKey } from "./config.ts";
 import type { Store } from "./db/store.ts";
 import { KeyedMutex } from "./mutex.ts";
 import type { PreviewConfig } from "./previewConfig.ts";
-import { CoolifyClient } from "./system/coolifyClient.ts";
+import { CoolifyClient, CoolifyRequestError } from "./system/coolifyClient.ts";
 import type { SystemAdapter } from "./system/types.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
@@ -23,6 +23,15 @@ const COMPLETED_DEPLOYMENT_STATUSES = ["finished"];
 const FAILED_DEPLOYMENT_STATUSES = ["failed", "cancelled-by-user", "cancelled", "error"];
 const PREVIEW_BCRYPT_COST = 10;
 const STOPPED_PREVIEW_AUDIT_INTERVAL_MS = 60_000;
+const STOPPED_PREVIEW_TIMEOUT_GRACE_MS = 10 * 60 * 1_000;
+const REQUIRED_EMPTY_CLEANUP_AUDITS = 2;
+const SECONDS_TO_MS = 1_000;
+const HTTP_VALIDATION_FAILED = 422;
+const MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES = 31;
+
+function validateNativePreviewPassword(password: string): void {
+  if (Buffer.byteLength(password, "utf8") > MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES) throw new Error(`Coolify native preview authentication requires a password of at most ${MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES} UTF-8 bytes. Update the private preview password before starting this Dockerfile preview.`);
+}
 
 interface PreviewManagerDependencies {
   store: Store;
@@ -77,7 +86,8 @@ export class PreviewManager {
   ticket(ticketId: string) {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket) throw new Error("Ticket not found.");
-    return { preview: this.deps.store.getTicketPreview(ticketId), projectSettings: this.projectSettings(ticket.project), vcsProvider: getProject(ticket.project).vcsProvider };
+    const cleanupWatchCount = this.list().filter((preview) => preview.ticketId === ticketId && preview.cleanupWatch).length;
+    return { preview: this.deps.store.getTicketPreview(ticketId), projectSettings: this.projectSettings(ticket.project), vcsProvider: getProject(ticket.project).vcsProvider, cleanupWatchCount };
   }
 
   async testConnection() {
@@ -125,6 +135,9 @@ export class PreviewManager {
       if (!this.deps.system.readPreviewSource) throw new Error("Preview source inspection is unavailable.");
       const source = await this.deps.system.readPreviewSource(project.repoPath, ticket.prUrl, projectSettings.recipePath);
       const recipe = previewRecipeSchema.parse(source.recipe);
+      const auth = this.deps.config.getPreviewAuth();
+      if (!auth) throw new Error("Preview authentication is unavailable.");
+      if (recipe.buildPack === "dockerfile") validateNativePreviewPassword(auth.password);
       const inventory = await this.testConnection();
       const environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
       const generation = (previous?.generation ?? 0) + 1;
@@ -162,8 +175,15 @@ export class PreviewManager {
     if (this.shuttingDown) throw new Error("Preview service is shutting down.");
     const preview = this.get(id);
     if (preview.cleanupStatus === "complete") return preview;
+    if (preview.cleanupWatchUntil !== null && Date.now() >= preview.cleanupWatchUntil) {
+      if (preview.deploymentTimeoutSeconds === null) throw new Error("The interrupted deployment timeout was not recorded. Inspect the remote workers before resolving this cleanup failure.");
+    }
     if (preview.desiredState !== "stopped") await this.stop(id);
-    this.update(id, { cleanupRequestedAt: null, stopRequestedAt: null, cleanupStatus: "pending", status: "stopping", error: null });
+    let deleteRequestedAt = preview.deleteRequestedAt;
+    if (deleteRequestedAt !== null && preview.appUuid && await this.client(preview).application(preview.appUuid)) deleteRequestedAt = null;
+    const cleanupWatch = preview.cleanupWatchUntil !== null;
+    const cleanupWatchUntil = preview.deploymentTimeoutSeconds === null ? null : Date.now() + preview.deploymentTimeoutSeconds * SECONDS_TO_MS + STOPPED_PREVIEW_TIMEOUT_GRACE_MS;
+    this.update(id, { cleanupRequestedAt: null, stopRequestedAt: null, deleteRequestedAt, cleanupStatus: "pending", status: "stopping", error: null, cleanupWatch, cleanupWatchUntil: cleanupWatch ? cleanupWatchUntil : null, cleanupAuditAt: null, cleanupEmptyAuditCount: 0 });
     this.schedule(id);
     return this.get(id);
   }
@@ -194,7 +214,7 @@ export class PreviewManager {
   async recover(): Promise<void> {
     this.shuttingDown = false;
     for (const preview of this.list()) {
-      if (preview.cleanupStatus === "complete" && !preview.cleanupWatch) continue;
+      if ((preview.cleanupStatus === "complete" && !preview.cleanupWatch) || preview.cleanupStatus === "failed") continue;
       if (preview.expiresAt !== null && preview.expiresAt <= Date.now()) this.update(preview.id, { desiredState: "stopped", status: "stopping" });
       this.schedule(preview.id);
     }
@@ -216,6 +236,7 @@ export class PreviewManager {
         if (preview.cleanupWatch && Date.now() - (this.cleanupAudits.get(preview.id) ?? 0) >= STOPPED_PREVIEW_AUDIT_INTERVAL_MS) this.schedule(preview.id);
         continue;
       }
+      if (preview.cleanupStatus === "failed") continue;
       if (preview.expiresAt !== null && preview.expiresAt <= Date.now() && preview.desiredState === "running") void this.stop(preview.id).catch(() => undefined);
       if (!["failed", "interrupted"].includes(preview.status) || preview.desiredState === "stopped") this.schedule(preview.id);
     }
@@ -233,7 +254,7 @@ export class PreviewManager {
       const current = this.deps.store.getPreview(id);
       if (!current) return;
       const message = this.deps.config.redactError(getErrorMessage(error));
-      if (current.desiredState === "stopped") this.update(id, { status: "stopping", cleanupStatus: "failed", error: message });
+      if (current.desiredState === "stopped") this.update(id, { status: "stopping", cleanupStatus: "failed", cleanupWatch: false, error: message });
       else this.update(id, { status: "failed", error: message });
     }).finally(() => { this.pending.delete(id); });
     this.pending.set(id, completion);
@@ -272,7 +293,6 @@ export class PreviewManager {
         this.update(id, { status: "interrupted", error: "Application creation had an unknown outcome. Stop and clean this attempt before retrying." });
         return;
       } else {
-        preview = this.update(id, { createRequestedAt: Date.now(), status: "provisioning" });
         const settings = this.settings;
         const auth = this.deps.config.getPreviewAuth();
         if (!auth) throw new Error("Preview authentication is unavailable.");
@@ -287,12 +307,13 @@ export class PreviewManager {
           name: preview.ownershipMarker, description: preview.ownershipMarker, tags: [preview.ownershipMarker],
           server_uuid: preview.serverUuid, project_uuid: settings.projectUuid, environment_uuid: preview.environmentUuid,
           git_repository: repository, git_branch: preview.branch, git_commit_sha: preview.revision,
-          build_pack: recipe.buildPack, ports_exposes: String(recipe.port), base_directory: recipe.buildContext,
+          build_pack: recipe.buildPack, ports_exposes: String(recipe.port), base_directory: recipe.buildContext === "." ? "/" : `/${recipe.buildContext}`,
           instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false,
           autogenerate_domain: false,
-          ...(recipe.buildPack === "dockerfile" ? { dockerfile_location: recipe.dockerfile } : { docker_compose_location: recipe.composeFile }),
+          ...(recipe.buildPack === "dockerfile" ? { dockerfile_location: `/${recipe.dockerfile}` } : { docker_compose_location: `/${recipe.composeFile}` }),
         };
         if (recipe.buildPack === "dockerfile") {
+          validateNativePreviewPassword(auth.password);
           payload.is_http_basic_auth_enabled = true;
           payload.http_basic_auth_username = auth.username;
           payload.http_basic_auth_password = auth.password;
@@ -302,8 +323,14 @@ export class PreviewManager {
         }
         const endpoint = settings.githubAppUuid ? "/applications/private-github-app" : "/applications/public";
         if (settings.githubAppUuid) payload.github_app_uuid = settings.githubAppUuid;
-        const application = await client.createApplication(endpoint, payload);
-        preview = this.update(id, { appUuid: application.uuid });
+        try {
+          preview = this.update(id, { createRequestedAt: Date.now(), status: "provisioning" });
+          const application = await client.createApplication(endpoint, payload);
+          preview = this.update(id, { appUuid: application.uuid });
+        } catch (error) {
+          if (error instanceof CoolifyRequestError && error.status === HTTP_VALIDATION_FAILED) this.update(id, { createRequestedAt: null });
+          throw error;
+        }
       }
     }
     preview = this.get(id);
@@ -321,7 +348,7 @@ export class PreviewManager {
       } else {
         const auth = this.deps.config.getPreviewAuth();
         if (!auth) throw new Error("Preview authentication is unavailable.");
-        await client.updateApplication(appUuid, { build_pack: "dockercompose", docker_compose_location: recipe.composeFile, instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false });
+        await client.updateApplication(appUuid, { build_pack: "dockercompose", docker_compose_location: `/${recipe.composeFile}`, instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false });
         environment[PREVIEW_AUTH_USERNAME_ENV] = auth.username;
         environment[PREVIEW_AUTH_HASH_ENV] = await Bun.password.hash(auth.password, { algorithm: "bcrypt", cost: PREVIEW_BCRYPT_COST });
       }
@@ -338,7 +365,9 @@ export class PreviewManager {
       }
       let deploymentUuid = existingUuid;
       if (!deploymentUuid) {
-        this.update(id, { deployRequestedAt: Date.now() });
+        if (!preview.serverUuid) throw new Error("Preview deployment server is missing.");
+        const deploymentTimeoutSeconds = await client.getDeploymentTimeoutSeconds(preview.serverUuid);
+        preview = this.update(id, { deployRequestedAt: Date.now(), deploymentTimeoutSeconds });
         deploymentUuid = await client.deploy(appUuid);
       }
       preview = this.update(id, { deploymentUuid, deploymentUuids: [...new Set([...preview.deploymentUuids, deploymentUuid])], status: "building" });
@@ -364,6 +393,10 @@ export class PreviewManager {
 
   private async cleanup(preview: PreviewRecord, client: CoolifyClient): Promise<void> {
     await this.deps.quality?.cancelPreview(preview.ticketId, preview.id);
+    if (preview.cleanupWatch && preview.cleanupWatchUntil !== null && Date.now() >= preview.cleanupWatchUntil) {
+      this.update(preview.id, { cleanupStatus: "failed", cleanupWatch: false, status: "stopping", error: "Interrupted deployment cleanup did not settle within the recorded server timeout and grace period. Inspect remote workers and retry cleanup." });
+      return;
+    }
     if (!preview.appUuid && preview.ownershipMarker) {
       const application = await client.findApplication(preview.ownershipMarker);
       if (application) preview = this.update(preview.id, { appUuid: application.uuid });
@@ -380,12 +413,20 @@ export class PreviewManager {
         return uuid ? [uuid] : [];
       });
       preview = this.update(preview.id, { deploymentUuids: [...new Set([...preview.deploymentUuids, ...deploymentUuids])] });
-      const interrupted = deployments.some((deployment) => !COMPLETED_DEPLOYMENT_STATUSES.includes(deployment.status ?? "") && !FAILED_DEPLOYMENT_STATUSES.includes(deployment.status ?? ""));
-      preview = this.update(preview.id, { stopRequestedAt: Date.now(), status: "stopping", cleanupWatch: preview.cleanupWatch || interrupted });
+      const unresolvedDeploymentRequest = preview.deployRequestedAt !== null && preview.deploymentUuid === null && deployments.length === 0;
+      const interrupted = unresolvedDeploymentRequest || deployments.some((deployment) => !COMPLETED_DEPLOYMENT_STATUSES.includes(deployment.status ?? "") && !FAILED_DEPLOYMENT_STATUSES.includes(deployment.status ?? ""));
+      const stopRequestedAt = Date.now();
+      const cleanupWatch = preview.cleanupWatch || interrupted;
+      const cleanupWatchUntil = preview.deploymentTimeoutSeconds === null ? null : stopRequestedAt + preview.deploymentTimeoutSeconds * SECONDS_TO_MS + STOPPED_PREVIEW_TIMEOUT_GRACE_MS;
+      preview = this.update(preview.id, { stopRequestedAt, status: "stopping", cleanupWatch, cleanupWatchUntil: cleanupWatch ? cleanupWatchUntil : null });
       for (const deployment of deployments) {
         const uuid = deployment.deployment_uuid ?? deployment.uuid;
         if (uuid && !COMPLETED_DEPLOYMENT_STATUSES.includes(deployment.status ?? "") && !FAILED_DEPLOYMENT_STATUSES.includes(deployment.status ?? "")) await client.cancelDeployment(uuid);
       }
+    }
+    if (preview.cleanupWatch && preview.deploymentTimeoutSeconds === null) {
+      this.update(preview.id, { cleanupStatus: "failed", cleanupWatch: false, status: "stopping", error: "The interrupted deployment timeout is unknown. Inspect remote workers before retrying cleanup." });
+      return;
     }
     if (!this.deps.system.confirmPreviewCleanup) {
       this.update(preview.id, { cleanupStatus: "failed", error: "Remote resource cleanup cannot be verified. The Coolify application has been retained." });
@@ -436,12 +477,26 @@ export class PreviewManager {
 
   private async auditStoppedPreview(preview: PreviewRecord): Promise<void> {
     this.cleanupAudits.set(preview.id, Date.now());
+    if (preview.cleanupWatchUntil === null || preview.deploymentTimeoutSeconds === null) {
+      this.update(preview.id, { cleanupWatch: false, cleanupStatus: "failed", status: "stopping", error: "The original deployment timeout is unknown. Automatic monitoring stopped; inspect the remote workers and retry cleanup." });
+      return;
+    }
     const client = this.client(preview);
     const expectedServerAddress = preview.serverUuid ? await client.getServerAddress(preview.serverUuid) : null;
     if (!this.deps.system.confirmPreviewCleanup) throw new Error("Stopped preview resource monitoring is unavailable.");
     const result = await this.deps.system.confirmPreviewCleanup(preview, { sshHostAlias: this.settings.sshHostAlias, expectedServerAddress, removeOwnedResources: false, deploymentUuids: preview.deploymentUuids });
-    if (result.complete) return;
-    const pending = this.update(preview.id, { status: "stopping", cleanupStatus: "pending", cleanupRequestedAt: null, error: result.reason });
+    if (result.complete) {
+      if (Date.now() < preview.cleanupWatchUntil) return;
+      if (preview.cleanupAuditAt !== null && Date.now() - preview.cleanupAuditAt < STOPPED_PREVIEW_AUDIT_INTERVAL_MS) return;
+      const cleanupEmptyAuditCount = preview.cleanupEmptyAuditCount + 1;
+      this.update(preview.id, { cleanupAuditAt: Date.now(), cleanupEmptyAuditCount, cleanupWatch: cleanupEmptyAuditCount < REQUIRED_EMPTY_CLEANUP_AUDITS });
+      return;
+    }
+    if (Date.now() >= preview.cleanupWatchUntil && !result.retryable) {
+      this.update(preview.id, { cleanupWatch: false, cleanupStatus: "failed", status: "stopping", cleanupAuditAt: Date.now(), cleanupEmptyAuditCount: 0, error: result.reason ?? "Final interrupted-deployment cleanup could not be verified. Retry cleanup after inspecting the remote resources." });
+      return;
+    }
+    const pending = this.update(preview.id, { status: "stopping", cleanupStatus: "pending", cleanupRequestedAt: null, cleanupAuditAt: null, cleanupEmptyAuditCount: 0, error: result.reason });
     await this.cleanup(pending, client);
   }
 }

@@ -1,7 +1,7 @@
 services:
   app:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile.preview
     environment:
       PORT: "52817"
@@ -13,7 +13,7 @@ services:
       - "52817"
   preview-gateway:
     build:
-      context: ..
+      context: .
       dockerfile: .coolify/Dockerfile.gateway
     environment:
       KANBAN_PREVIEW_AUTH_USERNAME: ${KANBAN_PREVIEW_AUTH_USERNAME}

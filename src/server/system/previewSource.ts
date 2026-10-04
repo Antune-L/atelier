@@ -36,10 +36,10 @@ function validateComposeGateway(text: string, recipe: Extract<PreviewRecipe, { b
     if (service.build !== undefined && /KANBAN_PREVIEW_AUTH_/i.test(JSON.stringify(service.build))) throw new Error("Compose preview authentication must never enter image builds.");
   }
   const mount = gateway.volumes?.find((volume) => volume.endsWith(":/etc/caddy/Caddyfile:ro"));
-  const directory = posix.dirname(recipe.composeFile);
+  const directory = recipe.buildContext;
   if (mount && gateway.image?.startsWith("caddy:")) {
     const source = mount.slice(0, -":/etc/caddy/Caddyfile:ro".length);
-    if (!source.startsWith("./") || source.includes("\\")) throw new Error("The Caddy configuration must be a repository file next to the Compose file.");
+    if (!source.startsWith("./") || source.includes("\\")) throw new Error("The Caddy configuration must be a repository file relative to the recipe build context.");
     return { caddyPath: repositoryPath(directory, source), dockerfilePath: null, buildContext: null };
   }
   const build = z.object({ context: z.string(), dockerfile: z.string().default("Dockerfile") }).parse(gateway.build);

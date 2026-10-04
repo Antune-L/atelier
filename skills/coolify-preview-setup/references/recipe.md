@@ -38,6 +38,8 @@ Example for a Bun application after verifying its files and routes:
 
 The default data policy is ephemeral, with no persistent mounts. Keep health checks inside Docker/Compose definitions as well as the recipe. Document required secret names and remote authentication through the application's existing mechanism; never store their values here.
 
+Coolify 4.3.23 sets Compose's `--project-directory` to the recipe's `buildContext`, which becomes the deployment working directory. Relative service build contexts and file paths resolve from there, rather than from the Compose file's directory. With `buildContext: "."`, use service `build.context: .` even when the Compose file lives in `.coolify`, and verify locally with the repository root as `--project-directory`.
+
 Compose gateway example:
 
 ```json

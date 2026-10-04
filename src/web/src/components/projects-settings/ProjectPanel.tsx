@@ -20,6 +20,7 @@ import {
   suggestionHint,
 } from "@/components/projects-settings/ProjectPanelParts";
 import { Button } from "@/components/ui/button";
+import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -476,6 +477,7 @@ export function ProjectPanel({
           advancedFields
         )}
         <ValidationConfigFields value={validation} onChange={setValidation} />
+        {project !== null && <ProjectPreviewSettings key={project.key} project={project} />}
       </div>
 
       <SettingsFooter dirty={dirty && !creating} justSaved={savedVisible}>

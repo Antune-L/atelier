@@ -322,8 +322,8 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
       {activeTab === "terminal" ? (
         <TerminalTab ticket={current} />
       ) : (
-        <>
-          <div className={cn("min-w-0 flex-1 overflow-y-auto px-4 py-3", activeTab === "overview" && "lg:overflow-hidden")}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+          <div className={cn("min-w-0 shrink-0 px-4 py-3 md:flex-1 md:shrink md:overflow-y-auto", activeTab === "overview" && "lg:overflow-hidden")}>
             {activeTab === "overview" && (
               <OverviewTab ticket={current} projects={projects} locked={locked} />
             )}
@@ -358,7 +358,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
             )}
             {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} />}
           </div>
-          <aside className="w-56 shrink-0 space-y-4 overflow-y-auto border-l border-border px-3 py-3">
+          <aside className="w-full shrink-0 space-y-4 border-t border-border px-3 py-3 md:w-56 md:overflow-y-auto md:border-l md:border-t-0">
             <TicketMeta
               ticket={current}
               projects={projects}
@@ -375,7 +375,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               onRecovery={() => selectTab("activity")}
             />
           </aside>
-        </>
+        </div>
       )}
 
       <AlertDialog

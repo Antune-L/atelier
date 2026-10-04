@@ -1,0 +1,12 @@
+FROM caddy:2.10.2-alpine AS caddy
+
+FROM alpine:3.22
+COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
+COPY --from=caddy /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY .coolify/Caddyfile.preview /etc/caddy/Caddyfile
+ENV XDG_DATA_HOME=/tmp/caddy/data \
+    XDG_CONFIG_HOME=/tmp/caddy/config
+USER 10001:10001
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 CMD wget -q -O /dev/null http://app:52817/health && wget -S -O /dev/null http://127.0.0.1:8080/health 2>&1 | grep -q 'HTTP/1.1 401 Unauthorized'
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

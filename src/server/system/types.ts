@@ -13,6 +13,8 @@ import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type { ReviewRequestSnapshot } from "./vcs/types.ts";
+import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
+import type { PreviewRecord } from "../../shared/preview.ts";
 
 export interface GitWorktreeAddOptions {
   repoPath: string;
@@ -241,6 +243,10 @@ export interface SpawnShellOptions {
 
 export interface SystemAdapter {
   readonly dryRun: boolean;
+  coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;
+  readPreviewSource?(repoPath: string, prUrl: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; recipe: unknown }>;
+  confirmPreviewCleanup?(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<{ complete: boolean; reason: string | null; retryable?: boolean }>;
+  probePreviewHealth?(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean>;
 
   // ---- Workspace trust seeding (slots at first-boot; the real repo before a triage session) ----
   seedWorkspaceTrust(paths: string[]): Promise<void>;
@@ -348,6 +354,7 @@ export interface SystemAdapter {
   codeSnapshot(slotPath: string): Promise<CodeSnapshot>;
   prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult>;
   readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult>;
+  readPullRequestHead(repoPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult>;
   publishReview(slotPath: string, prUrl: string, opts: PublishReviewOptions, provider: VcsProvider): Promise<PublishReviewResult>;
   /**
    * Create a PR for a stealth ticket from the worktree's pushed branch: ensures the base branch exists

@@ -2,6 +2,7 @@ import type { ErrorDetails, ProjectInfo, Ticket } from "@shared/schemas";
 
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { LaunchForm } from "@/components/ticket-detail/LaunchForm";
+import { PreviewPanel } from "@/components/ticket-detail/PreviewPanel";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { Markdown } from "@/components/ui/markdown";
 import { formatDateTime } from "@/lib/display";
@@ -60,6 +61,8 @@ export function OverviewTab({ ticket, projects, locked }: OverviewTabProps) {
               <p className="text-sm text-muted-foreground">(vide)</p>
             )}
           </section>
+
+          {ticket.kind === "feature" && ticket.prUrl !== null && <PreviewPanel key={ticket.id} ticket={ticket} />}
 
           {showSummary && ticket.agentSummary !== null && (
             <section className="space-y-2">

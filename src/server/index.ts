@@ -39,6 +39,8 @@ import { migrateConfigJsonIfPresent } from "./migration.ts";
 import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { PrNotificationMonitor } from "./prNotificationMonitor.ts";
+import { PreviewConfig } from "./previewConfig.ts";
+import { PreviewManager } from "./previewManager.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
@@ -210,14 +212,13 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const port = await resolveServerPort(requestedPort);
   const dbPath = resolveDataFile(opts.dataRoot, DB_FILENAME, process.env.KANBAN_DB);
 
-  // Warm the claude binary early (packaged app: detect a user install or download the pinned one) so
-  // it is usually ready before the first ticket launch. Non-blocking: a cold download must not delay
-  // the window, and a failure here simply defers provisioning to the first session launch (retried).
-  configureClaudeProvisionDir(join(dataRoot, "bin"));
-  void ensureClaudeBinary().then(
-    (binary) => createLogger("boot").info("binaire claude prêt", { binary }),
-    (error: unknown) => createLogger("boot").warn("provisioning claude différé au premier lancement", { error: getErrorMessage(error) }),
-  );
+  if (process.env.KANBAN_DRY_RUN === "0") {
+    configureClaudeProvisionDir(join(dataRoot, "bin"));
+    void ensureClaudeBinary().then(
+      (binary) => createLogger("boot").info("binaire claude prêt", { binary }),
+      (error: unknown) => createLogger("boot").warn("provisioning claude différé au premier lancement", { error: getErrorMessage(error) }),
+    );
+  }
 
   const db = createDatabase(dbPath);
   const store = new Store(db);
@@ -262,7 +263,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     if (current) await delegationManager.resumeImplementationPlan(current, slotId);
   });
   slotManager.setQualityGate((ticketId, mode) => qualityManager.gate(ticketId, mode));
-  slotManager.setQualityCancel((ticketId) => qualityManager.cancel(ticketId));
   slotManager.setQualityIterationVerifier((ticketId, worktreePath, iterationId) => qualityManager.verifyQualityIteration(ticketId, worktreePath, iterationId));
   qualityManager.setQualityIterationCorrectionStarter((ticketId, iterationId) => slotManager.startQualityCorrection(ticketId, iterationId));
   qualityManager.setQualityIterationSettled((ticketId, iterationId, runId, verdict) => slotManager.settleQualityIteration(ticketId, iterationId, runId, verdict));
@@ -285,24 +285,43 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
+  const ticketOperations = createTicketOperations({
+    store,
+    hub: clientHub,
+    lifecycle,
+    slots: slotManager,
+    feasibility: feasibilityManager,
+  });
+  const previewManager = new PreviewManager({
+    store,
+    config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),
+    system,
+    quality: qualityManager,
+    ticketOperations,
+    resourcesRoot,
+    onChange: (ticketId) => {
+      const ticket = store.getTicket(ticketId);
+      if (ticket) clientHub.pushTicket(ticket);
+    },
+  });
+  slotManager.setQualityCancel(async (ticketId) => {
+    const preview = store.getTicketPreview(ticketId);
+    if (preview && preview.cleanupStatus !== "complete") await previewManager.stop(preview.id);
+    await qualityManager.cancel(ticketId);
+  });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
     ? null
     : new PublicMcpManager(
-      createTicketOperations({
-        store,
-        hub: clientHub,
-        lifecycle,
-        slots: slotManager,
-        feasibility: feasibilityManager,
-      }),
+      ticketOperations,
       mcpToken,
       system.dryRun,
     );
 
   await runFirstBootSetup(store, system);
   await qualityManager.recover();
+  await previewManager.recover();
   await slotManager.recover();
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
@@ -318,6 +337,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   });
 
   const api = createApiRoutes({
+    previews: previewManager,
     quality: qualityManager,
     qualityArtifactDirectory: join(dataRoot, "quality-artifacts"),
     store,
@@ -446,6 +466,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       publicMcpManager?.setToken(token);
     },
     async teardownSessions() {
+      await previewManager.shutdown();
       await qualityManager.shutdown();
       await slotManager.teardownSessions();
       await delegationManager.drainClosingSessions();
@@ -453,6 +474,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await feasibilityManager.teardownAll();
     },
     async stop() {
+      await previewManager.shutdown();
       await qualityManager.shutdown();
       await prNotificationMonitor.stop();
       watchdog.stop();

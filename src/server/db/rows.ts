@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
+import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
+
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import type { AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
@@ -774,4 +777,16 @@ const prNotificationSyncRowSchema = z.object({
 });
 export function mapPrNotificationSyncRow(raw: unknown) {
   return prNotificationSyncRowSchema.parse(raw);
+}
+
+const previewPayloadRowSchema = z.object({ payload_json: z.string() });
+
+export function mapPreviewRow(raw: unknown): PreviewRecord {
+  const row = previewPayloadRowSchema.parse(raw);
+  return previewRecordSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapPreviewProjectSettingsRow(raw: unknown): PreviewProjectSettings {
+  const row = previewPayloadRowSchema.parse(raw);
+  return previewProjectSettingsSchema.parse(JSON.parse(row.payload_json));
 }

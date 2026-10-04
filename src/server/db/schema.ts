@@ -320,6 +320,24 @@ CREATE TABLE IF NOT EXISTS quality_criteria_snapshots (
   UNIQUE(ticket_id, version)
 );
 
+CREATE TABLE IF NOT EXISTS preview_runs (
+  id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE RESTRICT,
+  project TEXT NOT NULL,
+  desired_state TEXT NOT NULL,
+  cleanup_status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS preview_runs_ticket_idx ON preview_runs(ticket_id, created_at);
+CREATE INDEX IF NOT EXISTS preview_runs_cleanup_idx ON preview_runs(cleanup_status);
+
+CREATE TABLE IF NOT EXISTS preview_project_settings (
+  project TEXT PRIMARY KEY REFERENCES projects(key) ON DELETE CASCADE,
+  payload_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS quality_validation_runs (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

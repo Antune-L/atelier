@@ -87,7 +87,7 @@ export function atelierPrdExportUrl(id: string, format: "json" | "html"): string
   return `${atelierPrdPath(id)}/export.${format}`;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "content-type": "application/json", ...init?.headers },

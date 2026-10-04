@@ -90,6 +90,7 @@ if (!VERSION_PATTERN.test(version)) {
 assertSdkVersionsInSync();
 
 await run(["bun", "run", "build:web"]);
+await run(["bun", "run", "build:preview-tools"]);
 await run([ELECTROBUN_BIN, "build", "--env=stable"], { ATELIER_VERSION: version, ATELIER_RELEASE: "1" });
 
 if (!existsSync(BUILT_DMG)) fail(`DMG not found: ${BUILT_DMG}`);

@@ -230,8 +230,12 @@ export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { 
           const current = currentRunIds.includes(run.id);
           return (
             <div key={run.id} className="space-y-2 px-3 py-3 text-xs">
-              <QualityRunStatus run={run} current={current} quality={quality} />
-              <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
+              <QualityRunStatus run={run} current={current || Boolean(run.preview)} quality={quality} />
+              {run.preview ? (
+                <p className="break-all text-muted-foreground">Prévisualisation · {run.preview.revision}</p>
+              ) : (
+                <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
+              )}
               <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
               <p className="break-all font-mono text-2xs">{run.revision}</p>
               {run.environment && <p className="break-all text-muted-foreground">Copie séparée : {run.environment.directory} · port {run.environment.port}</p>}

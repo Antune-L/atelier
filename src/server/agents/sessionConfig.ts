@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+
 import {
   ATELIER_SLOT_ID,
   FEASIBILITY_SCOUT_AGENT_NAME,
@@ -8,6 +10,7 @@ import {
 } from "../../shared/constants.ts";
 import type { Orchestrator, VcsProvider } from "../../shared/constants.ts";
 import type { ResearchOptions, Ticket } from "../../shared/schemas.ts";
+import { COOLIFY_PREPARATION_MARKER } from "../../shared/skills.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSessionOptions, AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
@@ -436,7 +439,10 @@ const DELEGATED_BASH_ALLOWLIST = BASH_ALLOWLIST.filter((rule) => {
  * and further for its clean tickets (the only kind whose contract drives `az devops invoke`).
  */
 function bashAllowlist(ticket: Ticket, vcsProvider: VcsProvider, composerScriptPath: string): string[] {
-  if (vcsProvider !== "azureDevops") return [...BASH_ALLOWLIST, `Bash(${composerScriptPath}:*)`];
+  const preparation = ticket.kind === "feature" && vcsProvider === "github" && ticket.description.includes(COOLIFY_PREPARATION_MARKER)
+    ? [`Bash(${join(dirname(composerScriptPath), "verify_coolify_preview.sh")}:*)`]
+    : [];
+  if (vcsProvider !== "azureDevops") return [...BASH_ALLOWLIST, ...preparation, `Bash(${composerScriptPath}:*)`];
   const clean = ticket.kind === "clean" ? AZURE_CLEAN_BASH_ALLOWLIST : [];
   return [...BASH_ALLOWLIST, ...AZURE_BASH_ALLOWLIST, ...clean, `Bash(${composerScriptPath}:*)`];
 }

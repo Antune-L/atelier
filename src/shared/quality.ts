@@ -13,6 +13,22 @@ const timestampSchema = z.number().int().nonnegative();
 export const qualityValidationModeSchema = z.enum(["repository", "browser"]);
 export type QualityValidationMode = z.infer<typeof qualityValidationModeSchema>;
 
+export interface QualityPreviewTarget {
+  previewId: string;
+  revision: string;
+  url: string;
+  healthPath?: string;
+  auth?: { username: string; password: string };
+  assertCurrent?: () => Promise<void>;
+}
+
+export const qualityPreviewBindingSchema = z.object({
+  previewId: nonEmptyTextSchema,
+  revision: nonEmptyTextSchema,
+  url: z.string().url(),
+});
+export type QualityPreviewBinding = z.infer<typeof qualityPreviewBindingSchema>;
+
 export const qualityRunPhaseSchema = z.enum(["planning", "preparing", "checks", "validating", "cleanup"]);
 export type QualityRunPhase = z.infer<typeof qualityRunPhaseSchema>;
 
@@ -62,6 +78,7 @@ export const qualityCriteriaSnapshotSchema = z.object({
   purpose: qualityCriteriaPurposeSchema.default("acceptance"),
   baseSnapshotId: nonEmptyTextSchema.nullable().default(null),
   uncovered: z.array(qualityUncoveredCriterionSchema).default([]),
+  previewId: nonEmptyTextSchema.optional(),
 }).refine((snapshot) => new Set(snapshot.criteria.map((criterion) => criterion.id)).size === snapshot.criteria.length, "Criterion ids must be unique");
 export type QualityCriteriaSnapshot = z.infer<typeof qualityCriteriaSnapshotSchema>;
 
@@ -70,7 +87,7 @@ export function latestAcceptanceSnapshot(quality: Pick<TicketQuality, "criteriaS
 }
 
 export function latestFunctionalSnapshot(quality: Pick<TicketQuality, "criteriaSnapshots">): QualityCriteriaSnapshot | undefined {
-  return quality.criteriaSnapshots.filter((snapshot) => snapshot.purpose === "functional").at(-1);
+  return quality.criteriaSnapshots.filter((snapshot) => snapshot.purpose === "functional" && !snapshot.previewId).at(-1);
 }
 
 export const qualityEnvironmentSchema = z.object({
@@ -166,7 +183,8 @@ export const qualityValidationRunSchema = z.object({
   cleanupStatus: z.enum(["pending", "complete", "failed"]),
   error: z.string().nullable(),
   diagnostic: qualityRunDiagnosticSchema.nullable().default(null),
-});
+  preview: qualityPreviewBindingSchema.nullable().optional(),
+}).refine((run) => !run.preview || run.kind === "functional" && run.mode === "browser" && run.revision === run.preview.revision, "Preview validation must be a browser functional run of its bound revision");
 export type QualityValidationRun = z.infer<typeof qualityValidationRunSchema>;
 
 export const qualityEvidenceSchema = z.object({

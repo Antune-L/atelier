@@ -94,7 +94,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const independentRuns = [...quality.runs].reverse().filter((run) => (run.kind === "behavior" || run.kind === "full") && run.provider !== null);
   const independentRun = independentRuns[0];
   const independentCurrent = independentRun !== undefined && gate.currentRunIds.includes(independentRun.id);
-  const functionalRun = [...quality.runs].reverse().find((run) => run.kind === "functional");
+  const functionalRun = [...quality.runs].reverse().find((run) => run.kind === "functional" && !run.preview);
   const functionalCurrent = functionalRun !== undefined && gate.currentRunIds.includes(functionalRun.id);
   const busy = pending || activeRun !== undefined || iterationActive;
   const startIteration = async (request: Omit<StartQualityIterationInput, "provider">): Promise<void> => {
@@ -110,7 +110,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
     if (busy) return;
     void act(async () => setResponse(await api.createQualityFollowUp(ticket.id, input)));
   };
-  const latestRevision = quality.runs.at(-1)?.revision ?? preflight?.revision;
+  const latestRevision = quality.runs.filter((run) => !run.preview).at(-1)?.revision ?? preflight?.revision;
   const reservations = [...new Set([...gate.reservations, ...gate.reasons].map((message) => formatQualityGateMessage(message, quality)))];
   const simulated = quality.runs.some((run) => run.simulated);
   let deliveryLabel = "Validation à préparer";

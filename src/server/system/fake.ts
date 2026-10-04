@@ -4,11 +4,13 @@ import { basename, join } from "node:path";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import type { PreviewRecord } from "../../shared/preview.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
 import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { createFakeCoolifyTransport } from "./coolifyClient.ts";
 import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
@@ -82,6 +84,17 @@ function fakeMissingKey(name: string, provider: Orchestrator): string {
 }
 
 export class FakeSystemAdapter implements SystemAdapter {
+  readonly coolifyRequest = createFakeCoolifyTransport();
+  async readPreviewSource(_repoPath: string, prUrl: string, _recipePath: string) {
+    const url = new URL(prUrl);
+    return { revision: "0123456789012345678901234567890123456789", branch: "preview-demo", repository: url.pathname.split("/").slice(1, 3).join("/"), recipe: { version: 1, buildPack: "dockerfile", dockerfile: "Dockerfile", buildContext: ".", port: 3000, healthPath: "/", environment: {} } };
+  }
+  async confirmPreviewCleanup(_preview: PreviewRecord) {
+    return { complete: true, reason: null };
+  }
+  async probePreviewHealth(_url: string, _healthPath: string, _auth: { username: string; password: string }) {
+    return true;
+  }
   private readonly implementationLots = new Map<string, { slotPath: string; files: string[]; integrated: boolean }>();
   readonly dryRun = true;
   /** One fake client for every provider: dry-run never talks to a real PR host. */
@@ -391,6 +404,10 @@ export class FakeSystemAdapter implements SystemAdapter {
   async readReviewHead(slotPath: string, prUrl: string, provider: VcsProvider): Promise<ReviewHeadResult> {
     this.log("readReviewHead", { slotPath, prUrl });
     return this.vcs(provider).readPrHead(slotPath, prUrl);
+  }
+
+  async readPullRequestHead(_repoPath: string, _prUrl: string, _provider: VcsProvider): Promise<ReviewHeadResult> {
+    return { ok: true, reason: "", commitSha: "0123456789012345678901234567890123456789" };
   }
 
   async publishReview(

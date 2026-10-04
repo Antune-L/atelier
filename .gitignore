@@ -13,6 +13,8 @@ kanban-real.db-*
 *.sqlite
 slots/
 config.json
+preview-settings.json
+preview-settings.json.*.tmp
 .env
 .env.local
 .tokensave/

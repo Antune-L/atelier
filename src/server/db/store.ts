@@ -34,6 +34,8 @@ import { hasUnresolvedImplementation, implementationPlanSchema } from "../../sha
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
+import { createPreviewSchema, previewProjectSettingsSchema, previewRecordSchema, updatePreviewProjectSettingsSchema, updatePreviewSchema } from "../../shared/preview.ts";
+import type { CreatePreviewInput, PreviewProjectSettings, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput } from "../../shared/preview.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
@@ -45,7 +47,7 @@ import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -1439,6 +1441,9 @@ export class Store {
   /** Hard-delete a ticket and its dependent rows (comments + events). */
   deleteTicket(ticketId: string): void {
     const tx = this.db.transaction(() => {
+      const previews = this.db.query("SELECT * FROM preview_runs WHERE ticket_id = ?").all(ticketId).map(mapPreviewRow);
+      if (previews.some((preview) => preview.desiredState !== "stopped" || preview.cleanupStatus !== "complete" || preview.cleanupWatch)) throw new Error("Preview cleanup is incomplete or still being monitored. The ticket cannot be deleted yet.");
+      this.db.query("DELETE FROM preview_runs WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
       this.resetImplementationPlan(ticketId);
@@ -1686,12 +1691,13 @@ export class Store {
       if (!ticket) throw new Error("Quality iteration ticket not found");
       const source = this.getQualityRun(input.sourceRunId);
       if (!source || source.ticketId !== ticket.id) throw new Error("Quality iteration source run does not belong to the ticket");
+      if (source.preview) throw new Error("Remote preview runs cannot start a local quality correction iteration.");
       if (source.status === "queued" || source.status === "running") throw new Error("Quality iteration requires a completed source run");
       const quality = this.getTicketQuality(ticket.id);
       let sourceKinds: Array<QualityValidationRun["kind"]> = ["full"];
       if (trigger === "checks") sourceKinds = ["checks", "full"];
       else if (trigger === "functional") sourceKinds = ["functional"];
-      if (quality.runs.filter((run) => sourceKinds.includes(run.kind)).at(-1)?.id !== source.id) throw new Error(trigger === "checks" ? "Quality iteration requires the latest technical validation run" : `Quality iteration requires the latest ${trigger === "functional" ? "functional" : "full"} validation run`);
+      if (quality.runs.filter((run) => !run.preview && sourceKinds.includes(run.kind)).at(-1)?.id !== source.id) throw new Error(trigger === "checks" ? "Quality iteration requires the latest technical validation run" : `Quality iteration requires the latest ${trigger === "functional" ? "functional" : "full"} validation run`);
       const criteriaSnapshot = quality.criteriaSnapshots.find((snapshot) => snapshot.id === source.criteriaSnapshotId) ?? null;
       const currentSnapshot = trigger === "functional" ? latestFunctionalSnapshot(quality) : latestAcceptanceSnapshot(quality);
       if ((currentSnapshot?.id ?? null) !== source.criteriaSnapshotId) throw new Error("Quality iteration source criteria are stale");
@@ -1764,7 +1770,7 @@ export class Store {
     });
   }
 
-  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & Partial<Pick<QualityCriteriaSnapshot, "purpose" | "baseSnapshotId" | "uncovered">> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
+  createQualityCriteriaSnapshot(ticketId: string, input: Pick<QualityCriteriaSnapshot, "criteria" | "sourceFingerprint" | "createdBy"> & Partial<Pick<QualityCriteriaSnapshot, "purpose" | "baseSnapshotId" | "uncovered" | "previewId">> & { mode?: QualityValidationMode }): QualityCriteriaSnapshot {
     return this.transaction(() => {
       if (this.getActiveQualityIteration(ticketId)?.mode === "correction") throw new Error("Quality criteria are frozen during a correction iteration");
       const version = this.scalar("SELECT COALESCE(MAX(version), 0) + 1 AS n FROM quality_criteria_snapshots WHERE ticket_id = ?", ticketId);
@@ -2123,6 +2129,58 @@ export class Store {
       .get(ticketId, ...types);
     if (row && typeof row === "object" && "type" in row && typeof row.type === "string") return row.type;
     return null;
+  }
+
+  createPreview(input: CreatePreviewInput): PreviewRecord {
+    return this.transaction(() => {
+      const parsed = createPreviewSchema.parse(input);
+      const ticket = this.getTicket(parsed.ticketId);
+      if (!ticket || ticket.project !== parsed.project) throw new Error("Preview ticket and project must match.");
+      const now = Date.now();
+      const preview = previewRecordSchema.parse({ ...parsed, id: nanoid(), createdAt: now, updatedAt: now });
+      this.db.query("INSERT INTO preview_runs (id, ticket_id, project, desired_state, cleanup_status, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(preview.id, preview.ticketId, preview.project, preview.desiredState, preview.cleanupStatus, JSON.stringify(preview), preview.createdAt);
+      return preview;
+    });
+  }
+
+  getPreview(id: string): PreviewRecord | null {
+    const row = this.db.query("SELECT * FROM preview_runs WHERE id = ?").get(id);
+    return row ? mapPreviewRow(row) : null;
+  }
+
+  getTicketPreview(ticketId: string): PreviewRecord | null {
+    const row = this.db.query("SELECT * FROM preview_runs WHERE ticket_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(ticketId);
+    return row ? mapPreviewRow(row) : null;
+  }
+
+  listPreviews(): PreviewRecord[] {
+    return this.db.query("SELECT * FROM preview_runs ORDER BY created_at ASC, rowid ASC").all().map(mapPreviewRow);
+  }
+
+  updatePreview(id: string, input: UpdatePreviewInput, expectedGeneration?: number): PreviewRecord {
+    return this.transaction(() => {
+      const current = this.getPreview(id);
+      if (!current) throw new Error("Preview was not found.");
+      if (expectedGeneration !== undefined && current.generation !== expectedGeneration) throw new Error("Preview generation changed.");
+      const patch = updatePreviewSchema.parse(input);
+      const preview = previewRecordSchema.parse({ ...current, ...patch, updatedAt: Date.now() });
+      this.db.query("UPDATE preview_runs SET desired_state = ?, cleanup_status = ?, payload_json = ? WHERE id = ?").run(preview.desiredState, preview.cleanupStatus, JSON.stringify(preview), preview.id);
+      return preview;
+    });
+  }
+
+  getPreviewProjectSettings(project: string): PreviewProjectSettings {
+    const row = this.db.query("SELECT * FROM preview_project_settings WHERE project = ?").get(project);
+    return row ? mapPreviewProjectSettingsRow(row) : previewProjectSettingsSchema.parse({});
+  }
+
+  updatePreviewProjectSettings(project: string, input: UpdatePreviewProjectSettingsInput): PreviewProjectSettings {
+    return this.transaction(() => {
+      if (!this.getProjectRow(project)) throw new Error("Preview project was not found.");
+      const settings = previewProjectSettingsSchema.parse({ ...this.getPreviewProjectSettings(project), ...updatePreviewProjectSettingsSchema.parse(input) });
+      this.db.query("INSERT OR REPLACE INTO preview_project_settings (project, payload_json) VALUES (?, ?)").run(project, JSON.stringify(settings));
+      return settings;
+    });
   }
 
   // ---- App settings (global, stored in the `meta` table) ----

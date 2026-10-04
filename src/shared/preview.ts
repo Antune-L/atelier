@@ -71,6 +71,9 @@ export const updatePreviewSettingsSchema = z.object({
 export type UpdatePreviewSettingsInput = z.infer<typeof updatePreviewSettingsSchema>;
 
 const coolifyInventoryItemSchema = z.object({ uuid: nonEmptyTextSchema, name: z.string() });
+export const coolifyPrivateKeySchema = coolifyInventoryItemSchema;
+export type CoolifyPrivateKey = z.infer<typeof coolifyPrivateKeySchema>;
+export const coolifyPrivateKeysResponseSchema = z.object({ privateKeys: z.array(coolifyPrivateKeySchema) });
 export const coolifyInventorySchema = z.object({
   servers: z.array(coolifyInventoryItemSchema),
   projects: z.array(coolifyInventoryItemSchema),
@@ -81,6 +84,7 @@ export type CoolifyInventory = z.infer<typeof coolifyInventorySchema>;
 
 export const previewProjectSettingsSchema = z.object({
   enabled: z.boolean().default(false),
+  privateKeyUuid: nonEmptyTextSchema.nullable().default(null),
   githubAppUuid: nonEmptyTextSchema.nullable().default(null),
   recipePath: relativePathSchema.default(DEFAULT_PREVIEW_RECIPE_PATH),
   ttlHours: z.number().positive().max(MAX_PREVIEW_TTL_HOURS).default(DEFAULT_PREVIEW_TTL_HOURS),
@@ -89,6 +93,7 @@ export const previewProjectSettingsSchema = z.object({
 export type PreviewProjectSettings = z.infer<typeof previewProjectSettingsSchema>;
 export const updatePreviewProjectSettingsSchema = z.object({
   enabled: previewProjectSettingsSchema.shape.enabled.removeDefault().optional(),
+  privateKeyUuid: previewProjectSettingsSchema.shape.privateKeyUuid.removeDefault().optional(),
   githubAppUuid: previewProjectSettingsSchema.shape.githubAppUuid.removeDefault().optional(),
   recipePath: previewProjectSettingsSchema.shape.recipePath.removeDefault().optional(),
   ttlHours: previewProjectSettingsSchema.shape.ttlHours.removeDefault().optional(),
@@ -108,7 +113,8 @@ export const previewGithubSourceResolutionSchema = z.object({
   repository: nonEmptyTextSchema.nullable(),
   host: nonEmptyTextSchema.nullable(),
   visibility: previewGithubRepositorySchema.shape.visibility.nullable(),
-  source: z.enum(["public", "github_app"]).nullable(),
+  source: z.enum(["public", "github_app", "deploy_key"]).nullable(),
+  privateKeyUuid: nonEmptyTextSchema.nullable().default(null),
   githubAppUuid: nonEmptyTextSchema.nullable(),
   candidates: z.array(coolifyInventoryItemSchema),
   message: z.string().nullable(),
@@ -118,6 +124,7 @@ export type PreviewGithubSourceResolution = z.infer<typeof previewGithubSourceRe
 const previewGithubSourceSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("public") }),
   z.object({ type: z.literal("github_app"), uuid: nonEmptyTextSchema }),
+  z.object({ type: z.literal("deploy_key"), uuid: nonEmptyTextSchema }),
 ]);
 
 const previewRecipeBaseSchema = z.object({

@@ -98,10 +98,14 @@ export class PreviewManager {
     return { ok: true, inventory };
   }
 
+  async privateKeys() {
+    return { privateKeys: await this.client().privateKeys() };
+  }
+
   async githubSource(project: string): Promise<PreviewGithubSourceResolution> {
     const settings = this.projectSettings(project);
     const projectConfig = getProject(project);
-    const unavailable: PreviewGithubSourceResolution = { status: "incomplete", repository: null, host: null, visibility: null, source: null, githubAppUuid: null, candidates: [], message: null };
+    const unavailable: PreviewGithubSourceResolution = { status: "incomplete", repository: null, host: null, visibility: null, source: null, githubAppUuid: null, privateKeyUuid: settings.privateKeyUuid, candidates: [], message: null };
     if (projectConfig.vcsProvider !== "github") return { ...unavailable, status: "unsupported", message: "Les previews Coolify prennent actuellement en charge les projets GitHub uniquement." };
     if (!this.deps.system.readPreviewRepository) return { ...unavailable, message: "La lecture du dépôt GitHub local est indisponible." };
     let repository;
@@ -111,7 +115,7 @@ export class PreviewManager {
       return { ...unavailable, message: "Impossible de lire le dépôt avec gh. Vérifiez l’accès GitHub du projet sur cette machine." };
     }
     try {
-      return await resolvePreviewGithubSource(this.client(), repository, settings.githubAppUuid, this.settings.githubAppUuid);
+      return await resolvePreviewGithubSource(this.client(), repository, settings.githubAppUuid, this.settings.githubAppUuid, settings.privateKeyUuid);
     } catch {
       return { ...unavailable, ...repository, message: "Configurez la connexion privée Coolify avant de vérifier ses connexions GitHub." };
     }
@@ -247,15 +251,23 @@ export class PreviewManager {
     const repository = repositoryMetadata.success ? repositoryMetadata.data : previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository?.(project.repoPath));
     const prHost = ownership.prUrl ? new URL(ownership.prUrl).hostname : repository.host;
     if (repository.repository.toLowerCase() !== source.repository.toLowerCase() || repository.host.toLowerCase() !== prHost.toLowerCase()) throw new Error("The preview source does not match the verified GitHub repository.");
-    const resolution = await resolvePreviewGithubSource(this.client(), repository, projectSettings.githubAppUuid, settings.githubAppUuid);
+    const resolution = await resolvePreviewGithubSource(this.client(), repository, projectSettings.githubAppUuid, settings.githubAppUuid, projectSettings.privateKeyUuid);
     if (resolution.status !== "resolved") throw new Error(resolution.message ?? "Impossible de sélectionner une connexion GitHub Coolify pour ce dépôt.");
-    const githubSource = resolution.source === "github_app" && resolution.githubAppUuid ? { type: "github_app", uuid: resolution.githubAppUuid } satisfies NonNullable<PreviewRecord["githubSource"]> : { type: "public" } satisfies NonNullable<PreviewRecord["githubSource"]>;
+    let githubSource: NonNullable<PreviewRecord["githubSource"]>;
+    if (resolution.source === "deploy_key" && resolution.privateKeyUuid) githubSource = { type: "deploy_key", uuid: resolution.privateKeyUuid };
+    else if (resolution.source === "github_app" && resolution.githubAppUuid) githubSource = { type: "github_app", uuid: resolution.githubAppUuid };
+    else if (resolution.source === "public") githubSource = { type: "public" };
+    else throw new Error("The resolved preview source has no valid source identifier.");
     const recipe = previewRecipeSchema.parse(source.recipe);
     const auth = this.deps.config.getPreviewAuth();
     if (!auth) throw new Error("Preview authentication is unavailable.");
     if (recipe.buildPack === "dockerfile") validateNativePreviewPassword(auth.password);
-    const inventory = await this.testConnection();
-    const environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
+    let environment;
+    if (githubSource.type === "deploy_key") environment = await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
+    else {
+      const inventory = await this.testConnection();
+      environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
+    }
     const generation = (previous?.generation ?? 0) + 1;
     const ownershipMarker = `kanban-preview-${crypto.randomUUID()}`;
     const preview = this.deps.store.createPreview({
@@ -418,10 +430,11 @@ export class PreviewManager {
         const repository = preview.repository ?? (preview.prUrl ? new URL(preview.prUrl).pathname.split("/").slice(1, 3).join("/") : null);
         if (!repository) throw new Error("The queued preview repository identity is missing.");
         let gitRepository = repository;
-        if (preview.githubSource.type === "public") {
+        if (preview.githubSource.type === "public" || preview.githubSource.type === "deploy_key") {
           const host = preview.repositoryHost ?? (preview.prUrl ? new URL(preview.prUrl).hostname : null);
-          if (!host) throw new Error("The queued public preview repository host is missing. Stop and clean this attempt before retrying.");
-          gitRepository = new URL(`/${repository}`, `https://${host}`).href;
+          if (!host) throw new Error("The queued preview repository host is missing. Stop and clean this attempt before retrying.");
+          if (preview.githubSource.type === "deploy_key") gitRepository = `git@${host}:${repository}.git`;
+          else gitRepository = new URL(`/${repository}`, `https://${host}`).href;
         }
         const recipe = preview.recipe;
         if (!recipe) throw new Error("Preview recipe is missing.");
@@ -446,8 +459,14 @@ export class PreviewManager {
           payload.build_pack = "dockerfile";
           payload.docker_compose_domains = [{ name: recipe.serviceName, domain: `${publicUrl}:${recipe.port}` }];
         }
-        const endpoint = preview.githubSource.type === "github_app" ? "/applications/private-github-app" : "/applications/public";
-        if (preview.githubSource.type === "github_app") payload.github_app_uuid = preview.githubSource.uuid;
+        let endpoint = "/applications/public";
+        if (preview.githubSource.type === "github_app") {
+          endpoint = "/applications/private-github-app";
+          payload.github_app_uuid = preview.githubSource.uuid;
+        } else if (preview.githubSource.type === "deploy_key") {
+          endpoint = "/applications/private-deploy-key";
+          payload.private_key_uuid = preview.githubSource.uuid;
+        }
         try {
           preview = this.update(id, { createRequestedAt: Date.now(), status: "provisioning" });
           const application = await client.createApplication(endpoint, payload);

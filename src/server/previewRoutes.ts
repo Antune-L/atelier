@@ -42,6 +42,7 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
       if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid preview settings." }; }
       return { settings: previews.updateSettings(parsed.data) };
     })
+    .get("/settings/previews/private-keys", () => previews.privateKeys())
     .post("/settings/previews/test", () => previews.testConnection())
     .get("/projects/:key/preview", ({ params }) => ({ settings: previews.projectSettings(params.key) }))
     .get("/projects/:key/preview/source", async ({ params }) => ({ resolution: await previews.githubSource(params.key) }))

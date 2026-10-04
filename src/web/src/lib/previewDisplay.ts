@@ -3,6 +3,16 @@ import type { PreviewGithubSourceResolution, PreviewReadiness, PreviewRecord, Pr
 export const PREVIEW_POLL_INTERVAL_MS = 5_000;
 export const PREVIEW_CLEANUP_WATCH_LABEL = "Ressources supprimées · surveillance d’arrêt en cours";
 export const PREVIEW_GITHUB_SOURCE_ERROR = "Impossible de vérifier l'accès au dépôt. Vérifiez la connexion Coolify et l'accès GitHub du projet, puis réessayez.";
+export const PREVIEW_PRIVATE_KEYS_ERROR = "Impossible de charger les clés de déploiement depuis Coolify. La connexion GitHub reste disponible sans clé sélectionnée.";
+export const PREVIEW_DEPLOY_KEY_SOURCE_ERROR = "Impossible de vérifier la disponibilité de la clé dans Coolify. Actualisez les clés, puis réessayez.";
+
+export const PREVIEW_DEPLOY_KEY_SOURCE_LABELS: Record<PreviewGithubSourceResolution['status'], string> = {
+  resolved: "Clé disponible dans Coolify. L'accès au dépôt n'est pas encore vérifié.",
+  choice_required: "Enregistrez la clé de déploiement à utiliser pour ce projet.",
+  no_match: "La clé sélectionnée est introuvable dans Coolify. Rétablissez-la ou choisissez explicitement une autre connexion.",
+  incomplete: "La disponibilité de la clé n'a pas pu être vérifiée dans Coolify. Actualisez les clés, puis réessayez.",
+  unsupported: "Ce dépôt n'est pas compatible avec les prévisualisations GitHub.",
+};
 
 export const PREVIEW_GITHUB_SOURCE_LABELS: Record<PreviewGithubSourceResolution['status'], string> = {
   resolved: "Accès au dépôt vérifié.",

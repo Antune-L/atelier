@@ -53,3 +53,5 @@ A child can finish integration before its parent records completion. Keep the su
 ## Coolify GitHub source metadata
 
 Coolify repository-list lookup uses the GitHub App's numeric `id`, while application creation uses its `uuid`; preserve both rather than substituting one for the other. Parse public-source rows with `id: 0` and nullable installation metadata before filtering for installed Apps. Missing required metadata is incomplete evidence, not proof that an App is uninstalled.
+
+Coolify key inventory includes private/public key material, so validate responses into UUID/name metadata before returning them to clients. Do not filter selectable keys by `is_git_related`: on Coolify 4.3.23, a deploy key already installed on GitHub was still marked false before its first application association. Inventory presence does not prove repository clone access.

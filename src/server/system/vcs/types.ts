@@ -15,6 +15,7 @@ import type {
   PublishReviewResult,
   ReviewHeadResult,
   ReviewPublicationState,
+  RecoveryCandidateOptions,
 } from "../types.ts";
 
 export interface CreatePrResult {
@@ -47,6 +48,7 @@ export interface VcsClient {
   listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>>;
   /** done() gate: the PR still exists. */
   verifyPrExists(cwd: string, prUrl: string): Promise<DoneGateResult>;
+  verifyRecoveryCandidate(opts: RecoveryCandidateOptions): Promise<DoneGateResult>;
   /** The PR's current head commit, as the provider reports it. */
   readPrHead(cwd: string, prUrl: string): Promise<ReviewHeadResult>;
   /** Same read, worded for the review done() gate (PR existence first, then head confirmation). */

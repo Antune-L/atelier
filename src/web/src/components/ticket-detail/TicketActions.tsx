@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/confirm";
 import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
+import { canRecoverImplementation } from "@/lib/implementationRecovery";
 import { boardStore } from "@/lib/store";
 
 interface ConfirmSpec {
@@ -51,6 +52,7 @@ interface TicketActionsProps {
   onRefresh: () => void;
   onClose: () => void;
   onError: (message: string) => void;
+  onRecovery: () => void;
 }
 
 const RETRY_STAGES: Ticket["stage"][] = ["failed", "interrupted", "stalled"];
@@ -60,7 +62,7 @@ const RETRY_STAGES: Ticket["stage"][] = ["failed", "interrupted", "stalled"];
  * The ticket's action block: the first applicable action as a primary button, the rest behind an
  * « Actions ⋯ » popover menu. Visibility conditions mirror the board's own rules per column/stage.
  */
-export function TicketActions({ ticket, onRefresh, onClose, onError }: TicketActionsProps) {
+export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery }: TicketActionsProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pending, setPending] = useState<TicketAction | null>(null);
@@ -71,6 +73,7 @@ export function TicketActions({ ticket, onRefresh, onClose, onError }: TicketAct
     onRefresh,
     onClose,
     onError,
+    onRecovery,
     hasConflicts,
     onConflicts: () => setConflictTicketId(ticket.id),
   });
@@ -210,6 +213,7 @@ interface ActionContext {
   onRefresh: () => void;
   onClose: () => void;
   onError: (message: string) => void;
+  onRecovery: () => void;
   hasConflicts: boolean;
   onConflicts: () => void;
 }
@@ -225,6 +229,16 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
   const actions: TicketAction[] = [];
+  const recovering = canRecoverImplementation(ticket) && Boolean(ticket.implementationPlan?.recovery);
+
+  if (canRecoverImplementation(ticket)) {
+    actions.push({
+      id: "implementation-recovery",
+      label: recovering ? "Suivre la reprise" : "Reprendre les lots",
+      Icon: RotateCw,
+      run: async () => ctx.onRecovery(),
+    });
+  }
 
   if (ticket.column === "todo") {
     actions.push({
@@ -268,6 +282,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
 
   // A retry on an already-pushed PR would re-spawn a session for an existing PR: hide it there.
   const canRetry =
+    !recovering &&
     ticket.stage !== null &&
     RETRY_STAGES.includes(ticket.stage) &&
     !(ticket.slotId === null && ticket.prUrl !== null);
@@ -284,6 +299,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
 
   // Escape hatch for a stuck running card: the session spawned but its contract never landed.
   const canRelaunch =
+    !recovering &&
     ticket.column === "implementing" &&
     ticket.slotId !== null &&
     ticket.stage !== null &&

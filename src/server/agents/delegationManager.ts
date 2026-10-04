@@ -10,8 +10,8 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { submitReviewArgsSchema } from "../../shared/schemas.ts";
 import { reviewFindingSeveritySchema, reviewKindSchema } from "../../shared/protocol.ts";
-import type { ReviewFinding, ReviewKind, submitImplementationPlanArgsSchema } from "../../shared/protocol.ts";
-import type { ImplementationPlan, ImplementationPlanLot } from "../../shared/implementationPlan.ts";
+import type { ReviewFinding, ReviewKind, recoverImplementationPlanArgsSchema, submitImplementationPlanArgsSchema } from "../../shared/protocol.ts";
+import type { ImplementationPlan, ImplementationPlanLot, ImplementationRecovery } from "../../shared/implementationPlan.ts";
 
 import type { PersistedReviewResult, ReviewPass, Store } from "../db/store.ts";
 import { getProject, isProjectKey, MODELS, projectVcsProvider } from "../config.ts";
@@ -20,6 +20,7 @@ import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../system/agentSession.ts";
 import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
+import { implementationFailureDiagnostic } from "../system/delegationWorkspace.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 import type { CodeSnapshot, ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
@@ -33,6 +34,7 @@ import {
   type FindingRenderStyle,
 } from "./reviewFindings.ts";
 import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
+import { resolveBaseBranch } from "./baseBranch.ts";
 import { codexImplementerKnobs, delegatedImplementerPermissions } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
@@ -58,6 +60,13 @@ const REVIEW_GATE_FINGERPRINT_TIMEOUT_MS = 30_000;
 const SLOW_REVIEW_START_WARN_MS = 10_000;
 const GLOB_CHARACTERS = "*?[]{}";
 const MAX_CHANGED_PATHS = 30;
+const MAX_INFRASTRUCTURE_ATTEMPTS = 2;
+const MAX_IMPLEMENTATION_ATTEMPTS = 2;
+const RECOVERY_ASSESSMENT_TIMEOUT_MS = 300_000;
+const recoveryCoverageSchema = z.object({
+  coverage: z.array(z.object({ label: z.string().min(1), covered: z.boolean(), evidence: z.string().trim().min(1) })),
+});
+const { $schema: _coverageSchemaDraft, ...RECOVERY_COVERAGE_OUTPUT_SCHEMA } = z.toJSONSchema(recoveryCoverageSchema, { io: "output" });
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string, provider: Orchestrator): string {
@@ -118,6 +127,7 @@ interface ActiveDelegation {
   reservationId: string;
   planId: string | null;
   durableWorkspace: boolean;
+  consumesCodeAttempt: boolean;
   label: string;
   provider: Orchestrator;
   files: readonly string[];
@@ -390,6 +400,11 @@ export class DelegationManager {
   private readonly implementationResumes = new Map<string, Promise<void>>();
   private implementationScheduling = false;
   private implementationScheduleQueued = false;
+  private readonly recoveryOperations = new Map<string, Promise<{ ok: boolean; result: string }>>();
+  private readonly recoveryAssessments = new Map<string, ClosableExecution>();
+  private readonly unclosedWriters = new Set<string>();
+  private readonly writerOwners = new Map<string, string>();
+  private readonly integratingTickets = new Set<string>();
 
   constructor(
     private readonly store: Store,
@@ -408,7 +423,239 @@ export class DelegationManager {
 
   /** True while at least one implementation lot of this ticket runs or is being prepared. */
   hasActiveImplementations(ticketId: string): boolean {
-    return this.lotCount(ticketId) > 0 || this.pendingPlanLots(ticketId) > 0;
+    return this.lotCount(ticketId) > 0 || this.pendingPlanLots(ticketId) > 0 || this.integratingTickets.has(ticketId);
+  }
+
+  private hasImplementationWriters(ticketId: string): boolean {
+    return (this.active.get(ticketId)?.size ?? 0) > 0
+      || [...this.startingImplementations.keys()].some((key) => key.startsWith(`${ticketId}:`))
+      || (this.closingByTicket.get(ticketId)?.size ?? 0) > 0 || this.unclosedWriters.has(ticketId) || this.integratingTickets.has(ticketId);
+  }
+
+  private saveRecovery(ticketId: string, recovery: ImplementationRecovery): void {
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (!plan || plan.recovery?.generation !== recovery.generation) throw new Error("Recovery generation changed.");
+    this.store.saveImplementationPlan(ticketId, { ...plan, recovery: { ...recovery, updatedAt: Date.now() }, updatedAt: Date.now() });
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket) this.hub.pushTicket(ticket);
+  }
+
+  private ownsRecovery(ticketId: string, slotId: number, generation: string, epoch = this.reviewEpochs.get(ticketId) ?? 0): boolean {
+    const ticket = this.store.getTicket(ticketId);
+    const recovery = this.store.getImplementationPlan(ticketId)?.recovery;
+    return ticket?.kind === "feature" && !ticket.archived && !ticket.testing && !ticket.stealth && !ticket.directPush && ticket.column !== "abandoned"
+      && ticket.slotId === slotId && this.store.getSlot(slotId)?.ticketId === ticketId
+      && recovery?.generation === generation && recovery.slotId === slotId && (this.reviewEpochs.get(ticketId) ?? 0) === epoch;
+  }
+
+  recoverImplementationPlan(
+    ticketId: string,
+    slotId: number,
+    args: z.infer<typeof recoverImplementationPlanArgsSchema>,
+    actor: "user" | "agent",
+  ): Promise<{ ok: boolean; result: string }> {
+    const pending = this.recoveryOperations.get(ticketId);
+    if (pending) return Promise.resolve({ ok: false, result: "An implementation recovery operation is already in progress. Refresh its persisted status." });
+    const operation = this.recoverImplementationPlanNow(ticketId, slotId, args, actor).catch((error: unknown) => {
+      const recovery = this.store.getImplementationPlan(ticketId)?.recovery;
+      if (args.action === "takeover" && recovery?.status === "freezing" && this.ownsRecovery(ticketId, slotId, recovery.generation)) this.saveRecovery(ticketId, { ...recovery, diagnostic: getErrorMessage(error) });
+      return { ok: false, result: getErrorMessage(error) };
+    });
+    this.recoveryOperations.set(ticketId, operation);
+    void operation.finally(() => this.recoveryOperations.delete(ticketId));
+    return operation;
+  }
+
+  private async recoverImplementationPlanNow(
+    ticketId: string,
+    slotId: number,
+    args: z.infer<typeof recoverImplementationPlanArgsSchema>,
+    actor: "user" | "agent",
+  ): Promise<{ ok: boolean; result: string }> {
+    const ticket = this.store.getTicket(ticketId);
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return { ok: false, result: "Independent quality verification is running. Wait for its result before changing implementation recovery." };
+    if (!ticket || ticket.archived || ticket.column === "abandoned" || ticket.testing || ticket.stealth || ticket.directPush || ticket.resolvingConflicts || ticket.kind !== "feature" || ticket.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId || !plan || !isProjectKey(ticket.project)) {
+      return { ok: false, result: "Recovery requires a feature ticket owning its implementation plan and slot." };
+    }
+    if (args.generation && args.generation !== plan.recovery?.generation) return { ok: false, result: "Recovery generation changed. Refresh before continuing." };
+    if (plan.recovery && plan.recovery.slotId !== slotId) return { ok: false, result: "Recovery belongs to a different slot allocation; preserve the current owner." };
+    if (args.action === "retry_integration") return this.retryImplementationIntegration(ticket, slotId, plan, args.label);
+    if (args.action === "finalize") return { ok: false, result: "Finalize recovery through the normal delivery coordinator." };
+    if (args.action === "takeover") {
+      if (plan.recovery && plan.recovery.status !== "freezing") return { ok: true, result: "The remaining plan is already owned by recovery. Read its obligations and assess the current candidate." };
+      const obligations = plan.lots.filter((lot) => lot.status !== "completed").map(({ label, plan: requirement, files, dependsOn }) => ({ label, plan: requirement, files, dependsOn }));
+      if (this.store.getImplementationQueue(ticketId).some((lot) => !plan.lots.some((entry) => entry.label === lot.label))) return { ok: false, result: "A queued implementation is outside this plan. Reconcile its original obligation before whole-plan takeover." };
+      if (obligations.length === 0 && !plan.recovery) return { ok: false, result: "The implementation plan has no remaining obligations." };
+      const now = Date.now();
+      const recovery: ImplementationRecovery = plan.recovery ?? {
+        generation: nanoid(16), actor, reason: args.reason, status: "freezing", slotId, obligations,
+        candidate: null, coverage: [], assessmentExecutionId: null, archives: [], diagnostic: null,
+        prUrl: args.prUrl ?? null, createdAt: now, updatedAt: now,
+      };
+      this.store.saveImplementationPlan(ticketId, { ...plan, recovery, updatedAt: now });
+      this.stop(ticketId);
+      const frozenEpoch = this.reviewEpochs.get(ticketId) ?? 0;
+      await this.drainTicket(ticketId);
+      if (this.hasImplementationWriters(ticketId)) throw new Error("A delegated writer has not stopped. Recovery keeps the slot and child work.");
+      if (this.store.getTicket(ticketId)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId) throw new Error("Slot ownership changed during recovery.");
+      const archives = await this.system.preserveImplementationRecovery({ slotPath: slotPath(slotId), repoPath: getProject(ticket.project).repoPath });
+      if (!this.ownsRecovery(ticketId, slotId, recovery.generation, frozenEpoch) || this.store.getImplementationPlan(ticketId)?.recovery?.status !== "freezing" || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership changed during preservation. Retained archives remain available; the plan is not resumed.");
+      this.store.resetImplementationQueue(ticketId);
+      this.saveRecovery(ticketId, { ...recovery, status: "pending", archives, diagnostic: null });
+      this.store.logEvent(ticketId, "implementation_recovery_takeover", { generation: recovery.generation, actor, reason: args.reason, obligations, archives });
+      this.sessionHub.sendEvent(ticketId, { type: "nudge", message: `Explicit recovery owns all remaining obligations: ${JSON.stringify(obligations)}. Complete them in the ticket worktree, preserve the existing PR ${recovery.prUrl ?? "when present"}, then call recover_implementation_plan action=assess. Run the required normal reviews and checks before done(). Do not delegate or replace this frozen plan.` });
+      return { ok: true, result: "Remaining obligations are frozen, writers drained and child artifacts preserved. Complete the work and assess the clean candidate before normal delivery." };
+    }
+    const recovery = plan.recovery;
+    if (!recovery || recovery.status === "freezing") return { ok: false, result: "Take over and preserve the remaining plan before assessing it." };
+    if (this.system.dryRun) {
+      const diagnostic = "Recovery coverage is inconclusive in dry-run: no real independent candidate inspection was performed.";
+      this.saveRecovery(ticketId, { ...recovery, status: "pending", candidate: null, coverage: [], assessmentExecutionId: null, diagnostic });
+      return { ok: false, result: diagnostic };
+    }
+    if (this.hasImplementationWriters(ticketId) || this.hasActiveReviews(ticketId)) return { ok: false, result: "Wait for delegated writers and reviewers to close before assessment." };
+    const project = getProject(ticket.project);
+    const assessmentEpoch = this.reviewEpochs.get(ticketId) ?? 0;
+    const revision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: slotPath(slotId), ...(ticket.branch ? { branch: ticket.branch } : {}) });
+    if (!revision.clean) return { ok: false, result: "Commit the recovered candidate before assessment; its worktree must be clean." };
+    const candidate = { commitSha: revision.commitSha, fingerprint: (await this.system.codeSnapshot(slotPath(slotId))).fingerprint };
+    if (!this.ownsRecovery(ticketId, slotId, recovery.generation, assessmentEpoch) || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership changed while capturing the candidate.");
+    const generationId = nanoid(16);
+    this.saveRecovery(ticketId, { ...recovery, status: "assessing", candidate, coverage: [], assessmentExecutionId: generationId, diagnostic: null, prUrl: args.prUrl ?? recovery.prUrl });
+    const execution = resolveTicketExecution(ticket, "reviewer", { model: ticket.model ?? "sonnet", effort: ticket.effort ?? "low" });
+    const state: ClosableExecution = { handle: null, generationId, usageByModel: {} };
+    this.recoveryAssessments.set(ticketId, state);
+    this.store.startExecution({ id: generationId, ownerType: "ticket", ownerId: ticketId, generationId, sessionId: null, role: "reviewer", orchestrator: execution.provider, effectiveModel: execution.model, effectiveEffort: execution.effort, codexFast: execution.serviceTier === "fast" });
+    let assessmentError = "The independent assessor returned no complete structured coverage evidence.";
+    let coverageResult: z.infer<typeof recoveryCoverageSchema> | null = null;
+    const readToolCalls = new Set<string>();
+    const successfulReadToolCalls = new Set<string>();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await assertExecutionAvailable(this.system, execution);
+      if (!this.ownsRecovery(ticketId, slotId, recovery.generation, assessmentEpoch) || this.recoveryAssessments.get(ticketId) !== state || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership changed before independent assessor startup.");
+      await new Promise<void>((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Independent recovery assessment timed out.")), RECOVERY_ASSESSMENT_TIMEOUT_MS);
+        state.handle = this.system.startAgentSession({
+          ticketId: `${ticketId}-recovery-${recovery.generation}`, slotId: DELEGATION_SLOT_ID, cwd: slotPath(slotId),
+          provider: execution.provider, model: execution.model, effort: execution.effort, serviceTier: execution.serviceTier,
+          role: "reviewer", generation: 1, permissionMode: "dontAsk", readOnly: true, blockTypecheck: true,
+          allowedTools: REVIEW_TOOLS, disallowedTools: REVIEW_DISALLOWED_TOOLS, skills: [], disableWorkerTools: true,
+          outputSchema: RECOVERY_COVERAGE_OUTPUT_SCHEMA,
+          onToolCall: async () => ({ ok: false, result: "The recovery assessor has no pipeline tools." }),
+          onEvent: (event) => {
+            this.sessionHub.appendExternalEvent(ticketId, generationId, event, "⟨recovery coverage⟩ ");
+            if (event.type === "init") this.attachChildSession(generationId, event, { ticketId, recoveryGeneration: recovery.generation });
+            if (event.type === "error") assessmentError = event.message;
+            if (event.type === "tool_use" && event.toolCallId && (REVIEW_TOOLS.includes(event.name) || event.name === "command_execution")) readToolCalls.add(event.toolCallId);
+            if (event.type === "tool_result" && event.ok && readToolCalls.has(event.toolCallId)) successfulReadToolCalls.add(event.toolCallId);
+            if (event.type === "turn_end") {
+              state.usageByModel = mergeAgentUsageByModel(state.usageByModel, event.usageByModel);
+              const parsed = recoveryCoverageSchema.safeParse(event.structuredOutput);
+              if (event.ok && parsed.success) coverageResult = parsed.data;
+              resolve();
+            }
+          },
+        });
+        state.handle.send(`You are an independent READ-ONLY recovery assessor. Inspect this exact clean candidate ${candidate.commitSha} and its actual code and diff. Assess every original remaining obligation, including blocked descendants. Return coverage with exactly one entry per obligation label, covered=true only when the implementation fulfills all requirements, and evidence with concrete inspected file/line references explaining the observed behavior. Missing, partial, unobservable or inconclusive work must have covered=false. Do not infer fulfillment from PR existence, filenames, orchestrator claims, normal review approval or review budget exhaustion. Do not change code or call pipeline tools.\nTicket: ${ticket.title}\nDescription: ${ticket.description}\nObligations: ${JSON.stringify(recovery.obligations)}`);
+      });
+      if (!await this.closeHandle(state)) throw new Error("The coverage assessor has not closed.");
+      const assessed = recoveryCoverageSchema.safeParse(coverageResult);
+      const current = this.store.getImplementationPlan(ticketId)?.recovery;
+      if (current?.generation !== recovery.generation || current.status !== "assessing" || current.assessmentExecutionId !== generationId || this.store.getTicket(ticketId)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId) throw new Error("Recovery ownership or assessment changed.");
+      const latestRevision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: slotPath(slotId), ...(ticket.branch ? { branch: ticket.branch } : {}) });
+      const latestFingerprint = (await this.system.codeSnapshot(slotPath(slotId))).fingerprint;
+      if (!latestRevision.clean || latestRevision.commitSha !== candidate.commitSha || latestFingerprint !== candidate.fingerprint) throw new Error("Candidate changed during recovery assessment. Assess it again.");
+      const finalRecovery = this.store.getImplementationPlan(ticketId)?.recovery;
+      if (finalRecovery?.generation !== recovery.generation || finalRecovery.status !== "assessing" || finalRecovery.assessmentExecutionId !== generationId
+        || !this.ownsRecovery(ticketId, slotId, recovery.generation, assessmentEpoch) || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership or assessment changed before coverage persistence.");
+      const labels = new Set(assessed.success ? assessed.data.coverage.map((entry) => entry.label) : []);
+      const complete = assessed.success && successfulReadToolCalls.size > 0 && labels.size === recovery.obligations.length && assessed.data.coverage.length === labels.size
+        && recovery.obligations.every((obligation) => assessed.data.coverage.some((entry) => entry.label === obligation.label && entry.covered && /[^\s]+:\d+/.test(entry.evidence)));
+      if (!complete) {
+        this.saveRecovery(ticketId, { ...finalRecovery, status: "pending", coverage: assessed.success ? assessed.data.coverage : [], diagnostic: assessmentError });
+        this.store.finalizeExecution({ generationId, status: "failed", usageByModel: state.usageByModel, error: assessmentError });
+        return { ok: false, result: assessmentError };
+      }
+      this.saveRecovery(ticketId, { ...finalRecovery, status: "assessed", coverage: assessed.data.coverage, diagnostic: null });
+      this.store.finalizeExecution({ generationId, status: "completed", usageByModel: state.usageByModel });
+      this.store.logEvent(ticketId, "implementation_recovery_assessed", { generation: recovery.generation, generationId, candidate, coverage: assessed.data.coverage, successfulReadToolCalls: [...successfulReadToolCalls] });
+      this.sessionHub.sendEvent(ticketId, { type: "nudge", message: "Independent coverage passed for every recovery obligation. Complete the current normal reviews and required checks, keep quality reservations, then deliver the exact assessed candidate using done() and the existing PR when supplied." });
+      return { ok: true, result: "Every remaining obligation has affirmative independent coverage. Current normal reviews, checks and exact candidate delivery are still required." };
+    } catch (error) {
+      await this.closeHandle(state);
+      const current = this.store.getImplementationPlan(ticketId)?.recovery;
+      if (current?.generation === recovery.generation && current.assessmentExecutionId === generationId) this.saveRecovery(ticketId, { ...current, status: "pending", diagnostic: getErrorMessage(error) });
+      this.store.finalizeExecution({ generationId, status: "failed", usageByModel: state.usageByModel, error: getErrorMessage(error) });
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (this.recoveryAssessments.get(ticketId) === state) this.recoveryAssessments.delete(ticketId);
+    }
+  }
+
+  async verifyRecoveryDelivery(ticketId: string, slotId: number, prUrl: string): Promise<{ ok: boolean; result: string }> {
+    const deliveryEpoch = this.reviewEpochs.get(ticketId) ?? 0;
+    const plan = this.store.getImplementationPlan(ticketId);
+    const recovery = plan?.recovery;
+    if (!recovery) return { ok: true, result: "" };
+    if (this.system.dryRun) return { ok: false, result: "Simulated recovery evidence cannot certify delivery of a real candidate." };
+    const ticket = this.store.getTicket(ticketId);
+    if (!plan || !ticket || this.recoveryOperations.has(ticketId) || !this.ownsRecovery(ticketId, slotId, recovery.generation) || !ticket.branch || !isProjectKey(ticket.project)
+      || recovery.slotId !== slotId || !recovery.candidate || (recovery.status !== "assessed" && recovery.status !== "resolved") || this.hasImplementationWriters(ticketId) || this.recoveryAssessments.has(ticketId)) {
+      return { ok: false, result: "Recovery candidate, independent coverage or slot ownership is incomplete." };
+    }
+    const project = getProject(ticket.project);
+    const fingerprint = await this.system.codeSnapshot(slotPath(slotId));
+    if (fingerprint.fingerprint !== recovery.candidate.fingerprint) return { ok: false, result: "Recovered candidate changed. Assess coverage and review the candidate again." };
+    const reviewed = await this.reviewGate(ticketId, slotId, "approved_or_limit", recovery.generation);
+    if (!reviewed.ok) return { ok: false, result: reviewed.reason };
+    const gate = await this.system.verifyRecoveryCandidate({ repoPath: project.repoPath, slotPath: slotPath(slotId), branch: ticket.branch, baseBranch: resolveBaseBranch(ticket, project, this.store), prUrl, commitSha: recovery.candidate.commitSha }, projectVcsProvider(ticket.project));
+    if (!gate.ok) return { ok: false, result: gate.reason };
+    const archives = await this.system.preserveImplementationRecovery({ repoPath: project.repoPath, slotPath: slotPath(slotId) });
+    const current = this.store.getImplementationPlan(ticketId);
+    if (current?.recovery?.generation !== recovery.generation || (current.recovery.status !== "assessed" && current.recovery.status !== "resolved") || current.recovery.assessmentExecutionId !== recovery.assessmentExecutionId || current.recovery.candidate?.commitSha !== recovery.candidate.commitSha || this.store.getTicket(ticketId)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId) return { ok: false, result: "Recovery ownership changed before reconciliation." };
+    const finalFingerprint = await this.system.codeSnapshot(slotPath(slotId));
+    if (finalFingerprint.fingerprint !== recovery.candidate.fingerprint) return { ok: false, result: "Candidate changed before reconciliation." };
+    const reconciled = this.store.getImplementationPlan(ticketId);
+    if (this.recoveryOperations.has(ticketId) || this.hasImplementationWriters(ticketId) || reconciled?.recovery?.generation !== recovery.generation
+      || (reconciled.recovery.status !== "assessed" && reconciled.recovery.status !== "resolved")
+      || reconciled.recovery.assessmentExecutionId !== recovery.assessmentExecutionId || reconciled.recovery.candidate?.commitSha !== recovery.candidate.commitSha
+      || !this.ownsRecovery(ticketId, slotId, recovery.generation, deliveryEpoch)) return { ok: false, result: "Recovery ownership changed before reconciliation." };
+    const retainedArchives = new Map([...recovery.archives, ...archives].map((archive) => [`${archive.ticketId}:${archive.cycleId ?? ""}:${archive.archivePath}`, archive]));
+    this.store.saveImplementationPlan(ticketId, { ...reconciled, status: "completed", lots: reconciled.lots.map((lot) => recovery.obligations.some((obligation) => obligation.label === lot.label) ? { ...lot, status: "completed", summary: `Recovered candidate ${recovery.candidate?.commitSha}; independent coverage ${recovery.assessmentExecutionId}.` } : lot), recovery: { ...reconciled.recovery, status: "resolved", prUrl, archives: [...retainedArchives.values()], diagnostic: null, updatedAt: Date.now() }, updatedAt: Date.now() });
+    this.store.logEvent(ticketId, "implementation_recovery_resolved", { generation: recovery.generation, candidate: recovery.candidate, assessmentExecutionId: recovery.assessmentExecutionId, reviewPassId: reviewed.passId, prUrl });
+    this.hub.pushTicket(this.store.getTicket(ticketId) ?? ticket);
+    return { ok: true, result: "Recovery reconciled against the verified candidate and PR." };
+  }
+
+  private async retryImplementationIntegration(ticket: Ticket, slotId: number, plan: ImplementationPlan, label: string | undefined): Promise<{ ok: boolean; result: string }> {
+    if (plan.recovery) return { ok: false, result: "The frozen recovery plan cannot resume delegated integration." };
+    const lot = plan.lots.find((entry) => entry.label === label);
+    if (!lot || lot.failurePhase !== "integration" || !lot.childResult || this.hasImplementationWriters(ticket.id)) return { ok: false, result: "Integration retry requires a successful closed child result and no active writers." };
+    if (lot.retryBlockedReason) return { ok: false, result: `Integration retry refused: ${lot.retryBlockedReason}. Inspect the recorded identity diagnostic and preserve the original workspace.` };
+    if ((lot.infrastructureAttempts ?? 0) >= MAX_INFRASTRUCTURE_ATTEMPTS) return { ok: false, result: "Infrastructure retry allowance is exhausted. Use explicit takeover." };
+    this.updatePlannedLot(ticket.id, plan.id, lot.label, { infrastructureAttempts: (lot.infrastructureAttempts ?? 0) + 1 });
+    this.integratingTickets.add(ticket.id);
+    try {
+      const options = { ticketId: ticket.id, cycleId: plan.id, slotPath: slotPath(slotId), label: lot.label, files: lot.files, recoveryOnly: true };
+      const prepared = await this.system.prepareImplementationLot(options);
+      if (this.store.getTicket(ticket.id)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || this.store.getImplementationPlan(ticket.id)?.id !== plan.id || this.store.getImplementationPlan(ticket.id)?.recovery) throw new Error("Implementation ownership changed before retained integration.");
+      if (!prepared.integrated) await this.system.finishImplementationLot(options);
+      if (this.store.getTicket(ticket.id)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || this.store.getImplementationPlan(ticket.id)?.recovery) throw new Error("Implementation ownership changed during integration.");
+      this.updatePlannedLot(ticket.id, plan.id, lot.label, { status: "completed", failurePhase: null, summary: lot.childResult.summary });
+      this.implementationPlans.set(ticket.id, slotId);
+      this.scheduleImplementationPlans();
+      this.hub.pushTicket(this.store.getTicket(ticket.id) ?? ticket);
+      return { ok: true, result: "The retained successful child result was integrated without rerunning the child." };
+    } catch (error) {
+      this.system.cancelImplementationLot({ ticketId: ticket.id, cycleId: plan.id, slotPath: slotPath(slotId), label: lot.label, files: lot.files });
+      this.recordLotFailure(ticket.id, plan.id, lot.label, "integration", getErrorMessage(error));
+      throw error;
+    } finally {
+      this.integratingTickets.delete(ticket.id);
+    }
   }
 
   async submitImplementationPlan(
@@ -446,6 +693,10 @@ export class DelegationManager {
     }
     const existing = this.store.getImplementationPlan(ticket.id);
     const definitions = (planLots: ImplementationPlanLot[]): string => JSON.stringify(planLots.map(({ label, plan, files, dependsOn: lotDependencies }) => ({ label, plan, files, dependsOn: lotDependencies })));
+    if (existing?.recovery) {
+      if (definitions(existing.lots) === definitions(lots) && existing.maxParallel === args.maxParallel) return this.readImplementationPlan(ticket.id);
+      return { ok: false, result: "The recovery plan is frozen; its obligations and delivery provenance cannot be replaced." };
+    }
     if (existing && definitions(existing.lots) === definitions(lots) && existing.maxParallel === args.maxParallel) {
       if (existing.status === "interrupted" || existing.status === "cancelled") await this.resumeImplementationPlan(ticket, slotId);
       else {
@@ -504,6 +755,11 @@ export class DelegationManager {
   private async resumeImplementationPlanNow(ticket: Ticket, slotId: number): Promise<void> {
     if (!this.canScheduleImplementation(ticket)) return;
     const plan = this.store.getImplementationPlan(ticket.id);
+    if (plan?.recovery) {
+      const recovery = plan.recovery;
+      if (recovery.status === "assessing" && !this.recoveryAssessments.has(ticket.id)) this.saveRecovery(ticket.id, { ...recovery, status: "pending", diagnostic: "Independent assessment was interrupted by restart; assess the candidate again." });
+      return;
+    }
     const queued = this.store.getImplementationQueue(ticket.id);
     if ((!plan || plan.status === "completed" || plan.status === "failed") && queued.length === 0) return;
     if (this.hasActiveImplementations(ticket.id) && this.implementationPlans.has(ticket.id)) return;
@@ -544,7 +800,7 @@ export class DelegationManager {
   private updatePlannedLot(ticketId: string, planId: string | null, label: string, patch: Partial<ImplementationPlanLot>): void {
     if (planId === null) return;
     const plan = this.store.getImplementationPlan(ticketId);
-    if (!plan || plan.id !== planId || plan.status === "cancelled" || plan.status === "interrupted") return;
+    if (!plan || plan.id !== planId || plan.recovery || plan.status === "cancelled" || plan.status === "interrupted") return;
     const lots = plan.lots.map((lot) => lot.label === label ? { ...lot, ...patch } : lot);
     const byLabel = new Map(lots.map((lot) => [lot.label, lot]));
     let changed = true;
@@ -567,6 +823,19 @@ export class DelegationManager {
     if (lots.some((lot) => lot.status === "pending" || lot.status === "running")) status = "running";
     else if (lots.some((lot) => lot.status !== "completed")) status = "failed";
     this.store.saveImplementationPlan(ticketId, { ...plan, lots, status, updatedAt: Date.now() });
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket) this.hub.pushTicket(ticket);
+  }
+
+  private recordLotFailure(ticketId: string, planId: string | null, label: string, phase: NonNullable<ImplementationPlanLot["failurePhase"]>, summary: string, error?: unknown): void {
+    const lot = this.store.getImplementationPlan(ticketId)?.lots.find((entry) => entry.label === label);
+    const diagnostic = implementationFailureDiagnostic(error);
+    this.updatePlannedLot(ticketId, planId, label, {
+      status: "failed", failurePhase: phase, summary,
+      retryBlockedReason: diagnostic?.reason.includes("identity_mismatch") ? diagnostic.reason : (lot?.retryBlockedReason ?? null),
+      failureHistory: [...(lot?.failureHistory ?? []), { phase, summary, at: Date.now(), ...(diagnostic ? { diagnostic } : {}) }],
+    });
+    this.store.logEvent(ticketId, "delegation_phase_failed", { label, phase, summary, diagnostic });
   }
 
   private releaseImplementationReservation(reservationId: string): void {
@@ -601,7 +870,7 @@ export class DelegationManager {
             this.queuedImplementations.delete(key);
             continue;
           }
-          if (!this.canScheduleImplementation(ticket)) continue;
+          if (!this.canScheduleImplementation(ticket) || this.store.getImplementationPlan(ticket.id)?.recovery) continue;
           this.queuedImplementations.delete(key);
           launched = true;
           const epoch = this.reviewEpochs.get(ticket.id) ?? 0;
@@ -622,7 +891,7 @@ export class DelegationManager {
           if (this.implementationReservations.size >= MAX_GLOBAL_IMPLEMENTERS) break;
           const ticket = this.store.getTicket(ticketId);
           const plan = this.store.getImplementationPlan(ticketId);
-          if (!ticket || !plan || plan.status === "interrupted" || plan.status === "cancelled" || !this.sessionHub.getExecutionConfig(ticketId)) {
+          if (!ticket || !plan || plan.recovery || plan.status === "interrupted" || plan.status === "cancelled" || !this.sessionHub.getExecutionConfig(ticketId)) {
             this.implementationPlans.delete(ticketId);
             continue;
           }
@@ -630,8 +899,7 @@ export class DelegationManager {
           if (this.lotCount(ticketId) >= plan.maxParallel) continue;
           const ready = plan.lots.find((lot) => lot.status === "pending" && lot.dependsOn.every((dependency) => plan.lots.some((candidate) => candidate.label === dependency && candidate.status === "completed")));
           if (!ready) continue;
-          const attempts = this.recoveringImplementations.has(`${ticketId}:${ready.label}`) ? ready.attempts : ready.attempts + 1;
-          this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "running", attempts, summary: null });
+          this.updatePlannedLot(ticketId, plan.id, ready.label, { status: "running" });
           const started = this.launchImplementation(ticket, slotId, ready.plan, ready.label, ready.files);
           const epoch = this.reviewEpochs.get(ticketId) ?? 0;
           launched = true;
@@ -745,7 +1013,9 @@ export class DelegationManager {
     const startedAt = Date.now();
     log.info("gate de review démarrée", { ticketId, slotId, correlationId, requirement });
     const implementationPlan = this.store.getImplementationPlan(ticketId);
-    if (implementationPlan?.lots.some((lot) => lot.status !== "completed") || this.store.getImplementationQueue(ticketId).length > 0) {
+    if (this.hasImplementationWriters(ticketId) || this.recoveryAssessments.has(ticketId)) return { ok: false, reason: "Des écrivains délégués ou une évaluation indépendante sont encore actifs.", reasonCode: "incomplete_implementation" };
+    const recovered = implementationPlan?.recovery;
+    if ((implementationPlan?.lots.some((lot) => lot.status !== "completed") && recovered?.status !== "assessed" && recovered?.status !== "resolved") || this.store.getImplementationQueue(ticketId).length > 0) {
       return { ok: false, reason: "Le plan d'implémentation contient encore des lots non terminés. Relis read_implementation_plan, reprends les lots en échec et termine chaque lot avant la validation finale.", reasonCode: "incomplete_implementation" };
     }
     const reviewPass = this.store.getReviewPass(ticketId);
@@ -1060,6 +1330,7 @@ export class DelegationManager {
   /** Spawn one implementation child lot and hand it the plan. Non-blocking. */
   start(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[] = []): Promise<{ ok: boolean; result: string }> {
     const storedPlan = this.store.getImplementationPlan(ticket.id);
+    if (storedPlan?.recovery) return Promise.resolve({ ok: false, result: "The remaining plan is frozen for explicit recovery; do not start delegated writers." });
     const lot = storedPlan?.lots.find((candidate) => candidate.label === label);
     if (lot?.status === "completed") {
       return Promise.resolve({ ok: false, result: `Le lot «${label}» est déjà terminé. Utilise un nouveau label pour une nouvelle correction.` });
@@ -1070,8 +1341,11 @@ export class DelegationManager {
         return Promise.resolve({ ok: true, result: `Le lot «${label}» est déjà enregistré : le backend gère son lancement. Attends implementation_done.` });
       }
       if (lot.status === "failed") {
+        if (lot.retryBlockedReason) return Promise.resolve({ ok: false, result: `Unsafe workspace retry refused (${lot.retryBlockedReason}). Inspect its recorded identity diagnostic and use explicit recovery without changing the journal identity.` });
         const attempts = this.store.implementationLotAttempts(ticket.id, label);
-        if (attempts.started === 1 && attempts.failed === 1) {
+        const infrastructureFailure = lot.failurePhase === "preparation" || lot.failurePhase === "startup";
+        if (lot.childResult) return Promise.resolve({ ok: false, result: "The successful child result is retained. Use recover_implementation_plan action=retry_integration." });
+        if ((infrastructureFailure && (lot.infrastructureAttempts ?? 0) < MAX_INFRASTRUCTURE_ATTEMPTS) || (!infrastructureFailure && lot.attempts === 1 && attempts.failed >= 1)) {
           this.updatePlannedLot(ticket.id, storedPlan.id, label, { status: "pending" });
           this.implementationPlans.set(ticket.id, slotId);
           this.scheduleImplementationPlans();
@@ -1103,8 +1377,15 @@ export class DelegationManager {
       return { ok: false, result: `Le lot «${label}» est déjà en cours : attends son événement implementation_done.` };
     }
     const attempts = this.store.implementationLotAttempts(ticket.id, label);
+    const initialPlan = this.store.getImplementationPlan(ticket.id);
+    if (initialPlan?.recovery) return { ok: false, result: "Implementation scheduling is frozen by recovery." };
+    const initialLot = initialPlan?.lots.find((lot) => lot.label === label);
+    if (initialLot?.retryBlockedReason) return { ok: false, result: `Workspace retry refused: ${initialLot.retryBlockedReason}. Preserve and diagnose its original identity.` };
+    if (initialLot?.childResult) return { ok: false, result: "Retained successful child output requires integration-only retry." };
+    if (initialLot && (initialLot.infrastructureAttempts ?? 0) >= MAX_INFRASTRUCTURE_ATTEMPTS && (initialLot.failurePhase === "preparation" || initialLot.failurePhase === "startup")) return { ok: false, result: "Infrastructure retry allowance exhausted. Use explicit recovery." };
     const recovering = attempts.started > 0 && this.recoveringImplementations.has(`${ticket.id}:${label}`);
-    if (!recovering && attempts.started > 0 && (attempts.started !== 1 || attempts.failed !== 1)) {
+    const codeStarts = initialLot?.attempts ?? attempts.started;
+    if (!recovering && codeStarts > 0 && (codeStarts >= MAX_IMPLEMENTATION_ATTEMPTS || (initialLot === undefined && attempts.failed !== 1))) {
       return {
         ok: false,
         result: `Le lot «${label}» ne peut être relancé qu'une fois après son premier échec. Reprends l'implémentation toi-même ou appelle fail().`,
@@ -1158,7 +1439,7 @@ export class DelegationManager {
       const ready = plannedLot.dependsOn.every((dependency) => persistedPlan.lots.some((lot) => lot.label === dependency && lot.status === "completed"));
       if (!ready) return { ok: false, result: `Les dépendances du lot «${label}» ne sont pas terminées.` };
       if (plannedLot.status !== "running") {
-        this.updatePlannedLot(ticket.id, planId, label, { status: "running", attempts: plannedLot.attempts + 1, summary: null });
+        this.updatePlannedLot(ticket.id, planId, label, { status: "running" });
       }
     }
     const reservationId = nanoid(16);
@@ -1189,8 +1470,7 @@ export class DelegationManager {
     const lotOptions: ImplementationLotOptions | null = normalizedFiles.length === 0
       ? null
       : { ticketId: ticket.id, slotPath: slotPath(slotId), label, files: normalizedFiles, ...(planId === null ? {} : { cycleId: planId }) };
-    const eventType = recovering ? "delegation_resumed" : "delegation_started";
-    this.store.logEvent(ticket.id, eventType, { provider, model: knobs.model, effort: knobs.effort, label, files: normalizedFiles });
+    let preparationPhase: "preparation" | "startup" = "startup";
     if (queuedLot) this.store.saveImplementationQueue(ticket.id, this.store.getImplementationQueue(ticket.id).map((lot) => lot.label === label ? { ...lot, started: true } : lot));
     let childCwd = slotPath(slotId);
     try {
@@ -1203,6 +1483,7 @@ export class DelegationManager {
         });
       }
       if (lotOptions !== null) {
+        preparationPhase = "preparation";
         const prepared = await this.system.prepareImplementationLot(lotOptions);
         childCwd = prepared.cwd;
         if (prepared.integrated) {
@@ -1235,6 +1516,8 @@ export class DelegationManager {
       if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
       this.releaseImplementationReservation(reservationId);
       const message = error instanceof Error ? error.message : String(error);
+      this.updatePlannedLot(ticket.id, planId, label, { infrastructureAttempts: (plannedLot?.infrastructureAttempts ?? 0) + 1 });
+      this.recordLotFailure(ticket.id, planId, label, preparationPhase, message, error);
       this.store.logEvent(ticket.id, "delegation_done", { ok: false, delivered: false, label, remaining: this.lotCount(ticket.id), stage: "launch" });
       return { ok: false, result: `Impossible de lancer la délégation : ${message}` };
     }
@@ -1265,6 +1548,7 @@ export class DelegationManager {
       reservationId,
       planId,
       durableWorkspace,
+      consumesCodeAttempt: !recovering,
       label,
       provider,
       files: normalizedFiles,
@@ -1282,6 +1566,7 @@ export class DelegationManager {
       lastHeartbeatAt: Date.now(),
       settled: false,
     };
+    this.writerOwners.set(generationId, ticket.id);
     const lots = this.active.get(ticket.id) ?? new Map<string, ActiveDelegation>();
     lots.set(label, state);
     this.active.set(ticket.id, lots);
@@ -1325,8 +1610,13 @@ export class DelegationManager {
         : "";
       const retryDirective = plannedLot?.summary ? `\n- Résultat de la tentative précédente : ${plannedLot.summary}\n` : "";
       handle.send(`${CHILD_FRAMING}${scopeDirective}${recoveryDirective}${retryDirective}${plan}`);
+      const eventType = recovering ? "delegation_resumed" : "delegation_started";
+      this.store.logEvent(ticket.id, eventType, { provider, model: knobs.model, effort: knobs.effort, label, files: normalizedFiles });
+      this.updatePlannedLot(ticket.id, planId, label, { attempts: (plannedLot?.attempts ?? 0) + (recovering ? 0 : 1), failurePhase: null });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.updatePlannedLot(ticket.id, planId, label, { infrastructureAttempts: (plannedLot?.infrastructureAttempts ?? 0) + 1 });
+      this.recordLotFailure(ticket.id, planId, label, "startup", message, error);
       try {
         if (executionStarted) await this.closeAndFinalize(state, "failed", message);
         if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions);
@@ -1729,6 +2019,13 @@ export class DelegationManager {
     const terminal = !ticket || (ticket.stage !== null && TERMINAL_STAGES.includes(ticket.stage));
     if (terminal) this.store.resetImplementationQueue(ticketId);
     const plan = this.store.getImplementationPlan(ticketId);
+    const assessment = this.recoveryAssessments.get(ticketId);
+    if (assessment) {
+      this.recoveryAssessments.delete(ticketId);
+      if (plan?.recovery && plan.recovery.assessmentExecutionId === assessment.generationId) this.saveRecovery(ticketId, { ...plan.recovery, status: "pending", assessmentExecutionId: null, diagnostic: "Independent coverage assessment interrupted; assess again." });
+      void assessment.handle?.interrupt().catch((error: unknown) => log.warn("interruption de l'évaluation impossible", { ticketId, reason: getErrorMessage(error) }));
+      this.trackClosing(this.closeAndFinalize(assessment, "cancelled", "Recovery assessment interrupted."), ticketId);
+    }
     if (plan && (plan.status === "pending" || plan.status === "running")) {
       this.store.saveImplementationPlan(ticketId, {
         ...plan,
@@ -1755,7 +2052,7 @@ export class DelegationManager {
       this.active.delete(ticketId);
       for (const state of lots.values()) {
         state.cancelled = true;
-        state.preserveWorkspace = !terminal && (state.planId !== null || this.store.getImplementationQueue(ticketId).some((lot) => lot.label === state.label));
+        state.preserveWorkspace = !!plan?.recovery || (!terminal && (state.planId !== null || this.store.getImplementationQueue(ticketId).some((lot) => lot.label === state.label)));
         if (state.lotOptions !== null) this.system.cancelImplementationLot(state.lotOptions);
         void state.handle?.interrupt().catch((error: unknown) => {
           log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
@@ -2157,14 +2454,25 @@ export class DelegationManager {
 
   private async settleImplementation(ticketId: string, state: ActiveDelegation, turnOk: boolean): Promise<void> {
     const closed = await this.closeHandle(state);
+    if (!closed) this.unclosedWriters.add(ticketId);
     state.childClosed = true;
     let ok = turnOk && closed;
     let summary = ok
       ? state.lastAssistantText
       : state.lastError || state.lastAssistantText || "la session déléguée s'est terminée en erreur sans détail";
     if (!closed) summary = "La session déléguée n'a pas pu être fermée avant l'intégration de ses fichiers.";
+    if (turnOk && closed && !state.cancelled) this.updatePlannedLot(ticketId, state.planId, state.label, {
+      childResult: { summary: state.lastAssistantText, executionRunId: state.generationId },
+    });
+    let failurePhase: "startup" | "execution" | "integration" = "execution";
+    if (!turnOk && state.sessionId === null) {
+      failurePhase = "startup";
+      const lot = this.store.getImplementationPlan(ticketId)?.lots.find((entry) => entry.label === state.label);
+      this.updatePlannedLot(ticketId, state.planId, state.label, { attempts: Math.max(0, (lot?.attempts ?? 1) - (state.consumesCodeAttempt ? 1 : 0)), infrastructureAttempts: (lot?.infrastructureAttempts ?? 0) + 1 });
+    }
     try {
       if (state.lotOptions !== null) {
+        if (ok) failurePhase = "integration";
         if (ok && !state.cancelled) await this.system.finishImplementationLot(state.lotOptions);
         else if (!state.preserveWorkspace && !state.durableWorkspace) await this.system.discardImplementationLot(state.lotOptions);
         else this.system.cancelImplementationLot(state.lotOptions);
@@ -2180,6 +2488,7 @@ export class DelegationManager {
         }
       }
       if (state.lotOptions !== null && state.durableWorkspace) this.system.cancelImplementationLot(state.lotOptions);
+      this.recordLotFailure(ticketId, state.planId, state.label, "integration", summary, error);
     }
     if (state.cancelled || this.active.get(ticketId)?.get(state.label) !== state) {
       this.store.finalizeExecution({ generationId: state.generationId, status: "cancelled", usageByModel: state.usageByModel });
@@ -2192,7 +2501,8 @@ export class DelegationManager {
         usageByModel: state.usageByModel,
         error: ok ? null : summary,
       });
-      this.updatePlannedLot(ticketId, state.planId, state.label, { status: ok ? "completed" : "failed", summary });
+      if (ok) this.updatePlannedLot(ticketId, state.planId, state.label, { status: "completed", failurePhase: null, summary });
+      else if (failurePhase !== "integration") this.recordLotFailure(ticketId, state.planId, state.label, failurePhase, summary);
       const remaining = this.remainingImplementationLots(ticketId) - 1;
       const delivered = this.sessionHub.sendEvent(ticketId, { type: "implementation_done", ok, summary, label: state.label, remaining });
       this.store.logEvent(ticketId, "delegation_done", { ok, delivered, label: state.label, remaining, summary });
@@ -2221,8 +2531,11 @@ export class DelegationManager {
           timeout.unref();
         }),
       ]);
+      this.writerOwners.delete(state.generationId);
       return true;
     } catch (closeError) {
+      const writerOwner = this.writerOwners.get(state.generationId);
+      if (writerOwner) this.unclosedWriters.add(writerOwner);
       handle.dispose?.();
       log.warn("fermeture de session enfant incomplète", {
         generationId: state.generationId,

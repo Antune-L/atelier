@@ -194,6 +194,10 @@ class BoardStore {
     return [...this.state.tickets, ticket];
   }
 
+  rememberTicket(ticket: Ticket): void {
+    this.set({ tickets: this.upsertTicket(ticket) });
+  }
+
   /** Apply a conversation returned by a REST call without waiting for its WS push. */
   rememberConversation(conversation: Conversation): void {
     this.set({ conversations: this.upsertConversation(conversation) });

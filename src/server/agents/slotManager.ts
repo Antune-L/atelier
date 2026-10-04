@@ -15,6 +15,7 @@ import {
   type Column,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
+import { hasUnresolvedImplementation } from "../../shared/implementationPlan.ts";
 import type { QualityGate, QualityIteration, QualityRunStatus } from "../../shared/quality.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
@@ -72,6 +73,7 @@ const QUALITY_TECHNICAL_CHECK_NAMES: string[] = ["typecheck", "lint", "test"];
 const QUALITY_TECHNICAL_OUTPUT_LIMIT = 4_000;
 const MAX_SLUG_WORDS = 6;
 const SLUG_MAX_LENGTH = 40;
+const UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON = "Unresolved implementation obligations prevent delivery. Use implementation recovery and its normal pull request delivery checks before completing this ticket.";
 
 /** tmux session-name prefix for a standalone (ticket-less) runnable worktree session. */
 const WORKTREE_SESSION_PREFIX = "worktree";
@@ -144,6 +146,7 @@ export class SlotManager {
   private readonly phaseStartedAt = new Map<string, number>();
   private delegationDrain: ((ticketId: string) => Promise<void>) | null = null;
   private implementationPlanResume: ((ticket: Ticket, slotId: number) => Promise<void>) | null = null;
+  private implementationRecoveryGuard: ((ticketId: string, slotId: number, prUrl: string) => Promise<{ ok: boolean; result: string }>) | null = null;
   private qualityGate: ((ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>) | null = null;
   private qualityCancel: ((ticketId: string) => Promise<void>) | null = null;
   private qualityIterationVerifier: ((ticketId: string, worktreePath: string, iterationId: string) => Promise<void>) | null = null;
@@ -201,6 +204,16 @@ export class SlotManager {
     this.implementationPlanResume = resume;
   }
 
+  setImplementationRecoveryGuard(guard: (ticketId: string, slotId: number, prUrl: string) => Promise<{ ok: boolean; result: string }>): void {
+    this.implementationRecoveryGuard = guard;
+  }
+
+  private implementationPlanBlocksDelivery(ticketId: string): boolean {
+    const plan = this.store.getImplementationPlan(ticketId);
+    if (!plan) return false;
+    return plan.lots.some((lot) => lot.status !== "completed") || Boolean(plan.recovery && plan.recovery.status !== "resolved");
+  }
+
   setQualityGate(gate: (ticketId: string, mode: "strict" | "reservations") => Promise<QualityGate>): void {
     this.qualityGate = gate;
   }
@@ -228,6 +241,7 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || iteration?.id !== iterationId || iteration.mode !== "correction") throw new Error("Correction qualité introuvable.");
     if (iteration.status !== "queued") return;
+    if (ticket.slotId !== null && this.store.getImplementationPlan(ticketId)?.recovery) throw new Error("Reprends la récupération du plan conservé avant de lancer une autre correction qualité.");
     if (!this.qualityIterationVerifier) throw new Error("Vérification de correction qualité indisponible.");
     if (ticket.kind !== "feature" || ticket.directPush || ticket.stealth) throw new Error("La correction requiert une carte feature avec une PR ouverte.");
     await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
@@ -295,8 +309,18 @@ export class SlotManager {
       diagnostic = getErrorMessage(error);
     }
     if (this.store.getActiveQualityIteration(ticketId)?.id !== iterationId || this.store.getTicket(ticketId)?.slotId !== slotId) return;
+    if (this.store.getImplementationPlan(ticketId)?.recovery) {
+      const recoveryGate = await this.implementationRecoveryGuard?.(ticketId, slotId, ticket.prUrl ?? "");
+      if (this.store.getActiveQualityIteration(ticketId)?.id !== iterationId || this.store.getTicket(ticketId)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId) return;
+      if (!recoveryGate?.ok) {
+        diagnostic = recoveryGate?.result ?? "La livraison de la récupération n'a pas pu être vérifiée ; le worktree est conservé.";
+        this.store.updateQualityIteration(iterationId, { status: "failed", diagnostic, completedAt: Date.now() });
+        this.touch(this.store.updateTicket(ticketId, { column: "failed", stage: "failed", error: diagnostic, autoMerge: false, finishedAt: Date.now() }));
+        return;
+      }
+    }
     this.store.updateQualityIteration(iterationId, { status: complete ? "completed" : "failed", diagnostic: complete ? null : diagnostic, completedAt: Date.now() });
-    this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, error: complete ? null : diagnostic, finishedAt: Date.now(), autoMerge: false }));
+    this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, prUrl: ticket.prUrl, error: complete ? null : diagnostic, finishedAt: Date.now(), autoMerge: false }));
     const operation = iteration.mode === "correction" ? "Correction terminée" : "Vérification reprise";
     const verification = functional ? "nouveau test fonctionnel réussi dans le navigateur" : "nouvelle vérification indépendante complète réussie";
     const body = complete ? `${operation} et ${verification}.` :`${operation} avec réserves : ${diagnostic}. Aucune correction supplémentaire n'a été lancée.`;
@@ -316,8 +340,9 @@ export class SlotManager {
     this.sessionHub.disconnect(ticketId, "cancelled");
     await this.delegationDrain?.(ticketId);
     const retained = ticket.slotId !== null && this.store.getSlot(ticket.slotId)?.ticketId === ticketId;
+    const unresolvedDelivery = ticket.slotId !== null && hasUnresolvedImplementation(this.store.getImplementationPlan(ticketId));
     if (retained && ticket.slotId !== null) this.store.updateSlot(ticket.slotId, { status: "interrupted" });
-    this.touch(this.store.updateTicket(ticketId, { column: "done", stage: retained ? "interrupted" : "done", autoMerge: false, error: retained ? "Correction qualité annulée ; le worktree est conservé pour une relance explicite." : "Correction qualité annulée.", finishedAt: Date.now() }));
+    this.touch(this.store.updateTicket(ticketId, { column: unresolvedDelivery ? "failed" : "done", stage: retained ? "interrupted" : "done", autoMerge: false, error: retained ? "Correction qualité annulée ; le worktree est conservé pour une relance explicite." : "Correction qualité annulée.", finishedAt: Date.now() }));
     this.pumpQueue();
   }
 
@@ -1082,6 +1107,9 @@ export class SlotManager {
       }
     }
 
+    const recoveryBeforeGate = await this.implementationRecoveryGuard?.(ticketId, slotId, prUrl);
+    if (recoveryBeforeGate && !recoveryBeforeGate.ok) return { ok: false, reason: recoveryBeforeGate.result, slotReleased: false };
+
     log.info("vérification de la gate done", { ticketId, slotId, prUrl, kind: ticket.kind });
     const gate = await this.doneGate(ticket, path, ticket.branch, prUrl);
     if (!gate.ok) {
@@ -1132,6 +1160,8 @@ export class SlotManager {
       log.warn("finalisation done ignorée après changement de propriétaire du slot", { ticketId, slotId, prUrl });
       return { ok: false, reason: "slot périmé ou détenu par un autre ticket", slotReleased: false };
     }
+    const recoveryAfterQuality = await this.implementationRecoveryGuard?.(ticketId, slotId, prUrl);
+    if (recoveryAfterQuality && !recoveryAfterQuality.ok) return { ok: false, reason: recoveryAfterQuality.result, slotReleased: false };
     log.info("gate done validée", { ticketId, slotId, prUrl });
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
@@ -1267,6 +1297,7 @@ export class SlotManager {
   async markReadyForReview(ticketId: string, slotId: number): Promise<{ ok: boolean; reason: string }> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !ticket.branch) return { ok: false, reason: "ticket ou branche introuvable" };
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON };
     const path = slotPath(slotId);
 
     log.info("vérification de la gate ready_for_review", { ticketId, slotId, branch: ticket.branch });
@@ -1291,6 +1322,7 @@ export class SlotManager {
     }
 
     await this.recordDeliveryQuality(ticketId);
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON };
     // Stop the agent session but KEEP the slot busy and the worktree (do NOT releaseSlot): the card
     // still owns its slot so the user can test locally and queued tickets won't grab it.
     this.sessionHub.disconnect(ticketId, "completed");
@@ -1320,6 +1352,7 @@ export class SlotManager {
     if (!ticket || !ticket.branch || !isProjectKey(ticket.project)) {
       return { ok: false, reason: "ticket, branche ou projet introuvable" };
     }
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON };
     const path = slotPath(slotId);
     const quality = await this.recordDeliveryQuality(ticketId);
     if (quality?.enabled && !quality.complete) {
@@ -1346,6 +1379,7 @@ export class SlotManager {
       );
       return { ok: false, reason: gate.reason };
     }
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON };
     await this.releaseSlot(slotId, ticket, "completed");
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -1382,6 +1416,7 @@ export class SlotManager {
     ) {
       return { ok: false, reason: "création de PR réservée aux tickets stealth en colonne À review", prUrl: null };
     }
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON, prUrl: null };
     // Re-entrancy guard: two concurrent "Créer la PR" clicks would both pass the column check and open
     // two PRs (the column only flips to "done" AFTER createPr's awaits). Mark the in-flight stage
     // synchronously (before the first await) so a second call observes "opening_pr" and bails.
@@ -1402,6 +1437,7 @@ export class SlotManager {
     }
     // Capture the agent's work summary from the PR description before releasing the slot (gh cwd).
     const agentSummary = await this.system.fetchPrSummary(slotPath(ticket.slotId), result.url, provider);
+    if (this.implementationPlanBlocksDelivery(ticketId)) return { ok: false, reason: UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON, prUrl: result.url };
     await this.releaseSlot(ticket.slotId, ticket);
     this.touch(
       this.store.updateTicket(ticketId, {
@@ -1578,7 +1614,12 @@ export class SlotManager {
       const iteration = this.store.getActiveQualityIteration(ticketId);
       if (iteration?.mode === "correction" && iteration.status === "verifying") {
         this.store.updateQualityIteration(iteration.id, { status: "interrupted", diagnostic: "Vérification interrompue au redémarrage ; reprends la vérification explicitement.", completedAt: Date.now() });
-        this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, autoMerge: false, error: "Vérification interrompue au redémarrage.", finishedAt: Date.now() }));
+        if (this.store.getImplementationPlan(ticketId)?.recovery) {
+          this.touch(this.store.updateTicket(ticketId, { column: "failed", stage: "interrupted", autoMerge: false, error: "Vérification interrompue au redémarrage ; le worktree de récupération est conservé.", finishedAt: Date.now() }));
+          this.store.updateSlot(slot.id, { status: "interrupted" });
+          continue;
+        }
+        this.touch(this.store.updateTicket(ticketId, { column: "done", stage: "done", slotId: null, prUrl: recovered.prUrl, autoMerge: false, error: "Vérification interrompue au redémarrage.", finishedAt: Date.now() }));
         await this.cleanupTerminalSlot(slot.id, recovered, "failed", true);
         continue;
       }
@@ -1633,7 +1674,9 @@ export class SlotManager {
         await this.startQualityCorrection(ticket.id, iteration.id);
       } catch (error) {
         this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: getErrorMessage(error), completedAt: Date.now() });
-        this.touch(this.store.updateTicket(ticket.id, { column: "done", stage: "done", error: getErrorMessage(error), autoMerge: false, finishedAt: Date.now() }));
+        const currentTicket = this.store.getTicket(ticket.id);
+        const unresolvedDelivery = currentTicket?.slotId !== null && hasUnresolvedImplementation(this.store.getImplementationPlan(ticket.id));
+        this.touch(this.store.updateTicket(ticket.id, { column: unresolvedDelivery ? "failed" : "done", stage: unresolvedDelivery ? "failed" : "done", error: getErrorMessage(error), autoMerge: false, finishedAt: Date.now() }));
       }
     }
     this.hub.pushSlots(this.store.listSlots());
@@ -1713,6 +1756,40 @@ export class SlotManager {
     return true;
   }
 
+  async resumeImplementationRecovery(ticketId: string): Promise<boolean> {
+    const ticket = this.store.getTicket(ticketId);
+    const recovery = this.store.getImplementationPlan(ticketId)?.recovery;
+    if (!ticket || ticket.kind !== "feature" || ticket.slotId === null || ticket.testing || ticket.stealth || ticket.directPush || ticket.resolvingConflicts || !recovery || recovery.slotId !== ticket.slotId || this.store.getSlot(ticket.slotId)?.ticketId !== ticketId) return false;
+    if (recovery.status === "freezing" || recovery.status === "assessing" || this.isLaunching(ticketId)) return false;
+    let iteration = this.store.getActiveQualityIteration(ticketId);
+    if (iteration && (iteration.mode !== "correction" || iteration.status !== "correcting")) return false;
+    const previous = this.store.getLatestQualityIteration(ticketId);
+    if (!iteration && previous?.mode !== "correction") return this.relaunch(ticketId);
+    if (!iteration && previous?.mode === "correction" && previous.status !== "completed") {
+      const sourceRunId = previous.resultRunId ?? previous.sourceRunId;
+      const source = this.store.getQualityRun(sourceRunId);
+      if (!source || source.ticketId !== ticketId || source.criteriaSnapshotId !== (previous.criteriaSnapshot?.id ?? null)) throw new Error("The retained correction source no longer matches its frozen criteria. Resume quality verification before implementation recovery.");
+      if (ticket.prUrl !== previous.prUrl || ticket.branch !== previous.headBranch || ticket.title !== previous.originalTicket.title || ticket.description !== previous.originalTicket.description || ticket.prdMarkdown !== previous.originalTicket.prdMarkdown) throw new Error("The retained correction no longer matches its original pull request, branch or requirements. Resume quality verification before implementation recovery.");
+      iteration = this.store.createQualityIteration({
+        ticketId,
+        sourceRunId,
+        provider: previous.provider,
+        mode: "correction",
+        prUrl: previous.prUrl,
+        headBranch: previous.headBranch,
+        evidenceIds: previous.evidenceIds,
+        ...(previous.trigger ? { trigger: previous.trigger } : {}),
+        ...(sourceRunId === previous.sourceRunId ? { retryOfIterationId: previous.id } : {}),
+      });
+      if (iteration.status !== "queued" || (iteration.criteriaSnapshot?.id ?? null) !== (previous.criteriaSnapshot?.id ?? null)) throw new Error("The correction continuation cannot reuse this source safely. Resume quality verification before implementation recovery.");
+      this.store.updateQualityIteration(iteration.id, { status: "correcting" });
+    }
+    await this.relaunchInPlace(ticket.slotId, ticketId);
+    const currentTicket = this.store.getTicket(ticketId);
+    const currentRecovery = this.store.getImplementationPlan(ticketId)?.recovery;
+    return currentTicket?.slotId === ticket.slotId && this.store.getSlot(ticket.slotId)?.ticketId === ticketId && currentRecovery?.generation === recovery.generation && currentRecovery.slotId === ticket.slotId && this.sessionHub.isConnected(ticketId);
+  }
+
   /**
    * Auto-reclaim a dead/stalled turn: relaunch in the held slot (preserves the worktree — never
    * falls back to a fresh worktree, so uncommitted work is safe), bounded by AUTO_RECLAIM_MAX.
@@ -1763,6 +1840,7 @@ export class SlotManager {
     if (!storedTicket || !isProjectKey(storedTicket.project)) return;
     // A test session must never be relaunched with a pipeline contract; the user stops it manually.
     if (storedTicket.testing) return;
+    const recoveryGeneration = this.store.getImplementationPlan(ticketId)?.recovery?.generation;
     const previous = this.store.listExecutionRuns("ticket", ticketId)
       .findLast((run) => run.role === "orchestrator");
     const previousModel = codexModelSchema.safeParse(previous?.effectiveModel);
@@ -1823,6 +1901,9 @@ export class SlotManager {
     await this.delegationDrain?.(ticketId);
     const recoveryContext = buildRecoveryContext(ticket, this.store, restoredStage);
     if (iteration?.mode === "correction" && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la reprise.");
+    const currentTicket = this.store.getTicket(ticketId);
+    if (!currentTicket || currentTicket.testing || currentTicket.archived || currentTicket.column === "abandoned" || currentTicket.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId
+      || currentTicket.branch !== ticket.branch || currentTicket.project !== ticket.project || (recoveryGeneration && this.store.getImplementationPlan(ticketId)?.recovery?.generation !== recoveryGeneration)) throw new Error("Le propriétaire du worktree a changé pendant la reprise.");
     this.setPhase(ticketId, SETUP_PHASES.spawning);
     this.startAgentSession(ticket, slotId, path, { resume: true });
     this.setPhase(ticketId, SETUP_PHASES.waiting);

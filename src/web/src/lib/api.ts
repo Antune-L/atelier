@@ -45,6 +45,8 @@ import type {
   WorktreeSession,
 } from "@shared/schemas";
 import type { createConversationSchema, createTicketsFromPrdSchema } from "@shared/schemas";
+import { ticketSchema } from "@shared/schemas";
+import type { recoverImplementationPlanArgsSchema } from "@shared/protocol";
 import type { Column, Orchestrator, PrState } from "@shared/constants";
 import { qualityFollowUpResponseSchema } from "@shared/quality";
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
@@ -57,6 +59,7 @@ const ATELIER_BASE = "/api/atelier";
 
 export type CreateConversationBody = z.input<typeof createConversationSchema>;
 export type CreateTicketsFromPrdBody = z.input<typeof createTicketsFromPrdSchema>;
+export type RecoverImplementationPlanInput = z.input<typeof recoverImplementationPlanArgsSchema>;
 
 export interface ConversationDetail {
   conversation: Conversation;
@@ -169,6 +172,13 @@ export const api = {
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),
+  recoverImplementationPlan: async (id: string, input: RecoverImplementationPlanInput): Promise<Ticket> => {
+    const response = await request<{ ticket: unknown }>(`/api/tickets/${encodeURIComponent(id)}/implementation-recovery`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return ticketSchema.parse(response.ticket);
+  },
   ticketQuality: (id: string, signal?: AbortSignal): Promise<QualityResponse> =>
     request(ticketQualityPath(id), { signal }),
   setQualityCriteria: (id: string, input: SetQualityCriteriaInput): Promise<QualityResponse> =>

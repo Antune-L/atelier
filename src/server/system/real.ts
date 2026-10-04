@@ -45,6 +45,9 @@ import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
+  ImplementationRecoveryArchive,
+  ImplementationRecoveryOptions,
+  RecoveryCandidateOptions,
   ImportNotionOptions,
   PaneSize,
   PaneStream,
@@ -234,6 +237,10 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async finishImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     await this.delegationWorkspace.finish(opts);
+  }
+
+  preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
+    return this.delegationWorkspace.preserve(opts);
   }
 
   cancelImplementationLot(opts: ImplementationLotOptions): void {
@@ -706,6 +713,32 @@ export class RealSystemAdapter implements SystemAdapter {
       return { ok: false, reason: "la branche n'est pas poussée (commits en avance)" };
     }
     return this.vcs(provider).verifyPrExists(slotPath, prUrl);
+  }
+
+  async verifyRecoveryCandidate(opts: RecoveryCandidateOptions, provider: VcsProvider): Promise<DoneGateResult> {
+    const status = await runBoundedCommand(["git", "status", "--porcelain"], opts.slotPath);
+    if (status.exitCode !== 0 || status.timedOut || status.stdout.trim()) {
+      return { ok: false, reason: "Le candidat doit être un worktree propre et lisible." };
+    }
+    const head = await runBoundedCommand(["git", "rev-parse", "HEAD"], opts.slotPath);
+    const branch = await runBoundedCommand(["git", "branch", "--show-current"], opts.slotPath);
+    const parent = await runBoundedCommand(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], opts.repoPath);
+    const child = await runBoundedCommand(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], opts.slotPath);
+    if ([head, branch, parent, child].some((result) => result.exitCode !== 0 || result.timedOut)
+      || head.stdout.trim() !== opts.commitSha || branch.stdout.trim() !== opts.branch
+      || realpathSync(parent.stdout.trim()) !== realpathSync(child.stdout.trim())) {
+      return { ok: false, reason: "Le dépôt, la branche ou le commit du candidat a changé." };
+    }
+    const remote = await this.vcs(provider).verifyRecoveryCandidate(opts);
+    if (!remote.ok) return remote;
+    const finalHead = await runBoundedCommand(["git", "rev-parse", "HEAD"], opts.slotPath);
+    const finalBranch = await runBoundedCommand(["git", "branch", "--show-current"], opts.slotPath);
+    const finalStatus = await runBoundedCommand(["git", "status", "--porcelain"], opts.slotPath);
+    if ([finalHead, finalBranch, finalStatus].some((result) => result.exitCode !== 0 || result.timedOut)
+      || finalHead.stdout.trim() !== opts.commitSha || finalBranch.stdout.trim() !== opts.branch || finalStatus.stdout.trim()) {
+      return { ok: false, reason: "Le candidat a changé pendant la vérification de la PR." };
+    }
+    return remote;
   }
 
   async verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult> {

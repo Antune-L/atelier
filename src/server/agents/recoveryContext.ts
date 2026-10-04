@@ -40,6 +40,16 @@ export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage)
   const plan = store.getImplementationPlan(ticket.id);
   if (plan !== null) {
     append("Plan d'implémentation persistant", { id: plan.id, status: plan.status, maxParallel: plan.maxParallel });
+    if (plan.recovery) {
+      append("Reprise explicite du plan", { generation: plan.recovery.generation, status: plan.recovery.status, reason: plan.recovery.reason, candidate: plan.recovery.candidate, prUrl: plan.recovery.prUrl, diagnostic: plan.recovery.diagnostic });
+      lines.push("Le plan est gelé pour cette reprise. Ne resoumets pas de plan et ne relance aucun lot. Relis read_implementation_plan() pour les obligations complètes. Les lots ne sont résolus que par les contrôles de livraison du serveur.");
+      if (plan.recovery.status === "assessed" || plan.recovery.status === "resolved") {
+        lines.push("Le candidat a déjà été évalué. Conserve sa révision, complète les reviews et validations normales puis appelle done(pr_url). Toute modification invalide l'évaluation et impose recover_implementation_plan({action:\"assess\",reason,generation}) sur le nouveau commit propre.");
+      } else {
+        lines.push("Termine toutes les obligations restantes, appelle recover_implementation_plan({action:\"assess\",reason,generation}) sur un commit propre, puis attends une évaluation assessed avant la review et done(pr_url). Une évaluation assessing est déjà en cours : termine ton tour et attends son résultat.");
+      }
+      for (const obligation of plan.recovery.obligations.slice(0, MAX_RECOVERY_ENTRIES)) append("Obligation restante à vérifier", obligation);
+    }
     for (const lot of plan.lots.slice(0, MAX_RECOVERY_ENTRIES)) {
       append("Lot du plan", { label: lot.label, files: lot.files, dependsOn: lot.dependsOn, status: lot.status, attempts: lot.attempts, summary: lot.summary, plan: lot.plan });
     }

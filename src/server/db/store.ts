@@ -30,7 +30,7 @@ import {
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
-import { implementationPlanSchema } from "../../shared/implementationPlan.ts";
+import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
@@ -764,6 +764,7 @@ export class Store {
   }
 
   resetReviewCycle(ticketId: string): void {
+    if (this.getTicket(ticketId)?.slotId !== null && this.getImplementationPlan(ticketId)?.recovery) throw new Error("A held implementation recovery owns its frozen plan and review provenance. Resume that recovery before starting a new execution cycle.");
     this.transaction(() => {
       this.db.query("DELETE FROM review_approvals WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM review_passes WHERE ticket_id = ?").run(ticketId);
@@ -1095,7 +1096,7 @@ export class Store {
   getTicket(id: string): Ticket | null {
     const raw = this.db.query("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!raw) return null;
-    return mapTicketRow(raw, this.pendingQuestions(id));
+    return { ...mapTicketRow(raw, this.pendingQuestions(id)), implementationPlan: this.getImplementationPlan(id) };
   }
 
   listTickets(includeArchived: boolean): Ticket[] {
@@ -1105,7 +1106,7 @@ export class Store {
     const rows = this.db.query(sql).all();
     return rows.map((raw) => {
       const ticket = mapTicketRow(raw, 0);
-      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id) };
+      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id), implementationPlan: this.getImplementationPlan(ticket.id) };
     });
   }
 
@@ -1296,6 +1297,14 @@ export class Store {
   }
 
   updateTicket(id: string, patch: TicketPatch): Ticket {
+    if (patch.column === "done") {
+      const ticket = this.getTicket(id);
+      const finalizedRecovery = ticket?.implementationPlan?.recovery?.status === "resolved"
+        && patch.stage === "done" && patch.slotId === null && patch.prUrl === ticket.implementationPlan.recovery.prUrl;
+      if (ticket?.kind === "feature" && ticket.slotId !== null && hasUnresolvedImplementation(ticket.implementationPlan) && !finalizedRecovery) {
+        throw new Error("This feature still owns a slot with unresolved implementation obligations. Use implementation recovery and verified delivery before moving it to done.");
+      }
+    }
     const builder = new SqlUpdateBuilder();
     const set = builder.set.bind(builder);
 

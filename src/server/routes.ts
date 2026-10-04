@@ -28,6 +28,7 @@ import {
   inspectProjectSchema,
   moveTicketSchema,
   postConversationMessageSchema,
+  recoverImplementationPlanArgsSchema,
   reorderProjectsSchema,
   startWorktreeSessionBodySchema,
   testConnectionDraftSchema,
@@ -1312,6 +1313,11 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const target = parsed.data.column;
 
+      if (target === "done" && ticket.kind === "feature" && ticket.slotId !== null) {
+        const plan = store.getImplementationPlan(params.id);
+        if (plan?.lots.some((lot) => lot.status !== "completed")) return jsonError(set, HTTP_CONFLICT, "This ticket still has unresolved implementation obligations. Use implementation recovery to assess and deliver its candidate before marking it done.");
+      }
+
       if (store.getActiveQualityIteration(params.id) && target !== "abandoned") return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours : utilise son action dédiée ou annule-la.");
       if (target === "implementing" && store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise Corriger et revérifier ou Reprendre la vérification pour cette carte.");
 
@@ -1514,6 +1520,14 @@ export function createApiRoutes(deps: RouteDeps) {
       const result = await slots.createStealthPr(params.id);
       if (!result.ok) return jsonError(set, HTTP_CONFLICT, result.reason);
       return store.getTicket(params.id);
+    })
+    .post("/tickets/:id/implementation-recovery", async ({ params, body, set }) => {
+      if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
+      const parsed = recoverImplementationPlanArgsSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const outcome = await coordinator.recoverImplementationPlan(params.id, parsed.data);
+      if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
+      return { ...outcome, ticket: store.getTicket(params.id), implementationPlan: store.getImplementationPlan(params.id) };
     })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);

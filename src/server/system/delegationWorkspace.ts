@@ -6,7 +6,56 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { z } from "zod";
 
-import type { ImplementationLotOptions } from "./types.ts";
+import type { ImplementationLotOptions, ImplementationRecoveryArchive, ImplementationRecoveryOptions } from "./types.ts";
+
+interface WorktreeIdentity {
+  canonicalPath: string;
+  device: number;
+  inode: number;
+  head: string | null;
+}
+
+export interface ImplementationFailureDiagnostic {
+  phase: "preparation" | "integration";
+  reason: string;
+  ticketId: string;
+  label: string;
+  cycleId: string | null;
+  slotPath: string;
+  workspacePath: string;
+  journalPhase: string | null;
+  expected: WorktreeIdentity | null;
+  observed: WorktreeIdentity | null;
+  timestamp: number;
+  buildRevision: string | null;
+}
+
+export class DelegationWorkspaceError extends Error {
+  constructor(message: string, readonly diagnostic: ImplementationFailureDiagnostic) {
+    super(message);
+    this.name = "DelegationWorkspaceError";
+  }
+}
+
+export function implementationFailureDiagnostic(error: unknown): ImplementationFailureDiagnostic | null {
+  return error instanceof DelegationWorkspaceError ? error.diagnostic : null;
+}
+
+function workspaceFailure(
+  opts: ImplementationLotOptions,
+  lot: LotSnapshot | null,
+  phase: ImplementationFailureDiagnostic["phase"],
+  reason: string,
+  message: string,
+  expected: WorktreeIdentity | null = null,
+  observed: WorktreeIdentity | null = null,
+): DelegationWorkspaceError {
+  return new DelegationWorkspaceError(message, {
+    phase, reason, ticketId: opts.ticketId, label: opts.label, cycleId: opts.cycleId ?? null,
+    slotPath: opts.slotPath, workspacePath: workspacePath(opts), journalPhase: lot?.phase ?? null,
+    expected, observed, timestamp: Date.now(), buildRevision: process.env.KANBAN_BUILD_REVISION ?? null,
+  });
+}
 
 interface FileState {
   kind: "file" | "symlink" | "missing";
@@ -37,6 +86,12 @@ const ACTIVE_CLEANUP_POLL_MS = 50;
 const JOURNAL_SUFFIX = ".journal.json";
 const JOURNAL_VERSION = 1;
 const JOURNAL_FILE_MODE = 0o600;
+const ARCHIVE_DIRECTORY = ".implementation-recovery";
+const ARCHIVE_MANIFEST = "manifest.json";
+const ARCHIVE_CONTENT = "worktree";
+const ARCHIVE_BUNDLE = "repository.bundle";
+const ARCHIVE_JOURNAL = "journal.json";
+const ARCHIVE_DIRECTORY_MODE = 0o700;
 
 function isValidRelativePath(path: string): boolean {
   return Boolean(path) && !isAbsolute(path) && !path.includes("\\")
@@ -204,6 +259,89 @@ async function snapshot(root: string, paths: Iterable<string>): Promise<Map<stri
   const states = new Map<string, FileState>();
   for (const path of paths) states.set(path, await fileState(root, path));
   return states;
+}
+
+async function archiveFingerprint(root: string): Promise<string> {
+  const hash = createHash("sha256");
+  async function visit(directory: string, relative: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!relative && entry.name === ".git") continue;
+      const path = relative ? `${relative}/${entry.name}` : entry.name;
+      const info = await lstat(join(root, path));
+      hash.update(JSON.stringify([path, info.mode & FILE_MODE_MASK]));
+      if (entry.isDirectory()) {
+        hash.update("directory");
+        await visit(join(root, path), path);
+      } else {
+        hash.update(JSON.stringify(await fileState(root, path)));
+      }
+    }
+  }
+  await visit(root, "");
+  return hash.digest("hex");
+}
+
+async function copyArchiveContents(source: string, target: string): Promise<void> {
+  await mkdir(target, { recursive: true });
+  for (const entry of await readdir(source)) {
+    if (entry === ".git") continue;
+    await cp(join(source, entry), join(target, entry), { recursive: true, verbatimSymlinks: true });
+  }
+}
+
+async function syncArchive(directory: string): Promise<void> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await syncArchive(path);
+    else if (entry.isFile()) {
+      const file = await open(path, "r");
+      try { await file.sync(); } finally { await file.close(); }
+    }
+  }
+  const handle = await open(directory, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function verifyArchiveBundle(archivePath: string, expectedHead: string): Promise<void> {
+  const verification = await mkdtemp(join(dirname(archivePath), "verification-"));
+  try {
+    await git(verification, ["init", "--bare"]);
+    await git(verification, ["bundle", "verify", join(archivePath, ARCHIVE_BUNDLE)]);
+    await git(verification, ["fetch", join(archivePath, ARCHIVE_BUNDLE), "HEAD"]);
+    if ((await git(verification, ["rev-parse", "FETCH_HEAD"])).trim() !== expectedHead) {
+      throw new Error("Le bundle ne contient pas le commit attendu ; nettoyage refusé.");
+    }
+    await git(verification, ["fsck", "--full"]);
+  } finally {
+    await rm(verification, { force: true, recursive: true });
+  }
+}
+
+const archiveManifestSchema = z.object({
+  ticketId: z.string(), label: z.string(), cycleId: z.string().optional(),
+  originalWorkspace: z.string(), originalSlot: z.string(),
+  journalHash: z.string().nullable(), contentFingerprint: z.string().nullable(),
+  head: z.string().nullable(), createdAt: z.number(),
+});
+
+export async function restoreImplementationRecoveryArchive(archivePath: string, destination: string): Promise<void> {
+  if (await lstatIfExists(destination)) throw new Error("La destination de restauration existe déjà.");
+  const manifest = archiveManifestSchema.parse(JSON.parse(await readFile(join(archivePath, ARCHIVE_MANIFEST), "utf8")));
+  if (!manifest.contentFingerprint || !manifest.head) throw new Error("Cette archive ne contient qu'un journal.");
+  if (await archiveFingerprint(join(archivePath, ARCHIVE_CONTENT)) !== manifest.contentFingerprint) {
+    throw new Error("Le contenu de l'archive a changé ; restauration refusée.");
+  }
+  await verifyArchiveBundle(archivePath, manifest.head);
+  await git(dirname(destination), ["clone", "--no-checkout", join(archivePath, ARCHIVE_BUNDLE), destination]);
+  await git(destination, ["checkout", "--detach", manifest.head]);
+  for (const entry of await readdir(destination)) {
+    if (entry !== ".git") await rm(join(destination, entry), { recursive: true, force: true });
+  }
+  await copyArchiveContents(join(archivePath, ARCHIVE_CONTENT), destination);
+  if (await archiveFingerprint(destination) !== manifest.contentFingerprint) {
+    throw new Error("La restauration ne correspond pas au contenu préservé.");
+  }
 }
 
 async function ensureParentDirectory(root: string, path: string, create: boolean): Promise<void> {
@@ -408,25 +546,37 @@ export class DelegationWorkspace {
   }
 
   async prepare(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
-    return this.withSlotLock(opts.slotPath, () => this.prepareUnlocked(opts));
+    return this.withSlotLock(opts.slotPath, async () => {
+      try {
+        return await this.prepareUnlocked(opts);
+      } catch (error) {
+        if (error instanceof DelegationWorkspaceError) throw error;
+        const phase = opts.recoveryOnly ? "integration" : "preparation";
+        throw workspaceFailure(opts, null, phase, `${phase}_failed`, String(error));
+      }
+    });
   }
 
   private async prepareUnlocked(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
     validateScope(opts.files);
-    this.cancelled.delete(workspacePath(opts));
     const canonicalSlot = await realpath(opts.slotPath);
     const repoRoot = (await git(canonicalSlot, ["rev-parse", "--show-toplevel"])).trim();
     if (await realpath(repoRoot) !== canonicalSlot) throw new Error("Le lot doit partir de la racine du worktree du ticket.");
     const cwd = workspacePath(opts);
     if (this.lots.has(cwd)) throw new Error("Ce lot possède déjà un espace de travail actif.");
     const saved = await readJournal(opts);
+    const phase = opts.recoveryOnly ? "integration" : "preparation";
+    if (opts.recoveryOnly && !saved) {
+      throw workspaceFailure(opts, null, phase, "recovery_journal_missing", "Journal du lot introuvable ; reprise de l'intégration refusée sans recréer le lot.");
+    }
+    this.cancelled.delete(cwd);
     if (saved) {
-      await this.assertParent(opts, saved);
+      await this.assertParent(opts, saved, phase);
       if (saved.phase !== "prepared") {
         await this.finishUnlocked(opts);
         return { cwd, integrated: true };
       }
-      await this.assertWorkspace(opts, saved);
+      await this.assertWorkspace(opts, saved, phase);
       this.lots.set(cwd, saved);
       return { cwd };
     }
@@ -478,31 +628,44 @@ export class DelegationWorkspace {
   }
 
   async finish(opts: ImplementationLotOptions): Promise<void> {
-    return this.withSlotLock(opts.slotPath, () => this.finishUnlocked(opts));
+    return this.withSlotLock(opts.slotPath, async () => {
+      try {
+        await this.finishUnlocked(opts);
+      } catch (error) {
+        if (error instanceof DelegationWorkspaceError) throw error;
+        const lot = await readJournal(opts).catch(() => null);
+        throw workspaceFailure(opts, lot, "integration", "integration_failed", String(error));
+      }
+    });
   }
 
-  private async assertParent(opts: ImplementationLotOptions, lot: LotSnapshot): Promise<void> {
+  private async assertParent(opts: ImplementationLotOptions, lot: LotSnapshot, phase: ImplementationFailureDiagnostic["phase"] = "integration"): Promise<void> {
     const cwd = workspacePath(opts);
     if (this.cancelled.has(cwd)) throw new Error("Lot annulé pendant son intégration.");
     const canonicalSlot = await realpath(opts.slotPath);
     const info = await lstat(canonicalSlot);
+    const head = await git(canonicalSlot, ["rev-parse", "HEAD"]).then((value) => value.trim()).catch(() => null);
+    const expected = { canonicalPath: lot.canonicalSlot, device: lot.slotDevice, inode: lot.slotInode, head: lot.head };
+    const observed = { canonicalPath: canonicalSlot, device: info.dev, inode: info.ino, head };
     if (canonicalSlot !== lot.canonicalSlot || info.dev !== lot.slotDevice || info.ino !== lot.slotInode) {
-      throw new Error("Le worktree du ticket a été remplacé ; intégration refusée.");
+      throw workspaceFailure(opts, lot, phase, "parent_identity_mismatch", "Le worktree du ticket a été remplacé ; intégration refusée.", expected, observed);
     }
-    const head = (await git(canonicalSlot, ["rev-parse", "HEAD"])).trim();
-    if (head !== lot.head) throw new Error("Le commit du ticket a changé ; intégration refusée.");
+    if (head !== lot.head) throw workspaceFailure(opts, lot, phase, "parent_revision_mismatch", "Le commit du ticket a changé ; intégration refusée.", expected, observed);
   }
 
-  private async assertWorkspace(opts: ImplementationLotOptions, lot: LotSnapshot): Promise<void> {
+  private async assertWorkspace(opts: ImplementationLotOptions, lot: LotSnapshot, phase: ImplementationFailureDiagnostic["phase"] = "integration"): Promise<void> {
     const cwd = workspacePath(opts);
     const info = await lstat(cwd);
-    if (!info.isDirectory() || await realpath(cwd) !== resolve(cwd)
+    const canonicalPath = await realpath(cwd);
+    const childHead = await git(cwd, ["rev-parse", "HEAD"]).then((value) => value.trim()).catch(() => null);
+    const expected = { canonicalPath: resolve(cwd), device: lot.workspaceDevice, inode: lot.workspaceInode, head: lot.head };
+    const observed = { canonicalPath, device: info.dev, inode: info.ino, head: childHead };
+    if (!info.isDirectory() || canonicalPath !== resolve(cwd)
       || info.dev !== lot.workspaceDevice || info.ino !== lot.workspaceInode) {
-      throw new Error("Le worktree du lot a été remplacé ; reprise refusée.");
+      throw workspaceFailure(opts, lot, phase, "child_identity_mismatch", "Le worktree du lot a été remplacé ; reprise refusée.", expected, observed);
     }
-    const childHead = (await git(cwd, ["rev-parse", "HEAD"])).trim();
     if (childHead !== lot.head) {
-      throw new Error("Le commit de base a changé pendant le lot ; intégration refusée.");
+      throw workspaceFailure(opts, lot, phase, "child_revision_mismatch", "Le commit de base a changé pendant le lot ; intégration refusée.", expected, observed);
     }
   }
 
@@ -534,7 +697,7 @@ export class DelegationWorkspace {
         return current !== undefined && !sameState(previous, current);
       });
       const outside = changed.find((path) => !isWithinScope(path, opts.files));
-      if (outside) throw new Error(`Le lot a modifié un fichier hors de son périmètre : ${outside}`);
+      if (outside) throw workspaceFailure(opts, lot, "integration", "scope_violation", `Le lot a modifié un fichier hors de son périmètre : ${outside}`);
       const intended = new Map<string, FileState>();
       for (const path of changed) {
         const state = child.get(path);
@@ -544,14 +707,14 @@ export class DelegationWorkspace {
       }
       const recovering = lot.phase === "integrating";
       if (recovering && !sameSnapshot(intended, lot.integratedStates)) {
-        throw new Error("Le lot a changé depuis le début de son intégration ; reprise refusée.");
+        throw workspaceFailure(opts, lot, "integration", "child_changed_during_integration", "Le lot a changé depuis le début de son intégration ; reprise refusée.");
       }
       for (const [path, state] of intended) {
         const previous = lot.baseline.get(path) ?? { kind: "missing", signature: "", mode: 0 };
         await ensureParentDirectory(opts.slotPath, path, false);
         const current = await fileState(opts.slotPath, path);
         if (!sameState(previous, current) && !(recovering && sameState(state, current))) {
-          throw new Error(`Le fichier ${path} a changé dans le worktree du ticket ; intégration refusée.`);
+          throw workspaceFailure(opts, lot, "integration", "parent_file_conflict", `Le fichier ${path} a changé dans le worktree du ticket ; intégration refusée.`);
         }
       }
       lot.phase = "integrating";
@@ -599,6 +762,7 @@ export class DelegationWorkspace {
   }
 
   private async cleanupSlotWorktrees(slotPath: string, repoPath: string): Promise<void> {
+    await this.preserveUnlocked({ slotPath, repoPath });
     const prefix = `${basename(slotPath)}${WORKSPACE_MARKER}`;
     const entries = await readdir(dirname(slotPath));
     const visited = new Set<string>();
@@ -618,8 +782,102 @@ export class DelegationWorkspace {
 
   private async cleanup(opts: ImplementationLotOptions): Promise<void> {
     const cwd = workspacePath(opts);
+    await this.archiveWorkspace(cwd, opts.slotPath);
     await this.removeWorktree(opts.slotPath, cwd);
     await rm(`${cwd}${JOURNAL_SUFFIX}`, { force: true });
+  }
+
+  async preserve(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
+    return this.withSlotLock(opts.slotPath, () => this.preserveUnlocked(opts));
+  }
+
+  private async preserveUnlocked(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
+    const prefix = `${basename(opts.slotPath)}${WORKSPACE_MARKER}`;
+    const identities = new Set<string>();
+    for (const entry of await readdir(dirname(opts.slotPath))) {
+      if (!entry.startsWith(prefix)) continue;
+      const suffix = entry.slice(prefix.length);
+      const identity = suffix.endsWith(JOURNAL_SUFFIX) ? suffix.slice(0, -JOURNAL_SUFFIX.length) : suffix;
+      if (new RegExp(`^[a-f0-9]{${WORKSPACE_HASH_LENGTH}}$`).test(identity)) identities.add(identity);
+    }
+    const archives: ImplementationRecoveryArchive[] = [];
+    for (const identity of identities) {
+      const cwd = join(dirname(opts.slotPath), `${prefix}${identity}`);
+      if (this.lots.has(cwd)) throw new Error("Un lot possède encore son espace de travail ; préservation refusée.");
+      const archive = await this.archiveWorkspace(cwd, opts.slotPath);
+      if (archive) archives.push(archive);
+    }
+    return archives;
+  }
+
+  private async archiveWorkspace(cwd: string, slotPath: string): Promise<ImplementationRecoveryArchive | null> {
+    const workspaceInfo = await lstatIfExists(cwd);
+    const journalInfo = await lstatIfExists(`${cwd}${JOURNAL_SUFFIX}`);
+    if (!workspaceInfo && !journalInfo) return null;
+    if (workspaceInfo && (!workspaceInfo.isDirectory() || workspaceInfo.isSymbolicLink())) {
+      throw new Error("Espace de travail invalide ; nettoyage refusé pour préserver ses données.");
+    }
+    if (journalInfo && (!journalInfo.isFile() || journalInfo.isSymbolicLink())) {
+      throw new Error("Journal invalide ; nettoyage refusé pour préserver ses données.");
+    }
+    const journal = journalInfo ? await readFile(`${cwd}${JOURNAL_SUFFIX}`) : null;
+    const parsed = journal ? lotJournalSchema.safeParse(JSON.parse(journal.toString())) : null;
+    if (parsed && !parsed.success) throw new Error("Journal illisible ; nettoyage refusé.");
+    const identity = parsed?.success ? parsed.data : null;
+    const contentFingerprint = workspaceInfo ? await archiveFingerprint(cwd) : null;
+    const journalHash = journal ? createHash("sha256").update(journal).digest("hex") : null;
+    const head = workspaceInfo ? (await git(cwd, ["rev-parse", "HEAD"])).trim() : null;
+    const archiveKey = createHash("sha256").update(JSON.stringify([cwd, contentFingerprint, journalHash, head])).digest("hex");
+    const root = join(dirname(slotPath), ARCHIVE_DIRECTORY);
+    await mkdir(root, { recursive: true, mode: ARCHIVE_DIRECTORY_MODE });
+    const rootInfo = await lstat(root);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Répertoire d'archive invalide ; nettoyage refusé.");
+    const archivePath = join(root, archiveKey);
+    const manifest = {
+      ticketId: identity?.ticketId ?? "unknown", label: identity?.label ?? basename(cwd), cycleId: identity?.cycleId,
+      originalWorkspace: cwd, originalSlot: slotPath, journalHash, contentFingerprint, head, createdAt: Date.now(),
+    };
+    if (!await lstatIfExists(archivePath)) {
+      const temporary = await mkdtemp(join(root, "pending-"));
+      try {
+        if (workspaceInfo) {
+          await copyArchiveContents(cwd, join(temporary, ARCHIVE_CONTENT));
+          await git(cwd, ["bundle", "create", join(temporary, ARCHIVE_BUNDLE), "HEAD"]);
+          if (!head) throw new Error("Commit du lot introuvable ; nettoyage refusé.");
+          await verifyArchiveBundle(temporary, head);
+          if (await archiveFingerprint(join(temporary, ARCHIVE_CONTENT)) !== contentFingerprint
+            || await archiveFingerprint(cwd) !== contentFingerprint
+            || (await git(cwd, ["rev-parse", "HEAD"])).trim() !== head) {
+            throw new Error("Le lot a changé pendant sa préservation ; nettoyage refusé.");
+          }
+        }
+        if (journal) await Bun.write(join(temporary, ARCHIVE_JOURNAL), journal);
+        await Bun.write(join(temporary, ARCHIVE_MANIFEST), JSON.stringify(manifest));
+        await syncArchive(temporary);
+        await rename(temporary, archivePath);
+        const directory = await open(root, "r");
+        try { await directory.sync(); } finally { await directory.close(); }
+      } catch (error) {
+        await rm(temporary, { force: true, recursive: true });
+        throw error;
+      }
+    }
+    const saved = archiveManifestSchema.parse(JSON.parse(await readFile(join(archivePath, ARCHIVE_MANIFEST), "utf8")));
+    if (saved.contentFingerprint !== contentFingerprint || saved.journalHash !== journalHash
+      || saved.originalWorkspace !== cwd || saved.originalSlot !== slotPath || saved.head !== head
+      || (contentFingerprint && await archiveFingerprint(join(archivePath, ARCHIVE_CONTENT)) !== contentFingerprint)
+      || (journalHash && createHash("sha256").update(await readFile(join(archivePath, ARCHIVE_JOURNAL))).digest("hex") !== journalHash)) {
+      throw new Error("Archive non vérifiée ; nettoyage refusé.");
+    }
+    if (head) await verifyArchiveBundle(archivePath, head);
+    if ((contentFingerprint && await archiveFingerprint(cwd) !== contentFingerprint)
+      || (journalHash && createHash("sha256").update(await readFile(`${cwd}${JOURNAL_SUFFIX}`)).digest("hex") !== journalHash)) {
+      throw new Error("Le lot a changé après sa préservation ; nettoyage refusé.");
+    }
+    return {
+      ticketId: manifest.ticketId, label: manifest.label, cycleId: manifest.cycleId,
+      archivePath, journalPath: journal ? join(archivePath, ARCHIVE_JOURNAL) : null, verified: true, unchanged: false,
+    };
   }
 
   private async removeWorktree(slotPath: string, cwd: string, repoPath = slotPath): Promise<void> {

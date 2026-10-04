@@ -592,6 +592,7 @@ export class QualityManager {
       const trigger = input.trigger ?? defaultTrigger(input.mode);
       const duplicate = quality.iterations.find((entry) => entry.sourceRunId === input.sourceRunId && entry.mode === input.mode && entry.retryOfIterationId === (input.retryOfIterationId ?? null) && (entry.trigger ?? defaultTrigger(entry.mode)) === trigger);
       if (duplicate) return duplicate;
+      if (input.mode === "correction" && ticket.slotId !== null && this.dependencies.store.getImplementationPlan(ticketId)?.recovery) throw new Error("Resume the held implementation recovery before starting another quality correction.");
       this.requireNoIteration(ticketId);
       if (this.active.has(ticketId)) throw new Error("A quality run is already active for this ticket.");
       const source = quality.runs.find((run) => run.id === input.sourceRunId);

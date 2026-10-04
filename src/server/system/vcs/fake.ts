@@ -7,7 +7,7 @@ import type { PrMergeability, PrState } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
-import type { DoneGateResult, PublishReviewResult, ReviewHeadResult } from "../types.ts";
+import type { DoneGateResult, PublishReviewResult, ReviewHeadResult, RecoveryCandidateOptions } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
 import type { CreatePrResult, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
@@ -80,6 +80,13 @@ export class FakeVcsClient implements VcsClient {
 
   async verifyPrExists(_cwd: string, _prUrl: string): Promise<DoneGateResult> {
     return { ok: true, reason: "" };
+  }
+
+  async verifyRecoveryCandidate(opts: RecoveryCandidateOptions): Promise<DoneGateResult> {
+    if (!opts.commitSha || !opts.branch || !opts.baseBranch || !opts.prUrl) {
+      return { ok: false, reason: "Candidat simulé incomplet." };
+    }
+    return { ok: true, reason: "Mode simulation : identité de la PR non vérifiée auprès du fournisseur." };
   }
 
   async readPrHead(_cwd: string, _prUrl: string): Promise<ReviewHeadResult> {

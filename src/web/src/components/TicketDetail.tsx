@@ -7,6 +7,7 @@ import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { ActivityTab } from "@/components/ticket-detail/ActivityTab";
 import { DescriptionTab } from "@/components/ticket-detail/DescriptionTab";
+import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
 import { OverviewTab } from "@/components/ticket-detail/OverviewTab";
 import { PrdTab } from "@/components/ticket-detail/PrdTab";
 import { TerminalTab } from "@/components/ticket-detail/TerminalTab";
@@ -20,6 +21,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
 import { stageLabel, stageSteps, ticketCardState, type CardState } from "@/lib/display";
+import { canRecoverImplementation, IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +91,7 @@ function availableTabs(ticket: Ticket): TicketTab[] {
 }
 
 function initialTab(ticket: Ticket): TicketTab {
+  if (canRecoverImplementation(ticket)) return "activity";
   const remembered = TAB_MEMORY.get(ticket.id);
   if (remembered !== undefined) return remembered;
   return ticket.pendingQuestions > 0 ? "activity" : DEFAULT_TAB;
@@ -183,6 +186,11 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
   // by TicketMeta before landing here.
   const changeStatus = async (target: Column): Promise<void> => {
     if (target === current.column) return;
+    if (target === "done" && needsImplementationRecovery(current)) {
+      selectTab("activity");
+      setMoveError(IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE);
+      return;
+    }
     try {
       if (target === "abandoned") {
         await api.moveTicket(current.id, "abandoned", true);
@@ -320,14 +328,23 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               <OverviewTab ticket={current} projects={projects} locked={locked} />
             )}
             {activeTab === "activity" && (
-              <ActivityTab
-                key={current.id}
-                ticket={current}
-                comments={comments}
-                onAnswer={answer}
-                onComment={addComment}
-                triage={triage}
-              />
+              <div className="space-y-4">
+                {current.implementationPlan && (current.implementationPlan.recovery || canRecoverImplementation(current)) && (
+                  <ImplementationRecovery
+                    key={`${current.id}:${current.implementationPlan.id}:${current.implementationPlan.recovery?.generation ?? "delegated"}:${current.slotId}`}
+                    ticket={current}
+                    plan={current.implementationPlan}
+                  />
+                )}
+                <ActivityTab
+                  key={current.id}
+                  ticket={current}
+                  comments={comments}
+                  onAnswer={answer}
+                  onComment={addComment}
+                  triage={triage}
+                />
+              </div>
             )}
             {activeTab === "description" && (
               <DescriptionTab key={current.id} ticket={current} onSave={saveDescription} />
@@ -355,6 +372,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               onRefresh={refresh}
               onClose={onClose}
               onError={setMoveError}
+              onRecovery={() => selectTab("activity")}
             />
           </aside>
         </>

@@ -12,6 +12,7 @@ import {
   publishReviewArgsSchema,
   readReviewResultsArgsSchema,
   readImplementationPlanArgsSchema,
+  recoverImplementationPlanArgsSchema,
   submitImplementationPlanArgsSchema,
   readyForReviewArgsSchema,
   failArgsSchema,
@@ -45,6 +46,7 @@ import type {
 } from "./sessionHub.ts";
 import type { SlotManager } from "./slotManager.ts";
 import { parseAtelierSessionKey } from "./sessionConfig.ts";
+import { buildRecoveryContext } from "./recoveryContext.ts";
 import type { SplitManager } from "./splitManager.ts";
 import type { TriageManager } from "./triageManager.ts";
 import { addUsageByModel, toUsageByModel } from "./usage.ts";
@@ -90,6 +92,9 @@ type ToolHandler = (ctx: SessionToolCall) => ToolResult | Promise<ToolResult>;
  * Implements the auto-nudge ×1 → stalled escalation and persists per-session token usage.
  */
 export class AgentCoordinator {
+  private readonly userRecoveryOperations = new Set<string>();
+  private readonly completingTickets = new Set<string>();
+
   constructor(
     private readonly store: Store,
     private readonly hub: ClientHub,
@@ -104,6 +109,7 @@ export class AgentCoordinator {
     private readonly atelier: AtelierManager,
     private readonly quality?: QualityManager,
   ) {
+    this.slots.setImplementationRecoveryGuard((ticketId, slotId, prUrl) => this.delegation.verifyRecoveryDelivery(ticketId, slotId, prUrl));
     this.sessionHub.setHandlers({
       onToolCall: (ctx) => this.onToolCall(ctx),
       onStop: (ticketId, sessionId, usageByModel) => {
@@ -366,6 +372,7 @@ export class AgentCoordinator {
     delegate_implementation: (ctx) => this.handleDelegateImplementation(ctx),
     submit_implementation_plan: (ctx) => this.handleSubmitImplementationPlan(ctx),
     read_implementation_plan: (ctx) => this.handleReadImplementationPlan(ctx),
+    recover_implementation_plan: (ctx) => this.handleRecoverImplementationPlan(ctx),
     delegate_review: (ctx) => this.handleDelegateReview(ctx),
     read_review_results: (ctx) => this.handleReadReviewResults(ctx),
     publish_review: (ctx) => this.handlePublishReview(ctx),
@@ -512,6 +519,20 @@ export class AgentCoordinator {
   private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    return this.completeReviewedTicket(ctx, parsed.data.pr_url);
+  }
+
+  private async completeReviewedTicket(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string): Promise<ToolResult> {
+    if (this.completingTickets.has(ctx.ticketId)) return { ok: false, result: "Ticket delivery is already in progress. Wait for its result before retrying." };
+    this.completingTickets.add(ctx.ticketId);
+    try {
+      return await this.completeReviewedTicketNow(ctx, prUrl);
+    } finally {
+      this.completingTickets.delete(ctx.ticketId);
+    }
+  }
+
+  private async completeReviewedTicketNow(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string): Promise<ToolResult> {
     if (this.delegation.hasActiveImplementations(ctx.ticketId)) {
       return {
         ok: false,
@@ -554,7 +575,7 @@ export class AgentCoordinator {
       passId: reviewGate.passId,
     });
     this.lifecycle.beginOpeningPr(ctx.ticketId);
-    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, parsed.data.pr_url);
+    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, prUrl);
     log.info("finalisation done terminée", {
       ticketId: ctx.ticketId,
       slotId: ctx.slotId,
@@ -643,6 +664,74 @@ export class AgentCoordinator {
       return { ok: false, result: "read_implementation_plan indisponible pour cette session." };
     }
     return this.delegation.readImplementationPlan(ctx.ticketId);
+  }
+
+  async recoverImplementationPlan(ticketId: string, args: unknown): Promise<ToolResult> {
+    if (this.userRecoveryOperations.has(ticketId)) return { ok: false, result: "An implementation recovery action is already in progress. Refresh its persisted status." };
+    this.userRecoveryOperations.add(ticketId);
+    try {
+      return await this.recoverImplementationPlanFromUser(ticketId, args);
+    } finally {
+      this.userRecoveryOperations.delete(ticketId);
+    }
+  }
+
+  private async recoverImplementationPlanFromUser(ticketId: string, args: unknown): Promise<ToolResult> {
+    const parsed = recoverImplementationPlanArgsSchema.safeParse(args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return { ok: false, result: "Independent quality verification is in progress. Wait for its result before recovering the implementation." };
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.kind !== "feature" || ticket.slotId === null || ticket.testing || ticket.resolvingConflicts || ticket.stealth || ticket.directPush) return { ok: false, result: "Recovery requires a feature ticket with a pull request delivery path that still owns its worktree slot, without an active user test session." };
+    const recovery = this.store.getImplementationPlan(ticketId)?.recovery;
+    if (recovery && recovery.slotId !== ticket.slotId) return { ok: false, result: "The recovery belongs to another slot. Reload the ticket before continuing." };
+    if (parsed.data.generation && parsed.data.generation !== recovery?.generation) return { ok: false, result: "Recovery generation changed. Reload the ticket before continuing." };
+    if ((parsed.data.action === "assess" || parsed.data.action === "finalize") && !recovery) return { ok: false, result: "Record an explicit takeover before assessing or finalizing recovery." };
+    if (parsed.data.action === "finalize" && recovery?.status !== "assessed" && recovery?.status !== "resolved") return { ok: false, result: "Recovery finalization requires an independently assessed candidate." };
+    if (parsed.data.action === "assess" || parsed.data.action === "finalize") {
+      await this.sessionHub.interrupt(ticketId);
+      this.sessionHub.disconnect(ticketId);
+      await this.sessionHub.drainClosingSessions();
+      await this.delegation.drainTicket(ticketId);
+      if (this.store.getTicket(ticketId)?.slotId !== ticket.slotId || this.store.getSlot(ticket.slotId)?.ticketId !== ticketId) return { ok: false, result: "Slot ownership changed while stopping the orchestrator. Reload the ticket before continuing recovery." };
+      if (recovery && this.store.getImplementationPlan(ticketId)?.recovery?.generation !== recovery.generation) return { ok: false, result: "Recovery generation changed while stopping the orchestrator. Reload the ticket before continuing." };
+    }
+    if (parsed.data.action === "finalize") {
+      if (!recovery) return { ok: false, result: "Recovery generation changed. Reload the ticket before finalizing." };
+      const prUrl = parsed.data.prUrl ?? recovery.prUrl;
+      if (!prUrl) return { ok: false, result: "Recovery finalization requires the candidate pull request URL." };
+      return this.completeReviewedTicket({ ticketId, slotId: ticket.slotId, callId: nanoid(), generationId: recovery.generation }, prUrl);
+    }
+    const outcome = await this.delegation.recoverImplementationPlan(ticketId, ticket.slotId, parsed.data, "user");
+    if (!outcome.ok || (parsed.data.action !== "takeover" && parsed.data.action !== "assess")) return outcome;
+    const currentTicket = this.store.getTicket(ticketId);
+    const currentRecovery = this.store.getImplementationPlan(ticketId)?.recovery;
+    if (currentTicket?.slotId !== ticket.slotId || this.store.getSlot(ticket.slotId)?.ticketId !== ticketId || currentRecovery?.slotId !== ticket.slotId || (recovery && currentRecovery.generation !== recovery.generation)) return { ok: false, result: "Recovery ownership changed before the orchestrator could resume. Reload the ticket before continuing." };
+    if (this.sessionHub.isConnected(ticketId)) {
+      this.sessionHub.sendEvent(ticketId, { type: "nudge", message: buildRecoveryContext(currentTicket, this.store, "implementing") });
+      return outcome;
+    }
+    try {
+      const relaunched = await this.slots.resumeImplementationRecovery(ticketId);
+      if (!relaunched) return { ok: false, result: "Recovery is recorded, but the orchestrator could not resume. Relaunch the ticket session before continuing recovery." };
+    } catch (error) {
+      return { ok: false, result: `Recovery is recorded, but the orchestrator could not resume: ${String(error)}. Relaunch the ticket session before continuing recovery.` };
+    }
+    return outcome;
+  }
+
+  private async handleRecoverImplementationPlan(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = recoverImplementationPlanArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (this.store.getActiveQualityIteration(ctx.ticketId)?.status === "verifying") return { ok: false, result: "Independent quality verification is in progress. Wait for its result before recovering the implementation." };
+    if (parsed.data.action === "finalize") {
+      const recovery = this.store.getImplementationPlan(ctx.ticketId)?.recovery;
+      if (!recovery || (parsed.data.generation && parsed.data.generation !== recovery.generation)) return { ok: false, result: "Recovery generation changed. Read the plan again before finalizing." };
+      if (this.store.getTicket(ctx.ticketId)?.testing || recovery.slotId !== ctx.slotId) return { ok: false, result: "Recovery finalization cannot use a user test session or a different slot." };
+      const prUrl = parsed.data.prUrl ?? recovery.prUrl;
+      if (!prUrl) return { ok: false, result: "Recovery finalization requires the candidate pull request URL." };
+      return this.completeReviewedTicket(ctx, prUrl);
+    }
+    return this.delegation.recoverImplementationPlan(ctx.ticketId, ctx.slotId, parsed.data, "agent");
   }
 
   private async handleDelegateReview(ctx: SessionToolCall): Promise<ToolResult> {

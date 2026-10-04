@@ -9,6 +9,7 @@ import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
 import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
 import { projectValidationSchema } from "./quality.ts";
+import { implementationPlanSchema } from "./implementationPlan.ts";
 
 // Project keys are validated server-side against the loaded config (src/server/config.ts);
 // the shared schema only enforces a non-empty string so it stays runtime-agnostic.
@@ -250,6 +251,7 @@ export const TRIAGE_VERDICT_LABELS: Record<TriageVerdict, string> = {
 };
 
 export const ticketSchema = z.object({
+  implementationPlan: implementationPlanSchema.nullable().optional(),
   id: z.string(),
   title: z.string(),
   description: z.string(),
@@ -1217,6 +1219,7 @@ export {
   delegateImplementationArgsSchema,
   submitImplementationPlanArgsSchema,
   readImplementationPlanArgsSchema,
+  recoverImplementationPlanArgsSchema,
   delegateReviewArgsSchema,
   readReviewResultsArgsSchema,
   publishReviewArgsSchema,

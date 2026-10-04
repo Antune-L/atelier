@@ -27,6 +27,31 @@ export interface ImplementationLotOptions {
   slotPath: string;
   label: string;
   files: string[];
+  recoveryOnly?: boolean;
+}
+
+export interface ImplementationRecoveryArchive {
+  ticketId: string;
+  label: string;
+  cycleId?: string;
+  archivePath: string;
+  journalPath: string | null;
+  verified: true;
+  unchanged: boolean;
+}
+
+export interface ImplementationRecoveryOptions {
+  slotPath: string;
+  repoPath: string;
+}
+
+export interface RecoveryCandidateOptions {
+  repoPath: string;
+  slotPath: string;
+  branch: string;
+  baseBranch: string;
+  prUrl: string;
+  commitSha: string;
 }
 
 export interface ValidationRevisionOptions {
@@ -234,6 +259,7 @@ export interface SystemAdapter {
   worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
   prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }>;
   finishImplementationLot(opts: ImplementationLotOptions): Promise<void>;
+  preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]>;
   cancelImplementationLot(opts: ImplementationLotOptions): void;
   discardImplementationLot(opts: ImplementationLotOptions): Promise<void>;
   captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision>;
@@ -306,6 +332,7 @@ export interface SystemAdapter {
 
   // ---- done() gate verification ----
   verifyDone(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
+  verifyRecoveryCandidate(opts: RecoveryCandidateOptions, provider: VcsProvider): Promise<DoneGateResult>;
   /**
    * Stealth ready-for-review gate: clean working tree AND branch fully pushed (no commits ahead of
    * origin/<branch>). Mirrors verifyDone minus the `gh pr view` check — a stealth ticket has no PR yet.

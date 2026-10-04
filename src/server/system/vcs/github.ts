@@ -24,6 +24,7 @@ import type {
   ReviewHeadResult,
   ReviewPublicationEvent,
   ReviewPublicationState,
+  RecoveryCandidateOptions,
 } from "../types.ts";
 import { CONNECTION_TEST_PR_LIMIT, connectionFailure, connectionResult } from "./connection.ts";
 import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
@@ -58,6 +59,12 @@ const ghRequestedPullSchema = z.object({
 const ghRequestedPullPagesSchema = z.array(z.array(ghRequestedPullSchema));
 
 const ghPrHeadSchema = z.object({ url: z.string(), headRefOid: z.string().min(1) });
+const ghCandidateSchema = z.object({
+  number: z.number().int(), html_url: z.string(), state: z.string(),
+  head: z.object({ ref: z.string(), sha: z.string(), repo: z.object({ full_name: z.string() }).nullable() }),
+  base: z.object({ ref: z.string(), repo: z.object({ full_name: z.string() }) }),
+});
+const GH_REST_OPEN_STATE = "open";
 const ghRestPullSchema = z.object({
   base: z.object({ sha: z.string().min(1) }),
   head: z.object({ sha: z.string().min(1) }),
@@ -389,6 +396,44 @@ export class GithubVcsClient implements VcsClient {
     const pr = await $`gh pr view ${prUrl} --json url`.nothrow().quiet();
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
     return { ok: true, reason: "" };
+  }
+
+  async verifyRecoveryCandidate(opts: RecoveryCandidateOptions): Promise<DoneGateResult> {
+    try {
+      const expected = await readGithubRepoRef(opts.repoPath);
+      const slot = await readGithubRepoRef(opts.slotPath);
+      const target = parsePrUrl(opts.prUrl);
+      const url = new URL(opts.prUrl);
+      const repository = `${expected.owner}/${expected.repository}`;
+      if (target?.provider !== "github" || url.protocol !== "https:"
+        || url.hostname.toLowerCase() !== expected.host
+        || target.ownerSegments.join("/").toLowerCase() !== repository.toLowerCase()
+        || githubRepoKey(slot).toLowerCase() !== githubRepoKey(expected).toLowerCase()) {
+        return { ok: false, reason: "La PR ne correspond pas au dépôt configuré." };
+      }
+      const response = await runBoundedCommand([
+        GH_BINARY, "api", "--hostname", expected.host,
+        `repos/${expected.owner}/${expected.repository}/pulls/${target.number}`,
+      ], opts.slotPath);
+      const parsed = ghCandidateSchema.safeParse(safeJsonParse(response.stdout));
+      if (response.exitCode !== 0 || response.timedOut || !parsed.success) {
+        return { ok: false, reason: "Lecture de l'identité GitHub de la PR impossible." };
+      }
+      const pr = parsed.data;
+      if (pr.number !== target.number || pr.html_url !== opts.prUrl
+        || pr.base.repo.full_name.toLowerCase() !== repository.toLowerCase()
+        || pr.head.repo?.full_name.toLowerCase() !== repository.toLowerCase()) {
+        return { ok: false, reason: "L'identité du dépôt de la PR est incompatible." };
+      }
+      if (pr.state !== GH_REST_OPEN_STATE) return { ok: false, reason: "La PR doit être ouverte pour la récupération." };
+      if (pr.head.ref !== opts.branch || pr.base.ref !== opts.baseBranch) {
+        return { ok: false, reason: "Les branches de la PR ne correspondent pas au candidat." };
+      }
+      if (pr.head.sha !== opts.commitSha) return { ok: false, reason: "Le commit de la PR ne correspond pas au candidat évalué." };
+      return { ok: true, reason: "" };
+    } catch {
+      return { ok: false, reason: "Vérification de l'identité GitHub du candidat impossible." };
+    }
   }
 
   async readPrHead(cwd: string, prUrl: string): Promise<ReviewHeadResult> {

@@ -15,6 +15,9 @@ import type {
   DoneGateResult,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
+  ImplementationRecoveryArchive,
+  ImplementationRecoveryOptions,
+  RecoveryCandidateOptions,
   ImportNotionOptions,
   PaneSize,
   PaneStream,
@@ -46,6 +49,10 @@ const FAKE_CONVERSATION_REPLY =
 
 const FAKE_SETTLE_MS = 50;
 
+function implementationLotKey(opts: ImplementationLotOptions): string {
+  return JSON.stringify([opts.ticketId, opts.cycleId, opts.slotPath, opts.label]);
+}
+
 /** ASCII carriage return — marks an Enter keystroke in the dry-run shell echo. */
 const CARRIAGE_RETURN = 0x0d;
 
@@ -75,6 +82,7 @@ function fakeMissingKey(name: string, provider: Orchestrator): string {
 }
 
 export class FakeSystemAdapter implements SystemAdapter {
+  private readonly implementationLots = new Map<string, { slotPath: string; files: string[]; integrated: boolean }>();
   readonly dryRun = true;
   /** One fake client for every provider: dry-run never talks to a real PR host. */
   private readonly vcsClient = new FakeVcsClient();
@@ -102,15 +110,34 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
     this.log("worktreeRemove", { repoPath, slotPath });
+    for (const [key, lot] of this.implementationLots) {
+      if (lot.slotPath === slotPath) this.implementationLots.delete(key);
+    }
   }
 
-  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string }> {
+  async prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }> {
     this.log("prepareImplementationLot", { ...opts });
+    const key = implementationLotKey(opts);
+    const lot = this.implementationLots.get(key);
+    if (opts.recoveryOnly) {
+      if (!lot || JSON.stringify([...lot.files].sort()) !== JSON.stringify([...opts.files].sort())) {
+        throw new Error("Simulated retained implementation journal is missing or incompatible.");
+      }
+      return { cwd: opts.slotPath, integrated: lot.integrated };
+    }
+    this.implementationLots.set(key, { slotPath: opts.slotPath, files: [...opts.files], integrated: false });
     return { cwd: opts.slotPath };
   }
 
   async finishImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     this.log("finishImplementationLot", { ...opts });
+    const lot = this.implementationLots.get(implementationLotKey(opts));
+    if (lot) lot.integrated = true;
+  }
+
+  async preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
+    this.log("preserveImplementationRecovery", { ...opts, simulated: true });
+    return [];
   }
 
   cancelImplementationLot(opts: ImplementationLotOptions): void {
@@ -119,6 +146,7 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async discardImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     this.log("discardImplementationLot", { ...opts });
+    this.implementationLots.delete(implementationLotKey(opts));
   }
 
   async captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision> {
@@ -329,6 +357,11 @@ export class FakeSystemAdapter implements SystemAdapter {
   async verifyDone(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
     this.log("verifyDone", { slotPath, branch, prUrl });
     return this.vcs(provider).verifyPrExists(slotPath, prUrl);
+  }
+
+  async verifyRecoveryCandidate(opts: RecoveryCandidateOptions, provider: VcsProvider): Promise<DoneGateResult> {
+    this.log("verifyRecoveryCandidate", { ...opts, provider, simulated: true });
+    return this.vcs(provider).verifyRecoveryCandidate(opts);
   }
 
   async verifyStealthReady(slotPath: string, branch: string): Promise<DoneGateResult> {

@@ -19,6 +19,7 @@ import {
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { api } from "@/lib/api";
+import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { useBoard } from "@/hooks/useBoard";
 import { boardStore } from "@/lib/store";
 
@@ -208,6 +209,12 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     const ticket = tickets.find((t) => t.id === active.id);
     const target = String(over.id);
     if (!ticket || !isColumn(target) || ticket.column === target) return;
+
+    if (target === "done" && needsImplementationRecovery(ticket)) {
+      onOpenTicket(ticket);
+      setError(IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE);
+      return;
+    }
 
     if (isLocked(ticket) && target !== "abandoned") {
       setError("Ticket en traitement : seul Abandonnés est autorisé.");

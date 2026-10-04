@@ -98,6 +98,14 @@ export const submitImplementationPlanArgsSchema = z.object({
 
 export const readImplementationPlanArgsSchema = z.object({});
 
+export const recoverImplementationPlanArgsSchema = z.object({
+  action: z.enum(["takeover", "assess", "retry_integration", "finalize"]),
+  reason: z.string().trim().min(1),
+  label: z.string().trim().min(1).optional(),
+  prUrl: z.string().min(1).optional(),
+  generation: z.string().min(1).optional(),
+});
+
 export const reviewKindSchema = z.enum([
   "quality",
   "conventions",
@@ -273,6 +281,11 @@ export const WORKER_TOOLS = [
     argsSchema: readImplementationPlanArgsSchema,
   },
   {
+    name: "recover_implementation_plan",
+    description: "Freeze and preserve all remaining implementation obligations for explicit takeover, independently assess their coverage, or retry integration of a successful child result. Recovery keeps failed history and requires normal review and verified delivery.",
+    argsSchema: recoverImplementationPlanArgsSchema,
+  },
+  {
     name: "delegate_review",
     description:
       "Lance un reviewer indépendant en lecture seule pour une dimension de review. Retourne immédiatement : termine le tour et attends review_done.",
@@ -343,6 +356,7 @@ const WORKER_TOOL_NAMES = [
   "delegate_implementation",
   "submit_implementation_plan",
   "read_implementation_plan",
+  "recover_implementation_plan",
   "delegate_review",
   "read_review_results",
   "publish_review",

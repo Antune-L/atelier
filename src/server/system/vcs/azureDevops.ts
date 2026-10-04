@@ -29,6 +29,7 @@ import type {
   ReviewPublicationComment,
   ReviewPublicationEvent,
   ReviewPublicationState,
+  RecoveryCandidateOptions,
 } from "../types.ts";
 import { parseAzureRepoRef } from "./azureRemote.ts";
 import type { AzureRepoRef } from "./azureRemote.ts";
@@ -193,6 +194,14 @@ const azurePrShowSchema = z.object({
 });
 
 const azurePrCreateSchema = z.object({ pullRequestId: z.number().int() });
+const azureCandidateSchema = azurePrShowSchema.extend({
+  targetRefName: z.string(),
+  forkSource: z.unknown().nullable().default(null),
+  repository: z.object({ id: z.string().min(1), name: z.string().min(1), project: z.object({ name: z.string().min(1) }) }),
+});
+const azureCandidateRefsSchema = z.array(z.object({ name: z.string(), objectId: z.string().min(1) }));
+const AZURE_SOURCE_REF_FILTER_PREFIX = "heads/";
+const AZURE_ACTIVE_STATE = "active";
 
 const azureCommentSchema = z.object({
   id: z.number().int(),
@@ -432,6 +441,48 @@ export class AzureDevopsVcsClient implements VcsClient {
   async verifyPrExists(cwd: string, prUrl: string): Promise<DoneGateResult> {
     const pr = await this.showPr(cwd, prUrl);
     if (!pr.ok) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
+    return { ok: true, reason: "" };
+  }
+
+  async verifyRecoveryCandidate(opts: RecoveryCandidateOptions): Promise<DoneGateResult> {
+    const expected = await repoRefFromRemote(opts.repoPath);
+    const slot = await repoRefFromRemote(opts.slotPath);
+    const target = repoRefFromPrUrl(opts.prUrl);
+    if (!expected || !slot || !target || new URL(opts.prUrl).protocol !== "https:"
+      || JSON.stringify(expected).toLowerCase() !== JSON.stringify(slot).toLowerCase()
+      || JSON.stringify(expected).toLowerCase() !== JSON.stringify(target.ref).toLowerCase()) {
+      return { ok: false, reason: "La PR ne correspond pas au dépôt Azure DevOps configuré." };
+    }
+    const result = await runBoundedCommand([
+      AZ_BINARY, "repos", "pr", "show", "--id", String(target.prNumber),
+      "--org", expected.orgUrl, "--detect", "false", "-o", "json",
+    ], opts.slotPath);
+    const parsed = azureCandidateSchema.safeParse(safeJsonParse(result.stdout));
+    if (result.exitCode !== 0 || result.timedOut || !parsed.success) {
+      return { ok: false, reason: "Lecture de l'identité Azure DevOps de la PR impossible." };
+    }
+    const pr = parsed.data;
+    if (pr.forkSource !== null) return { ok: false, reason: "La PR provient d'un fork ; récupération refusée." };
+    if (pr.pullRequestId !== target.prNumber || pr.repository.name.toLowerCase() !== expected.repository.toLowerCase()
+      || pr.repository.project.name.toLowerCase() !== expected.project.toLowerCase()) {
+      return { ok: false, reason: "L'identité du dépôt de la PR Azure DevOps est incompatible." };
+    }
+    if (pr.status !== AZURE_ACTIVE_STATE) return { ok: false, reason: "La PR doit être ouverte pour la récupération." };
+    if (pr.sourceRefName !== `${HEADS_REF_PREFIX}${opts.branch}` || pr.targetRefName !== `${HEADS_REF_PREFIX}${opts.baseBranch}`) {
+      return { ok: false, reason: "Les branches de la PR ne correspondent pas au candidat." };
+    }
+    if (pr.lastMergeSourceCommit?.commitId !== opts.commitSha) return { ok: false, reason: "Le commit de la PR ne correspond pas au candidat évalué." };
+    const refs = await runBoundedCommand([
+      ...this.repoArgs(expected, ["repos", "ref", "list"]), "--filter", `${AZURE_SOURCE_REF_FILTER_PREFIX}${opts.branch}`,
+    ], opts.slotPath);
+    const parsedRefs = azureCandidateRefsSchema.safeParse(safeJsonParse(refs.stdout));
+    if (refs.exitCode !== 0 || refs.timedOut || !parsedRefs.success) {
+      return { ok: false, reason: "Lecture du commit courant de la branche Azure DevOps impossible." };
+    }
+    const sourceRefs = parsedRefs.data.filter((ref) => ref.name === `${HEADS_REF_PREFIX}${opts.branch}`);
+    if (sourceRefs.length !== 1 || sourceRefs[0]?.objectId !== opts.commitSha) {
+      return { ok: false, reason: "Le commit courant de la branche Azure DevOps ne correspond pas au candidat." };
+    }
     return { ok: true, reason: "" };
   }
 

@@ -4,7 +4,15 @@ import { CODEX_EFFORTS, CODEX_MODELS, CODEX_MODEL_EFFORTS, pairedCodexEffort } f
 
 describe("CODEX_MODEL_EFFORTS", () => {
   test("exposes exactly Astra, Sol, Luna and Terra, each with a prefix of the effort ladder", () => {
-    expect(CODEX_MODELS).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]);
+    expect(CODEX_MODELS).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+      "gpt-5.6-terra",
+    ]);
     for (const model of CODEX_MODELS) {
       const supported = CODEX_MODEL_EFFORTS[model];
       expect(supported).toEqual(CODEX_EFFORTS.slice(0, supported.length));

@@ -67,6 +67,7 @@ export function App() {
   const [filter, setFilter] = useState("all");
   const effectiveFilter = selectableProjects.some((project) => project.key === filter) ? filter : "all";
   const [search, setSearch] = useState("");
+  const [previewDemoCount, setPreviewDemoCount] = useState(0);
   const [creating, setCreating] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const [openTool, setOpenTool] = useState<ToolKind | null>(null);
@@ -271,6 +272,16 @@ export function App() {
           )}
           {view === "atelier" && <div className="ml-auto flex items-center">{projectFilterSelect}</div>}
           <NotificationCenter projects={projects} className={view === "home" || view === "atelier" ? undefined : "ml-auto"} />
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/30 bg-primary/10 px-4 py-3">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold">Preview Coolify — Démo</p>
+            <p className="text-xs text-muted-foreground" aria-live="polite">Compteur : {previewDemoCount}</p>
+          </div>
+          <Button size="sm" onClick={() => setPreviewDemoCount((count) => count + 1)}>
+            Incrémenter la démo
+          </Button>
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">

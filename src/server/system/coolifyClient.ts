@@ -4,6 +4,8 @@ import { PREVIEW_AUTH_HASH_ENV } from "../../shared/preview.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HTTP_NOT_FOUND = 404;
+const API_ERROR_SCHEMA = z.object({ errors: z.record(z.string(), z.unknown()).optional() });
+const API_FIELD_PATTERN = /^[a-zA-Z0-9_.]{1,100}$/;
 const RESOURCE_SCHEMA = z.object({ uuid: z.string(), name: z.string().nullable().optional() }).passthrough();
 const APPLICATION_SCHEMA = RESOURCE_SCHEMA.extend({ status: z.string().nullable().optional(), git_commit_sha: z.string().nullable().optional(), fqdn: z.string().nullable().optional() });
 const DEPLOYMENT_SCHEMA = z.object({ deployment_uuid: z.string().optional(), uuid: z.string().optional(), status: z.string().optional(), commit: z.string().nullable().optional() }).passthrough();
@@ -22,6 +24,10 @@ export interface CoolifyResponse {
 }
 
 export type CoolifyTransport = (request: CoolifyRequest) => Promise<CoolifyResponse>;
+
+export class CoolifyRequestError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
 
 export async function requestCoolify(request: CoolifyRequest): Promise<CoolifyResponse> {
   const url = new URL(`${request.baseUrl.replace(/\/$/, "")}/api/v1${request.path}`);
@@ -42,7 +48,12 @@ export class CoolifyClient {
   private async request(method: CoolifyRequest["method"], path: string, body?: unknown, allowMissing = false): Promise<unknown> {
     const result = await this.transport({ ...this.credentials, method, path, ...(body === undefined ? {} : { body }) });
     if (allowMissing && result.status === HTTP_NOT_FOUND) return null;
-    if (result.status < 200 || result.status >= 300) throw new Error(`Coolify ${method} ${path} failed (HTTP ${result.status}).`);
+    if (result.status < 200 || result.status >= 300) {
+      const error = API_ERROR_SCHEMA.safeParse(result.body);
+      const fields = error.success ? Object.keys(error.data.errors ?? {}).filter((field) => API_FIELD_PATTERN.test(field)) : [];
+      const details = fields.length > 0 ? ` Invalid fields: ${fields.join(", ")}.` : "";
+      throw new CoolifyRequestError(result.status, `Coolify ${method} ${path} failed (HTTP ${result.status}).${details}`);
+    }
     return result.body;
   }
 
@@ -64,6 +75,12 @@ export class CoolifyClient {
 
   async getServerAddress(uuid: string): Promise<string> {
     return z.object({ ip: z.string().min(1) }).parse(await this.request("GET", `/servers/${encodeURIComponent(uuid)}`)).ip;
+  }
+
+  async getDeploymentTimeoutSeconds(uuid: string): Promise<number> {
+    const server = z.object({ settings: z.object({ dynamic_timeout: z.number().int().positive() }) }).safeParse(await this.request("GET", `/servers/${encodeURIComponent(uuid)}`));
+    if (!server.success) throw new Error("Coolify must report a positive deployment timeout before a preview deployment can be queued.");
+    return server.data.settings.dynamic_timeout;
   }
 
   async ensureEnvironment(projectUuid: string, name: string) {
@@ -134,7 +151,7 @@ export function createFakeCoolifyTransport(): CoolifyTransport {
     const body = z.record(z.string(), z.unknown()).safeParse(request.body);
     const values = body.success ? body.data : {};
     if (path === "/servers") return { status: 200, body: [{ uuid: "fake-server", name: "Simulated preview server" }] };
-    if (path.startsWith("/servers/")) return { status: 200, body: { ip: "127.0.0.1" } };
+    if (path.startsWith("/servers/")) return { status: 200, body: { ip: "127.0.0.1", settings: { dynamic_timeout: 3600 } } };
     if (path === "/projects") return { status: 200, body: [{ uuid: "fake-project", name: "Simulated previews" }] };
     if (path === "/github-apps") return { status: 200, body: [{ uuid: "fake-github-app", name: "Simulated GitHub app" }] };
     if (path.endsWith("/environments")) return { status: 200, body: [{ uuid: "fake-environment", name: "previews" }] };

@@ -1,6 +1,7 @@
 import type { PreviewRecord } from "@shared/preview";
 
 export const PREVIEW_POLL_INTERVAL_MS = 5_000;
+export const PREVIEW_CLEANUP_WATCH_LABEL = "Ressources supprimées · surveillance d’arrêt en cours";
 
 export const PREVIEW_STATUS_LABELS: Record<PreviewRecord['status'], string> = {
   queued: "En attente",

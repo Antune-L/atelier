@@ -2,10 +2,18 @@ import { posix } from "node:path";
 
 import { z } from "zod";
 
-import { PREVIEW_AUTH_DISABLED_VALUE, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema, previewGithubRepositorySchema } from "../../shared/preview.ts";
-import type { PreviewRecipe } from "../../shared/preview.ts";
+import { PREVIEW_AUTH_DISABLED_VALUE, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema, previewGithubRepositorySchema, previewBranchSchema } from "../../shared/preview.ts";
+import type { PreviewReadiness, PreviewRecipe } from "../../shared/preview.ts";
 
-import { runBoundedCommand } from "./boundedCommand.ts";
+import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
+
+class PreviewPreparationError extends Error {
+  constructor(message: string, readonly revision: string) { super(message); }
+}
+
+class PreviewInspectionError extends Error {
+  constructor(message: string, readonly revision: string) { super(message); }
+}
 
 const SHA_SCHEMA = z.string().regex(/^[a-f0-9]{40}$/i);
 const PULL_SCHEMA = z.object({ head: z.object({ sha: SHA_SCHEMA, ref: z.string().min(1), repo: z.object({ full_name: z.string().min(1) }).nullable() }), base: z.object({ repo: z.object({ full_name: z.string().min(1) }) }), state: z.enum(["open", "closed"]), merged: z.boolean() });
@@ -68,37 +76,80 @@ export async function readPreviewSource(repoPath: string, prUrl: string, recipeP
   const parsed = PULL_SCHEMA.parse(JSON.parse(pull.stdout));
   if (parsed.state !== "open" && !parsed.merged) throw new Error("The pull request is closed without being merged.");
   if (parsed.base.repo.full_name.toLowerCase() !== repository.toLowerCase() || parsed.head.repo?.full_name.toLowerCase() !== repository.toLowerCase()) throw new Error("Fork pull requests are not supported by this preview recipe.");
-  const content = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/contents/${recipePath.split("/").map(encodeURIComponent).join("/")}?ref=${parsed.head.sha}`], repoPath);
-  if (content.exitCode !== 0 || content.timedOut) throw new Error("The preview recipe is missing from the exact pull request revision. Create a preparation ticket first.");
-  const file = CONTENT_SCHEMA.parse(JSON.parse(content.stdout));
-  const recipe = previewRecipeSchema.parse(JSON.parse(Buffer.from(file.content, "base64").toString("utf8")));
-  const buildPath = recipe.buildPack === "dockerfile" ? recipe.dockerfile : recipe.composeFile;
-  const build = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/contents/${buildPath.split("/").map(encodeURIComponent).join("/")}?ref=${parsed.head.sha}`], repoPath);
-  if (build.exitCode !== 0 || build.timedOut) throw new Error("The preview build file is missing from the exact pull request revision.");
-  const buildFile = CONTENT_SCHEMA.parse(JSON.parse(build.stdout));
-  const buildText = Buffer.from(buildFile.content, "base64").toString("utf8");
-  if (/\{\{\s*(?:environment|project|team)\./i.test(buildText)) throw new Error("Preview build files must not reference shared Coolify secrets.");
-  if (recipe.buildPack === "dockercompose") {
-    const gateway = validateComposeGateway(buildText, recipe);
-    let caddyPath = gateway.caddyPath;
-    if (gateway.dockerfilePath && gateway.buildContext !== null) {
-      const dockerfileResult = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/contents/${gateway.dockerfilePath.split("/").map(encodeURIComponent).join("/")}?ref=${parsed.head.sha}`], repoPath);
-      if (dockerfileResult.exitCode !== 0 || dockerfileResult.timedOut) throw new Error("The gateway Dockerfile is missing from the exact pull request revision.");
-      const dockerfile = CONTENT_SCHEMA.parse(JSON.parse(dockerfileResult.stdout));
-      const dockerfileText = Buffer.from(dockerfile.content, "base64").toString("utf8");
-      const copy = /^COPY\s+(\S+)\s+\/etc\/caddy\/Caddyfile\s*$/m.exec(dockerfileText);
-      if (!/^FROM\s+caddy:/im.test(dockerfileText) || !copy?.[1]) throw new Error("The gateway image must use Caddy and copy its tracked configuration into /etc/caddy/Caddyfile.");
-      caddyPath = repositoryPath(gateway.buildContext, copy[1]);
+  const recipe = await readPreviewRecipe(repoPath, identity, parsed.head.sha, recipePath);
+  return { ...identity, revision: parsed.head.sha, branch: parsed.head.ref, recipe };
+}
+
+async function readPreviewFile(repoPath: string, identity: ReturnType<typeof previewGithubRepositorySchema.parse>, revision: string, filePath: string): Promise<string> {
+  try {
+    const result = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${revision}`], repoPath);
+    if (result.exitCode !== 0 || result.timedOut) {
+      if (!result.timedOut && /\(HTTP 404\)/.test(result.stderr)) {
+        const tree = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/git/trees/${revision}?recursive=1`], repoPath);
+        if (tree.exitCode === 0 && !tree.timedOut) {
+          const parsed = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string() })) }).safeParse(safeJsonParse(tree.stdout));
+          if (parsed.success && !parsed.data.truncated && !parsed.data.tree.some((entry) => entry.path === filePath)) throw new PreviewPreparationError(`The preview file ${filePath} is missing from revision ${revision}. Prepare this branch before starting a preview.`, revision);
+        }
+      }
+      throw new PreviewInspectionError(`The preview file ${filePath} could not be read at revision ${revision}. Check GitHub access and connectivity before retrying.`, revision);
     }
-    if (!caddyPath) throw new Error("The tracked Caddy gateway configuration could not be identified.");
-    const caddyResult = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/contents/${caddyPath.split("/").map(encodeURIComponent).join("/")}?ref=${parsed.head.sha}`], repoPath);
-    if (caddyResult.exitCode !== 0 || caddyResult.timedOut) throw new Error("The protected Caddy gateway configuration is missing from the exact pull request revision.");
-    const caddyFile = CONTENT_SCHEMA.parse(JSON.parse(caddyResult.stdout));
-    const caddyText = Buffer.from(caddyFile.content, "base64").toString("utf8");
-    const username = `\\{(?:env\\.${PREVIEW_AUTH_USERNAME_ENV}|\\$${PREVIEW_AUTH_USERNAME_ENV})\\}`;
-    const password = `\\{(?:env\\.${PREVIEW_AUTH_HASH_ENV}|\\$${PREVIEW_AUTH_HASH_ENV})\\}`;
-    const gatewayPattern = new RegExp(`^\\s*(?:\\{\\s*(?:(?:admin off|auto_https off|persist_config off)\\s*)*\\}\\s*)?:${recipe.port}\\s*\\{\\s*basic_auth\\s*\\{\\s*${username}\\s+${password}\\s*\\}\\s*reverse_proxy\\s+[a-zA-Z0-9_.-]+:[0-9]+\\s*\\}\\s*$`);
-    if (!gatewayPattern.test(caddyText)) throw new Error("The Caddy gateway must use the prepared global authentication and reverse proxy configuration without bypass routes.");
+    const file = CONTENT_SCHEMA.parse(JSON.parse(result.stdout));
+    return Buffer.from(file.content, "base64").toString("utf8");
+  } catch (error) {
+    if (error instanceof PreviewPreparationError || error instanceof PreviewInspectionError) throw error;
+    throw new PreviewInspectionError(`The preview file ${filePath} could not be inspected at revision ${revision}. Check GitHub access and connectivity before retrying.`, revision);
   }
-  return { revision: parsed.head.sha, branch: parsed.head.ref, repository, host: identity.host, visibility: identity.visibility, recipe };
+}
+
+async function readPreviewRecipe(repoPath: string, identity: ReturnType<typeof previewGithubRepositorySchema.parse>, revision: string, recipePath: string): Promise<PreviewRecipe> {
+  try {
+    const recipe = previewRecipeSchema.parse(JSON.parse(await readPreviewFile(repoPath, identity, revision, recipePath)));
+    const buildPath = recipe.buildPack === "dockerfile" ? recipe.dockerfile : recipe.composeFile;
+    const buildText = await readPreviewFile(repoPath, identity, revision, buildPath);
+    if (/\{\{\s*(?:environment|project|team)\./i.test(buildText)) throw new Error("Preview build files must not reference shared Coolify secrets.");
+    if (recipe.buildPack === "dockercompose") {
+      const gateway = validateComposeGateway(buildText, recipe);
+      let caddyPath = gateway.caddyPath;
+      if (gateway.dockerfilePath && gateway.buildContext !== null) {
+        const dockerfileText = await readPreviewFile(repoPath, identity, revision, gateway.dockerfilePath);
+        const copy = /^COPY\s+(\S+)\s+\/etc\/caddy\/Caddyfile\s*$/m.exec(dockerfileText);
+        if (!/^FROM\s+caddy:/im.test(dockerfileText) || !copy?.[1]) throw new Error("The gateway image must use Caddy and copy its tracked configuration into /etc/caddy/Caddyfile.");
+        caddyPath = repositoryPath(gateway.buildContext, copy[1]);
+      }
+      if (!caddyPath) throw new Error("The tracked Caddy gateway configuration could not be identified.");
+      const caddyText = await readPreviewFile(repoPath, identity, revision, caddyPath);
+      const username = `\\{(?:env\\.${PREVIEW_AUTH_USERNAME_ENV}|\\$${PREVIEW_AUTH_USERNAME_ENV})\\}`;
+      const password = `\\{(?:env\\.${PREVIEW_AUTH_HASH_ENV}|\\$${PREVIEW_AUTH_HASH_ENV})\\}`;
+      const gatewayPattern = new RegExp(`^\\s*(?:\\{\\s*(?:(?:admin off|auto_https off|persist_config off)\\s*)*\\}\\s*)?:${recipe.port}\\s*\\{\\s*basic_auth\\s*\\{\\s*${username}\\s+${password}\\s*\\}\\s*reverse_proxy\\s+[a-zA-Z0-9_.-]+:[0-9]+\\s*\\}\\s*$`);
+      if (!gatewayPattern.test(caddyText)) throw new Error("The Caddy gateway must use the prepared global authentication and reverse proxy configuration without bypass routes.");
+    }
+    return recipe;
+  } catch (error) {
+    if (error instanceof PreviewPreparationError || error instanceof PreviewInspectionError) throw error;
+    const message = error instanceof Error ? error.message : "The preview recipe is invalid.";
+    throw new PreviewPreparationError(message, revision);
+  }
+}
+
+export async function readPreviewBranchSource(repoPath: string, branch: string, recipePath: string) {
+  const selectedBranch = previewBranchSchema.parse(branch);
+  const identity = await readPreviewRepository(repoPath);
+  const result = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/branches/${encodeURIComponent(selectedBranch)}`], repoPath);
+  if (result.exitCode !== 0 || result.timedOut) throw new Error("The latest remote branch revision could not be read. Check the selected branch, GitHub access and connectivity.");
+  const parsed = z.object({ name: z.string().min(1), commit: z.object({ sha: SHA_SCHEMA }) }).parse(JSON.parse(result.stdout));
+  if (parsed.name !== selectedBranch) throw new Error("The returned GitHub branch does not match the selected branch.");
+  const recipe = await readPreviewRecipe(repoPath, identity, parsed.commit.sha, recipePath);
+  return { ...identity, revision: parsed.commit.sha, branch: selectedBranch, recipe };
+}
+
+export async function inspectPreviewReadiness(repoPath: string, branch: string, recipePath: string): Promise<PreviewReadiness> {
+  try {
+    const source = await readPreviewBranchSource(repoPath, branch, recipePath);
+    return { status: "ready", branch: source.branch, revision: source.revision, diagnostics: [], preparationTicketId: null, preparationRetryAvailable: false };
+  } catch (error) {
+    const status = error instanceof PreviewPreparationError ? "not_ready" : "check_error";
+    const revision = error instanceof PreviewPreparationError || error instanceof PreviewInspectionError ? error.revision : null;
+    const message = error instanceof Error ? error.message : "Preview preparation could not be checked.";
+    return { status, branch, revision, diagnostics: [message], preparationTicketId: null, preparationRetryAvailable: false };
+  }
 }

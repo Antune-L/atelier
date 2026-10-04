@@ -2134,8 +2134,12 @@ export class Store {
   createPreview(input: CreatePreviewInput): PreviewRecord {
     return this.transaction(() => {
       const parsed = createPreviewSchema.parse(input);
-      const ticket = this.getTicket(parsed.ticketId);
-      if (!ticket || ticket.project !== parsed.project) throw new Error("Preview ticket and project must match.");
+      if (parsed.ticketId !== null) {
+        const ticket = this.getTicket(parsed.ticketId);
+        if (!ticket || ticket.project !== parsed.project) throw new Error("Preview ticket and project must match.");
+      } else if (!this.getProjectRow(parsed.project)) {
+        throw new Error("Preview project was not found.");
+      }
       const now = Date.now();
       const preview = previewRecordSchema.parse({ ...parsed, id: nanoid(), createdAt: now, updatedAt: now });
       this.db.query("INSERT INTO preview_runs (id, ticket_id, project, desired_state, cleanup_status, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(preview.id, preview.ticketId, preview.project, preview.desiredState, preview.cleanupStatus, JSON.stringify(preview), preview.createdAt);

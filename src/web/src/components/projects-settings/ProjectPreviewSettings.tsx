@@ -4,11 +4,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { PreviewGithubSourceResolution, PreviewProjectSettings } from "@shared/preview";
 import type { ManagedProject } from "@shared/schemas";
 
+import { PreviewReadinessStatus } from "@/components/PreviewReadinessStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useBusyAction } from "@/hooks/useBusyAction";
+import { usePreviewReadiness } from "@/hooks/usePreviewReadiness";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
@@ -27,6 +29,7 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
   const { busy, error, setError, run } = useBusyAction();
   const { saved, flashSaved } = useSavedFlag();
   const supported = project.vcsProvider === "github";
+  const check = usePreviewReadiness(supported ? project.key : "");
   const dirty = settings !== null && draft !== null && JSON.stringify(settings) !== JSON.stringify(draft);
   const connectionDirty = settings !== null && draft !== null && settings.githubAppUuid !== draft.githubAppUuid;
   const candidates = source?.candidates ?? [];
@@ -82,10 +85,12 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
       setSettings(result.settings);
       setDraft(result.settings);
       flashSaved();
-      await checkSource();
+      await Promise.all([checkSource(), check.refresh()]);
       if (prepare) {
-        const preparation = await previewApi.prepareProject(project.key);
-        setPreparationMessage(preparation.created ? `Carte « ${preparation.ticket.title} » créée dans À faire.` : `La carte « ${preparation.ticket.title} » existe déjà.`);
+        const preparation = await previewApi.prepareProject(project.key, undefined, check.readiness?.preparationRetryAvailable === true);
+        check.accept(preparation.readiness);
+        if (preparation.ticket === null) setPreparationMessage("Le projet est déjà prêt pour Coolify.");
+        else setPreparationMessage(preparation.created ? `Carte « ${preparation.ticket.title} » créée dans À faire.` : `La carte « ${preparation.ticket.title} » existe déjà.`);
         const refreshed = await previewApi.projectSettings(project.key);
         setSettings(refreshed.settings);
         setDraft(refreshed.settings);
@@ -98,7 +103,7 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
       <div className="flex items-center justify-between gap-3">
         <div className="space-y-1">
           <h4 className="flex items-center gap-2 text-sm font-medium"><Cloud className="size-4 text-primary" />Prévisualisations Coolify</h4>
-          <p className="text-xs text-muted-foreground">Un environnement temporaire par pull request, depuis son dernier commit.</p>
+          <p className="text-xs text-muted-foreground">Un environnement temporaire par branche ou pull request, depuis son dernier commit.</p>
         </div>
         <Switch aria-label="Activer les prévisualisations Coolify" checked={draft?.enabled ?? false} disabled={!supported || draft === null || busy} onCheckedChange={(enabled) => { if (draft !== null) setDraft({ ...draft, enabled }); }} />
       </div>
@@ -138,14 +143,16 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
             )}
             <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>Vérifier l'accès au dépôt</Button>
           </div>
+          <PreviewReadinessStatus readiness={check.readiness} loading={check.loading} error={check.error} />
+          {dirty && <p className="text-xs text-muted-foreground">La vérification utilise la recette enregistrée et la branche de base du projet. Enregistrez vos changements pour les revérifier.</p>}
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" disabled={busy || sourceLoading || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(true)}>{busy && <Loader2 className="size-3.5 animate-spin" />}Préparer pour Coolify</Button>
+            {!check.loading && check.readiness?.status === "not_ready" && check.readiness.preparationTicketId === null && <Button variant="outline" size="sm" disabled={busy || sourceLoading || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(true)}>{busy && <Loader2 className="size-3.5 animate-spin" />}{check.readiness.preparationRetryAvailable ? "Relancer la préparation" : "Préparer pour Coolify"}</Button>}
+            <Button variant="outline" size="sm" disabled={busy || check.loading || dirty} onClick={() => void check.refresh()}>Revérifier le projet</Button>
             <Button size="sm" disabled={busy || sourceLoading || !dirty || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(false)}>Enregistrer les prévisualisations</Button>
             {saved && <span className="text-xs text-primary">Enregistré</span>}
           </div>
-          <p className="text-xs text-muted-foreground">La préparation crée une carte ordinaire dans À faire, à lancer et à relire comme vos autres fonctionnalités.</p>
+          {check.readiness?.status === "not_ready" && <p className="text-xs text-muted-foreground">La préparation utilise une carte ordinaire, à lancer et à relire comme vos autres fonctionnalités. Après fusion dans la branche de base, revérifiez le projet.</p>}
           {preparationMessage && <p role="status" className="text-sm text-primary">{preparationMessage}</p>}
-          {draft.preparationTicketId !== null && preparationMessage === null && <p className="text-xs text-muted-foreground">Une carte de préparation est associée à ce projet.</p>}
         </>
       )}
     </section>

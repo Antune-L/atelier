@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import { z } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
-import { updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
+import { createBranchPreviewSchema, preparePreviewSchema, previewBranchSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
 
 import type { PreviewManager } from "./previewManager.ts";
 
@@ -18,6 +18,24 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
       return { error: getErrorMessage(error) };
     })
     .get("/previews", () => ({ previews: previews.list() }))
+    .get("/previews/:previewId", ({ params }) => ({ preview: previews.get(params.previewId) }))
+    .get("/projects/:key/preview/readiness", async ({ params, query, set }) => {
+      const branch = previewBranchSchema.optional().safeParse(query.branch);
+      if (!branch.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid preview branch." }; }
+      return { readiness: await previews.readiness(params.key, branch.data) };
+    })
+    .post("/projects/:key/previews", async ({ params, body, set }) => {
+      const parsed = createBranchPreviewSchema.safeParse(body);
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Select a remote branch for this preview." }; }
+      const preview = await previews.createBranch(params.key, parsed.data.branch);
+      set.status = HTTP_ACCEPTED;
+      return { preview };
+    })
+    .post("/previews/:previewId/redeploy", async ({ params, set }) => {
+      const preview = await previews.redeploy(params.previewId);
+      set.status = HTTP_ACCEPTED;
+      return { preview };
+    })
     .get("/settings/previews", () => ({ settings: previews.settings }))
     .patch("/settings/previews", ({ body, set }) => {
       const parsed = updatePreviewSettingsSchema.safeParse(body);
@@ -32,7 +50,11 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
       if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid project preview settings." }; }
       return { settings: previews.updateProjectSettings(params.key, parsed.data) };
     })
-    .post("/projects/:key/preview/prepare", ({ params }) => previews.prepare(params.key))
+    .post("/projects/:key/preview/prepare", ({ params, body, set }) => {
+      const parsed = preparePreviewSchema.safeParse(body ?? {});
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid preview preparation request." }; }
+      return previews.prepare(params.key, parsed.data);
+    })
     .get("/tickets/:id/preview", ({ params }) => previews.ticket(params.id))
     .post("/tickets/:id/preview", async ({ params, set }) => {
       const preview = await previews.create(params.id);

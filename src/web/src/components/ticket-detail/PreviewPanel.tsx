@@ -9,9 +9,8 @@ import { useBusyAction } from "@/hooks/useBusyAction";
 import { errorMessage } from "@/lib/errors";
 import { formatDateTime } from "@/lib/display";
 import { previewApi } from "@/lib/previewApi";
-import { PREVIEW_CLEANUP_LABELS, PREVIEW_CLEANUP_WATCH_LABEL, PREVIEW_POLL_INTERVAL_MS, PREVIEW_STATUS_LABELS } from "@/lib/previewDisplay";
+import { PREVIEW_CLEANUP_LABELS, PREVIEW_CLEANUP_WATCH_LABEL, PREVIEW_POLL_INTERVAL_MS, PREVIEW_REVISION_LABEL_LENGTH, PREVIEW_STATUS_LABELS, previewConnectionReady } from "@/lib/previewDisplay";
 
-const REVISION_LABEL_LENGTH = 8;
 const PENDING_PREVIEW_STATUSES: PreviewRecord["status"][] = ["queued", "provisioning", "building", "deploying"];
 
 function newerPreview(current: PreviewRecord | null, incoming: PreviewRecord | null): PreviewRecord | null {
@@ -65,9 +64,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
 
   const supported = provider === "github";
   const eligible = ticket.kind === "feature" && (ticket.column === "done" || ticket.column === "merged") && ticket.prUrl !== null;
-  const setupReady = settings !== null && settings.tokenConfigured && settings.previewAuthConfigured &&
-    settings.baseUrl !== null && settings.serverUuid !== null && settings.projectUuid !== null &&
-    settings.domainBase !== null;
+  const setupReady = previewConnectionReady(settings);
   const deploying = preview !== null && PENDING_PREVIEW_STATUSES.includes(preview.status);
   const previewCanDeploy = preview === null || (preview.desiredState === "stopped" && preview.cleanupStatus === "complete");
   const canDeploy = eligible && supported && setupReady && projectSettings?.enabled === true && !deploying && preview?.status !== "stopping" && previewCanDeploy;
@@ -147,7 +144,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
             {(deploying || preview.status === "stopping") && <Loader2 className="size-4 animate-spin text-primary" />}
             <span className={ready ? "font-medium text-primary" : "font-medium"}>{PREVIEW_STATUS_LABELS[preview.status]}</span>
             <span className="text-muted-foreground">·</span>
-            <span className="font-mono text-xs">{(preview.deployedRevision ?? preview.revision).slice(0, REVISION_LABEL_LENGTH)}</span>
+            <span className="font-mono text-xs">{(preview.deployedRevision ?? preview.revision).slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span>
             {preview.expiresAt !== null && <span className="text-xs text-muted-foreground">Expire le {formatDateTime(preview.expiresAt)}</span>}
           </div>
           {preview.error && <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{preview.error}</p>}

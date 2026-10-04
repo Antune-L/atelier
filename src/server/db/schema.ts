@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS quality_criteria_snapshots (
 
 CREATE TABLE IF NOT EXISTS preview_runs (
   id TEXT PRIMARY KEY,
-  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE RESTRICT,
+  ticket_id TEXT REFERENCES tickets(id) ON DELETE RESTRICT,
   project TEXT NOT NULL,
   desired_state TEXT NOT NULL,
   cleanup_status TEXT NOT NULL,
@@ -553,6 +553,7 @@ export function createDatabase(path: string): Database {
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS};`);
   db.exec(SCHEMA_SQL);
+  migrateStandalonePreviews(db);
   const reviewPassPolicyExisted = hasColumn(db, "review_passes", "requires_approval");
   migrate(db, "tickets", TICKET_MIGRATIONS);
   migrate(db, "profiles", PROFILE_MIGRATIONS);
@@ -695,6 +696,27 @@ function migrate(db: Database, table: string, migrations: { column: string; ddl:
   for (const { column, ddl } of migrations) {
     if (!existing.has(column)) db.exec(ddl);
   }
+}
+
+function migrateStandalonePreviews(db: Database): void {
+  const ticketColumn = db.query("PRAGMA table_info(preview_runs)").all().find((row) => row !== null && typeof row === "object" && "name" in row && row.name === "ticket_id");
+  if (!ticketColumn || typeof ticketColumn !== "object" || !("notnull" in ticketColumn) || ticketColumn.notnull === 0) return;
+  db.transaction(() => {
+    db.exec(`CREATE TABLE preview_runs_nullable (
+      id TEXT PRIMARY KEY,
+      ticket_id TEXT REFERENCES tickets(id) ON DELETE RESTRICT,
+      project TEXT NOT NULL,
+      desired_state TEXT NOT NULL,
+      cleanup_status TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO preview_runs_nullable SELECT id, ticket_id, project, desired_state, cleanup_status, payload_json, created_at FROM preview_runs;
+    DROP TABLE preview_runs;
+    ALTER TABLE preview_runs_nullable RENAME TO preview_runs;
+    CREATE INDEX preview_runs_ticket_idx ON preview_runs(ticket_id, created_at);
+    CREATE INDEX preview_runs_cleanup_idx ON preview_runs(cleanup_status);`);
+  })();
 }
 
 function hasColumn(db: Database, table: string, column: string): boolean {

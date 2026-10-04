@@ -33,6 +33,12 @@ Listen on a container-reachable interface and configure one explicit internal ap
 
 Preview data is disposable by default. A fresh container must start with its own non-secret fixture state. Document whether restart preserves that container's state and recreation resets it. Persistent storage requires explicit scoped ownership and lifecycle support; do not share a host path or production database.
 
+Inspect the repository's migration and seeding scripts, including startup and worktree setup definitions. Record the verified commands and seed inputs. If no seeders exist, record the searched paths and scripts as explicit evidence; do not invent a seed command or imply seeding ran.
+
+When seeders exist, the selected Dockerfile or Compose startup must automatically run migrations followed by the project's preview seeders on every preview startup and restart, before serving traffic or reporting readiness. Do not make seeding a manual or optional step, provide a seed-disable switch, or silently skip an existing seeder. Migration or seeding errors must stop startup and prevent readiness; do not ignore their exit status. A Compose initialization service that runs only on initial creation is insufficient for application restarts.
+
+Make preview seeding repeatable and idempotent: repeated successful initialization must not duplicate fixtures or delete existing persistent preview data. Adapt nonrepeatable seeders in preview scope while preserving ordinary local and production behavior. Use only the isolated preview database, non-secret test data and existing safe integrations. If existing seeds trigger real email or other external mutations, make those paths safe for previews before running them; do not silently omit them or execute them against actual data.
+
 Do not mount the Docker socket, home directories, developer credentials or production state. Never inject the deployment controller's Coolify credentials into the preview. Keep secret values out of recipes, task descriptions and evidence.
 
 Write `.coolify/preview.json` with `version: 1`, `buildPack: "dockerfile"` or `"dockercompose"`, a repository-relative `buildContext`, integer internal `port`, same-origin `healthPath` beginning with `/`, and `environment` mapping names to non-secret runtime string values. Dockerfile recipes require a repository-relative `dockerfile`; Compose recipes require `composeFile`, `serviceName` identifying the public authentication gateway, and `authentication: "gateway"`. A Compose recipe's `port` is the gateway listener port; upstream service ports belong in Compose and gateway configuration. Include the selected container-definition path only. Optional `websocketPaths` lists application socket paths. The default state policy is ephemeral with no persistent mounts. This complete contract is available when the skill is embedded in a preparation ticket; [references/recipe.md](references/recipe.md) provides standalone examples.
@@ -49,15 +55,17 @@ Run applicable existing project checks. Do not author tests unless asked. Build 
 
 Kanban preparation tickets provide an absolute path to the bounded local-verification wrapper. Execute that exact wrapper from the prepared checkout with no arguments; do not bypass its command boundary by invoking Docker through an unrestricted shell or package-manager command. The wrapper validates Dockerfile recipes, builds an owned image, checks health and removes its own resources. It explicitly leaves browser and two-preview isolation checks unverified. Compose needs separately controlled manual validation; report that prerequisite.
 
+The wrapper's health check does not independently verify seed completion or seeded data. When seeders exist, use the repository's existing commands through the permitted verification boundary to collect project-specific evidence on a fresh preview database, then repeat initialization and restart against that same database. Record actual migration and seed completion, representative seeded test-data checks, login checks when the application supports login, and evidence that repetition preserves data without duplicates. If the available boundary cannot run those checks, keep seeding verification incomplete and report the prerequisite. If no seeders exist, the explicit repository search evidence suffices for the seeding requirement. Distinguish simulated checks from authorized live preview observations.
+
 The wrapper defaults to `.coolify/preview.json`. If the preparation ticket selects another recipe location, write `.coolify/verification.json` containing `{ "recipePath": "the/repository-relative/recipe.json" }` so the same no-argument wrapper verifies that location. The selector and chosen recipe must remain inside the prepared checkout; absolute paths and parent traversal are rejected. Include this non-secret selector in the preparation change when using a custom location.
 
 Verify these observable gates:
 
 1. The image builds from the prepared source and lockfile.
-2. The application boots with isolated fixture state and safe integrations.
+2. The application boots with isolated fixture state and safe integrations; when seeders exist, they complete after migrations before readiness, with representative seeded test data verified and login checked when the application supports login.
 3. Health, static assets, a meaningful browser flow, API calls and used WebSockets work.
 4. Two containers cannot read or change each other's data.
-5. Restart and recreation follow the documented state policy.
+5. Repeated initialization and restart rerun existing seeders successfully without duplicate fixtures or destruction of persistent preview data; recreation follows the documented state policy. If no seeders exist, the repository inspection evidence states that explicitly.
 6. Teardown removes exactly the owned containers and temporary resources.
 
 Collect bounded startup logs before diagnosing readiness failures. Clean up owned resources after failure or interruption too. Never prune shared Docker resources. Distinguish a refused command from a technical failure. After two failures on the same issue, preserve evidence and present bounded alternatives.
@@ -76,6 +84,8 @@ Keep `not_run`, `failed`, `blocked` and `passed` distinct. A health response alo
 ## Provider and source scope
 
 Preparation must work through both Claude and Codex using the same skill contract. When invoked by Kanban Agents, the preparation ticket embeds this bundled skill's exact instructions with the `[coolify-preview-setup:v1]` marker. No manually installed slash command is required. Preserve the selected orchestrator, implementation provider, isolated checkout, reviews, checks and draft PR workflow. Verify that both providers receive the embedded contract. Preserve existing review skills and narrow validation permissions.
+
+Updated instructions apply to newly created preparation cards. Existing cards retain their embedded contract, and existing recipes are not retroactively changed or revalidated. Adapt those preparations to this startup and verification policy, or create a new preparation when the normal readiness and retry workflow permits it.
 
 The initial deployment integration supports GitHub. Keep existing Azure DevOps application behavior intact and report deployment support separately. Do not infer deployment authorization from preparation success.
 
@@ -101,6 +111,7 @@ Read current documentation relevant to the project's selected build method and i
 - Keep recipe paths repository-relative. Coolify 4.3.23 requires leading slashes for API `base_directory` and `dockerfile_location` values (root `/`); translate paths at the API boundary instead of changing recipe examples.
 - Coolify 4.3.23's native Dockerfile HTTP authentication stores encrypted passwords in a 255-character column. Keep passwords within 31 UTF-8 bytes: a 32-byte input produces 256 ciphertext characters and fails before application creation. The Compose gateway is unaffected.
 - A fake system adapter may not cover startup provisioning or probes. Inspect initialization paths rather than assuming dry-run isolates them all.
+- A healthy image can still have missing seed data. The generic verifier proves health only; require project-specific seed completion and data evidence after a fresh start and repeated initialization or restart.
 - Coolify may inject one runtime environment file into every Compose service. Explicitly blank gateway authentication variables in upstream services rather than assuming service.environment prevents inheritance.
 - Kanban Agents' legacy configuration migration removes its input after importing it. Only copy a disposable non-secret fixture into the fresh data root.
 - Kanban Agents' `startServer` needs an explicit `dataRoot` to isolate logs, uploads and configuration alongside its database; a database environment override alone is incomplete.

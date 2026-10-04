@@ -66,6 +66,10 @@ The ticket embeds the complete [Coolify preparation skill](../skills/coolify-pre
 
 An existing worktree setup script can supply useful installation, migration and fixture steps. Check what it actually starts: a script that creates only a database still needs containers for the backend and interface. Adapt local paths, development servers and `localhost` URLs to the remote application. Use disposable test data and separate preview services; do not reuse production databases, host credentials or home-directory mounts.
 
+Preparation must inspect the project's seeders (scripts that create test data). When they exist, the selected Dockerfile or Compose startup automatically runs migrations followed by safe preview seeders on every startup and restart, before serving traffic or reporting readiness. Seeding is mandatory, and migration or seeding errors prevent startup. Repeated initialization must not duplicate fixtures or delete existing persistent preview data. Adapt unsafe or nonrepeatable seeders only for previews, using the isolated preview database and safe integrations so seeds cannot send real email or mutate external services. If no seeders exist, record the searched paths and scripts explicitly.
+
+This contract applies to newly created preparation cards. Existing cards retain their embedded instructions, and existing recipes do not change automatically. Adapt an existing preparation to this policy, or create a new preparation when the readiness and retry workflow permits it; repository readiness alone does not verify seeding.
+
 ### Choose a container recipe
 
 The recipe describes the build, HTTP port, readiness path and non-secret runtime environment. It does not contain credentials or claim that validation passed. Adapt the [version 1 recipe examples](../skills/coolify-preview-setup/references/recipe.md) to the application's existing build and startup commands.
@@ -86,6 +90,8 @@ For Compose, the recipe's `serviceName` and `port` identify the public gateway. 
 The preparation ticket provides the exact installed verification helper to use. Its bounded Dockerfile check builds and runs a disposable container, publishes only a local loopback port, checks readiness, and cleans up its owned resources. A custom recipe location uses the optional `.coolify/verification.json` selector described in the recipe reference.
 
 The automatic helper currently covers Dockerfile recipes. Compose preparation needs a separately controlled local check, including gateway authentication, application readiness and cleanup. Do not interpret a Compose helper refusal as a successful check.
+
+The helper's health check does not prove that seeders completed or created usable data. When seeders exist, preparation evidence must also use existing project commands to verify a fresh isolated preview database, then repeated initialization and restart against the same database. Record actual seed completion, representative seeded test-data checks, login checks when the application supports login, and the absence of duplicate fixtures or destruction of persistent preview data. If no seeders exist, the explicit repository search evidence suffices for the seeding requirement. Keep missing checks incomplete and distinguish simulated checks from authorized live preview validation.
 
 A local build and health check do not prove remote DNS, certificates, GitHub source access or browser behavior. Record which checks actually ran. The remote preview and its browser report provide those separate observations.
 

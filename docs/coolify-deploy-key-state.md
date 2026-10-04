@@ -3,6 +3,7 @@
 ## Current state
 
 - Base revision: `0c5d52b2eb9ebb78934fdd9c5a6f595ae3d56d7d`.
+- Implementation commit: `0f53a6f`. Delivery: [draft pull request 190](https://github.com/Antune-L/atelier/pull/190), not merged.
 - Implementation is isolated on `feat/coolify-project-deploy-key` in a managed worktree. The primary checkout remains unchanged.
 - The requested behavior is an optional project key selection that takes priority over the existing GitHub App/public source selection. An unavailable selected key must fail explicitly.
 - Coolify supports listing private-key metadata and creating applications using an existing key reference. Kanban must retain only the reference and strip key material from responses.

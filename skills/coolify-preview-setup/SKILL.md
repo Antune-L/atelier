@@ -89,6 +89,7 @@ Read current documentation relevant to the project's selected build method and i
 
 ## Gotchas
 
+- Missing, ambiguous or incomplete GitHub connection resolution is a project/Coolify repository-access issue. Keep **Automatique selon le dépôt** or save a verified explicit project selection; the global default is only a preference among verified matches. Do not change recipes, embed credentials or change the global source to bypass this check.
 - Coolify 4.3.23 runs Compose with `--project-directory` set to the recipe's `buildContext`. Resolve service build contexts and relative file paths from that directory, even when the Compose file lives in `.coolify`; reproduce this working-directory contract during local verification.
 - Keep recipe paths repository-relative. Coolify 4.3.23 requires leading slashes for API `base_directory` and `dockerfile_location` values (root `/`); translate paths at the API boundary instead of changing recipe examples.
 - Coolify 4.3.23's native Dockerfile HTTP authentication stores encrypted passwords in a 255-character column. Keep passwords within 31 UTF-8 bytes: a 32-byte input produces 256 ciphertext characters and fails before application creation. The Compose gateway is unaffected.

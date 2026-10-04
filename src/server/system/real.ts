@@ -23,7 +23,7 @@ import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProv
 import { createCodexProvider } from "./codexProvider.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
-import { readPreviewSource } from "./previewSource.ts";
+import { readPreviewRepository, readPreviewSource } from "./previewSource.ts";
 import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
@@ -179,6 +179,9 @@ export class RealSystemAdapter implements SystemAdapter {
   }
   readPreviewSource(repoPath: string, prUrl: string, recipePath: string) {
     return readPreviewSource(repoPath, prUrl, recipePath);
+  }
+  readPreviewRepository(repoPath: string) {
+    return readPreviewRepository(repoPath);
   }
   async confirmPreviewCleanup(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }) {
     if (!preview.appUuid || !options.sshHostAlias || !options.expectedServerAddress) return { complete: false, reason: "Configure a verified SSH target to confirm remote resource cleanup." };

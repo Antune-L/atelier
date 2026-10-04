@@ -49,3 +49,7 @@ Azure DevOps can return `isRequired: null` for a reviewer. Keep reviewer schemas
 Manual takeover does not protect child changes from ordinary final slot-release cleanup. Before finalization, preserve and verify every unreconciled child workspace and journal outside the cleanup scope; if preservation fails, retain the slot and block cleanup. Recovery also needs affirmative evidence for every frozen obligation independently of the ordinary review-pass budget: an exhausted review budget cannot turn missing coverage into success.
 
 A child can finish integration before its parent records completion. Keep the successful integration journal after removing the child worktree so recovery can recognize that outcome without applying its changes twice, and bind journals to the execution cycle so a fresh run cannot reuse an old completion. Suspending a child must release its active workspace ownership while preserving the workspace and journal; otherwise cleanup can wait for a session that no longer exists or erase the changes needed for recovery.
+
+## Coolify GitHub source metadata
+
+Coolify repository-list lookup uses the GitHub App's numeric `id`, while application creation uses its `uuid`; preserve both rather than substituting one for the other. Parse public-source rows with `id: 0` and nullable installation metadata before filtering for installed Apps. Missing required metadata is incomplete evidence, not proof that an App is uninstalled.

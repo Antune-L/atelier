@@ -2,7 +2,7 @@ import { posix } from "node:path";
 
 import { z } from "zod";
 
-import { PREVIEW_AUTH_DISABLED_VALUE, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema } from "../../shared/preview.ts";
+import { PREVIEW_AUTH_DISABLED_VALUE, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema, previewGithubRepositorySchema } from "../../shared/preview.ts";
 import type { PreviewRecipe } from "../../shared/preview.ts";
 
 import { runBoundedCommand } from "./boundedCommand.ts";
@@ -47,14 +47,21 @@ function validateComposeGateway(text: string, recipe: Extract<PreviewRecipe, { b
   return { caddyPath: null, dockerfilePath: repositoryPath(buildContext, build.dockerfile), buildContext };
 }
 
-export async function readPreviewSource(repoPath: string, prUrl: string, recipePath: string) {
-  const repositoryResult = await runBoundedCommand(["gh", "repo", "view", "--json", "nameWithOwner,url"], repoPath);
+export async function readPreviewRepository(repoPath: string) {
+  const repositoryResult = await runBoundedCommand(["gh", "repo", "view", "--json", "nameWithOwner,url,isPrivate"], repoPath);
   if (repositoryResult.exitCode !== 0 || repositoryResult.timedOut) throw new Error("The configured GitHub repository identity could not be read.");
-  const identity = z.object({ nameWithOwner: z.string().min(1), url: z.url() }).parse(JSON.parse(repositoryResult.stdout));
-  const expectedHost = new URL(identity.url).hostname;
+  const identity = z.object({ nameWithOwner: z.string().regex(/^[^/]+\/[^/]+$/), url: z.url(), isPrivate: z.boolean() }).parse(JSON.parse(repositoryResult.stdout));
+  const url = new URL(identity.url);
+  if (url.protocol !== "https:" || url.username || url.password || url.port || url.pathname.replace(/\/$/, "").toLowerCase() !== `/${identity.nameWithOwner}`.toLowerCase()) throw new Error("The configured GitHub repository identity is invalid.");
+  return previewGithubRepositorySchema.parse({ repository: identity.nameWithOwner, host: url.hostname, visibility: identity.isPrivate ? "private" : "public" });
+}
+
+export async function readPreviewSource(repoPath: string, prUrl: string, recipePath: string) {
+  const identity = await readPreviewRepository(repoPath);
+  const expectedHost = identity.host;
   const url = new URL(prUrl);
   const match = /^\/([^/]+)\/([^/]+)\/pull\/([0-9]+)$/.exec(url.pathname);
-  const repository = identity.nameWithOwner;
+  const repository = identity.repository;
   if (url.protocol !== "https:" || url.hostname !== expectedHost || !match || `${match[1]}/${match[2]}`.toLowerCase() !== repository.toLowerCase()) throw new Error("The preview pull request must belong to the configured GitHub repository.");
   const pull = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/pulls/${match[3]}`], repoPath);
   if (pull.exitCode !== 0 || pull.timedOut) throw new Error("The latest GitHub pull request revision could not be read.");
@@ -93,5 +100,5 @@ export async function readPreviewSource(repoPath: string, prUrl: string, recipeP
     const gatewayPattern = new RegExp(`^\\s*(?:\\{\\s*(?:(?:admin off|auto_https off|persist_config off)\\s*)*\\}\\s*)?:${recipe.port}\\s*\\{\\s*basic_auth\\s*\\{\\s*${username}\\s+${password}\\s*\\}\\s*reverse_proxy\\s+[a-zA-Z0-9_.-]+:[0-9]+\\s*\\}\\s*$`);
     if (!gatewayPattern.test(caddyText)) throw new Error("The Caddy gateway must use the prepared global authentication and reverse proxy configuration without bypass routes.");
   }
-  return { revision: parsed.head.sha, branch: parsed.head.ref, repository, recipe };
+  return { revision: parsed.head.sha, branch: parsed.head.ref, repository, host: identity.host, visibility: identity.visibility, recipe };
 }

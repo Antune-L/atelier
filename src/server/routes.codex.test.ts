@@ -65,7 +65,15 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
     const capabilities = await app.handle(new Request("http://localhost/api/capabilities?refresh=1"));
     expect(capabilities.status).toBe(200);
     const caps = capabilitiesSchema.parse(await capabilities.json());
-    expect(caps.codex.models.map((model) => model.model)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"]);
+    expect(caps.codex.models.map((model) => model.model)).toEqual([
+      "gpt-6.1-sol",
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-luna",
+      "gpt-5.6-terra",
+    ]);
     expect(caps.defaultCodexFast).toBe(false);
     const settingsResponse = await app.handle(new Request("http://localhost/api/settings", {
       method: "PATCH",

@@ -332,11 +332,22 @@ export const FEASIBILITY_ENGINE_LABELS: Record<FeasibilityEngine, string> = {
 /**
  * Product allow-list for Codex. Runtime capabilities narrow availability without adding models.
  */
-export const CODEX_MODELS = ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"] as const;
+export const CODEX_MODELS = [
+  "gpt-6.1-sol",
+  "gpt-6-astra",
+  "gpt-6-sol",
+  "gpt-6-luna",
+  "gpt-5.6-sol",
+  "gpt-5.6-luna",
+  "gpt-5.6-terra",
+] as const;
 export type CodexModel = (typeof CODEX_MODELS)[number];
 
 export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
+  "gpt-6.1-sol": "6.1 Sol",
   "gpt-6-astra": "6 Astra",
+  "gpt-6-sol": "6 Sol",
+  "gpt-6-luna": "6 Luna",
   "gpt-5.6-sol": "5.6 Sol",
   "gpt-5.6-luna": "5.6 Luna",
   "gpt-5.6-terra": "5.6 Terra",
@@ -371,10 +382,13 @@ export const CODEX_EFFORT_FULL_LABELS: Record<CodexEffort, string> = {
 
 /**
  * Product-supported efforts. Runtime capabilities remain authoritative for the authenticated account.
- * Every entry is a PREFIX of CODEX_EFFORTS: Luna tops out at "max" ("ultra" is multi-agent only).
+ * Every entry is a PREFIX of CODEX_EFFORTS: Luna models top out at "max" ("ultra" is multi-agent only).
  */
 export const CODEX_MODEL_EFFORTS: Record<CodexModel, readonly CodexEffort[]> = {
+  "gpt-6.1-sol": CODEX_EFFORTS,
   "gpt-6-astra": CODEX_EFFORTS,
+  "gpt-6-sol": CODEX_EFFORTS,
+  "gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
   "gpt-5.6-sol": CODEX_EFFORTS,
   "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
   "gpt-5.6-terra": CODEX_EFFORTS,

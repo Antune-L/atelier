@@ -2,11 +2,12 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 
 import { assertCodexDowngradeSafe, CODEX_DOWNGRADE_TARGET, migrateCodexCatalog } from "../src/server/db/schema.ts";
+import { DEFAULT_CODEX_MODEL } from "../src/shared/constants.ts";
 
 const APPLY_FLAG = "--apply";
 
-function scalar(db: Database, sql: string): number {
-  const row = db.query(sql).get();
+function scalar(db: Database, sql: string, param: string): number {
+  const row = db.query(sql).get(param);
   return row && typeof row === "object" && "n" in row && typeof row.n === "number" ? row.n : 0;
 }
 
@@ -21,13 +22,15 @@ function main(): void {
     assertCodexDowngradeSafe(db);
     const conversions = scalar(
       db,
-      "SELECT COUNT(*) AS n FROM tickets WHERE codex_model IN ('gpt-6-astra', 'gpt-5.6-sol')",
+      "SELECT COUNT(*) AS n FROM tickets WHERE codex_model IS NOT NULL AND codex_model <> ?",
+      DEFAULT_CODEX_MODEL,
     ) + scalar(
       db,
-      "SELECT COUNT(*) AS n FROM profiles WHERE codex_model IN ('gpt-6-astra', 'gpt-5.6-sol')",
+      "SELECT COUNT(*) AS n FROM profiles WHERE codex_model IS NOT NULL AND codex_model <> ?",
+      DEFAULT_CODEX_MODEL,
     );
     console.log(`Application target: ${CODEX_DOWNGRADE_TARGET}`);
-    console.log(`Astra/Sol configurations to convert explicitly to Terra: ${conversions}`);
+    console.log(`Non-Terra Codex configurations to convert explicitly to Terra: ${conversions}`);
     if (!apply) {
       console.log(`Dry run only. Re-run with ${APPLY_FLAG} to apply.`);
       return;

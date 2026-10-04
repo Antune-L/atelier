@@ -26,3 +26,5 @@ graphify-out/
 
 # Persisted server logs
 logs/
+
+.playwright-mcp/

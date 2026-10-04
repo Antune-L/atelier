@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-export const CODEX_SDK_VERSION = "0.153.4";
+export const CODEX_SDK_VERSION = "0.160.0";
 
 export class CodexBinaryVersionError extends Error {}
 

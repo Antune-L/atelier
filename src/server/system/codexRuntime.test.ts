@@ -158,7 +158,7 @@ test("runtime reports an invalid App Server schema as incompatible rather than t
   });
 
   expect(status.status).toBe("unavailable");
-  expect(status.message).toContain("incompatible avec le protocole App Server 0.153.4");
+  expect(status.message).toContain("incompatible avec le protocole App Server 0.160.0");
 });
 
 test("runtime keeps an App Server exit during initialize temporary", async () => {
@@ -195,7 +195,7 @@ test("runtime reports an unsupported initialize method as incompatible", async (
   });
 
   expect(status.status).toBe("unavailable");
-  expect(status.message).toContain("incompatible avec le protocole App Server 0.153.4");
+  expect(status.message).toContain("incompatible avec le protocole App Server 0.160.0");
 });
 
 test("runtime rejects a mismatched Codex binary before starting App Server", async () => {
@@ -216,6 +216,6 @@ test("runtime rejects a mismatched Codex binary before starting App Server", asy
   });
 
   expect(status.status).toBe("unavailable");
-  expect(status.message).toContain("attendu codex-cli 0.153.4, reçu codex-cli 0.999.0");
+  expect(status.message).toContain("attendu codex-cli 0.160.0, reçu codex-cli 0.999.0");
   expect(existsSync(marker)).toBe(false);
 });

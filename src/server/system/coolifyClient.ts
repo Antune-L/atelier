@@ -9,6 +9,13 @@ const API_FIELD_PATTERN = /^[a-zA-Z0-9_.]{1,100}$/;
 const RESOURCE_SCHEMA = z.object({ uuid: z.string(), name: z.string().nullable().optional() }).passthrough();
 const APPLICATION_SCHEMA = RESOURCE_SCHEMA.extend({ status: z.string().nullable().optional(), git_commit_sha: z.string().nullable().optional(), fqdn: z.string().nullable().optional() });
 const DEPLOYMENT_SCHEMA = z.object({ deployment_uuid: z.string().optional(), uuid: z.string().optional(), status: z.string().optional(), commit: z.string().nullable().optional() }).passthrough();
+const GITHUB_APP_SCHEMA = z.object({
+  id: z.number().int().nonnegative(), uuid: z.string().min(1), name: z.string().nullable().optional(),
+  installation_id: z.union([z.number().int().nonnegative(), z.string().regex(/^[0-9]*$/)]).nullable(),
+  is_public: z.boolean().optional(),
+  html_url: z.string().nullable().optional(),
+});
+const GITHUB_REPOSITORIES_SCHEMA = z.object({ repositories: z.array(z.object({ full_name: z.string().min(1), html_url: z.string().min(1) })) });
 
 export interface CoolifyRequest {
   baseUrl: string;
@@ -66,7 +73,20 @@ export class CoolifyClient {
       const project = z.object({ environments: z.array(RESOURCE_SCHEMA).default([]) }).parse(await this.request("GET", `/projects/${encodeURIComponent(projectUuid)}`));
       environments = project.environments;
     }
-    return { servers: z.array(RESOURCE_SCHEMA).parse(servers), projects: z.array(RESOURCE_SCHEMA).parse(projects), githubApps: z.array(RESOURCE_SCHEMA).parse(githubApps), environments };
+    const appNames = z.array(z.object({ uuid: z.string(), name: z.string().nullable().optional() })).parse(githubApps);
+    return { servers: z.array(RESOURCE_SCHEMA).parse(servers), projects: z.array(RESOURCE_SCHEMA).parse(projects), githubApps: appNames, environments };
+  }
+
+  async githubApps() {
+    const parsed = z.array(GITHUB_APP_SCHEMA).safeParse(await this.request("GET", "/github-apps"));
+    if (!parsed.success) throw new Error("Coolify GitHub source discovery returned an invalid response.");
+    return parsed.data;
+  }
+
+  async githubRepositories(id: number) {
+    const parsed = GITHUB_REPOSITORIES_SCHEMA.safeParse(await this.request("GET", `/github-apps/${id}/repositories`));
+    if (!parsed.success) throw new Error("Coolify GitHub repository discovery returned an invalid response.");
+    return parsed.data.repositories;
   }
 
   async findApplication(name: string) {
@@ -153,7 +173,8 @@ export function createFakeCoolifyTransport(): CoolifyTransport {
     if (path === "/servers") return { status: 200, body: [{ uuid: "fake-server", name: "Simulated preview server" }] };
     if (path.startsWith("/servers/")) return { status: 200, body: { ip: "127.0.0.1", settings: { dynamic_timeout: 3600 } } };
     if (path === "/projects") return { status: 200, body: [{ uuid: "fake-project", name: "Simulated previews" }] };
-    if (path === "/github-apps") return { status: 200, body: [{ uuid: "fake-github-app", name: "Simulated GitHub app" }] };
+    if (path === "/github-apps") return { status: 200, body: [{ id: 1, uuid: "fake-github-app", name: "Simulated GitHub app", installation_id: 1, html_url: "https://github.com" }] };
+    if (path === "/github-apps/1/repositories") return { status: 200, body: { repositories: [{ full_name: "example/preview-demo", html_url: "https://github.com/example/preview-demo" }] } };
     if (path.endsWith("/environments")) return { status: 200, body: [{ uuid: "fake-environment", name: "previews" }] };
     if (path.startsWith("/projects/")) return { status: 200, body: { environments: [{ uuid: "fake-environment", name: "previews" }] } };
     if (path === "/applications" && request.method === "GET") return { status: 200, body: [...applications.values()] };

@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import type { Orchestrator } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
-import { coolifyInventorySchema, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
-import type { PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
+import { coolifyInventorySchema, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewGithubRepositorySchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
+import type { PreviewGithubSourceResolution, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
 import { COOLIFY_PREPARATION_MARKER } from "../shared/skills.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
@@ -13,6 +13,7 @@ import type { Store } from "./db/store.ts";
 import { KeyedMutex } from "./mutex.ts";
 import type { PreviewConfig } from "./previewConfig.ts";
 import { CoolifyClient, CoolifyRequestError } from "./system/coolifyClient.ts";
+import { resolvePreviewGithubSource } from "./system/previewGithubSource.ts";
 import type { SystemAdapter } from "./system/types.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
@@ -95,6 +96,25 @@ export class PreviewManager {
     return { ok: true, inventory };
   }
 
+  async githubSource(project: string): Promise<PreviewGithubSourceResolution> {
+    const settings = this.projectSettings(project);
+    const projectConfig = getProject(project);
+    const unavailable: PreviewGithubSourceResolution = { status: "incomplete", repository: null, host: null, visibility: null, source: null, githubAppUuid: null, candidates: [], message: null };
+    if (projectConfig.vcsProvider !== "github") return { ...unavailable, status: "unsupported", message: "Les previews Coolify prennent actuellement en charge les projets GitHub uniquement." };
+    if (!this.deps.system.readPreviewRepository) return { ...unavailable, message: "La lecture du dépôt GitHub local est indisponible." };
+    let repository;
+    try {
+      repository = previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository(projectConfig.repoPath));
+    } catch {
+      return { ...unavailable, message: "Impossible de lire le dépôt avec gh. Vérifiez l’accès GitHub du projet sur cette machine." };
+    }
+    try {
+      return await resolvePreviewGithubSource(this.client(), repository, settings.githubAppUuid, this.settings.githubAppUuid);
+    } catch {
+      return { ...unavailable, ...repository, message: "Configurez la connexion privée Coolify avant de vérifier ses connexions GitHub." };
+    }
+  }
+
   async prepare(project: string) {
     return this.trackRequest(this.operations.run(`prepare:${project}`, async () => {
       if (this.shuttingDown) throw new Error("Preview service is shutting down.");
@@ -134,6 +154,13 @@ export class PreviewManager {
       if (!settings.serverUuid || !settings.projectUuid || !settings.domainBase || !this.deps.config.getPreviewAuth()) throw new Error("Configure the preview server, Coolify project, HTTPS domain and authentication first.");
       if (!this.deps.system.readPreviewSource) throw new Error("Preview source inspection is unavailable.");
       const source = await this.deps.system.readPreviewSource(project.repoPath, ticket.prUrl, projectSettings.recipePath);
+      const repositoryMetadata = previewGithubRepositorySchema.safeParse(source);
+      const repository = repositoryMetadata.success ? repositoryMetadata.data : previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository?.(project.repoPath));
+      const prHost = new URL(ticket.prUrl).hostname;
+      if (repository.repository.toLowerCase() !== source.repository.toLowerCase() || repository.host.toLowerCase() !== prHost.toLowerCase()) throw new Error("The preview source does not match the verified GitHub repository.");
+      const resolution = await resolvePreviewGithubSource(this.client(), repository, projectSettings.githubAppUuid, settings.githubAppUuid);
+      if (resolution.status !== "resolved") throw new Error(resolution.message ?? "Impossible de sélectionner une connexion GitHub Coolify pour ce dépôt.");
+      const githubSource = resolution.source === "github_app" && resolution.githubAppUuid ? { type: "github_app", uuid: resolution.githubAppUuid } satisfies NonNullable<PreviewRecord["githubSource"]> : { type: "public" } satisfies NonNullable<PreviewRecord["githubSource"]>;
       const recipe = previewRecipeSchema.parse(source.recipe);
       const auth = this.deps.config.getPreviewAuth();
       if (!auth) throw new Error("Preview authentication is unavailable.");
@@ -145,6 +172,7 @@ export class PreviewManager {
       const preview = this.deps.store.createPreview({
         ticketId, project: ticket.project, prUrl: ticket.prUrl, revision: source.revision, branch: source.branch,
         generation, recipe, ownershipMarker, coolifyBaseUrl: settings.baseUrl, serverUuid: settings.serverUuid,
+        coolifyProjectUuid: settings.projectUuid, githubSource,
         environmentUuid: environment.uuid, expiresAt: Date.now() + projectSettings.ttlHours * HOURS_TO_MS,
       });
       this.deps.onChange?.(ticketId);
@@ -294,6 +322,7 @@ export class PreviewManager {
         return;
       } else {
         const settings = this.settings;
+        if (!preview.githubSource || !preview.coolifyProjectUuid) throw new Error("This queued preview has no recorded GitHub source. Stop and clean this attempt before starting a new preview.");
         const auth = this.deps.config.getPreviewAuth();
         if (!auth) throw new Error("Preview authentication is unavailable.");
         const url = new URL(preview.prUrl);
@@ -305,7 +334,7 @@ export class PreviewManager {
         const publicUrl = `https://${preview.ownershipMarker}.${domain}`;
         const payload: Record<string, unknown> = {
           name: preview.ownershipMarker, description: preview.ownershipMarker, tags: [preview.ownershipMarker],
-          server_uuid: preview.serverUuid, project_uuid: settings.projectUuid, environment_uuid: preview.environmentUuid,
+          server_uuid: preview.serverUuid, project_uuid: preview.coolifyProjectUuid, environment_uuid: preview.environmentUuid,
           git_repository: repository, git_branch: preview.branch, git_commit_sha: preview.revision,
           build_pack: recipe.buildPack, ports_exposes: String(recipe.port), base_directory: recipe.buildContext === "." ? "/" : `/${recipe.buildContext}`,
           instant_deploy: false, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false,
@@ -321,8 +350,8 @@ export class PreviewManager {
           payload.build_pack = "dockerfile";
           payload.docker_compose_domains = [{ name: recipe.serviceName, domain: `${publicUrl}:${recipe.port}` }];
         }
-        const endpoint = settings.githubAppUuid ? "/applications/private-github-app" : "/applications/public";
-        if (settings.githubAppUuid) payload.github_app_uuid = settings.githubAppUuid;
+        const endpoint = preview.githubSource.type === "github_app" ? "/applications/private-github-app" : "/applications/public";
+        if (preview.githubSource.type === "github_app") payload.github_app_uuid = preview.githubSource.uuid;
         try {
           preview = this.update(id, { createRequestedAt: Date.now(), status: "provisioning" });
           const application = await client.createApplication(endpoint, payload);

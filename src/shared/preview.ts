@@ -81,6 +81,7 @@ export type CoolifyInventory = z.infer<typeof coolifyInventorySchema>;
 
 export const previewProjectSettingsSchema = z.object({
   enabled: z.boolean().default(false),
+  githubAppUuid: nonEmptyTextSchema.nullable().default(null),
   recipePath: relativePathSchema.default(DEFAULT_PREVIEW_RECIPE_PATH),
   ttlHours: z.number().positive().max(MAX_PREVIEW_TTL_HOURS).default(DEFAULT_PREVIEW_TTL_HOURS),
   preparationTicketId: nonEmptyTextSchema.nullable().default(null),
@@ -88,11 +89,36 @@ export const previewProjectSettingsSchema = z.object({
 export type PreviewProjectSettings = z.infer<typeof previewProjectSettingsSchema>;
 export const updatePreviewProjectSettingsSchema = z.object({
   enabled: previewProjectSettingsSchema.shape.enabled.removeDefault().optional(),
+  githubAppUuid: previewProjectSettingsSchema.shape.githubAppUuid.removeDefault().optional(),
   recipePath: previewProjectSettingsSchema.shape.recipePath.removeDefault().optional(),
   ttlHours: previewProjectSettingsSchema.shape.ttlHours.removeDefault().optional(),
   preparationTicketId: previewProjectSettingsSchema.shape.preparationTicketId.removeDefault().optional(),
 }).strict();
 export type UpdatePreviewProjectSettingsInput = z.infer<typeof updatePreviewProjectSettingsSchema>;
+
+export const previewGithubRepositorySchema = z.object({
+  repository: nonEmptyTextSchema,
+  host: nonEmptyTextSchema,
+  visibility: z.enum(["public", "private"]),
+});
+export type PreviewGithubRepository = z.infer<typeof previewGithubRepositorySchema>;
+
+export const previewGithubSourceResolutionSchema = z.object({
+  status: z.enum(["resolved", "choice_required", "no_match", "incomplete", "unsupported"]),
+  repository: nonEmptyTextSchema.nullable(),
+  host: nonEmptyTextSchema.nullable(),
+  visibility: previewGithubRepositorySchema.shape.visibility.nullable(),
+  source: z.enum(["public", "github_app"]).nullable(),
+  githubAppUuid: nonEmptyTextSchema.nullable(),
+  candidates: z.array(coolifyInventoryItemSchema),
+  message: z.string().nullable(),
+});
+export type PreviewGithubSourceResolution = z.infer<typeof previewGithubSourceResolutionSchema>;
+
+const previewGithubSourceSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("public") }),
+  z.object({ type: z.literal("github_app"), uuid: nonEmptyTextSchema }),
+]);
 
 const previewRecipeBaseSchema = z.object({
   version: z.literal(PREVIEW_RECIPE_VERSION),
@@ -139,6 +165,8 @@ export const previewRecordSchema = z.object({
   cleanupAuditAt: timestampSchema.nullable().default(null),
   cleanupEmptyAuditCount: z.number().int().nonnegative().default(0),
   coolifyBaseUrl: httpUrlSchema.nullable().default(null),
+  coolifyProjectUuid: nonEmptyTextSchema.nullable().default(null),
+  githubSource: previewGithubSourceSchema.nullable().default(null),
   ownershipMarker: nonEmptyTextSchema.nullable().default(null),
   serverUuid: nonEmptyTextSchema.nullable().default(null),
   environmentUuid: nonEmptyTextSchema.nullable().default(null),

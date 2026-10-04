@@ -1,26 +1,37 @@
 import { Cloud, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import type { PreviewProjectSettings } from "@shared/preview";
+import type { PreviewGithubSourceResolution, PreviewProjectSettings } from "@shared/preview";
 import type { ManagedProject } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { previewApi } from "@/lib/previewApi";
+import { PREVIEW_GITHUB_SOURCE_ERROR, PREVIEW_GITHUB_SOURCE_LABELS } from "@/lib/previewDisplay";
 
 export function ProjectPreviewSettings({ project }: { project: ManagedProject }) {
   const [settings, setSettings] = useState<PreviewProjectSettings | null>(null);
   const [draft, setDraft] = useState<PreviewProjectSettings | null>(null);
   const [preparationMessage, setPreparationMessage] = useState<string | null>(null);
+  const [source, setSource] = useState<PreviewGithubSourceResolution | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(project.vcsProvider === "github");
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const sourceRequest = useRef(0);
+  const connectionId = useId();
   const { busy, error, setError, run } = useBusyAction();
   const { saved, flashSaved } = useSavedFlag();
   const supported = project.vcsProvider === "github";
   const dirty = settings !== null && draft !== null && JSON.stringify(settings) !== JSON.stringify(draft);
+  const connectionDirty = settings !== null && draft !== null && settings.githubAppUuid !== draft.githubAppUuid;
+  const candidates = source?.candidates ?? [];
+  const selectedMissing = draft?.githubAppUuid != null && !candidates.some((candidate) => candidate.uuid === draft.githubAppUuid);
+  const resolvedConnection = candidates.find((candidate) => candidate.uuid === source?.githubAppUuid);
 
   useEffect(() => {
     let active = true;
@@ -31,8 +42,32 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
     }).catch((cause: unknown) => {
       if (active) setError(errorMessage(cause, "Impossible de charger les prévisualisations du projet."));
     });
-    return () => { active = false; };
-  }, [project.key, setError]);
+    if (supported) {
+      const request = ++sourceRequest.current;
+      void previewApi.projectSource(project.key).then(({ resolution }) => {
+        if (active && request === sourceRequest.current) setSource(resolution);
+      }).catch(() => {
+        if (active && request === sourceRequest.current) setSourceError(PREVIEW_GITHUB_SOURCE_ERROR);
+      }).finally(() => {
+        if (active && request === sourceRequest.current) setSourceLoading(false);
+      });
+    }
+    return () => { active = false; sourceRequest.current += 1; };
+  }, [project.key, setError, supported]);
+
+  async function checkSource() {
+    const request = ++sourceRequest.current;
+    setSourceLoading(true);
+    setSourceError(null);
+    try {
+      const result = await previewApi.projectSource(project.key);
+      if (request === sourceRequest.current) setSource(result.resolution);
+    } catch {
+      if (request === sourceRequest.current) setSourceError(PREVIEW_GITHUB_SOURCE_ERROR);
+    } finally {
+      if (request === sourceRequest.current) setSourceLoading(false);
+    }
+  }
 
   async function save(prepare: boolean) {
     if (draft === null) return;
@@ -42,10 +77,12 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
         enabled: draft.enabled,
         recipePath: draft.recipePath,
         ttlHours: draft.ttlHours,
+        githubAppUuid: draft.githubAppUuid,
       });
       setSettings(result.settings);
       setDraft(result.settings);
       flashSaved();
+      await checkSource();
       if (prepare) {
         const preparation = await previewApi.prepareProject(project.key);
         setPreparationMessage(preparation.created ? `Carte « ${preparation.ticket.title} » créée dans À faire.` : `La carte « ${preparation.ticket.title} » existe déjà.`);
@@ -74,9 +111,36 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
             <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Recette du projet</span><Input value={draft.recipePath} disabled={busy} onChange={(event) => setDraft({ ...draft, recipePath: event.target.value })} /><span className="text-xs text-muted-foreground">Fichier du dépôt qui décrit la construction et le démarrage.</span></label>
             <label className="flex flex-col gap-1.5 sm:w-40"><span className={FIELD_LABEL_CLASSES}>Durée de vie (heures)</span><Input type="number" value={draft.ttlHours} disabled={busy} onChange={(event) => setDraft({ ...draft, ttlHours: Number(event.target.value) })} /></label>
           </div>
+          <div className="space-y-2 rounded-md border border-border p-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor={connectionId} className={FIELD_LABEL_CLASSES}>Connexion GitHub du projet</label>
+              <Select id={connectionId} value={draft.githubAppUuid ?? ""} disabled={busy || sourceLoading} onChange={(event) => setDraft({ ...draft, githubAppUuid: event.target.value || null })}>
+                <option value="">Automatique selon le dépôt</option>
+                {selectedMissing && <option value={draft.githubAppUuid ?? ""}>Connexion enregistrée · à vérifier</option>}
+                {candidates.map((candidate) => <option key={candidate.uuid} value={candidate.uuid}>{candidate.name || "Connexion GitHub"}</option>)}
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">Le choix automatique vérifie l'accès au dépôt et préfère l'application par défaut uniquement si elle y a accès. Une sélection manuelle s'applique aux prochaines prévisualisations.</p>
+            {connectionDirty ? (
+              <p role="status" className="text-xs text-muted-foreground">Enregistrez cette sélection pour vérifier son accès au dépôt.</p>
+            ) : (
+              <div role="status" className="space-y-1 text-sm">
+                {sourceLoading && <p className="flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Vérification de l'accès au dépôt…</p>}
+                {!sourceLoading && sourceError && <p className="text-danger">{sourceError}</p>}
+                {!sourceLoading && !sourceError && source !== null && (
+                  <>
+                    <p className={source.status === "resolved" ? "text-primary" : "text-muted-foreground"}>{PREVIEW_GITHUB_SOURCE_LABELS[source.status]}</p>
+                    {source.status === "resolved" && source.source === "public" && <p className="text-xs text-muted-foreground">Dépôt public · aucune GitHub App nécessaire.</p>}
+                    {source.status === "resolved" && source.source === "github_app" && <p className="text-xs text-muted-foreground">Connexion retenue : {resolvedConnection?.name || "Connexion GitHub vérifiée"}.</p>}
+                  </>
+                )}
+              </div>
+            )}
+            <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>Vérifier l'accès au dépôt</Button>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" disabled={busy || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(true)}>{busy && <Loader2 className="size-3.5 animate-spin" />}Préparer pour Coolify</Button>
-            <Button size="sm" disabled={busy || !dirty || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(false)}>Enregistrer les prévisualisations</Button>
+            <Button variant="outline" size="sm" disabled={busy || sourceLoading || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(true)}>{busy && <Loader2 className="size-3.5 animate-spin" />}Préparer pour Coolify</Button>
+            <Button size="sm" disabled={busy || sourceLoading || !dirty || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(false)}>Enregistrer les prévisualisations</Button>
             {saved && <span className="text-xs text-primary">Enregistré</span>}
           </div>
           <p className="text-xs text-muted-foreground">La préparation crée une carte ordinaire dans À faire, à lancer et à relire comme vos autres fonctionnalités.</p>

@@ -244,7 +244,8 @@ export interface SpawnShellOptions {
 export interface SystemAdapter {
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;
-  readPreviewSource?(repoPath: string, prUrl: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; recipe: unknown }>;
+  readPreviewRepository?(repoPath: string): Promise<{ repository: string; host: string; visibility: "public" | "private" }>;
+  readPreviewSource?(repoPath: string, prUrl: string, recipePath: string): Promise<{ revision: string; branch: string; repository: string; host?: string; visibility?: "public" | "private"; recipe: unknown }>;
   confirmPreviewCleanup?(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<{ complete: boolean; reason: string | null; retryable?: boolean }>;
   probePreviewHealth?(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean>;
 

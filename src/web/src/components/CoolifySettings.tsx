@@ -27,8 +27,8 @@ function ResourceSelect({ label, value, items, disabled, onChange }: {
       <label htmlFor={id} className={FIELD_LABEL_CLASSES}>{label}</label>
       <Select id={id} value={value ?? ""} disabled={disabled} onChange={(event) => onChange(event.target.value || null)}>
         <option value="">Sélectionner…</option>
-        {selectedMissing && <option value={value}>{value}</option>}
-        {items.map((item) => <option key={item.uuid} value={item.uuid}>{item.name || item.uuid}</option>)}
+        {selectedMissing && <option value={value}>Ressource enregistrée · à vérifier</option>}
+        {items.map((item) => <option key={item.uuid} value={item.uuid}>{item.name || "Ressource sans nom"}</option>)}
       </Select>
     </div>
   );
@@ -137,8 +137,8 @@ export function CoolifySettings() {
               <ResourceSelect label="Serveur" value={draft.serverUuid} items={inventory?.servers ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, serverUuid: value })} />
               <ResourceSelect label="Projet Coolify" value={draft.projectUuid} items={inventory?.projects ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, projectUuid: value })} />
             </div>
-            <ResourceSelect label="GitHub App (dépôts privés)" value={draft.githubAppUuid} items={inventory?.githubApps ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, githubAppUuid: value })} />
-            <p className="text-xs text-muted-foreground">Une GitHub App est nécessaire pour les dépôts privés. Les dépôts publics peuvent être déployés sans application.</p>
+            <ResourceSelect label="GitHub App par défaut" value={draft.githubAppUuid} items={inventory?.githubApps ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, githubAppUuid: value })} />
+            <p className="text-xs text-muted-foreground">Chaque projet choisit une connexion autorisée pour son dépôt. Cette GitHub App (connexion GitHub dans Coolify) est préférée seulement si son accès est vérifié ; un dépôt public peut fonctionner sans elle.</p>
             {inventory === null && <p className="text-xs text-muted-foreground">Testez la connexion pour charger les serveurs, projets et applications GitHub disponibles.</p>}
             <div className="flex flex-col gap-3 sm:flex-row">
               <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Environnement</span><Input value={draft.environmentName} onChange={(event) => setDraft({ ...draft, environmentName: event.target.value })} disabled={busy} /></label>

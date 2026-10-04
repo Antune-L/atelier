@@ -85,9 +85,12 @@ function fakeMissingKey(name: string, provider: Orchestrator): string {
 
 export class FakeSystemAdapter implements SystemAdapter {
   readonly coolifyRequest = createFakeCoolifyTransport();
+  async readPreviewRepository(_repoPath: string) {
+    return { repository: "example/preview-demo", host: "github.com", visibility: "public" } satisfies { repository: string; host: string; visibility: "public" | "private" };
+  }
   async readPreviewSource(_repoPath: string, prUrl: string, _recipePath: string) {
     const url = new URL(prUrl);
-    return { revision: "0123456789012345678901234567890123456789", branch: "preview-demo", repository: url.pathname.split("/").slice(1, 3).join("/"), recipe: { version: 1, buildPack: "dockerfile", dockerfile: "Dockerfile", buildContext: ".", port: 3000, healthPath: "/", environment: {} } };
+    return { revision: "0123456789012345678901234567890123456789", branch: "preview-demo", repository: url.pathname.split("/").slice(1, 3).join("/"), host: url.hostname, visibility: "public", recipe: { version: 1, buildPack: "dockerfile", dockerfile: "Dockerfile", buildContext: ".", port: 3000, healthPath: "/", environment: {} } } satisfies { revision: string; branch: string; repository: string; host: string; visibility: "public" | "private"; recipe: unknown };
   }
   async confirmPreviewCleanup(_preview: PreviewRecord) {
     return { complete: true, reason: null };

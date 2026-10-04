@@ -1,4 +1,4 @@
-import type { CoolifyInventory, PreviewProjectSettings, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
+import type { CoolifyInventory, PreviewGithubSourceResolution, PreviewProjectSettings, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
 import type { Ticket } from "@shared/schemas";
 
 import { request } from "@/lib/api";
@@ -8,6 +8,7 @@ export const previewApi = {
   updateSettings: (input: UpdatePreviewSettingsInput) => request<{ settings: PreviewSettings }>("/api/settings/previews", { method: "PATCH", body: JSON.stringify(input) }),
   testConnection: () => request<{ ok: boolean; inventory: CoolifyInventory }>("/api/settings/previews/test", { method: "POST" }),
   projectSettings: (project: string) => request<{ settings: PreviewProjectSettings }>(`/api/projects/${encodeURIComponent(project)}/preview`),
+  projectSource: (project: string) => request<{ resolution: PreviewGithubSourceResolution }>(`/api/projects/${encodeURIComponent(project)}/preview/source`),
   updateProjectSettings: (project: string, input: UpdatePreviewProjectSettingsInput) => request<{ settings: PreviewProjectSettings }>(`/api/projects/${encodeURIComponent(project)}/preview`, { method: "PATCH", body: JSON.stringify(input) }),
   prepareProject: (project: string) => request<{ created: boolean; ticket: Ticket }>(`/api/projects/${encodeURIComponent(project)}/preview/prepare`, { method: "POST" }),
   ticketPreview: (ticketId: string) => request<{ preview: PreviewRecord | null; projectSettings: PreviewProjectSettings; vcsProvider: "github" | "azureDevops"; cleanupWatchCount: number }>(`/api/tickets/${encodeURIComponent(ticketId)}/preview`),

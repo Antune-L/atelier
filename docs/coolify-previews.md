@@ -23,8 +23,8 @@ Global settings connect Kanban Agents to Coolify and protect every preview with 
 
 1. Open **Réglages**, then **Coolify**.
 2. Enter the HTTP(S) API address in **Adresse Coolify** and the API token in **Jeton API**. Use HTTPS for a remote instance; do not embed credentials in the URL.
-3. Click **Enregistrer et tester la connexion**. A successful test loads the available servers, projects and GitHub Apps. It confirms API connectivity; repository and recipe access are checked when creating a preview.
-4. Select **Serveur** and **Projet Coolify**. For a private repository, select its authorized **GitHub App (dépôts privés)**.
+3. Click **Enregistrer et tester la connexion**. A successful test loads the available servers, projects and GitHub Apps. It confirms API connectivity; check each project's repository access in its preview settings. Recipe access is checked when creating a preview.
+4. Select **Serveur** and **Projet Coolify**. Optionally choose **GitHub App par défaut** (a GitHub connection registered in Coolify). It is a preference among connections with verified access to the project's repository, rather than a connection imposed on every project.
 5. Set **Environnement** to your preview environment. The default is `previews`.
 6. Enter only the base hostname in **Domaine des prévisualisations**, for example `previews.example.com`. Do not include `https://` or a path. Kanban Agents generates a unique subdomain for each attempt.
 7. Enter the preview **Nom d'utilisateur** and **Mot de passe** manually. These are global access credentials shared by previews, separate from the API token. For Dockerfile previews, keep the password within **31 UTF-8 bytes** because of a verified limitation in Coolify 4.3.23. A randomly generated password of 24 ASCII characters fits this limit. The Compose gateway does not have that native Coolify limitation.
@@ -35,6 +35,16 @@ The SSH field is optional when saving settings, but cleanup cannot be confirmed 
 The API token and preview credentials are stored in a private local JSON file in the running application's data directory, with directory permissions `0700` and file permissions `0600`. This is file storage, not Keychain storage. The settings API returns configured flags instead of secret values; the preview credentials are sent privately to the authentication configuration and browser checks. Do not put their values in project recipes, source files or tickets.
 
 Changes to global connection, identity, authentication or domain settings are blocked while previews are active or still require cleanup. Stop them and wait for cleanup to complete before changing those settings. Domain changes apply to newly created attempts.
+
+## Choose each project's GitHub connection
+
+Open the project's **Prévisualisations Coolify** settings. **Connexion GitHub du projet** defaults to **Automatique selon le dépôt**. The application checks which existing Coolify connections can access that project's repository whenever a preview is created; checking the settings is a read-only way to see that result beforehand. A private repository uses its verified connection, even when another account's connection is preferred globally. A repository confirmed as public can deploy without a GitHub App.
+
+The automatic choice uses the global default only when its repository access is verified. If several connections have access and the default does not resolve the choice, select one of the verified connections for that project and click **Enregistrer les prévisualisations**. This explicit selection is retained for future previews and rechecked before deployment. It does not change an existing preview's connection.
+
+**Vérifier l'accès au dépôt** checks the saved selection without deploying or changing settings. Save a changed selection first; saving also refreshes the access check. If a saved connection no longer works, return to **Automatique selon le dépôt**, save, then inspect the newly verified choices. If no connection can access a private repository, authorize the appropriate GitHub App in Coolify. If the check is incomplete, check Coolify connectivity and the project's GitHub access, then retry; incomplete evidence does not permit a deployment.
+
+Kanban Agents neither installs a GitHub App automatically nor switches the accounts used by the GitHub command-line tool (`gh`). Coolify's repository connection and the Mac's access to pull requests are separate requirements.
 
 ## Prepare a new project
 
@@ -117,7 +127,9 @@ The configured lifetime starts the expiration workflow, but expiration and clean
 | What you see | What to check |
 | --- | --- |
 | The connection test fails | Check the Coolify address, network reachability and token access to the selected team/server/project. The test is API connectivity, not a deployment test. |
-| No private repository source is available, or creation fails to read the PR | Confirm the selected GitHub App can access that repository and the project's GitHub integration can read its PR. API connectivity alone does not prove source access. |
+| No private repository source is available, or creation fails to read the PR | Use **Vérifier l'accès au dépôt** in the project's preview settings. Confirm an existing Coolify GitHub App can access that repository and the project's GitHub integration can read its PR. API connectivity alone does not prove source access. |
+| Several GitHub connections match the repository | Select a verified connection under **Connexion GitHub du projet** and save, or use an authorized global default. The default is preferred only after its access is verified. |
+| The GitHub connection check is incomplete | Check Coolify connectivity and the project's GitHub access, then retry the read-only check. Kanban Agents does not select an unverified connection. |
 | The recipe is missing or invalid | Check **Recette du projet**, confirm the file and container inputs are tracked in the PR, and merge the reviewed preparation PR into its base. Use the version 1 recipe contract. |
 | A Compose build cannot find its Dockerfile | Resolve build contexts from the recipe's `buildContext`, not the Compose file's directory. Repeat the local check with the same project directory as Coolify. |
 | The URL does not resolve, or HTTPS fails | Check the wildcard DNS record, generated hostname, server address and certificate. DNS caching can delay visibility; verify resolution from the Mac as well as the server. |
@@ -126,4 +138,3 @@ The configured lifetime starts the expiration workflow, but expiration and clean
 | A provider's validation fails or has incomplete evidence | Read the run's plan, observations and evidence in **Validation** before changing code. Check Mac/provider connectivity and compare the verdict with the original criterion. |
 | Stop remains pending or cleanup fails | Keep the backend running, verify the selected server's SSH alias, and use **Réessayer le nettoyage** after fixing the reported cause. Do not recreate the preview while cleanup is unresolved. |
 | The settings cannot be changed | Stop all affected active previews and complete their cleanup first; this protects existing attempts from losing their connection or authentication settings. |
-

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { PREVIEW_AUTH_HASH_ENV } from "../../shared/preview.ts";
+import { coolifyPrivateKeySchema, PREVIEW_AUTH_HASH_ENV } from "../../shared/preview.ts";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const HTTP_NOT_FOUND = 404;
@@ -75,6 +75,19 @@ export class CoolifyClient {
     }
     const appNames = z.array(z.object({ uuid: z.string(), name: z.string().nullable().optional() })).parse(githubApps);
     return { servers: z.array(RESOURCE_SCHEMA).parse(servers), projects: z.array(RESOURCE_SCHEMA).parse(projects), githubApps: appNames, environments };
+  }
+
+  async privateKeys() {
+    let response;
+    try {
+      response = await this.request("GET", "/security/keys");
+    } catch (error) {
+      if (error instanceof CoolifyRequestError) throw new CoolifyRequestError(error.status, `Coolify private key discovery failed (HTTP ${error.status}).`);
+      throw new Error("Coolify private key discovery failed. Check connectivity and token permissions.");
+    }
+    const parsed = z.array(coolifyPrivateKeySchema).safeParse(response);
+    if (!parsed.success) throw new Error("Coolify private key discovery returned an invalid response.");
+    return parsed.data;
   }
 
   async githubApps() {
@@ -173,6 +186,7 @@ export function createFakeCoolifyTransport(): CoolifyTransport {
     if (path === "/servers") return { status: 200, body: [{ uuid: "fake-server", name: "Simulated preview server" }] };
     if (path.startsWith("/servers/")) return { status: 200, body: { ip: "127.0.0.1", settings: { dynamic_timeout: 3600 } } };
     if (path === "/projects") return { status: 200, body: [{ uuid: "fake-project", name: "Simulated previews" }] };
+    if (path === "/security/keys") return { status: 200, body: [{ uuid: "fake-private-key", name: "Simulated repository deploy key" }] };
     if (path === "/github-apps") return { status: 200, body: [{ id: 1, uuid: "fake-github-app", name: "Simulated GitHub app", installation_id: 1, html_url: "https://github.com" }] };
     if (path === "/github-apps/1/repositories") return { status: 200, body: { repositories: [{ full_name: "example/preview-demo", html_url: "https://github.com/example/preview-demo" }] } };
     if (path.endsWith("/environments")) return { status: 200, body: [{ uuid: "fake-environment", name: "previews" }] };

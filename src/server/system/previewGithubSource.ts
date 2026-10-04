@@ -15,8 +15,17 @@ function githubHost(value: string | null | undefined): string | null {
   }
 }
 
-export async function resolvePreviewGithubSource(client: CoolifyClient, repository: PreviewGithubRepository, overrideUuid: string | null, defaultUuid: string | null): Promise<PreviewGithubSourceResolution> {
-  const result: PreviewGithubSourceResolution = { ...repository, status: "no_match", source: null, githubAppUuid: null, candidates: [], message: null };
+export async function resolvePreviewGithubSource(client: CoolifyClient, repository: PreviewGithubRepository, overrideUuid: string | null, defaultUuid: string | null, privateKeyUuid: string | null = null): Promise<PreviewGithubSourceResolution> {
+  const result: PreviewGithubSourceResolution = { ...repository, status: "no_match", source: null, githubAppUuid: null, privateKeyUuid, candidates: [], message: null };
+  if (privateKeyUuid) {
+    try {
+      const key = (await client.privateKeys()).find((candidate) => candidate.uuid === privateKeyUuid);
+      if (!key) return { ...result, source: "deploy_key", message: "La clé de déploiement sélectionnée est introuvable dans Coolify. Sélectionnez une autre clé ou désactivez ce choix pour utiliser les connexions GitHub." };
+      return { ...result, status: "resolved", source: "deploy_key", message: "La clé de déploiement est disponible dans Coolify. Son accès au dépôt sera vérifié lors du clonage." };
+    } catch {
+      return { ...result, status: "incomplete", source: "deploy_key", message: "Impossible de lire les clés de déploiement Coolify. Vérifiez la connexion et les droits du jeton Coolify. La clé sélectionnée ne sera pas remplacée automatiquement." };
+    }
+  }
   if (!overrideUuid && repository.visibility === "public") return { ...result, status: "resolved", source: "public" };
   let apps;
   try {

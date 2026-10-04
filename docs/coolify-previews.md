@@ -10,7 +10,7 @@ Before configuring a project, prepare:
 
 - A reachable Coolify instance and server, with a Coolify project and environment for previews.
 - A Coolify API token authorized to read deployment information, create and configure applications, deploy them, and delete owned applications. This token gives Kanban Agents access to Coolify; it is separate from the password used to open a preview.
-- Coolify access to the GitHub repository. Private repositories need an authorized GitHub App with access to that repository.
+- Coolify access to the GitHub repository. Private repositories need an authorized GitHub App or a repository deploy key already registered in Coolify. A deploy key is an SSH credential authorized to clone that repository.
 - A preview domain and wildcard DNS record (a record that covers generated subdomains), pointing to the Coolify server. For a base domain such as `previews.example.com`, configure `*.previews.example.com` and check that generated names resolve from both the server and your Mac.
 - An existing SSH alias on the Mac for verified server cleanup. SSH is the secure connection used to check and remove only the preview's owned resources. The alias must reach the selected server with working authentication and trusted host verification.
 - Docker for local preparation checks, plus a working Claude or Codex session for agent tasks and browser validation.
@@ -36,13 +36,17 @@ The API token and preview credentials are stored in a private local JSON file in
 
 Changes to global connection, identity, authentication or domain settings are blocked while previews are active or still require cleanup. Stop them and wait for cleanup to complete before changing those settings. Domain changes apply to newly created attempts.
 
-## Choose each project's GitHub connection
+## Choose each project's repository connection
 
-Open the project's **Prévisualisations Coolify** settings. **Connexion GitHub du projet** defaults to **Automatique selon le dépôt**. The application checks which existing Coolify connections can access that project's repository whenever a preview is created; checking the settings is a read-only way to see that result beforehand. A private repository uses its verified connection, even when another account's connection is preferred globally. A repository confirmed as public can deploy without a GitHub App.
+Open the project's **Prévisualisations Coolify** settings. Optionally select an existing key under **Clé de déploiement du projet** and save. This key takes priority for future previews, including public repositories. Clearing it restores the GitHub App/public selection described below. A selected key must exist in Coolify; an unavailable key or incomplete key lookup stops creation without falling back to another source. Each attempt retains its selected source and key identifier, so changing project settings does not change an existing attempt.
+
+The key list is loaded independently from the global connection test. Only key names and identifiers are returned to the interface or saved in project settings; private and public key contents stay out of these responses and records. The saved-key check confirms availability in Coolify, not repository access. Access is established only when Coolify clones the frozen repository revision during deployment. Kanban Agents does not generate, upload or authorize repository keys automatically. Its token needs access to read Coolify's key inventory when this option is used.
+
+**Connexion GitHub du projet** defaults to **Automatique selon le dépôt**. The application checks which existing Coolify connections can access that project's repository whenever a preview is created; checking the settings is a read-only way to see that result beforehand. A private repository uses its verified connection, even when another account's connection is preferred globally. A repository confirmed as public can deploy without a GitHub App.
 
 The automatic choice uses the global default only when its repository access is verified. If several connections have access and the default does not resolve the choice, select one of the verified connections for that project and click **Enregistrer les prévisualisations**. This explicit selection is retained for future previews and rechecked before deployment. It does not change an existing preview's connection.
 
-**Vérifier l'accès au dépôt** checks the saved selection without deploying or changing settings. Save a changed selection first; saving also refreshes the access check. If a saved connection no longer works, return to **Automatique selon le dépôt**, save, then inspect the newly verified choices. If no connection can access a private repository, authorize the appropriate GitHub App in Coolify. If the check is incomplete, check Coolify connectivity and the project's GitHub access, then retry; incomplete evidence does not permit a deployment.
+**Vérifier l'accès au dépôt** checks the saved selection without deploying or changing settings. Save a changed selection first; saving also refreshes the access check. If a saved connection no longer works, return to **Automatique selon le dépôt**, save, then inspect the newly verified choices. If no connection can access a private repository, authorize the appropriate GitHub App in Coolify or select an existing authorized deploy key. If the check is incomplete, check Coolify connectivity and the project's GitHub access, then retry; incomplete evidence does not permit a deployment.
 
 Kanban Agents neither installs a GitHub App automatically nor switches the accounts used by the GitHub command-line tool (`gh`). Coolify's repository connection and the Mac's access to remote branches and pull requests are separate requirements.
 
@@ -143,6 +147,7 @@ The configured lifetime starts the expiration workflow, but expiration and clean
 | --- | --- |
 | The connection test fails | Check the Coolify address, network reachability and token access to the selected team/server/project. The test is API connectivity, not a deployment test. |
 | No private repository source is available, or creation fails to read the PR | Use **Vérifier l'accès au dépôt** in the project's preview settings. Confirm an existing Coolify GitHub App can access that repository and the project's GitHub integration can read its PR. API connectivity alone does not prove source access. |
+| The selected deploy key is unavailable or clone fails | Refresh the key list and select an existing key in Coolify. Confirm its public key is authorized on the repository. Metadata availability alone does not prove clone access; an invalid explicit key never falls back to a GitHub App or public source. |
 | Several GitHub connections match the repository | Select a verified connection under **Connexion GitHub du projet** and save, or use an authorized global default. The default is preferred only after its access is verified. |
 | The GitHub connection check is incomplete | Check Coolify connectivity and the project's GitHub access, then retry the read-only check. Kanban Agents does not select an unverified connection. |
 | The recipe is missing or invalid | Check **Recette du projet**, confirm the file and container inputs are tracked on the selected remote branch, and merge the reviewed preparation PR into its base when necessary. Use the version 1 recipe contract. |

@@ -1,3 +1,4 @@
+import { coolifyPrivateKeysResponseSchema } from "@shared/preview";
 import type { CoolifyInventory, PreviewGithubSourceResolution, PreviewProjectSettings, PreviewReadiness, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
 import type { Ticket } from "@shared/schemas";
 
@@ -7,6 +8,7 @@ export const previewApi = {
   settings: () => request<{ settings: PreviewSettings }>("/api/settings/previews"),
   updateSettings: (input: UpdatePreviewSettingsInput) => request<{ settings: PreviewSettings }>("/api/settings/previews", { method: "PATCH", body: JSON.stringify(input) }),
   testConnection: () => request<{ ok: boolean; inventory: CoolifyInventory }>("/api/settings/previews/test", { method: "POST" }),
+  privateKeys: async () => coolifyPrivateKeysResponseSchema.parse(await request<unknown>("/api/settings/previews/private-keys")),
   projectSettings: (project: string) => request<{ settings: PreviewProjectSettings }>(`/api/projects/${encodeURIComponent(project)}/preview`),
   projectSource: (project: string) => request<{ resolution: PreviewGithubSourceResolution }>(`/api/projects/${encodeURIComponent(project)}/preview/source`),
   updateProjectSettings: (project: string, input: UpdatePreviewProjectSettingsInput) => request<{ settings: PreviewProjectSettings }>(`/api/projects/${encodeURIComponent(project)}/preview`, { method: "PATCH", body: JSON.stringify(input) }),

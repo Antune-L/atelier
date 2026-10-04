@@ -1,7 +1,7 @@
 import { Cloud, Loader2 } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-import type { PreviewGithubSourceResolution, PreviewProjectSettings } from "@shared/preview";
+import type { CoolifyPrivateKey, PreviewGithubSourceResolution, PreviewProjectSettings } from "@shared/preview";
 import type { ManagedProject } from "@shared/schemas";
 
 import { PreviewReadinessStatus } from "@/components/PreviewReadinessStatus";
@@ -15,7 +15,7 @@ import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { previewApi } from "@/lib/previewApi";
-import { PREVIEW_GITHUB_SOURCE_ERROR, PREVIEW_GITHUB_SOURCE_LABELS } from "@/lib/previewDisplay";
+import { PREVIEW_DEPLOY_KEY_SOURCE_ERROR, PREVIEW_DEPLOY_KEY_SOURCE_LABELS, PREVIEW_GITHUB_SOURCE_ERROR, PREVIEW_GITHUB_SOURCE_LABELS, PREVIEW_PRIVATE_KEYS_ERROR } from "@/lib/previewDisplay";
 
 export function ProjectPreviewSettings({ project }: { project: ManagedProject }) {
   const [settings, setSettings] = useState<PreviewProjectSettings | null>(null);
@@ -24,14 +24,25 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
   const [source, setSource] = useState<PreviewGithubSourceResolution | null>(null);
   const [sourceLoading, setSourceLoading] = useState(project.vcsProvider === "github");
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [privateKeys, setPrivateKeys] = useState<CoolifyPrivateKey[] | null>(null);
+  const [privateKeysLoading, setPrivateKeysLoading] = useState(project.vcsProvider === "github");
+  const [privateKeysError, setPrivateKeysError] = useState<string | null>(null);
   const sourceRequest = useRef(0);
+  const privateKeysRequest = useRef(0);
   const connectionId = useId();
+  const privateKeyId = useId();
   const { busy, error, setError, run } = useBusyAction();
   const { saved, flashSaved } = useSavedFlag();
   const supported = project.vcsProvider === "github";
   const check = usePreviewReadiness(supported ? project.key : "");
   const dirty = settings !== null && draft !== null && JSON.stringify(settings) !== JSON.stringify(draft);
-  const connectionDirty = settings !== null && draft !== null && settings.githubAppUuid !== draft.githubAppUuid;
+  const connectionDirty = settings !== null && draft !== null && (settings.githubAppUuid !== draft.githubAppUuid || settings.privateKeyUuid !== draft.privateKeyUuid);
+  const privateKeySelected = draft?.privateKeyUuid != null;
+  const selectedPrivateKey = privateKeys?.find((key) => key.uuid === draft?.privateKeyUuid);
+  const privateKeyUnknown = privateKeySelected && selectedPrivateKey === undefined;
+  const privateKeyMissing = privateKeyUnknown && privateKeys !== null;
+  const privateKeyUnavailable = privateKeyMissing && !privateKeysLoading && !privateKeysError;
+  const sourceLabels = privateKeySelected ? PREVIEW_DEPLOY_KEY_SOURCE_LABELS : PREVIEW_GITHUB_SOURCE_LABELS;
   const candidates = source?.candidates ?? [];
   const selectedMissing = draft?.githubAppUuid != null && !candidates.some((candidate) => candidate.uuid === draft.githubAppUuid);
   const resolvedConnection = candidates.find((candidate) => candidate.uuid === source?.githubAppUuid);
@@ -54,8 +65,16 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
       }).finally(() => {
         if (active && request === sourceRequest.current) setSourceLoading(false);
       });
+      const keysRequest = ++privateKeysRequest.current;
+      void previewApi.privateKeys().then(({ privateKeys: loaded }) => {
+        if (active && keysRequest === privateKeysRequest.current) setPrivateKeys(loaded);
+      }).catch(() => {
+        if (active && keysRequest === privateKeysRequest.current) setPrivateKeysError(PREVIEW_PRIVATE_KEYS_ERROR);
+      }).finally(() => {
+        if (active && keysRequest === privateKeysRequest.current) setPrivateKeysLoading(false);
+      });
     }
-    return () => { active = false; sourceRequest.current += 1; };
+    return () => { active = false; sourceRequest.current += 1; privateKeysRequest.current += 1; };
   }, [project.key, setError, supported]);
 
   async function checkSource() {
@@ -72,6 +91,20 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
     }
   }
 
+  async function refreshPrivateKeys() {
+    const request = ++privateKeysRequest.current;
+    setPrivateKeysLoading(true);
+    setPrivateKeysError(null);
+    try {
+      const result = await previewApi.privateKeys();
+      if (request === privateKeysRequest.current) setPrivateKeys(result.privateKeys);
+    } catch {
+      if (request === privateKeysRequest.current) setPrivateKeysError(PREVIEW_PRIVATE_KEYS_ERROR);
+    } finally {
+      if (request === privateKeysRequest.current) setPrivateKeysLoading(false);
+    }
+  }
+
   async function save(prepare: boolean) {
     if (draft === null) return;
     setPreparationMessage(null);
@@ -81,6 +114,7 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
         recipePath: draft.recipePath,
         ttlHours: draft.ttlHours,
         githubAppUuid: draft.githubAppUuid,
+        privateKeyUuid: draft.privateKeyUuid,
       });
       setSettings(result.settings);
       setDraft(result.settings);
@@ -118,30 +152,50 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
           </div>
           <div className="space-y-2 rounded-md border border-border p-3">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor={connectionId} className={FIELD_LABEL_CLASSES}>Connexion GitHub du projet</label>
-              <Select id={connectionId} value={draft.githubAppUuid ?? ""} disabled={busy || sourceLoading} onChange={(event) => setDraft({ ...draft, githubAppUuid: event.target.value || null })}>
-                <option value="">Automatique selon le dépôt</option>
-                {selectedMissing && <option value={draft.githubAppUuid ?? ""}>Connexion enregistrée · à vérifier</option>}
-                {candidates.map((candidate) => <option key={candidate.uuid} value={candidate.uuid}>{candidate.name || "Connexion GitHub"}</option>)}
+              <label htmlFor={privateKeyId} className={FIELD_LABEL_CLASSES}>Clé de déploiement du projet (facultative)</label>
+              <Select id={privateKeyId} value={draft.privateKeyUuid ?? ""} disabled={busy || privateKeysLoading} onChange={(event) => setDraft({ ...draft, privateKeyUuid: event.target.value || null })}>
+                <option value="">Aucune · connexion GitHub habituelle</option>
+                {privateKeyUnknown && <option value={draft.privateKeyUuid ?? ""}>Clé enregistrée · à vérifier</option>}
+                {privateKeys?.map((key) => <option key={key.uuid} value={key.uuid}>{key.name || "Clé de déploiement"}</option>)}
               </Select>
+              <p className="text-xs text-muted-foreground">Une clé de déploiement est une clé SSH (connexion sécurisée) déjà enregistrée dans Coolify. Seuls son nom et son identifiant sont utilisés ici.</p>
+              {privateKeysLoading && <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Chargement des clés Coolify…</p>}
+              {privateKeysError && <p role="alert" className="text-xs text-danger">{privateKeysError}</p>}
+              {!privateKeysLoading && !privateKeysError && privateKeys?.length === 0 && <p className="text-xs text-muted-foreground">Aucune clé de déploiement n'est disponible dans Coolify.</p>}
+              {privateKeyUnavailable && <p role="alert" className="text-xs text-danger">La clé sélectionnée est introuvable dans Coolify. Elle reste enregistrée jusqu'à ce que vous la changiez explicitement.</p>}
+              <Button variant="outline" size="sm" className="self-start" disabled={busy || privateKeysLoading} onClick={() => void refreshPrivateKeys()}>Actualiser les clés</Button>
             </div>
-            <p className="text-xs text-muted-foreground">Le choix automatique vérifie l'accès au dépôt et préfère l'application par défaut uniquement si elle y a accès. Une sélection manuelle s'applique aux prochaines prévisualisations.</p>
+            {privateKeySelected ? (
+              <p className="text-xs text-muted-foreground">Cette clé est prioritaire pour les prochaines prévisualisations. Sa sélection ou sa disponibilité ne prouve pas l'accès au dépôt : Coolify le confirmera en clonant le dépôt lors du déploiement.</p>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor={connectionId} className={FIELD_LABEL_CLASSES}>Connexion GitHub du projet</label>
+                  <Select id={connectionId} value={draft.githubAppUuid ?? ""} disabled={busy || sourceLoading} onChange={(event) => setDraft({ ...draft, githubAppUuid: event.target.value || null })}>
+                    <option value="">Automatique selon le dépôt</option>
+                    {selectedMissing && <option value={draft.githubAppUuid ?? ""}>Connexion enregistrée · à vérifier</option>}
+                    {candidates.map((candidate) => <option key={candidate.uuid} value={candidate.uuid}>{candidate.name || "Connexion GitHub"}</option>)}
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">Le choix automatique vérifie l'accès au dépôt et préfère l'application par défaut uniquement si elle y a accès. Une sélection manuelle s'applique aux prochaines prévisualisations.</p>
+              </>
+            )}
             {connectionDirty ? (
-              <p role="status" className="text-xs text-muted-foreground">Enregistrez cette sélection pour vérifier son accès au dépôt.</p>
+              <p role="status" className="text-xs text-muted-foreground">{privateKeySelected ? "Enregistrez cette sélection pour vérifier la disponibilité de la clé dans Coolify." : "Enregistrez cette sélection pour vérifier son accès au dépôt."}</p>
             ) : (
               <div role="status" className="space-y-1 text-sm">
-                {sourceLoading && <p className="flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Vérification de l'accès au dépôt…</p>}
-                {!sourceLoading && sourceError && <p className="text-danger">{sourceError}</p>}
-                {!sourceLoading && !sourceError && source !== null && (
+                {sourceLoading && <p className="flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />{privateKeySelected ? "Vérification de la disponibilité de la clé…" : "Vérification de l'accès au dépôt…"}</p>}
+                {!sourceLoading && sourceError && <p className="text-danger">{privateKeySelected ? PREVIEW_DEPLOY_KEY_SOURCE_ERROR : sourceError}</p>}
+                {!sourceLoading && !sourceError && !privateKeyUnavailable && source !== null && (
                   <>
-                    <p className={source.status === "resolved" ? "text-primary" : "text-muted-foreground"}>{PREVIEW_GITHUB_SOURCE_LABELS[source.status]}</p>
-                    {source.status === "resolved" && source.source === "public" && <p className="text-xs text-muted-foreground">Dépôt public · aucune GitHub App nécessaire.</p>}
-                    {source.status === "resolved" && source.source === "github_app" && <p className="text-xs text-muted-foreground">Connexion retenue : {resolvedConnection?.name || "Connexion GitHub vérifiée"}.</p>}
+                    <p className={source.status === "resolved" ? "text-primary" : "text-muted-foreground"}>{privateKeySelected && source.source === "deploy_key" && source.message !== null ? source.message : sourceLabels[source.status]}</p>
+                    {!privateKeySelected && source.status === "resolved" && source.source === "public" && <p className="text-xs text-muted-foreground">Dépôt public · aucune GitHub App nécessaire.</p>}
+                    {!privateKeySelected && source.status === "resolved" && source.source === "github_app" && <p className="text-xs text-muted-foreground">Connexion retenue : {resolvedConnection?.name || "Connexion GitHub vérifiée"}.</p>}
                   </>
                 )}
               </div>
             )}
-            <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>Vérifier l'accès au dépôt</Button>
+            <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>{privateKeySelected ? "Vérifier la disponibilité de la clé" : "Vérifier l'accès au dépôt"}</Button>
           </div>
           <PreviewReadinessStatus readiness={check.readiness} loading={check.loading} error={check.error} />
           {dirty && <p className="text-xs text-muted-foreground">La vérification utilise la recette enregistrée et la branche de base du projet. Enregistrez vos changements pour les revérifier.</p>}

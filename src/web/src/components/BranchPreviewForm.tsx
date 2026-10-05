@@ -18,7 +18,7 @@ import { previewConnectionReady } from "@/lib/previewDisplay";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 import { boardStore } from "@/lib/store";
 
-function ProjectBranchPreviewForm({ project, onCreated }: { project: ProjectInfo; onCreated: (preview: PreviewRecord) => void }) {
+function ProjectBranchPreviewForm({ project, onCreated, onOpenTicket }: { project: ProjectInfo; onCreated: (preview: PreviewRecord) => void; onOpenTicket: (ticketId: string) => void }) {
   const [branch, setBranch] = useState(project.baseBranch);
   const [branches, setBranches] = useState<string[] | null>(null);
   const [branchError, setBranchError] = useState<string | null>(null);
@@ -82,7 +82,7 @@ function ProjectBranchPreviewForm({ project, onCreated }: { project: ProjectInfo
     await run(async () => {
       const result = await previewApi.prepareProject(project.key, branch.trim(), check.readiness?.preparationRetryAvailable === true);
       check.accept(result.readiness);
-      if (result.ticket !== null) boardStore.openTicket(result.ticket.id);
+      if (result.ticket !== null) onOpenTicket(result.ticket.id);
     }, "Impossible de préparer le projet pour Coolify.");
   }
 
@@ -107,7 +107,7 @@ function ProjectBranchPreviewForm({ project, onCreated }: { project: ProjectInfo
   </div>;
 }
 
-export function BranchPreviewForm({ projects, projectFilter, onCreated }: { projects: ProjectInfo[]; projectFilter: string; onCreated: (preview: PreviewRecord) => void }) {
+export function BranchPreviewForm({ projects, projectFilter, onCreated, onOpenTicket = (ticketId) => boardStore.openTicket(ticketId) }: { projects: ProjectInfo[]; projectFilter: string; onCreated: (preview: PreviewRecord) => void; onOpenTicket?: (ticketId: string) => void }) {
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const choices = projectFilter === "all" ? projects : projects.filter((project) => project.key === projectFilter);
   const projectKey = resolveProjectChoice(choices, projectChoice);
@@ -119,6 +119,6 @@ export function BranchPreviewForm({ projects, projectFilter, onCreated }: { proj
       <p className="text-xs text-muted-foreground">Déployez une branche dans un environnement temporaire.</p>
     </div>
     <ProjectSelect id="preview-project" projects={choices} value={projectKey} onChange={setProjectChoice} />
-    {project !== undefined && <ProjectBranchPreviewForm key={project.key} project={project} onCreated={onCreated} />}
+    {project !== undefined && <ProjectBranchPreviewForm key={project.key} project={project} onCreated={onCreated} onOpenTicket={onOpenTicket} />}
   </section>;
 }

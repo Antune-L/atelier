@@ -166,8 +166,8 @@ export const api = {
     request("/api/pr-notifications"),
   markPrNotificationRead: (id: string): Promise<PrNotification> =>
     request(`/api/pr-notifications/${encodeURIComponent(id)}/read`, { method: "POST" }),
-  createPrNotificationReview: (id: string): Promise<{ ticket: Ticket; created: boolean }> =>
-    request(`/api/pr-notifications/${encodeURIComponent(id)}/review`, { method: "POST" }),
+  createPrNotificationReview: (id: string, options?: Omit<CreateReviewInput, "project" | "prs">): Promise<{ ticket: Ticket; created: boolean }> =>
+    request(`/api/pr-notifications/${encodeURIComponent(id)}/review`, { method: "POST", body: JSON.stringify(options) }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>

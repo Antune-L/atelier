@@ -28,6 +28,7 @@ import {
   inspectProjectSchema,
   moveTicketSchema,
   postConversationMessageSchema,
+  prNotificationReviewOptionsSchema,
   recoverImplementationPlanArgsSchema,
   reorderProjectsSchema,
   startWorktreeSessionBodySchema,
@@ -1204,17 +1205,20 @@ export function createApiRoutes(deps: RouteDeps) {
       hub.pushPrNotifications();
       return notification;
     })
-    .post("/pr-notifications/:id/review", ({ params, set }) => {
+    .post("/pr-notifications/:id/review", ({ params, body, set }) => {
       const notification = store.listPrNotifications().find((entry) => entry.id === params.id);
       if (!notification) return jsonError(set, HTTP_NOT_FOUND, "Review notification not found");
       if (notification.resolvedAt !== null && (notification.ticketId === null || store.getTicket(notification.ticketId) === null)) return jsonError(set, HTTP_CONFLICT, "This review request is no longer active");
+      const options = prNotificationReviewOptionsSchema.safeParse(body ?? {});
+      if (!options.success) return jsonError(set, HTTP_BAD_REQUEST, options.error.message);
+      if (options.data.fixComments && store.listActiveQualityIterations().some((iteration) => iteration.project === notification.project && iteration.prUrl === notification.prUrl)) return jsonError(set, HTTP_CONFLICT, "Une PR sélectionnée est réservée par une itération qualité.");
       const pr: OpenPr = {
         number: notification.prNumber, title: notification.title, url: notification.prUrl,
         headBranch: notification.headRefName, baseBranch: notification.baseRefName,
         isDraft: false, reviewStatus: "needs_review", updatedAt: new Date(notification.detectedAt).toISOString(),
         author: notification.author, additions: null, deletions: null,
       };
-      const input = createReviewSchema.parse({ project: notification.project, prs: [pr] });
+      const input = createReviewSchema.parse({ ...options.data, project: notification.project, prs: [pr] });
       const result = store.createPrNotificationReview(params.id, reviewTicketInput(input, pr, store.getAppSettings().commitLanguage));
       hub.pushTicket(result.ticket);
       hub.pushPrNotifications();

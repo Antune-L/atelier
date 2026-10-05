@@ -4,7 +4,9 @@ import { useRef, useState } from "react";
 import type { PrNotification, ProjectInfo } from "@shared/schemas";
 
 import { resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
+import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
@@ -29,6 +31,7 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
   const [filter, setFilter] = useState<NotificationFilter>("active");
   const [pending, setPending] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [reviewNotification, setReviewNotification] = useState<PrNotification | null>(null);
   const pendingIds = useRef(new Set<string>());
   const unread = prNotifications.filter(isPending);
   const history = prNotifications.filter((notification) => !isPending(notification));
@@ -84,7 +87,13 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
       </div>
       <Sheet
         open={notificationCenterOpen}
-        onOpenChange={(open) => open ? boardStore.openNotificationCenter() : boardStore.closeNotificationCenter()}
+        onOpenChange={(open) => {
+          if (open) boardStore.openNotificationCenter();
+          else {
+            setReviewNotification(null);
+            boardStore.closeNotificationCenter();
+          }
+        }}
         title={<span className="flex items-center gap-2"><Bell className="h-4 w-4 text-brand" />Notifications</span>}
         titleAside={<span className="rounded border px-1.5 font-mono text-2xs text-muted-foreground">{unread.length}</span>}
         size="md"
@@ -136,7 +145,7 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
                     {notification.ticketId !== null ? (
                       <Button variant="outline" size="sm" className="h-6 px-2 text-2xs" disabled={busy} onClick={() => void runAction(notification, true)}>Ouvrir la review</Button>
                     ) : (
-                      <Button variant="outline" size="sm" className="h-6 px-2 text-2xs" disabled={busy} onClick={() => void runAction(notification, true)}>{busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitPullRequest className="h-3 w-3" />}Review</Button>
+                      <Button variant="outline" size="sm" className="h-6 px-2 text-2xs" disabled={busy} onClick={() => setReviewNotification(notification)}><GitPullRequest className="h-3 w-3" />Review</Button>
                     )}
                     {isPending(notification) && <Button variant="ghost" size="sm" className="h-6 px-2 text-2xs text-muted-foreground" disabled={busy} onClick={() => void runAction(notification, false)}><Check className="h-3 w-3" />Marquer lu</Button>}
                     <a href={notification.prUrl} target="_blank" rel="noreferrer" className="ml-auto inline-flex h-6 items-center gap-1 rounded px-1 text-2xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Ouvrir la PR #${notification.prNumber}`}><ExternalLink className="h-3 w-3" />PR</a>
@@ -155,6 +164,9 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
             <p className="mt-2 leading-relaxed">Nouvelle PR hors brouillon · review demandée.<br />Marquer lu déplace l’alerte dans l’historique.<br />La review reste à faire.</p>
           </footer>
         </div>
+        <Dialog open={reviewNotification !== null} onOpenChange={(open) => { if (!open) setReviewNotification(null); }} title="Configurer la review">
+          {reviewNotification && <ReviewPrPanel key={reviewNotification.id} projects={projects} notification={reviewNotification} onClose={() => setReviewNotification(null)} />}
+        </Dialog>
       </Sheet>
     </>
   );

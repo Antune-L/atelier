@@ -806,6 +806,9 @@ export const createReviewSchema = z.object({
 });
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 
+export const prNotificationReviewOptionsSchema = createReviewSchema.omit({ project: true, prs: true });
+export type PrNotificationReviewOptions = z.infer<typeof prNotificationReviewOptionsSchema>;
+
 /** Process a PR's reviewer feedback, applying only the pertinent fixes (minos-pr-feedback). */
 export const createCleanSchema = z.object({
   project: projectKeySchema,

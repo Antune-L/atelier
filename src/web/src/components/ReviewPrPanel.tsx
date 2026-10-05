@@ -15,7 +15,7 @@ import {
   type Orchestrator,
   type ReviewDepth,
 } from "@shared/constants";
-import type { ProjectInfo } from "@shared/schemas";
+import type { PrNotification, PrNotificationReviewOptions, ProjectInfo } from "@shared/schemas";
 import { commitLanguageSchema, reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
@@ -31,23 +31,27 @@ import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { refreshReviewCounts, useReviewCounts } from "@/hooks/useReviewCounts";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
+import { boardStore } from "@/lib/store";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 
 interface ReviewPrPanelProps {
   projects: ProjectInfo[];
   onClose: () => void;
+  notification?: PrNotification;
 }
 
 /** Sentinel value for the "Auto" base-branch option (no override → each PR's own detected target). */
 const BASE_BRANCH_AUTO = "";
 
-export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
-  const panel = useProjectPanel(projects);
+export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanelProps) {
+  const panel = useProjectPanel(notification ? [] : projects);
   const reviewCounts = useReviewCounts();
   const capabilities = useCapabilities();
   const { settings } = useAppSettings();
-  const { project, prs, selected, error, setError, busy, setBusy } = panel;
+  const { prs, selected, error, setError, busy, setBusy } = panel;
+  const project = notification?.project ?? panel.project;
+  const selectedCount = notification ? 1 : selected.size;
   const [depth, setDepth] = useState<ReviewDepth>("full");
   const [fixComments, setFixComments] = useState(false);
   const [language, setLanguage] = useState<CommitLanguage | null>(null);
@@ -68,6 +72,7 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
+  const launching = useRef(false);
 
   // Load the project's branches for the override picker on first render and on each
   // project change (mirrors the no-useEffect load-on-render pattern).
@@ -84,20 +89,17 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
   }
 
   const launch = async (): Promise<void> => {
-    if (selected.size === 0 || !prs) return;
+    if (launching.current || (!notification && (selected.size === 0 || !prs))) return;
+    launching.current = true;
     setBusy(true);
     setError(null);
     try {
-      const chosen = prs.filter((p) => selected.has(p.number));
-      // Posting inline comments on GitHub is now the default behaviour for every review.
-      await api.createReviews({
-        project,
+      const options: PrNotificationReviewOptions = {
         depth,
         postComments: true,
         fixComments,
         language: resolvedLanguage,
         humanTone,
-        // Auto → null override (each PR keeps its own detected target branch).
         baseBranch: baseBranch === BASE_BRANCH_AUTO ? null : baseBranch,
         model,
         effort,
@@ -105,25 +107,37 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         codexModel,
         codexEffort,
         codexFast,
-        prs: chosen,
-      });
+      };
+      if (notification) {
+        const result = await api.createPrNotificationReview(notification.id, options);
+        boardStore.closeNotificationCenter();
+        boardStore.openTicket(result.ticket.id);
+      } else {
+        await api.createReviews({ ...options, project, prs: (prs ?? []).filter((pr) => selected.has(pr.number)) });
+      }
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec du lancement de la revue");
     } finally {
+      launching.current = false;
       setBusy(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      <ProjectPrPicker
+      {notification ? (
+        <div className="space-y-1">
+          <p className="text-sm font-medium">#{notification.prNumber} · {notification.title}</p>
+          <p className="text-xs text-muted-foreground">Les options s’appliquent à la nouvelle review. Si une review est déjà en cours, elle sera ouverte avec ses réglages actuels.</p>
+        </div>
+      ) : <ProjectPrPicker
         projects={projects}
         panel={panel}
         idPrefix="review"
         reviewCounts={reviewCounts}
         onRefreshCounts={() => { void refreshReviewCounts(); }}
-      />
+      />}
 
       <div className="space-y-1.5">
         <Label htmlFor="review-depth" className={FIELD_LABEL_CLASSES}>Niveau de review</Label>
@@ -236,9 +250,9 @@ export function ReviewPrPanel({ projects, onClose }: ReviewPrPanelProps) {
         <Button size="sm" variant="ghost" onClick={onClose}>
           Annuler
         </Button>
-        <Button size="sm" onClick={launch} disabled={busy || selected.size === 0}>
+        <Button size="sm" onClick={launch} disabled={busy || selectedCount === 0}>
           <GitPullRequest className="h-4 w-4" />
-          Lancer la revue{selected.size > 0 ? ` (${selected.size})` : ""}
+          Lancer la revue{selectedCount > 0 ? ` (${selectedCount})` : ""}
         </Button>
       </div>
     </div>

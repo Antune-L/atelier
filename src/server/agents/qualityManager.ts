@@ -62,6 +62,7 @@ const FOLLOW_UP_INLINE_LIMIT = 300;
 const FOLLOW_UP_DESCRIPTION_LIMIT = 20_000;
 const PREVIEW_STALE_MESSAGE = "The preview no longer matches the current pull request head; its validation cannot be accepted.";
 const PREVIEW_PROTOCOLS = new Set(["http:", "https:"]);
+const QUALITY_ADMISSION_KEY = "global-quality";
 
 export interface QualityManagerDependencies {
   store: Store;
@@ -74,6 +75,7 @@ export interface QualityManagerDependencies {
 type CorrectionTarget = Extract<QualityIterationTrigger, "checks" | "functional">;
 
 interface ActiveQualityRun {
+  runId: string;
   controller: AbortController;
   completion: Promise<void>;
   previewId?: string;
@@ -244,21 +246,52 @@ export class QualityManager {
     return this.start(ticketId, "functional", provider);
   }
 
+  verifyAutonomous(ticketId: string, provider: Orchestrator, expectedRevision: string): Promise<QualityValidationRun> {
+    return this.starts.run(QUALITY_ADMISSION_KEY, async () => {
+      this.requireNoIteration(ticketId);
+      const ticket = this.ticket(ticketId);
+      if (!ticket.autonomous || !ticket.autonomousState?.acceptanceSnapshotId) throw new Error("Freeze the autonomous plan before independent verification.");
+      const snapshot = this.get(ticketId).criteriaSnapshots.find((entry) => entry.id === ticket.autonomousState?.acceptanceSnapshotId);
+      if (!snapshot) throw new Error("The frozen autonomous acceptance snapshot is missing.");
+      return this.launch(ticketId, "full", provider, undefined, undefined, undefined, snapshot, expectedRevision);
+    });
+  }
+
+  async awaitRun(runId: string): Promise<QualityValidationRun> {
+    const run = this.dependencies.store.getQualityRun(runId);
+    if (!run) throw new Error("Quality run not found.");
+    const active = this.active.get(run.ticketId);
+    if (active?.runId === runId) await active.completion;
+    return this.dependencies.store.getQualityRun(runId) ?? run;
+  }
+
   testPreview(ticketId: string, provider: Orchestrator, target: QualityPreviewTarget): Promise<QualityValidationRun> {
-    return this.starts.run(ticketId, async () => {
+    return this.starts.run(QUALITY_ADMISSION_KEY, async () => {
       this.requireNoIteration(ticketId);
       const binding = qualityPreviewBindingSchema.parse(target);
       const url = new URL(binding.url);
       if (!PREVIEW_PROTOCOLS.has(url.protocol) || url.username || url.password) throw new Error("Preview validation requires an HTTP(S) address without embedded credentials.");
       const ticket = this.ticket(ticketId);
-      if (ticket.column !== "done" || !ticket.prUrl || ticket.testing || ticket.slotId !== null) throw new Error("Preview validation requires a completed ticket with a pull request and no active worktree session.");
+      if (!target.autonomous && (ticket.column !== "done" || !ticket.prUrl || ticket.testing || ticket.slotId !== null)) throw new Error("Preview validation requires a completed ticket with a pull request and no active worktree session.");
       await this.requirePreviewHead(ticket, target);
-      return this.launch(ticketId, "functional", provider, undefined, undefined, target);
+      const frozen = target.autonomous ? this.get(ticketId).criteriaSnapshots.find((entry) => entry.id === ticket.autonomousState?.functionalSnapshotId) : undefined;
+      if (target.autonomous && !frozen) throw new Error("The frozen autonomous functional snapshot is missing.");
+      return this.launch(ticketId, "functional", provider, undefined, undefined, target, frozen);
     });
   }
 
   private async requirePreviewHead(ticket: Ticket, target: QualityPreviewTarget): Promise<void> {
     const current = this.ticket(ticket.id);
+    if (target.autonomous) {
+      if (!current.autonomous || !current.autonomousState?.plan || current.branch !== ticket.branch || current.autonomousState.revision !== target.revision || sourceFingerprint(current) !== sourceFingerprint(ticket)) throw new Error(PREVIEW_STALE_MESSAGE);
+      await target.assertCurrent?.();
+      const project = getProject(ticket.project);
+      const settings = this.dependencies.store.getPreviewProjectSettings(ticket.project);
+      if (project.vcsProvider !== "github" || !current.branch || !this.dependencies.system.readPreviewBranchSource) throw new Error(PREVIEW_STALE_MESSAGE);
+      const head = await this.dependencies.system.readPreviewBranchSource(project.repoPath, current.branch, settings.recipePath);
+      if (head.revision !== target.revision) throw new Error(PREVIEW_STALE_MESSAGE);
+      return;
+    }
     if (current.project !== ticket.project || current.prUrl !== ticket.prUrl || current.column !== "done" || current.testing || current.slotId !== null || sourceFingerprint(current) !== sourceFingerprint(ticket)) throw new Error(PREVIEW_STALE_MESSAGE);
     const project = getProject(ticket.project);
     if (project.vcsProvider !== "github" || !ticket.prUrl) throw new Error("Preview validation requires a GitHub pull request.");
@@ -620,7 +653,7 @@ export class QualityManager {
   }
 
   startQualityIteration(ticketId: string, input: StartQualityIterationInput): Promise<QualityIteration> {
-    return this.starts.run(ticketId, async () => {
+    return this.starts.run(QUALITY_ADMISSION_KEY, async () => {
       if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
       const ticket = this.ticket(ticketId);
       const quality = this.get(ticketId);
@@ -673,7 +706,7 @@ export class QualityManager {
   }
 
   async verifyQualityIteration(ticketId: string, worktreePath: string, iterationId: string): Promise<void> {
-    await this.starts.run(ticketId, async () => {
+    await this.starts.run(QUALITY_ADMISSION_KEY, async () => {
       const iteration = this.dependencies.store.getQualityIteration(iterationId);
       if (!iteration || iteration.ticketId !== ticketId || iteration.mode !== "correction") throw new Error("The correction iteration is not ready for independent verification.");
       if (iteration.resultRunId !== null) return;
@@ -686,21 +719,23 @@ export class QualityManager {
   }
 
   private start(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null): Promise<QualityValidationRun> {
-    return this.starts.run(ticketId, async () => {
+    return this.starts.run(QUALITY_ADMISSION_KEY, async () => {
       this.requireNoIteration(ticketId);
       return this.launch(ticketId, kind, provider);
     });
   }
 
-  private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget): Promise<QualityValidationRun> {
+  private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget, frozenCriteria?: QualityCriteriaSnapshot, expectedRevision?: string): Promise<QualityValidationRun> {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     if (this.active.has(ticketId)) throw new Error("A quality run is already active for this ticket.");
+    if (this.dependencies.store.listActiveQualityRuns().length > 0 || this.dependencies.store.listActiveQualityIterations().some((entry) => entry.id !== iteration?.id)) throw new Error("A quality validation or correction is already active. Wait for it to finish.");
     const ticket = this.ticket(ticketId);
     const project = getProject(ticket.project);
     const databaseProblem = preview ? null : databaseIsolationProblem(project);
     if (databaseProblem) throw new Error(databaseProblem);
     let criteria = iteration ? iteration.criteriaSnapshot ?? undefined : latestAcceptanceSnapshot(this.get(ticketId));
     if (kind === "functional" && !iteration) criteria = preview ? undefined : this.freshFunctionalSnapshot(ticket);
+    if (frozenCriteria) criteria = frozenCriteria;
     const source = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
     if (iteration && (!source || source.configFingerprint !== configFingerprint(project) || sourceFingerprint(ticket) !== fingerprint([iteration.originalTicket.title, iteration.originalTicket.description, iteration.originalTicket.prdMarkdown]))) throw new Error("The ticket or validation configuration changed during the quality iteration.");
     if (kind === "behavior" && !criteria) throw new Error("Define acceptance criteria before starting behavioral validation.");
@@ -715,6 +750,7 @@ export class QualityManager {
     }
     else if (sourcePath) revision = await this.repoMutex.run(project.repoPath, () => this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath, ...(iteration?.headBranch ? { branch: iteration.headBranch } : {}) }));
     else revision = await this.revision(ticket, true);
+    if (expectedRevision && (!revision.clean || revision.commitSha !== expectedRevision)) throw new Error("The autonomous revision changed before independent verification.");
     if (iteration?.mode === "recovery") {
       if (!source || revision.commitSha !== source.revision || revision.fingerprint !== source.fingerprint || !revision.clean) throw new Error("The validated revision changed before recovery started.");
     }
@@ -722,7 +758,7 @@ export class QualityManager {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     let selectedMode = criteria?.mode ?? (kind === "checks" ? "repository" : null);
     if (kind === "functional") selectedMode = "browser";
-    const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null, ...(preview ? { preview: qualityPreviewBindingSchema.parse(preview) } : {}) });
+    const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null, ...(preview ? { preview: qualityPreviewBindingSchema.parse(preview) } : {}) }, iteration?.id);
     const controller = new AbortController();
     if (iteration) this.dependencies.store.updateQualityIteration(iteration.id, { status: "verifying", resultRunId: run.id, resultRevision: run.revision });
     const settleRetainedSlot = iteration?.mode === "recovery" && this.parkedCorrection(ticket, iteration.sourceRunId, this.get(ticketId)) !== undefined;
@@ -743,7 +779,7 @@ export class QualityManager {
       }
       this.changed(ticketId);
     }).catch((error: unknown) => { log.warn("quality iteration settlement failed", { ticketId, runId: run.id, error: getErrorMessage(error) }); });
-    this.active.set(ticketId, { controller, completion, ...(preview ? { previewId: preview.previewId } : {}) });
+    this.active.set(ticketId, { runId: run.id, controller, completion, ...(preview ? { previewId: preview.previewId } : {}) });
     this.changed(ticketId);
     return run;
   }

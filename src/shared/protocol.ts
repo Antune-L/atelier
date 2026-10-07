@@ -17,6 +17,7 @@
 
 import { z } from "zod";
 
+import { autonomousPlanInputSchema } from "./autonomous.ts";
 import { DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 import { implementationPlanLotDefinitionSchema, implementationPlanParallelSchema } from "./implementationPlan.ts";
@@ -67,6 +68,12 @@ export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 export const doneArgsSchema = z.object({ pr_url: z.url() });
 
 export const readyForReviewArgsSchema = z.object({});
+export const AUTONOMOUS_UNIT_TEST_LOT = "unit-tests";
+
+export const deliverAutonomousArgsSchema = z.object({
+  title: z.string().trim().min(1),
+  body: z.string().trim().min(1),
+});
 
 export const qualityArgsSchema = z.object({
   action: z.enum(["get", "set_criteria", "preflight", "checks", "validate", "verify", "cancel"]),
@@ -221,6 +228,21 @@ const submitSplitMcpArgsSchema = z.object({
  */
 export const WORKER_TOOLS = [
   {
+    name: "submit_autonomous_plan",
+    description: "Freeze the autonomous plan and every required end-to-end scenario before delegating implementation. Include the existing unit-test preparation or explain its absence. The backend persists the plan and execution budget.",
+    argsSchema: autonomousPlanInputSchema,
+  },
+  {
+    name: "validate_autonomous",
+    description: "Start the autonomous checks and Coolify branch preview before creating a pull request. Independent review must approve the current code first. Keep the worktree, end the turn and wait for the backend continuation. Missing or stale evidence prevents delivery.",
+    argsSchema: readyForReviewArgsSchema,
+  },
+  {
+    name: "deliver_autonomous",
+    description: "Deliver the exact independently reviewed and preview-tested commit. Supply the pull request title and body. The backend creates or reconciles the pull request and applies the card's durable PR-only or merge choice. Agents must never create or merge the pull request themselves.",
+    argsSchema: deliverAutonomousArgsSchema,
+  },
+  {
     name: "quality",
     description: "Manage ticket quality: read persisted evidence, define observable criteria with repository or browser mode, and start verify for a complete isolated run that prepares criteria and dependencies, executes configured checks, and verifies independently with Claude or Codex. Legacy preflight, checks, and validate actions remain available. Cancel stops an active run. Runs are asynchronous; read get for progress. Missing or stale evidence prevents automatic merge.",
     argsSchema: qualityArgsSchema,
@@ -345,6 +367,9 @@ export type WorkerToolName = WorkerTool["name"];
  * stray name here — is a compile error.
  */
 const WORKER_TOOL_NAMES = [
+  "submit_autonomous_plan",
+  "validate_autonomous",
+  "deliver_autonomous",
   "quality",
   "update_stage",
   "ask_user",

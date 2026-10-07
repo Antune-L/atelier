@@ -16,6 +16,7 @@ import { getErrorMessage } from "../shared/errors.ts";
 import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AtelierManager } from "./agents/atelierManager.ts";
+import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
@@ -304,7 +305,30 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       if (ticket) clientHub.pushTicket(ticket);
     },
   });
+  const autonomousWorkflow = new AutonomousWorkflow({
+    store,
+    system,
+    quality: qualityManager,
+    preview: previewManager,
+    waitForDelivery: (ticketId) => slotManager.waitForAutonomousDelivery(ticketId),
+    acknowledgeDeliveryStop: (ticketId) => slotManager.acknowledgeAutonomousDeliveryStop(ticketId),
+    onChange: (ticketId) => {
+      const ticket = store.getTicket(ticketId);
+      if (ticket) clientHub.pushTicket(ticket);
+    },
+    inject: async (ticketId, prompt) => {
+      if (!sessionHub.sendEvent(ticketId, { type: "nudge", message: prompt })) {
+        throw new Error("The autonomous continuation could not reach the retained agent session.");
+      }
+    },
+  });
+  coordinator.setAutonomousWorkflow(autonomousWorkflow);
+  slotManager.setAutonomousWorkflow(autonomousWorkflow);
   slotManager.setQualityCancel(async (ticketId) => {
+    if (store.getTicket(ticketId)?.autonomous) {
+      await autonomousWorkflow.cancel(ticketId);
+      return;
+    }
     const preview = store.getTicketPreview(ticketId);
     if (preview && preview.cleanupStatus !== "complete") await previewManager.stop(preview.id);
     await qualityManager.cancel(ticketId);
@@ -323,6 +347,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await qualityManager.recover();
   await previewManager.recover();
   await slotManager.recover();
+  await autonomousWorkflow.recover();
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
   reformulateManager.recoverStale();
@@ -466,6 +491,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       publicMcpManager?.setToken(token);
     },
     async teardownSessions() {
+      await coordinator.stopAutonomousDeliveries();
+      await autonomousWorkflow.shutdown();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await slotManager.teardownSessions();
@@ -474,6 +501,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await feasibilityManager.teardownAll();
     },
     async stop() {
+      await coordinator.stopAutonomousDeliveries();
+      await autonomousWorkflow.shutdown();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await prNotificationMonitor.stop();

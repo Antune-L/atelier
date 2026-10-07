@@ -1,8 +1,10 @@
 import { nanoid } from "nanoid";
 
+import { autonomousPlanInputSchema } from "../../shared/autonomous.ts";
+import type { AutonomousPlanInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorStack } from "../../shared/errors.ts";
-import { qualityArgsSchema } from "../../shared/protocol.ts";
+import { AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
 import type { WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -14,7 +16,6 @@ import {
   readImplementationPlanArgsSchema,
   recoverImplementationPlanArgsSchema,
   submitImplementationPlanArgsSchema,
-  readyForReviewArgsSchema,
   failArgsSchema,
   submitAnswerArgsSchema,
   submitFeasibilityArgsSchema,
@@ -79,21 +80,41 @@ const NUDGE_MESSAGE =
 const SLOW_COORDINATOR_TOOL_MS = 15_000;
 const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
+const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
 
 interface ToolResult {
   ok: boolean;
   result: string;
+  pending?: boolean;
 }
 
 type ToolHandler = (ctx: SessionToolCall) => ToolResult | Promise<ToolResult>;
+
+interface AutonomousCoordinatorWorkflow {
+  submitPlan(ticketId: string, input: AutonomousPlanInput): Promise<void>;
+  validate(ticketId: string): Promise<{ status: "pending" | "ready" | "paused" }>;
+  assertDelivery(ticketId: string, revision: string): Promise<void>;
+}
 
 /**
  * Routes the agent session's worker-tool calls and turn-end events to state mutations.
  * Implements the auto-nudge ×1 → stalled escalation and persists per-session token usage.
  */
 export class AgentCoordinator {
+  private autonomousWorkflow: AutonomousCoordinatorWorkflow | null = null;
   private readonly userRecoveryOperations = new Set<string>();
   private readonly completingTickets = new Set<string>();
+  private readonly autonomousDeliveries = new Map<string, Promise<void>>();
+  private stoppingAutonomousDelivery = false;
+
+  setAutonomousWorkflow(workflow: AutonomousCoordinatorWorkflow): void {
+    this.autonomousWorkflow = workflow;
+  }
+
+  async stopAutonomousDeliveries(): Promise<void> {
+    this.stoppingAutonomousDelivery = true;
+    await Promise.allSettled([...this.autonomousDeliveries.values()]);
+  }
 
   constructor(
     private readonly store: Store,
@@ -361,6 +382,9 @@ export class AgentCoordinator {
   }
 
   private readonly pipelineHandlers: Record<WorkerToolName, ToolHandler> = {
+    submit_autonomous_plan: (ctx) => this.handleSubmitAutonomousPlan(ctx),
+    validate_autonomous: (ctx) => this.handleValidateAutonomous(ctx),
+    deliver_autonomous: (ctx) => this.handleDeliverAutonomous(ctx),
     quality: (ctx) => this.handleQuality(ctx),
     update_stage: (ctx) => this.handleUpdateStage(ctx),
     ask_user: (ctx) => this.handleAskUser(ctx),
@@ -383,6 +407,80 @@ export class AgentCoordinator {
     submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
   };
 
+  private async handleSubmitAutonomousPlan(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = autonomousPlanInputSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous planning is unavailable for this ticket." };
+    await this.autonomousWorkflow.submitPlan(ctx.ticketId, parsed.data);
+    return { ok: true, result: "Autonomous plan and required scenarios are frozen. Prepare unit tests when present, then delegate implementation." };
+  }
+
+  private async handleValidateAutonomous(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous validation is unavailable for this ticket." };
+    if (this.delegation.hasActiveImplementations(ctx.ticketId)) return { ok: false, result: "Wait for every implementation lot before autonomous validation." };
+    const review = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, "approved", ctx.callId);
+    if (!review.ok) return { ok: false, result: review.reason };
+    const outcome = await this.autonomousWorkflow.validate(ctx.ticketId);
+    return { ok: true, result: JSON.stringify(outcome) };
+  }
+
+  private async handleDeliverAutonomous(ctx: SessionToolCall): Promise<ToolResult> {
+    const parsed = deliverAutonomousArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous delivery is unavailable for this ticket." };
+    if (this.completingTickets.has(ctx.ticketId)) return { ok: false, result: "Ticket delivery is already in progress." };
+    this.completingTickets.add(ctx.ticketId);
+    let backgroundStarted = false;
+    try {
+      if (this.delegation.hasActiveImplementations(ctx.ticketId)) return { ok: false, result: "Wait for every implementation lot before delivery." };
+      const review = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, "approved", ctx.callId);
+      if (!review.ok) return { ok: false, result: review.reason };
+      const prepared = await this.slots.prepareAutonomousPr(ctx.ticketId, ctx.slotId, parsed.data);
+      if (!prepared.ok) return { ok: false, result: prepared.reason };
+      const outcome = await this.completeReviewedTicketNow(ctx, prepared.url);
+      if (!outcome.pending) return outcome;
+      const delivery = this.continueAutonomousDelivery(ctx, prepared.url).catch((error: unknown) => {
+        log.error("autonomous delivery continuation failed", { ticketId: ctx.ticketId, stack: getErrorStack(error) });
+      }).finally(() => {
+        this.autonomousDeliveries.delete(ctx.ticketId);
+        this.completingTickets.delete(ctx.ticketId);
+      });
+      this.autonomousDeliveries.set(ctx.ticketId, delivery);
+      backgroundStarted = true;
+      return { ok: true, pending: true, result: "The verified pull request exists. Native checks or reviews are pending; the backend will reconcile the chosen delivery until the retained deadline. The autonomous pilot never queues a merge or enables host auto-merge. End this turn and keep the worktree." };
+    } finally {
+      if (!backgroundStarted) this.completingTickets.delete(ctx.ticketId);
+    }
+  }
+
+  private async continueAutonomousDelivery(ctx: SessionToolCall, prUrl: string): Promise<void> {
+    while (!this.stoppingAutonomousDelivery) {
+      await new Promise<void>((resolve) => setTimeout(resolve, AUTONOMOUS_DELIVERY_POLL_MS));
+      if (this.stoppingAutonomousDelivery) return;
+      const ticket = this.store.getTicket(ctx.ticketId);
+      const state = ticket?.autonomousState;
+      if (!ticket || !state || state.phase !== "delivering" || ticket.slotId !== ctx.slotId) return;
+      if (Date.now() >= state.deadlineAt && !state.deliveryConfirmation) {
+        const reason = "Autonomous delivery timed out while waiting for native policies. The pull request and implementation worktree are retained.";
+        this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { stage: "stalled", error: reason, autonomousState: { ...state, phase: "paused", error: reason } }));
+        this.sessionHub.sendEvent(ctx.ticketId, { type: "nudge", message: reason });
+        return;
+      }
+      const outcome = await this.completeReviewedTicketNow(ctx, prUrl);
+      if (outcome.pending) continue;
+      if (!outcome.ok) {
+        this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { stage: "stalled", error: outcome.result }));
+        this.sessionHub.sendEvent(ctx.ticketId, { type: "nudge", message: outcome.result });
+      }
+      return;
+    }
+  }
+
   private async handleQuality(ctx: SessionToolCall): Promise<ToolResult> {
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!this.quality || ticket?.kind !== "feature") {
@@ -391,6 +489,7 @@ export class AgentCoordinator {
     const parsed = qualityArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const input = parsed.data;
+    if (ticket.autonomous && input.action !== "get") return { ok: false, result: "The autonomous workflow owns frozen criteria and validation. Use validate_autonomous and quality.get." };
     if (this.store.getActiveQualityIteration(ctx.ticketId)?.mode === "correction" && input.action !== "get") {
       return { ok: false, result: "Les critères sont figés et la vérification complète est pilotée par le backend pendant cette correction. Consulte quality.get uniquement." };
     }
@@ -471,6 +570,12 @@ export class AgentCoordinator {
   private handleUpdateStage(ctx: SessionToolCall): ToolResult {
     const parsed = updateStageArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.autonomous) {
+      if (parsed.data.stage === "done") return { ok: false, result: "Only verified autonomous delivery can complete this ticket." };
+      if (parsed.data.stage === "implementing" && !ticket.autonomousState?.plan) return { ok: false, result: "Freeze the autonomous plan before implementation." };
+      if (parsed.data.stage === "opening_pr" && ticket.autonomousState?.phase !== "ready" && ticket.autonomousState?.phase !== "delivering") return { ok: false, result: "Autonomous evidence must be ready before delivery." };
+    }
     this.lifecycle.setStage(ctx.ticketId, parsed.data.stage);
     if (parsed.data.stage === "implementing") this.delegation.refreshImplementationPlan(ctx.ticketId);
     return { ok: true, result: `stage=${parsed.data.stage}` };
@@ -491,6 +596,7 @@ export class AgentCoordinator {
   }
 
   private handleSubmitPrd(ctx: SessionToolCall): ToolResult {
+    if (this.store.getTicket(ctx.ticketId)?.autonomousState?.plan) return { ok: false, result: "The autonomous initial plan is frozen." };
     if (this.store.getActiveQualityIteration(ctx.ticketId)) return { ok: false, result: "Le PRD initial est figé pendant cette itération qualité." };
     const parsed = submitPrdArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
@@ -517,6 +623,7 @@ export class AgentCoordinator {
   }
 
   private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
+    if (this.store.getTicket(ctx.ticketId)?.autonomous) return { ok: false, result: "Use deliver_autonomous: the backend owns autonomous pull request creation and delivery." };
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     return this.completeReviewedTicket(ctx, parsed.data.pr_url);
@@ -544,8 +651,8 @@ export class AgentCoordinator {
     const ticket = this.store.getTicket(ctx.ticketId);
     const opensFeaturePr = ticket?.kind === "feature" && !ticket.stealth && !ticket.directPush;
     let requirement: "approved" | "approved_or_limit" | "completed" = "approved";
-    if (readOnlyReview) requirement = "completed";
-    else if (opensFeaturePr) requirement = "approved_or_limit";
+    if (readOnlyReview && !ticket?.autonomous) requirement = "completed";
+    else if (opensFeaturePr && !ticket?.autonomous) requirement = "approved_or_limit";
     const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId);
     if (!reviewGate.ok) {
       const result = `Gate échouée: ${reviewGate.reason}`;
@@ -584,7 +691,7 @@ export class AgentCoordinator {
       ok: outcome.ok,
     });
     if (!outcome.ok) {
-      return { ok: false, result: `Gate échouée: ${outcome.reason}. Corrige et rappelle done().` };
+      return { ok: false, pending: outcome.pending, result: `Gate échouée: ${outcome.reason}. ${ticket?.autonomous ? "Conserve la même PR et reprends deliver_autonomous après résolution du diagnostic." : "Corrige et rappelle done()."}` };
     }
     if (reviewReport) {
       const comment = this.store.addComment(ctx.ticketId, "agent", reviewReport, null);
@@ -602,6 +709,7 @@ export class AgentCoordinator {
     const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.autonomous) return this.handleValidateAutonomous(ctx);
     if (!ticket || ticket.kind !== "feature" || (!ticket.stealth && !ticket.directPush)) {
       return { ok: false, result: "ready_for_review réservé aux tickets stealth ou push direct." };
     }
@@ -628,6 +736,9 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     const execution = this.sessionHub.getExecutionConfig(ctx.ticketId);
+    if (ticket?.autonomous && (this.completingTickets.has(ctx.ticketId) || ticket.autonomousState?.phase === "delivering" || ticket.autonomousState?.hostMutation || ticket.autonomousState?.deliveryConfirmation)) return { ok: false, result: "Autonomous delivery owns the frozen worktree; implementation cannot start during delivery or host reconciliation." };
+    if (ticket?.autonomous && !ticket.autonomousState?.plan) return { ok: false, result: "Freeze the autonomous plan before delegating implementation." };
+    if (ticket?.autonomous && ticket.autonomousState?.plan?.unitTests === "present" && parsed.data.label !== AUTONOMOUS_UNIT_TEST_LOT && !this.store.listImplementationLotStates(ctx.ticketId).some((lot) => lot.label === AUTONOMOUS_UNIT_TEST_LOT && lot.status === "completed")) return { ok: false, result: `Complete the ${AUTONOMOUS_UNIT_TEST_LOT} preparation lot before feature implementation.` };
     if (!ticket || (execution?.delegateProvider !== "codex" && execution?.delegateProvider !== "claude")) {
       return {
         ok: false,
@@ -647,6 +758,13 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     const execution = this.sessionHub.getExecutionConfig(ctx.ticketId);
+    if (ticket?.autonomous && (this.completingTickets.has(ctx.ticketId) || ticket.autonomousState?.phase === "delivering" || ticket.autonomousState?.hostMutation || ticket.autonomousState?.deliveryConfirmation)) return { ok: false, result: "Autonomous delivery owns the frozen worktree; implementation cannot start during delivery or host reconciliation." };
+    if (ticket?.autonomous && !ticket.autonomousState?.plan) return { ok: false, result: "Freeze the autonomous plan before delegating implementation." };
+    if (ticket?.autonomous && ticket.autonomousState?.plan?.unitTests === "present") {
+      const preparation = parsed.data.lots.find((lot) => lot.label === AUTONOMOUS_UNIT_TEST_LOT);
+      const prepared = this.store.listImplementationLotStates(ctx.ticketId).some((lot) => lot.label === AUTONOMOUS_UNIT_TEST_LOT && lot.status === "completed");
+      if (!prepared && (!preparation || preparation.dependsOn.length > 0 || parsed.data.lots.some((lot) => lot.label !== AUTONOMOUS_UNIT_TEST_LOT && !lot.dependsOn.includes(AUTONOMOUS_UNIT_TEST_LOT)))) return { ok: false, result: `Every feature lot must depend on a first ${AUTONOMOUS_UNIT_TEST_LOT} preparation lot.` };
+    }
     if (!ticket || ticket.kind !== "feature" || (execution?.delegateProvider !== "codex" && execution?.delegateProvider !== "claude")) {
       return { ok: false, result: "submit_implementation_plan réservé aux tickets feature avec implémenteur Codex ou Claude." };
     }
@@ -765,6 +883,9 @@ export class AgentCoordinator {
   private async handleFail(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = failArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.autonomous && ticket.autonomousState?.deliveryConfirmation) return { ok: false, result: "The chosen autonomous delivery is already confirmed. Preserve its delivery state and reconcile the retained preview cleanup." };
+    if (ticket?.autonomousState && ticket.autonomous) this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { autonomousState: { ...ticket.autonomousState, phase: "paused", error: parsed.data.reason } }));
     const iteration = this.store.getActiveQualityIteration(ctx.ticketId);
     if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: parsed.data.reason, completedAt: Date.now() });
     await this.lifecycle.fail(ctx.ticketId, parsed.data.reason, parsed.data.findings);
@@ -797,6 +918,8 @@ export class AgentCoordinator {
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;
+    if (this.autonomousDeliveries.has(ticketId)) return;
+    if (ticket.autonomous && ticket.autonomousState && ["checks", "preview", "validating", "paused"].includes(ticket.autonomousState.phase)) return;
     if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return;
     // Interactive test sessions run on a "done" card (stage stays "done", not active nor
     // awaiting_answers), so they exit just below at `needsResolution` and are never escalated/nudged.

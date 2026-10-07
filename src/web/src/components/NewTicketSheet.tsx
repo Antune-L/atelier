@@ -1,9 +1,12 @@
 import { MessageSquare } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
 import { isNotionUrl } from "@shared/notion";
 import type { ProjectInfo } from "@shared/schemas";
 
+import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
+import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
@@ -68,6 +71,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
   const [optionsKey, setOptionsKey] = useState(0);
+  const [autonomousOptions, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
@@ -122,6 +126,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     setImportingNotion(false);
     clearDescription();
     setBaseBranchChoice(null);
+    setAutonomousOptions({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
@@ -193,7 +198,8 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
         project,
         prdEnabled,
         prDraft,
-        autoMerge,
+        autoMerge: autonomousOptions.autonomous ? false : autoMerge,
+        ...autonomousOptions,
         stealth,
         directPush,
         addScreenshots,
@@ -225,7 +231,9 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     }
   };
 
-  const submitDisabled = busy || (!title.trim() && !description.trim()) || !project;
+  const autonomousAvailability = autonomousEligibility(selectedProject, agent.implementer, !dependsOnValid);
+  const autonomousEligible = autonomousAvailability.eligible;
+  const submitDisabled = busy || (!title.trim() && !description.trim()) || !project || (autonomousOptions.autonomous && (!autonomousEligible || autonomousOptions.autonomousDelivery === null));
 
   return (
     <Sheet
@@ -366,7 +374,12 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                   onApplyProfile={agent.applyProfile}
                 />
               </div>
+              <AutonomousOptions id="new-autonomous" values={autonomousOptions} eligible={autonomousEligible} unavailableReason={autonomousAvailability.reason} onChange={(next) => {
+                setAutonomousOptions(next);
+                if (next.autonomous) { setAutoMergeChoice(false); setStealth(false); setDirectPush(false); }
+              }} />
               <TicketOptionsToggleGroup
+                autonomous={autonomousOptions.autonomous}
                 key={optionsKey}
                 headingId="ticket-options-heading"
                 values={{

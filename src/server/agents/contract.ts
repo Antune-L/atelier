@@ -5,6 +5,7 @@ import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
+import { AUTONOMOUS_UNIT_TEST_LOT } from "../../shared/protocol.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
@@ -58,6 +59,14 @@ function buildImplementingSteps(
   opts: { composerScriptPath: string },
   prdPath: string,
 ): string[] {
+  if (ticket.autonomous) {
+    return [
+      "2. implementing : délègue toutes les modifications à Claude ou Codex via les workers du backend ; n'écris aucun fichier directement et n'utilise aucun sous-agent natif.",
+      `   Si le projet a des tests unitaires, lance D'ABORD delegate_implementation({label:"${AUTONOMOUS_UNIT_TEST_LOT}",plan:"préparer les tests unitaires des cas du plan figé, sans implémenter la fonctionnalité",files:[...]}), termine ton tour et attends sa réussite. Les nouveaux tests peuvent échouer avant la fonctionnalité ; aucun test existant ne doit être affaibli. Le backend refuse tout lot de fonctionnalité avant cette préparation.`,
+      `   Ensuite délègue la fonctionnalité complète selon le plan figé. Pour plusieurs lots persistants, chaque lot de fonctionnalité dépend de "${AUTONOMOUS_UNIT_TEST_LOT}" si sa préparation est incluse dans le même plan ; conserve des fichiers disjoints. Une absence de suite unitaire identifiée est explicitement inscrite dans le plan, jamais remplacée par un succès fictif.`,
+      "   Après chaque délégation, termine ton tour et attends implementation_done ; consulte read_implementation_plan après une interruption. Toute correction passe aussi par un lot délégué. Conserve les critères, le budget et les travaux ; appelle fail si la délégation ne peut pas aboutir.",
+    ];
+  }
   if (ticket.implementer === "codex" || ticket.implementer === "claude") {
     const providerName = ticket.implementer === "codex" ? "Codex" : "Claude";
     let planSource = "un plan concis et complet rédigé depuis la description du ticket";
@@ -105,6 +114,7 @@ function buildImplementingSteps(
 
 /** Step 1 label of the contract: a PRD planning phase or a direct jump to implementing. */
 function buildPlanningStep(ticket: Ticket): string {
+  if (ticket.autonomous) return '1. planning : lis le projet et ses scripts existants. Avant toute modification, appelle submit_autonomous_plan({plan,criteria:[{id,text,source:"ticket",required:true,independent:true,expected,interaction}],unitTests:"present" ou "absent",unitTestPreparation}). Décris TOUS les cas d’acceptation initiaux, leurs interactions, leurs résultats attendus, et la préparation des tests unitaires existants. Le backend fige ce plan, vérifie les prérequis de preview et conserve un budget commun à toutes les reprises. Si un prérequis manque, conserve le travail et attends sa résolution.';
   if (ticket.prdEnabled) return "1. planning → submit_prd → (attente prd_validated)";
   return "1. implementing";
 }
@@ -152,8 +162,10 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
     `3. reviewing : récupère le diff complet et appelle EN PARALLÈLE les ${kinds.length} reviewers indépendants : ${reviewCalls(depth)}. Passe à chacun la description/PRD et le diff utile, sans leur transmettre le raisonnement privé ni le résultat d'un autre. Termine ton tour et attends les ${kinds.length} événements \`review_done\`.`,
     ...figmaLines,
     `3a. ${READ_REVIEW_RESULTS_HINT}`,
-    `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`done()\` avant les ${kinds.length} résultats vérifiés sur le code courant ; un reviewer échoué ou une dimension manquante bloque la validation.`,
-    `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, ne relance plus et ne fail pas pour ce seul motif : poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale clairement les findings encore ouverts dans sa description. Au-delà de ce budget, le backend refuse toute passe supplémentaire : \`delegate_review\` répond en erreur. Le backend désactive alors l'auto-merge.`,
+    `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`${ticket.autonomous ? "validate_autonomous()" : "done()"}\` avant les ${kinds.length} résultats vérifiés sur le code courant ; un reviewer échoué ou une dimension manquante bloque la validation.`,
+    ticket.autonomous
+      ? `4. fixing : si un verdict vaut revise, délègue les corrections de tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, appelle fail et conserve les travaux. Aucun épuisement du budget de review ne peut autoriser une preview, une PR ou une fusion autonome.`
+      : `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, ne relance plus et ne fail pas pour ce seul motif : poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale clairement les findings encore ouverts dans sa description. Au-delà de ce budget, le backend refuse toute passe supplémentaire : \`delegate_review\` répond en erreur. Le backend désactive alors l'auto-merge.`,
   ];
 }
 
@@ -282,12 +294,13 @@ export function buildTicketContract(
   // Both stealth and directPush open NO PR.
   const noPr = stealth || directPush;
   // A draft PR can't be auto-merged, so autoMerge always produces a ready PR.
-  const prIsDraft = ticket.prDraft && !ticket.autoMerge;
+  const mergeRequested = ticket.autonomous ? ticket.autonomousDelivery === "merge" : ticket.autoMerge;
+  const prIsDraft = ticket.prDraft && !mergeRequested;
   // Screenshots only make sense on a PR a human will read; auto-merge skips that.
   // NOTE(ali): `gh` can't upload images to GitHub's user-attachments CDN (that endpoint is
   // internal to the web editor's drag-and-drop, not in the REST API). The agent must host the
   // image elsewhere (commit it, release asset) before referencing it in the PR markdown.
-  const wantsScreenshots = ticket.addScreenshots && !ticket.autoMerge && !noPr;
+  const wantsScreenshots = ticket.addScreenshots && !mergeRequested && !noPr;
   const wantsVerify = ticket.verifyFeature;
   const verifyWithMockups = wantsVerify && hasMockups(ticket.description);
   const vcs = vcsCommands(project.vcsProvider);
@@ -302,7 +315,9 @@ export function buildTicketContract(
     ? "un nouveau test fonctionnel dans le navigateur isolé avec les mêmes scénarios figés (pas une vérification complète)"
     : "une nouvelle vérification indépendante complète";
   let toolDirective: string;
-  if (iteration) {
+  if (ticket.autonomous) {
+    toolDirective = '- `validate_autonomous()` seulement après review indépendante approuvée du code courant, commit propre et push de la branche. Termine ton tour et attends la continuation. Après les preuves satisfaisantes, `deliver_autonomous({title,body})` confie au backend la création de PR et la livraison choisie. N’appelle jamais done ni une commande de création ou fusion de PR.';
+  } else if (iteration) {
     toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite ${iterationVerification}.`;
   } else if (directPush) {
     toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
@@ -313,7 +328,9 @@ export function buildTicketContract(
   }
 
   let finalizationStep: string;
-  if (iteration) {
+  if (ticket.autonomous) {
+    finalizationStep = "6. finalisation : commit propre puis push de la branche de fonctionnalité. Appelle validate_autonomous et termine ton tour : le backend exécute les contrôles, déploie cette branche sur Coolify sans PR et teste tous les scénarios figés. Une correction impose une nouvelle review indépendante, un nouveau commit, un nouveau déploiement et tous les contrôles. Aucun critère échoué, absent, ignoré ou périmé n'autorise une PR.";
+  } else if (iteration) {
     finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse normalement la branche existante \`${iteration.headBranch}\`. Si le push est rejeté, appelle fail() et signale le changement externe ; ne force pas le push et ne recrée aucune PR.`;
   } else if (directPush) {
     finalizationStep = `6. finalisation : commit (conventions du projet), puis pousse tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` : \`git push origin HEAD:refs/heads/${baseBranch}\`. N'ouvre AUCUNE PR. Si le push est rejeté (non-fast-forward parce que \`${baseBranch}\` a avancé), rebase sur \`origin/${baseBranch}\` puis re-pousse.`;
@@ -324,7 +341,9 @@ export function buildTicketContract(
   }
 
   let signalStep: string;
-  if (iteration) {
+  if (ticket.autonomous) {
+    signalStep = `7. Quand le backend annonce les preuves prêtes, appelle deliver_autonomous({title,body}). Livraison choisie : ${ticket.autonomousDelivery === "merge" ? "fusion autonome uniquement après les politiques natives satisfaites et confirmation de la fusion du commit vérifié" : "créer la PR puis s’arrêter, sans activer ni demander ni planifier aucune fusion"}. Si la livraison reste en attente, conserve le worktree et relis quality.get ; ne crée jamais une deuxième PR ni ne contourne une politique.`;
+  } else if (iteration) {
     signalStep = `7. done(pr_url="${iteration.prUrl}"). Termine ton tour : le backend conserve le worktree jusqu'à la fin ${functionalIteration ? "du nouveau test fonctionnel de tous les scénarios" : "de la nouvelle vérification de tous les critères"}. Une vérification échouée ou non concluante termine cette passe ; aucun cycle automatique supplémentaire.`;
   } else if (directPush) {
     signalStep = `7. \`ready_for_review()\` — tes commits sont sur \`${baseBranch}\` ; le worktree sera fermé et la carte passera en « Fini » (aucune PR).`;
@@ -335,12 +354,17 @@ export function buildTicketContract(
   }
 
   let qualityDirective = '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.';
-  if (iteration) {
+  if (ticket.autonomous) {
+    qualityDirective = '- Le backend conserve séparément la vérification complète et le test fonctionnel sur preview Coolify du même commit. Les critères initiaux sont figés. Utilise uniquement quality.get pour les relire ; la validation passe par validate_autonomous. Ne modifie aucun compte réel, ne fournis aucun secret dans un prompt et ne contourne jamais un refus, une authentification interactive, une MFA ou un CAPTCHA. Un accès indisponible suspend le parcours avec les travaux conservés.';
+  } else if (iteration) {
     qualityDirective = '- Consulte uniquement `quality({action:"get"})` pour lire les preuves initiales. Corrige les défauts observés tout en préservant tous les critères requis ; la nouvelle vérification indépendante complète est obligatoire après done().';
     if (functionalIteration) qualityDirective = '- Consulte uniquement `quality({action:"get"})` pour lire les preuves initiales. Les défauts proviennent de scénarios exécutés dans le navigateur (interaction, résultat attendu, état observé, actions réalisées). Corrige-les tout en préservant tous les critères d’acceptation et scénarios requis ; le backend relance le test fonctionnel dans le navigateur après done(), pas une vérification complète.';
   } else if (project.validation?.enabled) {
     qualityDirective = '- Validation qualité activée : appelle `quality({action:"set_criteria",mode:"repository",criteria:[{id:"C01",text:"comportement et résultat attendu",source:"ticket",required:true,independent:true}]})` avec les vrais critères du ticket ou du PRD. Choisis le mode "repository" pour les changements vérifiables dans le dépôt ; choisis "browser" seulement si les critères nécessitent un navigateur. Après un commit propre, `quality({action:"verify",provider:"' + ticket.orchestrator + '"})` prépare les critères et dépendances dans un worktree isolé, exécute les commandes configurées et lance une vérification indépendante. Consulte `quality({action:"get"})` pour attendre la fin et lire les preuves ; ne déclare jamais une exécution réussie à partir de ton propre résumé. Toute modification impose un nouveau commit et une nouvelle vérification.';
   }
+  let prdDirective = buildPrdBullet(ticket);
+  if (iteration) prdDirective = "- Le PRD initial est figé ; aucune nouvelle soumission ni validation du PRD.";
+  if (ticket.autonomous) prdDirective = "- Le plan autonome initial est figé par submit_autonomous_plan ; aucune nouvelle soumission ni validation du PRD ne remplace ce plan.";
 
   const lines: string[] = [
     `# Ticket ${ticket.id} — ${ticket.title}`,
@@ -358,6 +382,9 @@ export function buildTicketContract(
     "",
     buildValidatedPrdSection(ticket),
     buildFeasibilityContextSection(ticket),
+    ticket.autonomousState?.plan
+      ? `## Reprise du parcours autonome\nÉtat durable : ${ticket.autonomousState.phase}. Plan figé :\n${JSON.stringify(ticket.autonomousState.plan, null, 2)}\nRévision vérifiée : ${ticket.autonomousState.revision ?? "aucune"}. PR : ${ticket.prUrl ?? "aucune"}. Corrections consommées : ${ticket.autonomousState.corrections}. Échéance conservée : ${new Date(ticket.autonomousState.deadlineAt).toISOString()}. Ne remplace pas le plan, ne recommence aucun lot réussi et ne réinitialise aucun budget. Si l'état est ready ou delivering, reprends directement deliver_autonomous pour réconcilier la même PR et le choix initial. Si l'état est paused, attends une reprise explicite du prérequis ou signale le diagnostic ; ne contourne pas la suspension.`
+      : "",
     "## Contrat de pipeline",
     buildSessionFramingLine(ticket),
     iteration && ticket.orchestrator === "claude"
@@ -365,18 +392,18 @@ export function buildTicketContract(
       : "",
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` dès qu'une décision te dépasse (ne devine jamais une exigence critique).",
-    iteration ? "- Le PRD initial est figé ; aucune nouvelle soumission ni validation du PRD." : buildPrdBullet(ticket),
+    prdDirective,
     toolDirective,
     "- `fail(reason, findings)` si tu es bloqué après avoir épuisé tes options.",
     qualityDirective,
-    !iteration && project.validation?.enabled && !noPr
+    !ticket.autonomous && !iteration && project.validation?.enabled && !noPr
       ? `- Avant la livraison, relis \`quality({action:"get"})\`. Si gate.complete est faux, les réserves empêchent la fusion automatique et la PR doit rester en brouillon : utilise \`${vcs.createPr({ draft: true, baseBranch })}\`. Cette règle prime sur la consigne auto-merge ci-dessous.`
       : "",
     commitLanguageDirective(opts.commitLanguage),
     "",
     "## Événements de channel",
     "Tu peux recevoir à tout moment un événement `user_comment` : une instruction/orientation de l'utilisateur à prendre en compte dans le travail en cours (ce n'est PAS une réponse à une question `ask_user`).",
-    ticket.prdEnabled
+    ticket.prdEnabled && !ticket.autonomous
       ? "Pendant l'attente de `prd_validated`, un `user_comment` contenant des retours sur le PRD (souvent des annotations citant des passages) signifie que le PRD doit être corrigé : révise-le en conséquence puis appelle de nouveau `submit_prd` avec la version corrigée. N'implémente qu'après `prd_validated` (dont le champ note peut porter des retours mineurs à appliquer pendant l'implémentation)."
       : "",
     "",
@@ -391,16 +418,16 @@ export function buildTicketContract(
     wantsVerify ? buildVerifyStep(ticket) : "",
     buildMockupReviewStep(ticket, verifyWithMockups),
     finalizationStep,
-    noPr || iteration
+    noPr || iteration || ticket.autonomous
       ? ""
       : `   Si la branche cible \`${baseBranch}\` n'existe pas encore sur origin, crée-la d'abord : \`git ls-remote --heads origin ${baseBranch} | grep -q . || git push origin HEAD:refs/heads/${baseBranch}\``,
-    noPr || iteration ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
-    noPr || iteration ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
+    noPr || iteration || ticket.autonomous ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
+    noPr || iteration || ticket.autonomous ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
     wantsScreenshots
       ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
       : "",
     signalStep,
-    !iteration && !noPr && ticket.autoMerge
+    !ticket.autonomous && !iteration && !noPr && ticket.autoMerge
       ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
       : "",
     "",

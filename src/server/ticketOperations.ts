@@ -18,6 +18,21 @@ import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 
+export function autonomousPilotEnabled(vcsProvider: string): boolean {
+  return process.env.KANBAN_AUTONOMOUS_PILOT === "1" && vcsProvider === "github";
+}
+
+export function autonomousOptionsError(input: { autonomous?: boolean; autonomousDelivery?: "pr_only" | "merge" | null; kind?: string; stealth?: boolean; directPush?: boolean; implementer?: string; dependsOn?: string | null; childOrder?: number | null }, vcsProvider: string): string | null {
+  if (!input.autonomous) return null;
+  if (vcsProvider !== "github") return "The autonomous pilot requires GitHub and a prepared Coolify preview.";
+  if (!autonomousPilotEnabled(vcsProvider)) return "The autonomous local pilot is not enabled on this machine.";
+  if (input.autonomousDelivery === null || input.autonomousDelivery === undefined) return "Choose PR only or merge after checks explicitly for autonomous delivery.";
+  if (input.kind !== undefined && input.kind !== "feature") return "The autonomous pilot only supports feature tickets.";
+  if (input.stealth || input.directPush || input.implementer === "composer") return "The autonomous pilot does not support stealth, direct push or Composer.";
+  if (input.dependsOn != null || input.childOrder != null) return "The autonomous pilot requires an independent, unsplit feature ticket.";
+  return null;
+}
+
 const DEFAULT_TICKET_LIST_LIMIT = 50;
 const MAX_TICKET_LIST_LIMIT = 100;
 const log = createLogger("ticket-operations");
@@ -32,6 +47,10 @@ export const createTodoTicketInputSchema = ticketBatchOptionsSchema
     prdEnabled: ticketBatchOptionsSchema.shape.prdEnabled.removeDefault().optional().describe("Prepare and get a PRD approved before implementation."),
     prDraft: ticketBatchOptionsSchema.shape.prDraft.removeDefault().optional().describe("Open the pull request as a draft."),
     autoMerge: ticketBatchOptionsSchema.shape.autoMerge.removeDefault().optional().describe("Automatically merge the pull request after validation."),
+    autonomous: ticketBatchOptionsSchema.shape.autonomous.removeDefault().optional().describe("Use the internal autonomous pilot with Coolify validation before opening a pull request."),
+    autonomousDelivery: ticketBatchOptionsSchema.shape.autonomousDelivery.removeDefault().optional().describe("Explicit autonomous delivery choice: PR only, or merge after verified checks."),
+    autonomousMaxCorrections: ticketBatchOptionsSchema.shape.autonomousMaxCorrections.removeDefault().optional().describe("Maximum automatic correction cycles, between zero and three."),
+    autonomousTimeoutMinutes: ticketBatchOptionsSchema.shape.autonomousTimeoutMinutes.removeDefault().optional().describe("Total autonomous execution deadline in minutes, between one and 1440."),
     stealth: ticketBatchOptionsSchema.shape.stealth.removeDefault().optional().describe("Implement without opening a pull request."),
     directPush: ticketBatchOptionsSchema.shape.directPush.removeDefault().optional().describe("Push directly to the base branch, without a pull request; disables stealth and autoMerge."),
     addScreenshots: ticketBatchOptionsSchema.shape.addScreenshots.removeDefault().optional().describe("Add screenshots to the pull request."),
@@ -101,6 +120,10 @@ export interface CompactTicket {
   column: Column;
   stage: Ticket["stage"];
   error: string | null;
+  autonomous?: boolean;
+  autonomousDelivery?: Ticket["autonomousDelivery"];
+  autonomousMaxCorrections?: number;
+  autonomousTimeoutMinutes?: number;
   dependsOn: string | null;
   createdAt: number;
   updatedAt: number;
@@ -147,6 +170,10 @@ function compactTicket(ticket: Ticket): CompactTicket {
     column: ticket.column,
     stage: ticket.stage,
     error: ticket.error,
+    autonomous: ticket.autonomous ?? false,
+    autonomousDelivery: ticket.autonomousDelivery ?? null,
+    autonomousMaxCorrections: ticket.autonomousMaxCorrections,
+    autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes,
     dependsOn: ticket.dependsOn,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
@@ -225,6 +252,8 @@ export class TicketOperations {
         key,
         label: project.label,
         baseBranch: project.baseBranch,
+        vcsProvider: project.vcsProvider,
+        autonomousPilot: autonomousPilotEnabled(project.vcsProvider),
         defaultAutoMerge: project.defaultAutoMerge,
         defaultAddScreenshots: project.defaultAddScreenshots,
         hidden: project.hidden ?? false,
@@ -276,11 +305,13 @@ export class TicketOperations {
       if (error !== null) throw new TicketOperationError("INVALID_INPUT", error);
     }
     const project = getProject(normalized.project);
+    const autonomousError = autonomousOptionsError(normalized, project.vcsProvider);
+    if (autonomousError !== null) throw new TicketOperationError("INVALID_INPUT", autonomousError);
     const title = normalized.title.trim() || deriveTitleFromDescription(normalized.description);
     const payload = JSON.stringify(normalized);
     const directPush = normalized.directPush ?? false;
     const stealth = directPush ? false : (normalized.stealth ?? false);
-    const autoMerge = stealth || directPush
+    const autoMerge = normalized.autonomous || stealth || directPush
       ? false
       : (normalized.autoMerge ?? project.defaultAutoMerge);
     const ticketInput: NewTicket = {
@@ -291,6 +322,10 @@ export class TicketOperations {
       prdEnabled: normalized.prdEnabled ?? false,
       prDraft: normalized.prDraft ?? true,
       autoMerge,
+      autonomous: normalized.autonomous ?? false,
+      autonomousDelivery: normalized.autonomousDelivery ?? null,
+      autonomousMaxCorrections: normalized.autonomousMaxCorrections,
+      autonomousTimeoutMinutes: normalized.autonomousTimeoutMinutes,
       addScreenshots: normalized.addScreenshots ?? (!autoMerge && project.defaultAddScreenshots),
       verifyFeature: normalized.verifyFeature ?? false,
       argusMultiLoop: normalized.argusMultiLoop ?? false,
@@ -412,7 +447,18 @@ export class TicketOperations {
       }
     }
 
+    const autonomousKeys = ["autonomous", "autonomousDelivery", "autonomousMaxCorrections", "autonomousTimeoutMinutes"];
+    if ((ticket.column !== "todo" || ticket.autonomousState != null) && autonomousKeys.some((key) => Object.hasOwn(parsed.data, key))) {
+      throw new TicketOperationError("CONFLICT", "Autonomous settings can only be changed before the first launch.");
+    }
+    if (ticket.autonomousState != null && Object.keys(parsed.data).length > 0) {
+      throw new TicketOperationError("CONFLICT", "The autonomous plan and execution settings are frozen after launch.");
+    }
+    const resulting = { ...ticket, ...parsed.data };
+    const autonomousError = autonomousOptionsError(resulting, getProject(project).vcsProvider);
+    if (autonomousError !== null) throw new TicketOperationError("INVALID_INPUT", autonomousError);
     const patch: TicketPatch = { ...parsed.data };
+    if (resulting.autonomous) patch.autoMerge = false;
     const resultingDirectPush = parsed.data.directPush ?? ticket.directPush;
     if (resultingDirectPush) {
       patch.stealth = false;

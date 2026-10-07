@@ -23,6 +23,7 @@ import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
   DoneGateResult,
+  MergePrExpectation,
   PublishReviewOptions,
   PublishReviewResult,
   ReviewHeadResult,
@@ -648,7 +649,8 @@ export class AzureDevopsVcsClient implements VcsClient {
     return this.verifyVote(cwd, context, check.expectedState, posted.author?.id ?? null);
   }
 
-  async mergePr(cwd: string, prUrl: string): Promise<DoneGateResult> {
+  async mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    if (expected) return { ok: false, reason: "Expected-head autonomous merge is not qualified for Azure DevOps." };
     const target = repoRefFromPrUrl(prUrl);
     if (target === null) return { ok: false, reason: "URL de PR Azure DevOps invalide" };
     // A draft PR can't be completed; publish it first (harmless if already published).

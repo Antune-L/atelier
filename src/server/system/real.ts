@@ -48,6 +48,8 @@ import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
   DoneGateResult,
+  CreatePrOptions,
+  MergePrExpectation,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
   ImplementationRecoveryArchive,
@@ -813,12 +815,13 @@ export class RealSystemAdapter implements SystemAdapter {
   async createPr(
     slotPath: string,
     baseBranch: string,
-    opts: { draft: boolean },
+    opts: CreatePrOptions,
     provider: VcsProvider,
   ): Promise<{ ok: boolean; url: string; reason: string }> {
     // The base branch must exist on origin before the PR creation can target it.
     const baseExists = await $`git -C ${slotPath} ls-remote --heads origin ${baseBranch}`.nothrow().quiet();
     if (baseExists.exitCode !== 0 || baseExists.stdout.toString().trim().length === 0) {
+      if (opts.requireExistingBase) return { ok: false, url: "", reason: "Autonomous delivery requires an existing remote target branch." };
       const push = await $`git -C ${slotPath} push origin HEAD:refs/heads/${baseBranch}`.nothrow().quiet();
       if (push.exitCode !== 0) {
         const detail = push.stderr.toString().trim() || push.stdout.toString().trim();
@@ -1072,14 +1075,15 @@ export class RealSystemAdapter implements SystemAdapter {
       .sort();
   }
 
-  async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
-    const merged = await this.vcs(provider).mergePr(slotPath, prUrl);
+  async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    const merged = await this.vcs(provider).mergePr(slotPath, prUrl, expected);
     if (!merged.ok) return merged;
     // Best-effort remote branch cleanup: the merge already succeeded, so a failed
     // deletion (e.g. branch protection) must not turn into a merge failure. We can't
     // use `gh pr merge --delete-branch` because its local cleanup checks out the base
     // branch, which is already checked out in the main worktree and would error.
-    await $`git push origin --delete ${branch}`.cwd(slotPath).nothrow().quiet();
+    if (expected) await runBoundedCommand(["git", "push", "origin", "--delete", branch], slotPath);
+    else await $`git push origin --delete ${branch}`.cwd(slotPath).nothrow().quiet();
     return { ok: true, reason: "" };
   }
 

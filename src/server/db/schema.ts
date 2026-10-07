@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS tickets (
   prd_enabled INTEGER NOT NULL DEFAULT 0,
   pr_draft INTEGER NOT NULL DEFAULT 1,
   auto_merge INTEGER NOT NULL DEFAULT 0,
+  autonomous INTEGER NOT NULL DEFAULT 0,
+  autonomous_delivery TEXT,
+  autonomous_max_corrections INTEGER NOT NULL DEFAULT 1,
+  autonomous_timeout_minutes INTEGER NOT NULL DEFAULT 60,
+  autonomous_state TEXT,
   add_screenshots INTEGER NOT NULL DEFAULT 0,
   verify_feature INTEGER NOT NULL DEFAULT 0,
   argus_multi_loop INTEGER NOT NULL DEFAULT 0,
@@ -436,6 +441,11 @@ CREATE INDEX IF NOT EXISTS idx_review_approvals_pass ON review_approvals(ticket_
 // parsing ignores unknown keys and inserts never reference them.
 /** Columns added after the original schema; applied idempotently to existing DBs. */
 const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "autonomous", ddl: "ALTER TABLE tickets ADD COLUMN autonomous INTEGER NOT NULL DEFAULT 0" },
+  { column: "autonomous_delivery", ddl: "ALTER TABLE tickets ADD COLUMN autonomous_delivery TEXT" },
+  { column: "autonomous_max_corrections", ddl: "ALTER TABLE tickets ADD COLUMN autonomous_max_corrections INTEGER NOT NULL DEFAULT 1" },
+  { column: "autonomous_timeout_minutes", ddl: "ALTER TABLE tickets ADD COLUMN autonomous_timeout_minutes INTEGER NOT NULL DEFAULT 60" },
+  { column: "autonomous_state", ddl: "ALTER TABLE tickets ADD COLUMN autonomous_state TEXT" },
   { column: "triage_status", ddl: "ALTER TABLE tickets ADD COLUMN triage_status TEXT NOT NULL DEFAULT 'none'" },
   { column: "triage_verdict", ddl: "ALTER TABLE tickets ADD COLUMN triage_verdict TEXT" },
   { column: "triage_report", ddl: "ALTER TABLE tickets ADD COLUMN triage_report TEXT" },

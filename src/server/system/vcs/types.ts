@@ -16,6 +16,8 @@ import type {
   ReviewHeadResult,
   ReviewPublicationState,
   RecoveryCandidateOptions,
+  CreatePrOptions,
+  MergePrExpectation,
 } from "../types.ts";
 
 export interface CreatePrResult {
@@ -59,7 +61,7 @@ export interface VcsClient {
    * provider without a dedicated PR ref only has to name the branch to fetch.
    */
   prHeadFetchRef(cwd: string, prUrl: string, prNumber: number): Promise<string | null>;
-  createPr(cwd: string, baseBranch: string, opts: { draft: boolean }): Promise<CreatePrResult>;
+  createPr(cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult>;
   /** PR description body, used as the agent-work summary. null when unreadable. */
   fetchPrSummary(cwd: string, prUrl: string): Promise<string | null>;
   /**
@@ -70,7 +72,7 @@ export interface VcsClient {
   /** Review done() gate: the publication described by `check` is really on the PR. */
   verifyReviewPublication(cwd: string, prUrl: string, check: ReviewPublicationCheck): Promise<DoneGateResult>;
   /** Mark the PR ready (no-op if already) and merge it; the caller deletes the remote branch. */
-  mergePr(cwd: string, prUrl: string): Promise<DoneGateResult>;
+  mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult>;
   readPrState(cwd: string, prUrl: string): Promise<PrState>;
   readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability>;
 }

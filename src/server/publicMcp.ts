@@ -6,7 +6,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { COLUMNS } from "../shared/constants.ts";
+import { COLUMNS, VCS_PROVIDERS } from "../shared/constants.ts";
 import {
   analyzeTicketsSchema,
   kindSchema,
@@ -35,12 +35,18 @@ const compactTicketSchema = z.object({
   column: columnSchema,
   stage: z.string().nullable(),
   error: z.string().nullable(),
+  autonomous: ticketSchema.shape.autonomous,
+  autonomousDelivery: ticketSchema.shape.autonomousDelivery,
+  autonomousMaxCorrections: ticketSchema.shape.autonomousMaxCorrections,
+  autonomousTimeoutMinutes: ticketSchema.shape.autonomousTimeoutMinutes,
   dependsOn: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
 
 const projectSchema = z.object({
+  vcsProvider: z.enum(VCS_PROVIDERS).optional(),
+  autonomousPilot: z.boolean().optional(),
   key: z.string(),
   label: z.string(),
   baseBranch: z.string(),
@@ -97,6 +103,11 @@ const editableTicketSchema = ticketSchema.pick({
   prdEnabled: true,
   prDraft: true,
   autoMerge: true,
+  autonomous: true,
+  autonomousDelivery: true,
+  autonomousMaxCorrections: true,
+  autonomousTimeoutMinutes: true,
+  autonomousState: true,
   stealth: true,
   directPush: true,
   addScreenshots: true,

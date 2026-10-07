@@ -1,5 +1,7 @@
-import { transcriptUpdateSchema } from "./transcript.ts";
 import { z } from "zod";
+
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "./autonomous.ts";
+import { transcriptUpdateSchema } from "./transcript.ts";
 
 import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import type { ResearchOptionKey } from "./constants.ts";
@@ -281,6 +283,11 @@ export const ticketSchema = z.object({
   prDraft: z.boolean(),
   /** Auto-merge the PR into the base branch once the done() gate passes. */
   autoMerge: z.boolean(),
+  autonomous: z.boolean().optional(),
+  autonomousDelivery: autonomousDeliverySchema.nullable().optional(),
+  autonomousMaxCorrections: autonomousMaxCorrectionsSchema.optional(),
+  autonomousTimeoutMinutes: autonomousTimeoutMinutesSchema.optional(),
+  autonomousState: autonomousStateSchema.nullable().optional(),
   /** Feature tickets only: run the full pipeline but, instead of opening a PR, push the branch and land the card in "À review" while keeping the slot busy for local testing. Mutually exclusive with autoMerge. */
   stealth: z.boolean(),
   /** Feature tickets only: run the full pipeline but, instead of opening a PR, commit and push the commits directly onto the base branch, then release the slot and land in "done". Mutually exclusive with stealth and autoMerge. */
@@ -496,6 +503,8 @@ export const startWorktreeSessionBodySchema = z.object({
 export type StartWorktreeSessionBody = z.infer<typeof startWorktreeSessionBodySchema>;
 
 export const projectInfoSchema = z.object({
+  vcsProvider: z.enum(VCS_PROVIDERS).optional(),
+  autonomousPilot: z.boolean().optional(),
   key: projectKeySchema,
   label: z.string(),
   baseBranch: z.string(),
@@ -654,6 +663,10 @@ export const ticketBatchOptionsSchema = z.object({
   prdEnabled: z.boolean().default(false),
   prDraft: z.boolean().default(true),
   autoMerge: z.boolean().default(false),
+  autonomous: z.boolean().default(false),
+  autonomousDelivery: autonomousDeliverySchema.nullable().default(null),
+  autonomousMaxCorrections: autonomousMaxCorrectionsSchema.default(AUTONOMOUS_DEFAULT_MAX_CORRECTIONS),
+  autonomousTimeoutMinutes: autonomousTimeoutMinutesSchema.default(AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES),
   stealth: z.boolean().default(false),
   directPush: z.boolean().default(false),
   addScreenshots: z.boolean().default(false),
@@ -708,7 +721,7 @@ export type ImportTicketRow = z.infer<typeof importTicketRowSchema>;
  * title/description/start, picked once for the whole batch); runFeasibility kicks off the batch
  * feasibility analysis after creation.
  */
-export const importTicketsSchema = ticketBatchOptionsSchema.extend({
+export const importTicketsSchema = ticketBatchOptionsSchema.omit({ autonomous: true, autonomousDelivery: true, autonomousMaxCorrections: true, autonomousTimeoutMinutes: true }).extend({
   rows: z.array(importTicketRowSchema).min(1).max(IMPORT_MAX_ROWS),
   runFeasibility: z.boolean().default(false),
 });
@@ -724,6 +737,10 @@ export const updateTicketSchema = z.object({
   prdEnabled: z.boolean().optional(),
   prDraft: z.boolean().optional(),
   autoMerge: z.boolean().optional(),
+  autonomous: z.boolean().optional(),
+  autonomousDelivery: autonomousDeliverySchema.nullable().optional(),
+  autonomousMaxCorrections: autonomousMaxCorrectionsSchema.optional(),
+  autonomousTimeoutMinutes: autonomousTimeoutMinutesSchema.optional(),
   stealth: z.boolean().optional(),
   directPush: z.boolean().optional(),
   addScreenshots: z.boolean().optional(),
@@ -1133,7 +1150,7 @@ export const updatePrdDocumentSchema = z.object({
 });
 export type UpdatePrdDocumentInput = z.infer<typeof updatePrdDocumentSchema>;
 
-export const prdTicketOptionsSchema = ticketBatchOptionsSchema.omit({ project: true, prdEnabled: true });
+export const prdTicketOptionsSchema = ticketBatchOptionsSchema.omit({ project: true, prdEnabled: true, autonomous: true, autonomousDelivery: true, autonomousMaxCorrections: true, autonomousTimeoutMinutes: true }).strict();
 export type PrdTicketOptions = z.infer<typeof prdTicketOptionsSchema>;
 
 export const createTicketsFromPrdSchema = z.object({

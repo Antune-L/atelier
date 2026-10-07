@@ -16,6 +16,7 @@ import type { PreviewConfig } from "./previewConfig.ts";
 import { CoolifyClient, CoolifyRequestError } from "./system/coolifyClient.ts";
 import { resolvePreviewGithubSource } from "./system/previewGithubSource.ts";
 import type { SystemAdapter } from "./system/types.ts";
+import { autonomousPilotEnabled } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
 const POLL_INTERVAL_MS = 5_000;
@@ -57,6 +58,8 @@ export class PreviewManager {
   constructor(private readonly deps: PreviewManagerDependencies) {}
 
   get settings() { return this.deps.config.getSettings(); }
+
+  redactError(error: string): string { return this.deps.config.redactError(error); }
 
   updateSettings(input: UpdatePreviewSettingsInput) {
     const patch = updatePreviewSettingsSchema.parse(input);
@@ -219,6 +222,36 @@ export class PreviewManager {
     }));
   }
 
+  async autonomousPreflight(ticketId: string): Promise<void> {
+    const ticket = this.deps.store.getTicket(ticketId);
+    if (!ticket?.autonomous || !isProjectKey(ticket.project)) throw new Error("An autonomous feature ticket is required.");
+    if (getProject(ticket.project).vcsProvider !== "github") throw new Error("Autonomous previews currently support GitHub projects only.");
+    const settings = this.settings;
+    if (!this.projectSettings(ticket.project).enabled || !settings.serverUuid || !settings.projectUuid || !settings.domainBase || !this.deps.config.getPreviewAuth()) throw new Error("Configure an enabled Coolify preview project, server, domain and authentication before autonomous execution.");
+    this.client();
+    const readiness = await this.readiness(ticket.project, ticket.baseBranch ?? undefined);
+    if (readiness.status !== "ready") throw new Error(readiness.diagnostics.join("; ") || "Prepare the preview recipe before autonomous execution.");
+    const source = await this.githubSource(ticket.project);
+    if (source.status !== "resolved") throw new Error(source.message ?? "The preview repository connection is not qualified.");
+  }
+
+  async createAutonomous(ticketId: string, requestedBranch: string, expectedRevision: string) {
+    const branch = previewBranchSchema.parse(requestedBranch);
+    return this.trackRequest(this.operations.run(`ticket:${ticketId}`, async () => {
+      if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+      const ticket = this.deps.store.getTicket(ticketId);
+      if (!ticket?.autonomous || ticket.kind !== "feature" || ticket.branch !== branch || ticket.prUrl || !isProjectKey(ticket.project)) throw new Error("An active autonomous feature branch without a pull request is required.");
+      if (getProject(ticket.project).vcsProvider !== "github") throw new Error("Autonomous previews currently support GitHub projects only.");
+      this.requireAutonomousDeployment(ticketId, expectedRevision);
+      const previous = this.deps.store.getTicketPreview(ticketId);
+      if (previous && previous.cleanupStatus !== "complete") {
+        if (previous.autonomous && previous.revision === expectedRevision && previous.desiredState === "running" && !["failed", "interrupted"].includes(previous.status)) return previous;
+        throw new Error("Clean the previous autonomous preview before deploying another revision.");
+      }
+      return this.launch(ticket.project, { ticketId, prUrl: null, branch, autonomous: true, expectedRevision }, previous);
+    }));
+  }
+
   async redeploy(id: string) {
     return this.trackRequest(this.operations.run(`redeploy:${id}`, async () => {
       if (this.shuttingDown) throw new Error("Preview service is shutting down.");
@@ -226,12 +259,13 @@ export class PreviewManager {
       if (previous.cleanupStatus !== "complete" || previous.cleanupWatch) throw new Error("Stop and finish cleanup before redeploying this preview.");
       const replacement = this.list().find((preview) => preview.replacesPreviewId === id);
       if (replacement) return replacement;
+      if (previous.autonomous && previous.ticketId && !this.deps.store.getTicket(previous.ticketId)?.prUrl) return this.createAutonomous(previous.ticketId, previous.branch, previous.revision);
       if (previous.ticketId) return this.create(previous.ticketId);
       return this.launch(previous.project, { ticketId: null, prUrl: null, branch: previous.branch }, previous);
     }));
   }
 
-  private async launch(projectKey: string, ownership: { ticketId: string | null; prUrl: string | null; branch?: string }, previous?: PreviewRecord | null) {
+  private async launch(projectKey: string, ownership: { ticketId: string | null; prUrl: string | null; branch?: string; autonomous?: boolean; expectedRevision?: string }, previous?: PreviewRecord | null) {
     const projectSettings = this.projectSettings(projectKey);
     if (!projectSettings.enabled) throw new Error("Enable previews for this project before starting a preview.");
     const settings = this.settings;
@@ -247,6 +281,8 @@ export class PreviewManager {
       source = await this.deps.system.readPreviewBranchSource(project.repoPath, ownership.branch, projectSettings.recipePath);
       if (source.branch !== ownership.branch) throw new Error("The preview source does not match the selected branch.");
     }
+    if (ownership.expectedRevision && source.revision !== ownership.expectedRevision) throw new Error("The remote branch changed before autonomous preview creation.");
+    if (ownership.autonomous && ownership.ticketId) this.requireAutonomousDeployment(ownership.ticketId, source.revision);
     const repositoryMetadata = previewGithubRepositorySchema.safeParse(source);
     const repository = repositoryMetadata.success ? repositoryMetadata.data : previewGithubRepositorySchema.parse(await this.deps.system.readPreviewRepository?.(project.repoPath));
     const prHost = ownership.prUrl ? new URL(ownership.prUrl).hostname : repository.host;
@@ -263,15 +299,18 @@ export class PreviewManager {
     if (!auth) throw new Error("Preview authentication is unavailable.");
     if (recipe.buildPack === "dockerfile") validateNativePreviewPassword(auth.password);
     let environment;
+    if (ownership.autonomous && ownership.ticketId) this.requireAutonomousDeployment(ownership.ticketId, source.revision);
     if (githubSource.type === "deploy_key") environment = await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
     else {
       const inventory = await this.testConnection();
+      if (ownership.autonomous && ownership.ticketId) this.requireAutonomousDeployment(ownership.ticketId, source.revision);
       environment = inventory.inventory.environments.find((item) => item.name === settings.environmentName) ?? await this.client().ensureEnvironment(settings.projectUuid, settings.environmentName);
     }
     const generation = (previous?.generation ?? 0) + 1;
+    if (ownership.autonomous && ownership.ticketId) this.requireAutonomousDeployment(ownership.ticketId, source.revision);
     const ownershipMarker = `kanban-preview-${crypto.randomUUID()}`;
     const preview = this.deps.store.createPreview({
-      ticketId: ownership.ticketId, project: projectKey, prUrl: ownership.prUrl, repository: source.repository, repositoryHost: repository.host, revision: source.revision, branch: source.branch,
+      ticketId: ownership.ticketId, autonomous: ownership.autonomous ?? false, project: projectKey, prUrl: ownership.prUrl, repository: source.repository, repositoryHost: repository.host, revision: source.revision, branch: source.branch,
       generation, recipe, ownershipMarker, replacesPreviewId: previous?.id ?? null, coolifyBaseUrl: settings.baseUrl, serverUuid: settings.serverUuid,
       coolifyProjectUuid: settings.projectUuid, githubSource,
       environmentUuid: environment.uuid, expiresAt: Date.now() + projectSettings.ttlHours * HOURS_TO_MS,
@@ -288,6 +327,7 @@ export class PreviewManager {
   private async stopPreview(id: string) {
     if (this.shuttingDown) throw new Error("Preview service is shutting down.");
     const preview = this.get(id);
+    if (preview.autonomous && preview.ticketId && this.deps.store.getTicket(preview.ticketId)?.autonomousState?.hostMutation) throw new Error("Reconcile the issued host operation before stopping its proof-bound preview.");
     if (preview.cleanupStatus === "complete") return preview;
     this.update(id, { desiredState: "stopped", status: "stopping", cleanupStatus: "pending", error: null });
     if (preview.ticketId) await this.deps.quality?.cancelPreview(preview.ticketId, id);
@@ -327,11 +367,13 @@ export class PreviewManager {
     const ticketId = preview.ticketId;
     if (!ticketId) throw new Error("Quality validation requires a ticket with acceptance criteria. Standalone branch previews do not have ticket criteria.");
     if (!this.deps.quality) throw new Error("Preview validation is unavailable.");
+    if (preview.autonomous) this.requireAutonomousDeployment(ticketId, preview.revision);
     const auth = this.deps.config.getPreviewAuth();
     if (!auth) throw new Error("Preview authentication is unavailable.");
     const run = await this.deps.quality.testPreview(ticketId, provider, {
-      previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth,
+      previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth, autonomous: preview.autonomous,
       assertCurrent: async () => {
+        if (preview.autonomous) this.requireAutonomousDeployment(ticketId, preview.revision);
         const current = this.get(id);
         const latest = this.deps.store.getTicketPreview(ticketId);
         if (latest?.id !== id || current.status !== "ready" || current.desiredState !== "running" || current.revision !== preview.revision || current.deployedRevision !== preview.revision || current.url !== preview.url) throw new Error("The preview changed or stopped during validation.");
@@ -343,7 +385,8 @@ export class PreviewManager {
 
   async recover(): Promise<void> {
     this.shuttingDown = false;
-    for (const preview of this.list()) {
+    for (const record of this.list()) {
+      const preview = this.reconcileAutonomousIntent(record);
       if ((preview.cleanupStatus === "complete" && !preview.cleanupWatch) || preview.cleanupStatus === "failed") continue;
       if (preview.expiresAt !== null && preview.expiresAt <= Date.now()) this.update(preview.id, { desiredState: "stopped", status: "stopping" });
       this.schedule(preview.id);
@@ -406,9 +449,30 @@ export class PreviewManager {
     });
   }
 
+  private autonomousDeploymentAllowed(ticketId: string, revision: string): boolean {
+    const ticket = this.deps.store.getTicket(ticketId);
+    const state = ticket?.autonomousState;
+    if (this.shuttingDown || !ticket?.autonomous || !state || !state.plan || state.deliveryConfirmation || state.revision !== revision || !["preview", "validating", "ready", "delivering"].includes(state.phase) || ["abandoned", "failed", "done", "merged"].includes(ticket.column) || Date.now() >= state.deadlineAt) return false;
+    if (!autonomousPilotEnabled(getProject(ticket.project).vcsProvider)) return false;
+    const slot = ticket.slotId === null ? null : this.deps.store.getSlot(ticket.slotId);
+    return slot?.ticketId === ticketId;
+  }
+
+  private requireAutonomousDeployment(ticketId: string, revision: string): void {
+    if (!this.autonomousDeploymentAllowed(ticketId, revision)) throw new Error("Autonomous preview deployment is no longer authorized by the active ticket state.");
+  }
+
+  private reconcileAutonomousIntent(preview: PreviewRecord): PreviewRecord {
+    if (preview.autonomous && preview.ticketId && this.deps.store.getTicket(preview.ticketId)?.autonomousState?.hostMutation?.revision === preview.revision) return preview;
+    if (!preview.autonomous || !preview.ticketId || preview.desiredState === "stopped" || this.autonomousDeploymentAllowed(preview.ticketId, preview.revision)) return preview;
+    return this.update(preview.id, { desiredState: "stopped", status: "stopping", error: "Autonomous execution no longer permits deployment. Reconcile the owned preview resources." });
+  }
+
   private async reconcile(id: string): Promise<void> {
     if (this.shuttingDown) return;
     let preview = this.get(id);
+    if (preview.autonomous && preview.ticketId && this.deps.store.getTicket(preview.ticketId)?.autonomousState?.hostMutation) return;
+    preview = this.reconcileAutonomousIntent(preview);
     if (preview.cleanupStatus === "complete") {
       if (preview.cleanupWatch) await this.auditStoppedPreview(preview);
       return;
@@ -418,6 +482,8 @@ export class PreviewManager {
     if (!preview.appUuid) {
       if (!preview.ownershipMarker || !preview.recipe) throw new Error("Preview ownership or recipe is missing.");
       const existing = await client.findApplication(preview.ownershipMarker);
+      preview = this.reconcileAutonomousIntent(this.get(id));
+      if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
       if (existing) preview = this.update(id, { appUuid: existing.uuid, status: "provisioning" });
       else if (preview.createRequestedAt !== null) {
         this.update(id, { status: "interrupted", error: "Application creation had an unknown outcome. Stop and clean this attempt before retrying." });
@@ -468,6 +534,8 @@ export class PreviewManager {
           payload.private_key_uuid = preview.githubSource.uuid;
         }
         try {
+          preview = this.reconcileAutonomousIntent(this.get(id));
+          if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
           preview = this.update(id, { createRequestedAt: Date.now(), status: "provisioning" });
           const application = await client.createApplication(endpoint, payload);
           preview = this.update(id, { appUuid: application.uuid });
@@ -477,7 +545,7 @@ export class PreviewManager {
         }
       }
     }
-    preview = this.get(id);
+    preview = this.reconcileAutonomousIntent(this.get(id));
     if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
     if (!preview.appUuid || !preview.recipe) throw new Error("Preview application or recipe is missing.");
     const appUuid = preview.appUuid;
@@ -487,6 +555,8 @@ export class PreviewManager {
       if (!domain || !/^[a-z0-9.-]+$/i.test(domain)) throw new Error("Configure a valid HTTPS preview domain suffix.");
       const url = `https://${preview.ownershipMarker}.${domain}`;
       const environment = { ...recipe.environment };
+      preview = this.reconcileAutonomousIntent(this.get(id));
+      if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
       if (recipe.buildPack === "dockerfile") {
         await client.updateApplication(appUuid, { domains: url, git_commit_sha: preview.revision, is_auto_deploy_enabled: false, is_preview_deployments_enabled: false });
       } else {
@@ -496,12 +566,17 @@ export class PreviewManager {
         environment[PREVIEW_AUTH_USERNAME_ENV] = auth.username;
         environment[PREVIEW_AUTH_HASH_ENV] = await Bun.password.hash(auth.password, { algorithm: "bcrypt", cost: PREVIEW_BCRYPT_COST });
       }
+      preview = this.reconcileAutonomousIntent(this.get(id));
+      if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
       await client.setEnvironment(appUuid, environment);
       preview = this.update(id, { url, status: "building" });
     }
-    if (this.get(id).desiredState === "stopped") { await this.cleanup(this.get(id), client); return; }
+    preview = this.reconcileAutonomousIntent(this.get(id));
+    if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
     if (!preview.deploymentUuid) {
       const existing = (await client.deployments(appUuid)).find((deployment) => deployment.commit === preview.revision);
+      preview = this.reconcileAutonomousIntent(this.get(id));
+      if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
       const existingUuid = existing?.deployment_uuid ?? existing?.uuid;
       if (!existingUuid && preview.deployRequestedAt !== null) {
         this.update(id, { status: "interrupted", error: "Deployment had an unknown outcome. Stop and clean this attempt before retrying." });
@@ -511,12 +586,15 @@ export class PreviewManager {
       if (!deploymentUuid) {
         if (!preview.serverUuid) throw new Error("Preview deployment server is missing.");
         const deploymentTimeoutSeconds = await client.getDeploymentTimeoutSeconds(preview.serverUuid);
+        preview = this.reconcileAutonomousIntent(this.get(id));
+        if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
         preview = this.update(id, { deployRequestedAt: Date.now(), deploymentTimeoutSeconds });
         deploymentUuid = await client.deploy(appUuid);
       }
       preview = this.update(id, { deploymentUuid, deploymentUuids: [...new Set([...preview.deploymentUuids, deploymentUuid])], status: "building" });
     }
-    if (this.get(id).desiredState === "stopped") { await this.cleanup(this.get(id), client); return; }
+    preview = this.reconcileAutonomousIntent(this.get(id));
+    if (preview.desiredState === "stopped") { await this.cleanup(preview, client); return; }
     const deployment = await client.deployment(preview.deploymentUuid ?? "");
     if (FAILED_DEPLOYMENT_STATUSES.includes(deployment.status ?? "")) throw new Error(`Coolify deployment ended with status ${deployment.status}.`);
     if (Date.now() - preview.createdAt > DEPLOYMENT_TIMEOUT_MS && preview.status !== "ready") throw new Error("Coolify deployment did not become ready within the preview timeout.");
@@ -531,7 +609,7 @@ export class PreviewManager {
     if (!auth) throw new Error("Preview authentication is unavailable.");
     const ready = await this.deps.system.probePreviewHealth(preview.url, recipe.healthPath, auth);
     if (!ready) { this.update(id, { status: "deploying", deployedRevision: deployment.commit }); return; }
-    if (this.get(id).desiredState === "running") this.update(id, { status: "ready", deployedRevision: deployment.commit, error: null });
+    if (this.reconcileAutonomousIntent(this.get(id)).desiredState === "running") this.update(id, { status: "ready", deployedRevision: deployment.commit, error: null });
     else await this.cleanup(this.get(id), client);
   }
 

@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
+import type { AutonomousDelivery, AutonomousState } from "../../shared/autonomous.ts";
+
 import {
   AUTO_MERGE_RESOLVE_EVENT,
   SUCCESS_COLUMNS,
@@ -148,6 +151,10 @@ export interface NewTicket {
   prdEnabled: boolean;
   prDraft: boolean;
   autoMerge: boolean;
+  autonomous?: boolean;
+  autonomousDelivery?: AutonomousDelivery | null;
+  autonomousMaxCorrections?: number;
+  autonomousTimeoutMinutes?: number;
   addScreenshots: boolean;
   verifyFeature: boolean;
   argusMultiLoop: boolean;
@@ -373,6 +380,11 @@ export interface TicketPatch {
   prdEnabled?: boolean;
   prDraft?: boolean;
   autoMerge?: boolean;
+  autonomous?: boolean;
+  autonomousDelivery?: AutonomousDelivery | null;
+  autonomousMaxCorrections?: number;
+  autonomousTimeoutMinutes?: number;
+  autonomousState?: AutonomousState | null;
   addScreenshots?: boolean;
   verifyFeature?: boolean;
   argusMultiLoop?: boolean;
@@ -1134,12 +1146,15 @@ export class Store {
   }
 
   createTicket(input: NewTicket): Ticket {
+    const autonomousMaxCorrections = autonomousMaxCorrectionsSchema.parse(input.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS);
+    const autonomousTimeoutMinutes = autonomousTimeoutMinutesSchema.parse(input.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES);
+    const autonomousDelivery = autonomousDeliverySchema.nullable().parse(input.autonomousDelivery ?? null);
     const id = nanoid(10);
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at, autonomous, autonomous_delivery, autonomous_max_corrections, autonomous_timeout_minutes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1149,7 +1164,7 @@ export class Store {
         input.project,
         input.prdEnabled ? 1 : 0,
         input.prDraft ? 1 : 0,
-        input.autoMerge ? 1 : 0,
+        !input.autonomous && input.autoMerge ? 1 : 0,
         input.addScreenshots ? 1 : 0,
         input.verifyFeature ? 1 : 0,
         input.argusMultiLoop ? 1 : 0,
@@ -1178,6 +1193,10 @@ export class Store {
         now,
         now,
         now,
+        input.autonomous ? 1 : 0,
+        autonomousDelivery,
+        autonomousMaxCorrections,
+        autonomousTimeoutMinutes,
       );
     return this.finalizeCreate(id, "createTicket", { title: input.title });
   }
@@ -1316,6 +1335,11 @@ export class Store {
     if (patch.prdEnabled !== undefined) set("prd_enabled", patch.prdEnabled ? 1 : 0);
     if (patch.prDraft !== undefined) set("pr_draft", patch.prDraft ? 1 : 0);
     if (patch.autoMerge !== undefined) set("auto_merge", patch.autoMerge ? 1 : 0);
+    if (patch.autonomous !== undefined) set("autonomous", patch.autonomous ? 1 : 0);
+    if (patch.autonomousDelivery !== undefined) set("autonomous_delivery", autonomousDeliverySchema.nullable().parse(patch.autonomousDelivery));
+    if (patch.autonomousMaxCorrections !== undefined) set("autonomous_max_corrections", autonomousMaxCorrectionsSchema.parse(patch.autonomousMaxCorrections));
+    if (patch.autonomousTimeoutMinutes !== undefined) set("autonomous_timeout_minutes", autonomousTimeoutMinutesSchema.parse(patch.autonomousTimeoutMinutes));
+    if (patch.autonomousState !== undefined) set("autonomous_state", patch.autonomousState === null ? null : JSON.stringify(autonomousStateSchema.parse(patch.autonomousState)));
     if (patch.addScreenshots !== undefined) set("add_screenshots", patch.addScreenshots ? 1 : 0);
     if (patch.verifyFeature !== undefined) set("verify_feature", patch.verifyFeature ? 1 : 0);
     if (patch.argusMultiLoop !== undefined) set("argus_multi_loop", patch.argusMultiLoop ? 1 : 0);
@@ -1687,6 +1711,7 @@ export class Store {
       const requestKey = JSON.stringify([input.sourceRunId, input.mode, input.retryOfIterationId ?? null, trigger]);
       const existing = this.db.query("SELECT * FROM quality_iterations WHERE ticket_id = ? AND request_key = ?").get(input.ticketId, requestKey);
       if (existing) return mapQualityIterationRow(existing);
+      if (this.listActiveQualityRuns().length > 0 || this.listActiveQualityIterations().length > 0) throw new Error("Another quality validation or iteration is already active.");
       const ticket = this.getTicket(input.ticketId);
       if (!ticket) throw new Error("Quality iteration ticket not found");
       const source = this.getQualityRun(input.sourceRunId);
@@ -1780,9 +1805,10 @@ export class Store {
     });
   }
 
-  createQualityRun(input: Omit<z.input<typeof qualityValidationRunSchema>, "id">): QualityValidationRun {
+  createQualityRun(input: Omit<z.input<typeof qualityValidationRunSchema>, "id">, iterationId?: string): QualityValidationRun {
     return this.transaction(() => {
       const run = qualityValidationRunSchema.parse({ ...input, id: nanoid() });
+      if ((run.status === "queued" || run.status === "running") && (this.listActiveQualityRuns().length > 0 || this.listActiveQualityIterations().some((iteration) => iteration.id !== iterationId || iteration.ticketId !== run.ticketId))) throw new Error("Another quality validation or iteration is already active.");
       if (run.criteriaSnapshotId !== null) {
         const row = this.db.query("SELECT * FROM quality_criteria_snapshots WHERE id = ? AND ticket_id = ?").get(run.criteriaSnapshotId, run.ticketId);
         if (!row) throw new Error("Quality criteria snapshot does not belong to the ticket");

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
+
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
 
@@ -69,6 +71,11 @@ const ticketRowSchema = z.object({
   prd_enabled: z.number(),
   pr_draft: z.number(),
   auto_merge: z.number(),
+  autonomous: z.number().default(0),
+  autonomous_delivery: autonomousDeliverySchema.nullable().default(null),
+  autonomous_max_corrections: autonomousMaxCorrectionsSchema.default(AUTONOMOUS_DEFAULT_MAX_CORRECTIONS),
+  autonomous_timeout_minutes: autonomousTimeoutMinutesSchema.default(AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES),
+  autonomous_state: z.string().nullable().default(null),
   add_screenshots: z.number(),
   verify_feature: z.number(),
   argus_multi_loop: z.number(),
@@ -338,6 +345,11 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     prdEnabled: row.prd_enabled === 1,
     prDraft: row.pr_draft === 1,
     autoMerge: row.auto_merge === 1,
+    autonomous: row.autonomous === 1,
+    autonomousDelivery: row.autonomous_delivery,
+    autonomousMaxCorrections: row.autonomous_max_corrections,
+    autonomousTimeoutMinutes: row.autonomous_timeout_minutes,
+    autonomousState: row.autonomous_state === null ? null : autonomousStateSchema.parse(JSON.parse(row.autonomous_state)),
     addScreenshots: row.add_screenshots === 1,
     verifyFeature: row.verify_feature === 1,
     argusMultiLoop: row.argus_multi_loop === 1,

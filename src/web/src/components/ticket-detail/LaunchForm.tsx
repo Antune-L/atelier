@@ -1,8 +1,12 @@
 import { useRef, useState } from "react";
 
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
+
 import type { Orchestrator } from "@shared/constants";
 import type { ProjectInfo, Ticket, UpdateTicketInput } from "@shared/schemas";
 
+import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
+import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
@@ -30,6 +34,12 @@ const OPTIONS_HEADING_ID = "ticket-detail-options-heading";
 /** Pre-launch configuration of a TODO ticket: target, dependency and agent knobs. */
 export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps) {
   const { tickets: boardTickets } = useBoard();
+  const [pendingAutonomous, setPendingAutonomous] = useState<AutonomousOptionValues | null>(null);
+  const autonomousTicketId = useRef(ticket.id);
+  if (autonomousTicketId.current !== ticket.id) {
+    autonomousTicketId.current = ticket.id;
+    if (pendingAutonomous !== null) setPendingAutonomous(null);
+  }
   const selectableProjects = projects.filter((project) => !project.hidden || project.key === ticket.project);
   // Base-branch picker state. null = remote list not loaded yet.
   const [branches, setBranches] = useState<string[] | null>(null);
@@ -53,7 +63,9 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
     void api.updateTicket(ticket.id, fields).catch(() => undefined);
   };
 
-  const projectDefaultBranch = projects.find((p) => p.key === ticket.project)?.baseBranch ?? "";
+  const selectedProject = projects.find((project) => project.key === ticket.project);
+  const autonomousAvailability = autonomousEligibility(selectedProject, ticket.implementer, ticket.dependsOn === null && ticket.childOrder === null);
+  const projectDefaultBranch = selectedProject?.baseBranch ?? "";
   // Current selection resolves null (no override) to the project default for display.
   const selectedBaseBranch = ticket.baseBranch ?? projectDefaultBranch;
   // The project default and the saved selection stay selectable while the remote list loads/fails.
@@ -153,9 +165,25 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
         />
       </div>
 
+      <AutonomousOptions
+        id="ticket-autonomous"
+        values={pendingAutonomous ?? { autonomous: ticket.autonomous ?? false, autonomousDelivery: ticket.autonomousDelivery ?? null, autonomousMaxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES }}
+        eligible={autonomousAvailability.eligible}
+        unavailableReason={autonomousAvailability.reason}
+        disabled={!canEditTarget || ticket.autonomousState != null}
+        onChange={(next) => {
+          if (next.autonomous && next.autonomousDelivery === null) {
+            setPendingAutonomous(next);
+            return;
+          }
+          setPendingAutonomous(null);
+          patch({ ...next, autoMerge: next.autonomous ? false : ticket.autoMerge, stealth: next.autonomous ? false : ticket.stealth, directPush: next.autonomous ? false : ticket.directPush });
+        }}
+      />
       <div className="min-w-0">
         <TicketOptionsToggleGroup
           key={ticket.id}
+          autonomous={ticket.autonomous}
           title="Options de PR"
           headingId={OPTIONS_HEADING_ID}
           values={{

@@ -20,6 +20,7 @@ export interface QualityPreviewTarget {
   healthPath?: string;
   auth?: { username: string; password: string };
   assertCurrent?: () => Promise<void>;
+  autonomous?: boolean;
 }
 
 export const qualityPreviewBindingSchema = z.object({

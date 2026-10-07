@@ -148,6 +148,7 @@ export const previewCleanupStatusSchema = z.enum(["pending", "complete", "failed
 const previewRecordBaseSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema.nullable(),
+  autonomous: z.boolean().default(false),
   project: nonEmptyTextSchema,
   prUrl: httpUrlSchema.nullable(),
   repository: nonEmptyTextSchema.nullable().default(null),
@@ -188,7 +189,10 @@ const previewRecordBaseSchema = z.object({
   cleanupRequestedAt: timestampSchema.nullable().default(null),
   recipe: previewRecipeSchema.nullable().default(null),
 });
-const hasPairedPreviewOwnership = (preview: { ticketId: string | null; prUrl: string | null }) => (preview.ticketId === null) === (preview.prUrl === null);
+const hasPairedPreviewOwnership = (preview: { ticketId: string | null; prUrl: string | null; autonomous: boolean }) => {
+  if (preview.autonomous) return preview.ticketId !== null && preview.prUrl === null;
+  return (preview.ticketId === null) === (preview.prUrl === null);
+};
 export const previewRecordSchema = previewRecordBaseSchema.refine(hasPairedPreviewOwnership, "Ticket and pull request ownership must be present together.");
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export const createPreviewSchema = previewRecordBaseSchema.omit({ id: true, createdAt: true, updatedAt: true }).refine(hasPairedPreviewOwnership, "Ticket and pull request ownership must be present together.");

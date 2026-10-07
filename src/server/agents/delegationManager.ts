@@ -1598,6 +1598,7 @@ export class DelegationManager {
         generation,
         ...(resumeSessionId ? { resumeSessionId } : {}),
         ...delegatedImplementerPermissions(projectVcsProvider(ticket.project)),
+        ...(ticket.autonomous ? { blockReviewPublishing: true } : {}),
         onToolCall: async () => ({ ok: false, result: "Session d'implémentation déléguée : aucun tool de pipeline n'est disponible." }),
         onEvent: (event) => this.handleEvent(ticket.id, state, event),
       });

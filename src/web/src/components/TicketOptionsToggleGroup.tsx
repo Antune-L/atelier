@@ -48,6 +48,7 @@ interface TicketOptionsToggleGroupProps {
   headingId?: string;
   title?: string;
   className?: string;
+  autonomous?: boolean;
 }
 
 function OptionToggleLabel({
@@ -73,6 +74,7 @@ export function TicketOptionsToggleGroup({
   headingId = "ticket-options-heading",
   title = "Options",
   className,
+  autonomous = false,
 }: TicketOptionsToggleGroupProps) {
   const prDraftBeforeAutoMerge = useRef(values.prDraft);
 
@@ -159,7 +161,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.draft}
-          disabled={values.autoMerge || values.directPush}
+          disabled={autonomous || values.autoMerge || values.directPush}
           aria-label="Ouvrir la PR en draft"
           className={OPTION_ITEM_CLASS}
         >
@@ -169,7 +171,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.autoMerge}
-          disabled={values.stealth || values.directPush}
+          disabled={autonomous || values.stealth || values.directPush}
           aria-label="Merge automatique de la PR"
           className={OPTION_ITEM_CLASS}
         >
@@ -179,7 +181,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.stealth}
-          disabled={values.autoMerge || values.directPush}
+          disabled={autonomous || values.autoMerge || values.directPush}
           aria-label="À review (sans PR)"
           className={OPTION_ITEM_CLASS}
         >
@@ -187,7 +189,7 @@ export function TicketOptionsToggleGroup({
         </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.directPush}
-          disabled={values.autoMerge || values.stealth}
+          disabled={autonomous || values.autoMerge || values.stealth}
           aria-label="Push direct (sans PR)"
           className={OPTION_ITEM_CLASS}
         >

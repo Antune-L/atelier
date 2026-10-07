@@ -5,6 +5,9 @@
  */
 
 import { $ } from "bun";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 
 import { VCS_PROVIDER_LABELS } from "../../../shared/constants.ts";
@@ -19,6 +22,8 @@ import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
   DoneGateResult,
+  CreatePrOptions,
+  MergePrExpectation,
   PublishReviewOptions,
   PublishReviewResult,
   ReviewHeadResult,
@@ -44,6 +49,7 @@ const GITHUB_API_HOST_BY_SSH_HOST: Record<string, string> = {
 };
 /** Merge strategy for the opt-in auto-merge (rebase replays commits onto the base branch). */
 const PR_MERGE_STRATEGY = "--rebase";
+const AUTONOMOUS_MERGE_METHOD = "rebase";
 /** GitHub PR state that proves the merge completed (vs. OPEN/CLOSED). */
 const PR_STATE_MERGED = "MERGED";
 const PR_STATE_CLOSED = "CLOSED";
@@ -61,9 +67,31 @@ const ghRequestedPullPagesSchema = z.array(z.array(ghRequestedPullSchema));
 const ghPrHeadSchema = z.object({ url: z.string(), headRefOid: z.string().min(1) });
 const ghCandidateSchema = z.object({
   number: z.number().int(), html_url: z.string(), state: z.string(),
+  merged: z.boolean().default(false),
   head: z.object({ ref: z.string(), sha: z.string(), repo: z.object({ full_name: z.string() }).nullable() }),
   base: z.object({ ref: z.string(), repo: z.object({ full_name: z.string() }) }),
 });
+const ghNativeCheckSchema = z.union([
+  z.object({ __typename: z.literal("CheckRun"), status: z.string(), conclusion: z.string().nullable() }),
+  z.object({ __typename: z.literal("StatusContext"), state: z.string() }),
+]);
+const ghAutonomousMergeSchema = z.object({
+  headRefOid: z.string().min(1),
+  baseRefName: z.string().min(1),
+  state: z.string(),
+  mergeStateStatus: z.string(),
+  reviewDecision: z.enum(["APPROVED", "REVIEW_REQUIRED", "CHANGES_REQUESTED"]).nullable(),
+  statusCheckRollup: z.array(ghNativeCheckSchema).nullable(),
+});
+const GH_NATIVE_CHECK_SUCCESS = "SUCCESS";
+const GH_NATIVE_CHECK_COMPLETED = "COMPLETED";
+const GH_NATIVE_CHECK_PENDING = "PENDING";
+const GH_MERGE_STATE_CLEAN = "CLEAN";
+const GH_PENDING_MERGE_STATES = new Set(["BLOCKED", "UNKNOWN"]);
+const GH_AUTONOMOUS_PR_FIELDS = "headRefOid,baseRefName,state,mergeStateStatus,reviewDecision,statusCheckRollup";
+const ghEmptyCheckRunsSchema = z.object({ total_count: z.literal(0), check_runs: z.array(z.unknown()).max(0) });
+const ghEmptyCommitStatusesSchema = z.object({ sha: z.string().min(1), total_count: z.literal(0), statuses: z.array(z.unknown()).max(0) });
+const ghSynchronousMergeSchema = z.object({ merged: z.boolean(), sha: z.string().nullable(), message: z.string() });
 const GH_REST_OPEN_STATE = "open";
 const ghRestPullSchema = z.object({
   base: z.object({ sha: z.string().min(1) }),
@@ -425,7 +453,7 @@ export class GithubVcsClient implements VcsClient {
         || pr.head.repo?.full_name.toLowerCase() !== repository.toLowerCase()) {
         return { ok: false, reason: "L'identité du dépôt de la PR est incompatible." };
       }
-      if (pr.state !== GH_REST_OPEN_STATE) return { ok: false, reason: "La PR doit être ouverte pour la récupération." };
+      if (pr.state !== GH_REST_OPEN_STATE && !(opts.allowMerged && pr.merged)) return { ok: false, reason: "La PR doit être ouverte pour la récupération." };
       if (pr.head.ref !== opts.branch || pr.base.ref !== opts.baseBranch) {
         return { ok: false, reason: "Les branches de la PR ne correspondent pas au candidat." };
       }
@@ -466,7 +494,24 @@ export class GithubVcsClient implements VcsClient {
     return githubPrHeadRef(prNumber);
   }
 
-  async createPr(cwd: string, baseBranch: string, opts: { draft: boolean }): Promise<CreatePrResult> {
+  async createPr(cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult> {
+    if (opts.title && opts.body && opts.headBranch) {
+      const directory = await mkdtemp(join(tmpdir(), "kanban-pr-"));
+      try {
+        const bodyPath = join(directory, "body.md");
+        await writeFile(bodyPath, opts.body, { mode: 0o600 });
+        const args = [GH_BINARY, "pr", "create", "--base", baseBranch, "--head", opts.headBranch, "--title", opts.title, "--body-file", bodyPath, "--no-maintainer-edit"];
+        if (opts.draft) args.push("--draft");
+        if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) throw new Error("Autonomous delivery deadline expired before pull request creation.");
+        opts.assertCurrent?.();
+        const result = await runBoundedCommand(args, cwd);
+        const url = extractPrUrl(result.stdout);
+        if (result.exitCode !== 0 || result.timedOut || !url.startsWith("http")) return { ok: false, url: "", reason: boundedCommandDetail(result) || "Pull request creation could not be confirmed." };
+        return { ok: true, url, reason: "" };
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
     const res = opts.draft
       ? await $`gh pr create --draft --base ${baseBranch} --fill`.cwd(cwd).nothrow().quiet()
       : await $`gh pr create --base ${baseBranch} --fill`.cwd(cwd).nothrow().quiet();
@@ -524,7 +569,26 @@ export class GithubVcsClient implements VcsClient {
     return this.verifyReviewPosted(cwd, endpoint, check, expectedState.state);
   }
 
-  async mergePr(cwd: string, prUrl: string): Promise<DoneGateResult> {
+  async mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    if (expected) {
+      const gate = await this.autonomousMergeGate(cwd, prUrl, expected);
+      if (!gate.ok) return gate;
+      const endpoint = reviewApiEndpoint(prUrl);
+      if (!endpoint) return { ok: false, reason: "Autonomous merge requires an identified GitHub pull request." };
+      const ref = await readGithubRepoRef(cwd);
+      const result = await withJsonRequestFile({ sha: expected.commitSha, merge_method: AUTONOMOUS_MERGE_METHOD }, (inputPath) => {
+        if (expected.deadlineAt !== undefined && Date.now() >= expected.deadlineAt) throw new Error("Autonomous delivery deadline expired before merge.");
+        expected.assertCurrent?.();
+        return runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, "--method", "PUT", `${pullApiEndpoint(endpoint)}/merge`, "--input", inputPath], cwd);
+      });
+      const response = ghSynchronousMergeSchema.safeParse(safeJsonParse(result.stdout));
+      if (result.exitCode !== 0 || result.timedOut || !response.success || !response.data.merged || !response.data.sha) return { ok: false, reason: `Direct expected-head merge was not confirmed. Native policies requiring a merge queue are not supported by this pilot; no queue or auto-merge request is made. ${boundedCommandDetail(result) || "Keep the pull request and worktree for reconciliation."}` };
+      const state = await confirmPrMerged(() => this.readPrState(cwd, prUrl));
+      if (state !== "merged") return { ok: false, pending: state === "open", reason: unmergedReason(VCS_PROVIDER_LABELS.github, state, boundedCommandDetail(result)) };
+      const head = await this.readPrHead(cwd, prUrl);
+      if (!head.ok || head.commitSha !== expected.commitSha) return { ok: false, reason: "Merged pull request source does not match the preview-tested commit." };
+      return { ok: true, reason: "" };
+    }
     // A draft PR can't be merged; mark it ready first (harmless if already ready).
     await $`gh pr ready ${prUrl}`.cwd(cwd).nothrow().quiet();
     const res = await $`gh pr merge ${prUrl} ${PR_MERGE_STRATEGY}`.cwd(cwd).nothrow().quiet();
@@ -542,6 +606,47 @@ export class GithubVcsClient implements VcsClient {
       return { ok: false, reason: unmergedReason(VCS_PROVIDER_LABELS.github, state, hint) };
     }
     return { ok: true, reason: "" };
+  }
+
+  private async autonomousMergeGate(cwd: string, prUrl: string, expected: MergePrExpectation): Promise<DoneGateResult> {
+    const response = await runBoundedCommand([GH_BINARY, "pr", "view", prUrl, "--json", GH_AUTONOMOUS_PR_FIELDS], cwd);
+    const parsed = ghAutonomousMergeSchema.safeParse(safeJsonParse(response.stdout));
+    if (response.exitCode !== 0 || response.timedOut || !parsed.success) return { ok: false, reason: "Native pull request checks are unknown; autonomous merge is blocked." };
+    const pr = parsed.data;
+    if (pr.headRefOid !== expected.commitSha || pr.baseRefName !== expected.baseBranch) return { ok: false, reason: "Pull request source or target changed after autonomous validation." };
+    if (pr.state === "MERGED") return { ok: true, reason: "" };
+    if (pr.state !== "OPEN") return { ok: false, reason: "Native pull request checks are unavailable; autonomous merge is blocked." };
+    if (pr.statusCheckRollup === null && !(await this.confirmAbsentNativeChecks(cwd, expected.commitSha))) return { ok: false, reason: "Native pull request checks are unknown; autonomous merge is blocked." };
+    const checks = pr.statusCheckRollup ?? [];
+    const failed = checks.some((check) => {
+      if (check.__typename === "StatusContext") return check.state !== GH_NATIVE_CHECK_SUCCESS && check.state !== GH_NATIVE_CHECK_PENDING;
+      return check.status === GH_NATIVE_CHECK_COMPLETED && check.conclusion !== GH_NATIVE_CHECK_SUCCESS;
+    });
+    if (failed) return { ok: false, reason: "Native pull request checks are unsuccessful; autonomous merge is blocked." };
+    const pending = checks.some((check) => {
+      if (check.__typename === "StatusContext") return check.state === GH_NATIVE_CHECK_PENDING;
+      return check.status !== GH_NATIVE_CHECK_COMPLETED;
+    });
+    if (pending) return { ok: false, pending: true, reason: "Native pull request checks are pending; autonomous merge is blocked." };
+    if (pr.mergeStateStatus !== GH_MERGE_STATE_CLEAN || pr.reviewDecision === "REVIEW_REQUIRED" || pr.reviewDecision === "CHANGES_REQUESTED") return { ok: false, pending: pr.reviewDecision !== "CHANGES_REQUESTED" && GH_PENDING_MERGE_STATES.has(pr.mergeStateStatus), reason: "Native pull request policies are not satisfied; keep the reviewed worktree and retry after they pass." };
+    return { ok: true, reason: "" };
+  }
+
+  private async confirmAbsentNativeChecks(cwd: string, commitSha: string): Promise<boolean> {
+    try {
+      const ref = await readGithubRepoRef(cwd);
+      const prefix = `repos/${ref.owner}/${ref.repository}/commits/${commitSha}`;
+      const [checks, statuses] = await Promise.all([
+        runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/check-runs`], cwd),
+        runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/status`], cwd),
+      ]);
+      if (checks.exitCode !== 0 || checks.timedOut || statuses.exitCode !== 0 || statuses.timedOut) return false;
+      const absentChecks = ghEmptyCheckRunsSchema.safeParse(safeJsonParse(checks.stdout));
+      const absentStatuses = ghEmptyCommitStatusesSchema.safeParse(safeJsonParse(statuses.stdout));
+      return absentChecks.success && absentStatuses.success && absentStatuses.data.sha === commitSha;
+    } catch {
+      return false;
+    }
   }
 
   async readPrState(cwd: string, prUrl: string): Promise<PrState> {

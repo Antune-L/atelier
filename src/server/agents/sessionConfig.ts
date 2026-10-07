@@ -511,6 +511,7 @@ export interface ImplementSessionInput {
  * except a fixComments review, which implements code on the PR head branch and needs the typecheck.
  */
 function reviewSessionGuards(ticket: Ticket): { blockReviewPublishing?: true; blockTypecheck?: true } {
+  if (ticket.autonomous) return { blockReviewPublishing: true };
   if (ticket.kind !== "review") return {};
   if (isReviewFixSession(ticket)) return { blockReviewPublishing: true };
   return { blockReviewPublishing: true, blockTypecheck: true };
@@ -563,6 +564,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
       ...(resumeSessionId ? { resumeSessionId } : {}),
       allowedTools: [...IMPLEMENTER_SAFE_TOOLS, "ToolSearch", ...(ticket.verifyFeature ? ["mcp__playwright"] : [])],
+      ...(ticket.autonomous ? { disallowedTools: ["Edit", "Write", "NotebookEdit", "Task", "Agent"] } : {}),
       skills: sessionSkills(vcs),
     agents: {
         "pr-fixer": prFixerAgent(vcs, delegateKnobs.model, delegateKnobs.effort, delegateKnobs.serviceTier),
@@ -598,6 +600,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       ...(ticket.verifyFeature ? ["mcp__playwright"] : []),
     ],
     skills: sessionSkills(vcs),
+    ...(ticket.autonomous ? { disallowedTools: ["Edit", "Write", "NotebookEdit", "Task", "Agent"] } : {}),
     agents: {
       "pr-fixer": prFixerAgent(vcs, implementerModel, implementerEffort),
     },

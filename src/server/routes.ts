@@ -71,6 +71,7 @@ import { createQualityRoutes } from "./qualityRoutes.ts";
 import { createPreviewRoutes } from "./previewRoutes.ts";
 import type { PreviewManager } from "./previewManager.ts";
 import {
+  autonomousOptionsError,
   createTicketOperations,
   ticketDependencyError,
   TicketOperationError,
@@ -1084,6 +1085,8 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
       const pairError = agentPairError(set, parsed.data.orchestrator, parsed.data.implementer);
       if (pairError) return pairError;
+      const autonomousError = autonomousOptionsError(parsed.data, getProject(parsed.data.project).vcsProvider);
+      if (autonomousError) return jsonError(set, HTTP_BAD_REQUEST, autonomousError);
       if (parsed.data.dependsOn !== null) {
         const depError = ticketDependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
@@ -1102,7 +1105,11 @@ export function createApiRoutes(deps: RouteDeps) {
         project: parsed.data.project,
         prdEnabled: parsed.data.prdEnabled,
         prDraft: parsed.data.prDraft,
-        autoMerge: (resultingStealth || directPush) ? false : parsed.data.autoMerge,
+        autoMerge: (parsed.data.autonomous || resultingStealth || directPush) ? false : parsed.data.autoMerge,
+        autonomous: parsed.data.autonomous,
+        autonomousDelivery: parsed.data.autonomousDelivery,
+        autonomousMaxCorrections: parsed.data.autonomousMaxCorrections,
+        autonomousTimeoutMinutes: parsed.data.autonomousTimeoutMinutes,
         stealth: resultingStealth,
         directPush,
         addScreenshots: parsed.data.addScreenshots,
@@ -1321,6 +1328,10 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const target = parsed.data.column;
 
+      if (ticket.autonomous && (target === "done" || target === "merged") && ticket.autonomousState?.phase !== "completed") {
+        return jsonError(set, HTTP_CONFLICT, "Autonomous delivery must verify its frozen plan and chosen outcome before completion.");
+      }
+
       if (target === "done" && ticket.kind === "feature" && ticket.slotId !== null) {
         const plan = store.getImplementationPlan(params.id);
         if (plan?.lots.some((lot) => lot.status !== "completed")) return jsonError(set, HTTP_CONFLICT, "This ticket still has unresolved implementation obligations. Use implementation recovery to assess and deliver its candidate before marking it done.");
@@ -1393,6 +1404,9 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merged", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (ticket.autonomous && ticket.autonomousState?.phase !== "completed") {
+        return jsonError(set, HTTP_CONFLICT, "Autonomous delivery must verify its chosen outcome before completion.");
+      }
       // Stamp the merge time so the board can order "PR mergée" newest-first.
       const merged = lifecycle.markMerged(params.id);
       return merged;
@@ -1592,6 +1606,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.kind !== "feature") return jsonError(set, HTTP_CONFLICT, "découpage réservé aux tickets feature");
+      if (ticket.autonomous) return jsonError(set, HTTP_CONFLICT, "The autonomous pilot supports a single feature card. Split delivery is not qualified.");
       // Gate (re-validated server-side): column todo, OR column prd with a non-null PRD markdown.
       const eligible =
         ticket.column === "todo" || (ticket.column === "prd" && ticket.prdMarkdown !== null);

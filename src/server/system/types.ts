@@ -54,6 +54,24 @@ export interface RecoveryCandidateOptions {
   baseBranch: string;
   prUrl: string;
   commitSha: string;
+  allowMerged?: boolean;
+}
+
+export interface CreatePrOptions {
+  draft: boolean;
+  title?: string;
+  body?: string;
+  headBranch?: string;
+  requireExistingBase?: boolean;
+  deadlineAt?: number;
+  assertCurrent?: () => void;
+}
+
+export interface MergePrExpectation {
+  commitSha: string;
+  baseBranch: string;
+  deadlineAt?: number;
+  assertCurrent?: () => void;
 }
 
 export interface ValidationRevisionOptions {
@@ -150,6 +168,7 @@ export interface PaneStream {
 
 export interface DoneGateResult {
   ok: boolean;
+  pending?: boolean;
   /** Human-readable reason when ok === false. */
   reason: string;
 }
@@ -364,7 +383,7 @@ export interface SystemAdapter {
    * on origin first, then asks the provider to open the PR from it. Returns the PR URL on success;
    * ok=false with the captured stderr/stdout on failure.
    */
-  createPr(slotPath: string, baseBranch: string, opts: { draft: boolean }, provider: VcsProvider): Promise<{ ok: boolean; url: string; reason: string }>;
+  createPr(slotPath: string, baseBranch: string, opts: CreatePrOptions, provider: VcsProvider): Promise<{ ok: boolean; url: string; reason: string }>;
   /** Review done() gate: the reviewed PR still exists, plus the posted-review check when requested. */
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions, provider: VcsProvider): Promise<DoneGateResult>;
   /** PR description body, used as the agent-work summary. null when unreadable. */
@@ -393,7 +412,7 @@ export interface SystemAdapter {
 
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
-  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
+  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult>;
   /** Read the PR's merge state, neutralised by the provider's client. `merged` is true only for "merged". */
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;

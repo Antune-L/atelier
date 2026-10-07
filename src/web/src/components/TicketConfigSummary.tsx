@@ -1,5 +1,8 @@
 import type { z } from "zod";
 
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
+import type { AutonomousState } from "@shared/autonomous";
+
 import {
   AGENT_EFFORT_LABELS,
   AGENT_MODEL_LABELS,
@@ -16,6 +19,8 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { useCapabilities } from "@/hooks/useCapabilities";
+
+const AUTONOMOUS_PHASE_LABELS: Record<AutonomousState["phase"], string> = { planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause" };
 
 const YES = "Oui";
 const NO = "Non";
@@ -221,6 +226,15 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
                 <Row label="Modèle (implémenteur Codex)" value={codexImplementerModelValue} />
                 <Row label="Effort (implémenteur Codex)" value={codexImplementerEffortValue} />
                 <Row label="Mode FAST (implémenteur Codex)" value={codexImplementerFastValue} />
+              </>
+            )}
+            {ticket.autonomous && (
+              <>
+                <Row label="Mode Devin" value="Autonome interne, sur ce Mac" />
+                <Row label="Livraison autonome" value={ticket.autonomousDelivery === "merge" ? "Fusion après contrôles" : "PR seule"} />
+                <Row label="Limites autonomes" value={`${ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS} correction(s), ${ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES} minutes`} />
+                {ticket.autonomousState && <Row label="État autonome" value={AUTONOMOUS_PHASE_LABELS[ticket.autonomousState.phase]} />}
+                {ticket.autonomousState?.error && <Row label="Blocage autonome" value={ticket.autonomousState.error} />}
               </>
             )}
             <Row label="PRD" value={ticket.prdEnabled ? YES : NO} />

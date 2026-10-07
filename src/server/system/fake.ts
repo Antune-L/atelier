@@ -15,6 +15,8 @@ import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
   DoneGateResult,
+  CreatePrOptions,
+  MergePrExpectation,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
   ImplementationRecoveryArchive,
@@ -434,9 +436,10 @@ export class FakeSystemAdapter implements SystemAdapter {
   async createPr(
     slotPath: string,
     baseBranch: string,
-    opts: { draft: boolean },
+    opts: CreatePrOptions,
     provider: VcsProvider,
   ): Promise<{ ok: boolean; url: string; reason: string }> {
+    opts.assertCurrent?.();
     this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
     return this.vcs(provider).createPr(slotPath, baseBranch, opts);
   }
@@ -499,9 +502,10 @@ export class FakeSystemAdapter implements SystemAdapter {
     return ["main", "develop", "staging"];
   }
 
-  async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
+  async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
     this.log("mergePr", { slotPath, branch, prUrl });
-    return this.vcs(provider).mergePr(slotPath, prUrl);
+    expected?.assertCurrent?.();
+    return this.vcs(provider).mergePr(slotPath, prUrl, expected);
   }
 
   async checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }> {

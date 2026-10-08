@@ -14,7 +14,7 @@ export interface AutonomousOptionValues {
 
 export function autonomousEligibility(project: ProjectInfo | undefined, implementer: string, independent: boolean): { eligible: boolean; reason: string | null } {
   if (project?.vcsProvider !== "github") return { eligible: false, reason: "Le pilote local nécessite un projet GitHub." };
-  if (project.autonomousPilot !== true) return { eligible: false, reason: "Pilote local non activé sur ce Mac." };
+  if (project.autonomousPilot !== true) return { eligible: false, reason: "Pilote indisponible sur ce poste : désactivé, ou validation qualité confiée à l'autre poste." };
   if (implementer === "composer" || !independent) return { eligible: false, reason: "Le pilote nécessite Claude ou Codex et une carte indépendante." };
   return { eligible: true, reason: null };
 }

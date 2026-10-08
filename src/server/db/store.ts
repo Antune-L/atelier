@@ -26,6 +26,7 @@ import {
   DEFAULT_PROJECT_COLOR,
   IMPLEMENT_EFFORT_META_KEY,
   IMPLEMENT_MODEL_META_KEY,
+  QUALITY_OWNER_META_KEY,
   TRIAGE_EFFORT_META_KEY,
   TRIAGE_LANGUAGE_META_KEY,
   TRIAGE_MODEL_META_KEY,
@@ -2240,6 +2241,7 @@ export class Store {
       codexModel: parsedCodexModel.success ? parsedCodexModel.data : DEFAULT_CODEX_MODEL,
       codexEffort: parsedCodexEffort.success ? parsedCodexEffort.data : DEFAULT_CODEX_EFFORT,
       codexFast: this.getMeta(CODEX_FAST_META_KEY) === "1",
+      qualityOwner: this.getMeta(QUALITY_OWNER_META_KEY) !== "0",
     };
   }
 
@@ -2253,6 +2255,7 @@ export class Store {
     if (patch.codexModel !== undefined) this.setMeta(CODEX_MODEL_META_KEY, patch.codexModel);
     if (patch.codexEffort !== undefined) this.setMeta(CODEX_EFFORT_META_KEY, patch.codexEffort);
     if (patch.codexFast !== undefined) this.setMeta(CODEX_FAST_META_KEY, patch.codexFast ? "1" : "0");
+    if (patch.qualityOwner !== undefined) this.setMeta(QUALITY_OWNER_META_KEY, patch.qualityOwner ? "1" : "0");
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;

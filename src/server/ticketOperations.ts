@@ -11,20 +11,24 @@ import {
 } from "../shared/schemas.ts";
 import type { ProjectInfo, Ticket } from "../shared/schemas.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
-import { getProject, isProjectKey, listProjectKeys, MODELS } from "./config.ts";
+import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
 import { TicketCreationRequestConflictError } from "./db/store.ts";
 import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
+import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 
 export function autonomousPilotEnabled(vcsProvider: string): boolean {
-  return (process.env.KANBAN_AUTONOMOUS_PILOT ?? "1") === "1" && vcsProvider === "github";
+  return (process.env.KANBAN_AUTONOMOUS_PILOT ?? "1") === "1" && vcsProvider === "github" && isQualityOwner();
 }
 
-export function autonomousOptionsError(input: { autonomous?: boolean; autonomousDelivery?: "pr_only" | "merge" | null; kind?: string; stealth?: boolean; directPush?: boolean; implementer?: string; dependsOn?: string | null; childOrder?: number | null }, vcsProvider: string): string | null {
+export function autonomousOptionsError(input: { autoMerge?: boolean; autonomous?: boolean; autonomousDelivery?: "pr_only" | "merge" | null; kind?: string; stealth?: boolean; directPush?: boolean; implementer?: string; dependsOn?: string | null; childOrder?: number | null }, vcsProvider: string): string | null {
+  const deliveryError = deliveryPolicyError(input);
+  if (deliveryError !== null) return deliveryError;
   if (!input.autonomous) return null;
   if (vcsProvider !== "github") return "The autonomous pilot requires GitHub and a prepared Coolify preview.";
+  if (!isQualityOwner()) return NOT_QUALITY_OWNER_MESSAGE;
   if (!autonomousPilotEnabled(vcsProvider)) return "The autonomous local pilot is not enabled on this machine.";
   if (input.autonomousDelivery === null || input.autonomousDelivery === undefined) return "Choose PR only or merge after checks explicitly for autonomous delivery.";
   if (input.kind !== undefined && input.kind !== "feature") return "The autonomous pilot only supports feature tickets.";
@@ -313,7 +317,7 @@ export class TicketOperations {
     const stealth = directPush ? false : (normalized.stealth ?? false);
     const autoMerge = normalized.autonomous || stealth || directPush
       ? false
-      : (normalized.autoMerge ?? project.defaultAutoMerge);
+      : (normalized.autoMerge ?? (isCloudHost() ? false : project.defaultAutoMerge));
     const ticketInput: NewTicket = {
       title,
       description: normalized.description,

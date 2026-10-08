@@ -7,7 +7,7 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import { QUALITY_DEFAULT_TIMEOUT_MS, latestAcceptanceSnapshot, latestFunctionalSnapshot, qualityBlockerCategory, qualityFollowUpIssueSchema, qualityPreviewBindingSchema } from "../../shared/quality.ts";
 import type { CreateQualityFollowUpInput, QualityCriteriaPlan, QualityCriteriaSnapshot, QualityCriterion, QualityEnvironment, QualityEvidence, QualityFollowUp, QualityFollowUpIssue, QualityGate, QualityIteration, QualityIterationActions, QualityIterationTrigger, QualityPermissionDenial, QualityPreflight, QualityPreviewTarget, QualityProblem, QualityRunPhase, StartQualityIterationInput, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
-import { getProject, isProjectKey, MODELS, SLOTS_ROOT } from "../config.ts";
+import { getProject, isProjectKey, isQualityOwner, MODELS, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
@@ -655,6 +655,7 @@ export class QualityManager {
   startQualityIteration(ticketId: string, input: StartQualityIterationInput): Promise<QualityIteration> {
     return this.starts.run(QUALITY_ADMISSION_KEY, async () => {
       if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
+      if (!isQualityOwner()) throw new Error(NOT_QUALITY_OWNER_MESSAGE);
       const ticket = this.ticket(ticketId);
       const quality = this.get(ticketId);
       const trigger = input.trigger ?? defaultTrigger(input.mode);
@@ -727,6 +728,7 @@ export class QualityManager {
 
   private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget, frozenCriteria?: QualityCriteriaSnapshot, expectedRevision?: string): Promise<QualityValidationRun> {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
+    if (provider !== null && !isQualityOwner()) throw new Error(NOT_QUALITY_OWNER_MESSAGE);
     if (this.active.has(ticketId)) throw new Error("A quality run is already active for this ticket.");
     if (this.dependencies.store.listActiveQualityRuns().length > 0 || this.dependencies.store.listActiveQualityIterations().some((entry) => entry.id !== iteration?.id)) throw new Error("A quality validation or correction is already active. Wait for it to finish.");
     const ticket = this.ticket(ticketId);

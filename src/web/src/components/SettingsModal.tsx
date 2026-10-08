@@ -411,6 +411,18 @@ function AgentDefaultsSettings({ query }: { query: string }) {
           )}
         </div>
       )}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={settings?.qualityOwner ?? true}
+            onCheckedChange={(value) => void patchAppSettings({ qualityOwner: value })}
+          />
+          <span className="text-sm">Validation qualité sur ce poste</span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Un seul poste (Mac ou VPS) lance les validations qualité et Devin. Désactive-la ici avant de l'activer sur l'autre, quand aucune validation n'est en cours.
+        </p>
+      </div>
       <div className="flex items-center gap-2">
         <p className="text-xs text-muted-foreground">
           Les changements s'appliquent aux prochains tickets. Enregistré automatiquement.

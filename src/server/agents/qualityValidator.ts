@@ -15,13 +15,13 @@ import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
 
 import type { ResolvedExecution } from "./executionConfig.ts";
+import { PLAYWRIGHT_MCP_VERSION, playwrightMcpArgs } from "./playwrightMcp.ts";
 import { QualityBlockerError } from "./qualityBlocker.ts";
 import { qualityErrorMessage, runQualitySession } from "./qualitySession.ts";
 import type { QualityObservation } from "./qualitySession.ts";
 
 const QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS = 10_000;
 const QUALITY_CHECK_EXCERPT_LIMIT = 2_000;
-const QUALITY_PLAYWRIGHT_VERSION = "0.0.83";
 const PRIVATE_FILE_MODE = 0o600;
 const QUALITY_BROWSER_TOOLS = [
   "browser_close", "browser_resize", "browser_console_messages", "browser_handle_dialog",
@@ -100,9 +100,9 @@ function qualityBrowserServer(options: QualityValidatorOptions, artifactDirector
   const origins = [...new Set(options.addresses.map((address) => new URL(address.url).origin))];
   const server = options.browserServer ?? {
     command: "npx",
-    args: ["-y", `@playwright/mcp@${QUALITY_PLAYWRIGHT_VERSION}`, "--isolated", "--headless", "--output-dir", artifactDirectory,
+    args: playwrightMcpArgs(["--output-dir", artifactDirectory,
       ...(origins.length > 0 ? ["--allowed-origins", origins.join(";")] : []),
-      ...(configPath ? ["--config", configPath] : [])],
+      ...(configPath ? ["--config", configPath] : [])]),
     env: { npm_config_offline: "true" },
   };
   return { ...server, alwaysLoad: true, enabledTools: QUALITY_BROWSER_TOOLS, disabledTools: QUALITY_DISABLED_BROWSER_TOOLS };
@@ -232,7 +232,7 @@ async function preflightQualityBrowser(options: QualityValidatorOptions, server:
   } catch (error) {
     if (options.signal.aborted) throw new Error("Validation cancelled during browser preflight");
     const detail = qualityErrorMessage(error instanceof Error ? error.message : "Unknown browser startup failure");
-    throw new QualityBlockerError("browser_unavailable", `Playwright MCP ${QUALITY_PLAYWRIGHT_VERSION} must be installed locally before behavioral validation. Automatic downloads are disabled. ${detail}`);
+    throw new QualityBlockerError("browser_unavailable", `Playwright MCP ${PLAYWRIGHT_MCP_VERSION} must be installed locally before behavioral validation. Automatic downloads are disabled. ${detail}`);
   } finally {
     if (timer) clearTimeout(timer);
     await client.close();

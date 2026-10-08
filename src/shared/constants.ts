@@ -405,6 +405,7 @@ export const CODEX_MODEL_META_KEY = "codex_model";
 export const CODEX_EFFORT_META_KEY = "codex_effort";
 /** `meta` table key holding the persisted default Codex fast-mode preference. */
 export const CODEX_FAST_META_KEY = "codex_fast";
+export const QUALITY_OWNER_META_KEY = "quality_owner";
 /** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
 export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
 /**

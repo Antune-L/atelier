@@ -177,6 +177,7 @@ export const appSettingsSchema = z.object({
   codexEffort: codexEffortSchema,
   /** Whether new Codex sessions request the fast service tier by default. */
   codexFast: z.boolean(),
+  qualityOwner: z.boolean(),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -190,6 +191,7 @@ export const updateAppSettingsSchema = z.object({
   codexModel: codexModelSchema.optional(),
   codexEffort: codexEffortSchema.optional(),
   codexFast: z.boolean().optional(),
+  qualityOwner: z.boolean().optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 

@@ -15,6 +15,7 @@ import { MODELS } from "../config.ts";
 import type { AgentSessionOptions, AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
 
 import { isReviewFixSession } from "./contract.ts";
+import { playwrightMcpArgs } from "./playwrightMcp.ts";
 import { vcsCommands } from "./vcsCommands.ts";
 import type { VcsCommandTable } from "./vcsCommands.ts";
 
@@ -95,7 +96,7 @@ const SLACK_READONLY_TOOLS = [
  */
 const PLAYWRIGHT_MCP_SERVER: StdioMcpServerDefinition = {
   command: "npx",
-  args: ["-y", "@playwright/mcp", "--isolated", "--headless"],
+  args: playwrightMcpArgs(),
 };
 
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */

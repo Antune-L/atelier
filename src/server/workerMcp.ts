@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
+import { DEFAULT_PORT } from "../shared/constants.ts";
 import { isWorkerToolName, WORKER_TOOLS } from "../shared/protocol.ts";
 import type { WorkerToolName } from "../shared/protocol.ts";
 
@@ -66,6 +67,7 @@ function rpcError(id: string | number | null, code: number, message: string): Re
  */
 export class WorkerMcpManager {
   private readonly registry = new Map<string, WorkerMcpHandlers>();
+  backendPort = DEFAULT_PORT;
 
   /** Register a session's onToolCall before spawning its Codex session. */
   register(token: string, handlers: WorkerMcpHandlers): void {

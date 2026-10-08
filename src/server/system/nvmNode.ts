@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 /** Env prefix reserved for the server's own boot contract; never inherited by a child process. */
 export const AGENT_ENV_EXCLUDED_PREFIX = "KANBAN_";
+const AGENT_ENV_EXCLUDED_KEYS = new Set(["PORT"]);
 
 /**
  * `process.env` minus every `KANBAN_*` key. The desktop app exports KANBAN_DB / KANBAN_CONFIG /
@@ -20,7 +21,7 @@ export const AGENT_ENV_EXCLUDED_PREFIX = "KANBAN_";
  */
 export function agentBaseEnv(): Record<string, string | undefined> {
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !key.startsWith(AGENT_ENV_EXCLUDED_PREFIX)),
+    Object.entries(process.env).filter(([key]) => !key.startsWith(AGENT_ENV_EXCLUDED_PREFIX) && !AGENT_ENV_EXCLUDED_KEYS.has(key)),
   );
 }
 

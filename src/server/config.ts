@@ -129,6 +129,12 @@ export function initProjectRegistry(store: Store): void {
   applyAppSettingsToModels(store.getAppSettings());
 }
 
+export const NOT_QUALITY_OWNER_MESSAGE = "This host does not own quality validation. Enable it in the general settings once the other host is idle.";
+
+export function isQualityOwner(): boolean {
+  return requireStore().getAppSettings().qualityOwner;
+}
+
 function requireStore(): Store {
   if (!_store) throw new Error("[config] project registry non initialisé (appelle initProjectRegistry au boot)");
   return _store;

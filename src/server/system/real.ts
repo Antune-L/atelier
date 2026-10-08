@@ -13,6 +13,7 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import { isCloudHost, PR_ONLY_MESSAGE } from "../hostRole.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
@@ -1076,6 +1077,7 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    if (isCloudHost()) return { ok: false, reason: PR_ONLY_MESSAGE };
     const merged = await this.vcs(provider).mergePr(slotPath, prUrl, expected);
     if (!merged.ok) return merged;
     // Best-effort remote branch cleanup: the merge already succeeded, so a failed

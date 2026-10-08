@@ -1,7 +1,9 @@
+import { chmodSync, rmSync } from "node:fs";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 
+import type { Server, WebSocketHandler } from "bun";
 import { Elysia } from "elysia";
 
 import {
@@ -32,6 +34,7 @@ import { runFirstBootSetup } from "./boot.ts";
 import { initProjectRegistry } from "./config.ts";
 import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
+import { isCloudHost } from "./hostRole.ts";
 import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
@@ -140,6 +143,10 @@ async function resolveServerPort(requestedPort: number): Promise<number> {
 
 const HTTP_NOT_FOUND = 404;
 const HTTP_FORBIDDEN = 403;
+const SERVER_IDLE_TIMEOUT_SECONDS = 255;
+const UI_SOCKET_MODE = 0o660;
+const PUBLIC_MCP_PATH = "/mcp";
+const SOCKET_MODE_TCP_PATHS = new Set(["/health", HTTP_PATH_WORKER_MCP, PUBLIC_MCP_PATH]);
 
 /**
  * Content-Type by extension for the static SPA. Elysia's onError re-wraps a raw Response and drops
@@ -231,6 +238,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await migrateConfigJsonIfPresent(store, resolveDataFile(opts.dataRoot, CONFIG_FILENAME, process.env.KANBAN_CONFIG));
   initProjectRegistry(store);
   const workerMcpManager = new WorkerMcpManager();
+  workerMcpManager.backendPort = port;
   const system = createSystemAdapter(workerMcpManager, join(dataRoot, LOGS_SUBPATH));
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
@@ -409,79 +417,92 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const hostname = resolveBindHost();
   const isTrustedRequest = createRequestGuard(hostname, process.env.DEV_HOST);
 
+  const handleRequest = async (request: Request, srv: Server<SocketData>): Promise<Response | undefined> => {
+    if (!isTrustedRequest(request)) return new Response("forbidden", { status: HTTP_FORBIDDEN });
+    const url = new URL(request.url);
+    if (url.pathname === WS_PATH_CLIENT) {
+      if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;
+      return new Response("upgrade failed", { status: 426 });
+    }
+    if (url.pathname === WS_PATH_TERMINAL) {
+      // Exactly one addressing param: an agent ticket pane or a worktree-session slot.
+      const ticketId = url.searchParams.get("ticketId") ?? undefined;
+      const rawSlotId = url.searchParams.get("slotId");
+      const parsedSlotId = rawSlotId === null ? Number.NaN : Number(rawSlotId);
+      const slotId = Number.isInteger(parsedSlotId) ? parsedSlotId : undefined;
+      if (!ticketId && slotId === undefined) {
+        return new Response("ticketId ou slotId requis", { status: 400 });
+      }
+      // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
+      const viewport = terminalViewportSchema.safeParse({
+        cols: url.searchParams.get("cols"),
+        rows: url.searchParams.get("rows"),
+      });
+      const { cols, rows } = viewport.success
+        ? viewport.data
+        : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
+      if (srv.upgrade(request, { data: { kind: "terminal", ticketId, slotId, cols, rows } })) {
+        return undefined;
+      }
+      return new Response("upgrade failed", { status: 426 });
+    }
+    if (url.pathname === HTTP_PATH_WORKER_MCP) {
+      return workerMcpManager.handleRequest(request);
+    }
+    if (url.pathname === PUBLIC_MCP_PATH && publicMcpManager !== null) {
+      return publicMcpManager.handleRequest({
+        request,
+        peerAddress: srv.requestIP(request)?.address ?? null,
+        port: srv.port ?? port,
+      });
+    }
+    if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
+      return serveUpload(dataRoot, url.pathname);
+    }
+    // Elysia owns /api, /health and every declared route; an unmatched non-API GET is served the
+    // built SPA from its NOT_FOUND onError handler (the final static fallback).
+    return app.handle(request);
+  };
+  const websocket: WebSocketHandler<SocketData> = {
+    open(ws) {
+      if (isClientSocket(ws)) clientHub.add(ws);
+      if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
+    },
+    message(ws, message) {
+      const text = typeof message === "string" ? message : message.toString();
+      if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
+    },
+    close(ws) {
+      if (isClientSocket(ws)) clientHub.remove(ws);
+      if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
+    },
+  };
+  const socketPath = process.env.KANBAN_SOCKET?.trim() || null;
+
   const server = Bun.serve<SocketData>({
     hostname,
     port,
     // NOTE: PRD generation holds the request open up to ~120s (REFORMULATE_TIMEOUT_MS); Bun's default
     // 10s idleTimeout would drop the connection mid-generation, so bump it to Bun's max (255s).
-    idleTimeout: 255,
-    async fetch(request, srv) {
-      if (!isTrustedRequest(request)) return new Response("forbidden", { status: HTTP_FORBIDDEN });
-      const url = new URL(request.url);
-      if (url.pathname === WS_PATH_CLIENT) {
-        if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;
-        return new Response("upgrade failed", { status: 426 });
-      }
-      if (url.pathname === WS_PATH_TERMINAL) {
-        // Exactly one addressing param: an agent ticket pane or a worktree-session slot.
-        const ticketId = url.searchParams.get("ticketId") ?? undefined;
-        const rawSlotId = url.searchParams.get("slotId");
-        const parsedSlotId = rawSlotId === null ? Number.NaN : Number(rawSlotId);
-        const slotId = Number.isInteger(parsedSlotId) ? parsedSlotId : undefined;
-        if (!ticketId && slotId === undefined) {
-          return new Response("ticketId ou slotId requis", { status: 400 });
-        }
-        // The viewport drives the pane geometry; fall back to the spawn default if absent/invalid.
-        const viewport = terminalViewportSchema.safeParse({
-          cols: url.searchParams.get("cols"),
-          rows: url.searchParams.get("rows"),
-        });
-        const { cols, rows } = viewport.success
-          ? viewport.data
-          : { cols: TERMINAL_DEFAULT_COLS, rows: TERMINAL_DEFAULT_ROWS };
-        if (srv.upgrade(request, { data: { kind: "terminal", ticketId, slotId, cols, rows } })) {
-          return undefined;
-        }
-        return new Response("upgrade failed", { status: 426 });
-      }
-      if (url.pathname === HTTP_PATH_WORKER_MCP) {
-        return workerMcpManager.handleRequest(request);
-      }
-      if (url.pathname === "/mcp" && publicMcpManager !== null) {
-        return publicMcpManager.handleRequest({
-          request,
-          peerAddress: srv.requestIP(request)?.address ?? null,
-          port: srv.port ?? port,
-        });
-      }
-      if (url.pathname.startsWith(`/${UPLOADS_DIR}/`)) {
-        return serveUpload(dataRoot, url.pathname);
-      }
-      // Elysia owns /api, /health and every declared route; an unmatched non-API GET is served the
-      // built SPA from its NOT_FOUND onError handler (the final static fallback).
-      return app.handle(request);
+    idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS,
+    fetch(request, srv) {
+      if (socketPath !== null && !SOCKET_MODE_TCP_PATHS.has(new URL(request.url).pathname)) return new Response("forbidden", { status: HTTP_FORBIDDEN });
+      return handleRequest(request, srv);
     },
-    websocket: {
-      open(ws) {
-        if (isClientSocket(ws)) clientHub.add(ws);
-        if (isTerminalSocket(ws)) void terminalManager.handleOpen(ws);
-      },
-      message(ws, message) {
-        const text = typeof message === "string" ? message : message.toString();
-        if (isTerminalSocket(ws)) terminalManager.handleMessage(ws, text);
-      },
-      close(ws) {
-        if (isClientSocket(ws)) clientHub.remove(ws);
-        if (isTerminalSocket(ws)) terminalManager.handleClose(ws);
-      },
-    },
+    websocket,
   });
+  let uiServer: Server<SocketData> | null = null;
+  if (socketPath !== null) {
+    rmSync(socketPath, { force: true });
+    uiServer = Bun.serve<SocketData>({ unix: socketPath, fetch: handleRequest, websocket });
+    chmodSync(socketPath, UI_SOCKET_MODE);
+  }
 
   store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
-  prNotificationMonitor.start();
+  if (!isCloudHost()) prNotificationMonitor.start();
 
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
@@ -509,6 +530,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       atelierManager.stop();
       automationManager.stop();
       await server.stop(true);
+      if (uiServer !== null) await uiServer.stop(true);
+      if (socketPath !== null) rmSync(socketPath, { force: true });
       await triageManager.teardownAll();
       await feasibilityManager.teardownAll();
       sessionHub.disconnectAll();
@@ -521,5 +544,22 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
 // Web mode: boot on the repo root. The desktop wrapper imports startServer dynamically instead.
 if (import.meta.main) {
-  await startServer();
+  const dataRoot = process.env.KANBAN_DATA_ROOT?.trim();
+  const running = await startServer(dataRoot ? { dataRoot } : {});
+  let stopping = false;
+  const shutdown = (signal: NodeJS.Signals): void => {
+    if (stopping) return;
+    stopping = true;
+    const log = createLogger("server");
+    log.info("arrêt demandé", { signal });
+    void running.stop().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        log.error("arrêt incomplet", { error: getErrorMessage(error) });
+        process.exit(1);
+      },
+    );
+  };
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }

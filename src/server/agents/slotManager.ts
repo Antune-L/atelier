@@ -22,6 +22,7 @@ import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from
 import type { ProjectConfig } from "../config.ts";
 
 import type { ReviewPass, Store } from "../db/store.ts";
+import { isCloudHost } from "../hostRole.ts";
 import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
@@ -1336,7 +1337,7 @@ export class SlotManager {
         column = "merged";
         this.store.logEvent(ticketId, "auto_merged", { prUrl, commitSha: currentTicket.autonomousState.revision });
       }
-    } else if ((currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
+    } else if ((currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {

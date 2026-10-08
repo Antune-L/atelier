@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, DEFAULT_PORT, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
+import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, HTTP_PATH_WORKER_MCP } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 import { createLogger } from "../logger.ts";
@@ -233,11 +233,6 @@ export interface CodexProviderDependencies {
   blockedSteerProbeMs?: number;
 }
 
-function resolveBackendPort(): number {
-  const parsed = Number(process.env.PORT ?? DEFAULT_PORT);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PORT;
-}
-
 function describeCodexError(message: string): string {
   const lower = message.toLowerCase();
   if (
@@ -286,6 +281,7 @@ function setConfigEntry(config: ConfigObject, key: string, value: ConfigValue): 
 
 function buildMcpServers(
   options: AgentSessionOptions,
+  backendPort: number,
   workerToken: string | null,
   workerTools: WorkerToolName[],
   inheritedServerNames: string[],
@@ -296,7 +292,7 @@ function buildMcpServers(
   }
   if (workerToken) {
     setConfigEntry(servers, "kanban", {
-      url: `http://127.0.0.1:${resolveBackendPort()}${HTTP_PATH_WORKER_MCP}`,
+      url: `http://127.0.0.1:${backendPort}${HTTP_PATH_WORKER_MCP}`,
       bearer_token_env_var: WORKER_TOKEN_ENV,
       default_tools_approval_mode: "approve",
       enabled_tools: workerTools,
@@ -1233,7 +1229,7 @@ function createCodexAgentSession(
         return;
       }
       skillInputs = preparedSkills?.inputs ?? [];
-      const servers = buildMcpServers(options, workerToken, workerTools, inheritedServerNames);
+      const servers = buildMcpServers(options, mcpManager.backendPort, workerToken, workerTools, inheritedServerNames);
       const gitWritableRoots = options.readOnly === true ? [] : await gitMetadataWritableRoots(options.cwd, environment);
       const config = threadConfig(
         options,

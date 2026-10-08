@@ -60,6 +60,7 @@ import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
+import { deliveryPolicyError, isCloudHost, PR_ONLY_MESSAGE } from "./hostRole.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -738,6 +739,8 @@ function createAtelierRoutes(deps: RouteDeps) {
       const { options, start } = parsed.data;
       const pairError = agentPairError(set, options.orchestrator, options.implementer);
       if (pairError) return pairError;
+      const deliveryError = deliveryPolicyError(options);
+      if (deliveryError) return jsonError(set, HTTP_BAD_REQUEST, deliveryError);
       const drafts = prdCardDrafts(record.document, parsed.data);
       if (typeof drafts === "string") return jsonError(set, HTTP_BAD_REQUEST, drafts);
       const prdMarkdown = renderPrdMarkdown(record.document);
@@ -1149,6 +1152,8 @@ export function createApiRoutes(deps: RouteDeps) {
       if (blankTitleRows.length > 0) {
         return jsonError(set, HTTP_BAD_REQUEST, `titre manquant aux lignes : ${blankTitleRows.join(", ")}`);
       }
+      const deliveryError = deliveryPolicyError(input);
+      if (deliveryError) return jsonError(set, HTTP_BAD_REQUEST, deliveryError);
 
       const directPush = input.directPush;
       const resultingStealth = directPush ? false : input.stealth;
@@ -1446,6 +1451,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merge", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      if (isCloudHost()) return jsonError(set, HTTP_CONFLICT, PR_ONLY_MESSAGE);
       if (!canMergePr(ticket) || ticket.prUrl === null || ticket.branch === null) {
         return jsonError(set, HTTP_CONFLICT, "merge réservé aux features terminées avec une PR ouverte");
       }

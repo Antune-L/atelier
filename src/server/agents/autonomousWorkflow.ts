@@ -7,7 +7,7 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import { latestAcceptanceSnapshot, latestFunctionalSnapshot } from "../../shared/quality.ts";
 import type { QualityValidationRun } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
-import { getProject, SLOTS_ROOT } from "../config.ts";
+import { getProject, isQualityOwner, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { PreviewManager } from "../previewManager.ts";
@@ -326,7 +326,10 @@ export class AutonomousWorkflow {
   }
 
   private waitForAdmission(ticketId: string): Promise<void> {
-    return this.waitFor(ticketId, () => this.deps.store.listActiveQualityRuns().length === 0 && this.deps.store.listActiveQualityIterations().length === 0);
+    return this.waitFor(ticketId, () => {
+      if (!isQualityOwner()) throw new Error(NOT_QUALITY_OWNER_MESSAGE);
+      return this.deps.store.listActiveQualityRuns().length === 0 && this.deps.store.listActiveQualityIterations().length === 0;
+    });
   }
 
   private armDeadline(ticketId: string, state: AutonomousState): void {

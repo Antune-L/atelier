@@ -25,6 +25,7 @@ import { createCodexProvider } from "./codexProvider.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
+import { confirmBrokerCleanup, previewBrokerSocket, requestPreviewBroker } from "./previewBroker.ts";
 import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
@@ -178,7 +179,8 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
 export class RealSystemAdapter implements SystemAdapter {
   readonly dryRun = false;
   coolifyRequest(request: CoolifyRequest): Promise<CoolifyResponse> {
-    return requestCoolify(request);
+    const brokerSocket = previewBrokerSocket();
+    return brokerSocket === null ? requestCoolify(request) : requestPreviewBroker(brokerSocket, request);
   }
   readPreviewBranchSource(repoPath: string, branch: string, recipePath: string) {
     return readPreviewBranchSource(repoPath, branch, recipePath);
@@ -195,6 +197,11 @@ export class RealSystemAdapter implements SystemAdapter {
     return readPreviewRepository(repoPath);
   }
   async confirmPreviewCleanup(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }) {
+    const brokerSocket = previewBrokerSocket();
+    if (brokerSocket !== null) {
+      if (!preview.appUuid) return { complete: false, reason: "The preview application identifier is missing." };
+      return confirmBrokerCleanup(brokerSocket, { appUuid: preview.appUuid, removeOwnedResources: options.removeOwnedResources, deploymentUuids: options.deploymentUuids });
+    }
     if (!preview.appUuid || !options.sshHostAlias || !options.expectedServerAddress) return { complete: false, reason: "Configure a verified SSH target to confirm remote resource cleanup." };
     return verifyPreviewCleanup({ appUuid: preview.appUuid, serverUuid: preview.serverUuid, ownershipMarker: preview.ownershipMarker, coolifyBaseUrl: preview.coolifyBaseUrl, sshHostAlias: options.sshHostAlias, expectedServerAddress: options.expectedServerAddress, removeOwnedResources: options.removeOwnedResources, deploymentUuids: options.deploymentUuids });
   }

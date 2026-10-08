@@ -7,6 +7,8 @@ import { z } from "zod";
 import { PREVIEW_PRIVATE_DIRECTORY_MODE, PREVIEW_PRIVATE_FILE_MODE, previewSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
 import type { PreviewSettings, UpdatePreviewSettingsInput } from "../shared/preview.ts";
 
+import { previewBrokerSocket } from "./system/previewBroker.ts";
+
 const PREVIEW_CONFIG_FILE = "preview-settings.json";
 const PRIVATE_CONFIG_ERROR = "Preview connection configuration is invalid.";
 const privatePreviewConfigSchema = previewSettingsSchema.omit({ tokenConfigured: true, previewAuthConfigured: true }).extend({
@@ -67,6 +69,7 @@ export class PreviewConfig {
   }
 
   getCredentials(): PreviewCredentials | null {
+    if (this.config.baseUrl !== null && previewBrokerSocket() !== null) return { baseUrl: this.config.baseUrl, token: "" };
     if (this.config.baseUrl === null || this.config.token === null) return null;
     return { baseUrl: this.config.baseUrl, token: this.config.token };
   }

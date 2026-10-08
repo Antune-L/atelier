@@ -19,7 +19,7 @@ import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 
 export function autonomousPilotEnabled(vcsProvider: string): boolean {
-  return process.env.KANBAN_AUTONOMOUS_PILOT === "1" && vcsProvider === "github";
+  return (process.env.KANBAN_AUTONOMOUS_PILOT ?? "1") === "1" && vcsProvider === "github";
 }
 
 export function autonomousOptionsError(input: { autonomous?: boolean; autonomousDelivery?: "pr_only" | "merge" | null; kind?: string; stealth?: boolean; directPush?: boolean; implementer?: string; dependsOn?: string | null; childOrder?: number | null }, vcsProvider: string): string | null {

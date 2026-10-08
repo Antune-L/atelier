@@ -2,7 +2,7 @@
 
 The **Devin (internal autonomous mode)** option reuses Claude or Codex on the machine running Kanban Agents. Coolify hosts the application preview. Remote implementation workers are outside this pilot.
 
-The pilot is disabled by default. `KANBAN_AUTONOMOUS_PILOT=1` in the backend environment enables controlled evaluation on GitHub projects. This switch is an activation boundary, not evidence that a provider, repository or delivery outcome has been qualified. Ordinary cards and Azure DevOps workflows remain available independently.
+The pilot is enabled by default on GitHub projects when `KANBAN_AUTONOMOUS_PILOT` is unset. Set `KANBAN_AUTONOMOUS_PILOT=0` in the backend environment to disable it; explicit `KANBAN_AUTONOMOUS_PILOT=1` also enables it. Other values leave it disabled. Availability is not evidence that a provider, repository or delivery outcome has been qualified. Ordinary cards and Azure DevOps workflows remain available independently.
 
 ## Card configuration
 
@@ -31,4 +31,4 @@ Disabling the pilot still permits retained uncertain or confirmed deliveries to 
 
 Prepared preview HTTP Basic credentials are injected by the server and redacted from persisted diagnostics and continuation prompts. Business login, MFA and CAPTCHA are not automatically bypassed; missing access remains a blocking prerequisite. Preview recipes, test accounts, seed data and external effects must be qualified for the target project before real evaluation. Real email testing requires separate authorization.
 
-The shared tool contract and publishing guard cover Claude and Codex. Automated checks and dry-run browser observations do not qualify real providers, Coolify deployment or GitHub delivery. Those combinations need controlled live validation before general activation.
+The shared tool contract and publishing guard cover Claude and Codex. Automated checks and dry-run browser observations do not qualify real providers, Coolify deployment or GitHub delivery. Those combinations still need controlled live validation despite the option being available by default.

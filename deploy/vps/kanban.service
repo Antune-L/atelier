@@ -1,0 +1,50 @@
+[Unit]
+Description=Kanban Agents cloud host
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=kanban
+Group=kanban
+WorkingDirectory=/var/lib/kanban
+EnvironmentFile=/etc/kanban/kanban.env
+Environment=HOME=/var/lib/kanban
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+Environment=TMPDIR=/var/lib/kanban/tmp
+Environment=KANBAN_DRY_RUN=0
+Environment=KANBAN_SETUP=1
+Environment=KANBAN_HOST_ROLE=cloud
+Environment=KANBAN_AUTONOMOUS_PILOT=0
+Environment=KANBAN_DATA_ROOT=/var/lib/kanban/data
+Environment=KANBAN_SOCKET=/run/kanban/ui.sock
+ExecStart=/usr/local/bin/bun /opt/kanban/current/src/server/index.ts
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=60
+RuntimeDirectory=kanban
+RuntimeDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/kanban
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/var/lib/docker -/data/coolify -/etc/kanban-preview -/var/lib/kanban-preview
+IPAddressDeny=169.254.0.0/16 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fe80::/10 fc00::/7
+MemoryMax=75%
+TasksMax=4096
+
+[Install]
+WantedBy=multi-user.target

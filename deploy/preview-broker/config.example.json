@@ -1,0 +1,21 @@
+{
+  "coolify": {
+    "baseUrl": "https://coolify.example.com",
+    "token": "COOLIFY_API_TOKEN_WITH_DEPLOY_PERMISSION",
+    "serverUuid": "COOLIFY_SERVER_UUID",
+    "projectUuid": "COOLIFY_PROJECT_UUID",
+    "environmentName": "kanban-previews"
+  },
+  "domainBase": "previews.example.com",
+  "maxActivePreviews": 3,
+  "projects": {
+    "atelier": {
+      "repository": "Antune-L/atelier",
+      "host": "github.com",
+      "source": { "type": "github_app", "uuid": "COOLIFY_GITHUB_APP_UUID" },
+      "dockerfile": "Dockerfile.preview",
+      "buildContext": ".",
+      "port": 52817
+    }
+  }
+}

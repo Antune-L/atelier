@@ -1,0 +1,16 @@
+[Unit]
+Description=Kanban preview cleanup helper
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /opt/kanban-preview/kanban-preview-cleanup.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=90
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes

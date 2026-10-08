@@ -1,0 +1,41 @@
+[Unit]
+Description=Kanban preview broker
+Wants=network-online.target
+Requires=kanban-preview-cleanup.socket
+After=network-online.target kanban-preview-cleanup.socket
+
+[Service]
+Type=simple
+User=kanban-preview
+Group=kanban-preview
+Environment=HOME=/var/lib/kanban-preview
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/bun /opt/kanban-preview/broker.ts
+LoadCredential=config:/etc/kanban-preview/config.json
+StateDirectory=kanban-preview
+StateDirectoryMode=0700
+RuntimeDirectory=kanban-preview
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+LockPersonality=yes
+RestrictRealtime=yes
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock -/var/lib/docker -/data/coolify
+MemoryMax=256M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

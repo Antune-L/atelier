@@ -1,0 +1,13 @@
+[Unit]
+Description=Kanban preview cleanup helper socket
+
+[Socket]
+ListenStream=/run/kanban-preview-cleanup.sock
+SocketUser=kanban-preview
+SocketGroup=kanban-preview
+SocketMode=0600
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

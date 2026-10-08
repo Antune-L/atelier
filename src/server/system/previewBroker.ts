@@ -1,3 +1,5 @@
+import type { z } from "zod";
+
 import { CLEANUP_RESULT_SCHEMA } from "./previewCleanup.ts";
 import { safeJsonParse } from "./boundedCommand.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
@@ -21,7 +23,7 @@ export async function requestPreviewBroker(socket: string, request: CoolifyReque
   return { status: response.status, body: safeJsonParse(await response.text()) };
 }
 
-export async function confirmBrokerCleanup(socket: string, input: { appUuid: string; removeOwnedResources: boolean; deploymentUuids: string[] }) {
+export async function confirmBrokerCleanup(socket: string, input: { appUuid: string; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<z.infer<typeof CLEANUP_RESULT_SCHEMA>> {
   try {
     const response = await fetch(`${BROKER_ORIGIN}/kanban/cleanup`, {
       unix: socket,

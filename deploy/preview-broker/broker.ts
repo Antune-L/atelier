@@ -61,6 +61,11 @@ interface Registry {
   apps: Record<string, AppEntry>;
 }
 
+interface CoolifyResult {
+  status: number;
+  body: unknown;
+}
+
 class PolicyError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
@@ -172,7 +177,7 @@ function recordDeployments(appUuid: string, deployments: unknown): void {
   });
 }
 
-async function coolify(method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+async function coolify(method: string, path: string, body?: unknown): Promise<CoolifyResult> {
   const response = await fetch(`${config.coolify.baseUrl.replace(/\/$/, "")}/api/v1${path}`, {
     method,
     headers: { authorization: `Bearer ${config.coolify.token}`, "content-type": "application/json", accept: "application/json" },
@@ -190,6 +195,11 @@ function repositoryIdentity(gitRepository: string): string {
   return gitRepository.toLowerCase();
 }
 
+function configuredProject(gitRepository: string): [string, ProjectConfig] | undefined {
+  const identity = repositoryIdentity(gitRepository);
+  return Object.entries(config.projects).find(([, project]) => project.repository.toLowerCase() === identity);
+}
+
 function sourceRepository(project: ProjectConfig): string {
   if (project.source.type === "deploy_key") return `git@${project.host}:${project.repository}.git`;
   if (project.source.type === "public") return new URL(`/${project.repository}`, `https://${project.host}`).href;
@@ -204,7 +214,7 @@ async function configuredEnvironmentUuid(): Promise<string> {
   return match.uuid;
 }
 
-async function createApplication(body: unknown): Promise<{ status: number; body: unknown }> {
+async function createApplication(body: unknown): Promise<CoolifyResult> {
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid application payload.");
   const marker = requireString(body.name, "ownership marker", MARKER_PATTERN);
   if (body.description !== marker) throw new PolicyError(HTTP_BAD_REQUEST, "The application description must be its ownership marker.");
@@ -213,8 +223,7 @@ async function createApplication(body: unknown): Promise<{ status: number; body:
   if (body.server_uuid !== config.coolify.serverUuid || body.project_uuid !== config.coolify.projectUuid) throw new PolicyError(HTTP_FORBIDDEN, "The preview settings do not match the broker configuration.");
   const branch = requireString(body.git_branch, "branch", BRANCH_PATTERN);
   const commit = requireString(body.git_commit_sha, "commit", COMMIT_PATTERN);
-  const identity = repositoryIdentity(requireString(body.git_repository, "repository"));
-  const projectEntry = Object.entries(config.projects).find(([, project]) => project.repository.toLowerCase() === identity);
+  const projectEntry = configuredProject(requireString(body.git_repository, "repository"));
   if (!projectEntry) throw new PolicyError(HTTP_FORBIDDEN, "The repository is not configured for previews.");
   const [projectKey, project] = projectEntry;
   if (body.is_http_basic_auth_enabled !== true) throw new PolicyError(HTTP_FORBIDDEN, "Preview authentication is required.");
@@ -248,7 +257,7 @@ async function createApplication(body: unknown): Promise<{ status: number; body:
   return result;
 }
 
-async function listApplications(): Promise<{ status: number; body: unknown }> {
+async function listApplications(): Promise<CoolifyResult> {
   const registry = readRegistry();
   const markers = new Set([...Object.keys(registry.intents), ...Object.values(registry.apps).map((entry) => entry.marker)]);
   const result = await coolify("GET", "/applications");
@@ -259,7 +268,8 @@ async function listApplications(): Promise<{ status: number; body: unknown }> {
       if (!isRecord(app) || typeof app.uuid !== "string" || typeof app.name !== "string") continue;
       const marker = app.name;
       if (current.intents[marker] === undefined || current.apps[app.uuid]) continue;
-      const project = Object.entries(config.projects).find(([, entry]) => typeof app.git_repository === "string" && repositoryIdentity(app.git_repository) === entry.repository.toLowerCase())?.[0] ?? "unknown";
+      const projectEntry = typeof app.git_repository === "string" ? configuredProject(app.git_repository) : undefined;
+      const project = projectEntry?.[0] ?? "unknown";
       current.apps[app.uuid] = { marker, project, createdAt: Date.now(), deletedAt: null, deployments: [] };
       delete current.intents[marker];
     }
@@ -267,7 +277,7 @@ async function listApplications(): Promise<{ status: number; body: unknown }> {
   return { status: result.status, body: owned };
 }
 
-function updateApplication(uuid: string, body: unknown): Promise<{ status: number; body: unknown }> {
+function updateApplication(uuid: string, body: unknown): Promise<CoolifyResult> {
   const entry = ownedApp(uuid);
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid application update.");
   const allowed: Record<string, unknown> = {};
@@ -282,7 +292,7 @@ function updateApplication(uuid: string, body: unknown): Promise<{ status: numbe
   return coolify("PATCH", `/applications/${encodeURIComponent(uuid)}`, allowed);
 }
 
-function updateEnvironment(uuid: string, body: unknown): Promise<{ status: number; body: unknown }> {
+function updateEnvironment(uuid: string, body: unknown): Promise<CoolifyResult> {
   ownedApp(uuid);
   if (!isRecord(body) || !Array.isArray(body.data)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid environment update.");
   const data = body.data.map((entry) => {
@@ -293,7 +303,7 @@ function updateEnvironment(uuid: string, body: unknown): Promise<{ status: numbe
   return coolify("PATCH", `/applications/${encodeURIComponent(uuid)}/envs/bulk`, { data });
 }
 
-async function deleteApplication(uuid: string): Promise<{ status: number; body: unknown }> {
+async function deleteApplication(uuid: string): Promise<CoolifyResult> {
   ownedApp(uuid);
   const result = await coolify("DELETE", `/applications/${encodeURIComponent(uuid)}?${DELETE_QUERY}`);
   if ((result.status >= 200 && result.status < 300) || result.status === 404) {
@@ -305,7 +315,7 @@ async function deleteApplication(uuid: string): Promise<{ status: number; body: 
   return result;
 }
 
-async function deploy(body: unknown): Promise<{ status: number; body: unknown }> {
+async function deploy(body: unknown): Promise<CoolifyResult> {
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid deployment request.");
   const uuid = requireString(body.uuid, "application", RESOURCE_UUID_PATTERN);
   if (ownedApp(uuid).deletedAt !== null) throw new PolicyError(HTTP_FORBIDDEN, "The application was deleted.");
@@ -314,14 +324,14 @@ async function deploy(body: unknown): Promise<{ status: number; body: unknown }>
   return result;
 }
 
-async function listDeployments(uuid: string): Promise<{ status: number; body: unknown }> {
+async function listDeployments(uuid: string): Promise<CoolifyResult> {
   ownedApp(uuid);
   const result = await coolify("GET", `/deployments/applications/${encodeURIComponent(uuid)}`);
   recordDeployments(uuid, isRecord(result.body) ? result.body.deployments : result.body);
   return result;
 }
 
-function filterList(result: { status: number; body: unknown }, allowed: (item: Record<string, unknown>) => boolean, pick?: (item: Record<string, unknown>) => Record<string, unknown>) {
+function filterList(result: CoolifyResult, allowed: (item: Record<string, unknown>) => boolean, pick?: (item: Record<string, unknown>) => Record<string, unknown>): CoolifyResult {
   if (!Array.isArray(result.body)) return result;
   const items = result.body.filter((item): item is Record<string, unknown> => isRecord(item) && allowed(item));
   return { status: result.status, body: pick ? items.map(pick) : items };
@@ -331,7 +341,7 @@ function configuredSourceUuids(type: SourceType): Set<string> {
   return new Set(Object.values(config.projects).flatMap((project) => project.source.type === type && project.source.uuid ? [project.source.uuid] : []));
 }
 
-async function githubAppRepositories(id: string): Promise<{ status: number; body: unknown }> {
+async function githubAppRepositories(id: string): Promise<CoolifyResult> {
   const apps = await coolify("GET", "/github-apps");
   const allowed = configuredSourceUuids("github_app");
   const match = Array.isArray(apps.body) && apps.body.some((app) => isRecord(app) && String(app.id) === id && typeof app.uuid === "string" && allowed.has(app.uuid));
@@ -339,7 +349,7 @@ async function githubAppRepositories(id: string): Promise<{ status: number; body
   return coolify("GET", `/github-apps/${encodeURIComponent(id)}/repositories`);
 }
 
-async function routeCoolify(method: string, path: string, body: unknown): Promise<{ status: number; body: unknown }> {
+async function routeCoolify(method: string, path: string, body: unknown): Promise<CoolifyResult> {
   const segments = path.split("?")[0]?.split("/").filter(Boolean).map(decodeURIComponent) ?? [];
   const [first, second, third, fourth] = segments;
   const { serverUuid, projectUuid, environmentName } = config.coolify;
@@ -396,7 +406,7 @@ function requestCleanup(request: { appUuid: string; mode: "remove" | "verify"; d
   });
 }
 
-async function cleanup(body: unknown): Promise<{ status: number; body: unknown }> {
+async function cleanup(body: unknown): Promise<CoolifyResult> {
   if (!isRecord(body)) throw new PolicyError(HTTP_BAD_REQUEST, "Invalid cleanup request.");
   const appUuid = requireString(body.appUuid, "application", UUID_PATTERN);
   const entry = ownedApp(appUuid);
@@ -420,7 +430,7 @@ Bun.serve({
     const url = new URL(request.url);
     try {
       const body = await readBody(request);
-      let result: { status: number; body: unknown };
+      let result: CoolifyResult;
       if (url.pathname === CLEANUP_PATH && request.method === "POST") result = await cleanup(body);
       else if (url.pathname.startsWith(`${COOLIFY_PREFIX}/`)) result = await routeCoolify(request.method, `${url.pathname.slice(COOLIFY_PREFIX.length)}${url.search}`, body);
       else throw new PolicyError(HTTP_FORBIDDEN, "Unknown broker endpoint.");

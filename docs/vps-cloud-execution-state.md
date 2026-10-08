@@ -2,7 +2,8 @@
 
 ## Current state
 
-- Revision: main `3bfe729` (2026-10-08). The loopback bind and Host/Origin guard shipped in `4f29093`.
+- Revision: branch `feat/vps-cloud-execution` on top of main `3bfe729` (2026-10-08). The loopback bind and Host/Origin guard shipped in `4f29093`.
+- Implementation status: PRD tasks T1–T10 are implemented. T11, the real qualification on the VPS, is on the user's side and follows `docs/vps-install.md`.
 - Goal: run Kanban as a second, independent instance on the Ubuntu 24.04 VPS that also hosts Coolify. Cloud cards keep going while the Mac is off, and the Mac stays autonomous when the VPS is unreachable. Only one quality validation runs at a time across both hosts.
 - Scope authorized by the user on 2026-10-08: implement Phase A (ordinary cloud cards, PR-only, no previews) and Phase B (same-host previews through a broker). PRD: `plans/20261008-vps-cloud-execution.prd.json`.
 - Private analysis reports, not in the public repo: `~/Library/Application Support/kanban-agents/notes/athena-vps-*.md`.
@@ -42,19 +43,36 @@
 
 ## Verified findings
 
+- Isolated dry-run server on macOS:
+  - With `KANBAN_SOCKET`, TCP answers only `/health` and the authenticated MCP endpoints.
+  - The socket serves the API and WebSockets.
+  - The cloud role refuses auto-merge, direct push and the merge route.
+  - `qualityOwner=false` disables Devin.
+  - SIGTERM stops cleanly and removes the socket.
+- Ubuntu 24.04 x64 container:
+  - The same socket checks pass under a dedicated `kanban` user.
+  - `kanban-release.sh` passes shellcheck, is idempotent, and produces a root-owned release with the Linux Claude and Codex packages, without `.git`.
+  - `systemd-analyze verify` reports nothing for the units.
+- Broker against a fake HTTPS Coolify:
+  - Refused: Compose, custom run options, other repositories, foreign apps, wrong domains, other servers and other environment names.
+  - Allowed: the normal create, deploy and delete cycle, rebuilt from the root config.
+  - Cleanup reaches the helper and refuses non-registered apps.
+- Typecheck, lint and 279 existing tests pass. A regression review found no default-path regression; its only finding (SIGINT handling) is fixed.
+
 - Bun's default `Bun.serve` bind is `*:port`. With `hostname: "127.0.0.1"`, Node's HTTP client and curl still reach it through `localhost`.
 - `Antune-L/atelier` is public, so rulesets are free.
 - Fine-grained tokens on an organization need membership and, by default, owner approval.
 
 ## Open hypotheses
 
-- Codex bubblewrap sandbox and headless Chromium under the hardened unit (to probe on the VPS).
-- Bun WebSocket upgrades over a Unix-socket listener (to probe locally).
+- The Codex bubblewrap sandbox and Google Chrome work under the hardened unit, with the AppArmor userns restriction on. To probe on the VPS.
+- Real Coolify accepts the broker's rebuilt payload (`environment_name` plus `environment_uuid`, no compose fields). To probe on the VPS in Phase B.
 
 ## Next action
 
-Write the PRD JSON, then implement Phase A.
+Merge the branch into main after the user's go-ahead. The user then follows `docs/vps-install.md` Phase A and reports the acceptance checks.
 
 ## History
 
+- 2026-10-08: implemented the cloud role, quality owner, socket UI, graceful stop, agent port, Playwright pinning, preview broker, root cleanup helper, units, release script and guide; verified as listed above.
 - 2026-10-08: plan resumed. Decisions D11–D13 settled in conversation, and implementation of Phases A and B authorized.

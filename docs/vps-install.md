@@ -50,7 +50,7 @@ sudo useradd --system --create-home --home-dir /var/lib/kanban-build --shell /us
 sudo install -d -o kanban -g kanban -m 0700 /var/lib/kanban/data /var/lib/kanban/tmp /var/lib/kanban/projects /var/lib/kanban/backups
 sudo install -d -o root -g root -m 0755 /opt/kanban /etc/kanban
 sudo install -m 0600 -o root -g root /dev/null /etc/kanban/kanban.env
-echo kanban | sudo tee -a /etc/cron.deny /etc/at.deny
+printf 'kanban\nkanban-build\n' | sudo tee -a /etc/cron.deny /etc/at.deny
 ```
 
 Then check that `kanban` has no extra power: `sudo -l -U kanban` must list nothing and `id kanban` must show no `sudo` or `docker` group.
@@ -64,7 +64,7 @@ sudo install -m 0755 kanban-release.sh /usr/local/sbin/kanban-release
 sudo kanban-release <full-commit-sha>
 ```
 
-The script builds as `kanban-build` with `bun install --frozen-lockfile --ignore-scripts`, copies the result to `/opt/kanban/releases/<sha>` owned by root, then points `/opt/kanban/current` at it.
+The script builds as `kanban-build` with `bun install --frozen-lockfile --ignore-scripts`, kills every leftover `kanban-build` process, copies the result to `/opt/kanban/releases/<sha>` owned by root, then points `/opt/kanban/current` at it.
 
 ### A4. Logins for the `kanban` user
 

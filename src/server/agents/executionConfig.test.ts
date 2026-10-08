@@ -23,7 +23,7 @@ function capabilityReader(status: CodexRuntimeStatus): {
 const READY_CODEX: CodexRuntimeStatus = {
   status: "ready",
   models: [{
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     efforts: ["low", "medium"],
     defaultEffort: "medium",
     serviceTiers: [{ id: "priority", name: "Fast", description: "Mode rapide" }],
@@ -48,16 +48,16 @@ describe("resolveExecution", () => {
     expect(
       resolveExecution(
         "one-shot",
-        { orchestrator: "codex", codexModel: "gpt-5.6-sol", codexEffort: "ultra" },
+        { orchestrator: "codex", codexModel: "gpt-6-sol", codexEffort: "ultra" },
         { model: "haiku", effort: "low" },
       ),
-    ).toEqual({ provider: "codex", model: "gpt-5.6-sol", effort: "ultra", serviceTier: "default", role: "one-shot" });
+    ).toEqual({ provider: "codex", model: "gpt-6-sol", effort: "ultra", serviceTier: "default", role: "one-shot" });
   });
 
   test("maps the explicit fast switch to the fast service tier", () => {
     expect(resolveExecution(
       "one-shot",
-      { orchestrator: "codex", codexModel: "gpt-5.6-sol", codexEffort: "medium", codexFast: true },
+      { orchestrator: "codex", codexModel: "gpt-6-sol", codexEffort: "medium", codexFast: true },
       { model: "haiku", effort: "low" },
     ).serviceTier).toBe("fast");
   });
@@ -114,7 +114,7 @@ describe("resolveFeasibilityExecution", () => {
     const ticket = makeTicket({ feasibilityEngine: "luna", orchestrator: "claude", model: "opus", effort: "high" });
     expect(resolveFeasibilityExecution(ticket, "triage", { model: "opus", effort: "high" })).toEqual({
       provider: "codex",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       effort: "medium",
       serviceTier: "fast",
       role: "triage",
@@ -131,15 +131,15 @@ describe("assertExecutionAvailable", () => {
 
   test("accepts only a freshly advertised Codex model and effort", async () => {
     const reader = capabilityReader(READY_CODEX);
-    await assertExecutionAvailable(reader, { provider: "codex", model: "gpt-5.6-sol", effort: "medium", serviceTier: "default" });
+    await assertExecutionAvailable(reader, { provider: "codex", model: "gpt-6-sol", effort: "medium", serviceTier: "default" });
     expect(reader.refreshes).toEqual([true]);
 
     await expect(
       assertExecutionAvailable(reader, { provider: "codex", model: "gpt-6-astra", effort: "medium", serviceTier: "default" }),
     ).rejects.toThrow("Modèle Codex indisponible pour ce compte : gpt-6-astra");
     await expect(
-      assertExecutionAvailable(reader, { provider: "codex", model: "gpt-5.6-sol", effort: "ultra", serviceTier: "default" }),
-    ).rejects.toThrow("Effort Codex indisponible pour gpt-5.6-sol : ultra");
+      assertExecutionAvailable(reader, { provider: "codex", model: "gpt-6-sol", effort: "ultra", serviceTier: "default" }),
+    ).rejects.toThrow("Effort Codex indisponible pour gpt-6-sol : ultra");
   });
 
   test("rejects fast when the selected runtime model does not advertise it", async () => {
@@ -149,7 +149,7 @@ describe("assertExecutionAvailable", () => {
     });
     await expect(assertExecutionAvailable(reader, {
       provider: "codex",
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       effort: "medium",
       serviceTier: "fast",
     })).rejects.toThrow("Mode FAST indisponible");
@@ -163,7 +163,7 @@ describe("assertExecutionAvailable", () => {
       message: "Connexion Codex requise",
     });
     await expect(
-      assertExecutionAvailable(unauthenticated, { provider: "codex", model: "gpt-5.6-sol", effort: "medium", serviceTier: "default" }),
+      assertExecutionAvailable(unauthenticated, { provider: "codex", model: "gpt-6-sol", effort: "medium", serviceTier: "default" }),
     ).rejects.toThrow("Connexion Codex requise");
 
     const unavailable = capabilityReader({
@@ -173,7 +173,7 @@ describe("assertExecutionAvailable", () => {
       message: "Service Codex injoignable",
     });
     await expect(
-      assertExecutionAvailable(unavailable, { provider: "codex", model: "gpt-5.6-sol", effort: "medium", serviceTier: "default" }),
+      assertExecutionAvailable(unavailable, { provider: "codex", model: "gpt-6-sol", effort: "medium", serviceTier: "default" }),
     ).rejects.toThrow("Service Codex injoignable");
   });
 });
@@ -182,7 +182,7 @@ describe("assertExecutionAvailable", () => {
 test("FAST launches accept the real priority catalog and retain the fast request value", async () => {
   const reader = capabilityReader(READY_CODEX);
   const execution = resolveExecution("one-shot", {
-    orchestrator: "codex", codexModel: "gpt-5.6-sol", codexEffort: "medium", codexFast: true,
+    orchestrator: "codex", codexModel: "gpt-6-sol", codexEffort: "medium", codexFast: true,
   }, { model: "sonnet", effort: "low" });
   await assertExecutionAvailable(reader, execution);
   expect(execution.serviceTier).toBe("fast");

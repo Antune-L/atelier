@@ -13,7 +13,7 @@ const inheritedProfile = profileSchema.parse({
   implementerModel: "opus",
   implementerEffort: "low",
   implementer: "codex",
-  codexModel: "gpt-5.6-terra",
+  codexModel: "gpt-6-sol",
   codexEffort: "high",
   codexFast: false,
   codexImplementerModel: null,

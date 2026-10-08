@@ -15,7 +15,7 @@ describe("nullable pricing", () => {
   });
 
   test("marks mixed known and unknown costs as partial", () => {
-    expect(summarizeSessionCosts({ one: { "claude-opus": USAGE, "gpt-5.6-sol": USAGE } })).toEqual({
+    expect(summarizeSessionCosts({ one: { "claude-opus": USAGE, "gpt-6-sol": USAGE } })).toEqual({
       costUsd: null,
       knownCostUsd: 5,
       partial: true,

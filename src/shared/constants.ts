@@ -222,7 +222,7 @@ export const CODEX_SEED_PROFILE: ProfileConfig = {
   implementerModel: "opus",
   implementerEffort: "low",
   implementer: "codex",
-  codexModel: "gpt-5.6-terra",
+  codexModel: "gpt-6.1-sol",
   codexEffort: "high",
   codexFast: false,
   codexImplementerModel: null,
@@ -240,7 +240,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.6-terra",
+    codexModel: "gpt-6.1-sol",
     codexEffort: "medium",
     codexFast: false,
     codexImplementerModel: null,
@@ -255,7 +255,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.6-terra",
+    codexModel: "gpt-6.1-sol",
     codexEffort: "medium",
     codexFast: false,
     codexImplementerModel: null,
@@ -270,7 +270,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "claude",
-    codexModel: "gpt-5.6-terra",
+    codexModel: "gpt-6.1-sol",
     codexEffort: "medium",
     codexFast: false,
     codexImplementerModel: null,
@@ -285,7 +285,7 @@ export const DEFAULT_PROFILES: ProfileConfig[] = [
     implementerModel: "opus",
     implementerEffort: "low",
     implementer: "composer",
-    codexModel: "gpt-5.6-terra",
+    codexModel: "gpt-6.1-sol",
     codexEffort: "medium",
     codexFast: false,
     codexImplementerModel: null,
@@ -337,9 +337,6 @@ export const CODEX_MODELS = [
   "gpt-6-astra",
   "gpt-6-sol",
   "gpt-6-luna",
-  "gpt-5.6-sol",
-  "gpt-5.6-luna",
-  "gpt-5.6-terra",
 ] as const;
 export type CodexModel = (typeof CODEX_MODELS)[number];
 
@@ -348,9 +345,6 @@ export const CODEX_MODEL_LABELS: Record<CodexModel, string> = {
   "gpt-6-astra": "6 Astra",
   "gpt-6-sol": "6 Sol",
   "gpt-6-luna": "6 Luna",
-  "gpt-5.6-sol": "5.6 Sol",
-  "gpt-5.6-luna": "5.6 Luna",
-  "gpt-5.6-terra": "5.6 Terra",
 };
 
 /**
@@ -389,9 +383,6 @@ export const CODEX_MODEL_EFFORTS: Record<CodexModel, readonly CodexEffort[]> = {
   "gpt-6-astra": CODEX_EFFORTS,
   "gpt-6-sol": CODEX_EFFORTS,
   "gpt-6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-sol": CODEX_EFFORTS,
-  "gpt-5.6-luna": ["low", "medium", "high", "xhigh", "max"],
-  "gpt-5.6-terra": CODEX_EFFORTS,
 };
 
 /**
@@ -405,7 +396,7 @@ export function pairedCodexEffort(model: CodexModel, effort: CodexEffort): Codex
 }
 
 /** Fallback Codex knobs when neither the ticket nor the persisted app settings pin them. */
-export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-5.6-terra";
+export const DEFAULT_CODEX_MODEL: CodexModel = "gpt-6.1-sol";
 export const DEFAULT_CODEX_EFFORT: CodexEffort = "medium";
 
 /** `meta` table key holding the persisted default Codex model. */

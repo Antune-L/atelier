@@ -9,7 +9,7 @@ describe("standalone action execution options", () => {
       importNotionSchema.safeParse({
         url: "https://notion.so/example",
         orchestrator: "codex",
-        codexModel: "gpt-5.6-sol",
+        codexModel: "gpt-6-sol",
         codexEffort: "low",
       }).success,
     ).toBe(true);

@@ -86,7 +86,7 @@ test("runtime catalog keeps exact supported models and efforts", () => {
     },
     {
       id: "hidden",
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       hidden: true,
       defaultReasoningEffort: "low",
       supportedReasoningEfforts: [{ reasoningEffort: "low" }],
@@ -114,7 +114,7 @@ test("runtime recognizes only a non-empty explicitly configured API key", () => 
 
 test("runtime catalog follows every model/list page before selecting product models", async () => {
   const fixture = runtimeConnection({
-    first: { data: [runtimeModel("gpt-5.6-terra", "medium")], nextCursor: "second" },
+    first: { data: [runtimeModel("gpt-6-sol", "medium")], nextCursor: "second" },
     second: { data: [runtimeModel("gpt-6-astra", "ultra")], nextCursor: null },
   });
   const status = await probeCodexRuntime({
@@ -125,7 +125,7 @@ test("runtime catalog follows every model/list page before selecting product mod
 
   expect(fixture.cursors).toEqual([null, "second"]);
   expect(status.status).toBe("ready");
-  expect(status.models.map((model) => model.model)).toEqual(["gpt-5.6-terra", "gpt-6-astra"]);
+  expect(status.models.map((model) => model.model)).toEqual(["gpt-6-sol", "gpt-6-astra"]);
 });
 
 test("runtime distinguishes an unsupported catalog from a temporary probe failure", async () => {

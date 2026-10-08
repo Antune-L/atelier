@@ -70,9 +70,6 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
       "gpt-6-astra",
       "gpt-6-sol",
       "gpt-6-luna",
-      "gpt-5.6-sol",
-      "gpt-5.6-luna",
-      "gpt-5.6-terra",
     ]);
     expect(caps.defaultCodexFast).toBe(false);
     const settingsResponse = await app.handle(new Request("http://localhost/api/settings", {
@@ -86,13 +83,13 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
       url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "ultra", codexFast: true,
     })).status).toBe(200);
     expect((await post("/notion/import", {
-      url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-5.6-sol", codexEffort: "max",
+      url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-6-sol", codexEffort: "max",
     })).status).toBe(200);
     expect((await post("/notion/import", { url: "https://www.notion.so/0123456789abcdef0123456789abcdef" })).status).toBe(200);
     expect((await post("/notion/import", { url: "https://www.notion.so/0123456789abcdef0123456789abcdef", orchestrator: "codex", codexModel: "gpt-5.5" })).status).toBe(400);
     system.runtimeStatus = {
       status: "ready",
-      models: [{ model: "gpt-5.6-terra", efforts: ["medium"], defaultEffort: "medium", serviceTiers: [], defaultServiceTier: null }],
+      models: [{ model: "gpt-6-sol", efforts: ["medium"], defaultEffort: "medium", serviceTiers: [], defaultServiceTier: null }],
       checkedAt: Date.now(),
       message: null,
     };
@@ -101,7 +98,7 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
     })).status).toBe(502);
     expect(system.calls.map(({ provider, model, effort, serviceTier }) => ({ provider, model, effort, serviceTier }))).toEqual([
       { provider: "codex", model: "gpt-6-astra", effort: "ultra", serviceTier: "fast" },
-      { provider: "codex", model: "gpt-5.6-sol", effort: "max", serviceTier: "default" },
+      { provider: "codex", model: "gpt-6-sol", effort: "max", serviceTier: "default" },
       { provider: "claude", model: "sonnet", effort: "low", serviceTier: "default" },
     ]);
     expect(system.runtimeChecks).toEqual([true, true, true, true]);

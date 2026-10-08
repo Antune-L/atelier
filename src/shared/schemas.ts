@@ -427,7 +427,7 @@ export const createProfileSchema = z.object({
   implementerModel: agentModelSchema.default("opus"),
   implementerEffort: agentEffortSchema.default("low"),
   implementer: implementerSchema.default("claude"),
-  codexModel: codexModelSchema.default("gpt-5.6-terra"),
+  codexModel: codexModelSchema.default("gpt-6.1-sol"),
   codexEffort: codexEffortSchema.default("medium"),
   codexFast: z.boolean().default(false),
   codexImplementerModel: codexModelSchema.nullable().default(null),
@@ -946,7 +946,7 @@ export const capabilitiesSchema = z.object({
   defaultImplementerModel: z.string(),
   /** Implementer sub-agent reasoning effort used when a ticket leaves it unset (e.g. "low"). */
   defaultImplementerEffort: z.string(),
-  /** Codex session model used when a ticket leaves it unset (e.g. "gpt-5.6-terra"). */
+  /** Codex session model used when a ticket leaves it unset (e.g. "gpt-6.1-sol"). */
   defaultCodexModel: z.string(),
   /** Codex session reasoning effort used when a ticket leaves it unset (e.g. "medium"). */
   defaultCodexEffort: z.string(),

@@ -177,9 +177,9 @@ describe("Codex catalog migration", () => {
 
     const migrated = createDatabase(path);
     const models = migrated.query("SELECT DISTINCT codex_model FROM profiles").all();
-    expect(models).toEqual([{ codex_model: "gpt-5.6-terra" }]);
+    expect(models).toEqual([{ codex_model: "gpt-6.1-sol" }]);
     const setting = migrated.query("SELECT value FROM meta WHERE key = 'codex_model'").get();
-    expect(setting).toEqual({ value: "gpt-5.6-terra" });
+    expect(setting).toEqual({ value: "gpt-6.1-sol" });
     const firstAuditCount = migrated.query("SELECT COUNT(*) AS n FROM configuration_migrations").get();
     expect(firstAuditCount).toEqual({ n: 6 });
     migrated.close();
@@ -243,8 +243,8 @@ describe("Codex catalog migration", () => {
     db.close();
 
     const upgraded = createDatabase(path);
-    expect(upgraded.query("SELECT value FROM meta WHERE key = 'codex_model'").get()).toEqual({ value: "gpt-5.6-terra" });
-    expect(upgraded.query("SELECT DISTINCT codex_model FROM profiles").all()).toEqual([{ codex_model: "gpt-5.6-terra" }]);
+    expect(upgraded.query("SELECT value FROM meta WHERE key = 'codex_model'").get()).toEqual({ value: "gpt-6.1-sol" });
+    expect(upgraded.query("SELECT DISTINCT codex_model FROM profiles").all()).toEqual([{ codex_model: "gpt-6.1-sol" }]);
     const audit = upgraded.query("SELECT COUNT(*) AS n FROM configuration_migrations WHERE direction = 'upgrade'").get();
     expect(audit).toEqual({ n: 6 });
     migrateCodexCatalog(upgraded, "upgrade");

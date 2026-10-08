@@ -21,7 +21,7 @@ export interface ExecutionOverrides {
  */
 const FEASIBILITY_ENGINE_EXECUTION: Record<FeasibilityEngine, ExecutionOverrides> = {
   sonnet: { orchestrator: "claude", model: "sonnet" satisfies AgentModel },
-  luna: { orchestrator: "codex", codexModel: "gpt-5.6-luna" satisfies CodexModel, codexEffort: DEFAULT_CODEX_EFFORT, codexFast: true },
+  luna: { orchestrator: "codex", codexModel: "gpt-6-luna" satisfies CodexModel, codexEffort: DEFAULT_CODEX_EFFORT, codexFast: true },
 };
 
 export interface ExecutionDefaults {

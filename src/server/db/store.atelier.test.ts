@@ -39,7 +39,7 @@ const NEW_CONVERSATION: NewConversation = {
   orchestrator: "codex",
   model: null,
   effort: null,
-  codexModel: "gpt-5.6-terra",
+  codexModel: "gpt-6-sol",
   codexEffort: "medium",
   codexFast: true,
   researchEnabled: true,

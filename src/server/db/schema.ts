@@ -8,6 +8,7 @@ export const CODEX_CATALOG_MIGRATION_ID = "codex-catalog-v4";
 export const CODEX_CATALOG_MIGRATED_META_KEY = "codex_catalog_v4_migrated";
 export const CODEX_CATALOG_SNAPSHOT_SUFFIX = ".pre-codex-catalog-v4.sqlite";
 export const CODEX_DOWNGRADE_TARGET = "c513f9493271d0780be7861648d4789e4cdcfe4a";
+export const CODEX_DOWNGRADE_MODEL = "gpt-5.6-terra";
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS pr_notifications (
@@ -157,7 +158,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   implementer_effort TEXT NOT NULL DEFAULT 'low',
   implementer TEXT NOT NULL DEFAULT 'claude',
   orchestrator TEXT NOT NULL DEFAULT 'claude',
-  codex_model TEXT NOT NULL DEFAULT 'gpt-5.6-terra',
+  codex_model TEXT NOT NULL DEFAULT 'gpt-6.1-sol',
   codex_effort TEXT NOT NULL DEFAULT 'medium',
   codex_fast INTEGER NOT NULL DEFAULT 0,
   codex_implementer_model TEXT,
@@ -505,7 +506,7 @@ const PROFILE_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "implementer_model", ddl: "ALTER TABLE profiles ADD COLUMN implementer_model TEXT NOT NULL DEFAULT 'opus'" },
   { column: "implementer_effort", ddl: "ALTER TABLE profiles ADD COLUMN implementer_effort TEXT NOT NULL DEFAULT 'low'" },
   { column: "orchestrator", ddl: "ALTER TABLE profiles ADD COLUMN orchestrator TEXT NOT NULL DEFAULT 'claude'" },
-  { column: "codex_model", ddl: "ALTER TABLE profiles ADD COLUMN codex_model TEXT NOT NULL DEFAULT 'gpt-5.6-terra'" },
+  { column: "codex_model", ddl: "ALTER TABLE profiles ADD COLUMN codex_model TEXT NOT NULL DEFAULT 'gpt-6.1-sol'" },
   { column: "codex_effort", ddl: "ALTER TABLE profiles ADD COLUMN codex_effort TEXT NOT NULL DEFAULT 'medium'" },
   { column: "codex_fast", ddl: "ALTER TABLE profiles ADD COLUMN codex_fast INTEGER NOT NULL DEFAULT 0" },
   { column: "codex_implementer_model", ddl: "ALTER TABLE profiles ADD COLUMN codex_implementer_model TEXT" },
@@ -632,20 +633,21 @@ export function migrateCodexCatalog(db: Database, direction: "upgrade" | "downgr
     const flag = db.query("SELECT value FROM meta WHERE key = ?").get(CODEX_CATALOG_MIGRATED_META_KEY);
     if (flag) return;
   }
-  const allowedModels = direction === "upgrade" ? new Set<string>(CODEX_MODELS) : new Set<string>([DEFAULT_CODEX_MODEL]);
+  const targetModel = direction === "upgrade" ? DEFAULT_CODEX_MODEL : CODEX_DOWNGRADE_MODEL;
+  const allowedModels = direction === "upgrade" ? new Set<string>(CODEX_MODELS) : new Set<string>([CODEX_DOWNGRADE_MODEL]);
   const transaction = db.transaction(() => {
     const meta = db.query("SELECT value FROM meta WHERE key = 'codex_model'").get();
     if (meta && typeof meta === "object" && "value" in meta && typeof meta.value === "string" && !allowedModels.has(meta.value)) {
-      recordConfigurationMigration(db, direction, "meta", "codex_model", meta.value, DEFAULT_CODEX_MODEL);
-      db.query("UPDATE meta SET value = ? WHERE key = 'codex_model'").run(DEFAULT_CODEX_MODEL);
+      recordConfigurationMigration(db, direction, "meta", "codex_model", meta.value, targetModel);
+      db.query("UPDATE meta SET value = ? WHERE key = 'codex_model'").run(targetModel);
     }
     const migrateTable = (scope: "profiles" | "tickets"): void => {
       const rows = db.query(`SELECT id, codex_model FROM ${scope} WHERE codex_model IS NOT NULL`).all();
       for (const row of rows) {
         if (!row || typeof row !== "object" || !("id" in row) || !("codex_model" in row)) continue;
         if (typeof row.id !== "string" || typeof row.codex_model !== "string" || allowedModels.has(row.codex_model)) continue;
-        recordConfigurationMigration(db, direction, scope, row.id, row.codex_model, DEFAULT_CODEX_MODEL);
-        db.query(`UPDATE ${scope} SET codex_model = ? WHERE id = ?`).run(DEFAULT_CODEX_MODEL, row.id);
+        recordConfigurationMigration(db, direction, scope, row.id, row.codex_model, targetModel);
+        db.query(`UPDATE ${scope} SET codex_model = ? WHERE id = ?`).run(targetModel, row.id);
       }
     };
     migrateTable("profiles");

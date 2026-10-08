@@ -30,11 +30,11 @@ describe("codexRuntimeStatusSchema", () => {
   test("repairs an effort against the refreshed runtime model", () => {
     const runtime = codexRuntimeStatusSchema.parse({
       status: "ready",
-      models: [{ model: "gpt-5.6-sol", efforts: ["low", "medium"], defaultEffort: "low", serviceTiers: [], defaultServiceTier: null }],
+      models: [{ model: "gpt-6-sol", efforts: ["low", "medium"], defaultEffort: "low", serviceTiers: [], defaultServiceTier: null }],
       checkedAt: 1,
       message: null,
     });
-    expect(pairedRuntimeCodexEffort(runtime, "gpt-5.6-sol", "ultra")).toBe("low");
+    expect(pairedRuntimeCodexEffort(runtime, "gpt-6-sol", "ultra")).toBe("low");
   });
 
   test("represents checking, missing models and temporary outages distinctly", () => {

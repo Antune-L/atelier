@@ -132,7 +132,7 @@ const ACTION_SESSION = {
   slotId: -1,
   cwd: "/tmp",
   provider: "codex",
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
   effort: "medium",
   role: "orchestrator",
   ownerType: "action",
@@ -164,7 +164,7 @@ test("coordinator persists queued, received and accepted without conflating sema
       subtype: "success",
       sessionId: "thread-1",
       usageByModel: {
-        "gpt-5.6-terra": {
+        "gpt-6-sol": {
           inputTokens: 12,
           outputTokens: 4,
           cacheReadTokens: 2,
@@ -174,7 +174,7 @@ test("coordinator persists queued, received and accepted without conflating sema
       },
     });
     expect(store.listExecutionRuns("action", ACTION_SESSION.ownerId)[0]?.usageByModel).toMatchObject({
-      "gpt-5.6-terra": { inputTokens: 12, outputTokens: 4 },
+      "gpt-6-sol": { inputTokens: 12, outputTokens: 4 },
     });
   } finally {
     await close();
@@ -192,7 +192,7 @@ test("a restarted owner replays queued or received messages with their stable id
       sessionId: "old-thread",
       role: "orchestrator",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-terra",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "medium",
     });
     store.enqueueAgentMessage({

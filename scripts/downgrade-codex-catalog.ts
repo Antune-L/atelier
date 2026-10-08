@@ -1,8 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 
-import { assertCodexDowngradeSafe, CODEX_DOWNGRADE_TARGET, migrateCodexCatalog } from "../src/server/db/schema.ts";
-import { DEFAULT_CODEX_MODEL } from "../src/shared/constants.ts";
+import { assertCodexDowngradeSafe, CODEX_DOWNGRADE_MODEL, CODEX_DOWNGRADE_TARGET, migrateCodexCatalog } from "../src/server/db/schema.ts";
 
 const APPLY_FLAG = "--apply";
 
@@ -23,11 +22,11 @@ function main(): void {
     const conversions = scalar(
       db,
       "SELECT COUNT(*) AS n FROM tickets WHERE codex_model IS NOT NULL AND codex_model <> ?",
-      DEFAULT_CODEX_MODEL,
+      CODEX_DOWNGRADE_MODEL,
     ) + scalar(
       db,
       "SELECT COUNT(*) AS n FROM profiles WHERE codex_model IS NOT NULL AND codex_model <> ?",
-      DEFAULT_CODEX_MODEL,
+      CODEX_DOWNGRADE_MODEL,
     );
     console.log(`Application target: ${CODEX_DOWNGRADE_TARGET}`);
     console.log(`Non-Terra Codex configurations to convert explicitly to Terra: ${conversions}`);

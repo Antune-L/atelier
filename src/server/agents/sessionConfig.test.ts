@@ -32,23 +32,23 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
     const ticket = makeTicket({
       orchestrator: "codex",
       implementer: "codex",
-      codexModel: "gpt-5.6-sol",
+      codexModel: "gpt-6-sol",
       codexEffort: "high",
       codexFast: true,
-      codexImplementerModel: "gpt-5.6-terra",
+      codexImplementerModel: "gpt-6-sol",
       codexImplementerEffort: "low",
       codexImplementerFast: false,
     });
     const cfg = implementConfig(ticket);
     expect(cfg.provider).toBe("codex");
-    expect(cfg.model).toBe("gpt-5.6-sol");
+    expect(cfg.model).toBe("gpt-6-sol");
     expect(cfg.effort).toBe("high");
     expect(cfg.serviceTier).toBe("fast");
-    expect(cfg.delegateModel).toBe("gpt-5.6-terra");
+    expect(cfg.delegateModel).toBe("gpt-6-sol");
     expect(cfg.delegateEffort).toBe("low");
     expect(cfg.delegateServiceTier).toBe("default");
     expect(cfg.agents?.implementer).toBeUndefined();
-    expect(cfg.agents?.["pr-fixer"]).toMatchObject({ model: "gpt-5.6-terra", effort: "low", serviceTier: "default" });
+    expect(cfg.agents?.["pr-fixer"]).toMatchObject({ model: "gpt-6-sol", effort: "low", serviceTier: "default" });
     expect(cfg.permissionAllow).toContain("Bash(git status:*)");
   });
 
@@ -56,7 +56,7 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
     const ticket = makeTicket({
       orchestrator: "codex",
       implementer: "codex",
-      codexModel: "gpt-5.6-sol",
+      codexModel: "gpt-6-sol",
       codexEffort: "high",
       codexFast: true,
       codexImplementerModel: null,
@@ -64,7 +64,7 @@ describe("buildImplementSessionConfig — codex orchestrator", () => {
       codexImplementerFast: null,
     });
     const cfg = implementConfig(ticket);
-    expect(cfg.delegateModel).toBe("gpt-5.6-sol");
+    expect(cfg.delegateModel).toBe("gpt-6-sol");
     expect(cfg.delegateEffort).toBe("high");
     expect(cfg.delegateServiceTier).toBe("fast");
   });
@@ -155,11 +155,11 @@ describe("buildImplementSessionConfig — claude orchestrator", () => {
 
 describe("read-only triage/split sessions", () => {
   test("codex driver → codex provider, read-only sandbox", () => {
-    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.6-terra", effort: "high", deep: false, driver: "codex" });
+    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-6-sol", effort: "high", deep: false, driver: "codex" });
     expect(triage.provider).toBe("codex");
     expect(triage.readOnly).toBe(true);
 
-    const split = buildSplitSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-5.6-terra", effort: "high", driver: "codex" });
+    const split = buildSplitSessionConfig({ ticketId: "t1", cwd: CWD, model: "gpt-6-sol", effort: "high", driver: "codex" });
     expect(split.provider).toBe("codex");
     expect(split.readOnly).toBe(true);
   });

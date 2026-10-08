@@ -8,14 +8,14 @@ const runtime: CodexRuntimeStatus = {
   status: "ready",
   models: [
     {
-      model: "gpt-5.6-terra",
+      model: "gpt-6-astra",
       efforts: ["medium"],
       defaultEffort: "medium",
       serviceTiers: [{ id: "priority", name: "Fast", description: "Faster responses" }],
       defaultServiceTier: "default",
     },
     {
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       efforts: ["medium"],
       defaultEffort: "medium",
       serviceTiers: [{ id: "default", name: "Default", description: "Standard responses" }],
@@ -28,12 +28,12 @@ const runtime: CodexRuntimeStatus = {
 
 describe("isCodexFastAvailable", () => {
   test("uses the selected model service-tier catalog", () => {
-    expect(isCodexFastAvailable(runtime, "gpt-5.6-terra")).toBe(true);
-    expect(isCodexFastAvailable(runtime, "gpt-5.6-sol")).toBe(false);
-    expect(isCodexFastAvailable(runtime, "gpt-6-astra")).toBe(false);
+    expect(isCodexFastAvailable(runtime, "gpt-6-astra")).toBe(true);
+    expect(isCodexFastAvailable(runtime, "gpt-6-sol")).toBe(false);
+    expect(isCodexFastAvailable(runtime, "gpt-6.1-sol")).toBe(false);
   });
 
   test("does not expose FAST while the catalog is unavailable", () => {
-    expect(isCodexFastAvailable({ ...runtime, status: "temporarily_unavailable" }, "gpt-5.6-terra")).toBe(false);
+    expect(isCodexFastAvailable({ ...runtime, status: "temporarily_unavailable" }, "gpt-6-astra")).toBe(false);
   });
 });

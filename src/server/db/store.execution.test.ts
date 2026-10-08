@@ -25,12 +25,12 @@ describe("Store execution lifecycle", () => {
       codexModel: "gpt-6-astra",
       codexEffort: "ultra",
       codexFast: true,
-      codexImplementerModel: "gpt-5.6-sol",
+      codexImplementerModel: "gpt-6-sol",
       codexImplementerEffort: "high",
       codexImplementerFast: false,
     });
     const ticket = store.createTicket({ ...source, childOrder: null });
-    expect(ticket.codexImplementerModel).toBe("gpt-5.6-sol");
+    expect(ticket.codexImplementerModel).toBe("gpt-6-sol");
     expect(ticket.codexImplementerEffort).toBe("high");
     expect(ticket.codexImplementerFast).toBe(false);
     const inherited = store.updateTicket(ticket.id, {
@@ -57,7 +57,7 @@ describe("Store execution lifecycle", () => {
       sessionId: null,
       role: "prd",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-sol",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "low",
       delegateProvider: "codex",
       delegateEffectiveModel: "gpt-6-astra",
@@ -71,7 +71,7 @@ describe("Store execution lifecycle", () => {
       generationId: "generation-1",
       status: "completed",
       usageByModel: {
-        "gpt-5.6-sol": {
+        "gpt-6-sol": {
           inputTokens: 100,
           outputTokens: 20,
           cacheReadTokens: 5,
@@ -89,7 +89,7 @@ describe("Store execution lifecycle", () => {
     expect(completed.delegateEffectiveEffort).toBe("high");
     expect(completed.delegateCodexFast).toBe(false);
     expect(completed.configuredServiceTier).toBe("fast");
-    expect(completed.usageByModel["gpt-5.6-sol"]?.costUsd).toBeNull();
+    expect(completed.usageByModel["gpt-6-sol"]?.costUsd).toBeNull();
 
     const duplicate = store.finalizeExecution({
       generationId: "generation-1",
@@ -208,7 +208,7 @@ describe("Store execution lifecycle", () => {
       sessionId: null,
       role: "one-shot",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-terra",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "medium",
     });
     store.enqueueAgentMessage({
@@ -244,11 +244,11 @@ describe("Store execution lifecycle", () => {
       sessionId: "session-checkpoint",
       role: "implementation",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-terra",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "high",
     });
     store.updateExecutionUsage("generation-checkpoint", {
-      "gpt-5.6-terra": {
+      "gpt-6-sol": {
         inputTokens: 21,
         outputTokens: 5,
         cacheReadTokens: 4,
@@ -262,7 +262,7 @@ describe("Store execution lifecycle", () => {
       status: "completed",
       usageByModel: {},
     });
-    expect(completed.usageByModel["gpt-5.6-terra"]?.inputTokens).toBe(21);
+    expect(completed.usageByModel["gpt-6-sol"]?.inputTokens).toBe(21);
     expect(completed.status).toBe("completed");
     db.close();
   });
@@ -277,7 +277,7 @@ test("restart preserves known terminal outcomes without claiming unfinished revi
   const ticket = store.createTicket(makeTicket());
   store.updateTicket(ticket.id, { column: "reviewed", stage: "done", finishedAt: 100 });
   for (const role of ["orchestrator", "reviewer"]) {
-    store.startExecution({ id: role, generationId: role, ownerType: "ticket", ownerId: ticket.id, sessionId: null, role, orchestrator: "codex", effectiveModel: "gpt-5.6-sol", effectiveEffort: "medium", codexFast: false });
+    store.startExecution({ id: role, generationId: role, ownerType: "ticket", ownerId: ticket.id, sessionId: null, role, orchestrator: "codex", effectiveModel: "gpt-6-sol", effectiveEffort: "medium", codexFast: false });
   }
   expect(store.failStaleExecutionRuns("restart")).toBe(2);
   const runs = store.listExecutionRuns("ticket", ticket.id);

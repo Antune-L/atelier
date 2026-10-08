@@ -101,7 +101,7 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
 }
 
 const CHILD_USAGE: Record<string, AgentTurnUsage> = {
-  "gpt-5.6-sol": { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheCreationTokens: 0, costUsd: 0 },
+  "gpt-6-sol": { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheCreationTokens: 0, costUsd: 0 },
 };
 
 /** The settle path defers one tick to capture trailing error details; wait past it. */
@@ -180,9 +180,9 @@ function newDelegatedTicket(): Ticket {
     implementerEffort: null,
     implementer: "codex",
     orchestrator: "claude",
-    codexModel: "gpt-5.6-sol",
+    codexModel: "gpt-6-sol",
     codexEffort: "high",
-    codexImplementerModel: "gpt-5.6-terra",
+    codexImplementerModel: "gpt-6-sol",
     codexImplementerEffort: "low",
     codexImplementerFast: false,
   });
@@ -250,7 +250,7 @@ describe("DelegationManager.start", () => {
     expect(child.opts.slotId).toBe(DELEGATION_SLOT_ID);
     expect(child.opts.disableWorkerTools).toBe(true);
     expect(child.opts.cwd.endsWith("slot-3")).toBe(true);
-    expect(child.opts.model).toBe("gpt-5.6-terra");
+    expect(child.opts.model).toBe("gpt-6-sol");
     expect(child.opts.effort).toBe("low");
     expect(child.opts.serviceTier).toBe("default");
     expect(child.sent).toHaveLength(1);
@@ -271,18 +271,18 @@ describe("DelegationManager.start", () => {
       role: "orchestrator",
       permissionMode: "dontAsk",
       delegateProvider: "codex",
-      delegateModel: "gpt-5.6-sol",
+      delegateModel: "gpt-6-sol",
       delegateEffort: "high",
       delegateServiceTier: "fast",
     });
     const edited = store.updateTicket(ticket.id, {
-      codexImplementerModel: "gpt-5.6-terra",
+      codexImplementerModel: "gpt-6-sol",
       codexImplementerEffort: "low",
       codexImplementerFast: false,
     });
 
     expect((await delegation.start(edited, 3, "plan capturé", "principal")).ok).toBe(true);
-    expect(system.sessions[1]?.opts).toMatchObject({ model: "gpt-5.6-sol", effort: "high", serviceTier: "fast" });
+    expect(system.sessions[1]?.opts).toMatchObject({ model: "gpt-6-sol", effort: "high", serviceTier: "fast" });
   });
 
   test("refuses a second delegation with the same label", async () => {
@@ -354,7 +354,7 @@ describe("DelegationManager — settlement", () => {
     const doneEvent = parent.sent.find((m) => m.includes("Implémentation déléguée terminée"));
     expect(doneEvent).toBeDefined();
     expect(doneEvent).toContain("Résumé final : feature X implémentée.");
-    const usage = store.getTicket(ticket.id)?.sessionUsage["codex-thread-1"]?.["gpt-5.6-sol"];
+    const usage = store.getTicket(ticket.id)?.sessionUsage["codex-thread-1"]?.["gpt-6-sol"];
     expect(usage?.input_tokens).toBe(100);
     expect(usage?.output_tokens).toBe(50);
     expect(usage?.cache_read_input_tokens).toBe(10);

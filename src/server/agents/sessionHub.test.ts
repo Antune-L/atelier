@@ -50,7 +50,7 @@ class RecordingSystem extends FakeSystemAdapter {
 }
 
 const USAGE: Record<string, AgentTurnUsage> = {
-  "gpt-5.6-terra": {
+  "gpt-6-sol": {
     inputTokens: 10,
     outputTokens: 5,
     cacheReadTokens: 1,
@@ -65,7 +65,7 @@ function sessionConfig(): SessionStartConfig {
     slotId: 1,
     cwd: "/tmp/worktree",
     provider: "codex",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     effort: "medium",
     role: "orchestrator",
     permissionMode: "dontAsk",

@@ -48,26 +48,26 @@ test("ticket reformulation persists its effective run and partial usage on failu
   class FailedReformulation extends FakeSystemAdapter {
     override async reformulate(options: ReformulateOptions): Promise<string> {
       expect(options.provider).toBe("codex");
-      expect(options.model).toBe("gpt-5.6-sol");
+      expect(options.model).toBe("gpt-6-sol");
       expect(options.effort).toBe("max");
       options.onEvent?.({ type: "init", sessionId: "reformulate-session" });
       options.onEvent?.({ type: "turn_end", sessionId: "reformulate-session", ok: false, subtype: "failed", usageByModel: {
-        "gpt-5.6-sol": { inputTokens: 12, outputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
+        "gpt-6-sol": { inputTokens: 12, outputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
       } });
       throw new Error("Échec contrôlé");
     }
   }
   try {
     db.query(`INSERT INTO tickets (id, title, project, orchestrator, codex_model, codex_effort, created_at, updated_at)
-      VALUES ('reformulate-ticket', 'Test', 'reformulate-project', 'codex', 'gpt-5.6-sol', 'max', 1, 1)`).run();
+      VALUES ('reformulate-ticket', 'Test', 'reformulate-project', 'codex', 'gpt-6-sol', 'max', 1, 1)`).run();
     const hub = new ClientHub(store);
     new ReformulateManager(store, new FailedReformulation(), hub, new Notifier(hub)).start("reformulate-ticket");
     await Bun.sleep(0);
     const run = store.listExecutionRuns("ticket", "reformulate-ticket")[0];
     expect(run?.status).toBe("failed");
     expect(run?.sessionId).toBe("reformulate-session");
-    expect(run?.effectiveModel).toBe("gpt-5.6-sol");
-    expect(run?.usageByModel["gpt-5.6-sol"]?.inputTokens).toBe(12);
+    expect(run?.effectiveModel).toBe("gpt-6-sol");
+    expect(run?.usageByModel["gpt-6-sol"]?.inputTokens).toBe(12);
     expect(store.getTicket("reformulate-ticket")?.reformulateStatus).toBe("failed");
   } finally {
     db.close();

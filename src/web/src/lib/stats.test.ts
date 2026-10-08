@@ -39,7 +39,7 @@ describe("effective execution statistics", () => {
       sessionId: "session-1",
       role: "orchestrator",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-sol",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "low",
       delegateProvider: null,
       delegateEffectiveModel: null,
@@ -55,7 +55,7 @@ describe("effective execution statistics", () => {
       finishedAt: 3_500,
     };
     expect(meanDurationByModel([record([execution])])).toEqual([
-      { key: "gpt-5.6-sol", label: "5.6 Sol", meanMs: 1_500, count: 1 },
+      { key: "gpt-6-sol", label: "6 Sol", meanMs: 1_500, count: 1 },
     ]);
   });
 
@@ -69,7 +69,7 @@ describe("effective execution statistics", () => {
       sessionId: null,
       role: "orchestrator",
       orchestrator: "codex",
-      effectiveModel: "gpt-5.6-sol",
+      effectiveModel: "gpt-6-sol",
       effectiveEffort: "medium",
       delegateProvider: null,
       delegateEffectiveModel: null,

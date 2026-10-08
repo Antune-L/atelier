@@ -41,10 +41,10 @@ test("relaunch preserves requested default tier when runtime reported fast", asy
   initProjectRegistry(store);
   const ticket = store.createTicket(makeTicket({
     orchestrator: "codex",
-    codexModel: "gpt-5.6-sol",
+    codexModel: "gpt-6-sol",
     codexEffort: "medium",
     codexFast: false,
-    codexImplementerModel: "gpt-5.6-terra",
+    codexImplementerModel: "gpt-6-sol",
     codexImplementerEffort: "low",
     codexImplementerFast: false,
   }));
@@ -58,11 +58,11 @@ test("relaunch preserves requested default tier when runtime reported fast", asy
     sessionId: null,
     role: "orchestrator",
     orchestrator: "codex",
-    effectiveModel: "gpt-5.6-sol",
+    effectiveModel: "gpt-6-sol",
     effectiveEffort: "medium",
     codexFast: false,
     delegateProvider: "codex",
-    delegateEffectiveModel: "gpt-5.6-sol",
+    delegateEffectiveModel: "gpt-6-sol",
     delegateEffectiveEffort: "high",
     delegateCodexFast: true,
   });
@@ -106,7 +106,7 @@ test("relaunch restores a Claude parent's captured Codex delegate after ticket e
   const ticket = store.createTicket(makeTicket({
     orchestrator: "codex",
     implementer: "claude",
-    codexImplementerModel: "gpt-5.6-terra",
+    codexImplementerModel: "gpt-6-sol",
     codexImplementerEffort: "low",
     codexImplementerFast: false,
   }));
@@ -124,7 +124,7 @@ test("relaunch restores a Claude parent's captured Codex delegate after ticket e
     effectiveEffort: "medium",
     codexFast: false,
     delegateProvider: "codex",
-    delegateEffectiveModel: "gpt-5.6-sol",
+    delegateEffectiveModel: "gpt-6-sol",
     delegateEffectiveEffort: "high",
     delegateCodexFast: true,
   });
@@ -142,7 +142,7 @@ test("relaunch restores a Claude parent's captured Codex delegate after ticket e
     expect(system.sessions[0]).toMatchObject({ provider: "claude", model: "opus", effort: "medium" });
     expect(sessionHub.getExecutionConfig(ticket.id)).toMatchObject({
       delegateProvider: "codex",
-      delegateModel: "gpt-5.6-sol",
+      delegateModel: "gpt-6-sol",
       delegateEffort: "high",
       delegateServiceTier: "fast",
     });

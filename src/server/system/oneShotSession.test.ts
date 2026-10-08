@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { AgentProvider, AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 
-const options = { provider: "codex", cwd: "/tmp", model: "gpt-5.6-terra", effort: "medium", permissionMode: "dontAsk" } satisfies
+const options = { provider: "codex", cwd: "/tmp", model: "gpt-6-sol", effort: "medium", permissionMode: "dontAsk" } satisfies
   Omit<AgentSessionOptions, "onEvent" | "onToolCall" | "ticketId" | "slotId">;
 
 function fixture(events: AgentSessionEvent[]) {

@@ -16,7 +16,7 @@ xattr -dr com.apple.quarantine /Applications/Atelier.app
 
 First launch needs `git` and a logged-in Claude Code session (run `claude` once); the full pipeline also needs `tmux` and an authenticated `gh` CLI. If no `claude` install is found on the machine, the app downloads the pinned version automatically (one-time, ~220 MB).
 
-For Codex, the app reuses the existing Codex connection. The available models are GPT-6 Astra, GPT-5.6 Sol, GPT-5.6 Luna and GPT-5.6 Terra, with the reasoning levels advertised by the connected account. Claude remains available. The « Vérifier à nouveau » (check again) button stays available in the settings even when Codex is unreachable; it refreshes the connection and the model list without restarting the app. The default stays Terra / medium.
+For Codex, the app reuses the existing Codex connection. The available models are GPT-6.1 Sol, GPT-6 Astra, GPT-6 Sol and GPT-6 Luna, with the reasoning levels advertised by the connected account. Claude remains available. The « Vérifier à nouveau » (check again) button stays available in the settings even when Codex is unreachable; it refreshes the connection and the model list without restarting the app. The default is 6.1 Sol / medium.
 
 For a Codex implementation, the implementer's model, effort and FAST mode can differ from the orchestrator's. By default they inherit the existing Codex settings; an explicitly chosen value stays independent. Profiles store these choices. Configurations are frozen at launch and kept across resumes: editing the ticket or the settings afterwards does not change a run that has already started.
 

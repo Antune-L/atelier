@@ -162,7 +162,7 @@ function options(events: AgentSessionEvent[]): AgentSessionOptions {
     cwd: "/tmp",
     provider: "codex",
     role: "one-shot",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     effort: "medium",
     permissionMode: "dontAsk",
     readOnly: true,
@@ -235,7 +235,7 @@ test("Codex session starts, steers, interrupts and drains before closing", async
     sessionId: "thread-1",
     turnId: "turn-1",
     usageByModel: {
-      "gpt-5.6-terra": {
+      "gpt-6-sol": {
         inputTokens: 11,
         outputTokens: 5,
         cacheReadTokens: 3,
@@ -299,7 +299,7 @@ test("one-shot timeout before App Server initialization rejects its prompt and n
     {
       cwd: "/tmp",
       provider: "codex",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-sol",
       effort: "medium",
       permissionMode: "dontAsk",
     },
@@ -753,7 +753,7 @@ test("native subagents cannot inherit the parent pipeline MCP", async () => {
       description: "writes code",
       prompt: "Implement the requested change.",
       role: "implementer",
-      model: "gpt-5.6-sol",
+      model: "gpt-6-sol",
       effort: "high",
       serviceTier: "fast",
     },
@@ -774,7 +774,7 @@ test("native subagents cannot inherit the parent pipeline MCP", async () => {
     .parse(started?.params).config.agents.implementer.config_file;
   const childConfig = readFileSync(configFile, "utf8");
   expect(childConfig).toContain("[mcp_servers.kanban]\nenabled = false");
-  expect(childConfig).toContain('model = "gpt-5.6-sol"');
+  expect(childConfig).toContain('model = "gpt-6-sol"');
   expect(childConfig).toContain('model_reasoning_effort = "high"');
   expect(childConfig).toContain('service_tier = "fast"');
   expect(childConfig).toContain("[features]\nfast_mode = true");

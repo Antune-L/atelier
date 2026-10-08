@@ -548,7 +548,7 @@ if (import.meta.main) {
   const running = await startServer(dataRoot ? { dataRoot } : {});
   let stopping = false;
   const shutdown = (signal: NodeJS.Signals): void => {
-    if (stopping) return;
+    if (stopping) process.exit(1);
     stopping = true;
     const log = createLogger("server");
     log.info("arrêt demandé", { signal });
@@ -561,5 +561,4 @@ if (import.meta.main) {
     );
   };
   process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
 }

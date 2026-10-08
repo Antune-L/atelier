@@ -1,5 +1,4 @@
 import { timingSafeEqual } from "node:crypto";
-import { isIP } from "node:net";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -14,6 +13,7 @@ import {
   updateTicketSchema,
 } from "../shared/schemas.ts";
 
+import { effectivePort, isLoopbackHost, parseHost } from "./requestGuard.ts";
 import { createTodoTicketInputSchema, TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
@@ -200,31 +200,6 @@ interface OutputValidator {
 
 function jsonResponse(status: number, error: string, headers?: HeadersInit): Response {
   return Response.json({ error }, { status, headers });
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  const normalized = hostname.startsWith("[") && hostname.endsWith("]")
-    ? hostname.slice(1, -1)
-    : hostname.toLowerCase();
-  if (normalized === "localhost" || normalized === "::1") return true;
-  if (isIP(normalized) === 4) return normalized.split(".")[0] === "127";
-  const mappedIpv4 = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : "";
-  return isIP(mappedIpv4) === 4 && mappedIpv4.split(".")[0] === "127";
-}
-
-function effectivePort(url: URL): number {
-  if (url.port !== "") return Number(url.port);
-  return url.protocol === "https:" ? 443 : 80;
-}
-
-function parseHost(host: string): URL | null {
-  try {
-    const parsed = new URL(`http://${host}`);
-    if (parsed.username !== "" || parsed.password !== "" || parsed.pathname !== "/") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
 }
 
 function isAllowedHost(request: Request, port: number): boolean {

@@ -1,6 +1,7 @@
 # Local HTTPS reverse proxy for the custom domain (see DEV_HOST in .env).
 # The domain is read from the environment, so nothing personal is committed here.
 {$DEV_HOST} {
+	bind 127.0.0.1 ::1
 	tls internal
 	reverse_proxy localhost:52818
 }

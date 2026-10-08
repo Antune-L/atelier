@@ -3,8 +3,9 @@ import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 
+import { DEV_WEB_PORT } from "../shared/devServer.ts";
+
 const BACKEND_PORT = process.env.PORT ?? "52817";
-const DEV_PORT = 52818;
 const HTTPS_PORT = 443;
 const PROJECT_ROOT = resolve(import.meta.dirname, "..", "..");
 
@@ -31,7 +32,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: DEV_PORT,
+      port: DEV_WEB_PORT,
       ...(devHost && {
         allowedHosts: [devHost],
         hmr: { host: devHost, clientPort: HTTPS_PORT, protocol: "wss" },
@@ -40,7 +41,7 @@ export default defineConfig(({ mode }) => {
     },
     // `real` mode: frozen build served by `vite preview` (no HMR), same topology as dev.
     preview: {
-      port: DEV_PORT,
+      port: DEV_WEB_PORT,
       ...(devHost && { allowedHosts: [devHost] }),
       proxy: backendProxy,
     },

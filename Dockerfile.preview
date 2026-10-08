@@ -29,6 +29,7 @@ RUN mkdir -p /app/data/home && chown -R bun:bun /app/data
 ENV NODE_ENV=production \
     HOME=/app/data/home \
     PORT=52817 \
+    KANBAN_HOST=0.0.0.0 \
     KANBAN_DRY_RUN=1 \
     KANBAN_SETUP=0
 USER bun

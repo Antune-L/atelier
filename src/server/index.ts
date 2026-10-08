@@ -43,6 +43,7 @@ import { PrNotificationMonitor } from "./prNotificationMonitor.ts";
 import { PreviewConfig } from "./previewConfig.ts";
 import { PreviewManager } from "./previewManager.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
+import { createRequestGuard, resolveBindHost } from "./requestGuard.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
@@ -138,6 +139,7 @@ async function resolveServerPort(requestedPort: number): Promise<number> {
 }
 
 const HTTP_NOT_FOUND = 404;
+const HTTP_FORBIDDEN = 403;
 
 /**
  * Content-Type by extension for the static SPA. Elysia's onError re-wraps a raw Response and drops
@@ -404,20 +406,17 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       return { error: getErrorMessage(error) };
     });
 
-  // CORS for the Vite dev server.
-  app.onRequest(({ set }) => {
-    set.headers["access-control-allow-origin"] = "*";
-    set.headers["access-control-allow-methods"] = "GET, POST, PATCH, DELETE, OPTIONS";
-    set.headers["access-control-allow-headers"] = "content-type";
-  });
-  app.options("/*", () => new Response(null, { status: 204 }));
+  const hostname = resolveBindHost();
+  const isTrustedRequest = createRequestGuard(hostname, process.env.DEV_HOST);
 
   const server = Bun.serve<SocketData>({
+    hostname,
     port,
     // NOTE: PRD generation holds the request open up to ~120s (REFORMULATE_TIMEOUT_MS); Bun's default
     // 10s idleTimeout would drop the connection mid-generation, so bump it to Bun's max (255s).
     idleTimeout: 255,
     async fetch(request, srv) {
+      if (!isTrustedRequest(request)) return new Response("forbidden", { status: HTTP_FORBIDDEN });
       const url = new URL(request.url);
       if (url.pathname === WS_PATH_CLIENT) {
         if (srv.upgrade(request, { data: { kind: "client" } })) return undefined;

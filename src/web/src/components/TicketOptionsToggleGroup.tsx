@@ -1,4 +1,5 @@
 import {
+  Bot,
   EyeOff,
   FileText,
   FlaskConical,
@@ -9,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useRef } from "react";
+import type { ReactNode } from "react";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
@@ -22,7 +24,8 @@ const TICKET_OPTION = {
   directPush: "direct-push",
   verify: "verify",
   argusMultiLoop: "argus-multi-loop",
-} as const;
+  autonomous: "autonomous",
+} satisfies Record<string, string>;
 
 const OPTION_ITEM_CLASS =
   "h-16 w-full min-w-0 flex-row items-center justify-start gap-2 whitespace-normal px-3 text-sm font-normal hover:-translate-y-0.5 hover:shadow-sm active:translate-y-0 disabled:hover:translate-y-0 disabled:hover:shadow-none data-[state=on]:hover:-translate-y-0.5 data-[state=on]:hover:shadow-md";
@@ -49,6 +52,12 @@ interface TicketOptionsToggleGroupProps {
   title?: string;
   className?: string;
   autonomous?: boolean;
+  autonomousControl?: {
+    disabled: boolean;
+    unavailableReason: string | null;
+    onChange: (enabled: boolean) => void;
+  };
+  children?: ReactNode;
 }
 
 function OptionToggleLabel({
@@ -75,6 +84,8 @@ export function TicketOptionsToggleGroup({
   title = "Options",
   className,
   autonomous = false,
+  autonomousControl,
+  children,
 }: TicketOptionsToggleGroupProps) {
   const prDraftBeforeAutoMerge = useRef(values.prDraft);
 
@@ -86,9 +97,15 @@ export function TicketOptionsToggleGroup({
     ...(values.directPush ? [TICKET_OPTION.directPush] : []),
     ...(values.verifyFeature ? [TICKET_OPTION.verify] : []),
     ...(values.argusMultiLoop ? [TICKET_OPTION.argusMultiLoop] : []),
+    ...(autonomous ? [TICKET_OPTION.autonomous] : []),
   ];
 
   const onOptionsChange = (toggleValues: string[]): void => {
+    const nextAutonomous = toggleValues.includes(TICKET_OPTION.autonomous);
+    if (autonomousControl && nextAutonomous !== autonomous) {
+      autonomousControl.onChange(nextAutonomous);
+      return;
+    }
     const stealthRaw = toggleValues.includes(TICKET_OPTION.stealth);
     const autoMergeRaw = toggleValues.includes(TICKET_OPTION.autoMerge);
     const directPushRaw = toggleValues.includes(TICKET_OPTION.directPush);
@@ -209,7 +226,25 @@ export function TicketOptionsToggleGroup({
         >
           <OptionToggleLabel icon={Repeat2}>Argus 2 boucles</OptionToggleLabel>
         </ToggleGroupItem>
+        {autonomousControl && (
+          <ToggleGroupItem
+            value={TICKET_OPTION.autonomous}
+            disabled={autonomousControl.disabled}
+            aria-label="Devin (mode autonome interne)"
+            aria-describedby={autonomousControl.unavailableReason ? `${headingId}-autonomous-reason` : undefined}
+            title={autonomousControl.unavailableReason ?? "Mode autonome interne avec Claude ou Codex"}
+            className={OPTION_ITEM_CLASS}
+          >
+            <OptionToggleLabel icon={Bot}>Devin</OptionToggleLabel>
+          </ToggleGroupItem>
+        )}
       </ToggleGroup>
+      {autonomousControl?.unavailableReason && (
+        <p id={`${headingId}-autonomous-reason`} className="text-xs text-muted-foreground">
+          {autonomousControl.unavailableReason}
+        </p>
+      )}
+      {children}
     </div>
   );
 }

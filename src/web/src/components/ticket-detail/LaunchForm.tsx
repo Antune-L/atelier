@@ -65,6 +65,21 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
 
   const selectedProject = projects.find((project) => project.key === ticket.project);
   const autonomousAvailability = autonomousEligibility(selectedProject, ticket.implementer, ticket.dependsOn === null && ticket.childOrder === null);
+  const autonomousValues = pendingAutonomous ?? {
+    autonomous: ticket.autonomous ?? false,
+    autonomousDelivery: ticket.autonomousDelivery ?? null,
+    autonomousMaxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS,
+    autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES,
+  };
+  const autonomousDisabled = !canEditTarget || ticket.autonomousState != null;
+  const updateAutonomousOptions = (next: AutonomousOptionValues): void => {
+    if (next.autonomous && next.autonomousDelivery === null) {
+      setPendingAutonomous(next);
+      return;
+    }
+    setPendingAutonomous(null);
+    patch({ ...next, autoMerge: next.autonomous ? false : ticket.autoMerge, stealth: next.autonomous ? false : ticket.stealth, directPush: next.autonomous ? false : ticket.directPush });
+  };
   const projectDefaultBranch = selectedProject?.baseBranch ?? "";
   // Current selection resolves null (no override) to the project default for display.
   const selectedBaseBranch = ticket.baseBranch ?? projectDefaultBranch;
@@ -165,25 +180,15 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
         />
       </div>
 
-      <AutonomousOptions
-        id="ticket-autonomous"
-        values={pendingAutonomous ?? { autonomous: ticket.autonomous ?? false, autonomousDelivery: ticket.autonomousDelivery ?? null, autonomousMaxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES }}
-        eligible={autonomousAvailability.eligible}
-        unavailableReason={autonomousAvailability.reason}
-        disabled={!canEditTarget || ticket.autonomousState != null}
-        onChange={(next) => {
-          if (next.autonomous && next.autonomousDelivery === null) {
-            setPendingAutonomous(next);
-            return;
-          }
-          setPendingAutonomous(null);
-          patch({ ...next, autoMerge: next.autonomous ? false : ticket.autoMerge, stealth: next.autonomous ? false : ticket.stealth, directPush: next.autonomous ? false : ticket.directPush });
-        }}
-      />
       <div className="min-w-0">
         <TicketOptionsToggleGroup
           key={ticket.id}
-          autonomous={ticket.autonomous}
+          autonomous={autonomousValues.autonomous}
+          autonomousControl={{
+            disabled: autonomousDisabled || (!autonomousAvailability.eligible && !autonomousValues.autonomous),
+            unavailableReason: autonomousAvailability.reason,
+            onChange: (autonomous) => updateAutonomousOptions({ ...autonomousValues, autonomous }),
+          }}
           title="Options de PR"
           headingId={OPTIONS_HEADING_ID}
           values={{
@@ -196,7 +201,9 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
             argusMultiLoop: ticket.argusMultiLoop,
           }}
           onChange={(next) => patch(next)}
-        />
+        >
+          <AutonomousOptions id="ticket-autonomous" values={autonomousValues} disabled={autonomousDisabled} onChange={updateAutonomousOptions} />
+        </TicketOptionsToggleGroup>
       </div>
     </div>
   );

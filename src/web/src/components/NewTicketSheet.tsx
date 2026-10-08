@@ -233,6 +233,14 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
 
   const autonomousAvailability = autonomousEligibility(selectedProject, agent.implementer, !dependsOnValid);
   const autonomousEligible = autonomousAvailability.eligible;
+  const updateAutonomousOptions = (next: AutonomousOptionValues): void => {
+    setAutonomousOptions(next);
+    if (next.autonomous) {
+      setAutoMergeChoice(false);
+      setStealth(false);
+      setDirectPush(false);
+    }
+  };
   const submitDisabled = busy || (!title.trim() && !description.trim()) || !project || (autonomousOptions.autonomous && (!autonomousEligible || autonomousOptions.autonomousDelivery === null));
 
   return (
@@ -374,12 +382,13 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                   onApplyProfile={agent.applyProfile}
                 />
               </div>
-              <AutonomousOptions id="new-autonomous" values={autonomousOptions} eligible={autonomousEligible} unavailableReason={autonomousAvailability.reason} onChange={(next) => {
-                setAutonomousOptions(next);
-                if (next.autonomous) { setAutoMergeChoice(false); setStealth(false); setDirectPush(false); }
-              }} />
               <TicketOptionsToggleGroup
                 autonomous={autonomousOptions.autonomous}
+                autonomousControl={{
+                  disabled: !autonomousEligible && !autonomousOptions.autonomous,
+                  unavailableReason: autonomousAvailability.reason,
+                  onChange: (autonomous) => updateAutonomousOptions({ ...autonomousOptions, autonomous }),
+                }}
                 key={optionsKey}
                 headingId="ticket-options-heading"
                 values={{
@@ -402,7 +411,9 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                     setAutoMergeChoice(next.autoMerge);
                   }
                 }}
-              />
+              >
+                <AutonomousOptions id="new-autonomous" values={autonomousOptions} onChange={updateAutonomousOptions} />
+              </TicketOptionsToggleGroup>
               {error && <p className="text-sm text-danger">{error}</p>}
             </div>
           </div>

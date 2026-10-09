@@ -211,6 +211,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async worktreeExists(slotPath: string): Promise<boolean> {
+    this.log("worktreeExists", { slotPath });
+    return true;
+  }
+
   async findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null> {
     this.log("findWorktreeByBranch", { repoPath, branch });
     return null;

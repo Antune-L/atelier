@@ -2049,6 +2049,7 @@ export class SlotManager {
     if (autonomousError && !this.isAutonomousDeliveryReconciliation(storedTicket)) throw new Error(autonomousError);
     // A test session must never be relaunched with a pipeline contract; the user stops it manually.
     if (storedTicket.testing) return;
+    if (!(await this.system.worktreeExists(slotPath(slotId)))) throw new Error(`Le worktree du slot ${slotId} n'existe pas : abandonne la carte puis recrée-la pour repartir d'un lancement complet.`);
     const recoveryGeneration = this.store.getImplementationPlan(ticketId)?.recovery?.generation;
     const previous = this.store.listExecutionRuns("ticket", ticketId)
       .findLast((run) => run.role === "orchestrator");

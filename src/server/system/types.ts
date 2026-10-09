@@ -278,6 +278,7 @@ export interface SystemAdapter {
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string): Promise<void>;
   findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null>;
+  worktreeExists(slotPath: string): Promise<boolean>;
   worktreeAdd(opts: GitWorktreeAddOptions): Promise<void>;
   /**
    * Check out an EXISTING remote branch into a worktree, resetting the local ref to origin/<startBranch>.

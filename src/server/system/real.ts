@@ -330,6 +330,10 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async worktreeExists(slotPath: string): Promise<boolean> {
+    return existsSync(join(slotPath, ".git"));
+  }
+
   async findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null> {
     const res = await $`git -C ${repoPath} worktree list --porcelain -z`.nothrow().quiet();
     if (res.exitCode !== 0) {

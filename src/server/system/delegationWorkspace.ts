@@ -224,6 +224,13 @@ async function lstatIfExists(path: string): Promise<Stats | null> {
   });
 }
 
+async function readdirIfExists(path: string): Promise<string[]> {
+  return readdir(path).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  });
+}
+
 async function fileState(root: string, path: string): Promise<FileState> {
   const absolutePath = join(root, path);
   const info = await lstatIfExists(absolutePath);
@@ -764,7 +771,7 @@ export class DelegationWorkspace {
   private async cleanupSlotWorktrees(slotPath: string, repoPath: string): Promise<void> {
     await this.preserveUnlocked({ slotPath, repoPath });
     const prefix = `${basename(slotPath)}${WORKSPACE_MARKER}`;
-    const entries = await readdir(dirname(slotPath));
+    const entries = await readdirIfExists(dirname(slotPath));
     const visited = new Set<string>();
     for (const entry of entries) {
       if (!entry.startsWith(prefix)) continue;
@@ -794,7 +801,7 @@ export class DelegationWorkspace {
   private async preserveUnlocked(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
     const prefix = `${basename(opts.slotPath)}${WORKSPACE_MARKER}`;
     const identities = new Set<string>();
-    for (const entry of await readdir(dirname(opts.slotPath))) {
+    for (const entry of await readdirIfExists(dirname(opts.slotPath))) {
       if (!entry.startsWith(prefix)) continue;
       const suffix = entry.slice(prefix.length);
       const identity = suffix.endsWith(JOURNAL_SUFFIX) ? suffix.slice(0, -JOURNAL_SUFFIX.length) : suffix;

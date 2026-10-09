@@ -57,6 +57,11 @@
   - The A1 packages install. The `apparmor` package already ships `/etc/apparmor.d/bwrap-userns-restrict`, while 24.04 only has it under `/usr/share/apparmor/extra-profiles`. The guide handles both.
   - Bun 1.3.14 installs, `kanban-release.sh` builds main, and the branch server answers `/health` on TCP, `forbidden` for `/api` on TCP and serves `/api` on the socket.
 - Real VPS, step 0 (2026-10-09): `x86_64`, Ubuntu 26.04 LTS, `kernel.apparmor_restrict_unprivileged_userns = 1`. Public listeners: SSH, Docker ports 80, 443, 6001, 6002, 8000 and 8080. Nothing listens on 52817.
+- Real VPS, A7 (2026-10-09): `/health` from the Mac times out (`000`), TCP `/api/settings` on the VPS returns `forbidden`, and a card with auto-merge or direct push is refused with the PR-only message. Remaining: a real card to PR with the Mac off, and a restart during a card.
+- Real VPS, Phase A (2026-10-09): release `f4c5949` installed, skills copied to `/var/lib/kanban/.agents/skills`, and `kanban.service` active with `dryRun=false`, the Claude binary ready and the Codex runtime `ready`.
+- First real card on the VPS failed with `ENOENT ... scandir '/var/lib/kanban/kanban-worktrees'`: the slot reset lists the worktrees root before `git worktree add` creates it, so any fresh host fails. Fixed by treating a missing root as empty in `delegationWorkspace.ts`; reproduced before and passing after with a probe. Workaround on the VPS: create the directory as `kanban`.
+- After that failure, "relance en place" spawned Claude in the never-created `slot-1` worktree. The spawn ENOENT came from the missing cwd, and the Claude SDK reported it as a libc mismatch. The binary itself runs under `kanban` (`2.1.288`). Fix: `relaunchInPlace` now refuses a missing worktree with a clear message. A full-launch fallback was rejected because a regression review showed it could re-fork a branch that was already pushed.
+- The next card failed with `401 OAuth access token is invalid`: the `CLAUDE_CODE_OAUTH_TOKEN` in `kanban.env` is rejected. The user is checking and regenerating it.
 - Broker against a fake HTTPS Coolify:
   - Refused: Compose, custom run options, other repositories, foreign apps, wrong domains, other servers and other environment names.
   - Allowed: the normal create, deploy and delete cycle, rebuilt from the root config.
@@ -77,6 +82,8 @@
 Merge the branch into main after the user's go-ahead. The user then follows `docs/vps-install.md` Phase A and reports the acceptance checks.
 
 ## History
+
+- 2026-10-09: the user finished A1–A5 on the VPS; the service runs. Next: A6 tunnel and settings, then the A7 checks.
 
 - 2026-10-09: the user ran step 0 on the VPS. It runs Ubuntu 26.04, so the guide was adapted and Phase A was replayed in a 26.04 container.
 

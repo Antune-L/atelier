@@ -1,6 +1,6 @@
 # Running Kanban on a VPS
 
-This guide installs a second, independent Kanban instance on an Ubuntu 24.04 VPS that already runs Coolify. Cards created on the VPS board keep running while the Mac is off.
+This guide installs a second, independent Kanban instance on an Ubuntu 24.04 or 26.04 VPS that already runs Coolify. Cards created on the VPS board keep running while the Mac is off.
 
 Two phases:
 - **Phase A** runs ordinary cards in PR-only mode, without previews.
@@ -35,12 +35,12 @@ Note the architecture: browser validation in Phase B uses Google Chrome, availab
 
 ```bash
 sudo apt update && sudo apt install -y git gh tmux zsh python3 bubblewrap sqlite3 nodejs npm curl unzip apparmor-profiles apparmor-utils
-sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+[ -f /etc/apparmor.d/bwrap-userns-restrict ] || sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
 sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
 curl -fsSL https://bun.sh/install | sudo BUN_INSTALL=/usr/local bash -s "bun-v1.3.14"
 ```
 
-The AppArmor profile lets the Codex sandbox (bubblewrap) work without disabling the user-namespace restriction for the whole host.
+The AppArmor profile lets the Codex sandbox (bubblewrap) work without disabling the user-namespace restriction for the whole host. Ubuntu 26.04 already ships it in `/etc/apparmor.d`; Ubuntu 24.04 needs the copy from `apparmor-profiles`.
 
 ### A2. Users and directories
 

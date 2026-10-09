@@ -16,6 +16,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
 import { SkillsPreflightDialog } from "@/components/SkillsPreflightDialog";
 import { SlotPips } from "@/components/SlotPips";
+import { HostMetricsBadge } from "@/components/HostMetricsBadge";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
@@ -228,6 +229,7 @@ export function App() {
           )}
 
           <SlotPips slots={slots} />
+          <HostMetricsBadge />
 
           {view === "home" && (
             <div className="ml-auto flex items-center gap-2">

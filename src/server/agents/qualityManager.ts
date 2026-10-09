@@ -12,6 +12,7 @@ import type { ProjectConfig } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
+import { isSuccessStatus, previewStatus } from "../system/previewNetwork.ts";
 import { parsePackageManifest, LOCKFILE_NAMES } from "../system/repoInspection.ts";
 import type { SystemAdapter, ValidationCommandResult, ValidationRevision, ValidationServiceHandle, ValidationWorkspaceOptions } from "../system/types.ts";
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
@@ -1057,9 +1058,7 @@ export class QualityManager {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline && !signal.aborted) {
       try {
-        const response = await fetch(url, { headers, signal: AbortSignal.any([signal, AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS)]), redirect: "error" });
-        await response.body?.cancel();
-        if (response.ok) return;
+        if (isSuccessStatus(await previewStatus(url, headers, AbortSignal.any([signal, AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS)])))) return;
       } catch { /* NOTE(ali): the remote preview may still be becoming available. */ }
       await new Promise<void>((resolveWait) => setTimeout(resolveWait, HEALTH_POLL_MS));
     }

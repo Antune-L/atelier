@@ -191,6 +191,10 @@ sudo systemctl restart kanban
 sudo journalctl -u kanban-preview-broker -n 20 --no-pager
 ```
 
+The drop-in also sets `KANBAN_PREVIEW_CONNECT_ADDRESS=127.0.0.1`. The service blocks private addresses, and Docker rewrites a connection from the VPS to its own public address into the Coolify proxy's private address. Kanban's health checks and Chrome therefore reach previews through `127.0.0.1`, which Docker's port proxy forwards to the proxy.
+
+Coolify's API IP allowlist, if set, must include the VPS public address and the gateway of the `coolify` Docker network (`sudo docker network inspect coolify --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`).
+
 ### B3. Preview settings on the VPS board
 
 In **Settings → Coolify**, fill in the same Coolify URL, server, project, environment and domain as the broker, plus the preview username and password. Leave the token and SSH alias empty: the broker holds the token and performs the cleanup. Enable previews for the project with the recipe `.coolify/preview.json` (the Dockerfile recipe). Compose recipes are refused on this host.
@@ -248,6 +252,8 @@ Root never opens the database: every query and the backup run as `kanban`. Betwe
 Exit codes: `0` upgraded or already current, `1` refused or failed with the service on the previous release, `2` the rollback health check failed too, `64` bad usage.
 
 **Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3.
+
+**Updating units and broker files.** `kanban-upgrade` does not copy them either. When a commit changes `deploy/vps` or `deploy/preview-broker`, copy the changed files from `/opt/kanban/current` again as in A5, B1 and B2, run `sudo systemctl daemon-reload`, then restart the affected services.
 
 ### Manual upgrade
 

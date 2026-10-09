@@ -78,6 +78,10 @@
 - Devin availability did not refresh after toggling the quality owner, because the projects list carries `autonomousPilot`. The UI now refreshes projects after the toggle.
 - Agents cannot pass a multi-line `--body` with backticks to `gh pr create` in dontAsk mode. They fall back to `.pr-body.md` and cannot `rm` it, which blocks the clean-tree done gate (PR #193). `.pr-body.md` is now added to `.git/info/exclude` at boot.
 - `KANBAN_SLOTS` in `/etc/kanban/kanban.env` raises the slot count (default 5). The service MemoryMax is 8.5G on this VPS.
+- First Devin card (2026-10-09): the broker created and deployed the preview (revision `e7f98c8`) and the cleanup completed. Kanban never saw it ready and paused after 30 minutes with `Coolify deployment did not become ready within the preview timeout.`
+  - Root cause, proven with `systemd-run`: under the unit's `IPAddressDeny`, the call to `https://coolify.bixu.fr` times out (`000`). Without the deny it returns `401`, and through `--resolve ...:127.0.0.1` with the deny it also returns `401`. Docker DNATs a hairpin connection to the public IP into the proxy's private address (`coolify-proxy` = 10.0.1.7).
+  - Fix: `KANBAN_PREVIEW_CONNECT_ADDRESS=127.0.0.1` in the drop-in. The preview health probe and the quality health wait use `node:https` with a custom lookup, which keeps SNI and certificate checks on the hostname (probed against github.com). Chrome gets `--host-resolver-rules=MAP <preview host> 127.0.0.1` through the Playwright MCP config file, probed with a positive and a negative control.
+- `kanban-upgrade` comes from PR #194 (merged from a VPS card). It does not copy unit or broker files, so drop-in changes still need a manual `install` and `daemon-reload`.
 - Broker against a fake HTTPS Coolify:
   - Refused: Compose, custom run options, other repositories, foreign apps, wrong domains, other servers and other environment names.
   - Allowed: the normal create, deploy and delete cycle, rebuilt from the root config.

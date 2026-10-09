@@ -13,6 +13,7 @@ import type { QualityCriterion, QualityEvidence, QualityFunctionalBlocker, Quali
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, StdioMcpServerDefinition } from "../system/agentSession.ts";
 import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
+import { previewHostResolverArgs } from "../system/previewNetwork.ts";
 
 import type { ResolvedExecution } from "./executionConfig.ts";
 import { PLAYWRIGHT_MCP_VERSION, playwrightMcpArgs } from "./playwrightMcp.ts";
@@ -255,7 +256,8 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
     const authorization = `Basic ${Buffer.from(`${options.browserAuth.username}:${options.browserAuth.password}`).toString("base64")}`;
     sensitiveValues.push(authorization, authorization.slice("Basic ".length), options.browserAuth.password);
     configPath = join(tmpdir(), `kanban-quality-browser-auth-${randomUUID()}.json`);
-    browserConfig = { browser: { contextOptions: { httpCredentials: { ...options.browserAuth, origin: new URL(address.url).origin } } } };
+    const resolverArgs = previewHostResolverArgs(address.url);
+    browserConfig = { browser: { contextOptions: { httpCredentials: { ...options.browserAuth, origin: new URL(address.url).origin } }, ...(resolverArgs.length > 0 ? { launchOptions: { args: resolverArgs } } : {}) } };
   }
   const redact = (value: string): string => {
     let redacted = value;

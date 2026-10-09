@@ -54,6 +54,7 @@ export class PreviewConfig {
       environmentName: this.config.environmentName,
       domainBase: this.config.domainBase,
       tokenConfigured: this.config.token !== null,
+      previewAuthUsername: this.config.previewAuthUsername,
       previewAuthConfigured: this.config.previewAuthUsername !== null && this.config.previewAuthPassword !== null,
     });
   }

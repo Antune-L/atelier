@@ -52,6 +52,7 @@ export const previewSettingsSchema = z.object({
   environmentName: nonEmptyTextSchema.default(DEFAULT_PREVIEW_ENVIRONMENT_NAME),
   domainBase: previewDomainBaseSchema.nullable().default(null),
   tokenConfigured: z.boolean().default(false),
+  previewAuthUsername: nonEmptyTextSchema.nullable().default(null),
   previewAuthConfigured: z.boolean().default(false),
 });
 export type PreviewSettings = z.infer<typeof previewSettingsSchema>;

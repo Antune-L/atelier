@@ -62,15 +62,18 @@ export function CoolifySettings() {
       if (!active) return;
       setSettings(loaded);
       setDraft(loaded);
+      setUsername(loaded.previewAuthUsername ?? "");
     }).catch((cause: unknown) => {
       if (active) setError(errorMessage(cause, "Impossible de charger la connexion Coolify."));
     });
     return () => { active = false; };
   }, [setError]);
 
+  const trimmedUsername = username.trim();
+  const usernameChanged = trimmedUsername !== "" && trimmedUsername !== (settings?.previewAuthUsername ?? "");
   const dirty = settings !== null && draft !== null && (
     JSON.stringify(settingsInput(settings)) !== JSON.stringify(settingsInput(draft)) ||
-    token !== "" || username !== "" || password !== ""
+    token !== "" || usernameChanged || password !== ""
   );
 
   async function save(testConnection: boolean) {
@@ -79,13 +82,13 @@ export function CoolifySettings() {
     await run(async () => {
       const input: UpdatePreviewSettingsInput = settingsInput(draft);
       if (token.trim()) input.token = token.trim();
-      if (username.trim()) input.previewAuthUsername = username.trim();
+      if (usernameChanged) input.previewAuthUsername = trimmedUsername;
       if (password) input.previewAuthPassword = password;
       const result = await previewApi.updateSettings(input);
       setSettings(result.settings);
       setDraft(result.settings);
       setToken("");
-      setUsername("");
+      setUsername(result.settings.previewAuthUsername ?? "");
       setPassword("");
       flashSaved();
       if (testConnection) {
@@ -111,6 +114,7 @@ export function CoolifySettings() {
             const result = await previewApi.settings();
             setSettings(result.settings);
             setDraft(result.settings);
+            setUsername(result.settings.previewAuthUsername ?? "");
           }, "Impossible de charger la connexion Coolify.")}>Réessayer</Button>}
         </div>
       ) : (
@@ -150,8 +154,8 @@ export function CoolifySettings() {
             <div className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4 text-primary" />Accès protégé</div>
             <p className="text-xs text-muted-foreground">Chaque prévisualisation demande ces identifiants dans le navigateur. {settings?.previewAuthConfigured ? "Des identifiants sont déjà enregistrés." : "Définissez-les avant le premier déploiement."}</p>
             <div className="flex flex-col gap-3 sm:flex-row">
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Nom d'utilisateur</span><Input autoComplete="off" placeholder="Saisir pour remplacer" value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} /></label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Mot de passe</span><Input type="password" autoComplete="new-password" placeholder="Saisir pour remplacer" value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} /></label>
+              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Nom d'utilisateur</span><Input autoComplete="off" placeholder={settings?.previewAuthConfigured ? "Saisir pour remplacer" : "Choisissez un identifiant"} value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} /></label>
+              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Mot de passe</span><Input type="password" autoComplete="new-password" placeholder={settings?.previewAuthConfigured ? "••••••••" : "Choisissez un mot de passe"} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} /></label>
             </div>
           </div>
           <label className="flex flex-col gap-1.5">

@@ -19,6 +19,11 @@ export function usageLevel(percent: number | null): UsageLevel {
   return "normal";
 }
 
+export function usageValueText(percent: number | null, level: UsageLevel): string {
+  if (level === "unknown" || percent === null || Number.isNaN(percent)) return USAGE_LEVEL_STYLES.unknown.label;
+  return `${Math.round(percent)} % — ${USAGE_LEVEL_STYLES[level].label}`;
+}
+
 export function memPercent(usedBytes: number, totalBytes: number): number {
   if (totalBytes <= 0) return 0;
   return Math.min(100, Math.max(0, (usedBytes / totalBytes) * 100));

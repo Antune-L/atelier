@@ -5,6 +5,7 @@ import {
   formatGib,
   memPercent,
   usageLevel,
+  usageValueText,
 } from "./hostMetrics";
 
 const GIB = 1024 ** 3;
@@ -62,5 +63,15 @@ describe("formatGib", () => {
     expect(formatGib(8 * GIB, true)).toBe("8");
     expect(formatGib(8 * GIB, false)).toBe("8.0");
     expect(formatGib(7.96 * GIB, true)).toBe("8");
+  });
+});
+
+describe("usageValueText", () => {
+  test("formats percent and level label", () => {
+    expect(usageValueText(null, "unknown")).toBe("Inconnu");
+    expect(usageValueText(22.4, "normal")).toBe("22 % — Normal");
+    expect(usageValueText(60, "elevated")).toBe("60 % — Élevé");
+    expect(usageValueText(85, "critical")).toBe("85 % — Critique");
+    expect(usageValueText(50, "unknown")).toBe("Inconnu");
   });
 });

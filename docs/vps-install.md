@@ -55,16 +55,27 @@ printf 'kanban\nkanban-build\n' | sudo tee -a /etc/cron.deny /etc/at.deny
 
 Then check that `kanban` has no extra power: `sudo -l -U kanban` must list nothing and `id kanban` must show no `sudo` or `docker` group.
 
-### A3. Install a release
+### A3. Install the root scripts and a release
 
-Copy `deploy/vps/kanban-release.sh` from the repository to `/usr/local/sbin/kanban-release`, then build a reviewed commit of `main`:
+Files that root executes or loads (the release and upgrade scripts, the systemd units, the preview broker and its cleanup helper) are installed from a commit you reviewed, never from `/opt/kanban/current`: an upgrade deploys whatever `main` holds, so root only runs code you read at install time. Keep an admin review clone in your own account, outside `/var/lib/kanban`:
 
 ```bash
-sudo install -m 0755 kanban-release.sh /usr/local/sbin/kanban-release
-sudo kanban-release <full-commit-sha>
+git clone https://github.com/Antune-L/atelier.git ~/kanban-admin
+git -C ~/kanban-admin fetch
+git -C ~/kanban-admin log --oneline origin/main
 ```
 
-The script builds as `kanban-build` with `bun install --frozen-lockfile --ignore-scripts`, kills every leftover `kanban-build` process, copies the result to `/opt/kanban/releases/<sha>` owned by root, then points `/opt/kanban/current` at it.
+Pick the reviewed commit, set `sha=<full-commit-sha>`, then install the two scripts from it and build the release:
+
+```bash
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-release.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-release
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
+sudo kanban-release "$sha"
+```
+
+`kanban-release` runs each build step (`git clone`, `bun install --frozen-lockfile --ignore-scripts`, `bun run build:web`) as `kanban-build` in a transient systemd unit with the same `IPAddressDeny` filter as `kanban.service`: the build reaches GitHub and the npm registry, not Docker or Coolify, and systemd kills every process of a step when it ends, even on failure. The result is copied to `/opt/kanban/releases/<sha>` owned by root, then `/opt/kanban/current` points at it. `kanban-release --build-only <sha>` builds the release without switching `current`; it always uses the hard-coded repository URL and ignores `KANBAN_REPO_URL`.
+
+`kanban-release` and `kanban-upgrade` never update themselves from a release. To update them, rerun the two `install` lines with a newly reviewed `sha`.
 
 ### A4. Logins for the `kanban` user
 
@@ -116,9 +127,10 @@ sudo -u kanban -H git clone https://github.com/Antune-L/atelier.git /var/lib/kan
 
 ### A5. Start the service
 
-Copy `deploy/vps/kanban.service` to `/etc/systemd/system/`, then:
+Install the unit from the reviewed commit, then start it:
 
 ```bash
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now kanban
 sudo systemctl status kanban --no-pager
@@ -154,18 +166,25 @@ Prerequisites: Phase A works, a Coolify API token with the `read`, `write` and `
 ```bash
 sudo useradd --system --no-create-home --home-dir /var/lib/kanban-preview --shell /usr/sbin/nologin kanban-preview
 sudo install -d -o root -g root -m 0755 /opt/kanban-preview /etc/kanban-preview
-sudo install -m 0644 /opt/kanban/current/deploy/preview-broker/broker.ts /opt/kanban/current/deploy/preview-broker/kanban-preview-cleanup.py /opt/kanban/current/src/server/system/previewCleanup.py /opt/kanban-preview/
-sudo install -m 0600 -o root -g root /opt/kanban/current/deploy/preview-broker/config.example.json /etc/kanban-preview/config.json
+for file in deploy/preview-broker/broker.ts deploy/preview-broker/kanban-preview-cleanup.py src/server/system/previewCleanup.py; do
+  git -C ~/kanban-admin show "$sha:$file" | sudo install -m 0644 -o root -g root /dev/stdin "/opt/kanban-preview/$(basename "$file")"
+done
+git -C ~/kanban-admin show "$sha:deploy/preview-broker/config.example.json" | sudo install -m 0600 -o root -g root /dev/stdin /etc/kanban-preview/config.json
 sudo nano /etc/kanban-preview/config.json
 ```
 
-Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository and its Coolify source (`github_app`, `deploy_key` or `public` with its uuid). The project key is only a label: the broker matches projects by repository. The broker copies are only updated when you run the `install` line again, never by a release upgrade.
+`sha` is the reviewed commit from A3. Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository and its Coolify source (`github_app`, `deploy_key` or `public` with its uuid). The project key is only a label: the broker matches projects by repository. The broker copies are only updated when you run the `for` loop again with a reviewed `sha`, never by a release upgrade. Install `config.example.json` only once: rerunning that line overwrites your configuration.
 
 ### B2. Units
 
-Copy `kanban-preview-broker.service`, `kanban-preview-cleanup.socket` and `kanban-preview-cleanup@.service` to `/etc/systemd/system/`, and `kanban.service.d/preview-broker.conf` to `/etc/systemd/system/kanban.service.d/`. Then:
+Install the broker units and the `kanban.service` drop-in from the reviewed commit, then start them:
 
 ```bash
+for unit in kanban-preview-broker.service kanban-preview-cleanup.socket kanban-preview-cleanup@.service; do
+  git -C ~/kanban-admin show "$sha:deploy/vps/$unit" | sudo install -m 0644 -o root -g root /dev/stdin "/etc/systemd/system/$unit"
+done
+sudo install -d -o root -g root -m 0755 /etc/systemd/system/kanban.service.d
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service.d/preview-broker.conf" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service.d/preview-broker.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now kanban-preview-cleanup.socket kanban-preview-broker.service
 sudo systemctl restart kanban
@@ -201,6 +220,39 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
 
 ## Upgrade
 
+From the Mac:
+
+```bash
+ssh -t -p <ssh-port> <vps> sudo kanban-upgrade
+```
+
+The command prints each step and the commit before and after:
+1. Takes a lock in `/run`, so two upgrades never run at once.
+2. Reads the tip of `main` with `git ls-remote` on the hard-coded repository. It stops if that commit is already current.
+3. Checks free disk space (3 GB on the release, build and data disks, plus the database size for the backup).
+4. Builds the release with `kanban-release --build-only` while the service keeps running. A failed build stops here: the service still runs the old release.
+5. Checks, as `kanban` and read-only, that no execution run, quality validation, preview operation or busy slot is active, and lists them otherwise.
+6. Backs up the database as `kanban` to `/var/lib/kanban/backups/kanban-<utc-date>-<short-sha>.db`.
+7. Stops `kanban`, points `/opt/kanban/current` at the new release, and starts it.
+8. Requires 5 consecutive healthy answers from `GET /health` on `127.0.0.1` and the service port (`PORT` from the unit or `/etc/kanban/kanban.env`, else 52817), spread over about 20 seconds, with the unit active. It gives up after 2 minutes.
+9. Keeps the 5 most recent releases and the 10 most recent backups. The current and previous releases are never removed.
+
+Options:
+- `--sha <full-commit-sha>` upgrades to that commit instead of the tip of `main`.
+- `--force` upgrades even if work is running; that work is interrupted. Without it, the command refuses and lists what runs.
+
+Root never opens the database: every query and the backup run as `kanban`. Between the check (step 5) and the stop (step 7), an automation or autonomous delivery can still start. This is accepted because you run the command yourself; there is no drain mode.
+
+**Rollback.** If the health check fails, the command points `current` back to the previous release, restarts the service and checks its health again. It never restores the database. The output names the backup taken before the upgrade. The database schema only migrates forward, so the new release may already have migrated it: restore that backup only if the previous release fails on the migrated schema, with the service stopped and as `kanban`, and never after new pull requests or previews were created.
+
+Exit codes: `0` upgraded or already current, `1` refused or failed with the service on the previous release, `2` the rollback health check failed too, `64` bad usage.
+
+**Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3.
+
+### Manual upgrade
+
+Use this if `kanban-upgrade` is unavailable.
+
 1. Check that no card, quality validation or preview is running on the VPS board.
 2. Back up, then stop the service:
 
@@ -216,4 +268,4 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
    sudo systemctl start kanban
    ```
 
-Roll back by running `kanban-release` with the previous commit, but only if the database schema is compatible. Never restore an older database after new pull requests or previews were created.
+Roll back by running `kanban-release` with the previous commit, then restarting the service, but only if the database schema is compatible. Never restore an older database after new pull requests or previews were created.

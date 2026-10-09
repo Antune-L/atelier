@@ -23,6 +23,8 @@
 - D11: the VPS uses the owner's GitHub account with a fine-grained token limited to the owner's repos. Organization repos where the owner is only a collaborator may use a classic token. There is no robot account, so rulesets, CODEOWNERS and the never-APPROVE rule bring no protection. PR-only delivery is enforced by Kanban's cloud role instead.
 - D12: there is one `gh` login per VPS, not a token per project. A fine-grained token covers every selected repo of one owner, and a classic token covers everything.
 - D13: the Mac keeps today's direct preview mode. Only the VPS uses the broker.
+- D14: no update button in the VPS UI. The server and its agents share the `kanban` user (D8), so a button would give agents a trigger for a root action. No socket, `.path` unit or HTTP route reachable by `kanban` starts an upgrade. Upgrades run as `ssh <vps> sudo kanban-upgrade`.
+- D15: every file root executes or loads on the VPS (`kanban-release`, `kanban-upgrade`, the units, the broker and its cleanup helper) is installed from a reviewed commit with `git show <sha>:<path> | sudo install ... /dev/stdin <dest>`, never from `/opt/kanban/current`. Neither script updates itself from a release.
 
 ## Plan
 
@@ -39,7 +41,11 @@
   2. A root cleanup helper behind a socket-activated unit.
   3. A broker transport in PreviewManager.
   4. A configurable Playwright browser.
-- User side: VPS commands, logins, and the final real-card qualification.
+- Upgrade tooling:
+  1. `kanban-release --build-only <sha>` builds without switching `current`. Build steps run in transient systemd units with the service's `IPAddressDeny`, so no build process survives.
+  2. `kanban-upgrade`: lock in `/run`, `main` tip or `--sha`, disk check, build before stop, read-only active-work check as `kanban` (`--force` to override), backup as `kanban`, atomic switch, `/health` check, code-only rollback, retention.
+  3. Install guide: root files from a reviewed sha (D15), Upgrade section around `sudo kanban-upgrade`, manual fallback kept.
+- User side: VPS commands, logins, and the final real-card qualification. The real qualification of `kanban-upgrade` on the VPS is pending.
 
 ## Verified findings
 
@@ -92,6 +98,8 @@
 Merge the branch into main after the user's go-ahead. The user then follows `docs/vps-install.md` Phase A and reports the acceptance checks.
 
 ## History
+
+- 2026-10-09: added `kanban-upgrade` and `kanban-release --build-only` (D14, D15). Not yet run on the VPS.
 
 - 2026-10-09: the user finished A1–A5 on the VPS; the service runs. Next: A6 tunnel and settings, then the A7 checks.
 

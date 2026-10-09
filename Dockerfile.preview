@@ -31,7 +31,8 @@ ENV NODE_ENV=production \
     PORT=52817 \
     KANBAN_HOST=0.0.0.0 \
     KANBAN_DRY_RUN=1 \
-    KANBAN_SETUP=0
+    KANBAN_SETUP=0 \
+    KANBAN_HOST_ROLE=cloud
 USER bun
 EXPOSE 52817
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 CMD bun -e 'const response = await fetch("http://127.0.0.1:" + process.env.PORT + "/health"); const body = await response.json(); process.exit(response.ok && body.ok === true && body.dryRun === true ? 0 : 1);'

@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for Kanban
+Wants=network-online.target
+After=network-online.target kanban.service
+
+[Service]
+User=cloudflared
+Group=cloudflared
+SupplementaryGroups=kanban
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/kanban.token
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

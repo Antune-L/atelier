@@ -9,7 +9,7 @@ Two phases:
 ## What protects what
 
 - The service and its agents run as `kanban`, a user with no sudo, no docker group and no SSH key. Agents can read the service's data and provider logins, but nothing on the VPS that leads to root.
-- The interface is only reachable through a Unix socket that you open with an SSH tunnel. No port is published.
+- The interface is only reachable through a Unix socket that you open with an SSH tunnel. No port is published. To open it from any device instead, see [vps-remote-access.md](./vps-remote-access.md).
 - On this host (`KANBAN_HOST_ROLE=cloud`), Kanban refuses every merge and direct push: cards end with a pull request that you merge yourself.
 - Only one host runs quality validations and Devin cards. Set this in **Settings → Agents par défaut → Validation qualité sur ce poste** on each host.
 - In Phase B, the Coolify token lives in the preview broker, under the `kanban-preview` user. The broker only creates Dockerfile previews from its own configuration and only touches resources it created. A root helper cleans leftovers after checking the broker's registry.
@@ -149,6 +149,8 @@ Open http://localhost:52819. Then, on the VPS board:
 1. Add the project with the path `/var/lib/kanban/projects/atelier`.
 2. In **Settings → Agents par défaut**, turn off **Validation qualité sur ce poste**. The Mac stays the quality owner in Phase A.
 3. In **Settings → Fournisseurs** and **Settings → Skills**, check that Claude, Codex and the skills are detected.
+
+To open the board from a phone or any browser behind a Google login, follow [vps-remote-access.md](./vps-remote-access.md). The SSH tunnel stays the fallback.
 
 ### A7. Acceptance checks
 

@@ -25,6 +25,7 @@
 - D13: the Mac keeps today's direct preview mode. Only the VPS uses the broker.
 - D14: no update button in the VPS UI. The server and its agents share the `kanban` user (D8), so a button would give agents a trigger for a root action. No socket, `.path` unit or HTTP route reachable by `kanban` starts an upgrade. Upgrades run as `ssh <vps> sudo kanban-upgrade`.
 - D15: every file root executes or loads on the VPS (`kanban-release`, `kanban-upgrade`, the units, the broker and its cleanup helper) is installed from a reviewed commit with `git show <sha>:<path> | sudo install ... /dev/stdin <dest>`, never from `/opt/kanban/current`. Neither script updates itself from a release.
+- D16: the board is also reachable from any device through Cloudflare Tunnel + Access (`docs/vps-remote-access.md`): one allowed Google email, Google-only login, Access's independent MFA, and `cloudflared` validating the Access JWT before the Unix socket. The user accepted that Cloudflare terminates TLS and sees the traffic, terminal included. Tailscale (private, but a client on every device), Better Auth in Kanban (code plus a public login surface on the VPS) and self-hosted VPNs were rejected. The SSH tunnel stays as fallback.
 
 ## Plan
 
@@ -88,6 +89,12 @@
   - Cleanup reaches the helper and refuses non-registered apps.
 - Typecheck, lint and 279 existing tests pass. A regression review found no default-path regression; its only finding (SIGINT handling) is fixed.
 
+- Remote access, real VPS (2026-10-09):
+  - `cloudflared` 2026.10.0 from Cloudflare's apt repo runs as the `cloudflared` user with the `kanban` supplementary group and `--token-file`. The tunnel registered 4 connections and turned Healthy.
+  - An anonymous request to the board hostname gets a 302 to the team's Access login. After Google and the Access OTP, the board loads.
+  - The first post-login `forbidden` came from Kanban's guard: `DEV_HOST` had a stray trailing character. Through the socket with that Host header, `/health` returned 403 before the fix.
+  - Not yet checked: refusal of another Google account, both WebSockets from the phone, and the `/etc/cloudflared` entry in `InaccessiblePaths`, which needs the unit reinstalled from a commit that contains it.
+
 - Bun's default `Bun.serve` bind is `*:port`. With `hostname: "127.0.0.1"`, Node's HTTP client and curl still reach it through `localhost`.
 - `Antune-L/atelier` is public, so rulesets are free.
 - Fine-grained tokens on an organization need membership and, by default, owner approval.
@@ -102,6 +109,8 @@
 Merge the branch into main after the user's go-ahead. The user then follows `docs/vps-install.md` Phase A and reports the acceptance checks.
 
 ## History
+
+- 2026-10-09: remote access through Cloudflare Tunnel + Access set up on the VPS and documented in `docs/vps-remote-access.md` (D16), with `deploy/vps/cloudflared-kanban.service` and `/etc/cloudflared` hidden from `kanban.service`.
 
 - 2026-10-09: added `kanban-upgrade` and `kanban-release --build-only` (D14, D15). Not yet run on the VPS.
 

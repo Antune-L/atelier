@@ -11,6 +11,7 @@ import type { Orchestrator } from "../../shared/constants.ts";
 import { qualityEvidenceSchema } from "../../shared/quality.ts";
 import type { QualityCriterion, QualityEvidence, QualityFunctionalBlocker, QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationMode } from "../../shared/quality.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, StdioMcpServerDefinition } from "../system/agentSession.ts";
+import { safeJsonParse } from "../system/boundedCommand.ts";
 import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
 import { previewHostResolverArgs } from "../system/previewNetwork.ts";
@@ -51,7 +52,7 @@ const QUALITY_SCREENSHOT_FORMAT = "png";
 const QUALITY_SCREENSHOT_EXTENSION = `.${QUALITY_SCREENSHOT_FORMAT}`;
 const QUALITY_SCREENSHOT_LINK = /^- \[Screenshot of .+\]\(([^)\n]+)\)$/gm;
 const QUALITY_VISUAL_REJECTION = "No eligible viewport or element screenshot of this run supports this visual result";
-const qualityScreenshotInputSchema = z.object({ filename: z.string().nullish(), fullPage: z.boolean().nullish(), type: z.string().nullish() });
+const qualityViewportScreenshotInputSchema = z.object({ filename: z.null().optional(), fullPage: z.literal(false).nullish(), type: z.literal(QUALITY_SCREENSHOT_FORMAT).nullish() });
 const qualityResultSchema = z.object({
   criterionId: z.string().min(1),
   status: z.enum(["passed", "failed", "inconclusive"]),
@@ -123,22 +124,16 @@ function navigationIndex(observations: IndexedQualityObservation[], origins: str
   return navigation?.index ?? Number.POSITIVE_INFINITY;
 }
 
-function toolArguments(input: unknown): unknown {
-  if (typeof input !== "string") return input;
-  try {
-    return JSON.parse(input);
-  } catch {
-    return null;
-  }
+function isViewportScreenshot(input: unknown): boolean {
+  const toolArguments = typeof input === "string" ? safeJsonParse(input) : input;
+  return qualityViewportScreenshotInputSchema.safeParse(toolArguments).success;
 }
 
-function isViewportScreenshot(input: unknown): boolean {
-  const parsed = qualityScreenshotInputSchema.safeParse(toolArguments(input));
-  if (!parsed.success) return false;
-  const { filename, fullPage, type } = parsed.data;
-  if (filename !== undefined && filename !== null) return false;
-  if (fullPage === true) return false;
-  return type === undefined || type === null || type === QUALITY_SCREENSHOT_FORMAT;
+function screenshotName(output: string): string | null {
+  const names = [...output.matchAll(QUALITY_SCREENSHOT_LINK)]
+    .map((match) => basename(match[1] ?? ""))
+    .filter((name) => extname(name).toLowerCase() === QUALITY_SCREENSHOT_EXTENSION);
+  return names.length === 1 ? names[0] ?? null : null;
 }
 
 async function isFile(path: string): Promise<boolean> {
@@ -149,18 +144,16 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-async function qualityScreenshots(observations: IndexedQualityObservation[], earliestIndex: number, artifactDirectory: string): Promise<QualityScreenshot[]> {
-  const calls = observations.filter((observation) => observation.tool === QUALITY_SCREENSHOT_TOOL).slice(0, QUALITY_SCREENSHOT_LIMIT);
-  const screenshots = await Promise.all(calls.map(async (observation) => {
-    if (!observation.ok || observation.index <= earliestIndex || !isViewportScreenshot(observation.input)) return [];
-    const names = [...observation.output.matchAll(QUALITY_SCREENSHOT_LINK)].flatMap((match) => {
-      const name = basename(match[1] ?? "");
-      return extname(name).toLowerCase() === QUALITY_SCREENSHOT_EXTENSION ? [name] : [];
-    });
-    const [name] = names;
-    if (names.length !== 1 || name === undefined) return [];
+async function qualityScreenshots(observations: IndexedQualityObservation[], navigatedIndex: number, artifactDirectory: string): Promise<QualityScreenshot[]> {
+  const eligible = observations
+    .filter((observation) => observation.tool === QUALITY_SCREENSHOT_TOOL)
+    .slice(0, QUALITY_SCREENSHOT_LIMIT)
+    .filter((observation) => observation.ok && observation.index > navigatedIndex && isViewportScreenshot(observation.input));
+  const screenshots = await Promise.all(eligible.map(async ({ output }) => {
+    const name = screenshotName(output);
+    if (name === null) return [];
     const path = join(artifactDirectory, name);
-    return await isFile(path) ? [{ name, output: observation.output, path }] : [];
+    return await isFile(path) ? [{ name, output, path }] : [];
   }));
   return screenshots.flat();
 }
@@ -246,12 +239,11 @@ Application addresses: ${JSON.stringify(options.addresses)}
 Return your results using the supplied structured output schema.`;
 }
 
-function functionalAcceptance(result: QualityValidatorResponseResult, scenario: QualityCriterion, observations: IndexedQualityObservation[], origins: string[], previousInteractionIndex: number, screenshots: QualityScreenshot[]): QualityFunctionalAcceptance {
+function functionalAcceptance(result: QualityValidatorResponseResult, scenario: QualityCriterion, observations: IndexedQualityObservation[], navigatedIndex: number, previousInteractionIndex: number, screenshots: QualityScreenshot[]): QualityFunctionalAcceptance {
   const claimed = (result.actions ?? []).flatMap((tool) => {
     const name = browserToolName(tool);
     return name === null ? [] : [name];
   });
-  const navigatedIndex = navigationIndex(observations, origins);
   const actions = claimed.map((tool) => ({ tool, ok: observations.some((observation) => observation.ok && observation.tool === tool && observation.index >= navigatedIndex) }));
   const excerpt = result.observedText;
   const singleLine = excerpt.trim().length > 0 && !excerpt.includes("\n") && !excerpt.includes("\r");
@@ -259,12 +251,13 @@ function functionalAcceptance(result: QualityValidatorResponseResult, scenario: 
     const name = browserToolName(tool);
     return name === null ? [] : [name];
   })]);
+  const accepted = (interactionIndex: number | null, screenshot: QualityScreenshot | null): QualityFunctionalAcceptance => ({ accepted: true, actions, reason: "", interactionIndex, screenshot });
   const rejected = (reason: string): QualityFunctionalAcceptance => ({ accepted: false, actions, reason, interactionIndex: null, screenshot: null });
   if (navigatedIndex === Number.POSITIVE_INFINITY) return rejected("No successful navigation to the validation application was recorded");
   if (result.checkEvidenceIds.length > 0) return rejected("Functional scenarios cannot cite server check evidence");
   const visual = scenario.interaction === "visual";
   const screenshot = visual ? citedScreenshot(result.screenshot, screenshots) : null;
-  if (screenshot) return { accepted: true, actions, reason: "", interactionIndex: null, screenshot };
+  if (screenshot) return accepted(null, screenshot);
   if (!singleLine) return rejected(visual ? QUALITY_VISUAL_REJECTION : "The reported observation is not a single observed line");
   if (scenario.interaction === "interactive") {
     const earliest = Math.max(navigatedIndex, previousInteractionIndex);
@@ -272,20 +265,20 @@ function functionalAcceptance(result: QualityValidatorResponseResult, scenario: 
     if (!interaction) return rejected("No recorded user interaction of its own supports this interactive scenario");
     const observed = observations.some((observation) => observation.ok && observation.index >= interaction.index && QUALITY_OBSERVATION_TOOLS.has(observation.tool) && cited.has(observation.tool) && observation.output.includes(excerpt));
     if (!observed) return rejected("The reported state was not observed after the interaction");
-    return { accepted: true, actions, reason: "", interactionIndex: interaction.index, screenshot: null };
+    return accepted(interaction.index, null);
   }
   const observed = observations.some((observation) => observation.ok && observation.index >= navigatedIndex && QUALITY_DISPLAY_TOOLS.has(observation.tool) && cited.has(observation.tool) && observation.output.includes(excerpt));
-  if (observed) return { accepted: true, actions, reason: "", interactionIndex: null, screenshot: null };
+  if (observed) return accepted(null, null);
   return rejected(visual ? QUALITY_VISUAL_REJECTION : "The reported content was not observed in the validation application");
 }
 
-function functionalAcceptances(results: QualityValidatorResponseResult[], criteria: QualityCriterion[], observations: IndexedQualityObservation[], origins: string[], screenshots: QualityScreenshot[]): Map<string, QualityFunctionalAcceptance> {
+function functionalAcceptances(results: QualityValidatorResponseResult[], criteria: QualityCriterion[], observations: IndexedQualityObservation[], navigatedIndex: number, screenshots: QualityScreenshot[]): Map<string, QualityFunctionalAcceptance> {
   const acceptances = new Map<string, QualityFunctionalAcceptance>();
   let previousInteractionIndex = Number.NEGATIVE_INFINITY;
   for (const result of results) {
     const scenario = criteria.find((criterion) => criterion.id === result.criterionId);
     if (!scenario || results.filter((entry) => entry.criterionId === result.criterionId).length !== 1) continue;
-    const acceptance = functionalAcceptance(result, scenario, observations, origins, previousInteractionIndex, screenshots);
+    const acceptance = functionalAcceptance(result, scenario, observations, navigatedIndex, previousInteractionIndex, screenshots);
     if (acceptance.interactionIndex !== null && !result.blocker) previousInteractionIndex = acceptance.interactionIndex;
     acceptances.set(result.criterionId, acceptance);
   }
@@ -390,8 +383,9 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
   const indexedObservations = observations.map((observation, index) => ({ ...observation, index }));
   const origins = [...new Set(options.addresses.map((address) => new URL(address.url).origin))];
   const blockers: QualityFunctionalBlocker[] = [];
-  const screenshots = mode === "browser" ? await qualityScreenshots(indexedObservations, navigationIndex(indexedObservations, origins), artifactDirectory) : [];
-  const acceptances = functional && results ? functionalAcceptances(results, options.criteria, indexedObservations, origins, screenshots) : new Map<string, QualityFunctionalAcceptance>();
+  const navigatedIndex = navigationIndex(indexedObservations, origins);
+  const screenshots = await qualityScreenshots(indexedObservations, navigatedIndex, artifactDirectory);
+  const acceptances = functional && results ? functionalAcceptances(results, options.criteria, indexedObservations, navigatedIndex, screenshots) : new Map<string, QualityFunctionalAcceptance>();
   const evidence = options.criteria.map((criterion) => {
     const matchingResults = results ? results.filter((result) => result.criterionId === criterion.id) : [];
     const result = matchingResults.length === 1 ? matchingResults[0] : undefined;

@@ -105,7 +105,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
   if (options.signal.aborted) throw new Error("Validation cancelled before session startup");
   const startedAt = Date.now();
   const observations: QualityObservation[] = [];
-  const pendingTools = new Map<string, { name: string; input: unknown }>();
+  const pendingTools = new Map<string, Pick<QualityObservation, "tool" | "input">>();
   const toolDiagnostics: QualityToolDiagnostic[] = [];
   const permissionDenials: QualityPermissionDiagnostic[] = [];
   let permissionDenialCount = 0;
@@ -182,7 +182,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
         options.onEvent?.(event);
         if (event.type === "init") sessionId = event.sessionId;
         if (event.type === "tool_use" && event.toolCallId) {
-          pendingTools.set(event.toolCallId, { name: event.name, input: event.input });
+          pendingTools.set(event.toolCallId, { tool: event.name, input: event.input });
           if (toolDiagnostics.length < QUALITY_DIAGNOSTIC_TOOL_LIMIT) {
             const input = toolDiagnosticInputSchema.safeParse(event.input);
             const path = input.success ? input.data.file_path ?? input.data.path : undefined;
@@ -197,10 +197,10 @@ export async function runQualitySession(options: QualitySessionOptions) {
           }
         }
         if (event.type === "tool_result") {
-          const tool = pendingTools.get(event.toolCallId);
-          if (tool) {
+          const pending = pendingTools.get(event.toolCallId);
+          if (pending) {
             const output = toolOutputText(event.output);
-            observations.push({ toolCallId: event.toolCallId, tool: tool.name, input: tool.input, output, ok: event.ok });
+            observations.push({ toolCallId: event.toolCallId, ...pending, output, ok: event.ok });
             const diagnostic = toolDiagnostics.find((entry) => entry.toolCallId === event.toolCallId);
             if (diagnostic) {
               diagnostic.completedMs = lastEventMs;

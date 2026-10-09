@@ -61,6 +61,7 @@ import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import { deliveryPolicyError, isCloudHost, PR_ONLY_MESSAGE } from "./hostRole.ts";
+import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -849,6 +850,11 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(deps.previews ? createPreviewRoutes({ previews: deps.previews }) : new Elysia())
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
+    // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.
+    .get("/host-metrics", async () => {
+      const metrics = isCloudHost() ? await readHostMetrics() : null;
+      return new Response(JSON.stringify(metrics), { headers: { "content-type": "application/json" } });
+    })
     .get("/projects", () => ticketOperations.listProjects())
     .get("/projects/manage", () => {
       const projects: ManagedProject[] = [];

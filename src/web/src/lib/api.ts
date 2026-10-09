@@ -51,6 +51,7 @@ import type { Column, Orchestrator, PrState } from "@shared/constants";
 import { qualityFollowUpResponseSchema } from "@shared/quality";
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult } from "@shared/ticketMerge";
+import type { HostMetrics } from "@shared/types";
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -102,6 +103,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   projects: (): Promise<ProjectInfo[]> => request("/api/projects"),
+  hostMetrics: (): Promise<HostMetrics | null> => request("/api/host-metrics"),
   manageProjects: (): Promise<ManagedProject[]> => request("/api/projects/manage"),
   reorderProjects: (keys: string[]): Promise<{ ok: boolean }> =>
     request("/api/projects/order", { method: "PUT", body: JSON.stringify({ keys }) }),

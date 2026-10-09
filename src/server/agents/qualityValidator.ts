@@ -51,8 +51,14 @@ const QUALITY_SCREENSHOT_LIMIT = 12;
 const QUALITY_SCREENSHOT_FORMAT = "png";
 const QUALITY_SCREENSHOT_EXTENSION = `.${QUALITY_SCREENSHOT_FORMAT}`;
 const QUALITY_SCREENSHOT_LINK = /^- \[Screenshot of .+\]\(([^)\n]+)\)$/gm;
+const QUALITY_SCREENSHOT_LINK_BREAK = /[\r\n]|\]\(/;
 const QUALITY_VISUAL_REJECTION = "No eligible viewport or element screenshot of this run supports this visual result";
-const qualityViewportScreenshotInputSchema = z.object({ filename: z.null().optional(), fullPage: z.literal(false).nullish(), type: z.literal(QUALITY_SCREENSHOT_FORMAT).nullish() });
+const qualityViewportScreenshotInputSchema = z.object({
+  filename: z.null().optional(),
+  fullPage: z.literal(false).nullish(),
+  type: z.literal(QUALITY_SCREENSHOT_FORMAT).nullish(),
+  element: z.string().refine((label) => !QUALITY_SCREENSHOT_LINK_BREAK.test(label)).nullish(),
+});
 const qualityResultSchema = z.object({
   criterionId: z.string().min(1),
   status: z.enum(["passed", "failed", "inconclusive"]),
@@ -76,6 +82,7 @@ interface QualityScreenshot {
   name: string;
   output: string;
   path: string;
+  index: number;
 }
 interface QualityFunctionalAcceptance {
   accepted: boolean;
@@ -149,11 +156,11 @@ async function qualityScreenshots(observations: IndexedQualityObservation[], nav
     .filter((observation) => observation.tool === QUALITY_SCREENSHOT_TOOL)
     .slice(0, QUALITY_SCREENSHOT_LIMIT)
     .filter((observation) => observation.ok && observation.index > navigatedIndex && isViewportScreenshot(observation.input));
-  const screenshots = await Promise.all(eligible.map(async ({ output }) => {
+  const screenshots = await Promise.all(eligible.map(async ({ output, index }) => {
     const name = screenshotName(output);
     if (name === null) return [];
     const path = join(artifactDirectory, name);
-    return await isFile(path) ? [{ name, output, path }] : [];
+    return await isFile(path) ? [{ name, output, path, index }] : [];
   }));
   return screenshots.flat();
 }
@@ -257,10 +264,15 @@ function functionalAcceptance(result: QualityValidatorResponseResult, scenario: 
   if (result.checkEvidenceIds.length > 0) return rejected("Functional scenarios cannot cite server check evidence");
   const visual = scenario.interaction === "visual";
   const screenshot = visual ? citedScreenshot(result.screenshot, screenshots) : null;
-  if (screenshot) return accepted(null, screenshot);
+  const earliest = Math.max(navigatedIndex, previousInteractionIndex);
+  if (screenshot) {
+    const interaction = observations.find((observation) => observation.ok && observation.index > earliest && observation.index < screenshot.index && QUALITY_INTERACTION_TOOLS.has(observation.tool) && claimed.includes(observation.tool));
+    if (claimed.some((tool) => QUALITY_INTERACTION_TOOLS.has(tool)) && !interaction) return rejected("No recorded user interaction of its own precedes the cited screenshot");
+    if (screenshot.index <= earliest) return rejected("The cited screenshot predates this scenario");
+    return accepted(interaction?.index ?? null, screenshot);
+  }
   if (!singleLine) return rejected(visual ? QUALITY_VISUAL_REJECTION : "The reported observation is not a single observed line");
   if (scenario.interaction === "interactive") {
-    const earliest = Math.max(navigatedIndex, previousInteractionIndex);
     const interaction = observations.find((observation) => observation.ok && observation.index > earliest && QUALITY_INTERACTION_TOOLS.has(observation.tool) && claimed.includes(observation.tool));
     if (!interaction) return rejected("No recorded user interaction of its own supports this interactive scenario");
     const observed = observations.some((observation) => observation.ok && observation.index >= interaction.index && QUALITY_OBSERVATION_TOOLS.has(observation.tool) && cited.has(observation.tool) && observation.output.includes(excerpt));
@@ -377,7 +389,7 @@ export async function runQualityValidator(options: QualityValidatorOptions): Pro
   const response = functional ? qualityFunctionalResponseSchema.safeParse(structuredOutput) : qualityResponseSchema.safeParse(structuredOutput);
   const results: QualityValidatorResponseResult[] | null = response.success ? response.data.results.map((result) => ({ ...result, summary: redact(result.summary), output: redact(result.output), observedText: redact(result.observedText) })) : null;
   const serverCheckObservations = functional ? [] : options.checks.filter((check) => check.kind === "command" && check.authority === "server" && check.status !== "inconclusive");
-  await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations, serverCheckObservations, diagnostics: session.diagnostics, response: results === null ? null : { results } }, (_key, value: unknown) => typeof value === "string" ? redact(value) : value, 2));
+  await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations: observations.map((observation) => ({ ...observation, input: undefined })), serverCheckObservations, diagnostics: session.diagnostics, response: results === null ? null : { results } }, (_key, value: unknown) => typeof value === "string" ? redact(value) : value, 2));
   const successful = observations.filter((observation) => observation.ok);
   const navigated = successful.some((observation) => observation.tool === "browser_navigate");
   const indexedObservations = observations.map((observation, index) => ({ ...observation, index }));

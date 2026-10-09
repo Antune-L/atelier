@@ -4,7 +4,7 @@ import { qualityCriterionSchema, qualityScenarioInteractionSchema } from "./qual
 
 export const AUTONOMOUS_DEFAULT_MAX_CORRECTIONS = 1;
 export const AUTONOMOUS_MAX_CORRECTIONS = 3;
-export const AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES = 60;
+export const AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES = 180;
 export const AUTONOMOUS_MAX_TIMEOUT_MINUTES = 1440;
 
 export const autonomousDeliverySchema = z.enum(["pr_only", "merge"]);

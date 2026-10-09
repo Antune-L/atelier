@@ -147,7 +147,7 @@ Open http://localhost:52819. Then, on the VPS board:
 
 ## Phase B: previews through the broker
 
-Prerequisites: Phase A works, a Coolify API token with the `write` and `deploy` permissions (not `root`), and the kanban-agents preview recipe (`Dockerfile.preview`).
+Prerequisites: Phase A works, a Coolify API token with the `read`, `write` and `deploy` permissions (not `root`, not `read:sensitive`), and the kanban-agents preview recipe (`Dockerfile.preview`).
 
 ### B1. Broker user, files and configuration
 
@@ -159,7 +159,7 @@ sudo install -m 0600 -o root -g root /opt/kanban/current/deploy/preview-broker/c
 sudo nano /etc/kanban-preview/config.json
 ```
 
-Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository and its Coolify source (`github_app`, `deploy_key` or `public` with its uuid). The project key must match the project key on the VPS board. The broker copies are only updated when you run the `install` line again, never by a release upgrade.
+Fill in the Coolify URL, token, server, project, environment name, preview domain and, for each project, the repository and its Coolify source (`github_app`, `deploy_key` or `public` with its uuid). The project key is only a label: the broker matches projects by repository. The broker copies are only updated when you run the `install` line again, never by a release upgrade.
 
 ### B2. Units
 
@@ -188,7 +188,7 @@ Devin cards then run on the VPS and stay unavailable on the Mac.
 
 ```bash
 sudo npx -y playwright install --with-deps chrome
-sudo -u kanban -H npx -y @playwright/mcp@0.0.83 --help
+cd /tmp && sudo -u kanban -H npx -y @playwright/mcp@0.0.83 --help
 ```
 
 The second command caches the pinned Playwright MCP for the `kanban` user, because quality validation runs it offline.

@@ -62,6 +62,16 @@
 - First real card on the VPS failed with `ENOENT ... scandir '/var/lib/kanban/kanban-worktrees'`: the slot reset lists the worktrees root before `git worktree add` creates it, so any fresh host fails. Fixed by treating a missing root as empty in `delegationWorkspace.ts`; reproduced before and passing after with a probe. Workaround on the VPS: create the directory as `kanban`.
 - After that failure, "relance en place" spawned Claude in the never-created `slot-1` worktree. The spawn ENOENT came from the missing cwd, and the Claude SDK reported it as a libc mismatch. The binary itself runs under `kanban` (`2.1.288`). Fix: `relaunchInPlace` now refuses a missing worktree with a clear message. A full-launch fallback was rejected because a regression review showed it could re-fork a branch that was already pushed.
 - The next card failed with `401 OAuth access token is invalid`: the `CLAUDE_CODE_OAUTH_TOKEN` in `kanban.env` is rejected. The user is checking and regenerating it.
+- A7 test 4 (2026-10-09): after the token was regenerated, a VPS card opened draft PR #192 (1 file, not merged). Whether the Mac was off, and whether Codex ran under bubblewrap, is not recorded yet. Test 5 (restart during a card) is pending. Fixes `dc34077` are pushed but not yet released on the VPS.
+- Real VPS, Phase B (2026-10-09):
+  - The broker started (`preview broker ready`, project `atelier`).
+  - Coolify answered 403 `You are not allowed to access the API.` until the VPS addresses were added to Coolify's API IP allowlist. Requests from the VPS to its own domain are hairpinned through Docker.
+  - The token needs `read` as well; the guide now says so.
+  - Chrome and Playwright MCP 0.0.83 install on Ubuntu 26.04 (checked in a container and on the VPS). The MCP cache step must run from a directory `kanban` can read, so the guide now uses `cd /tmp`.
+  - Next: B4 owner switch and B6, a Devin card with a preview and its cleanup.
+- Devin availability did not refresh after toggling the quality owner, because the projects list carries `autonomousPilot`. The UI now refreshes projects after the toggle.
+- Agents cannot pass a multi-line `--body` with backticks to `gh pr create` in dontAsk mode. They fall back to `.pr-body.md` and cannot `rm` it, which blocks the clean-tree done gate (PR #193). `.pr-body.md` is now added to `.git/info/exclude` at boot.
+- `KANBAN_SLOTS` in `/etc/kanban/kanban.env` raises the slot count (default 5). The service MemoryMax is 8.5G on this VPS.
 - Broker against a fake HTTPS Coolify:
   - Refused: Compose, custom run options, other repositories, foreign apps, wrong domains, other servers and other environment names.
   - Allowed: the normal create, deploy and delete cycle, rebuilt from the root config.

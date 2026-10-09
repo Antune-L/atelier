@@ -264,6 +264,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const lines = new Set(current.split("\n").map((l) => l.trim()).filter(Boolean));
     lines.add(".claude/");
     lines.add(".mcp.json");
+    lines.add(".pr-body.md");
     await Bun.write(excludePath, `${[...lines].join("\n")}\n`);
   }
 

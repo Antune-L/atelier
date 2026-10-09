@@ -34,7 +34,7 @@ import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { patchAppSettings, useAppSettings } from "@/hooks/useAppSettings";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProfiles } from "@/hooks/useProfiles";
-import { useProjects } from "@/hooks/useProjects";
+import { refreshProjects, useProjects } from "@/hooks/useProjects";
 import { useTheme } from "@/hooks/useTheme";
 import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } from "@/lib/display";
 import { THEMES, type Theme } from "@/lib/theme";
@@ -415,7 +415,7 @@ function AgentDefaultsSettings({ query }: { query: string }) {
         <div className="flex items-center gap-2">
           <Switch
             checked={settings?.qualityOwner ?? true}
-            onCheckedChange={(value) => void patchAppSettings({ qualityOwner: value })}
+            onCheckedChange={(value) => void patchAppSettings({ qualityOwner: value }).then(refreshProjects)}
           />
           <span className="text-sm">Validation qualité sur ce poste</span>
         </div>

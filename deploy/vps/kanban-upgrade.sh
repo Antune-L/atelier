@@ -70,7 +70,7 @@ fi
 
 # Runs a command as the service user with a minimal environment. Root never opens the database itself.
 as_service() {
-  runuser -u "$SERVICE_USER" -- env -i HOME="$SERVICE_HOME" PATH="$SAFE_PATH" "$@"
+  runuser -u "$SERVICE_USER" -- env -i -C "$SERVICE_HOME" HOME="$SERVICE_HOME" PATH="$SAFE_PATH" "$@"
 }
 
 # Strips control characters from text read out of the kanban-owned database before printing it.

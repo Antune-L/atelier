@@ -134,6 +134,7 @@ const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
   "Some browser scenarios could not be exercised in the validation environment.": "Certains scénarios n’ont pas pu être exécutés dans le navigateur de l’environnement de validation.",
   "Functional scenarios cannot cite server check evidence": "Un scénario fonctionnel ne peut pas s’appuyer sur les contrôles du serveur.",
   "No recorded user interaction supports this interactive scenario": "Aucune interaction enregistrée ne justifie ce scénario interactif.",
+  "No eligible viewport or element screenshot of this run supports this visual result": "Aucune capture d’écran recevable (zone visible ou élément) de cette exécution ne justifie ce résultat visuel.",
   "Validation cancelled before scenario preparation": "La validation a été annulée avant la préparation des scénarios.",
   "Scenario preparation did not return valid scenarios": "La préparation des scénarios n’a pas renvoyé de scénarios valides.",
 };

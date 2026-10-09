@@ -46,7 +46,7 @@ export const projectValidationSchema = z.object({
 });
 export type ProjectValidation = z.infer<typeof projectValidationSchema>;
 
-export const qualityScenarioInteractionSchema = z.enum(["interactive", "display"]);
+export const qualityScenarioInteractionSchema = z.enum(["interactive", "display", "visual"]);
 export type QualityScenarioInteraction = z.infer<typeof qualityScenarioInteractionSchema>;
 
 export const qualityCriterionSchema = z.object({

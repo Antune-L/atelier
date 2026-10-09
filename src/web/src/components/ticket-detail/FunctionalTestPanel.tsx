@@ -7,7 +7,7 @@ import { PREPARATION_COMMAND_SUMMARIES, QualityResult, QualityRunStatus, quality
 import { formatDuration } from "@/lib/display";
 import { formatQualityCriterionText, formatQualityEvidenceSummary, formatQualityMessage, qualityFunctionalBlockerLabel } from "@/lib/qualityMessages";
 
-const INTERACTION_LABELS: Record<QualityScenarioInteraction, string> = { interactive: "Interaction", display: "Affichage" };
+const INTERACTION_LABELS: Record<QualityScenarioInteraction, string> = { interactive: "Interaction", display: "Affichage", visual: "Rendu visuel" };
 const SCOPE_NOTE = "Un test réussi dans le navigateur ne remplace ni les contrôles techniques ni la validation avant livraison.";
 const PREREQUISITES_NOTE = "Les contrôles techniques (types, qualité du code, tests) n’ont pas été exécutés pendant ce test.";
 

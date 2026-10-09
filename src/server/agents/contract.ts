@@ -114,7 +114,7 @@ function buildImplementingSteps(
 
 /** Step 1 label of the contract: a PRD planning phase or a direct jump to implementing. */
 function buildPlanningStep(ticket: Ticket): string {
-  if (ticket.autonomous) return '1. planning : lis le projet et ses scripts existants. Avant toute modification, appelle submit_autonomous_plan({plan,criteria:[{id,text,source:"ticket",required:true,independent:true,expected,interaction}],unitTests:"present" ou "absent",unitTestPreparation}). Décris TOUS les cas d’acceptation initiaux, leurs interactions, leurs résultats attendus, et la préparation des tests unitaires existants. Le backend fige ce plan, vérifie les prérequis de preview et conserve un budget commun à toutes les reprises. Si un prérequis manque, conserve le travail et attends sa résolution.';
+  if (ticket.autonomous) return '1. planning : lis le projet et ses scripts existants. Avant toute modification, appelle submit_autonomous_plan({plan,criteria:[{id,text,source:"ticket",required:true,independent:true,expected,interaction}],unitTests:"present" ou "absent",unitTestPreparation}). Décris TOUS les cas d’acceptation initiaux, leurs interactions, leurs résultats attendus, et la préparation des tests unitaires existants. interaction vaut "interactive", "display" ou "visual" ; choisis "visual" pour un cas d’apparence (couleur, icône, mise en page, jauge, rafraîchissement visuel) que seule une capture d’écran prouve. Le backend fige ce plan, vérifie les prérequis de preview et conserve un budget commun à toutes les reprises. Si un prérequis manque, conserve le travail et attends sa résolution.';
   if (ticket.prdEnabled) return "1. planning → submit_prd → (attente prd_validated)";
   return "1. implementing";
 }

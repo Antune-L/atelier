@@ -55,3 +55,7 @@ A child can finish integration before its parent records completion. Keep the su
 Coolify repository-list lookup uses the GitHub App's numeric `id`, while application creation uses its `uuid`; preserve both rather than substituting one for the other. Parse public-source rows with `id: 0` and nullable installation metadata before filtering for installed Apps. Missing required metadata is incomplete evidence, not proof that an App is uninstalled.
 
 Coolify key inventory includes private/public key material, so validate responses into UUID/name metadata before returning them to clients. Do not filter selectable keys by `is_git_related`: on Coolify 4.3.23, a deploy key already installed on GitHub was still marked false before its first application association. Inventory presence does not prove repository clone access.
+
+## Claude sub-agent tool is `Task` internally
+
+Claude Code lists its sub-agent tool as `Task` in the `system/init` tool list even though the model calls it `Agent`. Putting either `Task` or `Agent` in `disallowedTools` removes it entirely, even when `Agent` is in `allowedTools`, so fan-out orchestrators silently never launch their scouts. Block built-in agents with `permissionDeny` `Agent(general-purpose|Explore|Plan)` instead; only the scouts themselves keep both names disallowed. On Codex, the orchestrator's `spawn_agent` passes the PreToolUse policy (no `agent_type` in its payload) while declared scouts are denied.

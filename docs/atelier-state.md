@@ -153,6 +153,23 @@ already validated and must be implemented as-is (no `submit_prd`).
 - Files: `shared/constants.ts`, `shared/schemas.ts`, `server/agents/{atelier,sessionConfig,atelierManager}.ts`,
   `server/system/codexProvider.ts`, `web/src/components/atelier/{ResearchFields,NewConversationForm,ConversationPanel}.tsx`.
 
+#### Gotcha: the Claude sub-agent tool is `Task` internally
+
+- Claude Code names its sub-agent tool `Task` internally (that name is in the `system/init` tool
+  list) even though the model calls it `Agent`. Disallowing either `Task` or `Agent` removes the
+  tool entirely, even with `Agent` in `allowedTools`: the scouts never launch.
+- Fan-out orchestrators (Atelier adversarial, triage "Analyse +", batch feasibility) therefore use
+  `READONLY_FANOUT_DISALLOWED = ["Edit", "Write", "Bash"]` and block the built-in agents through
+  `permissionDeny` `Agent(general-purpose|Explore|Plan)`. Scouts keep both `Task` and `Agent` in
+  their `disallowedTools` (`SCOUT_DISALLOWED`), so they cannot recurse.
+- Codex: `prepareAgents` enables `agents` with `max_depth: 1` for role `atelier`; whether Codex
+  CLI 0.160.0 also needs a `[features]` flag for multi-agent was not confirmed live (no App Server
+  probe run for this fix). The PreToolUse policy allows the orchestrator's
+  own `spawn_agent` (no `agent_type` in the hook payload, `restrictNestedAgents` only applies to the
+  implementer role) and denies it to scouts (`agent_type` in the declared scout types).
+- Live check: `KANBAN_REAL_SDK_PROBE=1 bun test src/server/system/claudeSubagentProbe.test.ts`
+  (skipped by default, needs Claude credentials).
+
 ## Lots and status
 
 | Lot | Scope | Status |

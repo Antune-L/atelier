@@ -114,7 +114,7 @@ export function toSdkEffort(effort: string | null): SdkEffort | undefined {
 const HIDDEN_COMMIT_ATTRIBUTION = { commit: "" };
 
 /** Build the `settings` partial: hide commit attribution always, add allow/deny permissions when set. */
-function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settings"> {
+export function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settings"> {
   const settings: NonNullable<Options["settings"]> = { attribution: HIDDEN_COMMIT_ATTRIBUTION };
   const permissions: { allow?: string[]; deny?: string[] } = {};
   if (allow && allow.length > 0) permissions.allow = allow;
@@ -123,7 +123,7 @@ function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settin
   return { settings };
 }
 
-function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {
+export function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {
   const out: SdkAgents = {};
   for (const [name, def] of Object.entries(agents)) {
     const effort = toSdkEffort(def.effort ?? null);

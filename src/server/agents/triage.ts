@@ -5,6 +5,7 @@ import {
   CODEX_EFFORTS,
   CODEX_MODELS,
   FEASIBILITY_SCOUT_AGENT_NAME,
+  FEASIBILITY_VERIFIER_AGENT_NAME,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
 } from "../../shared/constants.ts";
 import type { CommitLanguage, Orchestrator } from "../../shared/constants.ts";
@@ -34,13 +35,39 @@ function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { 
   }
   return en
     ? [
-        `You are a READ-ONLY ${sessionKind.en} session (only Read, Glob, Grep and the read-only Figma`,
-        "MCP tools are available; Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
+        `You are a READ-ONLY ${sessionKind.en} session (only Read, Glob, Grep, the read-only Figma MCP tools`,
+        "and the `Agent` sub-agent tool are available; Edit/Write/Bash are uncallable). Do not attempt to modify the repository.",
       ]
     : [
-        `Tu es une session de ${sessionKind.fr} en LECTURE SEULE (seuls Read, Glob, Grep et les outils`,
-        "MCP Figma de lecture sont disponibles ; Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
+        `Tu es une session de ${sessionKind.fr} en LECTURE SEULE (seuls Read, Glob, Grep, les outils MCP Figma`,
+        "de lecture et le tool de sous-agents `Agent` sont disponibles ; Edit/Write/Bash sont inappelables). N'essaie pas de modifier le dépôt.",
       ];
+}
+
+/** How the orchestrator launches one read-only sub-agent of type `name` on each provider. */
+export function subagentSpawnHint(driver: Orchestrator, name: string, en = false): string {
+  if (driver === "codex") {
+    return en
+      ? `\`spawn_agent\` with \`agent_type: "${name}"\`, \`fork_turns: "none"\` and a unique \`task_name\` (lowercase letters, digits, \`_\`)`
+      : `\`spawn_agent\` avec \`agent_type: "${name}"\`, \`fork_turns: "none"\` et un \`task_name\` unique (lettres minuscules, chiffres, \`_\`)`;
+  }
+  return en ? `the \`Agent\` tool with \`subagent_type: "${name}"\`` : `le tool \`Agent\` avec \`subagent_type: "${name}"\``;
+}
+
+/** Sub-agent discipline shared by every feasibility orchestrator: wait in the same turn, never nest. */
+export function subagentDisciplineLines(driver: Orchestrator, en = false): string[] {
+  if (en) {
+    return [
+      driver === "codex" ? "Wait for every sub-agent with `wait_agent` before moving on." : "Wait for every sub-agent within this same turn: never run one in the background.",
+      "Sub-agents do not inherit this conversation: copy the exact ticket into each prompt.",
+      "NEVER nest sub-agents: a sub-agent must never launch another one.",
+    ];
+  }
+  return [
+    driver === "codex" ? "Attends chaque sous-agent avec `wait_agent` avant de passer à l'étape suivante." : "Attends chaque sous-agent dans ce même tour : n'en lance jamais en arrière-plan.",
+    "Les sous-agents n'héritent pas de cette conversation : recopie le ticket exact dans chaque prompt.",
+    "N'imbrique JAMAIS les sous-agents : un sous-agent ne doit jamais en lancer un autre.",
+  ];
 }
 
 /**
@@ -216,13 +243,25 @@ export function buildTriageChannelPrompt(
   const mission = en
     ? [
         "## Your mission",
-        "Explore THIS repository (read-only) and decide whether the ticket is implementable",
-        "EXACTLY as written, without rewording it.",
+        "Decide whether the ticket is implementable EXACTLY as written against THIS repository, without",
+        "rewording it. You orchestrate two fresh-context read-only sub-agents, one after the other:",
+        `1. ONE feasibility scout via ${subagentSpawnHint(driver, FEASIBILITY_SCOUT_AGENT_NAME, true)}: it returns`,
+        "   verdict, summary, reasons/questions per the verdict, files read, suggestedModel/suggestedEffort if implementable.",
+        `2. Then ONE verifier via ${subagentSpawnHint(driver, FEASIBILITY_VERIFIER_AGENT_NAME, true)}, given the exact`,
+        "   ticket AND the scout's full report: it re-checks every cited path and decisive claim and hunts for what was missed.",
+        "3. Decide yourself: re-read in the files every contested or decisive claim, then submit the final verdict.",
+        ...subagentDisciplineLines(driver, true),
       ]
     : [
         "## Ta mission",
-        "Explore CE dépôt (en lecture seule) et décide si le ticket est implémentable",
-        "EXACTEMENT tel qu'il est écrit, sans le reformuler.",
+        "Décide si le ticket est implémentable EXACTEMENT tel qu'il est écrit contre CE dépôt, sans le",
+        "reformuler. Tu orchestres deux sous-agents en lecture seule à contexte frais, l'un après l'autre :",
+        `1. UN scout de faisabilité via ${subagentSpawnHint(driver, FEASIBILITY_SCOUT_AGENT_NAME)} : il renvoie`,
+        "   verdict, summary, reasons/questions selon le verdict, files lus, suggestedModel/suggestedEffort si implementable.",
+        `2. Puis UN vérificateur via ${subagentSpawnHint(driver, FEASIBILITY_VERIFIER_AGENT_NAME)}, avec le ticket exact`,
+        "   ET le rapport complet du scout : il revérifie chaque chemin cité et chaque affirmation décisive, et cherche ce qui a été manqué.",
+        "3. Tranche toi-même : relis dans les fichiers chaque affirmation contestée ou décisive, puis soumets le verdict final.",
+        ...subagentDisciplineLines(driver),
       ];
 
   const lines: string[] = [
@@ -244,7 +283,7 @@ export function buildTriageChannelPrompt(
 
 /**
  * Builds the read-only DEEP triage prompt ("Analyse +"): the session fans out PARALLEL sub-agents
- * (feasibility + solutions angles), judges their findings, then submits the verdict AND the concrete
+ * (feasibility + solutions angles), has a verifier challenge its draft, then submits the verdict AND the concrete
  * deployable solution options via `submit_triage` (the `solutions` field). Same strict contract rules
  * as the normal triage for verdict/questions/reasons/files/suggested*.
  */
@@ -266,61 +305,53 @@ export function buildTriagePlusChannelPrompt(
       ? `Project: ${project.label} (base branch: ${baseBranch})`
       : `Projet : ${project.label} (branche de base : ${baseBranch})`,
     "",
-    ...(driver === "codex"
-      ? readOnlyFramingLines("codex", en, { en: "deep analysis", fr: "analyse approfondie" })
-      : en
-        ? [
-            "You are a READ-ONLY deep-analysis session on the real repository (no worktree).",
-            "Only Read, Glob, Grep, the read-only Figma MCP tools and Task (sub-agents) are available;",
-            "Edit/Write/Bash are uncallable. Do not attempt to modify the repository.",
-          ]
-        : [
-            "Tu es une session d'analyse approfondie en LECTURE SEULE sur le dépôt réel (pas de worktree).",
-            "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;",
-            "Edit/Write/Bash sont inappelables. N'essaie pas de modifier le dépôt.",
-          ]),
+    ...readOnlyFramingLines(driver, en, { en: "deep analysis", fr: "analyse approfondie" }),
   ];
 
-  const claudeMission = en
+  const mission = en
     ? [
         "## Your mission",
         "Run a deep analysis of THIS ticket against THIS repository. Launch IN PARALLEL (fan-out, a single",
         "message, several native sub-agent calls) EXACTLY these fresh-context sub-agents:",
         "",
-        `1. ONE \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` sub-agent (feasibility): is the ticket`,
+        `1. ONE feasibility sub-agent via ${subagentSpawnHint(driver, FEASIBILITY_SCOUT_AGENT_NAME, true)}: is the ticket`,
         "   implementable EXACTLY as written? Contradictions, missing dependencies, gray areas.",
         "   It returns: verdict (`implementable` | `needs_info` | `needs_rework`), summary,",
         "   reasons/questions per the verdict, files read, suggestedModel/suggestedEffort if implementable.",
         "",
-        `2. TWO \`subagent_type: "${TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME}"\` sub-agents with`,
+        `2. TWO solutions sub-agents via ${subagentSpawnHint(driver, TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME, true)}, with`,
         "   DELIBERATELY distinct angles (don't tell them what the other does):",
         "   - Scout A: conventional / documented / mainstream approach for this repository.",
         "   - Scout B: alternative approach (simplicity, performance, or a contrarian angle).",
         "   Each solutions scout returns: Recommendation, Evidence (cited files), Trade-offs, Confidence.",
         "",
-        "NEVER nest sub-agents: a sub-agent must never launch another one.",
-        "Once you receive their feedback, JUDGE yourself (paris-research style): compare feasibility and",
-        "solutions, decide on the final verdict and the retained options, then synthesize.",
+        "Once you receive their feedback, draft a provisional verdict and the retained options (paris-research",
+        `style), then launch ONE verifier via ${subagentSpawnHint(driver, FEASIBILITY_VERIFIER_AGENT_NAME, true)} with the`,
+        "exact ticket, your draft and the evidence it relies on. Finally decide yourself: re-read every contested",
+        "claim in the files, then synthesize the final verdict and options.",
+        ...subagentDisciplineLines(driver, true),
       ]
     : [
         "## Ta mission",
         "Mène une analyse approfondie de CE ticket contre CE dépôt. Lance EN PARALLÈLE (fan-out, un seul",
         "message, plusieurs appels de sous-agents natifs) EXACTEMENT ces sous-agents à contexte frais :",
         "",
-        `1. UN sous-agent \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (faisabilité) : le ticket est-il`,
+        `1. UN sous-agent de faisabilité via ${subagentSpawnHint(driver, FEASIBILITY_SCOUT_AGENT_NAME)} : le ticket est-il`,
         "   implémentable EXACTEMENT tel qu'il est écrit ? Contradictions, dépendances manquantes, zones",
         "   d'ombre. Il renvoie : verdict (`implementable` | `needs_info` | `needs_rework`), summary,",
         "   reasons/questions selon le verdict, files lus, suggestedModel/suggestedEffort si implementable.",
         "",
-        `2. DEUX sous-agents \`subagent_type: "${TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME}"\` avec des angles`,
+        `2. DEUX sous-agents de solutions via ${subagentSpawnHint(driver, TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME)}, avec des angles`,
         "   DELIBERÉMENT distincts (ne leur dis pas ce que fait l'autre) :",
         "   - Scout A : approche conventionnelle / documentée / mainstream pour ce dépôt.",
         "   - Scout B : approche alternative (simplicité, performance, ou angle contrarian).",
         "   Chaque scout solutions renvoie : Recommendation, Evidence (fichiers cités), Trade-offs, Confidence.",
         "",
-        "N'imbrique JAMAIS les sous-agents : un sous-agent ne doit jamais en lancer un autre.",
-        "Une fois leurs retours reçus, JUGE toi-même (style paris-research) : compare faisabilité et",
-        "solutions, tranche sur le verdict final et les options retenues, puis synthétise.",
+        "Une fois leurs retours reçus, rédige un verdict provisoire et les options retenues (style paris-research),",
+        `puis lance UN vérificateur via ${subagentSpawnHint(driver, FEASIBILITY_VERIFIER_AGENT_NAME)} avec le ticket exact,`,
+        "ton brouillon et les preuves sur lesquelles il repose. Tranche enfin toi-même : relis dans les fichiers chaque",
+        "affirmation contestée, puis synthétise le verdict final et les options.",
+        ...subagentDisciplineLines(driver),
       ];
 
   const solutionsField = en
@@ -338,7 +369,7 @@ export function buildTriagePlusChannelPrompt(
     "",
     ...buildTicketLines(ticket, en, driver),
     "",
-    ...claudeMission,
+    ...mission,
     "",
     ...buildStrictRulesLines(en),
     "",

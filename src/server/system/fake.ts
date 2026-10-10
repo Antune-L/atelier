@@ -211,6 +211,18 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void> {
+    this.log("prepareAnalysisWorkspace", { repoPath, path, baseBranch });
+  }
+
+  async removeAnalysisWorkspace(repoPath: string, path: string): Promise<void> {
+    this.log("removeAnalysisWorkspace", { repoPath, path });
+  }
+
+  async clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void> {
+    this.log("clearAnalysisWorkspaces", { root, repoPaths });
+  }
+
   async worktreeExists(slotPath: string): Promise<boolean> {
     this.log("worktreeExists", { slotPath });
     return true;

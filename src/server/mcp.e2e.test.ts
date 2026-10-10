@@ -360,7 +360,7 @@ test("analyze_tickets launches feasibility with the ticket engine without starti
       project: PROJECT_KEY,
       title: "Carte à analyser",
       requestId: "analyze-ticket",
-      feasibilityEngine: "luna",
+      feasibilityEngine: "codex",
     },
   })));
   const analyzed = analyzeResultSchema.parse(structuredContent(await client.callTool({
@@ -377,7 +377,7 @@ test("analyze_tickets launches feasibility with the ticket engine without starti
   const persisted = z.array(ticketSchema).parse(await (await fetch(`${baseUrl}/api/tickets`)).json())
     .find((ticket) => ticket.id === created.ticket.id);
   expect(persisted).toMatchObject({
-    feasibilityEngine: "luna",
+    feasibilityEngine: "codex",
     triageStatus: "done",
     triageVerdict: "needs_info",
     column: "todo",
@@ -558,7 +558,7 @@ test("update_ticket applies every option partially, broadcasts it, and preserves
         codexImplementerModel: "gpt-6-sol",
         codexImplementerEffort: "low",
         codexImplementerFast: false,
-        feasibilityEngine: "sonnet",
+        feasibilityEngine: "claude",
         feasibilityContext: true,
       },
     })));
@@ -590,7 +590,7 @@ test("update_ticket applies every option partially, broadcasts it, and preserves
       codexImplementerModel: "gpt-6-sol",
       codexImplementerEffort: "low",
       codexImplementerFast: false,
-      feasibilityEngine: "sonnet",
+      feasibilityEngine: "claude",
       feasibilityContext: true,
       column: "todo",
       stage: null,
@@ -773,7 +773,7 @@ test("create_todo_ticket persists every explicit creation option and retains the
     codexImplementerModel: "gpt-6-sol",
     codexImplementerEffort: "medium",
     codexImplementerFast: false,
-    feasibilityEngine: "luna",
+    feasibilityEngine: "codex",
   };
   const created = createResultSchema.parse(structuredContent(await client.callTool({
     name: "create_todo_ticket",
@@ -806,7 +806,7 @@ test("create_todo_ticket persists every explicit creation option and retains the
     codexImplementerModel: "gpt-6-sol",
     codexImplementerEffort: "medium",
     codexImplementerFast: false,
-    feasibilityEngine: "luna",
+    feasibilityEngine: "codex",
   });
 
   const changedValues: Record<string, unknown> = {
@@ -836,7 +836,7 @@ test("create_todo_ticket persists every explicit creation option and retains the
     codexImplementerModel: null,
     codexImplementerEffort: null,
     codexImplementerFast: null,
-    feasibilityEngine: "sonnet",
+    feasibilityEngine: "claude",
   };
   for (const [field, changedValue] of Object.entries(changedValues)) {
     const conflict = await client.callTool({

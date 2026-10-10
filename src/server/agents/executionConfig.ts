@@ -1,6 +1,5 @@
 import { isCodexFastServiceTier } from "../../shared/codexCapabilities.ts";
-import { DEFAULT_CODEX_EFFORT } from "../../shared/constants.ts";
-import type { AgentModel, CodexModel, FeasibilityEngine, Orchestrator } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, CodexEffort, CodexModel, FeasibilityEngine, Orchestrator } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSessionRole } from "../system/agentSession.ts";
@@ -16,12 +15,12 @@ export interface ExecutionOverrides {
 }
 
 /**
- * Provider knobs each feasibility engine pins. Kept server-side (not shared) because it is expressed
+ * Orchestrator knobs each feasibility provider pins. Kept server-side (not shared) because it is expressed
  * in ExecutionOverrides, which the web bundle never resolves.
  */
 const FEASIBILITY_ENGINE_EXECUTION: Record<FeasibilityEngine, ExecutionOverrides> = {
-  sonnet: { orchestrator: "claude", model: "sonnet" satisfies AgentModel },
-  luna: { orchestrator: "codex", codexModel: "gpt-6-luna" satisfies CodexModel, codexEffort: DEFAULT_CODEX_EFFORT, codexFast: true },
+  claude: { orchestrator: "claude", model: "opus" satisfies AgentModel, effort: "medium" satisfies AgentEffort },
+  codex: { orchestrator: "codex", codexModel: "gpt-6.1-sol" satisfies CodexModel, codexEffort: "medium" satisfies CodexEffort },
 };
 
 export interface ExecutionDefaults {
@@ -115,14 +114,10 @@ export function resolveTicketExecution(
 }
 
 /**
- * Resolve a feasibility/triage action: a ticket pinning a feasibility engine runs on that engine's
- * knobs, otherwise the analysis follows the ticket's own orchestrator settings.
+ * Resolve a feasibility/triage action on the pinned knobs of the ticket's feasibility provider, which
+ * defaults to the ticket's own orchestrator.
  */
-export function resolveFeasibilityExecution(
-  ticket: Ticket,
-  role: AgentSessionRole,
-  defaults: ExecutionDefaults,
-): ResolvedExecution {
-  if (ticket.feasibilityEngine === null) return resolveTicketExecution(ticket, role, defaults);
-  return resolveExecution(role, FEASIBILITY_ENGINE_EXECUTION[ticket.feasibilityEngine], defaults);
+export function resolveFeasibilityExecution(ticket: Pick<Ticket, "feasibilityEngine" | "orchestrator">, role: AgentSessionRole): ResolvedExecution {
+  const engine = ticket.feasibilityEngine ?? ticket.orchestrator;
+  return resolveExecution(role, FEASIBILITY_ENGINE_EXECUTION[engine], { model: MODELS.triage, effort: MODELS.triageEffort });
 }

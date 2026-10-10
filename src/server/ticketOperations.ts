@@ -74,7 +74,7 @@ export const createTodoTicketInputSchema = ticketBatchOptionsSchema
     codexImplementerModel: ticketBatchOptionsSchema.shape.codexImplementerModel.removeDefault().optional().describe("Model of the Codex implementation subagent; null uses the server setting."),
     codexImplementerEffort: ticketBatchOptionsSchema.shape.codexImplementerEffort.removeDefault().optional().describe("Effort of the Codex implementation subagent; null uses the server setting."),
     codexImplementerFast: ticketBatchOptionsSchema.shape.codexImplementerFast.removeDefault().optional().describe("Fast mode of the Codex subagent; null inherits from the orchestrator."),
-    feasibilityEngine: ticketBatchOptionsSchema.shape.feasibilityEngine.removeDefault().optional().describe("Engine used for the feasibility study; null follows the orchestrator."),
+    feasibilityEngine: ticketBatchOptionsSchema.shape.feasibilityEngine.removeDefault().optional().describe("Provider running the feasibility study (claude or codex); null follows the orchestrator."),
     requestId: z.string().trim().min(1).describe("Persistent idempotent identifier chosen by the client."),
   })
   .strict()

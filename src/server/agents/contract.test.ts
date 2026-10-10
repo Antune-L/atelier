@@ -44,29 +44,30 @@ beforeAll(() => {
 });
 
 describe("buildFeasibilityBatchContract", () => {
-  test("uses the configured read-only scout type for Claude", () => {
+  test("runs a Claude scout then a verifier per ticket", () => {
     const contract = buildFeasibilityBatchContract(
       [makeTicket({ project: FIXTURE_PROJECT_KEY })],
       getProject(FIXTURE_PROJECT_KEY),
-      store,
+      "main",
       "claude",
     );
 
     expect(contract).toContain('subagent_type: "feasibility-scout"');
+    expect(contract).toContain('subagent_type: "feasibility-verifier"');
   });
 
-  test("uses generic fresh Codex agents without advertising an unavailable custom type", () => {
+  test("runs the configured Codex agent types with fresh context", () => {
     const contract = buildFeasibilityBatchContract(
       [makeTicket({ project: FIXTURE_PROJECT_KEY })],
       getProject(FIXTURE_PROJECT_KEY),
-      store,
+      "main",
       "codex",
     );
 
     expect(contract).toContain("task_name");
     expect(contract).toContain('fork_turns: "none"');
-    expect(contract).toContain("aucun outil kanban");
-    expect(contract).not.toContain("feasibility-scout");
+    expect(contract).toContain('agent_type: "feasibility-scout"');
+    expect(contract).toContain('agent_type: "feasibility-verifier"');
   });
 });
 

@@ -318,15 +318,21 @@ export const CLEANER_MODEL: AgentModel = "opus";
 export const CLEANER_EFFORT: AgentEffort = "low";
 
 /**
- * Which model runs a ticket's feasibility analysis ("Analyse" / "Analyse +" and the import batch),
+ * Which provider runs a ticket's feasibility analysis ("Analyse" / "Analyse +" and the import batch),
  * independently of the orchestrator that implements it. null on a ticket = follow the orchestrator.
  */
-export const FEASIBILITY_ENGINES = ["sonnet", "luna"] as const;
+export const FEASIBILITY_ENGINES = ORCHESTRATORS;
 export type FeasibilityEngine = (typeof FEASIBILITY_ENGINES)[number];
 
 export const FEASIBILITY_ENGINE_LABELS: Record<FeasibilityEngine, string> = {
-  sonnet: "Sonnet",
-  luna: "Luna",
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/** Read-only sub-agents of every feasibility analysis, on the analysis provider. */
+export const FEASIBILITY_SUBAGENTS: Record<FeasibilityEngine, { model: string; effort: string }> = {
+  claude: { model: "sonnet" satisfies AgentModel, effort: "high" satisfies AgentEffort },
+  codex: { model: "gpt-6-luna" satisfies CodexModel, effort: "high" satisfies CodexEffort },
 };
 
 /**
@@ -543,7 +549,7 @@ export const AUTO_MERGE_RESOLVE_EVENT = "auto_merge_resolve";
 export const DONE_GATE_MAX_FAILURES = 5;
 
 /** Implementability triage ("Analyser"): read-only, user-initiated. Generous so large repos can be explored — the timer also covers claude boot + MCP connect (~2 min poll). */
-export const TRIAGE_TIMEOUT_MS = 15 * 60 * 1000;
+export const TRIAGE_TIMEOUT_MS = 25 * 60 * 1000;
 /**
  * SLOT_ID a triage worker identifies with: a triage runs in NO slot. The coordinator uses it to
  * recognize a triage session and bar it from the slot-pipeline tools (it may only submit_triage).
@@ -568,10 +574,10 @@ export const SPLIT_SLOT_ID = -3;
 export const SPLIT_BRANCH_PREFIX = "split/";
 
 /**
- * Batch feasibility analysis ("Import CSV"): ONE orchestrator session fans out X read-only
- * sub-agents (one per imported ticket), each returning a verdict reusing the triage fields.
+ * Batch feasibility analysis ("Import CSV"): ONE orchestrator session fans out a read-only scout then
+ * a verifier per imported ticket, each verdict reusing the triage fields.
  */
-export const FEASIBILITY_TIMEOUT_MS = 20 * 60 * 1000;
+export const FEASIBILITY_TIMEOUT_MS = 30 * 60 * 1000;
 /**
  * SLOT_ID a feasibility-batch worker identifies with (distinct from TRIAGE_SLOT_ID). The orchestrator
  * runs in NO slot on a synthetic batch id; the coordinator uses it to bar every pipeline tool but
@@ -604,6 +610,8 @@ export const FEASIBILITY_BATCH_PREFIX = "feasibility-";
  * `--tools` only bounds the top-level session, never the subagents it spawns.
  */
 export const FEASIBILITY_SCOUT_AGENT_NAME = "feasibility-scout";
+/** Read-only sub-agent challenging a provisional feasibility verdict against the code. */
+export const FEASIBILITY_VERIFIER_AGENT_NAME = "feasibility-verifier";
 /**
  * Subagent type the "Analyse +" orchestrator fans out for solution/approach research (read-only,
  * no Task — cannot recurse). The orchestrator launches two instances with distinct angles.

@@ -9,7 +9,7 @@ import {
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { FeasibilityResult, Ticket, TriageResult } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
-import { MODELS, getProject, isProjectKey } from "../config.ts";
+import { getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
@@ -17,6 +17,9 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
+import { prepareAnalysisWorkspace, releaseAnalysisWorkspace } from "./analysisWorkspace.ts";
+import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
+import { resolveBaseBranch } from "./baseBranch.ts";
 import { buildFeasibilityBatchContract } from "./contract.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
@@ -60,15 +63,18 @@ interface FeasibilitySession {
   ticketIds: string[];
   ticketVersions: Map<string, number>;
   project: ProjectConfig;
+  baseBranch: string;
   execution: ResolvedExecution;
   /** Number of prior automatic relaunches; 0 for the initial spawn. */
   attempt: number;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
+  workspace: AnalysisWorkspace | null;
 }
 
 export interface FeasibilityGroup {
   ticketIds: string[];
   project: ProjectConfig;
+  baseBranch: string;
   execution: ResolvedExecution;
 }
 
@@ -76,7 +82,7 @@ interface QueuedFeasibility extends FeasibilityGroup {
   attempt: number;
 }
 
-export function groupFeasibilityTickets(tickets: Ticket[]): {
+export function groupFeasibilityTickets(tickets: Ticket[], baseBranchOf: (ticket: Ticket, project: ProjectConfig) => string): {
   groups: FeasibilityGroup[];
   invalidTicketIds: string[];
 } {
@@ -87,24 +93,23 @@ export function groupFeasibilityTickets(tickets: Ticket[]): {
       invalidTicketIds.push(ticket.id);
       continue;
     }
-    const execution = resolveFeasibilityExecution(ticket, "feasibility", {
-      model: MODELS.triage,
-      effort: MODELS.triageEffort,
-    });
-    const key = [ticket.project, execution.provider, execution.model, execution.effort ?? "", execution.serviceTier].join("\u0000");
+    const execution = resolveFeasibilityExecution(ticket, "feasibility");
+    const project = getProject(ticket.project);
+    const baseBranch = baseBranchOf(ticket, project);
+    const key = [ticket.project, baseBranch, execution.provider, execution.model, execution.effort ?? "", execution.serviceTier].join("\u0000");
     const existing = groups.get(key);
     if (existing) {
       existing.ticketIds.push(ticket.id);
     } else {
-      groups.set(key, { ticketIds: [ticket.id], project: getProject(ticket.project), execution });
+      groups.set(key, { ticketIds: [ticket.id], project, baseBranch, execution });
     }
   }
   return { groups: [...groups.values()], invalidTicketIds };
 }
 
 /**
- * Runs the batch feasibility analysis as ONE read-only SDK agent session that fans out a sub-agent
- * per imported ticket (reusing the triage fields). Calqued on TriageManager: no worktree/slot, a
+ * Runs the batch feasibility analysis as ONE read-only SDK agent session on a detached origin/<base>
+ * analysis worktree that fans out a scout then a verifier per imported ticket (reusing the triage fields). Calqued on TriageManager: no worktree/slot, a
  * synthetic batch id (no real ticket) the session identifies with, stopped once the orchestrator
  * submits its aggregated verdicts via `submit_feasibility`.
  */
@@ -156,7 +161,7 @@ export class FeasibilityBatchManager {
       return;
     }
 
-    const { groups, invalidTicketIds } = groupFeasibilityTickets(tickets);
+    const { groups, invalidTicketIds } = groupFeasibilityTickets(tickets, (ticket, project) => resolveBaseBranch(ticket, project, this.store));
     for (const ticketId of invalidTicketIds) this.failTicket(ticketId, "projet inconnu");
     for (const group of groups) {
       for (let offset = 0; offset < group.ticketIds.length; offset += MAX_TICKETS_PER_BATCH) {
@@ -174,7 +179,7 @@ export class FeasibilityBatchManager {
       const group = this.pending.shift();
       if (!group) return;
       this.launching += 1;
-      void this.spawnBatch(group.ticketIds, group.project, group.execution, group.attempt).finally(() => {
+      void this.spawnBatch(group).finally(() => {
         this.launching -= 1;
         this.drainQueue();
       });
@@ -186,12 +191,8 @@ export class FeasibilityBatchManager {
    * once the worker connects. `attempt` tracks automatic relaunches (0 = initial). A failure to
    * spawn routes to `retryOrFail` WITH the known ids so a throw before registration can't lose them.
    */
-  private async spawnBatch(
-    ticketIds: string[],
-    project: ProjectConfig,
-    execution: ResolvedExecution,
-    attempt: number,
-  ): Promise<void> {
+  private async spawnBatch(group: QueuedFeasibility): Promise<void> {
+    const { ticketIds, project, baseBranch, execution, attempt } = group;
     const batchId = `${FEASIBILITY_BATCH_PREFIX}${nanoid(8)}`;
     const tickets = ticketIds
       .map((id) => this.store.getTicket(id))
@@ -208,25 +209,32 @@ export class FeasibilityBatchManager {
     try {
       await assertExecutionAvailable(this.system, execution);
       if (this.stopped) return;
-      const prompt = buildFeasibilityBatchContract(tickets, project, this.store, execution.provider);
-      const timer = setTimeout(
-        () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
-        FEASIBILITY_TIMEOUT_MS,
-      );
       const session: FeasibilitySession = {
         ticketIds: tickets.map((ticket) => ticket.id),
         ticketVersions,
         project,
+        baseBranch,
         execution,
         attempt,
-        timer,
+        timer: null,
+        workspace: null,
       };
       this.sessions.set(batchId, session);
+      session.workspace = await prepareAnalysisWorkspace(this.system, project.repoPath, baseBranch, batchId);
+      if (this.stopped || this.sessions.get(batchId) !== session) {
+        releaseAnalysisWorkspace(this.system, session.workspace);
+        return;
+      }
+      const prompt = buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider);
+      session.timer = setTimeout(
+        () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
+        FEASIBILITY_TIMEOUT_MS,
+      );
       for (const ticket of tickets) this.ticketToBatch.set(ticket.id, batchId);
       this.sessionHub.start(
         buildFeasibilitySessionConfig({
           batchId,
-          cwd: project.repoPath,
+          cwd: session.workspace.cwd,
           model: execution.model,
           effort: execution.effort,
           serviceTier: execution.serviceTier,
@@ -242,15 +250,7 @@ export class FeasibilityBatchManager {
       log.info("contrat de faisabilité délivré", { batchId });
     } catch (error) {
       this.cleanup(batchId);
-      await this.retryOrFail(
-        tickets.map((ticket) => ticket.id),
-        project,
-        execution,
-        attempt,
-        batchId,
-        getErrorMessage(error),
-        ticketVersions,
-      );
+      await this.retryOrFail({ ...group, ticketIds: tickets.map((ticket) => ticket.id) }, batchId, getErrorMessage(error), ticketVersions);
     }
   }
 
@@ -321,8 +321,9 @@ export class FeasibilityBatchManager {
     this.pending.length = 0;
     this.scheduledTickets.clear();
     for (const [batchId, entry] of this.sessions) {
-      clearTimeout(entry.timer);
+      if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(batchId);
+      if (entry.workspace) releaseAnalysisWorkspace(this.system, entry.workspace);
     }
     this.sessions.clear();
     this.ticketToBatch.clear();
@@ -362,24 +363,17 @@ export class FeasibilityBatchManager {
   private async handleBatchFailure(batchId: string, reason: string): Promise<void> {
     const session = this.sessions.get(batchId);
     if (!session) return;
-    const { ticketIds, ticketVersions, project, execution, attempt } = session;
+    const { ticketIds, ticketVersions, project, baseBranch, execution, attempt } = session;
     this.cleanup(batchId, "failed");
-    await this.retryOrFail(ticketIds, project, execution, attempt, batchId, reason, ticketVersions);
+    await this.retryOrFail({ ticketIds, project, baseBranch, execution, attempt }, batchId, reason, ticketVersions);
   }
 
   /**
    * Bounded automatic relaunch (calqued on the slot auto-reclaim convention): under the cap, spawn a
    * fresh batch for the same tickets; once exhausted, mark every ticket failed for good.
    */
-  private async retryOrFail(
-    ticketIds: string[],
-    project: ProjectConfig,
-    execution: ResolvedExecution,
-    attempt: number,
-    batchId: string,
-    reason: string,
-    ticketVersions: Map<string, number>,
-  ): Promise<void> {
+  private async retryOrFail(group: QueuedFeasibility, batchId: string, reason: string, ticketVersions: Map<string, number>): Promise<void> {
+    const { ticketIds, attempt } = group;
     const currentTicketIds = ticketIds.filter((ticketId) =>
       this.isCurrentBatchTicket(ticketId, ticketVersions.get(ticketId)),
     );
@@ -397,7 +391,7 @@ export class FeasibilityBatchManager {
         reason,
         attempt: attempt + 1,
       });
-      if (!this.stopped) this.pending.push({ ticketIds: currentTicketIds, project, execution, attempt: attempt + 1 });
+      if (!this.stopped) this.pending.push({ ...group, ticketIds: currentTicketIds, attempt: attempt + 1 });
       this.drainQueue();
       return;
     }
@@ -413,7 +407,8 @@ export class FeasibilityBatchManager {
   /** Stop the SDK session, drop the batch↔ticket mappings, and clear the timeout. Idempotent. */
   private cleanup(batchId: string, status: "completed" | "failed" | "cancelled" = "cancelled"): void {
     const entry = this.sessions.get(batchId);
-    if (entry) clearTimeout(entry.timer);
+    if (entry?.timer) clearTimeout(entry.timer);
+    if (entry?.workspace) releaseAnalysisWorkspace(this.system, entry.workspace);
     this.sessions.delete(batchId);
     for (const [ticketId, id] of this.ticketToBatch) {
       if (id === batchId) this.ticketToBatch.delete(ticketId);

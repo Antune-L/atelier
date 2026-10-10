@@ -277,6 +277,11 @@ export interface SystemAdapter {
   // ---- git worktree lifecycle ----
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string): Promise<void>;
+  /** Fetch origin/<baseBranch> and check it out detached at `path`, so read-only analyses see the up-to-date base. */
+  prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void>;
+  removeAnalysisWorkspace(repoPath: string, path: string): Promise<void>;
+  /** Boot recovery: delete every leftover analysis worktree under `root` and prune their registrations. */
+  clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void>;
   findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null>;
   worktreeExists(slotPath: string): Promise<boolean>;
   worktreeAdd(opts: GitWorktreeAddOptions): Promise<void>;

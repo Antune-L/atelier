@@ -2,7 +2,7 @@ import { TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../../shared/constants
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
 import { TRIAGE_VERDICT_LABELS } from "../../shared/schemas.ts";
-import { MODELS, getProject, isProjectKey } from "../config.ts";
+import { getProject, isProjectKey, listProjectKeys } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
@@ -10,6 +10,8 @@ import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
+import { ANALYSIS_WORKSPACES_ROOT, prepareAnalysisWorkspace, releaseAnalysisWorkspace } from "./analysisWorkspace.ts";
+import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
 import { resolveBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
@@ -31,18 +33,20 @@ const DRY_RUN_VERDICT: TriageResult = {
 };
 
 interface TriageSession {
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
+  workspace: AnalysisWorkspace;
 }
 
 /**
- * Runs the read-only feasibility triage as an SDK agent session on the real repo (no worktree,
- * branch, install, or slot): a light read-only session whose contract is its first user turn,
- * stopped once the verdict arrives via `submit_triage`.
+ * Runs the read-only feasibility triage as an SDK agent session on a detached origin/<base> analysis
+ * worktree (no branch, install, or slot): a read-only orchestrator fanning out scouts, whose contract
+ * is its first user turn, stopped once the verdict arrives via `submit_triage`.
  */
 export class TriageManager {
   private readonly sessions = new Map<string, TriageSession>();
   /** Tickets whose spawn is mid-flight: guards the relaunch path (no 409) against unserialized double-spawn. */
   private readonly launching = new Set<string>();
+  private stopped = false;
 
   constructor(
     private readonly store: Store,
@@ -54,7 +58,7 @@ export class TriageManager {
 
   /**
    * Start the read-only triage SDK session and inject its prompt as the first turn. With `deep`, runs
-   * the deeper "Analyse +" variant: a parallel-fan-out feasibility/solutions analysis on opus/low.
+   * the deeper "Analyse +" variant that adds two solutions scouts to the feasibility scout and verifier.
    */
   async start(ticketId: string, opts?: { deep?: boolean }): Promise<void> {
     const deep = opts?.deep ?? false;
@@ -87,19 +91,22 @@ export class TriageManager {
       const baseBranch = resolveBaseBranch(ticket, project, this.store);
       // The ticket's feasibility engine wins when pinned; otherwise a codex-orchestrated ticket triages
       // on Codex too (its knobs), so Claude never enters its pipeline.
-      const execution = resolveFeasibilityExecution(ticket, "triage", {
-        model: MODELS.triage,
-        effort: MODELS.triageEffort,
-      });
+      const execution = resolveFeasibilityExecution(ticket, "triage");
       await assertExecutionAvailable(this.system, execution);
       const driver = execution.provider;
+      const workspace = await prepareAnalysisWorkspace(this.system, project.repoPath, baseBranch, ticketId);
+      if (this.stopped) {
+        releaseAnalysisWorkspace(this.system, workspace);
+        return;
+      }
+      this.sessions.set(ticketId, { timer: null, workspace });
       const prompt = deep
         ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver)
         : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver);
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,
-          cwd: project.repoPath,
+          cwd: workspace.cwd,
           model: execution.model,
           effort: execution.effort,
           serviceTier: execution.serviceTier,
@@ -112,7 +119,7 @@ export class TriageManager {
       this.sessionHub.sendEvent(ticketId, { type: "ticket", payload: prompt });
       this.store.logEvent(ticketId, "triage_prompt_delivered", {});
       const timer = setTimeout(() => void this.failTriage(ticketId, "délai de triage dépassé"), TRIAGE_TIMEOUT_MS);
-      this.sessions.set(ticketId, { timer });
+      this.sessions.set(ticketId, { timer, workspace });
     } catch (error) {
       await this.failTriage(ticketId, getErrorMessage(error));
     } finally {
@@ -145,6 +152,7 @@ export class TriageManager {
 
   /** Boot recovery: a `running` triage has no surviving SDK session after a restart, so it is dead. */
   async recoverStale(): Promise<void> {
+    await this.system.clearAnalysisWorkspaces(ANALYSIS_WORKSPACES_ROOT, listProjectKeys().map((key) => getProject(key).repoPath));
     for (const ticket of this.store.listTickets(true)) {
       if (ticket.triageStatus !== "running") continue;
       this.sessionHub.disconnect(ticket.id);
@@ -161,9 +169,11 @@ export class TriageManager {
 
   /** Stop every live triage session (desktop shutdown). */
   async teardownAll(): Promise<void> {
+    this.stopped = true;
     for (const [ticketId, entry] of this.sessions) {
-      clearTimeout(entry.timer);
+      if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(ticketId);
+      releaseAnalysisWorkspace(this.system, entry.workspace);
     }
     this.sessions.clear();
   }
@@ -194,8 +204,9 @@ export class TriageManager {
   /** Stop the SDK session and clear the timeout. Idempotent. */
   private cleanup(ticketId: string, status: "completed" | "failed" | "cancelled" = "cancelled"): void {
     const entry = this.sessions.get(ticketId);
-    if (entry) clearTimeout(entry.timer);
+    if (entry?.timer) clearTimeout(entry.timer);
     this.sessions.delete(ticketId);
     this.sessionHub.disconnect(ticketId, status);
+    if (entry) releaseAnalysisWorkspace(this.system, entry.workspace);
   }
 }

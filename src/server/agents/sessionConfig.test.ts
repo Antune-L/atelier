@@ -5,6 +5,7 @@ import {
   ATELIER_EXPLORER_AGENT_NAME,
   ATELIER_REVIEWER_AGENT_NAME,
   FEASIBILITY_SCOUT_AGENT_NAME,
+  FEASIBILITY_VERIFIER_AGENT_NAME,
 } from "../../shared/constants.ts";
 import { DEFAULT_RESEARCH_OPTIONS } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
@@ -171,7 +172,7 @@ describe("read-only triage/split sessions", () => {
     expect(split.readOnly).toBe(true);
   });
 
-  test("Codex Analyse + keeps bounded scouts while feasibility uses generic children", () => {
+  test("Codex Analyse + and feasibility pin their read-only sub-agents on Luna high", () => {
     const triage = buildTriageSessionConfig({
       ticketId: "t1",
       cwd: CWD,
@@ -180,8 +181,9 @@ describe("read-only triage/split sessions", () => {
       deep: true,
       driver: "codex",
     });
-    expect(Object.keys(triage.agents ?? {})).toHaveLength(2);
+    expect(Object.keys(triage.agents ?? {})).toHaveLength(3);
     expect(triage.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.role).toBe("scout");
+    expect(triage.agents?.[FEASIBILITY_VERIFIER_AGENT_NAME]).toMatchObject({ role: "scout", model: "gpt-6-luna", effort: "high" });
     expect(triage.allowedTools).not.toContain("mcp__plugin_figma_figma__get_screenshot");
     expect(triage.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.prompt).toContain("réellement présent");
 
@@ -194,12 +196,13 @@ describe("read-only triage/split sessions", () => {
     });
     expect(feasibility.ownerType).toBe("batch");
     expect(feasibility.provider).toBe("codex");
-    expect(feasibility.agents).toBeUndefined();
+    expect(Object.keys(feasibility.agents ?? {})).toEqual([FEASIBILITY_SCOUT_AGENT_NAME, FEASIBILITY_VERIFIER_AGENT_NAME]);
+    expect(feasibility.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]).toMatchObject({ model: "gpt-6-luna", effort: "high" });
     expect(feasibility.allowedTools).toContain("Agent");
     expect(feasibility.allowedTools).not.toContain("mcp__claude_ai_Slack__slack_read_thread");
   });
 
-  test("Claude feasibility keeps the configured read-only scout", () => {
+  test("Claude feasibility pins its read-only scout and verifier on Sonnet high", () => {
     const feasibility = buildFeasibilitySessionConfig({
       batchId: "feasibility-batch-1",
       cwd: CWD,
@@ -210,6 +213,7 @@ describe("read-only triage/split sessions", () => {
 
     expect(feasibility.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.role).toBe("scout");
     expect(feasibility.agents?.[FEASIBILITY_SCOUT_AGENT_NAME]?.tools).not.toContain("Bash");
+    expect(feasibility.agents?.[FEASIBILITY_VERIFIER_AGENT_NAME]).toMatchObject({ model: "sonnet", effort: "high" });
   });
 
   test("claude driver → claude provider with read-only tools", () => {
@@ -236,9 +240,10 @@ describe("read-only triage/split sessions", () => {
       "mcp__claude_ai_Slack__slack_get_reactions",
     ];
 
-    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "sonnet", effort: "low", deep: false, driver: "claude" });
+    const triage = buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "opus", effort: "medium", deep: false, driver: "claude" });
     expect(triage.provider).toBe("claude");
-    expect(triage.allowedTools).toEqual(readOnlyTools);
+    expect(triage.allowedTools).toEqual([...readOnlyTools, "Agent"]);
+    expect(Object.keys(triage.agents ?? {})).toEqual([FEASIBILITY_SCOUT_AGENT_NAME, FEASIBILITY_VERIFIER_AGENT_NAME]);
     expect(triage.disallowedTools ?? []).toContain("Bash");
     expect(triage.disallowedTools ?? []).toContain("Edit");
     expect(triage.disallowedTools ?? []).toContain("Write");

@@ -1,5 +1,5 @@
-import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SCOUT_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
-import type { CommitLanguage, ReviewDepth } from "../../shared/constants.ts";
+import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SCOUT_AGENT_NAME, FEASIBILITY_VERIFIER_AGENT_NAME, MAX_PARALLEL_IMPLEMENTERS, REVIEWER_BRANCH_SUFFIX } from "../../shared/constants.ts";
+import type { CommitLanguage, Orchestrator, ReviewDepth } from "../../shared/constants.ts";
 import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { triageResultSchema } from "../../shared/schemas.ts";
@@ -8,8 +8,7 @@ import { hasMockups } from "../../shared/mockups.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT } from "../../shared/protocol.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
-import type { Store } from "../db/store.ts";
-import { resolveBaseBranch } from "./baseBranch.ts";
+import { subagentDisciplineLines, subagentSpawnHint } from "./triage.ts";
 import { vcsCommands } from "./vcsCommands.ts";
 import type { VcsCommandTable } from "./vcsCommands.ts";
 
@@ -515,30 +514,25 @@ function truncateDescription(description: string): string {
 }
 
 /**
- * Builds the `ticket` channel payload for a batch feasibility session: ONE read-only orchestrator on
- * the real repo fans out one fresh-context sub-agent per imported ticket (Read/Glob/Grep only),
- * aggregates the verdicts, and submits them all at once via the `submit_feasibility` worker tool.
+ * Builds the `ticket` channel payload for a batch feasibility session: ONE read-only orchestrator fans
+ * out a scout then a verifier per imported ticket (Read/Glob/Grep only), settles the verdicts, and
+ * submits them all at once via the `submit_feasibility` worker tool.
  * Non-readable attachments (e.g. Trello links) are flagged in `questions` with an explicit prefix.
  */
 export function buildFeasibilityBatchContract(
   tickets: Ticket[],
   project: ProjectConfig,
-  store: Store,
-  driver: "claude" | "codex" = "claude",
+  baseBranch: string,
+  driver: Orchestrator = "claude",
 ): string {
-  const ticketList = tickets.map((ticket) => {
-    const resolvedBase = resolveBaseBranch(ticket, project, store);
-    const baseAnnotation =
-      resolvedBase === project.baseBranch ? "" : ` (branche de base : ${resolvedBase})`;
-    return `- [${ticket.id}] ${ticket.title}${baseAnnotation} :: ${truncateDescription(ticket.description)}`;
-  });
+  const ticketList = tickets.map((ticket) => `- [${ticket.id}] ${ticket.title} :: ${truncateDescription(ticket.description)}`);
 
   const lines: string[] = [
     `# Analyse de faisabilité en lot — ${tickets.length} ticket(s)`,
     "",
-    `Projet : ${project.label} (branche de base : ${project.baseBranch})`,
+    `Projet : ${project.label} (branche de base : ${baseBranch})`,
     "",
-    "Tu es une session orchestratrice de faisabilité en LECTURE SEULE sur le dépôt réel (pas de worktree).",
+    "Tu es une session orchestratrice de faisabilité en LECTURE SEULE sur le dépôt.",
     driver === "claude"
       ? "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;"
       : "Seuls les outils de lecture exposés à Codex et les sous-agents bornés sont disponibles ;",
@@ -559,22 +553,17 @@ export function buildFeasibilityBatchContract(
         ]),
     "",
     "## Ta mission",
-    `Pour CHACUN des tickets ci-dessus, lance EXACTEMENT UN sous-agent natif à contexte frais.`,
-    ...(driver === "claude"
-      ? [
-          `Utilise \`subagent_type: "${FEASIBILITY_SCOUT_AGENT_NAME}"\` (sous-agent en lecture seule, sans Task ni Bash : il ne`,
-          "peut pas relancer d'autre sous-agent).",
-        ]
-      : [
-          "Utilise un sous-agent générique avec un `task_name` unique composé de lettres minuscules, chiffres et `_`,",
-          "`fork_turns: \"none\"`, sans `agent_type`, `model` ni `reasoning_effort`. Dans son message, recopie le ticket",
-          "exact et impose : lecture seule, aucun sous-agent, aucun outil kanban, rapport rendu uniquement au parent.",
-        ]),
-    "Chaque sous-agent décide si SON ticket est implémentable EXACTEMENT",
-    "tel qu'il est écrit contre CE dépôt, sans le reformuler. Lance-les EN PARALLÈLE (fan-out, un seul par ticket).",
-    "N'imbrique JAMAIS les sous-agents : un sous-agent ne doit jamais en lancer un autre.",
+    "Pour CHACUN des tickets ci-dessus, décide s'il est implémentable EXACTEMENT tel qu'il est écrit contre CE",
+    "dépôt, sans le reformuler, en deux vagues de sous-agents en lecture seule à contexte frais :",
+    `1. Vague 1 : EXACTEMENT UN scout par ticket via ${subagentSpawnHint(driver, FEASIBILITY_SCOUT_AGENT_NAME)},`,
+    "   tous lancés EN PARALLÈLE (fan-out).",
+    `2. Vague 2 : EXACTEMENT UN vérificateur par ticket via ${subagentSpawnHint(driver, FEASIBILITY_VERIFIER_AGENT_NAME)},`,
+    "   tous lancés EN PARALLÈLE, chacun avec le ticket exact ET le rapport complet de son scout : il revérifie chaque",
+    "   chemin cité et chaque affirmation décisive, et cherche ce qui a été manqué.",
+    "3. Tranche toi-même ticket par ticket : relis dans les fichiers chaque affirmation contestée avant de retenir un verdict.",
+    ...subagentDisciplineLines(driver),
     "",
-    "Chaque sous-agent renvoie pour son ticket :",
+    "Le verdict retenu pour chaque ticket comporte :",
     "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
     "- `summary` : 2-3 phrases",
     "- `reasons` : raisons (obligatoire si `needs_rework`)",
@@ -596,7 +585,7 @@ export function buildFeasibilityBatchContract(
     "- Lis les AGENTS.md applicables ; si une règle nécessaire manque, consulte le CLAUDE.md applicable comme compatibilité, sans importer ses permissions ni secrets.",
     "",
     "## Format de réponse",
-    "Une fois TOUS les sous-agents terminés, agrège leurs verdicts et appelle UNE SEULE FOIS le tool",
+    "Une fois les deux vagues terminées et tes verdicts tranchés, appelle UNE SEULE FOIS le tool",
     "`submit_feasibility` (serveur MCP `kanban`) avec `{ results: [{ ticketId, verdict, summary, reasons, questions, files, suggestedOrchestrator, suggestedModel, suggestedEffort, suggestedCodexModel, suggestedCodexEffort }] }`,",
     "un objet par ticket (reprends le `ticketId` exact entre crochets ci-dessus). Ne termine pas ton tour avant",
     "d'avoir appelé `submit_feasibility` ou `fail`. N'écris pas les verdicts en texte : seul l'appel au tool compte.",

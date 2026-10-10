@@ -266,7 +266,7 @@ export const ticketSchema = z.object({
   kind: kindSchema,
   /** Argus depth for review tickets (null for feature tickets). */
   reviewDepth: reviewDepthSchema.nullable(),
-  /** Model running the feasibility analysis (null = follow the ticket's own orchestrator knobs). */
+  /** Provider running the feasibility analysis (null = follow the ticket's orchestrator). */
   feasibilityEngine: feasibilityEngineSchema.nullable(),
   /** Number of the reviewed PR (review tickets only). */
   prNumber: z.number().int().nullable(),

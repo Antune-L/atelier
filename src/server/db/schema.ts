@@ -591,6 +591,7 @@ export function createDatabase(path: string): Database {
   }
   migrateCodexCatalog(db, "upgrade");
   backfillOrchestrator(db);
+  migrateFeasibilityEngines(db);
   seedSlots(db);
   seedProfiles(db);
   seedCodexProfile(db);
@@ -685,6 +686,12 @@ export function assertCodexDowngradeSafe(db: Database): void {
       `downgrade refusé : ${runningExecutions} exécution(s) et ${activeTickets} ticket(s) encore actifs`,
     );
   }
+}
+
+/** Map the retired model-named feasibility engines onto the provider each one ran on. */
+function migrateFeasibilityEngines(db: Database): void {
+  db.exec("UPDATE tickets SET feasibility_engine = 'claude' WHERE feasibility_engine = 'sonnet'");
+  db.exec("UPDATE tickets SET feasibility_engine = 'codex' WHERE feasibility_engine = 'luna'");
 }
 
 /**

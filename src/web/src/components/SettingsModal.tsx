@@ -326,7 +326,7 @@ interface DefaultsRowSpec {
 
 const FEASIBILITY_ROW: DefaultsRowSpec = {
   label: "Étude de faisabilité",
-  hint: "Analyse, reformulation, découpage",
+  hint: "Reformulation, découpage (l'analyse tourne sur Opus ou Sol, effort medium)",
 };
 const IMPLEMENTATION_ROW: DefaultsRowSpec = {
   label: "Implémentation",

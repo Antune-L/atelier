@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { cn } from "@/lib/utils";
-import { DEFAULT_FEASIBILITY_ENGINE, feasibilityEngineTabOptions, triageVerdictVariant } from "@/lib/display";
+import { feasibilityEngineTabOptions, triageVerdictVariant } from "@/lib/display";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 
 interface TriageSectionProps {
@@ -205,10 +205,10 @@ export function TriageSection({
       {running && <TerminalView ticketId={ticket.id} />}
 
       <div className="flex flex-col items-start gap-1.5">
-        <Label id={engineLabelId}>Modèle d'analyse</Label>
+        <Label id={engineLabelId}>Moteur d'analyse</Label>
         <Tabs
           options={feasibilityEngineTabOptions(codex)}
-          value={ticket.feasibilityEngine ?? DEFAULT_FEASIBILITY_ENGINE}
+          value={ticket.feasibilityEngine ?? ticket.orchestrator}
           onChange={onFeasibilityEngineChange}
           aria-labelledby={engineLabelId}
         />

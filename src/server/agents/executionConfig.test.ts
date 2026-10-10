@@ -88,35 +88,35 @@ describe("resolveTicketExecution", () => {
 });
 
 describe("resolveFeasibilityExecution", () => {
-  test("falls back to the ticket knobs when no engine is pinned", () => {
+  test("follows the ticket orchestrator on its pinned knobs when no provider is chosen", () => {
     const ticket = makeTicket({ feasibilityEngine: null, orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "max" });
-    expect(resolveFeasibilityExecution(ticket, "feasibility", { model: "sonnet", effort: "low" })).toEqual({
+    expect(resolveFeasibilityExecution(ticket, "feasibility")).toEqual({
       provider: "codex",
-      model: "gpt-6-astra",
-      effort: "max",
+      model: "gpt-6.1-sol",
+      effort: "medium",
       serviceTier: "default",
       role: "feasibility",
     });
   });
 
-  test("pins Sonnet on Claude regardless of the ticket orchestrator", () => {
-    const ticket = makeTicket({ feasibilityEngine: "sonnet", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "max" });
-    expect(resolveFeasibilityExecution(ticket, "triage", { model: "opus", effort: "low" })).toEqual({
+  test("pins Opus medium on Claude regardless of the ticket orchestrator", () => {
+    const ticket = makeTicket({ feasibilityEngine: "claude", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "max" });
+    expect(resolveFeasibilityExecution(ticket, "triage")).toEqual({
       provider: "claude",
-      model: "sonnet",
-      effort: "low",
+      model: "opus",
+      effort: "medium",
       serviceTier: "default",
       role: "triage",
     });
   });
 
-  test("pins Luna on Codex regardless of the ticket orchestrator", () => {
-    const ticket = makeTicket({ feasibilityEngine: "luna", orchestrator: "claude", model: "opus", effort: "high" });
-    expect(resolveFeasibilityExecution(ticket, "triage", { model: "opus", effort: "high" })).toEqual({
+  test("pins Sol medium on Codex regardless of the ticket orchestrator", () => {
+    const ticket = makeTicket({ feasibilityEngine: "codex", orchestrator: "claude", model: "sonnet", effort: "high" });
+    expect(resolveFeasibilityExecution(ticket, "triage")).toEqual({
       provider: "codex",
-      model: "gpt-6-luna",
+      model: "gpt-6.1-sol",
       effort: "medium",
-      serviceTier: "fast",
+      serviceTier: "default",
       role: "triage",
     });
   });

@@ -50,15 +50,12 @@ export const AGENT_MODEL_FULL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.ma
   label: AGENT_MODEL_FULL_LABELS[m],
 }));
 
-/** Engine backing the feasibility analysis when the ticket carries no explicit choice. */
-export const DEFAULT_FEASIBILITY_ENGINE: FeasibilityEngine = "sonnet";
-
-/** Feasibility engines annotated with availability: Luna runs on Codex, so it needs a ready runtime. */
+/** Feasibility providers annotated with availability: Codex needs a ready runtime. */
 export function feasibilityEngineTabOptions(runtime: CodexRuntimeStatus): TabOption<FeasibilityEngine>[] {
   const codexReady = runtime.status === "ready";
   return FEASIBILITY_ENGINES.map((engine) => {
     const label = FEASIBILITY_ENGINE_LABELS[engine];
-    const enabled = engine !== "luna" || codexReady;
+    const enabled = engine !== "codex" || codexReady;
     return {
       value: engine,
       label: enabled ? label : `${label} — indisponible`,

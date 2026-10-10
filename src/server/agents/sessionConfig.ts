@@ -8,6 +8,8 @@ import {
   ATELIER_SLOT_ID,
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
+  FEASIBILITY_SUBAGENTS,
+  FEASIBILITY_VERIFIER_AGENT_NAME,
   SPLIT_SLOT_ID,
   TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME,
   TRIAGE_SLOT_ID,
@@ -148,23 +150,36 @@ const SOLUTIONS_SCOUT_PROMPT =
   "et l'angle fournis, propose UNE approche concrète et déployable. Retourne : Recommendation " +
   "(l'approche), Evidence (fichiers:line ou raisonnement), Trade-offs, Confidence (high/medium/low).";
 
-function feasibilityScoutAgent(driver: Orchestrator): AgentSubagentDefinition {
+const FEASIBILITY_VERIFIER_PROMPT =
+  "Tu es un vérificateur adversarial de faisabilité en LECTURE SEULE. Tu ne peux ni modifier le dépôt, " +
+  "ni exécuter de commande, ni lancer d'autre sous-agent. Tu reçois un ticket et le verdict provisoire " +
+  "d'un scout. Revérifie dans le code chaque chemin cité et chaque affirmation décisive (existence, " +
+  "absence, comportement), puis cherche ce que le scout a manqué : code existant qui couvre déjà le " +
+  "besoin, consommateurs impactés, contrainte qui contredit le ticket. Retourne pour chaque affirmation : " +
+  "confirmée, réfutée (avec la preuve fichier:ligne) ou non vérifiable ; puis le verdict que tu " +
+  "maintiens ou corriges, avec sa justification.";
+
+function feasibilitySubagent(driver: Orchestrator, description: string, prompt: string): AgentSubagentDefinition {
+  const { model, effort } = FEASIBILITY_SUBAGENTS[driver];
   return {
-    description: "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.",
-    prompt: `${FEASIBILITY_SCOUT_PROMPT} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    description,
+    prompt: `${prompt} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    model,
+    effort,
     role: "scout",
     tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
     disallowedTools: SCOUT_DISALLOWED,
   };
 }
 
-function solutionsScoutAgent(driver: Orchestrator): AgentSubagentDefinition {
+/** The read-only sub-agents of a feasibility analysis; `withSolutions` adds the "Analyse +" solutions scout. */
+function feasibilityAgents(driver: Orchestrator, withSolutions: boolean): Record<string, AgentSubagentDefinition> {
   return {
-    description: "Identifie en lecture seule des approches de solution concrètes pour UN ticket.",
-    prompt: `${SOLUTIONS_SCOUT_PROMPT} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
-    role: "scout",
-    tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
-    disallowedTools: SCOUT_DISALLOWED,
+    [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilitySubagent(driver, "Évalue en lecture seule la faisabilité d'UN ticket contre le dépôt.", FEASIBILITY_SCOUT_PROMPT),
+    [FEASIBILITY_VERIFIER_AGENT_NAME]: feasibilitySubagent(driver, "Conteste en lecture seule le verdict provisoire de faisabilité d'UN ticket.", FEASIBILITY_VERIFIER_PROMPT),
+    ...(withSolutions
+      ? { [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: feasibilitySubagent(driver, "Identifie en lecture seule des approches de solution concrètes pour UN ticket.", SOLUTIONS_SCOUT_PROMPT) }
+      : {}),
   };
 }
 
@@ -180,7 +195,7 @@ export interface TriageSessionInput {
   driver: Orchestrator;
 }
 
-/** Config for a read-only feasibility-triage session (no worktree/slot; only `submit_triage` is gated in). */
+/** Config for a read-only feasibility-triage session (no slot; only `submit_triage` is gated in). */
 export function buildTriageSessionConfig(input: TriageSessionInput): SessionStartConfig {
   const { ticketId, cwd, model, effort, serviceTier = "default", deep, driver } = input;
   if (driver === "codex") {
@@ -195,20 +210,13 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
       role: "triage",
       permissionMode: "dontAsk",
       readOnly: true,
-      allowedTools: deep ? [...CODEX_READONLY_TOOLS, "Agent"] : [...CODEX_READONLY_TOOLS],
-      disallowedTools: deep ? READONLY_FANOUT_DISALLOWED : READONLY_PLAIN_DISALLOWED,
+      allowedTools: [...CODEX_READONLY_TOOLS, "Agent"],
+      disallowedTools: READONLY_FANOUT_DISALLOWED,
       skills: NO_SKILLS,
-      ...(deep
-        ? {
-            agents: {
-              [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver),
-              [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(driver),
-            },
-          }
-        : {}),
+      agents: feasibilityAgents(driver, deep),
     };
   }
-  const base: SessionStartConfig = {
+  return {
     ticketId,
     slotId: TRIAGE_SLOT_ID,
     cwd,
@@ -217,18 +225,11 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     effort,
     role: "triage",
     permissionMode: "dontAsk",
-    allowedTools: deep ? [...READONLY_TOOLS, "Agent"] : [...READONLY_TOOLS],
-    disallowedTools: deep ? READONLY_FANOUT_DISALLOWED : READONLY_PLAIN_DISALLOWED,
-    skills: NO_SKILLS,
-  };
-  if (!deep) return base;
-  return {
-    ...base,
+    allowedTools: [...READONLY_TOOLS, "Agent"],
+    disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: {
-      [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver),
-      [TRIAGE_PLUS_SOLUTIONS_SCOUT_AGENT_NAME]: solutionsScoutAgent(driver),
-    },
+    skills: NO_SKILLS,
+    agents: feasibilityAgents(driver, deep),
   };
 }
 
@@ -400,7 +401,7 @@ export interface FeasibilitySessionInput {
   driver: Orchestrator;
 }
 
-/** Config for a read-only batch feasibility session (fans out one scout per ticket via the `Agent` tool). */
+/** Config for a read-only batch feasibility session (fans out a scout then a verifier per ticket). */
 export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): SessionStartConfig {
   const { batchId, cwd, model, effort, serviceTier = "default", driver } = input;
   return {
@@ -419,7 +420,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     allowedTools: [...(driver === "codex" ? CODEX_READONLY_TOOLS : READONLY_TOOLS), "Agent"],
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: driver === "claude" ? { [FEASIBILITY_SCOUT_AGENT_NAME]: feasibilityScoutAgent(driver) } : undefined,
+    agents: feasibilityAgents(driver, false),
     skills: NO_SKILLS,
   };
 }

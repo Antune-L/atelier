@@ -55,7 +55,7 @@ afterAll(() => {
 });
 
 describe("groupFeasibilityTickets", () => {
-  test("batches only tickets sharing project, provider, model and effort", () => {
+  test("batches only tickets sharing project, base branch and pinned provider", () => {
     const tickets = [
       makeTicket({ id: "a-1", project: "project-a" }),
       makeTicket({ id: "a-2", project: "project-a" }),
@@ -69,15 +69,15 @@ describe("groupFeasibilityTickets", () => {
       makeTicket({ id: "b-1", project: "project-b" }),
     ];
 
-    const result = groupFeasibilityTickets(tickets);
+    const result = groupFeasibilityTickets(tickets, (_ticket, project) => project.baseBranch);
 
     expect(result.invalidTicketIds).toEqual([]);
     expect(result.groups).toHaveLength(3);
     expect(result.groups.find((group) => group.ticketIds.includes("a-1"))?.ticketIds).toEqual(["a-1", "a-2"]);
     expect(result.groups.find((group) => group.ticketIds.includes("a-codex"))?.execution).toMatchObject({
       provider: "codex",
-      model: "gpt-6-astra",
-      effort: "high",
+      model: "gpt-6.1-sol",
+      effort: "medium",
     });
     expect(result.groups.find((group) => group.ticketIds.includes("b-1"))?.project.label).toBe("project-b");
   });

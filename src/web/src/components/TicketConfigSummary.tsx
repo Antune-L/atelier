@@ -137,7 +137,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
         <Row label="Orchestrateur" value={ORCHESTRATOR_LABELS[ticket.orchestrator]} />
         {ticket.feasibilityEngine !== null && (
           <Row
-            label="Modèle d'analyse"
+            label="Moteur d'analyse"
             value={FEASIBILITY_ENGINE_LABELS[ticket.feasibilityEngine]}
           />
         )}

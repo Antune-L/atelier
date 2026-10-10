@@ -124,6 +124,7 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
           <ResearchFields
             enabled={researchEnabled}
             options={researchOptions}
+            orchestrator={agent.orchestrator}
             onEnabledChange={setResearchEnabled}
             onOptionsChange={setResearchOptions}
           />

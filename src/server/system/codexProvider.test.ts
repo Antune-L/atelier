@@ -843,6 +843,49 @@ test("only orchestrator sessions cap their native subagent threads", async () =>
   expect(await startWithRole("triage")).toBeUndefined();
 });
 
+test("Atelier adversarial sub-agents are shallow, read-only and without worker tools", async () => {
+  const fixture = appServerFixture();
+  const config = options([]);
+  config.role = "atelier";
+  config.readOnly = true;
+  config.agents = {
+    "atelier-explorer": {
+      description: "explores",
+      prompt: "Explore.",
+      model: "gpt-6-luna",
+      effort: "high",
+      role: "scout",
+    },
+  };
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(config);
+  await waitFor(() => fixture.requests.some((request) => request.method === "thread/start"));
+
+  const started = fixture.requests.find((request) => request.method === "thread/start");
+  const agents = z
+    .object({
+      config: z.object({
+        agents: z.object({
+          enabled: z.literal(true),
+          max_concurrent_threads_per_session: z.literal(CODEX_MAX_CONCURRENT_SUBAGENT_THREADS),
+          max_depth: z.literal(1),
+          "atelier-explorer": z.object({ config_file: z.string() }),
+        }),
+      }),
+    })
+    .parse(started?.params).config.agents;
+  const childConfig = readFileSync(agents["atelier-explorer"].config_file, "utf8");
+  expect(childConfig).toContain('sandbox_mode = "read-only"');
+  expect(childConfig).toContain("[mcp_servers.kanban]\nenabled = false");
+  expect(childConfig).toContain('model = "gpt-6-luna"');
+  expect(childConfig).toContain('model_reasoning_effort = "high"');
+  await session.close();
+});
+
 test("read-only sessions retain local commands and explicitly scoped HTTP MCP tools", async () => {
   const fixture = appServerFixture();
   const config = options([]);

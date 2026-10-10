@@ -374,6 +374,9 @@ function prepareAgents(
     declarations = { enabled: true, max_concurrent_threads_per_session: FEASIBILITY_MAX_CONCURRENT_THREADS, max_depth: 1 };
   } else if (role === "orchestrator") {
     declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS };
+  } else if (role === "atelier") {
+    // Atelier adversarial review: read-only scouts that must never spawn further sub-agents.
+    declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, max_depth: 1 };
   }
   for (const [name, definition] of definitions) {
     const fileName = `${name.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}.toml`;

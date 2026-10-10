@@ -253,6 +253,7 @@ export class AtelierManager {
         effort: execution.effort,
         serviceTier: execution.serviceTier,
         driver: execution.provider,
+        researchEnabled: conversation.researchEnabled,
         researchOptions: conversation.researchOptions,
         resumeSessionId,
       }),

@@ -155,6 +155,7 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
               <ResearchFields
                 enabled={conversation.researchEnabled}
                 options={conversation.researchOptions}
+                orchestrator={conversation.orchestrator}
                 onEnabledChange={(researchEnabled) => updateSettings({ researchEnabled })}
                 onOptionsChange={(researchOptions) => updateSettings({ researchOptions })}
               />

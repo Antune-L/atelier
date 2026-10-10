@@ -693,7 +693,7 @@ export const PRD_SPLIT_MODE_LABELS: Record<PrdSplitMode, string> = {
 
 export const PRD_SINGLE_SELECTION = "single";
 
-export const RESEARCH_OPTION_KEYS = ["feasibility", "howTo", "externalDocs", "duplicates"] as const;
+export const RESEARCH_OPTION_KEYS = ["feasibility", "howTo", "externalDocs", "duplicates", "adversarialReview"] as const;
 export type ResearchOptionKey = (typeof RESEARCH_OPTION_KEYS)[number];
 
 export const RESEARCH_OPTION_LABELS: Record<ResearchOptionKey, string> = {
@@ -701,4 +701,20 @@ export const RESEARCH_OPTION_LABELS: Record<ResearchOptionKey, string> = {
   howTo: "Comment faire",
   externalDocs: "Documentation externe",
   duplicates: "Doublons",
+  adversarialReview: "Revue adversariale",
 };
+
+/**
+ * Native sub-agents of the Atelier adversarial review. Sub-agents always run on the orchestrator's own
+ * provider, so the model family is derived from the conversation's orchestrator (no extra setting).
+ */
+export const ATELIER_ADVERSARIAL_SUBAGENTS: Record<Orchestrator, { model: string; effort: string; label: string }> = {
+  claude: { model: "sonnet" satisfies AgentModel, effort: "medium" satisfies AgentEffort, label: "Sonnet · medium" },
+  codex: { model: "gpt-6-luna" satisfies CodexModel, effort: "high" satisfies CodexEffort, label: "Luna · high" },
+};
+/** Read-only sub-agent establishing repository facts for a bounded question (never proposes a solution). */
+export const ATELIER_EXPLORER_AGENT_NAME = "atelier-explorer";
+/** Read-only sub-agent drafting an independent solution from one angle. */
+export const ATELIER_ANALYST_AGENT_NAME = "atelier-analyst";
+/** Read-only sub-agent challenging the synthesized draft through one lens. */
+export const ATELIER_REVIEWER_AGENT_NAME = "atelier-adversarial-reviewer";

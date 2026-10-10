@@ -108,8 +108,14 @@ const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_
 const CODEX_READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch"];
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
 const READONLY_PLAIN_DISALLOWED = ["Edit", "Write", "Bash", "Task", "Agent"];
-/** Tools removed from a fan-out read-only session: no writes, no built-in `Task` (scouts go via `Agent`). */
-const READONLY_FANOUT_DISALLOWED = ["Edit", "Write", "Bash", "Task"];
+/**
+ * Tools removed from a fan-out read-only session: no writes, no bash. The Claude sub-agent tool is
+ * named `Task` internally (that is the name in the `system/init` tool list) even though the model
+ * calls it `Agent`, so disallowing either `Task` or `Agent` removes the sub-agent tool entirely and
+ * the scouts can never launch. Built-in agent types are blocked via `permissionDeny` with
+ * DENIED_BUILTIN_AGENTS instead.
+ */
+const READONLY_FANOUT_DISALLOWED = ["Edit", "Write", "Bash"];
 /**
  * Built-in spawnable agent types a fan-out read-only orchestrator must never invoke: each carries the
  * full toolset and would re-open unbounded recursion. Denied via `settings.permissions.deny` so only

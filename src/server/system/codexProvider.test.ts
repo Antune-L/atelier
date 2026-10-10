@@ -13,6 +13,7 @@ import {
   type CodexAppServerNotification,
   type CodexAppServerOptions,
 } from "./codexAppServer.ts";
+import { CODEX_SCOUT_DENIAL_REASON } from "./codexCommandPolicy.ts";
 import { codexSessionPreToolUseHookHash } from "./codexHookTrust.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
@@ -884,6 +885,28 @@ test("Atelier adversarial sub-agents are shallow, read-only and without worker t
   expect(childConfig).toContain('model = "gpt-6-luna"');
   expect(childConfig).toContain('model_reasoning_effort = "high"');
   await session.close();
+});
+
+test("Atelier adversarial hook lets the parent spawn sub-agents but never the scouts", async () => {
+  const config = options([]);
+  config.role = "atelier";
+  config.readOnly = true;
+  config.agents = {
+    "atelier-explorer": { description: "explores", prompt: "Explore.", role: "scout" },
+  };
+  const hook = await hookPathForSession(config);
+  const decide = async (payload: Record<string, unknown>): Promise<string> => {
+    const child = Bun.spawn([hook.path], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+    const output = await new Response(child.stdout).text();
+    await child.exited;
+    return output.trim();
+  };
+  const spawn = { tool_name: "spawn_agent", tool_input: { agent_type: "atelier-explorer", message: "x" } };
+  expect(await decide(spawn)).toBe("");
+  expect(await decide({ ...spawn, agent_id: "child-1", agent_type: "atelier-explorer" })).toContain(CODEX_SCOUT_DENIAL_REASON);
+  await hook.close();
 });
 
 test("read-only sessions retain local commands and explicitly scoped HTTP MCP tools", async () => {

@@ -269,7 +269,7 @@ describe("buildAtelierSessionConfig — adversarial review", () => {
     expect(config.provider).toBe("claude");
     expect(config.allowedTools).toContain("Agent");
     expect(config.allowedTools).toContain("WebSearch");
-    expect(config.disallowedTools).toEqual(["Edit", "Write", "Bash", "Task"]);
+    expect(config.disallowedTools).toEqual(["Edit", "Write", "Bash"]);
     expect(config.permissionDeny).toEqual(["Agent(general-purpose)", "Agent(Explore)", "Agent(Plan)"]);
     expect(Object.keys(config.agents ?? {}).sort()).toEqual([...agentNames].sort());
     for (const name of agentNames) {
@@ -307,4 +307,46 @@ describe("buildAtelierSessionConfig — adversarial review", () => {
     }
     expect(atelierConfig("claude", true, false).disallowedTools).toEqual(["Edit", "Write", "Bash", "Task", "Agent"]);
   });
+});
+
+describe("fan-out sessions keep the sub-agent tool", () => {
+  // The Claude sub-agent tool is `Task` internally (system/init) even though the model calls it
+  // `Agent`: disallowing either name removes it entirely and no scout can ever launch.
+  const fanOutConfigs = (["claude", "codex"] as const).flatMap((driver) => [
+    { label: `triage deep ${driver}`, config: buildTriageSessionConfig({ ticketId: "t1", cwd: CWD, model: "m", effort: null, deep: true, driver }) },
+    {
+      label: `atelier adversarial ${driver}`,
+      config: buildAtelierSessionConfig({
+        conversationId: "c1",
+        cwd: CWD,
+        model: "m",
+        effort: null,
+        driver,
+        researchEnabled: true,
+        researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true },
+      }),
+    },
+    { label: `feasibility ${driver}`, config: buildFeasibilitySessionConfig({ batchId: "b1", cwd: CWD, model: "m", effort: null, driver }) },
+  ]);
+
+  for (const { label, config } of fanOutConfigs) {
+    test(`${label}: Agent allowed means neither Task nor Agent is disallowed; scouts cannot recurse`, () => {
+      // Every Claude fan-out orchestrator must expose the sub-agent tool; Codex Atelier gates
+      // spawning through its PreToolUse hook instead of the tool lists.
+      if (config.provider === "claude") expect(config.allowedTools ?? []).toContain("Agent");
+      if (config.allowedTools?.includes("Agent")) {
+        expect(config.disallowedTools ?? []).not.toContain("Task");
+        expect(config.disallowedTools ?? []).not.toContain("Agent");
+      }
+      if (config.provider === "claude") {
+        expect(config.permissionDeny ?? []).toEqual(
+          expect.arrayContaining(["Agent(general-purpose)", "Agent(Explore)", "Agent(Plan)"]),
+        );
+      }
+      for (const agent of Object.values(config.agents ?? {})) {
+        if (agent.role !== "scout") continue;
+        expect(agent.disallowedTools ?? []).toEqual(expect.arrayContaining(["Task", "Agent"]));
+      }
+    });
+  }
 });

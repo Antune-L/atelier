@@ -148,8 +148,8 @@ already validated and must be implemented as-is (no `submit_prd`).
   `atelier-adversarial-reviewer`. Claude gets `Agent` + the built-in agent deny list; Codex keeps the
   read-only sandbox, and `prepareAgents` caps role `atelier` at `max_depth: 1`.
 - Non-adversarial session configs are unchanged; the "Réflexion préalable" checklist excludes the key.
-- UI: `ResearchFields` takes the `orchestrator` and, when the option is on, shows a "Sous-agents"
-  switch (`Sonnet · medium` / `Luna · high`) where only the orchestrator's family is enabled.
+- UI: the sub-agent model is not shown. Sub-agents always follow the Atelier agent's provider, so
+  `ResearchFields` only exposes the option toggle (change the agent to change the sub-agent model).
 - Files: `shared/constants.ts`, `shared/schemas.ts`, `server/agents/{atelier,sessionConfig,atelierManager}.ts`,
   `server/system/codexProvider.ts`, `web/src/components/atelier/{ResearchFields,NewConversationForm,ConversationPanel}.tsx`.
 

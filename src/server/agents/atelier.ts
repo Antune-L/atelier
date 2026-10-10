@@ -22,7 +22,7 @@ const ADVERSARIAL_HEADING = "### Revue adversariale";
 const ADVERSARIAL_MIN_ANALYSTS = 2;
 const ADVERSARIAL_MAX_SUBAGENTS = 10;
 const ADVERSARIAL_MAX_QUESTIONS = 2;
-const HISTORY_HEADING = "##Historique de la conversation";
+const HISTORY_HEADING = "## Historique de la conversation";
 
 const HISTORY_ROLE_LABELS: Record<Exclude<ConversationMessage["role"], "activity">, string> = {
   user: "Utilisateur",

@@ -1,4 +1,10 @@
-import { RESEARCH_OPTION_LABELS } from "../../shared/constants.ts";
+import {
+  ATELIER_ADVERSARIAL_SUBAGENTS,
+  ATELIER_ANALYST_AGENT_NAME,
+  ATELIER_EXPLORER_AGENT_NAME,
+  ATELIER_REVIEWER_AGENT_NAME,
+  RESEARCH_OPTION_LABELS,
+} from "../../shared/constants.ts";
 import type { ResearchOptionKey } from "../../shared/constants.ts";
 import { PRD_MAX_AXES, PRD_SCHEMA_VERSION } from "../../shared/prdDocument.ts";
 import { enabledResearchOptionKeys } from "../../shared/schemas.ts";
@@ -12,6 +18,10 @@ const SUMMARY_WORD_BUDGET = 60;
 const AXIS_SUMMARY_WORD_BUDGET = 20;
 const MIN_AXES = 3;
 const RESEARCH_HEADING = "### Réflexion préalable";
+const ADVERSARIAL_HEADING = "### Revue adversariale";
+const ADVERSARIAL_MIN_ANALYSTS = 2;
+const ADVERSARIAL_MAX_SUBAGENTS = 10;
+const ADVERSARIAL_MAX_QUESTIONS = 2;
 const HISTORY_HEADING = "## Historique de la conversation";
 
 const HISTORY_ROLE_LABELS: Record<Exclude<ConversationMessage["role"], "activity">, string> = {
@@ -19,7 +29,14 @@ const HISTORY_ROLE_LABELS: Record<Exclude<ConversationMessage["role"], "activity
   assistant: "Toi (assistant)",
 };
 
-const RESEARCH_CHECK_INSTRUCTIONS: Record<ResearchOptionKey, string> = {
+/** The adversarial review is a separate multi-agent run, not a checklist line. */
+type ResearchCheckKey = Exclude<ResearchOptionKey, "adversarialReview">;
+
+function isResearchCheckKey(key: ResearchOptionKey): key is ResearchCheckKey {
+  return key !== "adversarialReview";
+}
+
+const RESEARCH_CHECK_INSTRUCTIONS: Record<ResearchCheckKey, string> = {
   feasibility: "faisabilité dans CE code : la demande est-elle réalisable avec l'architecture actuelle ? cite les fichiers qui le montrent.",
   howTo: "comment faire : quels modules, patterns ou utilitaires existants réutiliser (chemins de fichiers exacts).",
   externalDocs: "documentation externe : vérifie les API, bibliothèques ou services tiers concernés via WebSearch / WebFetch quand ces outils sont disponibles ; sinon indique [—] et pourquoi.",
@@ -60,7 +77,7 @@ function buildRole(): string[] {
 
 function buildResearch(conversation: Conversation): string[] {
   if (!conversation.researchEnabled) return [];
-  const keys = enabledResearchOptionKeys(conversation.researchOptions);
+  const keys = enabledResearchOptionKeys(conversation.researchOptions).filter(isResearchCheckKey);
   if (keys.length === 0) return [];
   return [
     "## Réflexion préalable (activée)",
@@ -71,6 +88,38 @@ function buildResearch(conversation: Conversation): string[] {
     "- `- [KO] …` quand elle révèle un obstacle ou un doublon (avec les chemins de fichiers) ;",
     "- `- [—] …` quand elle n'a pas pu être menée ou ne s'applique pas (dis pourquoi).",
     "Puis donne ta réponse.",
+  ];
+}
+
+function buildAdversarialReview(conversation: Conversation): string[] {
+  if (!conversation.researchEnabled || !conversation.researchOptions.adversarialReview) return [];
+  const { label } = ATELIER_ADVERSARIAL_SUBAGENTS[conversation.orchestrator];
+  const spawnTool = conversation.orchestrator === "codex" ? "tes sous-agents natifs Codex" : "le tool `Agent`";
+  const agents = `\`${ATELIER_EXPLORER_AGENT_NAME}\`, \`${ATELIER_ANALYST_AGENT_NAME}\` et \`${ATELIER_REVIEWER_AGENT_NAME}\``;
+  return [
+    "## Revue adversariale (activée)",
+    "### Quand",
+    `- Avant de proposer à l'utilisateur une SOLUTION RECOMMANDÉE (une approche concrète à construire), et avant de consolider en PRD (\`${SUBMIT_TOOL}\`) si la solution recommandée a changé depuis la dernière revue.`,
+    "- Pas pour une simple question ou une clarification. Annonce la taille du run en une ligne avant de le lancer.",
+    "### Qui",
+    `- Tu restes l'orchestrateur. Lance les sous-agents via ${spawnTool}, uniquement ${agents} (ils tournent sur ${label}). N'utilise jamais d'autre type d'agent.`,
+    "- Les sous-agents n'héritent pas de la conversation : passe-leur le dossier en entier dans leur prompt (aucun fichier n'est écrit).",
+    "### Budget",
+    `- Au moins ${ADVERSARIAL_MIN_ANALYSTS} analystes indépendants et 1 relecteur adversarial neuf ; au plus ${ADVERSARIAL_MAX_SUBAGENTS} sous-agents par run, explorateurs et re-revue compris.`,
+    "- Léger : 2 explorateurs si du code est concerné (sinon 0), 2 analystes, 1 challenger.",
+    "- Standard (par défaut) : 2 explorateurs, 3 analystes, 3 relecteurs = 8 ; garde une place pour la re-revue.",
+    "### Étapes",
+    "1. Dossier : ce que l'utilisateur a demandé (citations verbatim des exigences et décisions de la conversation ; une décision plus récente l'emporte sur une plus ancienne ; signale les conflits), les sources et liens collés, la racine du dépôt.",
+    `2. Exploration : 2 \`${ATELIER_EXPLORER_AGENT_NAME}\` en parallèle sur des périmètres complémentaires (artefacts et découverte sur tout le dépôt / comportement, responsabilités et consommateurs), sans leur donner de solution.`,
+    `3. Vague 1 : les \`${ATELIER_ANALYST_AGENT_NAME}\` en parallèle dans un SEUL message, angles distincts (spec d'abord, code d'abord, risques d'abord, + produit/UX ou données si pertinent) ; aucun ne voit la sortie d'un autre.`,
+    "4. Synthèse (par TOI) : réconcilie, vérifie toi-même dans les fichiers chaque affirmation décisive, choisis UN candidat, greffe les meilleurs points des autres, liste les hypothèses.",
+    `5. Vague 2 : les \`${ATELIER_REVIEWER_AGENT_NAME}\` en parallèle (fidélité à la spec, réalité du code, challenger) reçoivent d'abord le dossier, puis un bloc marqué « après recherche » avec le brouillon et les faits d'exploration — jamais les sorties brutes des analystes. Si tous les analystes convergent, durcis le brief du challenger.`,
+    "6. Verdict : accepte ou rejette chaque objection en une ligne étayée par une preuve. Au plus UNE re-revue avec des relecteurs neufs si une objection critique acceptée change la solution (ou si une objection majeure acceptée invalide une affirmation d'absence). Les désaccords restants vont en questions ouvertes.",
+    "### Restitution",
+    `- Affiche le résultat EN PREMIER sous le titre \`${ADVERSARIAL_HEADING}\` (après \`${RESEARCH_HEADING}\` s'il est présent) : taille du run, objections acceptées et comment elles ont changé la solution, alternatives rejetées (une ligne chacune).`,
+    `- Puis la solution recommandée, au plus ${ADVERSARIAL_MAX_QUESTIONS} questions avec un choix par défaut.`,
+    "- Termine par le verdict de faisabilité en deux listes à puces `✅ Faisable` / `❌ Non faisable` : chaque exigence dans exactement une liste ; une preuve manquante est une condition de validation, pas une impossibilité.",
+    "- Si les sous-agents sont indisponibles dans cette session, dis-le explicitement au lieu de prétendre que la revue a eu lieu.",
   ];
 }
 
@@ -122,6 +171,7 @@ export function buildAtelierPrompt({ conversation, project, history }: AtelierPr
     buildFraming(conversation, project),
     buildRole(),
     buildResearch(conversation),
+    buildAdversarialReview(conversation),
     buildAuthoringRules(),
     buildHistory(history),
     ["## Message de l'utilisateur"],

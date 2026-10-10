@@ -133,6 +133,26 @@ already validated and must be implemented as-is (no `submit_prd`).
   `AGENT_EFFORT_FULL_OPTIONS`, defaults from `useCapabilities`.
 - Secondary entry points: `NewTicketSheet` `onOpenAtelier(seed)`; `TicketMeta` "Origine" row.
 
+### Adversarial review option ("Revue adversariale")
+
+- 5th research option key `adversarialReview` (opt-in, default `false`). `researchOptionsSchema`
+  defaults the key so `research_options` JSON persisted before it keeps its four original choices.
+- Active when `researchEnabled && researchOptions.adversarialReview`. The Atelier agent stays the
+  orchestrator and runs an Athena-style read-only pipeline (dossier → 2 explorers → ≥2 independent
+  analysts → own synthesis → fresh adversarial reviewers → verdict, ≤10 sub-agents, ≤1 re-review)
+  before handing over a recommended solution or consolidating a changed one into a PRD. The outcome
+  is shown under `### Revue adversariale`, ending with `✅ Faisable` / `❌ Non faisable` lists.
+- Sub-agents are native and bound to the orchestrator's provider (no DB column):
+  `ATELIER_ADVERSARIAL_SUBAGENTS` = Claude → `sonnet`/`medium`, Codex → `gpt-6-luna`/`high`. Three
+  read-only `scout` sub-agents: `atelier-explorer`, `atelier-analyst`,
+  `atelier-adversarial-reviewer`. Claude gets `Agent` + the built-in agent deny list; Codex keeps the
+  read-only sandbox, and `prepareAgents` caps role `atelier` at `max_depth: 1`.
+- Non-adversarial session configs are unchanged; the "Réflexion préalable" checklist excludes the key.
+- UI: `ResearchFields` takes the `orchestrator` and, when the option is on, shows a "Sous-agents"
+  switch (`Sonnet · medium` / `Luna · high`) where only the orchestrator's family is enabled.
+- Files: `shared/constants.ts`, `shared/schemas.ts`, `server/agents/{atelier,sessionConfig,atelierManager}.ts`,
+  `server/system/codexProvider.ts`, `web/src/components/atelier/{ResearchFields,NewConversationForm,ConversationPanel}.tsx`.
+
 ## Lots and status
 
 | Lot | Scope | Status |

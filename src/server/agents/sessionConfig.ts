@@ -1,6 +1,10 @@
 import { dirname, join } from "node:path";
 
 import {
+  ATELIER_ADVERSARIAL_SUBAGENTS,
+  ATELIER_ANALYST_AGENT_NAME,
+  ATELIER_EXPLORER_AGENT_NAME,
+  ATELIER_REVIEWER_AGENT_NAME,
   ATELIER_SLOT_ID,
   FEASIBILITY_SCOUT_AGENT_NAME,
   FEASIBILITY_SLOT_ID,
@@ -284,12 +288,61 @@ export interface AtelierSessionInput {
   effort: string | null;
   serviceTier?: "default" | "fast";
   driver: Orchestrator;
+  researchEnabled: boolean;
   researchOptions: ResearchOptions;
   resumeSessionId?: string | null;
 }
 
+const ATELIER_SUBAGENT_GUARD =
+  "Tu es en LECTURE SEULE : tu ne peux ni modifier le dépôt, ni exécuter de commande, ni lancer " +
+  "d'autre sous-agent. Tu n'as pas accès à la conversation : tout ton contexte est dans ton prompt.";
+
+const ATELIER_EXPLORER_PROMPT =
+  `Tu es un explorateur de dépôt. ${ATELIER_SUBAGENT_GUARD} Pour la question bornée fournie, établis ` +
+  "les FAITS du dépôt sans jamais proposer de solution. Retourne : Couverture de recherche (requêtes, " +
+  "dossiers parcourus), Candidats inspectés (fichier:ligne), Traces de comportement, Preuves " +
+  "contradictoires, Lacunes restantes. Une recherche négative est une preuve limitée à son périmètre : " +
+  "dis exactement où tu as cherché.";
+
+const ATELIER_ANALYST_PROMPT =
+  `Tu es un analyste indépendant. ${ATELIER_SUBAGENT_GUARD} À partir du dossier et de l'angle fournis ` +
+  "(spec d'abord, code d'abord, risques d'abord, produit/UX ou données), vérifie dans le code puis " +
+  "retourne : Énoncé du problème, Exigences (avec leur source), État actuel (fichier:ligne), Solution " +
+  "proposée, Risques, Questions ouvertes, Confiance (haute/moyenne/basse).";
+
+const ATELIER_REVIEWER_PROMPT =
+  `Tu es un relecteur adversarial. ${ATELIER_SUBAGENT_GUARD} Lis d'abord le dossier, puis cherche ` +
+  "dans le code AVANT de lire le bloc « après recherche » qui contient le brouillon de solution. Selon " +
+  "la lentille fournie (fidélité à la spec, réalité du code, challenger), retourne des objections, " +
+  "chacune avec : sévérité (critical/major/minor), preuve (fichier:ligne), correction suggérée. En " +
+  "challenger, défends que le brouillon est la mauvaise solution et propose une alternative plus " +
+  "simple ou plus robuste.";
+
+function atelierSubagent(driver: Orchestrator, description: string, prompt: string): AgentSubagentDefinition {
+  const { model, effort } = ATELIER_ADVERSARIAL_SUBAGENTS[driver];
+  return {
+    description,
+    prompt: `${prompt} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    model,
+    effort,
+    role: "scout",
+    tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
+    disallowedTools: SCOUT_DISALLOWED,
+  };
+}
+
+/** The three read-only sub-agents of the Atelier adversarial review, on the orchestrator's provider. */
+function atelierAdversarialAgents(driver: Orchestrator): Record<string, AgentSubagentDefinition> {
+  return {
+    [ATELIER_EXPLORER_AGENT_NAME]: atelierSubagent(driver, "Établit en lecture seule les faits du dépôt pour une question bornée, sans proposer de solution.", ATELIER_EXPLORER_PROMPT),
+    [ATELIER_ANALYST_AGENT_NAME]: atelierSubagent(driver, "Rédige en lecture seule une analyse et une solution indépendantes selon un angle donné.", ATELIER_ANALYST_PROMPT),
+    [ATELIER_REVIEWER_AGENT_NAME]: atelierSubagent(driver, "Conteste en lecture seule un brouillon de solution selon une lentille donnée.", ATELIER_REVIEWER_PROMPT),
+  };
+}
+
 export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionStartConfig {
-  const { conversationId, cwd, model, effort, serviceTier = "default", driver, researchOptions, resumeSessionId } = input;
+  const { conversationId, cwd, model, effort, serviceTier = "default", driver, researchEnabled, researchOptions, resumeSessionId } = input;
+  const adversarial = researchEnabled && researchOptions.adversarialReview;
   const base = {
     ticketId: atelierSessionKey(conversationId),
     slotId: ATELIER_SLOT_ID,
@@ -308,13 +361,26 @@ export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionSt
       serviceTier,
       readOnly: true,
       ...(resumeSessionId ? { resumeSessionId } : {}),
+      ...(adversarial ? { agents: atelierAdversarialAgents(driver) } : {}),
+    };
+  }
+  const tools = researchOptions.externalDocs ? [...READONLY_TOOLS, ...ATELIER_WEB_TOOLS] : [...READONLY_TOOLS];
+  if (!adversarial) {
+    return {
+      ...base,
+      provider: "claude",
+      allowedTools: tools,
+      disallowedTools: READONLY_PLAIN_DISALLOWED,
+      skills: NO_SKILLS,
     };
   }
   return {
     ...base,
     provider: "claude",
-    allowedTools: researchOptions.externalDocs ? [...READONLY_TOOLS, ...ATELIER_WEB_TOOLS] : [...READONLY_TOOLS],
-    disallowedTools: READONLY_PLAIN_DISALLOWED,
+    allowedTools: [...tools, "Agent"],
+    disallowedTools: READONLY_FANOUT_DISALLOWED,
+    permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
+    agents: atelierAdversarialAgents(driver),
     skills: NO_SKILLS,
   };
 }

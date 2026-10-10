@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
-import { FEASIBILITY_SCOUT_AGENT_NAME } from "../../shared/constants.ts";
+import {
+  ATELIER_ANALYST_AGENT_NAME,
+  ATELIER_EXPLORER_AGENT_NAME,
+  ATELIER_REVIEWER_AGENT_NAME,
+  FEASIBILITY_SCOUT_AGENT_NAME,
+} from "../../shared/constants.ts";
+import { DEFAULT_RESEARCH_OPTIONS } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import { makeTicket } from "../testing/fixtures.ts";
 
 import {
+  buildAtelierSessionConfig,
   buildFeasibilitySessionConfig,
   buildImplementSessionConfig,
   buildSplitSessionConfig,
@@ -240,5 +247,64 @@ describe("read-only triage/split sessions", () => {
     expect(split.provider).toBe("claude");
     expect(split.allowedTools).toEqual(readOnlyTools);
     expect(split.disallowedTools ?? []).toContain("Bash");
+  });
+});
+
+describe("buildAtelierSessionConfig — adversarial review", () => {
+  const atelierConfig = (driver: "claude" | "codex", researchEnabled: boolean, adversarialReview: boolean) =>
+    buildAtelierSessionConfig({
+      conversationId: "c1",
+      cwd: CWD,
+      model: driver === "codex" ? "gpt-6-sol" : "opus",
+      effort: "medium",
+      driver,
+      researchEnabled,
+      researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview },
+      resumeSessionId: driver === "codex" ? "thread-1" : null,
+    });
+  const agentNames = [ATELIER_EXPLORER_AGENT_NAME, ATELIER_ANALYST_AGENT_NAME, ATELIER_REVIEWER_AGENT_NAME];
+
+  test("claude fans out three read-only sonnet/medium sub-agents through Agent", () => {
+    const config = atelierConfig("claude", true, true);
+    expect(config.provider).toBe("claude");
+    expect(config.allowedTools).toContain("Agent");
+    expect(config.allowedTools).toContain("WebSearch");
+    expect(config.disallowedTools).toEqual(["Edit", "Write", "Bash", "Task"]);
+    expect(config.permissionDeny).toEqual(["Agent(general-purpose)", "Agent(Explore)", "Agent(Plan)"]);
+    expect(Object.keys(config.agents ?? {}).sort()).toEqual([...agentNames].sort());
+    for (const name of agentNames) {
+      const agent = config.agents?.[name];
+      expect(agent?.model).toBe("sonnet");
+      expect(agent?.effort).toBe("medium");
+      expect(agent?.role).toBe("scout");
+      expect(agent?.tools ?? []).not.toContain("Bash");
+      expect(agent?.disallowedTools).toEqual(["Task", "Agent", "Bash", "Edit", "Write"]);
+    }
+  });
+
+  test("codex keeps the read-only sandbox and declares three luna/high sub-agents", () => {
+    const config = atelierConfig("codex", true, true);
+    expect(config.provider).toBe("codex");
+    expect(config.readOnly).toBe(true);
+    expect(config.resumeSessionId).toBe("thread-1");
+    expect(Object.keys(config.agents ?? {}).sort()).toEqual([...agentNames].sort());
+    for (const name of agentNames) {
+      const agent = config.agents?.[name];
+      expect(agent?.model).toBe("gpt-6-luna");
+      expect(agent?.effort).toBe("high");
+      expect(agent?.tools).toEqual(["Read", "Glob", "Grep", "ToolSearch"]);
+    }
+  });
+
+  test("without the option (or with research off) the config is unchanged", () => {
+    for (const driver of ["claude", "codex"] as const) {
+      for (const [enabled, adversarial] of [[true, false], [false, true]] as const) {
+        const config = atelierConfig(driver, enabled, adversarial);
+        expect(config.agents).toBeUndefined();
+        expect(config.allowedTools ?? []).not.toContain("Agent");
+        expect(config.permissionDeny).toBeUndefined();
+      }
+    }
+    expect(atelierConfig("claude", true, false).disallowedTools).toEqual(["Edit", "Write", "Bash", "Task", "Agent"]);
   });
 });

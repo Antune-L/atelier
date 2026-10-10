@@ -1038,6 +1038,8 @@ export const researchOptionsSchema = z.object({
   howTo: z.boolean(),
   externalDocs: z.boolean(),
   duplicates: z.boolean(),
+  // Defaulted so research_options persisted before this key existed keep their four original choices.
+  adversarialReview: z.boolean().default(false),
 }) satisfies z.ZodType<Record<ResearchOptionKey, boolean>>;
 export type ResearchOptions = z.infer<typeof researchOptionsSchema>;
 
@@ -1046,6 +1048,8 @@ export const DEFAULT_RESEARCH_OPTIONS: ResearchOptions = {
   howTo: true,
   externalDocs: true,
   duplicates: true,
+  // Expensive multi-agent run: opt-in only.
+  adversarialReview: false,
 };
 
 export function enabledResearchOptionKeys(options: ResearchOptions): ResearchOptionKey[] {
@@ -1059,6 +1063,7 @@ export function researchOptionsFromKeys(keys: Iterable<ResearchOptionKey>): Rese
     howTo: picked.has("howTo"),
     externalDocs: picked.has("externalDocs"),
     duplicates: picked.has("duplicates"),
+    adversarialReview: picked.has("adversarialReview"),
   };
 }
 

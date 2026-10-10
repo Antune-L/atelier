@@ -398,6 +398,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   session_status TEXT NOT NULL DEFAULT 'idle',
   session_id TEXT,
   error TEXT,
+  unread INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -554,6 +555,10 @@ const QUALITY_RUN_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "evidence_accepted", ddl: "ALTER TABLE quality_validation_runs ADD COLUMN evidence_accepted INTEGER NOT NULL DEFAULT 0" },
 ];
 
+const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "unread", ddl: "ALTER TABLE conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0" },
+];
+
 /** SQLite lock wait before a concurrent write fails with SQLITE_BUSY (several sessions write usage at once). */
 const BUSY_TIMEOUT_MS = 5_000;
 
@@ -577,6 +582,7 @@ export function createDatabase(path: string): Database {
   migrate(db, "review_passes", REVIEW_PASS_MIGRATIONS);
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);
   migrate(db, "quality_validation_runs", QUALITY_RUN_MIGRATIONS);
+  migrate(db, "conversations", CONVERSATION_MIGRATIONS);
   if (!reviewPassPolicyExisted) {
     db.exec(`UPDATE review_passes SET requires_approval = 0
       WHERE ticket_id IN (

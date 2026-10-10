@@ -335,7 +335,7 @@ export class AtelierManager {
     this.flush(conversationId);
     const runtime = this.runtime(conversationId);
     runtime.turn = emptyTurn();
-    this.patchConversation(conversationId, { sessionStatus: "idle" });
+    this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
     this.clearIdleTimer(runtime);
     runtime.idleTimer = setTimeout(() => {
       runtime.idleTimer = null;
@@ -349,7 +349,7 @@ export class AtelierManager {
     const runtime = this.runtime(conversationId);
     this.flush(conversationId);
     runtime.turn = emptyTurn();
-    const patch: ConversationPatch = { sessionStatus: "error", error: reason };
+    const patch: ConversationPatch = { sessionStatus: "error", error: reason, unread: true };
     if (runtime.resumed) patch.sessionId = null;
     runtime.resumed = false;
     log.warn("session atelier en échec", { conversationId, reason });
@@ -359,7 +359,7 @@ export class AtelierManager {
 
   private markError(conversationId: string, reason: string): void {
     this.flush(conversationId);
-    this.patchConversation(conversationId, { sessionStatus: "error", error: reason });
+    this.patchConversation(conversationId, { sessionStatus: "error", error: reason, unread: true });
   }
 
   // NOTE(ali): a queued Claude turn keeps streaming after the previous turn_end marked the conversation idle.

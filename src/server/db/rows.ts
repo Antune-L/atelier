@@ -684,6 +684,7 @@ const conversationRowSchema = z.object({
   session_status: z.string(),
   session_id: z.string().nullable(),
   error: z.string().nullable(),
+  unread: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -743,6 +744,7 @@ export function mapConversationRow(raw: unknown): Conversation {
     sessionStatus: conversationSessionStatusSchema.parse(row.session_status),
     sessionId: row.session_id,
     error: row.error,
+    unread: row.unread === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

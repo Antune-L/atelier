@@ -686,6 +686,14 @@ function createAtelierRoutes(deps: RouteDeps) {
       await atelier.interrupt(params.id);
       return { ok: true };
     })
+    .post("/conversations/:id/read", ({ params, set }) => {
+      const conversation = store.getConversation(params.id);
+      if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      if (!conversation.unread) return conversation;
+      const updated = store.markConversationRead(params.id);
+      hub.pushConversation(updated);
+      return updated;
+    })
     .post("/conversations/:id/consolidate", ({ params, body, set }) => {
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = consolidatePrdSchema.safeParse(body ?? {});

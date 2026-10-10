@@ -211,6 +211,18 @@ describe("AtelierManager", () => {
     expect(updated?.error).toBe("processus claude mort");
   });
 
+  test("marks the conversation unread when a turn ends but not on interrupt", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    await manager.interrupt(conversation.id);
+    expect(store.getConversation(conversation.id)?.unread).toBe(false);
+
+    await manager.postMessage(conversation.id, "Encore").delivered;
+    system.emit(TURN_END);
+    expect(store.getConversation(conversation.id)?.unread).toBe(true);
+  });
+
   test("session keys round-trip and tool traces stay one line", () => {
     expect(parseAtelierSessionKey(atelierSessionKey("abc"))).toBe("abc");
     expect(parseAtelierSessionKey("ticket-1")).toBeNull();

@@ -1,5 +1,5 @@
 import { MessageSquarePlus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
 import type { Conversation, ProjectInfo } from "@shared/schemas";
@@ -71,6 +71,18 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const resolveSeq = useRef(0);
 
   const detail = useConversationDetail(selectedId);
+
+  // Clears the unread dot of the open conversation: on click, and when a turn ends while it is on screen.
+  const openUnread = compose === null && conversations.some((c) => c.id === selectedId && c.unread);
+  useEffect(() => {
+    if (selectedId === null || !openUnread) return;
+    const current = boardStore.getSnapshot().conversations.find((c) => c.id === selectedId);
+    if (current) boardStore.rememberConversation({ ...current, unread: false });
+    api.atelierMarkConversationRead(selectedId).then(
+      (updated) => boardStore.rememberConversation(updated),
+      () => undefined,
+    );
+  }, [selectedId, openUnread]);
 
   const select = (conversationId: string, nextStep: AtelierStep = "conversation", prdId: string | null = null): void => {
     resolveSeq.current += 1;
@@ -211,6 +223,9 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
                     {item.sessionStatus === "running" && <LiveDot />}
                     {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
                     <span className="truncate text-sm">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
+                    {item.unread && (
+                      <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
+                    )}
                   </span>
                   <span className="mt-1 flex items-center gap-1.5 font-mono text-2xs text-muted-foreground">
                     <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>

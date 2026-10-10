@@ -1078,6 +1078,7 @@ export const conversationSchema = z.object({
   sessionStatus: conversationSessionStatusSchema,
   sessionId: z.string().nullable(),
   error: z.string().nullable(),
+  unread: z.boolean(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

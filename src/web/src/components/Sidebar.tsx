@@ -19,6 +19,8 @@ interface SidebarProps {
   onUpdate?: () => void;
   updating?: boolean;
   canUpdate?: boolean;
+  /** Views showing an unread dot on their icon. */
+  badges?: Partial<Record<SidebarView, boolean>>;
 }
 
 interface NavEntry {
@@ -49,21 +51,28 @@ export function Sidebar({
   onUpdate,
   updating = false,
   canUpdate = false,
+  badges = {},
 }: SidebarProps): ReactNode {
   return (
     <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
-      {NAV_ENTRIES.map(({ value, label, Icon }) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => onSelect(value)}
-          aria-pressed={view === value}
-          title={label}
-          className={cn(ITEM_BASE, view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
-        >
-          <Icon className="h-4 w-4" />
-        </button>
-      ))}
+      {NAV_ENTRIES.map(({ value, label, Icon }) => {
+        const badged = badges[value] === true;
+        const title = badged ? `${label} — nouvelles réponses` : label;
+        return (
+          <button
+            key={value}
+            type="button"
+            onClick={() => onSelect(value)}
+            aria-pressed={view === value}
+            aria-label={title}
+            title={title}
+            className={cn(ITEM_BASE, "relative", view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
+          >
+            <Icon className="h-4 w-4" />
+            {badged && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-background" />}
+          </button>
+        );
+      })}
 
       <div className="flex-1" />
 

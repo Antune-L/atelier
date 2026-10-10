@@ -64,7 +64,9 @@ export function App() {
   const selectableProjects = projects.filter((project) => !project.hidden);
   const projectsLoaded = useProjectsLoaded();
   const showOnboarding = projectsLoaded && projects.length === 0;
-  const { slots, openTicketId } = useBoard();
+  const { slots, openTicketId, conversations } = useBoard();
+  // Global icon badge: ignores the project filter.
+  const atelierUnread = conversations.some((c) => c.unread);
   const [view, setView] = useState<SidebarView>("home");
   const [homeView, setHomeView] = useState<HomeView>("kanban");
   const [filter, setFilter] = useState("all");
@@ -194,6 +196,7 @@ export function App() {
       <Sidebar
         view={view}
         onSelect={selectView}
+        badges={{ atelier: atelierUnread }}
         onOpenSettings={() => setSettingsOpen(true)}
         onUpdate={handleUpdate}
         updating={updating}

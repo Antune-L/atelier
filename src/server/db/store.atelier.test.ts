@@ -61,6 +61,17 @@ describe("Store atelier", () => {
     expect(updated.sessionId).toBe("thread-1");
   });
 
+  test("tracks the unread flag without reordering on read", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    expect(conversation.unread).toBe(false);
+    const unread = store.updateConversation(conversation.id, { unread: true });
+    expect(unread.unread).toBe(true);
+    const read = store.markConversationRead(conversation.id);
+    expect(read.unread).toBe(false);
+    expect(read.updatedAt).toBe(unread.updatedAt);
+  });
+
   test("appends and edits messages in order", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

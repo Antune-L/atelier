@@ -283,6 +283,8 @@ export const api = {
     request(`${atelierConversationPath(id)}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
   atelierInterrupt: (id: string): Promise<{ ok: boolean }> =>
     request(`${atelierConversationPath(id)}/interrupt`, { method: "POST" }),
+  atelierMarkConversationRead: (id: string): Promise<Conversation> =>
+    request(`${atelierConversationPath(id)}/read`, { method: "POST" }),
   atelierConsolidate: (id: string, feedback?: string): Promise<{ ok: boolean }> =>
     request(`${atelierConversationPath(id)}/consolidate`, { method: "POST", body: JSON.stringify({ feedback }) }),
   atelierUpdatePrd: (id: string, patch: UpdatePrdDocumentInput): Promise<PrdDocumentRecord> =>

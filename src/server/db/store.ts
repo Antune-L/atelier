@@ -211,6 +211,7 @@ export interface ConversationPatch {
   sessionStatus?: ConversationSessionStatus;
   sessionId?: string | null;
   error?: string | null;
+  unread?: boolean;
 }
 
 export interface NewConversationMessage {
@@ -2317,9 +2318,16 @@ export class Store {
     if (patch.sessionStatus !== undefined) set("session_status", patch.sessionStatus);
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
     if (patch.error !== undefined) set("error", patch.error);
+    if (patch.unread !== undefined) set("unread", patch.unread ? 1 : 0);
     set("updated_at", Date.now());
     builder.run(this.db, "conversations", id);
     return this.requireConversation(id, "updateConversation");
+  }
+
+  /** Clears the unread flag without bumping updated_at, so the list order stays stable. */
+  markConversationRead(id: string): Conversation {
+    this.db.query("UPDATE conversations SET unread = 0 WHERE id = ?").run(id);
+    return this.requireConversation(id, "markConversationRead");
   }
 
   deleteConversation(id: string): void {

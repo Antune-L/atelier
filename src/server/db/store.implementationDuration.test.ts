@@ -63,16 +63,16 @@ describe("Store implementationFinishedAt", () => {
     close();
   });
 
-  test("freezes the agent end once a PR is open (conflict resolution, quality correction)", () => {
+  test("a later agent run on an open PR restamps the last agent end", () => {
     const { store, ticketId, close } = setup();
     store.updateTicket(ticketId, { prUrl: "https://github.com/o/r/pull/1" });
     expect(store.updateTicket(ticketId, { finishedAt: 42_000 }).implementationFinishedAt).toBe(42_000);
     const rerun = store.updateTicket(ticketId, { finishedAt: null });
     expect(rerun.finishedAt).toBeNull();
-    expect(rerun.implementationFinishedAt).toBe(42_000);
+    expect(rerun.implementationFinishedAt).toBeNull();
     const redelivered = store.updateTicket(ticketId, { finishedAt: 80_000 });
     expect(redelivered.finishedAt).toBe(80_000);
-    expect(redelivered.implementationFinishedAt).toBe(42_000);
+    expect(redelivered.implementationFinishedAt).toBe(80_000);
     close();
   });
 

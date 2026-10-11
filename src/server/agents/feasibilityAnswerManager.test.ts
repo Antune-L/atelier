@@ -66,7 +66,7 @@ for (const [orchestrator, engine, expected] of [
     expect(() => manager.start(ticket().id, input(1))).toThrow("already running");
     await Bun.sleep(0);
     const call = system.calls[0];
-    expect(call).toMatchObject({ provider: expected, model: expected === "codex" ? "gpt-6.1-sol" : "opus", effort: "medium", serviceTier: "default" });
+    expect(call).toMatchObject({ provider: expected, model: expected === "codex" ? "gpt-6.1-sol" : "sonnet", effort: expected === "codex" ? "medium" : "low", serviceTier: "default" });
     store.updateTicket(ticket().id, { orchestrator: expected === "claude" ? "codex" : "claude" });
     call?.onEvent?.({ type: "init", sessionId: "answer-session" });
     call?.onEvent?.({ type: "turn_end", sessionId: "answer-session", ok: true, subtype: "success", usageByModel: {

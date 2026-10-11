@@ -1436,12 +1436,9 @@ export class Store {
     if (patch.sessionUsage !== undefined) set("session_usage", JSON.stringify(patch.sessionUsage));
     if (patch.finishedAt !== undefined) set("finished_at", patch.finishedAt);
     // The agent-run end mirrors finishedAt unless set explicitly: markMerged later overwrites
-    // finishedAt with the merge time, which must not leak into the implementation duration. Once a
-    // PR is open and its agent end recorded, later runs on that PR (conflict resolution, quality
-    // correction) are review/merge wait: the agent end stays frozen across their resets and stamps.
-    const agentEndFrozen = before !== null && before.prUrl !== null && before.implementationFinishedAt !== null;
+    // finishedAt with the merge time, which must not leak into the implementation duration.
     if (patch.implementationFinishedAt !== undefined) set("implementation_finished_at", patch.implementationFinishedAt);
-    else if (patch.finishedAt !== undefined && !agentEndFrozen) set("implementation_finished_at", patch.finishedAt);
+    else if (patch.finishedAt !== undefined) set("implementation_finished_at", patch.finishedAt);
 
     set("updated_at", Date.now());
     builder.run(this.db, "tickets", id);

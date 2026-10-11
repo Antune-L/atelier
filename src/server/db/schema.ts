@@ -731,9 +731,8 @@ const IMPLEMENTATION_DURATION_BACKFILL_META_KEY = "implementation_duration_backf
 /**
  * One-shot backfill of the implementation bounds on DBs that predate `implementation_finished_at`:
  * markMerged used to overwrite finishedAt with the merge time, so a merged card's duration included
- * the review/merge wait, and later agent runs on the PR (conflict resolution, quality correction)
- * re-stamped it. The agent end that opened the PR is the FIRST `done` event; without one, non-merged
- * tickets fall back to finished_at while merged ones stay NULL. The missing start is recovered
+ * the review/merge wait. Non-merged tickets take finished_at; merged ones take the latest `done`
+ * event — the last agent end — and stay NULL without one. The missing start is recovered
  * from the first `update_stage → implementing` event. Meta-flagged so it runs EXACTLY once.
  */
 function backfillImplementationDuration(db: Database): void {
@@ -748,10 +747,11 @@ function backfillImplementationDuration(db: Database): void {
   );
   if (!columns.has("column_name") || !columns.has("finished_at")) return;
   db.transaction(() => {
-    db.exec(`UPDATE tickets SET implementation_finished_at = COALESCE(
-        (SELECT MIN(created_at) FROM events WHERE ticket_id = tickets.id AND type = 'done'),
-        CASE WHEN column_name <> 'merged' THEN finished_at END
-      ) WHERE implementation_finished_at IS NULL`);
+    db.exec(`UPDATE tickets SET implementation_finished_at = finished_at
+      WHERE implementation_finished_at IS NULL AND finished_at IS NOT NULL AND column_name <> 'merged'`);
+    db.exec(`UPDATE tickets SET implementation_finished_at = (
+        SELECT MAX(created_at) FROM events WHERE ticket_id = tickets.id AND type = 'done'
+      ) WHERE implementation_finished_at IS NULL AND column_name = 'merged'`);
     db.exec(`UPDATE tickets SET implementation_started_at = (
         SELECT MIN(created_at) FROM events
         WHERE ticket_id = tickets.id AND type = 'update_stage' AND json_extract(payload, '$.stage') = 'implementing'

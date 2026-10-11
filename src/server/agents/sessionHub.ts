@@ -298,6 +298,7 @@ export function renderSessionEvent(event: AgentSessionEvent, messageChannel?: Ch
     case "rate_limit":
       return `⏳ rate limit : ${event.status}`;
     case "context_usage":
+    case "background_tasks":
       return null;
     case "error":
       return `⚠️ ${event.message}`;

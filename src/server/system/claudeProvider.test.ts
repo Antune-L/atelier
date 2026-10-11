@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import type {
+  SDKBackgroundTasksChangedMessage,
   SDKCompactBoundaryMessage,
   SDKMessage,
   SDKResultSuccess,
@@ -7,7 +8,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
-import { createSdkAgentSession, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
+import { createSdkAgentSession, dispatchClaudeMessage, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
 
 const RESULT = {
   type: "result",
@@ -158,4 +159,27 @@ test("a failing context read never breaks the Claude stream", async () => {
   await waitFor(() => turnEnds(events) === 2);
   await session.close();
   expect(events.some((event) => event.type === "error" || event.type === "context_usage")).toBe(false);
+});
+
+test("Claude reports live non-ambient background tasks, including an empty set", () => {
+  const events: AgentSessionEvent[] = [];
+  const changed = (tasks: SDKBackgroundTasksChangedMessage["tasks"]): SDKBackgroundTasksChangedMessage => ({
+    type: "system",
+    subtype: "background_tasks_changed",
+    tasks,
+    uuid: "00000000-0000-4000-8000-000000000003",
+    session_id: "s1",
+  });
+
+  dispatchClaudeMessage(changed([
+    { task_id: "t1", task_type: "local_agent", description: "revue" },
+    { task_id: "w1", task_type: "monitor", description: "watcher", ambient: true },
+    { task_id: "t2", task_type: "local_agent", description: "revue 2", ambient: false },
+  ]), (event) => events.push(event));
+  dispatchClaudeMessage(changed([]), (event) => events.push(event));
+
+  expect(events).toEqual([
+    { type: "background_tasks", activeTaskIds: ["t1", "t2"] },
+    { type: "background_tasks", activeTaskIds: [] },
+  ]);
 });

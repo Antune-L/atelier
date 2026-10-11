@@ -63,6 +63,10 @@ interface ConversationRuntime {
   resumed: boolean;
   /** Set while a compaction turn runs: context occupancy before, and after once reported. */
   compaction: { before: number | null; after: number | null } | null;
+  /** Live background tasks (sub-agents) of the root session, as last reported. */
+  backgroundTasks: ReadonlySet<string>;
+  /** A turn ended while background tasks were still running: the final notification is deferred. */
+  awaitingBackground: boolean;
 }
 
 export type CompactOutcome =
@@ -204,6 +208,12 @@ export class AtelierManager {
   async interrupt(conversationId: string): Promise<void> {
     await this.sessionHub.interrupt(atelierSessionKey(conversationId));
     this.flush(conversationId);
+    const runtime = this.runtimes.get(conversationId);
+    if (runtime?.awaitingBackground) {
+      runtime.awaitingBackground = false;
+      // The deferred turn_end left no idle close, and no relaunch turn may come to arm one.
+      this.armIdleTimer(conversationId, runtime);
+    }
     this.patchConversation(conversationId, { sessionStatus: "idle" });
   }
 
@@ -299,7 +309,10 @@ export class AtelierManager {
     await assertExecutionAvailable(this.system, execution);
     const resumeSessionId = execution.provider === "codex" ? conversation.sessionId : null;
     const key = atelierSessionKey(conversationId);
-    this.runtime(conversationId).resumed = resumeSessionId !== null;
+    const runtime = this.runtime(conversationId);
+    runtime.resumed = resumeSessionId !== null;
+    // The SDK emits nothing at startup: a fresh CLI process starts with no background task.
+    this.resetBackground(runtime);
     this.sessionHub.start(
       buildAtelierSessionConfig({
         conversationId,
@@ -355,6 +368,10 @@ export class AtelierManager {
       case "context_usage":
         if (event.sourceId) return;
         this.onContextUsage(conversationId, event.usedTokens, event.maxTokens);
+        return;
+      case "background_tasks":
+        if (event.sourceId) return;
+        this.onBackgroundTasks(conversationId, event.activeTaskIds);
         return;
       default:
         return;
@@ -412,8 +429,30 @@ export class AtelierManager {
     runtime.turn = emptyTurn();
     runtime.compaction = null;
     if (compaction) this.addCompactionSummary(conversationId, turnId, ok, compaction);
+    if (ok && runtime.backgroundTasks.size > 0) {
+      // Sub-agents will relaunch the orchestrator: notify only once it has truly finished.
+      runtime.awaitingBackground = true;
+      this.clearIdleTimer(runtime);
+      if (this.store.getConversation(conversationId)?.sessionStatus !== "running") {
+        this.patchConversation(conversationId, { sessionStatus: "running" });
+      }
+      return;
+    }
+    runtime.awaitingBackground = false;
     this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
     this.armIdleTimer(conversationId, runtime);
+  }
+
+  private onBackgroundTasks(conversationId: string, activeTaskIds: string[]): void {
+    const runtime = this.runtime(conversationId);
+    runtime.backgroundTasks = new Set(activeTaskIds);
+    // No relaunch turn may follow: the idle close then settles the conversation.
+    if (runtime.backgroundTasks.size === 0 && runtime.awaitingBackground) this.armIdleTimer(conversationId, runtime);
+  }
+
+  private resetBackground(runtime: ConversationRuntime): void {
+    runtime.backgroundTasks = new Set();
+    runtime.awaitingBackground = false;
   }
 
   /** Close the live session after `idleTimeoutMs` without a new turn. */
@@ -422,7 +461,10 @@ export class AtelierManager {
     runtime.idleTimer = setTimeout(() => {
       runtime.idleTimer = null;
       log.info("session atelier fermée après inactivité", { conversationId });
+      const awaiting = runtime.awaitingBackground;
+      this.resetBackground(runtime);
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      if (awaiting) this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
       this.clearContext(conversationId);
     }, this.idleTimeoutMs);
     runtime.idleTimer.unref?.();
@@ -456,6 +498,7 @@ export class AtelierManager {
     this.flush(conversationId);
     runtime.turn = emptyTurn();
     runtime.compaction = null;
+    this.resetBackground(runtime);
     const patch: ConversationPatch = { sessionStatus: "error", error: reason, unread: true, contextTokens: null, contextWindow: null };
     if (runtime.resumed) patch.sessionId = null;
     runtime.resumed = false;
@@ -515,6 +558,7 @@ export class AtelierManager {
       runtime.turn = emptyTurn();
       runtime.resumed = false;
       runtime.compaction = null;
+      this.resetBackground(runtime);
     }
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "cancelled");
     this.clearContext(conversationId);
@@ -528,7 +572,16 @@ export class AtelierManager {
   private runtime(conversationId: string): ConversationRuntime {
     let runtime = this.runtimes.get(conversationId);
     if (!runtime) {
-      runtime = { turn: emptyTurn(), lastUserTurnId: null, flushTimer: null, idleTimer: null, resumed: false, compaction: null };
+      runtime = {
+        turn: emptyTurn(),
+        lastUserTurnId: null,
+        flushTimer: null,
+        idleTimer: null,
+        resumed: false,
+        compaction: null,
+        backgroundTasks: new Set(),
+        awaitingBackground: false,
+      };
       this.runtimes.set(conversationId, runtime);
     }
     return runtime;

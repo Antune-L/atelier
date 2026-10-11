@@ -229,6 +229,104 @@ describe("AtelierManager", () => {
     expect(store.getConversation(conversation.id)?.unread).toBe(true);
   });
 
+  test("notifies only once the orchestrator finishes after its background sub-agents", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    const state = () => {
+      const current = store.getConversation(conversation.id);
+      return [current?.sessionStatus, current?.unread];
+    };
+
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1", "t2"] });
+    system.emit({ type: "assistant_text", text: "Revue lancée." });
+    system.emit(TURN_END);
+    expect(state()).toEqual(["running", false]);
+
+    system.emit({ type: "background_tasks", activeTaskIds: ["t2"] });
+    system.emit({ type: "assistant_text", text: "Premier retour." });
+    system.emit(TURN_END);
+    expect(state()).toEqual(["running", false]);
+
+    system.emit({ type: "background_tasks", activeTaskIds: [] });
+    expect(state()).toEqual(["running", false]);
+    system.emit({ type: "assistant_text", text: "final" });
+    system.emit(TURN_END);
+    expect(state()).toEqual(["idle", true]);
+    expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe("final");
+  });
+
+  test("a failed turn notifies immediately even while sub-agents run", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1"] });
+    system.emit({ ...TURN_END, ok: false, subtype: "error_during_execution" });
+    const updated = store.getConversation(conversation.id);
+    expect(updated?.sessionStatus).toBe("idle");
+    expect(updated?.unread).toBe(true);
+  });
+
+  test("ignores background tasks reported by a sub-agent source", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1"], sourceId: "agent-1" });
+    system.emit(TURN_END);
+    const updated = store.getConversation(conversation.id);
+    expect(updated?.sessionStatus).toBe("idle");
+    expect(updated?.unread).toBe(true);
+  });
+
+  test("the idle close settles a conversation whose sub-agents ended without a final turn", async () => {
+    const { store, system, sessionHub, manager } = setup(20);
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1"] });
+    system.emit(TURN_END);
+    await Bun.sleep(40);
+    // No idle close while a sub-agent still runs.
+    expect(sessionHub.isConnected(atelierSessionKey(conversation.id))).toBe(true);
+    expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+
+    system.emit({ type: "background_tasks", activeTaskIds: [] });
+    await Bun.sleep(40);
+    const updated = store.getConversation(conversation.id);
+    expect(updated?.sessionStatus).toBe("idle");
+    expect(updated?.unread).toBe(true);
+    expect(sessionHub.isConnected(atelierSessionKey(conversation.id))).toBe(false);
+  });
+
+  test("interrupting while sub-agents run re-arms the idle close", async () => {
+    const { store, system, sessionHub, manager } = setup(20);
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1"] });
+    system.emit(TURN_END);
+
+    await manager.interrupt(conversation.id);
+    system.emit({ type: "background_tasks", activeTaskIds: [] });
+    await Bun.sleep(40);
+    expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+    expect(sessionHub.isConnected(atelierSessionKey(conversation.id))).toBe(false);
+  });
+
+  test("a new session forgets the background tasks of the failed one", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "background_tasks", activeTaskIds: ["t1"] });
+    system.emit({ type: "error", message: "processus claude mort" });
+    store.updateConversation(conversation.id, { unread: false });
+
+    await manager.postMessage(conversation.id, "Encore").delivered;
+    expect(system.sessions.length).toBe(2);
+    system.emit(TURN_END);
+    const updated = store.getConversation(conversation.id);
+    expect(updated?.sessionStatus).toBe("idle");
+    expect(updated?.unread).toBe(true);
+  });
+
   test.each([
     ["claude", CLAUDE_CONVERSATION],
     ["codex", CODEX_CONVERSATION],

@@ -15,7 +15,6 @@ import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts"
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import { isCloudHost, PR_ONLY_MESSAGE } from "../hostRole.ts";
 import { createLogger } from "../logger.ts";
-import { KeyedMutex } from "../mutex.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -32,6 +31,7 @@ import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
 import { DelegationWorkspace } from "./delegationWorkspace.ts";
+import { addDetachedWorktree, removeDetachedWorktree } from "./detachedWorktree.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
@@ -220,7 +220,6 @@ export class RealSystemAdapter implements SystemAdapter {
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
   private readonly delegationWorkspace = new DelegationWorkspace();
-  private readonly analysisGitMutex = new KeyedMutex();
   private readonly shellStartupDirectories = new Map<string, string>();
   /** The PR hosts behind the VCS seam, keyed by the project's `vcsProvider`. */
   private readonly vcsClients: Record<VcsProvider, VcsClient> = {
@@ -334,34 +333,20 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void> {
-    await this.analysisGitMutex.run(repoPath, async () => {
-      const fetched = await runBoundedCommand(["git", "-C", repoPath, "fetch", "origin", baseBranch], repoPath);
-      if (fetched.exitCode !== 0 || fetched.timedOut) {
-        throw new Error(`git fetch origin ${baseBranch} a échoué : ${boundedCommandDetail(fetched)}`);
-      }
-      const res = await $`git -C ${repoPath} worktree add --detach ${path} origin/${baseBranch}`.nothrow().quiet();
-      if (res.exitCode !== 0) {
-        const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-        throw new Error(`git worktree add (analyse) a échoué (code ${res.exitCode}) : ${detail}`);
-      }
-    });
+    const fetched = await runBoundedCommand(["git", "-C", repoPath, "fetch", "origin", baseBranch], repoPath);
+    if (fetched.exitCode !== 0 || fetched.timedOut) {
+      throw new Error(`git fetch origin ${baseBranch} a échoué : ${boundedCommandDetail(fetched)}`);
+    }
+    await addDetachedWorktree(repoPath, path, `origin/${baseBranch}`);
   }
 
   async removeAnalysisWorkspace(repoPath: string, path: string): Promise<void> {
-    await this.analysisGitMutex.run(repoPath, async () => {
-      await $`git -C ${repoPath} worktree remove ${path} --force`.nothrow().quiet();
-      await rm(path, { recursive: true, force: true });
-      await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
-    });
+    await removeDetachedWorktree(repoPath, path);
   }
 
   async clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void> {
     await rm(root, { recursive: true, force: true });
-    for (const repoPath of repoPaths) {
-      await this.analysisGitMutex.run(repoPath, async () => {
-        await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
-      });
-    }
+    for (const repoPath of repoPaths) await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
   }
 
   async worktreeExists(slotPath: string): Promise<boolean> {

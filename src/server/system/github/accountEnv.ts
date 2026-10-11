@@ -166,12 +166,21 @@ export function githubAccountEnvOverrides(login: string): Record<string, string>
   };
 }
 
-/** Drop the ambient token variables and undefined values from an environment. */
-export function withoutGithubTokens(base: Record<string, string | undefined>): Record<string, string> {
-  const blocked = new Set<string>(GITHUB_TOKEN_ENV_KEYS);
+/** An environment without undefined values (and without `blocked` keys), ready for a spawn. */
+export function definedEnv(base: Record<string, string | undefined>, blocked: ReadonlySet<string> = new Set()): Record<string, string> {
   return Object.fromEntries(
     Object.entries(base).flatMap(([key, value]) => (value === undefined || blocked.has(key) ? [] : [[key, value]])),
   );
+}
+
+/** Drop the ambient token variables and undefined values from an environment. */
+export function withoutGithubTokens(base: Record<string, string | undefined>): Record<string, string> {
+  return definedEnv(base, new Set<string>(GITHUB_TOKEN_ENV_KEYS));
+}
+
+/** French label naming an account in messages: the login, or the machine's default account. */
+export function githubAccountLabel(account: string | null): string {
+  return account === null ? "compte par défaut de la machine" : `compte « ${account} »`;
 }
 
 /**
@@ -227,18 +236,28 @@ function commonDirArgs(cwd: string): string[] {
   return ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"];
 }
 
-async function commonDir(cwd: string): Promise<string | null> {
-  const result = await commandRunner(commonDirArgs(cwd), existingDirectory(cwd));
-  if (result.exitCode !== 0 || result.timedOut) return null;
+/**
+ * A git common-dir probe: the directory, `null` when the path is genuinely not a git repository
+ * (or does not exist), or `failed` when git could not answer (timeout, unexpected error). A failed
+ * probe must never be read as "no project": that would silently run under the machine account.
+ */
+type CommonDirProbe = string | null | "failed";
+const PROBE_FAILED = "failed";
+const NOT_A_REPOSITORY_PATTERN = /not a git repository/i;
+
+function interpretProbe(cwd: string, result: { exitCode: number; stdout: string; stderr: string; timedOut?: boolean }): CommonDirProbe {
+  if (result.timedOut) return PROBE_FAILED;
+  if (result.exitCode !== 0) return !existsSync(cwd) || NOT_A_REPOSITORY_PATTERN.test(result.stderr) ? null : PROBE_FAILED;
   const path = result.stdout.trim();
-  return path ? realpathOrSelf(path) : null;
+  return path ? realpathOrSelf(path) : PROBE_FAILED;
 }
 
-function commonDirSync(cwd: string): string | null {
-  const result = syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd));
-  if (result.exitCode !== 0) return null;
-  const path = result.stdout.trim();
-  return path ? realpathOrSelf(path) : null;
+async function commonDir(cwd: string): Promise<CommonDirProbe> {
+  return interpretProbe(cwd, await commandRunner(commonDirArgs(cwd), existingDirectory(cwd)));
+}
+
+function commonDirSync(cwd: string): CommonDirProbe {
+  return interpretProbe(cwd, syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd)));
 }
 
 /** Spawning in a missing cwd throws; the `-C` argument carries the real target anyway. */
@@ -246,23 +265,42 @@ function existingDirectory(cwd: string): string {
   return existsSync(cwd) ? cwd : process.cwd();
 }
 
-async function projectCommonDir(repoPath: string): Promise<string | null> {
+async function projectCommonDir(repoPath: string): Promise<CommonDirProbe> {
   const cached = commonDirCache.get(repoPath);
   if (cached !== undefined) return cached;
   const dir = await commonDir(repoPath);
-  if (dir !== null) commonDirCache.set(repoPath, dir);
+  if (dir !== null && dir !== PROBE_FAILED) commonDirCache.set(repoPath, dir);
   return dir;
 }
 
-function projectCommonDirSync(repoPath: string): string | null {
+function projectCommonDirSync(repoPath: string): CommonDirProbe {
   const cached = commonDirCache.get(repoPath);
   if (cached !== undefined) return cached;
   const dir = commonDirSync(repoPath);
-  if (dir !== null) commonDirCache.set(repoPath, dir);
+  if (dir !== null && dir !== PROBE_FAILED) commonDirCache.set(repoPath, dir);
   return dir;
 }
 
-function isInside(parent: string, child: string): boolean {
+/**
+ * Fail closed: while any project is attached to an account, an unanswered probe (of the cwd or of
+ * a project repository) blocks the operation instead of defaulting to the machine account.
+ */
+function assertProbeAnswered(probe: CommonDirProbe, path: string, projects: GithubProjectBinding[]): void {
+  if (probe !== PROBE_FAILED || !projects.some((project) => project.githubAccount)) return;
+  throw new GithubAccountError(`Dépôt git illisible (${path}) : impossible de déterminer le compte GitHub du projet, opération refusée plutôt que d'utiliser le compte de la machine.`);
+}
+
+/** Projects whose git common directory is `dir`; unanswered probes fail closed. */
+function matchProjects(dir: string, projects: GithubProjectBinding[], probe: (repoPath: string) => CommonDirProbe): GithubProjectBinding[] {
+  return projects.filter((project) => {
+    const projectDir = probe(project.repoPath);
+    assertProbeAnswered(projectDir, project.repoPath, projects);
+    return projectDir === dir;
+  });
+}
+
+/** True when `child` is strictly inside `parent` (both absolute). */
+export function isInsidePath(parent: string, child: string): boolean {
   const rel = relative(parent, child);
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
@@ -271,7 +309,7 @@ function isInside(parent: string, child: string): boolean {
 function unresolvedAttachedClone(cwd: string): string | null {
   const root = realpathOrSelf(githubCloneRoot());
   const target = realpathOrSelf(cwd);
-  if (!isInside(root, target)) return null;
+  if (!isInsidePath(root, target)) return null;
   const segment = relative(root, target).split(sep)[0];
   return segment && segment !== MACHINE_ACCOUNT_SEGMENT ? segment : null;
 }
@@ -326,13 +364,13 @@ function prepareAccount(account: string): void {
 
 export async function resolveGithubAccount(cwd: string): Promise<GithubResolution> {
   const projects = projectSource();
-  const attachedCandidates = projects.length > 0;
-  const dir = attachedCandidates ? await commonDir(cwd) : null;
+  const dir = projects.length > 0 ? await commonDir(cwd) : null;
+  assertProbeAnswered(dir, cwd, projects);
   const matches: GithubProjectBinding[] = [];
-  if (dir !== null) {
-    for (const project of projects) {
-      if (await projectCommonDir(project.repoPath) === dir) matches.push(project);
-    }
+  if (dir !== null && dir !== PROBE_FAILED) {
+    const probes = new Map<string, CommonDirProbe>();
+    for (const project of projects) probes.set(project.repoPath, await projectCommonDir(project.repoPath));
+    matches.push(...matchProjects(dir, projects, (repoPath) => probes.get(repoPath) ?? null));
   }
   const decision = decide(cwd, matches);
   if (decision.check !== null && decision.account !== null) {
@@ -346,7 +384,8 @@ export async function resolveGithubAccount(cwd: string): Promise<GithubResolutio
 export function resolveGithubAccountSync(cwd: string): GithubResolution {
   const projects = projectSource();
   const dir = projects.length > 0 ? commonDirSync(cwd) : null;
-  const matches = dir === null ? [] : projects.filter((project) => projectCommonDirSync(project.repoPath) === dir);
+  assertProbeAnswered(dir, cwd, projects);
+  const matches = dir === null || dir === PROBE_FAILED ? [] : matchProjects(dir, projects, projectCommonDirSync);
   const decision = decide(cwd, matches);
   if (decision.check !== null && decision.account !== null) {
     prepareAccount(decision.account);
@@ -401,8 +440,12 @@ export interface GithubCommandOptions {
   verifyIdentity?: boolean;
 }
 
+/**
+ * Only stderr is masked: it is what errors and logs surface. stdout carries gh's JSON payloads
+ * (reviews, PR bodies…), which callers parse and never log; masking it would corrupt that JSON.
+ */
 function redactResult(result: BoundedCommandResult): BoundedCommandResult {
-  return { ...result, stdout: redactSecrets(result.stdout), stderr: redactSecrets(result.stderr) };
+  return { ...result, stderr: redactSecrets(result.stderr) };
 }
 
 /**
@@ -448,7 +491,7 @@ export function applyGithubEnvSync(env: Record<string, string | undefined>, cwd:
 function isAccountEnvironment(env: Record<string, string | undefined>): boolean {
   const dir = env.GH_CONFIG_DIR;
   if (!dir || accountsRoot === null) return false;
-  return isInside(accountsRoot, resolve(dir));
+  return isInsidePath(accountsRoot, resolve(dir));
 }
 
 /**

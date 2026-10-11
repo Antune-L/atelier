@@ -170,6 +170,30 @@ describe("resolveGithubAccount", () => {
     expect((await resolveGithubAccount(clone)).account).toBe("grace");
   });
 
+  test("an unanswered git probe fails closed while a project is attached", async () => {
+    makeAccount("heidi");
+    const repo = makeRepo("probe", "https://github.com/o/r.git");
+    setGithubProjectSource(() => [project({ repoPath: repo, githubAccount: "heidi" })]);
+    const base = fakeIdentityRunner(() => "heidi");
+    setGithubCommandRunners({
+      sync: base.sync,
+      async: async (args, cwd, options) => (args.includes("--git-common-dir")
+        ? { exitCode: 137, stdout: "", stderr: "", timedOut: true }
+        : base.async(args, cwd, options)),
+    });
+    await expect(resolveGithubAccount(repo)).rejects.toThrow(/compte de la machine/);
+    setGithubProjectSource(() => [project({ repoPath: repo })]);
+    expect((await resolveGithubAccount(repo)).account).toBeNull();
+  });
+
+  test("a folder that is not a git repository still resolves to no project", async () => {
+    makeAccount("ivan");
+    const plain = join(root, "plain-folder");
+    mkdirSync(plain, { recursive: true });
+    setGithubProjectSource(() => [project({ repoPath: makeRepo("ivan-repo", "https://github.com/o/r.git"), githubAccount: "ivan" })]);
+    expect((await resolveGithubAccount(plain)).account).toBeNull();
+  });
+
   test("an Azure DevOps project gets no GitHub environment", async () => {
     const repo = makeRepo("azure", "https://dev.azure.com/org/p/_git/r");
     setGithubProjectSource(() => [project({ repoPath: repo, vcsProvider: "azureDevops" })]);
@@ -215,7 +239,8 @@ describe("identity and command wrapper", () => {
     process.env.GH_TOKEN = "ambient";
     try {
       const result = await runGithubCommand(["gh", "pr", "list"], repo, { verifyIdentity: true });
-      expect(result.stdout).toBe("[redacted]");
+      // stdout carries gh JSON and is left intact; only stderr (surfaced in errors) is masked.
+      expect(result.stdout).toBe("ghp_abcdefghijklmnopqrstuvwxyz0123");
     } finally {
       if (previous === undefined) delete process.env.GH_TOKEN;
       else process.env.GH_TOKEN = previous;

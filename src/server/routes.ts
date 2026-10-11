@@ -66,7 +66,7 @@ import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
-import { GithubAccountError, normalizeGithubLogin } from "./system/github/accountEnv.ts";
+import { githubAccountLabel, GithubAccountError, normalizeGithubLogin } from "./system/github/accountEnv.ts";
 import { CloneConflictError, CloneSourceError, CloneTimeoutError } from "./system/github/clone.ts";
 import { redactSecrets } from "./system/secretRedaction.ts";
 import { addGithubAccountRequestSchema, cloneProjectRequestSchema, githubLoginSchema } from "../shared/github.ts";
@@ -1031,8 +1031,7 @@ export function createApiRoutes(deps: RouteDeps) {
         set.status = HTTP_CREATED;
         return added;
       } catch (error) {
-        const message = getErrorMessage(error, "Ajout du compte GitHub impossible.").split(parsed.data.token).join("[redacted]");
-        return jsonError(set, HTTP_BAD_REQUEST, redactSecrets(message));
+        return jsonError(set, HTTP_BAD_REQUEST, redactSecrets(getErrorMessage(error, "Ajout du compte GitHub impossible."), [parsed.data.token]));
       }
     })
     .delete("/github/accounts/:login", async ({ params, set }) => {
@@ -1056,8 +1055,7 @@ export function createApiRoutes(deps: RouteDeps) {
       try {
         return await deps.system.listGithubRepos(account.login);
       } catch (error) {
-        const owner = account.login === null ? "compte par défaut de la machine" : `compte « ${account.login} »`;
-        const message = error instanceof GithubAccountError ? error.message : `Liste des dépôts illisible pour le ${owner}.`;
+        const message = error instanceof GithubAccountError ? error.message : `Liste des dépôts illisible pour le ${githubAccountLabel(account.login)}.`;
         return jsonError(set, HTTP_BAD_GATEWAY, redactSecrets(message));
       }
     })

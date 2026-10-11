@@ -47,7 +47,7 @@ import {
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
-import { GH_AUTH_DENIAL_REASON, GH_AUTH_PATTERN_SOURCE } from "./github/ghAuthGuard.ts";
+import { GH_AUTH_DENIAL_REASON, isGhAuthCommand } from "./github/ghAuthGuard.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
@@ -483,7 +483,7 @@ function extractCommandScript(): string {
 
 /** Same `gh auth` matcher as the Claude PreToolUse hook, evaluated on the extracted command. */
 function ghAuthGuardScript(): string {
-  const matcher = `const source=${JSON.stringify(GH_AUTH_PATTERN_SOURCE)};process.exit(new RegExp(source).test(await Bun.stdin.text())?0:1)`;
+  const matcher = `const isGhAuthCommand=${isGhAuthCommand.toString()};process.exit(isGhAuthCommand(await Bun.stdin.text())?0:1)`;
   return (
     extractCommandScript() +
     `if printf '%s' "$command" | ${shellQuote(process.execPath)} -e ${shellQuote(matcher)}; then\n  ${shellDeny(GH_AUTH_DENIAL_REASON)}\nfi\n`

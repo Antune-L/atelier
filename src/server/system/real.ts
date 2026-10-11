@@ -27,7 +27,7 @@ import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
 import { confirmBrokerCleanup, previewBrokerSocket, requestPreviewBroker } from "./previewBroker.ts";
-import { isSuccessStatus, previewStatus } from "./previewNetwork.ts";
+import { isSuccessStatus, previewBasicAuthorization, previewStatus, previewWebSocketOpens } from "./previewNetwork.ts";
 import { verifyPreviewCleanup } from "./previewCleanup.ts";
 import type { PreviewRecord } from "../../shared/preview.ts";
 import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.ts";
@@ -100,6 +100,8 @@ const CODEX_HOME_ENV = "CODEX_HOME";
 const DEFAULT_CODEX_HOME = join(homedir(), ".codex");
 const AGENTS_SKILLS_DIR = join(homedir(), ".agents", SKILLS_DIR_NAME);
 const PROD_ENV_MARKER = "prod";
+const SECURE_WEBSOCKET_PROTOCOL = "wss:";
+const PREVIEW_WEBSOCKET_TIMEOUT_MS = 10_000;
 /** Bound the synchronous one-shot reformulation SDK query (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
 /** Read-only toolset for the reformulation query (the description may reference local image paths). */
@@ -243,8 +245,15 @@ export class RealSystemAdapter implements SystemAdapter {
     const unauthenticated = await previewStatus(target, {}, AbortSignal.timeout(5_000));
     if (unauthenticated === null || unauthenticated === 404 || unauthenticated >= 500) return false;
     if (unauthenticated !== 401) throw new Error("The preview does not enforce HTTP Basic authentication.");
-    const status = await previewStatus(target, { authorization: `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}` }, AbortSignal.timeout(5_000));
+    const status = await previewStatus(target, { authorization: previewBasicAuthorization(auth) }, AbortSignal.timeout(5_000));
     return isSuccessStatus(status);
+  }
+  async probePreviewWebSocket(url: string, path: string, auth: { username: string; password: string }): Promise<boolean> {
+    const origin = new URL(url);
+    const target = new URL(path, origin);
+    if (target.origin !== origin.origin || target.protocol !== "https:") throw new Error("Preview WebSocket checks must stay on the preview HTTPS origin.");
+    target.protocol = SECURE_WEBSOCKET_PROTOCOL;
+    return previewWebSocketOpens(target, { authorization: previewBasicAuthorization(auth) }, PREVIEW_WEBSOCKET_TIMEOUT_MS);
   }
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;

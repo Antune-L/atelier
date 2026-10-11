@@ -21,6 +21,7 @@ export interface QualityPreviewTarget {
   auth?: { username: string; password: string };
   assertCurrent?: () => Promise<void>;
   autonomous?: boolean;
+  testData?: string;
 }
 
 export const qualityPreviewBindingSchema = z.object({

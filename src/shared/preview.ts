@@ -21,6 +21,7 @@ const MAX_DNS_HOSTNAME_LENGTH = 253;
 const MAX_DNS_LABEL_LENGTH = 63;
 const MAX_PREVIEW_DOMAIN_BASE_LENGTH = MAX_DNS_HOSTNAME_LENGTH - MAX_DNS_LABEL_LENGTH - 1;
 const MAX_PREVIEW_HEALTH_PATH_LENGTH = 2_048;
+export const MAX_PREVIEW_TEST_DATA_LENGTH = 4_000;
 const COMPOSE_SERVICE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$/;
 const DNS_LABEL_PATTERN = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/;
 const RESERVED_PREVIEW_ENVIRONMENT_KEYS = [PREVIEW_AUTH_USERNAME_ENV, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_DISABLED_ENV];
@@ -83,6 +84,25 @@ export const coolifyInventorySchema = z.object({
 });
 export type CoolifyInventory = z.infer<typeof coolifyInventorySchema>;
 
+export const PREVIEW_QUALIFICATION_STEP_IDS = ["readiness", "test_data", "deploy", "ready", "health", "root_page", "websockets", "cleanup"] as const;
+export const previewQualificationStepSchema = z.object({
+  id: z.enum(PREVIEW_QUALIFICATION_STEP_IDS),
+  status: z.enum(["passed", "failed", "warning", "skipped"]),
+  detail: z.string(),
+});
+export type PreviewQualificationStep = z.infer<typeof previewQualificationStepSchema>;
+export const previewQualificationSchema = z.object({
+  status: z.enum(["running", "passed", "failed"]),
+  startedAt: timestampSchema,
+  finishedAt: timestampSchema.nullable(),
+  branch: nonEmptyTextSchema,
+  revision: nonEmptyTextSchema.nullable(),
+  previewId: nonEmptyTextSchema.nullable(),
+  steps: z.array(previewQualificationStepSchema),
+  error: z.string().nullable(),
+});
+export type PreviewQualification = z.infer<typeof previewQualificationSchema>;
+
 export const previewProjectSettingsSchema = z.object({
   enabled: z.boolean().default(false),
   privateKeyUuid: nonEmptyTextSchema.nullable().default(null),
@@ -90,6 +110,7 @@ export const previewProjectSettingsSchema = z.object({
   recipePath: relativePathSchema.default(DEFAULT_PREVIEW_RECIPE_PATH),
   ttlHours: z.number().positive().max(MAX_PREVIEW_TTL_HOURS).default(DEFAULT_PREVIEW_TTL_HOURS),
   preparationTicketId: nonEmptyTextSchema.nullable().default(null),
+  qualification: previewQualificationSchema.nullable().default(null),
 });
 export type PreviewProjectSettings = z.infer<typeof previewProjectSettingsSchema>;
 export const updatePreviewProjectSettingsSchema = z.object({
@@ -99,6 +120,7 @@ export const updatePreviewProjectSettingsSchema = z.object({
   recipePath: previewProjectSettingsSchema.shape.recipePath.removeDefault().optional(),
   ttlHours: previewProjectSettingsSchema.shape.ttlHours.removeDefault().optional(),
   preparationTicketId: previewProjectSettingsSchema.shape.preparationTicketId.removeDefault().optional(),
+  qualification: previewProjectSettingsSchema.shape.qualification.removeDefault().optional(),
 }).strict();
 export type UpdatePreviewProjectSettingsInput = z.infer<typeof updatePreviewProjectSettingsSchema>;
 
@@ -135,6 +157,7 @@ const previewRecipeBaseSchema = z.object({
   healthPath: previewHealthPathSchema.default(DEFAULT_PREVIEW_HEALTH_PATH),
   environment: z.record(previewEnvironmentKeySchema, z.string().refine((value) => !COOLIFY_SHARED_ENVIRONMENT_REFERENCE_PATTERN.test(value), "Shared Coolify environment references are not allowed in previews.")).default({}),
   websocketPaths: z.array(z.string().startsWith("/")).optional(),
+  testData: nonEmptyTextSchema.max(MAX_PREVIEW_TEST_DATA_LENGTH).optional(),
 });
 export const previewRecipeSchema = z.discriminatedUnion("buildPack", [
   previewRecipeBaseSchema.extend({ buildPack: z.literal("dockerfile"), dockerfile: relativePathSchema }).strict(),

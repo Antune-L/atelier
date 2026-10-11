@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import type { Orchestrator } from "../shared/constants.ts";
 import { getErrorMessage } from "../shared/errors.ts";
-import { coolifyInventorySchema, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewBranchSchema, previewGithubRepositorySchema, previewReadinessSchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
-import type { PreviewGithubSourceResolution, PreviewReadiness, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
+import { coolifyInventorySchema, DEFAULT_PREVIEW_HEALTH_PATH, PREVIEW_AUTH_HASH_ENV, PREVIEW_QUALIFICATION_STEP_IDS, PREVIEW_AUTH_USERNAME_ENV, previewBranchSchema, previewGithubRepositorySchema, previewReadinessSchema, previewRecipeSchema, updatePreviewProjectSettingsSchema, updatePreviewSettingsSchema } from "../shared/preview.ts";
+import type { PreviewGithubSourceResolution, PreviewQualification, PreviewQualificationStep, PreviewReadiness, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "../shared/preview.ts";
 import type { Ticket } from "../shared/schemas.ts";
 import { COOLIFY_PREPARATION_MARKER } from "../shared/skills.ts";
 
@@ -32,6 +32,27 @@ const SECONDS_TO_MS = 1_000;
 const HTTP_VALIDATION_FAILED = 422;
 const MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES = 31;
 const TERMINAL_PREPARATION_COLUMNS = ["merged", "failed", "abandoned", "reviewed", "answered"];
+const UNSUCCESSFUL_PREVIEW_STATUSES = ["failed", "interrupted"];
+const QUALIFICATION_CLEANUP_TIMEOUT_MS = STOPPED_PREVIEW_TIMEOUT_GRACE_MS;
+const PREVIEW_ROOT_PATH = "/";
+const QUALIFICATION_RUNNING_ERROR = "A Devin readiness test is already running for this project.";
+const QUALIFICATION_INTERRUPTED_ERROR = "The Devin readiness test was interrupted by a server restart. Its preview is being stopped.";
+const QUALIFICATION_MISSING_TEST_DATA = "The recipe declares no testData: the planner and the validator will not know which accounts or records the preview seeds.";
+
+type QualificationRecorder = (step: PreviewQualificationStep, patch?: Partial<Pick<PreviewQualification, "revision" | "previewId">>) => void;
+
+function previewDeployed(preview: PreviewRecord): boolean {
+  return preview.status === "ready" && preview.desiredState === "running" && preview.url !== null && preview.deployedRevision === preview.revision;
+}
+
+function previewDeploymentSettled(preview: PreviewRecord): boolean {
+  return previewDeployed(preview) || UNSUCCESSFUL_PREVIEW_STATUSES.includes(preview.status) || preview.desiredState === "stopped";
+}
+
+function previewDeploymentFailure(preview: PreviewRecord | null): string {
+  if (preview === null) return "The preview did not become ready within the deployment timeout.";
+  return preview.error ?? `The preview ended with status ${preview.status} before serving the requested revision.`;
+}
 
 function validateNativePreviewPassword(password: string): void {
   if (Buffer.byteLength(password, "utf8") > MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES) throw new Error(`Coolify native preview authentication requires a password of at most ${MAX_NATIVE_PREVIEW_AUTH_PASSWORD_BYTES} UTF-8 bytes. Update the private preview password before starting this Dockerfile preview.`);
@@ -52,6 +73,7 @@ export class PreviewManager {
   private readonly pending = new Map<string, Promise<void>>();
   private readonly requests = new Set<Promise<unknown>>();
   private readonly cleanupAudits = new Map<string, number>();
+  private readonly qualifications = new Map<string, Promise<void>>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
 
@@ -176,7 +198,7 @@ export class PreviewManager {
       if (active) return { created: false, ticket: active, readiness: { ...readiness, preparationTicketId: active.id } };
       if (previous.length > 0 && !input.retry) throw new Error("The previous preparation ticket is finished. Recheck the selected branch and explicitly retry preparation if it still needs changes.");
       const skill = await readFile(join(this.deps.resourcesRoot, "skills", "coolify-preview-setup", "SKILL.md"), "utf8");
-      const description = `${COOLIFY_PREPARATION_MARKER}\n\nPrepare branch ${readiness.branch} for isolated Coolify previews using the bundled skill below. Write the version 1 recipe at ${settings.recipePath}. Inspect existing seeders and record evidence if none exist. When seeders exist, Dockerfile or Compose startup must automatically run migrations then safe, repeatable preview seeders on every startup and restart before traffic and readiness; failures must prevent startup. Verify local build, health and cleanup by invoking the bundled helper directly without arguments: '${join(this.deps.resourcesRoot, "templates", "verify_coolify_preview.sh").replaceAll("'", "'\\''")}'. The helper does not prove seeding: when seeders exist, also collect project-specific seed completion and representative seeded test-data evidence, plus login checks when the application supports login, on a fresh isolated preview database and after repeated initialization and restart, without duplicate fixtures or destruction of persistent preview data. If no seeders exist, explicit repository search evidence suffices for the seeding requirement. Open a draft pull request targeting ${readiness.branch} for human review. Do not deploy or merge automatically. Do not read or copy production secrets or connect to production services.\n\n${skill}`;
+      const description = `${COOLIFY_PREPARATION_MARKER}\n\nPrepare branch ${readiness.branch} for isolated Coolify previews using the bundled skill below. Write the version 1 recipe at ${settings.recipePath}. Inspect existing seeders and record evidence if none exist. When seeders exist, Dockerfile or Compose startup must automatically run migrations then safe, repeatable preview seeders on every startup and restart before traffic and readiness; failures must prevent startup. Verify local build, health and cleanup by invoking the bundled helper directly without arguments: '${join(this.deps.resourcesRoot, "templates", "verify_coolify_preview.sh").replaceAll("'", "'\\''")}'. The helper does not prove seeding: when seeders exist, also collect project-specific seed completion and representative seeded test-data evidence, plus login checks when the application supports login, on a fresh isolated preview database and after repeated initialization and restart, without duplicate fixtures or destruction of persistent preview data. If no seeders exist, explicit repository search evidence suffices for the seeding requirement. Describe the seeded records, test accounts and simulated or unavailable behaviour in the recipe's testData field, without secrets. Open a draft pull request targeting ${readiness.branch} for human review. Do not deploy or merge automatically. Do not read or copy production secrets or connect to production services.\n\n${skill}`;
       return this.deps.store.transaction(() => {
         const latest = this.preparationTickets(project, readiness.branch, settings.recipePath);
         const active = latest.find((ticket) => !TERMINAL_PREPARATION_COLUMNS.includes(ticket.column));
@@ -233,6 +255,137 @@ export class PreviewManager {
     if (readiness.status !== "ready") throw new Error(readiness.diagnostics.join("; ") || "Prepare the preview recipe before autonomous execution.");
     const source = await this.githubSource(ticket.project);
     if (source.status !== "resolved") throw new Error(source.message ?? "The preview repository connection is not qualified.");
+  }
+
+  qualify(project: string): PreviewQualification {
+    if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+    const settings = this.projectSettings(project);
+    if (this.qualifications.has(project) || settings.qualification?.status === "running") throw new Error(QUALIFICATION_RUNNING_ERROR);
+    const projectConfig = getProject(project);
+    if (projectConfig.vcsProvider !== "github") throw new Error("Coolify previews currently support GitHub projects only.");
+    const qualification = this.saveQualification(project, {
+      status: "running", startedAt: Date.now(), finishedAt: null, branch: previewBranchSchema.parse(projectConfig.baseBranch), revision: null, previewId: null, steps: [], error: null,
+    });
+    const run = this.runQualification(project, qualification).finally(() => { this.qualifications.delete(project); });
+    this.qualifications.set(project, run);
+    return qualification;
+  }
+
+  private saveQualification(project: string, qualification: PreviewQualification): PreviewQualification {
+    this.deps.store.updatePreviewProjectSettings(project, { qualification });
+    return qualification;
+  }
+
+  private async runQualification(project: string, initial: PreviewQualification): Promise<void> {
+    let state = initial;
+    const record: QualificationRecorder = (step, patch = {}) => {
+      state = this.saveQualification(project, { ...state, ...patch, steps: [...state.steps, step] });
+    };
+    let error: string | null = null;
+    try {
+      await this.qualifyPreview(project, state.branch, record);
+    } catch (cause) {
+      if (this.shuttingDown) return;
+      error = this.redactError(getErrorMessage(cause));
+      const pending = PREVIEW_QUALIFICATION_STEP_IDS.find((id) => !state.steps.some((step) => step.id === id));
+      if (pending) record({ id: pending, status: "failed", detail: error });
+    }
+    if (this.shuttingDown) return;
+    if (state.previewId === null) record({ id: "cleanup", status: "skipped", detail: "No preview was created." });
+    else record(await this.qualificationCleanup(state.previewId));
+    if (this.shuttingDown) return;
+    const failed = state.steps.some((step) => step.status === "failed");
+    this.saveQualification(project, { ...state, status: failed ? "failed" : "passed", finishedAt: Date.now(), error });
+  }
+
+  private async qualifyPreview(project: string, branch: string, record: QualificationRecorder): Promise<void> {
+    const readiness = await this.readiness(project, branch);
+    if (readiness.status !== "ready") {
+      record({ id: "readiness", status: "failed", detail: readiness.diagnostics.join("\n") || "The preview recipe is not ready on the base branch." }, { revision: readiness.revision });
+      return;
+    }
+    record({ id: "readiness", status: "passed", detail: `The recipe is valid on ${branch}.` }, { revision: readiness.revision });
+    if (!this.deps.system.readPreviewBranchSource) throw new Error("Branch preview source inspection is unavailable.");
+    const source = await this.deps.system.readPreviewBranchSource(getProject(project).repoPath, branch, this.projectSettings(project).recipePath);
+    if (previewRecipeSchema.parse(source.recipe).testData) record({ id: "test_data", status: "passed", detail: "The recipe declares the seeded test data." });
+    else record({ id: "test_data", status: "warning", detail: QUALIFICATION_MISSING_TEST_DATA });
+    const created = await this.createBranch(project, branch);
+    record({ id: "deploy", status: "passed", detail: `Preview ${created.id} requested for revision ${created.revision}.` }, { previewId: created.id, revision: created.revision });
+    const deployed = await this.waitForPreview(created.id, previewDeploymentSettled, DEPLOYMENT_TIMEOUT_MS);
+    if (deployed === null || !previewDeployed(deployed) || deployed.url === null) {
+      record({ id: "ready", status: "failed", detail: previewDeploymentFailure(deployed) });
+      return;
+    }
+    const url = deployed.url;
+    record({ id: "ready", status: "passed", detail: `Revision ${deployed.revision} is deployed at ${url}.` });
+    const auth = this.deps.config.getPreviewAuth();
+    if (!auth) throw new Error("Preview authentication is unavailable.");
+    const healthPath = deployed.recipe?.healthPath ?? DEFAULT_PREVIEW_HEALTH_PATH;
+    record(await this.probeStep("health", () => this.probeHealth(url, healthPath, auth), `Authenticated GET ${healthPath} succeeded.`, `Authenticated GET ${healthPath} did not return a success status.`));
+    record(await this.probeStep("root_page", () => this.probeHealth(url, PREVIEW_ROOT_PATH, auth), "The root page refuses anonymous requests and answers 2xx with HTTP Basic credentials.", "The root page did not answer 2xx with HTTP Basic credentials."));
+    const websocketPaths = deployed.recipe?.websocketPaths ?? [];
+    if (websocketPaths.length === 0) {
+      record({ id: "websockets", status: "skipped", detail: "The recipe declares no websocketPaths." });
+      return;
+    }
+    const failures: string[] = [];
+    for (const path of websocketPaths) {
+      const step = await this.probeStep("websockets", () => this.probeWebSocket(url, path, auth), path, `${path}: the authenticated WebSocket upgrade did not open in time.`);
+      if (step.status === "failed") failures.push(step.detail);
+    }
+    if (failures.length > 0) record({ id: "websockets", status: "failed", detail: failures.join("\n") });
+    else record({ id: "websockets", status: "passed", detail: `Authenticated WebSocket upgrades opened on ${websocketPaths.join(", ")}.` });
+  }
+
+  private probeHealth(url: string, path: string, auth: { username: string; password: string }): Promise<boolean> {
+    if (!this.deps.system.probePreviewHealth) throw new Error("Preview readiness verification is unavailable.");
+    return this.deps.system.probePreviewHealth(url, path, auth);
+  }
+
+  private probeWebSocket(url: string, path: string, auth: { username: string; password: string }): Promise<boolean> {
+    if (!this.deps.system.probePreviewWebSocket) throw new Error("Preview WebSocket verification is unavailable.");
+    return this.deps.system.probePreviewWebSocket(url, path, auth);
+  }
+
+  private async probeStep(id: PreviewQualificationStep["id"], probe: () => Promise<boolean>, passedDetail: string, failedDetail: string): Promise<PreviewQualificationStep> {
+    try {
+      if (await probe()) return { id, status: "passed", detail: passedDetail };
+      return { id, status: "failed", detail: failedDetail };
+    } catch (error) {
+      return { id, status: "failed", detail: this.redactError(getErrorMessage(error)) };
+    }
+  }
+
+  private async qualificationCleanup(previewId: string): Promise<PreviewQualificationStep> {
+    try {
+      await this.stop(previewId);
+      const settled = await this.waitForPreview(previewId, (preview) => preview.cleanupStatus !== "pending", QUALIFICATION_CLEANUP_TIMEOUT_MS);
+      if (settled?.cleanupStatus === "complete") return { id: "cleanup", status: "passed", detail: "The preview was stopped and its resources were removed." };
+      return { id: "cleanup", status: "failed", detail: settled?.error ?? "The preview cleanup did not complete within the timeout." };
+    } catch (error) {
+      return { id: "cleanup", status: "failed", detail: this.redactError(getErrorMessage(error)) };
+    }
+  }
+
+  private async waitForPreview(id: string, settled: (preview: PreviewRecord) => boolean, timeoutMs: number): Promise<PreviewRecord | null> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (this.shuttingDown) throw new Error("Preview service is shutting down.");
+      const preview = this.get(id);
+      if (settled(preview)) return preview;
+      if (Date.now() >= deadline) return null;
+      await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+  }
+
+  private interruptQualifications(): void {
+    for (const project of this.deps.store.listProjectKeys()) {
+      const qualification = this.deps.store.getPreviewProjectSettings(project).qualification;
+      if (qualification?.status !== "running" || this.qualifications.has(project)) continue;
+      const preview = qualification.previewId === null ? null : this.deps.store.getPreview(qualification.previewId);
+      if (preview && preview.desiredState === "running" && preview.cleanupStatus !== "complete") this.update(preview.id, { desiredState: "stopped", status: "stopping" });
+      this.saveQualification(project, { ...qualification, status: "failed", finishedAt: Date.now(), error: QUALIFICATION_INTERRUPTED_ERROR });
+    }
   }
 
   async createAutonomous(ticketId: string, requestedBranch: string, expectedRevision: string) {
@@ -371,7 +524,7 @@ export class PreviewManager {
     const auth = this.deps.config.getPreviewAuth();
     if (!auth) throw new Error("Preview authentication is unavailable.");
     const run = await this.deps.quality.testPreview(ticketId, provider, {
-      previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth, autonomous: preview.autonomous,
+      previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth, autonomous: preview.autonomous, testData: preview.recipe?.testData,
       assertCurrent: async () => {
         if (preview.autonomous) this.requireAutonomousDeployment(ticketId, preview.revision);
         const current = this.get(id);
@@ -385,6 +538,7 @@ export class PreviewManager {
 
   async recover(): Promise<void> {
     this.shuttingDown = false;
+    this.interruptQualifications();
     for (const record of this.list()) {
       const preview = this.reconcileAutonomousIntent(record);
       if ((preview.cleanupStatus === "complete" && !preview.cleanupWatch) || preview.cleanupStatus === "failed") continue;
@@ -399,6 +553,7 @@ export class PreviewManager {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     await Promise.allSettled([...this.requests]);
+    await Promise.allSettled([...this.qualifications.values()]);
     await Promise.allSettled([...this.pending.values()]);
   }
 

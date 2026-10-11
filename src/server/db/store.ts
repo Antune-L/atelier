@@ -445,6 +445,14 @@ export interface TicketPatch {
   finishedAt?: number | null;
 }
 
+export interface TicketTimeline {
+  createdAt: number;
+  updatedAt: number;
+  implementingStartedAt: number | null;
+  implementationStartedAt: number | null;
+  finishedAt: number | null;
+}
+
 export interface StartExecutionInput {
   id: string;
   ownerType: ExecutionOwnerType;
@@ -2462,5 +2470,14 @@ export class Store {
 
   setMeta(key: string, value: string): void {
     this.db.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, value);
+  }
+
+  setTicketTimeline(id: string, timeline: TicketTimeline): Ticket {
+    this.db
+      .query("UPDATE tickets SET created_at = ?, updated_at = ?, last_progress_at = ?, implementing_started_at = ?, implementation_started_at = ?, finished_at = ? WHERE id = ?")
+      .run(timeline.createdAt, timeline.updatedAt, timeline.updatedAt, timeline.implementingStartedAt, timeline.implementationStartedAt, timeline.finishedAt, id);
+    const ticket = this.getTicket(id);
+    if (!ticket) throw new Error(`setTicketTimeline: ticket ${id} introuvable`);
+    return ticket;
   }
 }

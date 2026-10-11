@@ -46,6 +46,7 @@ import { Notifier } from "./notifier.ts";
 import { PrNotificationMonitor } from "./prNotificationMonitor.ts";
 import { PreviewConfig } from "./previewConfig.ts";
 import { PreviewManager } from "./previewManager.ts";
+import { seedPreviewDemoData } from "./previewSeed.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
 import { createRequestGuard, resolveBindHost } from "./requestGuard.ts";
 import { createApiRoutes } from "./routes.ts";
@@ -240,6 +241,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     .map((run) => run.generationId);
   await migrateConfigJsonIfPresent(store, resolveDataFile(opts.dataRoot, CONFIG_FILENAME, process.env.KANBAN_CONFIG));
   initProjectRegistry(store);
+  seedPreviewDemoData(store);
   // Per-project GitHub accounts: registry folders under dataRoot, project bindings read live from SQLite.
   configureGithubAccountsRoot(dataRoot);
   setGithubProjectSource(() => store.listProjectKeys().flatMap((key) => {

@@ -15,7 +15,7 @@ Required fields:
 | `healthPath` | Existing read-only HTTP readiness path beginning with `/`. |
 | `environment` | Object mapping runtime variable names to non-secret string values. |
 
-For `dockerfile`, include `dockerfile` with the relative Dockerfile path. For `dockercompose`, include `composeFile` with the relative Compose file path, `serviceName` identifying the public gateway, and `authentication: "gateway"`. The `port` identifies that gateway's listener. Do not include both definition-path fields. Optional `websocketPaths` contains the used WebSocket paths.
+For `dockerfile`, include `dockerfile` with the relative Dockerfile path. For `dockercompose`, include `composeFile` with the relative Compose file path, `serviceName` identifying the public gateway, and `authentication: "gateway"`. The `port` identifies that gateway's listener. Do not include both definition-path fields. Optional `websocketPaths` contains the used WebSocket paths. Optional `testData` is a plain-text description (at most 4,000 characters, no secrets) of the seeded records, test accounts and simulated behaviour available on the preview; autonomous planning and browser validation rely on it.
 
 Example for a Bun application after verifying its files and routes:
 

@@ -271,6 +271,7 @@ export interface SystemAdapter {
   inspectPreviewReadiness?(repoPath: string, branch: string, recipePath: string): Promise<PreviewReadiness>;
   confirmPreviewCleanup?(preview: PreviewRecord, options: { sshHostAlias: string | null; expectedServerAddress: string | null; removeOwnedResources: boolean; deploymentUuids: string[] }): Promise<{ complete: boolean; reason: string | null; retryable?: boolean }>;
   probePreviewHealth?(url: string, healthPath: string, auth: { username: string; password: string }): Promise<boolean>;
+  probePreviewWebSocket?(url: string, path: string, auth: { username: string; password: string }): Promise<boolean>;
 
   // ---- Workspace trust seeding (slots at first-boot; the real repo before a triage session) ----
   seedWorkspaceTrust(paths: string[]): Promise<void>;

@@ -6,6 +6,7 @@ services:
     environment:
       PORT: "52817"
       KANBAN_DRY_RUN: "1"
+      KANBAN_PREVIEW_SEED: "1"
       KANBAN_SETUP: "0"
       KANBAN_PREVIEW_AUTH_USERNAME: disabled
       KANBAN_PREVIEW_AUTH_HASH: disabled

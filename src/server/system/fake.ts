@@ -117,6 +117,9 @@ export class FakeSystemAdapter implements SystemAdapter {
   async probePreviewHealth(_url: string, _healthPath: string, _auth: { username: string; password: string }) {
     return true;
   }
+  async probePreviewWebSocket(_url: string, _path: string, _auth: { username: string; password: string }) {
+    return true;
+  }
   private readonly implementationLots = new Map<string, { slotPath: string; files: string[]; integrated: boolean }>();
   readonly dryRun = true;
   /** One fake client for every provider: dry-run never talks to a real PR host. */

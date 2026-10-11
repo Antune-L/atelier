@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { CoolifyPrivateKey, PreviewGithubSourceResolution, PreviewProjectSettings } from "@shared/preview";
 import type { ManagedProject } from "@shared/schemas";
 
+import { PreviewQualificationPanel } from "@/components/projects-settings/PreviewQualificationPanel";
 import { PreviewReadinessStatus } from "@/components/PreviewReadinessStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,6 +199,7 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
             <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>{privateKeySelected ? "Vérifier la disponibilité de la clé" : "Vérifier l'accès au dépôt"}</Button>
           </div>
           <PreviewReadinessStatus readiness={check.readiness} loading={check.loading} error={check.error} />
+          <PreviewQualificationPanel key={project.key} project={project.key} initial={settings?.qualification ?? null} disabled={busy || dirty || !draft.enabled || check.readiness?.status !== "ready"} />
           {dirty && <p className="text-xs text-muted-foreground">La vérification utilise la recette enregistrée et la branche de base du projet. Enregistrez vos changements pour les revérifier.</p>}
           <div className="flex flex-wrap items-center gap-2">
             {!check.loading && check.readiness?.status === "not_ready" && check.readiness.preparationTicketId === null && <Button variant="outline" size="sm" disabled={busy || sourceLoading || !draft.recipePath.trim() || draft.ttlHours <= 0} onClick={() => void save(true)}>{busy && <Loader2 className="size-3.5 animate-spin" />}{check.readiness.preparationRetryAvailable ? "Relancer la préparation" : "Préparer pour Coolify"}</Button>}

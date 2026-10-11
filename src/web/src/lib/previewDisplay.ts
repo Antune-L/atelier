@@ -1,4 +1,6 @@
-import type { PreviewGithubSourceResolution, PreviewReadiness, PreviewRecord, PreviewSettings } from "@shared/preview";
+import type { PreviewGithubSourceResolution, PreviewQualification, PreviewQualificationStep, PreviewReadiness, PreviewRecord, PreviewSettings } from "@shared/preview";
+
+import type { BadgeVariant } from "@/components/ui/badge";
 
 export const PREVIEW_POLL_INTERVAL_MS = 5_000;
 export const PREVIEW_CLEANUP_WATCH_LABEL = "Ressources supprimées · surveillance d’arrêt en cours";
@@ -45,6 +47,43 @@ export const PREVIEW_READINESS_LABELS: Record<PreviewReadiness["status"], string
   ready: "Projet prêt pour Coolify",
   not_ready: "Préparation du projet nécessaire",
   check_error: "Vérification du projet indisponible",
+};
+
+export const PREVIEW_QUALIFICATION_LABELS: Record<PreviewQualification["status"], string> = {
+  running: "Test en cours",
+  passed: "Prêt pour Devin",
+  failed: "Pas prêt pour Devin",
+};
+
+export const PREVIEW_QUALIFICATION_VARIANTS: Record<PreviewQualification["status"], BadgeVariant> = {
+  running: "info",
+  passed: "success",
+  failed: "danger",
+};
+
+export const PREVIEW_QUALIFICATION_STEP_LABELS: Record<PreviewQualificationStep["id"], string> = {
+  readiness: "Recette sur la branche de base",
+  test_data: "Données de test déclarées",
+  deploy: "Création de la prévisualisation",
+  ready: "Déploiement de la révision",
+  health: "Contrôle de santé authentifié",
+  root_page: "Page d'accueil avec authentification",
+  websockets: "Connexions WebSocket",
+  cleanup: "Arrêt et nettoyage",
+};
+
+export const PREVIEW_QUALIFICATION_STEP_STATUS_LABELS: Record<PreviewQualificationStep["status"], string> = {
+  passed: "Réussi",
+  failed: "Échec",
+  warning: "Avertissement",
+  skipped: "Ignoré",
+};
+
+export const PREVIEW_QUALIFICATION_STEP_VARIANTS: Record<PreviewQualificationStep["status"], BadgeVariant> = {
+  passed: "success",
+  failed: "danger",
+  warning: "warning",
+  skipped: "secondary",
 };
 
 export const PREVIEW_HISTORY_LIMIT = 10;

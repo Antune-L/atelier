@@ -79,7 +79,7 @@ The recipe describes the build, HTTP port, readiness path and non-secret runtime
 | Dockerfile | One application image, protected by Coolify's native HTTP authentication. See [Dockerfile.preview](../Dockerfile.preview) and [.coolify/preview.json](../.coolify/preview.json). |
 | Compose | Several services, with a public authentication gateway protecting every HTTP and WebSocket path. See [.coolify/docker-compose.preview.yml](../.coolify/docker-compose.preview.yml), [.coolify/preview.compose.json](../.coolify/preview.compose.json) and [.coolify/Caddyfile.preview](../.coolify/Caddyfile.preview). |
 
-These examples run Kanban Agents with simulated agents and fresh demo data. Prepare each other project's actual application and required services rather than assuming the example image will run it.
+These examples run Kanban Agents with simulated agents and demo data seeded at startup by `KANBAN_PREVIEW_SEED=1` (dry-run only, inserted once per database), described in the recipe's `testData`. Prepare each other project's actual application and required services rather than assuming the example image will run it.
 
 Recipe paths remain relative to the repository. For Compose, Coolify uses the recipe's `buildContext` as its working directory, even when the Compose file is inside `.coolify`. With `buildContext: "."`, service build contexts are `.` and local verification must use the repository root as the Compose project directory.
 

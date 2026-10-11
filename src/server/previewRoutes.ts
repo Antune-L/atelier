@@ -47,7 +47,7 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
     .get("/projects/:key/preview", ({ params }) => ({ settings: previews.projectSettings(params.key) }))
     .get("/projects/:key/preview/source", async ({ params }) => ({ resolution: await previews.githubSource(params.key) }))
     .patch("/projects/:key/preview", ({ params, body, set }) => {
-      const parsed = updatePreviewProjectSettingsSchema.omit({ preparationTicketId: true }).safeParse(body);
+      const parsed = updatePreviewProjectSettingsSchema.omit({ preparationTicketId: true, qualification: true }).safeParse(body);
       if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid project preview settings." }; }
       return { settings: previews.updateProjectSettings(params.key, parsed.data) };
     })
@@ -55,6 +55,12 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
       const parsed = preparePreviewSchema.safeParse(body ?? {});
       if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid preview preparation request." }; }
       return previews.prepare(params.key, parsed.data);
+    })
+    .get("/projects/:key/preview/qualification", ({ params }) => ({ qualification: previews.projectSettings(params.key).qualification }))
+    .post("/projects/:key/preview/qualification", ({ params, set }) => {
+      const qualification = previews.qualify(params.key);
+      set.status = HTTP_ACCEPTED;
+      return { qualification };
     })
     .get("/tickets/:id/preview", ({ params }) => previews.ticket(params.id))
     .post("/tickets/:id/preview", async ({ params, set }) => {

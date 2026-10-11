@@ -16,6 +16,38 @@ export function previewHostResolverArgs(url: string): string[] {
   return address ? [`--host-resolver-rules=MAP ${new URL(url).hostname} ${address}`] : [];
 }
 
+export function previewBasicAuthorization(auth: { username: string; password: string }): string {
+  return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString("base64")}`;
+}
+
+type BunWebSocketConstructor = new (url: string, options: Bun.WebSocketOptions) => WebSocket;
+
+function isBunWebSocketConstructor(value: unknown): value is BunWebSocketConstructor {
+  return typeof value === "function";
+}
+
+export function previewWebSocketOpens(url: URL, headers: Record<string, string>, timeoutMs: number): Promise<boolean> {
+  const BunWebSocket: unknown = WebSocket;
+  if (!isBunWebSocketConstructor(BunWebSocket)) throw new Error("The WebSocket client is unavailable.");
+  return new Promise((resolve) => {
+    const socket = new BunWebSocket(url.href, { headers });
+    const settle = (opened: boolean) => {
+      clearTimeout(timer);
+      resolve(opened);
+    };
+    const timer = setTimeout(() => {
+      settle(false);
+      socket.close();
+    }, timeoutMs);
+    socket.addEventListener("open", () => {
+      settle(true);
+      socket.close();
+    });
+    socket.addEventListener("error", () => settle(false));
+    socket.addEventListener("close", () => settle(false));
+  });
+}
+
 export function isSuccessStatus(status: number | null): boolean {
   return status !== null && status >= SUCCESS_STATUS_MIN && status <= SUCCESS_STATUS_MAX;
 }

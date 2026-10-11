@@ -8,7 +8,7 @@ The pilot is enabled by default on GitHub projects when `KANBAN_AUTONOMOUS_PILOT
 
 Create an independent feature card and explicitly choose **Create the PR without merging** or **Merge after successful checks**. The delivery choice is persisted separately from the ordinary `autoMerge` option, which is disabled for autonomous cards. Creation leaves the card in TODO unless launch is explicitly requested.
 
-The default correction budget is one correction and the default execution deadline is sixty minutes. Both are visible and configurable before launch. Restart or retry preserves the original budget and deadline. The first pilot excludes split families, dependent cards, Composer, direct push and stealth delivery. Batch creation from PRDs and CSV does not enable this mode.
+The default correction budget is one correction and the default execution deadline is 180 minutes. Both are visible and configurable before launch. Restart or retry preserves the original budget and deadline. The first pilot excludes split families, dependent cards, Composer, direct push and stealth delivery. Batch creation from PRDs and CSV does not enable this mode.
 
 ## Execution
 
@@ -29,6 +29,6 @@ Cancellation and deadline handling wait for an active delivery operation before 
 
 Disabling the pilot still permits retained uncertain or confirmed deliveries to regain their session for reconciliation and cleanup. It blocks new host requests, preview deployment and delegated implementation.
 
-Prepared preview HTTP Basic credentials are injected by the server and redacted from persisted diagnostics and continuation prompts. Business login, MFA and CAPTCHA are not automatically bypassed; missing access remains a blocking prerequisite. Preview recipes, test accounts, seed data and external effects must be qualified for the target project before real evaluation. Real email testing requires separate authorization.
+Prepared preview HTTP Basic credentials are injected by the server and redacted from persisted diagnostics and continuation prompts. Business login, MFA and CAPTCHA are not automatically bypassed; missing access remains a blocking prerequisite. Preview recipes, test accounts, seed data and external effects must be qualified for the target project before real evaluation. The recipe's optional `testData` field describes the seeded data and simulated behaviour: the planning agent must write only cases reachable with it, or add the missing seed data on its branch, and the browser validator receives it to locate seeded records. A case whose data are missing ends inconclusive and blocks delivery without consuming the correction budget. Real email testing requires separate authorization.
 
 The shared tool contract and publishing guard cover Claude and Codex. Automated checks and dry-run browser observations do not qualify real providers, Coolify deployment or GitHub delivery. Those combinations still need controlled live validation despite the option being available by default.

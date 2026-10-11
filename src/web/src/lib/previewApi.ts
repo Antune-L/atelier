@@ -1,5 +1,5 @@
 import { coolifyPrivateKeysResponseSchema } from "@shared/preview";
-import type { CoolifyInventory, PreviewGithubSourceResolution, PreviewProjectSettings, PreviewReadiness, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
+import type { CoolifyInventory, PreviewGithubSourceResolution, PreviewProjectSettings, PreviewQualification, PreviewReadiness, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
 import type { Ticket } from "@shared/schemas";
 
 import { request } from "@/lib/api";
@@ -14,6 +14,8 @@ export const previewApi = {
   updateProjectSettings: (project: string, input: UpdatePreviewProjectSettingsInput) => request<{ settings: PreviewProjectSettings }>(`/api/projects/${encodeURIComponent(project)}/preview`, { method: "PATCH", body: JSON.stringify(input) }),
   projectReadiness: (project: string, branch?: string) => request<{ readiness: PreviewReadiness }>(`/api/projects/${encodeURIComponent(project)}/preview/readiness${branch ? `?branch=${encodeURIComponent(branch)}` : ""}`),
   prepareProject: (project: string, branch?: string, retry = false) => request<{ created: boolean; ticket: Ticket | null; readiness: PreviewReadiness }>(`/api/projects/${encodeURIComponent(project)}/preview/prepare`, { method: "POST", body: JSON.stringify({ branch, retry }) }),
+  projectQualification: (project: string) => request<{ qualification: PreviewQualification | null }>(`/api/projects/${encodeURIComponent(project)}/preview/qualification`),
+  qualifyProject: (project: string) => request<{ qualification: PreviewQualification }>(`/api/projects/${encodeURIComponent(project)}/preview/qualification`, { method: "POST" }),
   list: () => request<{ previews: PreviewRecord[] }>("/api/previews"),
   createBranchPreview: (project: string, branch: string) => request<{ preview: PreviewRecord }>(`/api/projects/${encodeURIComponent(project)}/previews`, { method: "POST", body: JSON.stringify({ branch }) }),
   redeployPreview: (previewId: string) => request<{ preview: PreviewRecord }>(`/api/previews/${encodeURIComponent(previewId)}/redeploy`, { method: "POST" }),

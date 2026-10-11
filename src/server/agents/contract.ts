@@ -5,6 +5,7 @@ import type { Ticket } from "../../shared/schemas.ts";
 import { formatTriageQuestion, triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
+import { DEFAULT_PREVIEW_RECIPE_PATH } from "../../shared/preview.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT } from "../../shared/protocol.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
@@ -114,7 +115,7 @@ function buildImplementingSteps(
 
 /** Step 1 label of the contract: a PRD planning phase or a direct jump to implementing. */
 function buildPlanningStep(ticket: Ticket): string {
-  if (ticket.autonomous) return '1. planning : lis le projet et ses scripts existants. Avant toute modification, appelle submit_autonomous_plan({plan,criteria:[{id,text,source:"ticket",required:true,independent:true,expected,interaction}],unitTests:"present" ou "absent",unitTestPreparation}). Décris TOUS les cas d’acceptation initiaux, leurs interactions, leurs résultats attendus, et la préparation des tests unitaires existants. interaction vaut "interactive", "display" ou "visual" ; choisis "visual" pour un cas d’apparence (couleur, icône, mise en page, jauge, rafraîchissement visuel) que seule une capture d’écran prouve. Le backend fige ce plan, vérifie les prérequis de preview et conserve un budget commun à toutes les reprises. Si un prérequis manque, conserve le travail et attends sa résolution.';
+  if (ticket.autonomous) return `1. planning : lis le projet et ses scripts existants. Avant toute modification, appelle submit_autonomous_plan({plan,criteria:[{id,text,source:"ticket",required:true,independent:true,expected,interaction}],unitTests:"present" ou "absent",unitTestPreparation}). Décris TOUS les cas d’acceptation initiaux, leurs interactions, leurs résultats attendus, et la préparation des tests unitaires existants. interaction vaut "interactive", "display" ou "visual" ; choisis "visual" pour un cas d’apparence (couleur, icône, mise en page, jauge, rafraîchissement visuel) que seule une capture d’écran prouve. Chaque cas est testé dans un navigateur sur la preview Coolify de ta branche : lis d’abord la recette de preview du projet (par défaut ${DEFAULT_PREVIEW_RECIPE_PATH}) et son champ testData, puis n’écris que des cas atteignables avec ces données et les limites qu’elle décrit (par exemple des agents simulés). Si un cas exige des données ou un état absents de la preview, inclus dans le plan l’ajout de ces données au seeder de preview dans la même branche et mets à jour testData ; sinon le test finit inconclusive et bloque la livraison sans correction possible. Le backend fige ce plan, vérifie les prérequis de preview et conserve un budget commun à toutes les reprises. Si un prérequis manque, conserve le travail et attends sa résolution.`;
   if (ticket.prdEnabled) return "1. planning → submit_prd → (attente prd_validated)";
   return "1. implementing";
 }

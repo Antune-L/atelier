@@ -1,0 +1,11 @@
+# Combined feature verification
+
+Completed feature cards with a pull request expose a separate **Vérification** tab. Its single button starts one backend-owned `combined` quality run, bound to the PR head through the shared GitHub/Azure DevOps VCS seam. Claude and Codex use the same result contract and draft-07 structured output schemas.
+
+The isolated workspace runs configured typecheck/lint/test commands and discovers additional unit, integration and E2E package scripts. Watch, interactive and maintenance test scripts are excluded. An independent read-only repository session assesses assertions against the ticket's business rules using source-path and literal-excerpt citations attributed to completed reads. A separate preparation session derives functional scenarios; a browser-only validator exercises them through the existing Playwright policy. Browser execution needs an isolated local application start command and the existing Playwright installation. Technical failures and absent browser configuration do not suppress test-relevance analysis.
+
+The run payload persists all three component outcomes and their two bullet lists (`tested`, `improvements`), including provenance and detailed evidence. The UI groups them into two lists with collapsed disclosures. Command logs additionally use the existing server-owned evidence store. Existing acceptance snapshots and standalone checks/full/functional validation gates are preserved; combined reports do not replace acceptance evidence or enable automatic merge.
+
+Simulation, missing commands, unattributed source claims, missing browser configuration, cancellation, interrupted runs, stale PR/ticket/configuration bindings and failed cleanup cannot establish combined success. Restart recovery retains completed components and marks the overall run interrupted; pending components remain unverified. PR head changes invalidate displayed currency even after a run finishes. The combined flow currently validates a local isolated application; existing standalone preview validation remains available separately.
+
+Tests use fake providers and a browser-validator fixture. They verify orchestration, source attribution, persistence, policies and UI rendering, but do not establish live Claude/Codex CLI or browser compatibility.

@@ -59,3 +59,7 @@ Coolify key inventory includes private/public key material, so validate response
 ## Claude sub-agent tool is `Task` internally
 
 Claude Code lists its sub-agent tool as `Task` in the `system/init` tool list even though the model calls it `Agent`. Putting either `Task` or `Agent` in `disallowedTools` removes it entirely, even when `Agent` is in `allowedTools`, so fan-out orchestrators silently never launch their scouts. Block built-in agents with `permissionDeny` `Agent(general-purpose|Explore|Plan)` instead; only the scouts themselves keep both names disallowed. On Codex, the orchestrator's `spawn_agent` passes the PreToolUse policy (no `agent_type` in its payload) while declared scouts are denied.
+
+## Attributing independent source analysis
+
+Do not require an agent to cite backend/provider-internal observation IDs: Codex App Server command item IDs need not be visible in the model's tool context. Match exact normalized source paths and literal excerpts against completed single-file reads, then persist the server-observed tool ID and session identity. Discovery-only results, path substrings and ambiguous multi-file command outputs cannot attribute a source assertion.

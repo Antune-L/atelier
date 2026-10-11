@@ -174,6 +174,16 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
       set.status = HTTP_ACCEPTED;
       return { run };
     })
+    .post("/combined", async ({ params, body, set }) => {
+      const parsed = validateQualitySchema.safeParse(body);
+      if (!parsed.success) {
+        set.status = HTTP_BAD_REQUEST;
+        return { error: parsed.error.message };
+      }
+      const run = await quality?.verifyCombined(params.id, parsed.data.provider);
+      set.status = HTTP_ACCEPTED;
+      return { run };
+    })
     .post("/functional", async ({ params, body, set }) => {
       const parsed = validateQualitySchema.safeParse(body);
       if (!parsed.success) {

@@ -1854,11 +1854,12 @@ export class Store {
     return this.db.query("SELECT * FROM quality_validation_runs ORDER BY started_at ASC").all().map(mapQualityValidationRunRow).filter((run) => run.cleanupStatus !== "complete");
   }
 
-  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "diagnostic" | "evidenceAccepted" | "technicalEvidenceAccepted" | "criteriaSnapshotId" | "mode" | "phase" | "failurePhase">>): QualityValidationRun | null {
+  updateQualityRun(runId: string, patch: Partial<Pick<QualityValidationRun, "verification" | "status" | "completedAt" | "environment" | "cleanupStatus" | "error" | "diagnostic" | "evidenceAccepted" | "technicalEvidenceAccepted" | "criteriaSnapshotId" | "mode" | "phase" | "failurePhase">>): QualityValidationRun | null {
     return this.transaction(() => {
       const previous = this.getQualityRun(runId);
       if (!previous) return null;
       const active = previous.status === "queued" || previous.status === "running";
+      if (!active && patch.verification !== undefined) throw new Error("Completed quality run results are immutable");
       if (!active && ((patch.status !== undefined && patch.status !== previous.status) || patch.completedAt !== undefined || patch.environment !== undefined || patch.diagnostic !== undefined || patch.evidenceAccepted !== undefined || patch.technicalEvidenceAccepted !== undefined || patch.criteriaSnapshotId !== undefined || patch.mode !== undefined || patch.failurePhase !== undefined)) {
         throw new Error("Completed quality run results are immutable");
       }
@@ -1885,7 +1886,7 @@ export class Store {
       const run = this.getQualityRun(evidence.runId);
       if (!run) throw new Error("Quality run not found");
       if (run.status !== "queued" && run.status !== "running") throw new Error("Cannot append evidence to a completed quality run");
-      if (run.kind !== "checks" && (run.mode === null || run.criteriaSnapshotId === null)) throw new Error("Quality validation evidence requires planned criteria and mode");
+      if (run.kind !== "checks" && run.kind !== "combined" && (run.mode === null || run.criteriaSnapshotId === null)) throw new Error("Quality validation evidence requires planned criteria and mode");
       if (evidence.kind === "behavior" && ((run.kind !== "behavior" && run.kind !== "full" && run.kind !== "functional") || (evidence.authority === "agent" && evidence.provider !== run.provider))) {
         throw new Error("Behavioral evidence must match the validation run provider");
       }

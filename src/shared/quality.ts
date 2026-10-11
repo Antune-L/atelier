@@ -162,11 +162,37 @@ export const qualityRunDiagnosticSchema = z.object({
 });
 export type QualityRunDiagnostic = z.infer<typeof qualityRunDiagnosticSchema>;
 
+export const qualityVerificationBulletSchema = z.object({
+  summary: nonEmptyTextSchema,
+  details: z.string(),
+  evidenceId: nonEmptyTextSchema.nullable(),
+  provider: z.enum(ORCHESTRATORS).nullable(),
+  sessionId: nonEmptyTextSchema.nullable(),
+  artifactPath: nonEmptyTextSchema.nullable(),
+  model: nonEmptyTextSchema.nullable().optional(),
+  status: z.enum(["passed", "failed", "inconclusive", "blocked"]).optional(),
+});
+export const qualityVerificationComponentSchema = z.object({
+  status: z.enum(["pending", "passed", "failed", "inconclusive", "blocked"]),
+  tested: z.array(qualityVerificationBulletSchema),
+  improvements: z.array(qualityVerificationBulletSchema),
+});
+export const qualityVerificationReportSchema = z.object({
+  sourceFingerprint: nonEmptyTextSchema,
+  acceptanceSnapshotId: nonEmptyTextSchema.nullable().optional(),
+  technical: qualityVerificationComponentSchema,
+  relevance: qualityVerificationComponentSchema,
+  browser: qualityVerificationComponentSchema,
+});
+export type QualityVerificationReport = z.infer<typeof qualityVerificationReportSchema>;
+export type QualityVerificationComponent = z.infer<typeof qualityVerificationComponentSchema>;
+
 export const qualityValidationRunSchema = z.object({
   id: nonEmptyTextSchema,
   ticketId: nonEmptyTextSchema,
   criteriaSnapshotId: nonEmptyTextSchema.nullable(),
-  kind: z.enum(["checks", "behavior", "full", "functional"]),
+  kind: z.enum(["checks", "behavior", "full", "functional", "combined"]),
+  verification: qualityVerificationReportSchema.nullable().default(null),
   mode: qualityValidationModeSchema.nullable().default("browser"),
   phase: qualityRunPhaseSchema.nullable().default(null),
   failurePhase: qualityRunPhaseSchema.nullable().default(null),

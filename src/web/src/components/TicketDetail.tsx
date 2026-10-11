@@ -16,6 +16,7 @@ import { TicketMeta } from "@/components/ticket-detail/TicketMeta";
 import { TicketTabs, type TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { TriageSection } from "@/components/ticket-detail/TriageSection";
 import { ValidationTab } from "@/components/ticket-detail/ValidationTab";
+import { VerificationTab, canShowVerification } from "@/components/ticket-detail/VerificationTab";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
@@ -86,6 +87,7 @@ function availableTabs(ticket: Ticket): TicketTab[] {
   const tabs: TicketTab[] = ["overview", "activity", "description"];
   if (ticket.prdMarkdown !== null || ticket.column === "prd") tabs.push("prd");
   if (ticket.kind === "feature" && ticket.column !== "todo") tabs.push("validation");
+  if (canShowVerification(ticket)) tabs.push("verification");
   if (hasSessionPane(ticket)) tabs.push("terminal");
   return tabs;
 }
@@ -358,6 +360,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               />
             )}
             {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} />}
+            {activeTab === "verification" && <VerificationTab key={current.id} ticket={current} />}
           </div>
           <aside className="w-full shrink-0 space-y-4 border-t border-border px-3 py-3 md:w-56 md:overflow-y-auto md:border-l md:border-t-0">
             <TicketMeta

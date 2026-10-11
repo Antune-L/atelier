@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-export type TicketTab = "overview" | "activity" | "description" | "prd" | "validation" | "terminal";
+export type TicketTab = "overview" | "activity" | "description" | "prd" | "validation" | "verification" | "terminal";
 
 export const TICKET_TAB_LABELS: Record<TicketTab, string> = {
   overview: "Aperçu",
@@ -8,6 +8,7 @@ export const TICKET_TAB_LABELS: Record<TicketTab, string> = {
   description: "Description",
   prd: "PRD",
   validation: "Validation",
+  verification: "Vérification",
   terminal: "Terminal",
 };
 

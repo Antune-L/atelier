@@ -74,8 +74,12 @@ function unreviewedPathLines(changes: UnreviewedChanges): string[] {
   return lines;
 }
 
+export function unreviewedChangesReport(changes: UnreviewedChanges): string {
+  return [UNREVIEWED_SECTION_HEADING, "", UNREVIEWED_SECTION_INTRO, "", ...unreviewedPathLines(changes)].join("\n");
+}
+
 export function withUnreviewedChangesSection(body: string, changes: UnreviewedChanges): string {
-  const section = [UNREVIEWED_SECTION_START, UNREVIEWED_SECTION_HEADING, "", UNREVIEWED_SECTION_INTRO, "", ...unreviewedPathLines(changes), UNREVIEWED_SECTION_END].join("\n");
+  const section = [UNREVIEWED_SECTION_START, unreviewedChangesReport(changes), UNREVIEWED_SECTION_END].join("\n");
   const start = body.indexOf(UNREVIEWED_SECTION_START);
   const end = start === -1 ? -1 : body.indexOf(UNREVIEWED_SECTION_END, start);
   if (end !== -1) return `${body.slice(0, start)}${section}${body.slice(end + UNREVIEWED_SECTION_END.length)}`;

@@ -111,6 +111,10 @@ const SETUP_PHASES = {
   waiting: "En attente de la première sortie de l'agent…",
 } as const;
 
+export interface FinishTicketOptions {
+  skipMerge?: boolean;
+}
+
 export interface SlotManagerConfig {
   /** Read-only resources root, used to resolve the vendored composer driver script path. */
   projectRoot: string;
@@ -578,11 +582,13 @@ export class SlotManager {
       );
       return false;
     }
-    this.store.logEvent(ticketId, "resolve_conflicts_started", { prUrl: ticket.prUrl });
+    this.store.logEvent(ticketId, "resolve_conflicts_started", { prUrl: ticket.prUrl, previousReviewRounds: ticket.reviewRounds });
     // opus low per the feature spec; the flag routes the conflict-resolution contract at delivery.
+    // NOTE(ali): the resolution diff is new code, so it gets its own review budget.
     this.touch(
       this.store.updateTicket(ticketId, {
         resolvingConflicts: true,
+        reviewRounds: 0,
         model: "opus",
         effort: "low",
         column: "implementing",
@@ -1224,12 +1230,13 @@ export class SlotManager {
     ticketId: string,
     slotId: number,
     prUrl: string,
+    options: FinishTicketOptions = {},
   ): Promise<{ ok: boolean; reason: string; slotReleased: boolean; pending?: boolean }> {
-    if (this.store.getTicket(ticketId)?.autonomous) return this.reserveAutonomousDelivery(ticketId, () => this.finishTicketReserved(ticketId, slotId, prUrl));
-    return this.finishTicketReserved(ticketId, slotId, prUrl);
+    if (this.store.getTicket(ticketId)?.autonomous) return this.reserveAutonomousDelivery(ticketId, () => this.finishTicketReserved(ticketId, slotId, prUrl, options));
+    return this.finishTicketReserved(ticketId, slotId, prUrl, options);
   }
 
-  private async finishTicketReserved(ticketId: string, slotId: number, prUrl: string): Promise<{ ok: boolean; reason: string; slotReleased: boolean; pending?: boolean }> {
+  private async finishTicketReserved(ticketId: string, slotId: number, prUrl: string, options: FinishTicketOptions): Promise<{ ok: boolean; reason: string; slotReleased: boolean; pending?: boolean }> {
     const ticket = this.store.getTicket(ticketId);
     const slot = this.store.getSlot(slotId);
     if (!ticket || !ticket.branch) {
@@ -1337,7 +1344,9 @@ export class SlotManager {
         column = "merged";
         this.store.logEvent(ticketId, "auto_merged", { prUrl, commitSha: currentTicket.autonomousState.revision });
       }
-    } else if ((currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
+    } else if (options.skipMerge && currentTicket.resolvingConflicts) {
+      this.store.logEvent(ticketId, "merge_skipped_after_review_limit", { prUrl });
+    } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {

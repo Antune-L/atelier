@@ -35,6 +35,8 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 
 import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
+import { unreviewedChangesReport } from "./reviewPass.ts";
+import type { UnreviewedChanges } from "./reviewPass.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { QualityManager } from "./qualityManager.ts";
 import type {
@@ -81,6 +83,13 @@ const SLOW_COORDINATOR_TOOL_MS = 15_000;
 const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
+const DIRECT_PUSH_AT_REVIEW_LIMIT_MESSAGE = "Gate échouée: le budget de passes de review est épuisé sans approbation du code courant ; le push direct sur la branche cible est refusé. Appelle fail(reason, findings) en conservant le travail pour une reprise manuelle.";
+
+interface ReviewLimitAcceptance {
+  passId: string;
+  acceptedWithFindings: boolean;
+  unreviewedChanges: UnreviewedChanges | null;
+}
 
 interface ToolResult {
   ok: boolean;
@@ -654,7 +663,7 @@ export class AgentCoordinator {
     if (readOnlyReview && !ticket?.autonomous) requirement = "completed";
     else if (opensFeaturePr && !ticket?.autonomous) requirement = "approved_or_limit";
     const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId, {
-      acceptChangesAfterBudget: requirement === "approved_or_limit" && ticket?.resolvingConflicts !== true,
+      acceptChangesAfterBudget: requirement === "approved_or_limit",
     });
     if (!reviewGate.ok) return this.rejectDoneGate(ctx, reviewGate.reasonCode, reviewGate.reason);
     if (reviewGate.unreviewedChanges !== null) {
@@ -677,7 +686,7 @@ export class AgentCoordinator {
       passId: reviewGate.passId,
     });
     this.lifecycle.beginOpeningPr(ctx.ticketId);
-    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, prUrl);
+    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, prUrl, { skipMerge: acceptedAtReviewLimit });
     log.info("finalisation done terminée", {
       ticketId: ctx.ticketId,
       slotId: ctx.slotId,
@@ -708,6 +717,26 @@ export class AgentCoordinator {
     return { ok: false, result: `Gate échouée: ${reason}` };
   }
 
+  private async readyForReviewGate(ctx: SessionToolCall): Promise<{ ok: true; atLimit: ReviewLimitAcceptance | null } | { ok: false; result: string }> {
+    if (await this.delegation.reviewsApproved(ctx.ticketId, ctx.slotId)) return { ok: true, atLimit: null };
+    const limit = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, "approved_or_limit", ctx.callId, { acceptChangesAfterBudget: true });
+    if (limit.ok && (limit.acceptedWithFindings || limit.unreviewedChanges !== null)) {
+      return { ok: true, atLimit: { passId: limit.passId, acceptedWithFindings: limit.acceptedWithFindings, unreviewedChanges: limit.unreviewedChanges } };
+    }
+    return { ok: false, result: "Gate échouée: tous les reviewers indépendants requis doivent approuver le code courant." };
+  }
+
+  private reportStealthReviewLimit(ticketId: string, limit: ReviewLimitAcceptance): void {
+    const sections = [
+      limit.acceptedWithFindings ? this.delegation.reviewBoardReport(ticketId) : null,
+      limit.unreviewedChanges === null ? null : unreviewedChangesReport(limit.unreviewedChanges),
+    ].filter((section) => section !== null);
+    this.store.logEvent(ticketId, "stealth_ready_after_review_limit", { passId: limit.passId, changedPaths: limit.unreviewedChanges?.paths ?? [] });
+    if (sections.length === 0) return;
+    const comment = this.store.addComment(ticketId, "agent", sections.join("\n\n"), null);
+    this.hub.pushComment(comment);
+  }
+
   private async handleReadyForReview(ctx: SessionToolCall): Promise<ToolResult> {
     const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
@@ -716,8 +745,11 @@ export class AgentCoordinator {
     if (!ticket || ticket.kind !== "feature" || (!ticket.stealth && !ticket.directPush)) {
       return { ok: false, result: "ready_for_review réservé aux tickets stealth ou push direct." };
     }
-    if (!(await this.delegation.reviewsApproved(ctx.ticketId, ctx.slotId))) {
-      return { ok: false, result: "Gate échouée: tous les reviewers indépendants requis doivent approuver le code courant." };
+    const review = await this.readyForReviewGate(ctx);
+    if (!review.ok) return { ok: false, result: review.result };
+    if (review.atLimit !== null && ticket.directPush) {
+      this.store.logEvent(ctx.ticketId, "direct_push_refused_after_review_limit", { passId: review.atLimit.passId });
+      return { ok: false, result: DIRECT_PUSH_AT_REVIEW_LIMIT_MESSAGE };
     }
     this.lifecycle.beginOpeningPr(ctx.ticketId);
     const outcome = ticket.directPush
@@ -726,6 +758,7 @@ export class AgentCoordinator {
     if (!outcome.ok) {
       return { ok: false, result: `Gate échouée: ${outcome.reason}: corrige et rappelle ready_for_review().` };
     }
+    if (review.atLimit !== null) this.reportStealthReviewLimit(ctx.ticketId, review.atLimit);
     return {
       ok: true,
       result: ticket.directPush

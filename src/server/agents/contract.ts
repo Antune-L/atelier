@@ -153,9 +153,9 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   const loopBudget = ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction";
   const depth = ticket.reviewDepth ?? "light";
   const kinds = reviewKinds(depth);
-  const unreviewedChangesHint = ticket.stealth || ticket.directPush
-    ? ""
-    : " Si tu modifies encore le code après cette dernière passe, done() reste accepté : le backend ajoute à la description de la PR la section « Fichiers modifiés après la dernière review (non relus) » ; ne la retire pas.";
+  let unreviewedChangesHint = " Si tu modifies encore le code après cette dernière passe, done() reste accepté : le backend ajoute à la description de la PR la section « Fichiers modifiés après la dernière review (non relus) » ; ne la retire pas.";
+  if (ticket.directPush) unreviewedChangesHint = " En push direct, si des findings restent ouverts après cette limite ou si tu modifies encore le code après la dernière passe, ready_for_review() refuse le push : appelle fail(reason, findings) en conservant le travail.";
+  else if (ticket.stealth) unreviewedChangesHint = " En stealth, ready_for_review() reste accepté après cette limite, même si tu modifies encore le code : le backend publie en commentaire du ticket les findings ouverts et les fichiers non relus.";
   return [
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `   ${CHECKS_BEFORE_REVIEW_HINT}`,
@@ -494,7 +494,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     "   Résous TOUS les conflits en préservant l'intention des DEUX côtés (lis le code concerné, ne supprime aucune fonctionnalité pour faire taire un conflit), puis `git add` et `git rebase --continue` jusqu'à la fin du rebase.",
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `   ${CHECKS_BEFORE_REVIEW_HINT}`,
-    `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`.`,
+    `3. \`update_stage("reviewing")\` : sur le diff de résolution, lance EN PARALLÈLE les 4 reviewers ${reviewCalls("light")}. Attends 4 verdicts approve sur le code courant ; corrige et relance les 4 sinon. Un échec bloque \`done()\`. Cette résolution a son propre budget de passes de review : une fois épuisé, \`delegate_review\` répond en erreur ; appelle alors \`done()\` sans relancer. Le backend signale dans la PR les fichiers modifiés après la dernière passe, publie les findings ouverts et ne merge PAS automatiquement : l'utilisateur merge à la main.`,
     `   ${READ_REVIEW_RESULTS_HINT}`,
     '4. `update_stage("testing")` : exécute typecheck, lint et tests du projet. Rouge → corrige (commits additionnels) ; si tu ne peux pas rétablir le vert, `fail()`.',
     `5. \`update_stage("opening_pr")\` : pousse la branche réécrite par le rebase avec \`git push --force-with-lease\` (jamais \`--no-verify\`).`,

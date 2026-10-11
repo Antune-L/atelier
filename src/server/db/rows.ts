@@ -685,6 +685,8 @@ const conversationRowSchema = z.object({
   session_id: z.string().nullable(),
   error: z.string().nullable(),
   unread: z.number(),
+  context_tokens: z.number().int().nonnegative().nullable(),
+  context_window: z.number().int().positive().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -745,6 +747,8 @@ export function mapConversationRow(raw: unknown): Conversation {
     sessionId: row.session_id,
     error: row.error,
     unread: row.unread === 1,
+    contextTokens: row.context_tokens,
+    contextWindow: row.context_window,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

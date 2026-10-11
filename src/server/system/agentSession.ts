@@ -73,6 +73,8 @@ export type AgentSessionEvent = (
     }
   | { type: "rate_limit"; status: string; resetsAt: number | null }
   | { type: "error"; message: string }
+  /** Current context-window occupancy of the live session (only with `reportContextUsage`). */
+  | { type: "context_usage"; usedTokens: number; maxTokens: number | null }
 ) & { sourceId?: string };
 
 /**
@@ -186,6 +188,11 @@ export interface AgentSessionOptions {
    */
   skills?: string[];
   outputSchema?: Record<string, unknown>;
+  /**
+   * Emit `context_usage` events describing the live context window (Claude: `getContextUsage()`
+   * after each turn; Codex: `thread/tokenUsage/updated`). Off by default: no extra control request.
+   */
+  reportContextUsage?: boolean;
   /** Routes a worker tool call to the backend; the returned text is what the agent sees. */
   onToolCall(name: WorkerToolName, args: unknown): Promise<AgentSessionToolResult>;
   /** Receives parsed stream events (assistant text, tool uses, turn boundaries, errors). */
@@ -200,6 +207,11 @@ export interface AgentSessionHandle {
   send(content: string, messageId?: string): string;
   /** Preempt the current turn (best-effort; surfaces as a non-success turn_end). */
   interrupt(): Promise<void>;
+  /**
+   * Start a context compaction turn (Claude `/compact`, Codex `thread/compact/start`). It ends with
+   * a normal `turn_end`. The caller guarantees no turn is running.
+   */
+  compact?(): Promise<void>;
   /** Stop the session and release the subprocess. Idempotent. */
   close(): Promise<void>;
   /** Immediately revoke tools and terminate the provider when graceful cleanup exceeds its deadline. */

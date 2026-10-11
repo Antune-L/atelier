@@ -33,6 +33,7 @@ const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "vendor", "prd", "prd-te
 const HTTP_OK = 200;
 const HTTP_BAD_REQUEST = 400;
 const HTTP_NOT_FOUND = 404;
+const HTTP_CONFLICT = 409;
 const HTTP_BAD_GATEWAY = 502;
 
 const conversationDetailSchema = z.object({
@@ -63,11 +64,14 @@ afterEach(async () => {
 });
 
 function setup() {
+  return setupWith(new CapturingSystem());
+}
+
+function setupWith<System extends FakeSystemAdapter>(system: System) {
   const db = createDatabase(":memory:");
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
   initProjectRegistry(store);
-  const system = new CapturingSystem();
   const hub = new ClientHub(store);
   const sessionHub = new SessionHub(system);
   const notifier = new Notifier(hub);
@@ -107,6 +111,14 @@ async function flushMicrotasks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function waitForIdle(store: Store, conversationId: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    await flushMicrotasks();
+    if (store.getConversation(conversationId)?.sessionStatus === "idle") return;
+  }
+  throw new Error("conversation toujours en cours");
+}
+
 describe("Atelier routes", () => {
   for (const orchestrator of ["claude", "codex"] satisfies Orchestrator[]) {
     test(`a ${orchestrator} conversation seeds its session and accepts a PRD through the worker tool`, async () => {
@@ -142,6 +154,36 @@ describe("Atelier routes", () => {
       expect(detail.messages.map((message) => message.role)).toEqual(["user"]);
       expect(detail.prds.map((prd) => prd.revision)).toEqual([1, 2]);
       expect(detail.conversation.status).toBe("prd_draft");
+    });
+  }
+
+  for (const orchestrator of ["claude", "codex"] satisfies Orchestrator[]) {
+    test(`a live ${orchestrator} session reports its context and compacts it`, async () => {
+      const { store, request } = setupWith(new FakeSystemAdapter());
+      const conversation = conversationSchema.parse(await (await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY, orchestrator })).json());
+      expect(conversation.contextTokens).toBeNull();
+      expect((await request("POST", `/conversations/${conversation.id}/compact`)).status).toBe(HTTP_CONFLICT);
+
+      await request("POST", `/conversations/${conversation.id}/messages`, { content: "Bonjour" });
+      await waitForIdle(store, conversation.id);
+      const before = store.getConversation(conversation.id);
+      expect(before?.contextWindow).toBe(200_000);
+      expect(before?.contextTokens).toBeGreaterThan(4_000);
+
+      const compacted = await request("POST", `/conversations/${conversation.id}/compact`);
+      expect(compacted.status).toBe(HTTP_OK);
+      const body = z.object({ conversation: conversationSchema }).parse(await compacted.json());
+      expect(body.conversation.sessionStatus).toBe("running");
+      expect((await request("POST", `/conversations/${conversation.id}/compact`)).status).toBe(HTTP_CONFLICT);
+      await waitForIdle(store, conversation.id);
+
+      expect(store.getConversation(conversation.id)?.contextTokens).toBe(4_000);
+      const contents = store.listConversationMessages(conversation.id).map((message) => [message.role, message.content]);
+      expect(contents.slice(-2)).toEqual([
+        ["user", "Compacter le contexte"],
+        ["assistant", `Contexte compacté : ${(before?.contextTokens ?? 0).toLocaleString("fr-FR").replace(/\s/g, " ")} → 4 000 tokens.`],
+      ]);
+      expect((await request("POST", "/conversations/absent/compact")).status).toBe(HTTP_NOT_FOUND);
     });
   }
 

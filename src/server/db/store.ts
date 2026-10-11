@@ -212,6 +212,8 @@ export interface ConversationPatch {
   sessionId?: string | null;
   error?: string | null;
   unread?: boolean;
+  contextTokens?: number | null;
+  contextWindow?: number | null;
 }
 
 export interface NewConversationMessage {
@@ -531,6 +533,10 @@ class SqlUpdateBuilder {
   set(column: string, value: SqlBindValue): void {
     this.fields.push(`${column} = ?`);
     this.values.push(value);
+  }
+
+  hasChanges(): boolean {
+    return this.fields.length > 0;
   }
 
   run(db: Database, table: string, id: SqlBindValue): void {
@@ -2319,7 +2325,11 @@ export class Store {
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.unread !== undefined) set("unread", patch.unread ? 1 : 0);
-    set("updated_at", Date.now());
+    const touchesConversation = builder.hasChanges();
+    if (patch.contextTokens !== undefined) set("context_tokens", patch.contextTokens);
+    if (patch.contextWindow !== undefined) set("context_window", patch.contextWindow);
+    // Live context figures are telemetry: they must not reorder the conversation list.
+    if (touchesConversation || !builder.hasChanges()) set("updated_at", Date.now());
     builder.run(this.db, "conversations", id);
     return this.requireConversation(id, "updateConversation");
   }

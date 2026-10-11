@@ -1084,6 +1084,10 @@ export const conversationSchema = z.object({
   sessionId: z.string().nullable(),
   error: z.string().nullable(),
   unread: z.boolean(),
+  /** Context occupancy of the LIVE agent session (server-owned); null when no session is live. */
+  contextTokens: z.number().int().nonnegative().nullable(),
+  /** Context window of the live session, or null when unknown / no session. */
+  contextWindow: z.number().int().positive().nullable(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });

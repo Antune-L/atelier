@@ -170,6 +170,41 @@ already validated and must be implemented as-is (no `submit_prd`).
 - Live check: `KANBAN_REAL_SDK_PROBE=1 bun test src/server/system/claudeSubagentProbe.test.ts`
   (skipped by default, needs Claude credentials).
 
+### Context usage and compaction
+
+The conversation header shows the live session's context occupancy (`Contexte : 45,2k / 200k
+tokens (23 %)`, a progress bar that turns to the warning color at 80 %, `Contexte : aucune session
+active` when nothing is live) and a `Compacter` button.
+
+- Seam (`agentSession.ts`): event `{ type: "context_usage"; usedTokens; maxTokens | null }`, opt-in
+  through `AgentSessionOptions.reportContextUsage` (set only by `buildAtelierSessionConfig`, both
+  orchestrators), and the optional handle method `compact()` which starts a compaction turn that
+  ends with a normal `turn_end`. `SessionHub.compact(key)` returns false without a live handle or
+  without `compact`. `renderSessionEvent` renders nothing for `context_usage`.
+- Claude: after each `result` and each `system/compact_boundary`, `Query.getContextUsage({ detail:
+  "summary" })` → `totalTokens` / `rawMaxTokens` (errors are logged, never break the stream).
+  `compact()` enqueues the `/compact` slash command as a user turn. `createSdkAgentSession` takes
+  injectable `query`/`ensureBinary` dependencies for tests.
+- Codex: `thread/tokenUsage/updated` → `last.totalTokens` (else `inputTokens + outputTokens`) and
+  `tokenUsage.modelContextWindow` (else null); both fields are optional in the schema, the older
+  payload keeps working. `compact()` calls `thread/compact/start { threadId }`; the compaction runs
+  as a turn tracked by the existing `turn/started` / `turn/completed` handlers. A `contextCompaction`
+  item emits a `Contexte compacté` plan progress.
+- Persistence: nullable `conversations.context_tokens` / `context_window` (additive migration),
+  server-owned (`updateConversationSchema` does not accept them). They describe the live session
+  only: reset to null on settings change, delete, idle close, session failure and `recoverStale`.
+  A context-only patch does not bump `updatedAt`.
+- `AtelierManager.compact` + `POST /api/atelier/conversations/:id/compact` → 200 `{ conversation }`,
+  404 unknown, 409 when the agent is running or no session is live. It persists a `Compacter le
+  contexte` user message; the compaction turn's assistant text is dropped and replaced by
+  `Contexte compacté : A → B tokens.` (or `Contexte compacté.` / `Échec du compactage du contexte.`).
+  These two messages land in the history replayed when a Claude session is relaunched.
+- The dry-run `FakeSystemAdapter` simulates a growing context (window 200 000) and a compaction to
+  4 000 tokens for the Atelier role.
+- **Not verified live**: real Claude `/compact` + `getContextUsage` and real Codex
+  `thread/compact/start` + `modelContextWindow` were only checked against the SDK types and the
+  strings in the bundled Codex 0.160.0 binary; the tests use scripted providers.
+
 ## Lots and status
 
 | Lot | Scope | Status |

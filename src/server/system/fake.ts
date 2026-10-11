@@ -48,6 +48,9 @@ import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
 const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
+const FAKE_CONTEXT_WINDOW = 200_000;
+const FAKE_CONTEXT_BASE_TOKENS = 12_000;
+const FAKE_COMPACTED_TOKENS = 4_000;
 const FAKE_CONVERSATION_REPLY =
   "Réponse simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable. Active le mode réel (KANBAN_DRY_RUN=0) pour converser avec Claude ou Codex.";
 
@@ -278,6 +281,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     // NOTE(ali): an Atelier conversation idles between turns, so its synthetic session answers each message and ends the turn.
     const conversational = opts.role === "atelier";
     const sessionId = `dry-${opts.ticketId}`;
+    // Simulated context occupancy: grows with each reply, shrinks on compaction.
+    let contextTokens = 0;
+    const reportContext = (): void => {
+      if (opts.reportContextUsage) opts.onEvent({ type: "context_usage", usedTokens: contextTokens, maxTokens: FAKE_CONTEXT_WINDOW });
+    };
     setTimeout(() => opts.onEvent({ type: "init", sessionId }), 0);
     if (!conversational) {
       setTimeout(() => opts.onEvent({ type: "assistant_text", text: FAKE_SESSION_TEXT }), 0);
@@ -291,11 +299,23 @@ export class FakeSystemAdapter implements SystemAdapter {
         if (conversational) {
           setTimeout(() => {
             opts.onEvent({ type: "assistant_text", text: FAKE_CONVERSATION_REPLY });
+            contextTokens += FAKE_CONTEXT_BASE_TOKENS + content.length;
+            reportContext();
             opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId, usageByModel: {} });
           }, 0);
         }
         return messageId;
       },
+      ...(conversational ? {
+        compact: async () => {
+          this.log("agentSession.compact", { ticketId: opts.ticketId });
+          setTimeout(() => {
+            contextTokens = Math.min(contextTokens, FAKE_COMPACTED_TOKENS);
+            reportContext();
+            opts.onEvent({ type: "turn_end", ok: true, subtype: "success", sessionId, usageByModel: {} });
+          }, 0);
+        },
+      } : {}),
       interrupt: async () => this.log("agentSession.interrupt", { ticketId: opts.ticketId }),
       close: async () => this.log("agentSession.close", { ticketId: opts.ticketId }),
     };

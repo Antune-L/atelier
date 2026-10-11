@@ -1,4 +1,4 @@
-import { FileText, Send, Settings2, Square } from "lucide-react";
+import { FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 
 import { RESEARCH_OPTION_LABELS } from "@shared/constants";
@@ -18,7 +18,7 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, agentLabel, agentSettingsOf, agentSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, agentLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -104,6 +104,13 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
     void run(() => api.atelierInterrupt(conversation.id), "Interruption impossible");
   };
 
+  const compact = (): void => {
+    void run(async () => {
+      const { conversation: updated } = await api.atelierCompact(conversation.id);
+      boardStore.rememberConversation(updated);
+    }, "Compactage impossible");
+  };
+
   const consolidate = (): void => {
     void run(() => api.atelierConsolidate(conversation.id), "Consolidation impossible");
   };
@@ -137,6 +144,7 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
           <p className="truncate font-mono text-2xs text-muted-foreground">
             {agentSummary(settings, defaults)} · {researchSummary(conversation)}
           </p>
+          <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
         </div>
         <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
           <PopoverTrigger>
@@ -167,6 +175,16 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
             Interrompre
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={compact}
+          disabled={conversation.contextTokens === null || running || busy}
+          title="Compacter le contexte de la session"
+        >
+          <Minimize2 className="h-3.5 w-3.5" />
+          Compacter
+        </Button>
         <Button
           size="sm"
           onClick={consolidate}
@@ -232,6 +250,23 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ContextUsage({ contextTokens, contextWindow }: { contextTokens: number | null; contextWindow: number | null }) {
+  const usage = contextUsageSummary(contextTokens, contextWindow);
+  if (usage === null) {
+    return <p className="truncate font-mono text-2xs text-muted-foreground/70">Contexte : aucune session active</p>;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <p className={`truncate font-mono text-2xs ${usage.warn ? "text-warning" : "text-muted-foreground"}`}>{usage.label}</p>
+      {usage.percent !== null && (
+        <div className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
+          <div className={`h-full ${usage.warn ? "bg-warning" : "bg-primary"}`} style={{ width: `${usage.percent}%` }} />
+        </div>
+      )}
     </div>
   );
 }

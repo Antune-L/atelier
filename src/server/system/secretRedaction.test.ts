@@ -34,6 +34,10 @@ describe("redactSecrets", () => {
     expect(JSON.parse(masked).body).toContain("[redacted]");
   });
 
+  test("masks a secret value containing a backslash entirely", () => {
+    expect(redactSecrets("password=ab\\cd next")).toBe("password=[redacted] next");
+  });
+
   test("masks extra literal secrets such as a freshly pasted token", () => {
     expect(redactSecrets("bad credentials for abc123secret", ["abc123secret"])).toBe("bad credentials for [redacted]");
   });

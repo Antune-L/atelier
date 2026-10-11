@@ -354,6 +354,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
   }
 
   const isFinishedFeature = ticket.column === "done" && ticket.kind === "feature";
+  const isProcessing = ticket.stage === "awaiting_answers" || (ticket.stage !== null && ACTIVE_STAGES.includes(ticket.stage));
   if (isFinishedFeature) {
     if (canMergePr(ticket) && !ctx.hasConflicts) {
       actions.push({
@@ -381,6 +382,8 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
       });
     }
     if (resolveConflictsAction !== null && !resolveConflictsFirst) actions.push(resolveConflictsAction);
+  }
+  if (isFinishedFeature && !isProcessing) {
     actions.push({
       id: "check-merge",
       label: "Vérifier le merge",
@@ -408,8 +411,12 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
         confirmLabel: "PR mergée",
       },
       run: async () => {
-        await api.markMerged(ticket.id);
-        ctx.onClose();
+        try {
+          await api.markMerged(ticket.id);
+          ctx.onClose();
+        } catch (error) {
+          ctx.onError(errorMessage(error, "Marquage de la PR échoué"));
+        }
       },
     });
   }

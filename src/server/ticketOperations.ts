@@ -107,6 +107,14 @@ interface FeasibilityStarter {
   start(ticketIds: string[], projectKey: string): Promise<void>;
 }
 
+export function startFeasibilityInBackground(feasibility: FeasibilityStarter, ticketIds: string[], project: string): void {
+  void feasibility.start(ticketIds, project).catch((error: unknown) => {
+    log.error("batch analysis start failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}
+
 export interface ListTicketsInput {
   project?: string;
   column?: Column;
@@ -353,7 +361,10 @@ export class TicketOperations {
     };
     try {
       const result = this.deps.store.createTicketIdempotent(normalized.requestId, payload, ticketInput);
-      if (result.created) this.deps.hub.pushTicket(result.ticket);
+      if (result.created) {
+        this.deps.hub.pushTicket(result.ticket);
+        startFeasibilityInBackground(this.deps.feasibility, [result.ticket.id], result.ticket.project);
+      }
       return { created: result.created, ticket: compactTicket(result.ticket) };
     } catch (error) {
       if (error instanceof TicketCreationRequestConflictError) {
@@ -385,11 +396,7 @@ export class TicketOperations {
     }
 
     for (const [project, projectIds] of idsByProject) {
-      void this.deps.feasibility.start(projectIds, project).catch((error: unknown) => {
-        log.error("batch analysis start failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+      startFeasibilityInBackground(this.deps.feasibility, projectIds, project);
     }
 
     return { started: startedIds.length, startedIds, rejected };

@@ -75,6 +75,7 @@ import type { PreviewManager } from "./previewManager.ts";
 import {
   autonomousOptionsError,
   createTicketOperations,
+  startFeasibilityInBackground,
   ticketDependencyError,
   TicketOperationError,
 } from "./ticketOperations.ts";
@@ -512,6 +513,7 @@ function parkOrStart(deps: RouteDeps, ticket: Ticket, start: boolean): Ticket {
   // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
   if (!start || isBlocked(ticket, store)) {
     hub.pushTicket(ticket);
+    if (!start) startFeasibilityInBackground(deps.feasibility, [ticket.id], ticket.project);
     return ticket;
   }
   const started = lifecycle.enqueue(ticket.id);
@@ -1209,13 +1211,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!input.runFeasibility) return { created, feasibilityStarted: false };
       // Kick off the batch feasibility analysis in the background; it marks tickets running then
       // persists verdicts via the worker channel (mirrors the triage path).
-      void deps.feasibility
-        .start(created.map((ticket) => ticket.id), input.project)
-        .catch((e) => {
-          log.error("démarrage de la faisabilité échoué", {
-            error: getErrorMessage(e),
-          });
-        });
+      startFeasibilityInBackground(deps.feasibility, created.map((ticket) => ticket.id), input.project);
       // The batch id is generated inside the manager; the client only needs to know the run started.
       return { created, feasibilityStarted: true };
     })
@@ -1613,7 +1609,7 @@ export function createApiRoutes(deps: RouteDeps) {
         triageReport: null,
       });
       hub.pushTicket(running);
-      // Deep "Analyse +": fan-out feasibility/solutions analysis (opus/low) in the background.
+      // Deep "Analyse +": background fan-out analysis using configured Claude study defaults or pinned Codex knobs.
       void deps.triage.start(params.id, { deep: true }).catch((e) => {
         log.error("démarrage de l'analyse + échoué", {
           ticketId: params.id,

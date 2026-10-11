@@ -1,5 +1,5 @@
 import { isCodexFastServiceTier } from "../../shared/codexCapabilities.ts";
-import type { AgentEffort, AgentModel, CodexEffort, CodexModel, FeasibilityEngine, Orchestrator } from "../../shared/constants.ts";
+import type { CodexEffort, CodexModel, FeasibilityEngine, Orchestrator } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSessionRole } from "../system/agentSession.ts";
@@ -15,11 +15,11 @@ export interface ExecutionOverrides {
 }
 
 /**
- * Orchestrator knobs each feasibility provider pins. Kept server-side (not shared) because it is expressed
- * in ExecutionOverrides, which the web bundle never resolves.
+ * Feasibility provider selection and pinned Codex knobs. Claude inherits the configured triage
+ * defaults. Kept server-side because ExecutionOverrides is never resolved by the web bundle.
  */
 const FEASIBILITY_ENGINE_EXECUTION: Record<FeasibilityEngine, ExecutionOverrides> = {
-  claude: { orchestrator: "claude", model: "opus" satisfies AgentModel, effort: "medium" satisfies AgentEffort },
+  claude: { orchestrator: "claude" },
   codex: { orchestrator: "codex", codexModel: "gpt-6.1-sol" satisfies CodexModel, codexEffort: "medium" satisfies CodexEffort },
 };
 
@@ -114,8 +114,8 @@ export function resolveTicketExecution(
 }
 
 /**
- * Resolve a feasibility/triage action on the pinned knobs of the ticket's feasibility provider, which
- * defaults to the ticket's own orchestrator.
+ * Resolve feasibility/triage using configured Claude triage defaults or pinned Codex knobs.
+ * The feasibility provider falls back to the ticket orchestrator; implementation knobs are ignored.
  */
 export function resolveFeasibilityExecution(ticket: Pick<Ticket, "feasibilityEngine" | "orchestrator">, role: AgentSessionRole): ResolvedExecution {
   const engine = ticket.feasibilityEngine ?? ticket.orchestrator;

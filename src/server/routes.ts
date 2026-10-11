@@ -353,6 +353,14 @@ function isProcessing(stage: Stage | null): boolean {
   return ACTIVE_STAGES.includes(stage);
 }
 
+const MARK_MERGED_FAILED = "impossible de marquer la PR comme mergée";
+
+function markMergedBlocker(ticket: Ticket, store: Store): string | null {
+  if (isProcessing(ticket.stage)) return "ticket en traitement : attends la fin ou abandonne-le avant de le marquer mergé";
+  if (store.getActiveQualityIteration(ticket.id)) return "Itération qualité en cours : utilise son action dédiée ou annule-la.";
+  return null;
+}
+
 const MANUAL_MERGED_EVENT = "manual_merged";
 const mergesInFlight = new Set<string>();
 
@@ -1532,6 +1540,13 @@ export function createApiRoutes(deps: RouteDeps) {
         await slots.retry(params.id);
         return store.getTicket(params.id);
       }
+      if (target === "merged") {
+        try {
+          return await slots.markMerged(params.id);
+        } catch (error) {
+          return jsonError(set, HTTP_CONFLICT, getErrorMessage(error, MARK_MERGED_FAILED));
+        }
+      }
       return lifecycle.moveColumn(params.id, target);
     })
     .post("/tickets/:id/comments", ({ params, body, set }) => {
@@ -1560,15 +1575,19 @@ export function createApiRoutes(deps: RouteDeps) {
       coordinator.validatePrd(params.id, parsed.data.note);
       return store.getTicket(params.id);
     })
-    .post("/tickets/:id/merged", ({ params, set }) => {
+    .post("/tickets/:id/merged", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.autonomous && ticket.autonomousState?.phase !== "completed") {
         return jsonError(set, HTTP_CONFLICT, "Autonomous delivery must verify its chosen outcome before completion.");
       }
-      // Stamp the merge time so the board can order "PR mergée" newest-first.
-      const merged = lifecycle.markMerged(params.id);
-      return merged;
+      const blocker = markMergedBlocker(ticket, store);
+      if (blocker) return jsonError(set, HTTP_CONFLICT, blocker);
+      try {
+        return await slots.markMerged(params.id);
+      } catch (error) {
+        return jsonError(set, HTTP_CONFLICT, getErrorMessage(error, MARK_MERGED_FAILED));
+      }
     })
     .post("/tickets/:id/check-merged", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
@@ -1576,16 +1595,18 @@ export function createApiRoutes(deps: RouteDeps) {
       if (ticket.column !== "done" || ticket.kind !== "feature") {
         return jsonError(set, HTTP_CONFLICT, "vérification réservée aux features en colonne Fini");
       }
+      const blocker = markMergedBlocker(ticket, store);
+      if (blocker) return jsonError(set, HTTP_CONFLICT, blocker);
       // directPush tickets push commits straight onto the base branch and never open a PR, so the
       // work is already merged; skip the PR existence check and the gh query entirely.
       if (ticket.directPush) {
-        const merged = lifecycle.markMerged(params.id);
+        const merged = await slots.markMerged(params.id);
         return { merged: true, state: DIRECT_PUSH_MERGED_STATE, ticket: merged };
       }
       // A split mother has no PR but its integration branch carries the children's merged work; treat
       // it like directPush — its work IS integrated, so move it straight to "PR mergée".
       if (isSplitMother(ticket)) {
-        const merged = lifecycle.markMerged(params.id);
+        const merged = await slots.markMerged(params.id);
         return { merged: true, state: SPLIT_MERGED_STATE, ticket: merged };
       }
       if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
@@ -1599,7 +1620,7 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (!result.merged) return { merged: false, state: result.state };
       // Mirror /merged: stamp finishedAt so the board orders newest-first.
-      const merged = lifecycle.markMerged(params.id);
+      const merged = await slots.markMerged(params.id);
       return { merged: true, state: result.state, ticket: merged };
     })
     .post("/tickets/:id/merge", async ({ params, set }) => {

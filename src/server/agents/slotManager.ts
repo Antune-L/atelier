@@ -1767,6 +1767,16 @@ export class SlotManager {
     this.pumpQueue();
   }
 
+  async markMerged(ticketId: string): Promise<Ticket> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) throw new Error(`markMerged: ticket ${ticketId} introuvable`);
+    if (ticket.slotId === null) return this.lifecycle.markMerged(ticketId);
+    await this.releaseSlotIfOwned(ticket, ticket.slotId);
+    const merged = this.lifecycle.markMerged(ticketId);
+    this.pumpQueue();
+    return merged;
+  }
+
   private markFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): void {
     this.clearPhase(ticketId);
     const iteration = this.store.getActiveQualityIteration(ticketId);

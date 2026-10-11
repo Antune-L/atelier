@@ -65,4 +65,14 @@ describe("buildAtelierPrompt — adversarial review", () => {
     expect(only).not.toContain(RESEARCH_SECTION);
     expect(only).toContain(ADVERSARIAL_SECTION);
   });
+
+  test("the restitution is a bullet-list synthesis in a fixed order", () => {
+    const labels = ["**Run**", "**Objections retenues**", "**Alternatives écartées**", "**Solution recommandée**", "**Questions ouvertes**", "✅ Faisable", "❌ Non faisable"];
+    const text = prompt(conversation("claude", true, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true }));
+    const positions = labels.map((label) => text.indexOf(label));
+    for (const position of positions) expect(position).toBeGreaterThan(-1);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    const off = prompt(conversation("claude", true, DEFAULT_RESEARCH_OPTIONS));
+    for (const label of labels) expect(off).not.toContain(label);
+  });
 });

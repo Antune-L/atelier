@@ -141,7 +141,9 @@ already validated and must be implemented as-is (no `submit_prd`).
   orchestrator and runs an Athena-style read-only pipeline (dossier → 2 explorers → ≥2 independent
   analysts → own synthesis → fresh adversarial reviewers → verdict, ≤10 sub-agents, ≤1 re-review)
   before handing over a recommended solution or consolidating a changed one into a PRD. The outcome
-  is shown under `### Revue adversariale`, ending with `✅ Faisable` / `❌ Non faisable` lists.
+  is shown under `### Revue adversariale` as synthetic bullet lists (Run, Objections retenues,
+  Alternatives écartées, Solution recommandée, Questions ouvertes) ending with `✅ Faisable` /
+  `❌ Non faisable` lists.
 - Sub-agents are native and bound to the orchestrator's provider (no DB column):
   `ATELIER_ADVERSARIAL_SUBAGENTS` = Claude → `sonnet`/`medium`, Codex → `gpt-6-luna`/`high`. Three
   read-only `scout` sub-agents: `atelier-explorer`, `atelier-analyst`,

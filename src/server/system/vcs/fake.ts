@@ -111,6 +111,10 @@ export class FakeVcsClient implements VcsClient {
     return "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
   }
 
+  async updatePrBody(_cwd: string, _prUrl: string): Promise<DoneGateResult> {
+    return { ok: true, reason: "" };
+  }
+
   async publishReview(_cwd: string, _prUrl: string): Promise<PublishReviewResult> {
     return { ok: true, reason: "", reviewId: FAKE_REVIEW_ID };
   }

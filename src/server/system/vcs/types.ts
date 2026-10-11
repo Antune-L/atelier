@@ -66,6 +66,7 @@ export interface VcsClient {
   createPr(cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult>;
   /** PR description body, used as the agent-work summary. null when unreadable. */
   fetchPrSummary(cwd: string, prUrl: string): Promise<string | null>;
+  updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string): Promise<DoneGateResult>;
   /**
    * Publish the review pass on the PR. The client applies its own capabilities here (GitHub rejects
    * APPROVE/REQUEST_CHANGES on one's own PR, so it downgrades the event to COMMENT).

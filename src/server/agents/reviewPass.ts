@@ -54,3 +54,31 @@ export function publishedReviewFindings(
 export function allowedReviewPasses(ticket: Pick<Ticket, "argusMultiLoop"> | null): number {
   return ticket?.argusMultiLoop === true ? MAX_REVIEW_ROUNDS + 1 : MAX_REVIEW_ROUNDS;
 }
+
+export interface UnreviewedChanges {
+  paths: string[];
+  count: number | null;
+}
+
+const UNREVIEWED_SECTION_START = "<!-- kanban-unreviewed-changes:start -->";
+const UNREVIEWED_SECTION_END = "<!-- kanban-unreviewed-changes:end -->";
+const UNREVIEWED_SECTION_HEADING = "## Fichiers modifiés après la dernière review (non relus)";
+const UNREVIEWED_SECTION_INTRO = "Le budget de passes de review était épuisé : ces fichiers ont changé après la dernière passe et n'ont pas été relus par les reviewers indépendants.";
+const UNREVIEWED_SECTION_UNKNOWN = "Liste indisponible : la dernière passe n'a pas conservé l'empreinte de chaque fichier.";
+
+function unreviewedPathLines(changes: UnreviewedChanges): string[] {
+  if (changes.paths.length === 0) return [UNREVIEWED_SECTION_UNKNOWN];
+  const lines = changes.paths.map((path) => `- \`${path}\``);
+  const hidden = (changes.count ?? changes.paths.length) - changes.paths.length;
+  if (hidden > 0) lines.push(`- … et ${hidden} autre(s) fichier(s)`);
+  return lines;
+}
+
+export function withUnreviewedChangesSection(body: string, changes: UnreviewedChanges): string {
+  const section = [UNREVIEWED_SECTION_START, UNREVIEWED_SECTION_HEADING, "", UNREVIEWED_SECTION_INTRO, "", ...unreviewedPathLines(changes), UNREVIEWED_SECTION_END].join("\n");
+  const start = body.indexOf(UNREVIEWED_SECTION_START);
+  const end = start === -1 ? -1 : body.indexOf(UNREVIEWED_SECTION_END, start);
+  if (end !== -1) return `${body.slice(0, start)}${section}${body.slice(end + UNREVIEWED_SECTION_END.length)}`;
+  const trimmed = body.trimEnd();
+  return trimmed.length === 0 ? section : `${trimmed}\n\n${section}`;
+}

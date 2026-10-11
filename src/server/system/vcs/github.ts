@@ -60,6 +60,7 @@ const PR_STATE_MERGED = "MERGED";
 const PR_STATE_CLOSED = "CLOSED";
 const PR_STATE_OPEN = "OPEN";
 
+const ghPrBodySchema = z.object({ body: z.string() });
 const ghAuthenticatedUserSchema = z.object({ id: z.number().int(), login: z.string().min(1) });
 const ghRequestedPullSchema = z.object({
   number: z.number().int(), title: z.string(), html_url: z.string(), draft: z.boolean(),
@@ -535,10 +536,27 @@ export class GithubVcsClient implements VcsClient {
   async fetchPrSummary(cwd: string, prUrl: string): Promise<string | null> {
     const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "body"], cwd);
     if (res.exitCode !== 0) return null;
-    const parsed = z.object({ body: z.string() }).safeParse(safeJsonParse(res.stdout));
+    const parsed = ghPrBodySchema.safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return null;
     const body = parsed.data.body.trim();
     return body.length > 0 ? body : null;
+  }
+
+  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string): Promise<DoneGateResult> {
+    const read = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "body"], cwd);
+    if (read.exitCode !== 0 || read.timedOut) return { ok: false, reason: ghFailure(read, "gh pr view a échoué") };
+    const parsed = ghPrBodySchema.safeParse(safeJsonParse(read.stdout));
+    if (!parsed.success) return { ok: false, reason: "description de la PR GitHub illisible" };
+    const directory = await mkdtemp(join(tmpdir(), "kanban-pr-"));
+    try {
+      const bodyPath = join(directory, "body.md");
+      await writeFile(bodyPath, transform(parsed.data.body), { mode: 0o600 });
+      const res = await runGh([GH_BINARY, "pr", "edit", prUrl, "--body-file", bodyPath], cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+      if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: ghFailure(res, "gh pr edit a échoué") };
+      return { ok: true, reason: "" };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 
   async publishReview(cwd: string, prUrl: string, opts: PublishReviewOptions): Promise<PublishReviewResult> {

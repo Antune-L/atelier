@@ -653,24 +653,19 @@ export class AgentCoordinator {
     let requirement: "approved" | "approved_or_limit" | "completed" = "approved";
     if (readOnlyReview && !ticket?.autonomous) requirement = "completed";
     else if (opensFeaturePr && !ticket?.autonomous) requirement = "approved_or_limit";
-    const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId);
-    if (!reviewGate.ok) {
-      const result = `Gate échouée: ${reviewGate.reason}`;
-      const fields = {
-        callId: ctx.callId,
-        generationId: ctx.generationId,
-        reasonCode: reviewGate.reasonCode,
-        reason: reviewGate.reason,
-      };
-      this.store.logEvent(ctx.ticketId, REVIEW_GATE_REJECTED_EVENT, fields);
-      this.sessionHub.appendExternalLine(ctx.ticketId, `⚠️ done() rejeté : ${reviewGate.reason}`);
-      log.warn("gate done rejetée avant finalisation", { ticketId: ctx.ticketId, slotId: ctx.slotId, ...fields });
-      return { ok: false, result };
+    const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId, {
+      acceptChangesAfterBudget: requirement === "approved_or_limit" && ticket?.resolvingConflicts !== true,
+    });
+    if (!reviewGate.ok) return this.rejectDoneGate(ctx, reviewGate.reasonCode, reviewGate.reason);
+    if (reviewGate.unreviewedChanges !== null) {
+      const flagged = await this.delegation.flagUnreviewedChanges(ctx.ticketId, ctx.slotId, prUrl, reviewGate.unreviewedChanges);
+      if (!flagged.ok) return this.rejectDoneGate(ctx, "unreviewed_changes_flag_failed", flagged.reason);
     }
+    const acceptedAtReviewLimit = reviewGate.acceptedWithFindings || reviewGate.unreviewedChanges !== null;
     const reviewReport = readOnlyReview || reviewGate.acceptedWithFindings
       ? this.delegation.reviewBoardReport(ctx.ticketId)
       : null;
-    if (reviewGate.acceptedWithFindings && ticket?.autoMerge === true) {
+    if (acceptedAtReviewLimit && ticket?.autoMerge === true) {
       this.store.updateTicket(ctx.ticketId, { autoMerge: false });
       this.store.logEvent(ctx.ticketId, "auto_merge_disabled_after_review_limit", { passId: reviewGate.passId });
     }
@@ -703,6 +698,14 @@ export class AgentCoordinator {
         ? "Ticket clôturé, slot libéré."
         : outcome.reason,
     };
+  }
+
+  private rejectDoneGate(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, reasonCode: string, reason: string): ToolResult {
+    const fields = { callId: ctx.callId, generationId: ctx.generationId, reasonCode, reason };
+    this.store.logEvent(ctx.ticketId, REVIEW_GATE_REJECTED_EVENT, fields);
+    this.sessionHub.appendExternalLine(ctx.ticketId, `⚠️ done() rejeté : ${reason}`);
+    log.warn("gate done rejetée avant finalisation", { ticketId: ctx.ticketId, slotId: ctx.slotId, ...fields });
+    return { ok: false, result: `Gate échouée: ${reason}` };
   }
 
   private async handleReadyForReview(ctx: SessionToolCall): Promise<ToolResult> {

@@ -928,6 +928,10 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcs(provider).fetchPrSummary(slotPath, prUrl);
   }
 
+  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult> {
+    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform);
+  }
+
   async verifyReviewDone(
     slotPath: string,
     prUrl: string,

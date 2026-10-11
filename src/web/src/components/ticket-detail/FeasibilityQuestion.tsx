@@ -27,6 +27,9 @@ export function FeasibilityQuestion({ ticket, question, index, onSubmit }: Feasi
     || ticket.column !== "todo" || ticket.archived || ticket.kind !== "feature" || ticket.slotId !== null
     || (ticket.stage !== null && ACTIVE_STAGES.includes(ticket.stage));
   const message = error ?? (run?.status === "failed" ? run.error : null);
+  const answerDisabled = pending || run?.status === "done";
+  const recommendation = question.recommendedAnswer;
+  const recommendationTooLong = recommendation !== null && recommendation.length > 10000;
 
   const submit = async (): Promise<void> => {
     if (postingRef.current || pending || blocked || run?.status === "done" || !answer.trim()) return;
@@ -50,8 +53,22 @@ export function FeasibilityQuestion({ ticket, question, index, onSubmit }: Feasi
       {question.recommendedAnswer !== null && (
         <p className="text-sm text-muted-foreground">Réponse conseillée : {question.recommendedAnswer}</p>
       )}
+      {recommendation !== null && recommendation.trim() !== "" && (
+        <>
+          <Button type="button" size="sm" variant="outline" disabled={answerDisabled || recommendationTooLong}
+            aria-describedby={recommendationTooLong ? `${id}-recommendation-limit` : undefined}
+            onClick={() => setAnswer(recommendation)}>
+            Utiliser la réponse conseillée
+          </Button>
+          {recommendationTooLong && (
+            <p id={`${id}-recommendation-limit`} className="text-sm text-muted-foreground">
+              La réponse conseillée dépasse la limite de 10 000 caractères. Vous pouvez saisir une réponse plus courte manuellement.
+            </p>
+          )}
+        </>
+      )}
       <Textarea id={id} value={answer} maxLength={10000}
-        onChange={(event) => setAnswer(event.target.value)} disabled={pending || run?.status === "done"}
+        onChange={(event) => setAnswer(event.target.value)} disabled={answerDisabled}
         aria-describedby={`${id}-status`} required />
       <Button type="submit" size="sm" variant="secondary" disabled={pending || blocked || run?.status === "done" || !answer.trim()}>
         {pending ? "Intégration en cours…" : run?.status === "failed" ? "Réessayer" : "Intégrer la réponse"}

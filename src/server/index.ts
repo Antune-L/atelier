@@ -26,6 +26,7 @@ import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { QualityManager } from "./agents/qualityManager.ts";
 import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
@@ -251,6 +252,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier, repoMutex);
   const splitManager = new SplitManager(store, system, sessionHub);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
+  const feasibilityAnswerManager = new FeasibilityAnswerManager(store, system, clientHub);
   const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system });
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
@@ -361,6 +363,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   await triageManager.recoverStale();
   await feasibilityManager.recoverStale();
   reformulateManager.recoverStale();
+  feasibilityAnswerManager.recoverStale();
   atelierManager.recoverStale();
   watchdog.start();
   automationManager.start();
@@ -387,6 +390,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     split: splitManager,
     atelier: atelierManager,
     reformulate: reformulateManager,
+    feasibilityAnswers: feasibilityAnswerManager,
     automations: automationManager,
     projectRoot: dataRoot,
     resourcesRoot,

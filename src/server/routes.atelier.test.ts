@@ -12,6 +12,7 @@ import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { atelierSessionKey } from "./agents/sessionConfig.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
@@ -82,6 +83,7 @@ function setup() {
   const app = createApiRoutes({
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
     reformulate: new ReformulateManager(store, system, hub, notifier),
+    feasibilityAnswers: new FeasibilityAnswerManager(store, system, hub),
     automations: new AutomationManager(store, system, hub),
     projectRoot: "/tmp", composerAvailable: true,
   });

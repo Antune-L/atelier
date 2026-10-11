@@ -211,6 +211,22 @@ export const REFORMULATE_STATUSES = ["none", "running", "done", "failed"] as con
 export const reformulateStatusSchema = z.enum(REFORMULATE_STATUSES);
 export type ReformulateStatus = z.infer<typeof reformulateStatusSchema>;
 
+export const feasibilityAnswerInputSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  reportVersion: z.number().int().nonnegative(),
+  questionIndex: z.number().int().nonnegative(),
+  answer: z.string().max(10000).trim().min(1),
+}).strict();
+export type FeasibilityAnswerInput = z.infer<typeof feasibilityAnswerInputSchema>;
+export const feasibilityAnswerRunSchema = feasibilityAnswerInputSchema.extend({
+  id: z.string().min(1),
+  question: z.string(),
+  status: z.enum(["running", "done", "failed"]),
+  error: z.string().nullable(),
+});
+export const feasibilityAnswerRunsSchema = z.array(feasibilityAnswerRunSchema);
+export type FeasibilityAnswerRun = z.infer<typeof feasibilityAnswerRunSchema>;
+
 /** Shape the triage agent must emit (and we re-parse on both server and client). */
 export const triageResultSchema = z.object({
   verdict: triageVerdictSchema,
@@ -352,6 +368,9 @@ export const ticketSchema = z.object({
   triageReport: z.string().nullable(),
   /** Lifecycle of the async "Reformuler le besoin" run (none until first triggered). */
   reformulateStatus: reformulateStatusSchema,
+  feasibilityRevision: z.number().int().nonnegative().default(0),
+  feasibilityReportVersion: z.number().int().nonnegative().default(0),
+  feasibilityAnswers: feasibilityAnswerRunsSchema.default([]),
   /** Reformulated need (markdown) when done, or the failure reason when failed; null otherwise. */
   reformulation: z.string().nullable(),
   /** Inject the feasibility-triage findings as a dedicated section of the implementation contract. */

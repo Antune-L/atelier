@@ -2,6 +2,7 @@ import type { z } from "zod";
 
 import type {
   AnalyzeTicketsInput,
+  FeasibilityAnswerInput,
   AppSettings,
   Automation,
   Capabilities,
@@ -253,6 +254,8 @@ export const api = {
     request(`/api/tickets/${id}/split`, { method: "POST" }),
   reformulate: (id: string): Promise<{ started: boolean }> =>
     request(`/api/tickets/${id}/reformulate`, { method: "POST" }),
+  answerFeasibility: (id: string, input: FeasibilityAnswerInput): Promise<{ started: boolean; id: string }> =>
+    request(`/api/tickets/${id}/feasibility-answers`, { method: "POST", body: JSON.stringify(input) }),
   importNotion: (input: ImportNotionInput): Promise<{ markdown: string }> =>
     request(`/api/notion/import`, { method: "POST", body: JSON.stringify(input) }),
   deleteTicket: (id: string): Promise<{ ok: boolean }> =>

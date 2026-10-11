@@ -83,6 +83,21 @@ function orchestratorOf(db: Database, table: "tickets" | "profiles", id: string)
 }
 
 describe("orchestrator migration + backfill", () => {
+  test("backfills feasibility answer persistence on legacy tickets and preserves it on reopen", () => {
+    const path = reserveDbPath();
+    createLegacyDb(path);
+    const db = createDatabase(path);
+    expect(db.query("SELECT feasibility_revision, feasibility_report_version, feasibility_answers FROM tickets WHERE id = 't-claude'").get()).toEqual({
+      feasibility_revision: 0, feasibility_report_version: 0, feasibility_answers: "[]",
+    });
+    db.query("UPDATE tickets SET feasibility_revision = 7, feasibility_report_version = 3, feasibility_answers = ? WHERE id = 't-claude'").run('[{"answer":"Blue"}]');
+    db.close();
+    const reopened = createDatabase(path);
+    expect(reopened.query("SELECT feasibility_revision, feasibility_report_version, feasibility_answers FROM tickets WHERE id = 't-claude'").get()).toEqual({
+      feasibility_revision: 7, feasibility_report_version: 3, feasibility_answers: '[{"answer":"Blue"}]',
+    });
+    reopened.close();
+  });
   test("adds nullable Codex implementer and delegate snapshot columns without backfilling legacy rows", () => {
     const path = reserveDbPath();
     createLegacyDb(path);

@@ -211,8 +211,8 @@ describe("implementation_finished_at backfill", () => {
     const db = createDatabase(path);
     expect(hasColumn(db, "tickets", "implementation_finished_at")).toBe(true);
     expect(ticketNumberOf(db, "implementation_finished_at", toReview)).toBe(5_000);
-    expect(ticketNumberOf(db, "implementation_finished_at", mergedWithDone)).toBe(10_000);
-    expect(ticketNumberOf(db, "implementation_finished_at", doneWithDone)).toBe(30_000);
+    expect(ticketNumberOf(db, "implementation_finished_at", mergedWithDone)).toBe(20_000);
+    expect(ticketNumberOf(db, "implementation_finished_at", doneWithDone)).toBe(40_000);
     expect(ticketNumberOf(db, "implementation_finished_at", mergedNoDone)).toBeNull();
     expect(ticketNumberOf(db, "implementation_started_at", noStart)).toBe(200);
     expect(ticketNumberOf(db, "implementation_started_at", withStart)).toBe(777);

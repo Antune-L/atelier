@@ -24,6 +24,7 @@ import {
   ConfirmPopover,
 } from "@/components/ui/confirm";
 import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 import { boardStore } from "@/lib/store";
@@ -67,9 +68,11 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
   const [menuOpen, setMenuOpen] = useState(false);
   const [pending, setPending] = useState<TicketAction | null>(null);
   const [conflictTicketId, setConflictTicketId] = useState<string | null>(null);
+  const { prOnly } = useCapabilities();
 
   const hasConflicts = conflictTicketId === ticket.id;
   const actions = buildActions(ticket, {
+    prOnly,
     onRefresh,
     onClose,
     onError,
@@ -210,6 +213,8 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
 }
 
 interface ActionContext {
+  /** Cloud host: no automatic merge after a conflict resolution, the user merges by hand. */
+  prOnly: boolean;
   onRefresh: () => void;
   onClose: () => void;
   onError: (message: string) => void;
@@ -222,6 +227,8 @@ const RESOLVE_CONFLICTS_FAILED_TITLE =
   "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR pour relancer le merge auto";
 const RESOLVE_CONFLICTS_DONE_TITLE =
   "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits, repousse la PR puis relance le merge";
+const RESOLVE_CONFLICTS_PR_ONLY_TITLE =
+  "Lancer une session Opus (effort bas) qui rebase la branche, résout les conflits et repousse la PR, à merger ensuite à la main";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -266,7 +273,9 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
       id: "resolve-conflicts",
       label: "Résoudre les conflits",
       Icon: GitMerge,
-      title: ticket.column === "done" ? RESOLVE_CONFLICTS_DONE_TITLE : RESOLVE_CONFLICTS_FAILED_TITLE,
+      title: ctx.prOnly
+        ? RESOLVE_CONFLICTS_PR_ONLY_TITLE
+        : ticket.column === "done" ? RESOLVE_CONFLICTS_DONE_TITLE : RESOLVE_CONFLICTS_FAILED_TITLE,
       run: async () => {
         try {
           await api.resolveConflicts(ticket.id);

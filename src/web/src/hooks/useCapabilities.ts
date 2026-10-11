@@ -20,6 +20,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultCodexFast: false,
   canUpdate: false,
   canPickFolder: false,
+  prOnly: false,
   skills: [],
 };
 

@@ -5,7 +5,7 @@ import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES 
 import { isNotionUrl } from "@shared/notion";
 import type { ProjectInfo } from "@shared/schemas";
 
-import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
+import { AutonomousOptions, autonomousEligibility, prOnlyAutonomousOptions } from "@/components/AutonomousOptions";
 import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { ProjectSelect } from "@/components/ProjectSelect";
@@ -17,6 +17,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
 import { dependencyCandidates } from "@/lib/display";
@@ -71,12 +72,15 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
   const [optionsKey, setOptionsKey] = useState(0);
-  const [autonomousOptions, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
+  // A cloud host refuses auto-merge, direct push and merge delivery: force them off, not only hide them.
+  const { prOnly } = useCapabilities();
+  const [autonomousChoice, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
+  const autonomousOptions = prOnlyAutonomousOptions(autonomousChoice, prOnly);
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false;
+  const autoMerge = !prOnly && (autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false);
   const [addScreenshotsChoice, setAddScreenshotsChoice] = useState<boolean | null>(null);
   // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
   const addScreenshots =
@@ -84,7 +88,8 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [argusMultiLoop, setArgusMultiLoop] = useState(false);
   const [stealth, setStealth] = useState(false);
-  const [directPush, setDirectPush] = useState(false);
+  const [directPushChoice, setDirectPush] = useState(false);
+  const directPush = !prOnly && directPushChoice;
   const { tickets } = useBoard();
   const [dependsOn, setDependsOn] = useState<string | null>(null);
   const dependsCandidates = dependencyCandidates(tickets, project, null);
@@ -390,6 +395,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                   onChange: (autonomous) => updateAutonomousOptions({ ...autonomousOptions, autonomous }),
                 }}
                 key={optionsKey}
+                prOnly={prOnly}
                 headingId="ticket-options-heading"
                 values={{
                   prdEnabled,
@@ -412,7 +418,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                   }
                 }}
               >
-                <AutonomousOptions id="new-autonomous" values={autonomousOptions} onChange={updateAutonomousOptions} />
+                <AutonomousOptions id="new-autonomous" values={autonomousOptions} prOnly={prOnly} onChange={updateAutonomousOptions} />
               </TicketOptionsToggleGroup>
               {error && <p className="text-sm text-danger">{error}</p>}
             </div>

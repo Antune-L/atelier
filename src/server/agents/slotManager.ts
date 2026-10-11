@@ -1315,7 +1315,7 @@ export class SlotManager {
     if (currentTicket.autonomous) {
       const identity = await this.verifyAutonomousPr(currentTicket, path, prUrl);
       if (!identity.ok) return { ok: false, reason: identity.reason, slotReleased: false };
-      if (currentTicket.autonomousDelivery === "merge") {
+      if (currentTicket.autonomousDelivery === "merge" && !isCloudHost()) {
         if (!isProjectKey(currentTicket.project) || !currentTicket.autonomousState?.revision) return { ok: false, reason: "Autonomous merge revision is unavailable.", slotReleased: false };
         const project = getProject(currentTicket.project);
         const merged = await this.system.checkPrMerged(path, prUrl, project.vcsProvider);

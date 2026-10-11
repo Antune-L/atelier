@@ -20,6 +20,8 @@ import type {
   MergePrExpectation,
 } from "../types.ts";
 
+export const PR_BODY_FILE = ".pr-body.md";
+
 export interface CreatePrResult {
   ok: boolean;
   url: string;

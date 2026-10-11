@@ -60,7 +60,7 @@ Consequences for working in this repo:
 
 - `bun run dev` is a safe sandbox — it spawns no real `claude`, touches no real repos, never writes `~/.claude.json`, and the app creates **no git commits** in this repo.
 - Live `claude`/tmux spawning is only exercisable under `bun run real` (`KANBAN_DRY_RUN=0`).
-- `KANBAN_SETUP=1` (gated, off by default; requires `KANBAN_DRY_RUN=0`) mutates `~/.claude.json` and each project's `.git/info/exclude`. Don't enable casually.
+- `KANBAN_SETUP=1` (gated, off by default; requires `KANBAN_DRY_RUN=0`) mutates `~/.claude.json`. Don't enable casually. Every slot worktree creation appends any missing `.claude/`, `.mcp.json` and `.pr-body.md` entries to the repo's shared `.git/info/exclude`, regardless of this flag.
 - When testing the UI, drive the dry-run sandbox — **do not** point automation at a live real-mode server on :52817.
 
 ## Architecture

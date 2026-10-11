@@ -1,5 +1,3 @@
-import { getProject, listProjectKeys } from "./config.ts";
-
 import type { Store } from "./db/store.ts";
 import { slotPath } from "./agents/slotManager.ts";
 import { createLogger } from "./logger.ts";
@@ -13,7 +11,6 @@ const log = createLogger("boot");
 /**
  * First-boot setup, gated behind KANBAN_SETUP=1. Side effects:
  *  - seed hasTrustDialogAccepted in ~/.claude.json for the 3 slot paths
- *  - add .claude/ and .mcp.json to each repo's .git/info/exclude
  * With the fake adapter (dry-run) these are no-ops that only log.
  */
 export async function runFirstBootSetup(store: Store, system: SystemAdapter): Promise<void> {
@@ -29,9 +26,6 @@ export async function runFirstBootSetup(store: Store, system: SystemAdapter): Pr
 
   const slotPaths = Array.from({ length: SLOT_COUNT }, (_, i) => slotPath(i + 1));
   await system.seedWorkspaceTrust(slotPaths);
-  for (const key of listProjectKeys()) {
-    await system.excludeAgentFilesInRepo(getProject(key).repoPath);
-  }
 
   store.setMeta(SETUP_DONE_KEY, "1");
   log.info("setup premier-boot terminé");

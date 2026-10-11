@@ -202,7 +202,6 @@ with lowercase segments. The clone root is `KANBAN_CLONE_ROOT`, default `~/kanba
 - HTTPS only: no SSH cloning, deploy keys or per-account SSH keys.
 - Only github.com: Azure DevOps and GitHub Enterprise repositories are added with **Dossier local** after cloning them yourself.
 - Deleting a project does not delete its clone.
-- A repository cloned while the server runs does not automatically get the agent-file exclusions in `.git/info/exclude` (`.claude/`, `.mcp.json`, `.pr-body.md`).
 
 ## Phase B: previews through the broker
 

@@ -139,10 +139,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("seedWorkspaceTrust", { paths });
   }
 
-  async excludeAgentFilesInRepo(repoPath: string): Promise<void> {
-    this.log("excludeAgentFilesInRepo", { repoPath });
-  }
-
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
     this.log("worktreeRemove", { repoPath, slotPath });
     for (const [key, lot] of this.implementationLots) {

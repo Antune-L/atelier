@@ -3,9 +3,9 @@ import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { $ } from "bun";
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
@@ -150,6 +150,7 @@ const WORKTREE_TEARDOWN_CANDIDATES = ["scripts/teardown-worktree.sh", "teardown-
 /** Cursor headless binary names, in priority order (installed as `cursor-agent`, also `agent`). */
 const REVIEW_WORKTREE_DISCARD_ARGS = ["git", "checkout", "--", "."];
 const REVIEW_WORKTREE_CLEAN_ARGS = ["git", "clean", "-fd"];
+const AGENT_EXCLUDED_FILES = [".claude/", ".mcp.json", PR_BODY_FILE];
 
 const CLAUDE_BINARY_NAME = "claude";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
@@ -301,19 +302,21 @@ export class RealSystemAdapter implements SystemAdapter {
     await Bun.write(CLAUDE_JSON_PATH, JSON.stringify(config, null, 2));
   }
 
-  async excludeAgentFilesInRepo(repoPath: string): Promise<void> {
-    const infoDir = join(repoPath, ".git", "info");
-    // A configured repo may be missing (placeholder/example config) or not a git checkout; skip
-    // rather than abort first-boot setup. Bun.write would otherwise ENOENT on a missing parent.
-    if (!existsSync(infoDir)) return;
-    const excludePath = join(infoDir, "exclude");
+  private async excludeAgentFilesInRepo(repoPath: string): Promise<void> {
+    const res = await $`git -C ${repoPath} rev-parse --path-format=absolute --git-path info/exclude`.nothrow().quiet();
+    if (res.exitCode !== 0) {
+      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+      throw new Error(`résolution de .git/info/exclude a échoué (code ${res.exitCode}) : ${detail}`);
+    }
+    const excludePath = res.stdout.toString().trim();
     const file = Bun.file(excludePath);
     const current = (await file.exists()) ? await file.text() : "";
-    const lines = new Set(current.split("\n").map((l) => l.trim()).filter(Boolean));
-    lines.add(".claude/");
-    lines.add(".mcp.json");
-    lines.add(PR_BODY_FILE);
-    await Bun.write(excludePath, `${[...lines].join("\n")}\n`);
+    const present = new Set(current.split("\n").map((line) => line.trim()));
+    const missing = AGENT_EXCLUDED_FILES.filter((entry) => !present.has(entry));
+    if (missing.length === 0) return;
+    const separator = current === "" || current.endsWith("\n") ? "" : "\n";
+    await mkdir(dirname(excludePath), { recursive: true });
+    await appendFile(excludePath, `${separator}${missing.join("\n")}\n`);
   }
 
   async worktreeRemove(repoPath: string, slotPath: string): Promise<void> {
@@ -443,6 +446,7 @@ export class RealSystemAdapter implements SystemAdapter {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       throw new Error(`git worktree add a échoué (code ${res.exitCode}) : ${detail}`);
     }
+    await this.excludeAgentFilesInRepo(opts.repoPath);
   }
 
   async worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch = localBranch): Promise<void> {
@@ -454,6 +458,7 @@ export class RealSystemAdapter implements SystemAdapter {
       const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
       throw new Error(`git worktree add (branche existante) a échoué (code ${res.exitCode}) : ${detail}`);
     }
+    await this.excludeAgentFilesInRepo(repoPath);
   }
 
   async deleteLocalBranch(repoPath: string, branch: string): Promise<void> {

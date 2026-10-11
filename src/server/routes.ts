@@ -693,6 +693,12 @@ function createAtelierRoutes(deps: RouteDeps) {
       await atelier.interrupt(params.id);
       return { ok: true };
     })
+    .post("/conversations/:id/compact", async ({ params, set }) => {
+      const outcome = await atelier.compact(params.id);
+      if (outcome.ok) return { conversation: outcome.conversation };
+      if (outcome.reason === "not_found") return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      return jsonError(set, HTTP_CONFLICT, outcome.message);
+    })
     .post("/conversations/:id/read", ({ params, set }) => {
       const conversation = store.getConversation(params.id);
       if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);

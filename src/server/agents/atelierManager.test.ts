@@ -14,7 +14,7 @@ import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from 
 import { FakeSystemAdapter } from "../system/fake.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
-import { AtelierManager, describeToolUse } from "./atelierManager.ts";
+import { AtelierManager, COMPACT_NO_SESSION_MESSAGE, COMPACT_RUNNING_MESSAGE, describeToolUse } from "./atelierManager.ts";
 import { atelierSessionKey, parseAtelierSessionKey } from "./sessionConfig.ts";
 import { SessionHub } from "./sessionHub.ts";
 
@@ -23,6 +23,8 @@ const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "..", "vendor", "prd", "
 class CapturingSystem extends FakeSystemAdapter {
   readonly sessions: AgentSessionOptions[] = [];
   readonly sent: string[][] = [];
+  compacts = 0;
+  compactError: string | null = null;
 
   override startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.sessions.push(opts);
@@ -33,6 +35,10 @@ class CapturingSystem extends FakeSystemAdapter {
       send: (content, messageId = crypto.randomUUID()) => {
         sent.push(content);
         return messageId;
+      },
+      compact: async () => {
+        if (this.compactError) throw new Error(this.compactError);
+        this.compacts += 1;
       },
       interrupt: async () => undefined,
       close: async () => undefined,
@@ -76,7 +82,7 @@ afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-function setup() {
+function setup(idleTimeoutMs?: number) {
   const db = createDatabase(":memory:");
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
@@ -84,7 +90,7 @@ function setup() {
   const system = new CapturingSystem();
   const hub = new ClientHub(store);
   const sessionHub = new SessionHub(system);
-  const manager = new AtelierManager({ store, hub, sessionHub, system, flushIntervalMs: 0 });
+  const manager = new AtelierManager({ store, hub, sessionHub, system, flushIntervalMs: 0, ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}) });
   closers.push(async () => {
     manager.stop();
     sessionHub.disconnectAll();
@@ -221,6 +227,90 @@ describe("AtelierManager", () => {
     await manager.postMessage(conversation.id, "Encore").delivered;
     system.emit(TURN_END);
     expect(store.getConversation(conversation.id)?.unread).toBe(true);
+  });
+
+  test.each([
+    ["claude", CLAUDE_CONVERSATION],
+    ["codex", CODEX_CONVERSATION],
+  ] as const)("compacts the live %s session and summarizes the result", async (_provider, input) => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(input);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    expect(system.sessions[0]?.reportContextUsage).toBe(true);
+    system.emit({ type: "assistant_text", text: "Salut" });
+    system.emit({ type: "context_usage", usedTokens: 85_000, maxTokens: 200_000 });
+    system.emit(TURN_END);
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: 85_000, contextWindow: 200_000 });
+
+    const outcome = await manager.compact(conversation.id);
+    expect(outcome.ok).toBe(true);
+    expect(system.compacts).toBe(1);
+    expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+    expect(await manager.compact(conversation.id)).toMatchObject({ ok: false, reason: "conflict", message: COMPACT_RUNNING_MESSAGE });
+
+    system.emit({ type: "assistant_text", text: "Résumé interne du compactage" });
+    system.emit({ type: "context_usage", usedTokens: 12_000, maxTokens: 200_000 });
+    system.emit(TURN_END);
+
+    const messages = store.listConversationMessages(conversation.id).map((entry) => [entry.role, entry.content]);
+    expect(messages.slice(-2)).toEqual([
+      ["user", "Compacter le contexte"],
+      ["assistant", "Contexte compacté : 85 000 → 12 000 tokens."],
+    ]);
+    expect(store.getConversation(conversation.id)).toMatchObject({ sessionStatus: "idle", contextTokens: 12_000 });
+  });
+
+  test("a failed compaction turn is reported without an empty bubble", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CODEX_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit(TURN_END);
+    await manager.compact(conversation.id);
+    system.emit({ ...TURN_END, ok: false, subtype: "failed" });
+    expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe("Échec du compactage du contexte.");
+    expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+  });
+
+  test("a compaction that fails to start keeps the idle close armed", async () => {
+    const { store, system, sessionHub, manager } = setup(20);
+    const conversation = store.createConversation(CODEX_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "context_usage", usedTokens: 40_000, maxTokens: 200_000 });
+    system.emit(TURN_END);
+
+    system.compactError = "rpc refusé";
+    expect(await manager.compact(conversation.id)).toMatchObject({ ok: false, reason: "failed", message: "rpc refusé" });
+    expect(store.getConversation(conversation.id)).toMatchObject({ sessionStatus: "idle", error: "rpc refusé" });
+
+    const key = atelierSessionKey(conversation.id);
+    for (let attempt = 0; attempt < 100 && sessionHub.isConnected(key); attempt += 1) await Bun.sleep(5);
+    expect(sessionHub.isConnected(key)).toBe(false);
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: null, contextWindow: null });
+  });
+
+  test("refuses to compact without a live session and clears the context when it closes", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    expect(await manager.compact("inconnue")).toMatchObject({ ok: false, reason: "not_found" });
+    expect(await manager.compact(conversation.id)).toMatchObject({ ok: false, reason: "conflict", message: COMPACT_NO_SESSION_MESSAGE });
+
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "context_usage", usedTokens: 30_000, maxTokens: null });
+    system.emit(TURN_END);
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: 30_000, contextWindow: null });
+
+    manager.settingsChanged(conversation.id);
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: null, contextWindow: null });
+    expect(await manager.compact(conversation.id)).toMatchObject({ ok: false, reason: "conflict" });
+
+    await manager.postMessage(conversation.id, "Encore").delivered;
+    system.emit({ type: "context_usage", usedTokens: 1_000, maxTokens: 200_000 });
+    system.emit({ type: "error", message: "processus claude mort" });
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: null, contextWindow: null });
+
+    store.updateConversation(conversation.id, { contextTokens: 5, contextWindow: 10, sessionStatus: "running" });
+    manager.recoverStale();
+    expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: null, contextWindow: null, sessionStatus: "idle" });
   });
 
   test("session keys round-trip and tool traces stay one line", () => {

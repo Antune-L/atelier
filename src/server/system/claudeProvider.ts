@@ -16,7 +16,6 @@ import type {
   McpHttpServerConfig,
   McpServerToolPolicy,
   Options,
-  Query,
   SDKMessage,
   SDKPermissionDenial,
   SDKUserMessage,
@@ -144,7 +143,25 @@ function workerToolNames(names: readonly string[]): string[] {
   return names.map((name) => `mcp__${MCP_SERVER_NAME}__${name}`);
 }
 
-export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+/** The slice of the SDK `Query` this provider drives. */
+export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
+  interrupt(): Promise<unknown>;
+  close(): void;
+  getContextUsage(opts: { detail: "summary" }): Promise<{ totalTokens: number; rawMaxTokens: number }>;
+}
+
+/** Injectable SDK entry points (tests substitute a scripted query). */
+export interface ClaudeSessionDependencies {
+  query: (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => ClaudeQuery;
+  ensureBinary: typeof ensureClaudeBinary;
+}
+
+const DEFAULT_DEPENDENCIES: ClaudeSessionDependencies = { query, ensureBinary: ensureClaudeBinary };
+
+export function createSdkAgentSession(
+  opts: AgentSessionOptions,
+  dependencies: ClaudeSessionDependencies = DEFAULT_DEPENDENCIES,
+): AgentSessionHandle {
   const reportedDenials = new Set<string>();
   // ---- streaming input: a queue feeding a never-returning generator keeps the session alive ----
   const inbox: Array<{ id: string; prompt: SDKUserMessage }> = [];
@@ -278,11 +295,11 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   // The query starts only once a runnable binary exists (instant when resolved; on a cold packaged
   // install this downloads it, streaming progress lines into the session transcript). The inbox
   // generator above already buffers any turns sent in the meantime, so callers stay synchronous.
-  const sessionPromise: Promise<Query> = ensureClaudeBinary((message) =>
+  const sessionPromise: Promise<ClaudeQuery> = dependencies.ensureBinary((message) =>
     opts.onEvent({ type: "assistant_text", text: message }),
   ).then((binary) => {
     if (disposed) throw new Error("Session fermée avant démarrage");
-    return query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } });
+    return dependencies.query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } });
   });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
@@ -291,6 +308,11 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   return {
     ticketId: opts.ticketId,
     send: enqueue,
+    // `/compact` is a slash command: sent as a user turn, the CLI compacts and ends with a `result`.
+    compact: async () => {
+      if (closed) throw new Error("Session Claude fermée : compactage impossible.");
+      enqueue("/compact");
+    },
     interrupt: async () => {
       try {
         const session = await sessionPromise;
@@ -331,7 +353,7 @@ export function createSdkAgentSession(opts: AgentSessionOptions): AgentSessionHa
   };
 }
 
-async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionOptions, reportedDenials: Set<string>): Promise<void> {
+async function pumpStream(sessionPromise: Promise<ClaudeQuery>, options: AgentSessionOptions, reportedDenials: Set<string>): Promise<void> {
   const denialReasons = new Map<string, { reason: string; sourceId?: string }>();
   try {
     const session = await sessionPromise;
@@ -355,9 +377,33 @@ async function pumpStream(sessionPromise: Promise<Query>, options: AgentSessionO
         });
         denialReasons.delete(denial.tool_use_id);
       });
+      if (options.reportContextUsage && shouldReportContextUsage(message)) {
+        await reportClaudeContextUsage(session, options.onEvent);
+      }
     }
   } catch (error) {
     options.onEvent({ type: "error", message: getErrorMessage(error) });
+  }
+}
+
+/** Context occupancy changes at turn boundaries and right after a compaction. */
+function shouldReportContextUsage(message: SDKMessage): boolean {
+  return message.type === "result" || (message.type === "system" && message.subtype === "compact_boundary");
+}
+
+/**
+ * Reads the live context occupancy (`summary` skips the token-count API calls) and emits it. Never
+ * throws: a closed or failing session must not break the stream.
+ */
+export async function reportClaudeContextUsage(
+  session: Pick<ClaudeQuery, "getContextUsage">,
+  onEvent: (event: AgentSessionEvent) => void,
+): Promise<void> {
+  try {
+    const usage = await session.getContextUsage({ detail: "summary" });
+    onEvent({ type: "context_usage", usedTokens: usage.totalTokens, maxTokens: usage.rawMaxTokens > 0 ? usage.rawMaxTokens : null });
+  } catch (error) {
+    log.warn("lecture de l'usage du contexte impossible", { reason: getErrorMessage(error) });
   }
 }
 
@@ -443,5 +489,5 @@ export function dispatchClaudeMessage(
 /** The Claude provider — the only `AgentProvider` implementation today. */
 export const claudeProvider: AgentProvider = {
   name: "claude",
-  createSession: createSdkAgentSession,
+  createSession: (opts) => createSdkAgentSession(opts),
 };

@@ -1233,3 +1233,70 @@ test("a delivery failure during close rejects the message instead of stalling th
   );
   expect(rejection).toBeDefined();
 });
+
+function tokenUsageNotification(last: Record<string, number>, modelContextWindow?: number | null): CodexAppServerNotification {
+  return {
+    method: "thread/tokenUsage/updated",
+    params: {
+      threadId: "thread-1",
+      turnId: "turn-1",
+      tokenUsage: {
+        last: { inputTokens: 100, cachedInputTokens: 10, cacheWriteInputTokens: 0, outputTokens: 20, ...last },
+        ...(modelContextWindow !== undefined ? { modelContextWindow } : {}),
+      },
+    },
+  };
+}
+
+test("Codex reports the live context usage only when asked", async () => {
+  const fixture = appServerFixture();
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), { connect: fixture.connect, resolveBinary: () => "/fixture/codex" });
+  const session = provider.createSession({ ...options(events), reportContextUsage: true });
+  await waitFor(() => events.some((event) => event.type === "init"));
+
+  fixture.notify(tokenUsageNotification({ totalTokens: 4_200 }, 258_400));
+  fixture.notify(tokenUsageNotification({}));
+  fixture.notify(tokenUsageNotification({}, null));
+  expect(events.filter((event) => event.type === "context_usage")).toEqual([
+    { type: "context_usage", usedTokens: 4_200, maxTokens: 258_400 },
+    { type: "context_usage", usedTokens: 120, maxTokens: null },
+    { type: "context_usage", usedTokens: 120, maxTokens: null },
+  ]);
+  await session.close();
+
+  const quietFixture = appServerFixture();
+  const quietEvents: AgentSessionEvent[] = [];
+  const quiet = createCodexProvider(new WorkerMcpManager(), { connect: quietFixture.connect, resolveBinary: () => "/fixture/codex" })
+    .createSession(options(quietEvents));
+  await waitFor(() => quietEvents.some((event) => event.type === "init"));
+  quietFixture.notify(tokenUsageNotification({ totalTokens: 4_200 }, 258_400));
+  expect(quietEvents.some((event) => event.type === "context_usage")).toBe(false);
+  await quiet.close();
+});
+
+test("Codex compaction starts thread/compact/start and ends as a normal turn", async () => {
+  const fixture = appServerFixture();
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), { connect: fixture.connect, resolveBinary: () => "/fixture/codex" });
+  const session = provider.createSession({ ...options(events), reportContextUsage: true });
+  await waitFor(() => events.some((event) => event.type === "init"));
+
+  if (!session.compact) throw new Error("compact manquant");
+  await session.compact();
+  expect(fixture.requests).toContainEqual({ method: "thread/compact/start", params: { threadId: "thread-1" } });
+
+  fixture.notify({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-compact" } } });
+  await expect(session.compact()).rejects.toThrow("compactage impossible");
+  fixture.notify({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-compact", item: { type: "contextCompaction", id: "item-1" } } });
+  fixture.notify(tokenUsageNotification({ totalTokens: 900 }, 258_400));
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-compact", status: "completed", error: null } },
+  });
+
+  expect(events).toContainEqual({ type: "progress", kind: "plan", message: "Contexte compacté" });
+  expect(events).toContainEqual({ type: "context_usage", usedTokens: 900, maxTokens: 258_400 });
+  expect(events.some((event) => event.type === "turn_end" && event.ok && event.turnId === "turn-compact")).toBe(true);
+  await session.close();
+});

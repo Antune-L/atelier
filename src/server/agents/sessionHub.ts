@@ -55,6 +55,8 @@ export interface SessionStartConfig {
   readOnly?: boolean;
   blockReviewPublishing?: boolean;
   blockTypecheck?: boolean;
+  /** Emit `context_usage` events for the live session (Atelier only). */
+  reportContextUsage?: boolean;
   /** Resume the provider-side conversation with this id (auto-reclaim; Codex only). */
   resumeSessionId?: string;
   /** Pre-approved permission rules (SDK `settings.permissions.allow`) — the bash allowlist under `dontAsk`. */
@@ -295,6 +297,8 @@ export function renderSessionEvent(event: AgentSessionEvent, messageChannel?: Ch
       return event.ok ? "—— fin du tour ——" : `—— tour interrompu (${event.subtype}) ——`;
     case "rate_limit":
       return `⏳ rate limit : ${event.status}`;
+    case "context_usage":
+      return null;
     case "error":
       return `⚠️ ${event.message}`;
   }
@@ -392,6 +396,7 @@ export class SessionHub {
         ...(config.readOnly !== undefined ? { readOnly: config.readOnly } : {}),
         ...(config.blockReviewPublishing ? { blockReviewPublishing: true } : {}),
         ...(config.blockTypecheck ? { blockTypecheck: true } : {}),
+        ...(config.reportContextUsage ? { reportContextUsage: true } : {}),
         ...(config.resumeSessionId ? { resumeSessionId: config.resumeSessionId } : {}),
         ...(config.permissionAllow ? { permissionAllow: config.permissionAllow } : {}),
         ...(config.permissionDeny ? { permissionDeny: config.permissionDeny } : {}),
@@ -451,6 +456,17 @@ export class SessionHub {
   /** Preempt the current turn (urgent stop/nudge). No-op when the session is gone. */
   async interrupt(ticketId: string): Promise<void> {
     await this.sessions.get(ticketId)?.handle?.interrupt();
+  }
+
+  /**
+   * Start a context compaction turn on the live session. False when there is no live handle or its
+   * provider cannot compact; provider failures reject.
+   */
+  async compact(ticketId: string): Promise<boolean> {
+    const handle = this.sessions.get(ticketId)?.handle;
+    if (!handle?.compact) return false;
+    await handle.compact();
+    return true;
   }
 
   /** Stop and evict a ticket's session. Idempotent. */

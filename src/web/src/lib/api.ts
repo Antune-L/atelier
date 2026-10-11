@@ -288,6 +288,8 @@ export const api = {
     request(`${atelierConversationPath(id)}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
   atelierInterrupt: (id: string): Promise<{ ok: boolean }> =>
     request(`${atelierConversationPath(id)}/interrupt`, { method: "POST" }),
+  atelierCompact: (id: string): Promise<{ conversation: Conversation }> =>
+    request(`${atelierConversationPath(id)}/compact`, { method: "POST" }),
   atelierMarkConversationRead: (id: string): Promise<Conversation> =>
     request(`${atelierConversationPath(id)}/read`, { method: "POST" }),
   atelierConsolidate: (id: string, feedback?: string): Promise<{ ok: boolean }> =>

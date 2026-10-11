@@ -360,6 +360,7 @@ export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionSt
     ownerType: "conversation",
     ownerId: conversationId,
     permissionMode: "dontAsk",
+    reportContextUsage: true,
   } satisfies Partial<SessionStartConfig>;
   if (driver === "codex") {
     return {

@@ -30,6 +30,16 @@ const TOOL_DETAIL_KEYS = ["file_path", "path", "pattern", "query", "url", "comma
 const ACTIVITY_PROGRESS_KINDS: ReadonlySet<string> = new Set(["plan", "subagent"]);
 const CONSOLIDATE_LABEL = "Consolider en PRD";
 const SESSION_UNAVAILABLE_MESSAGE = "Session de l'Atelier indisponible : renvoie ton message.";
+const COMPACT_LABEL = "Compacter le contexte";
+export const COMPACT_NO_SESSION_MESSAGE = "Aucune session active à compacter : le contexte sera reconstruit au prochain message.";
+export const COMPACT_RUNNING_MESSAGE = "L'agent est en cours de réponse.";
+const COMPACT_FAILED_MESSAGE = "Échec du compactage du contexte.";
+const tokenFormatter = new Intl.NumberFormat("fr-FR");
+
+/** `85 000`, with a plain space instead of the narrow no-break space Intl emits. */
+function formatTokens(tokens: number): string {
+  return tokenFormatter.format(tokens).replace(/\s/g, " ");
+}
 
 const toolInputSchema = z.record(z.string(), z.unknown());
 
@@ -51,7 +61,13 @@ interface ConversationRuntime {
   flushTimer: ReturnType<typeof setTimeout> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
   resumed: boolean;
+  /** Set while a compaction turn runs: context occupancy before, and after once reported. */
+  compaction: { before: number | null; after: number | null } | null;
 }
+
+export type CompactOutcome =
+  | { ok: true; conversation: Conversation }
+  | { ok: false; reason: "not_found" | "conflict" | "failed"; message: string };
 
 export interface AtelierManagerDeps {
   store: Store;
@@ -125,8 +141,47 @@ export class AtelierManager {
 
   recoverStale(): void {
     for (const conversation of this.store.listConversations()) {
-      if (conversation.sessionStatus === "running") this.store.updateConversation(conversation.id, { sessionStatus: "idle" });
+      const patch: ConversationPatch = {};
+      if (conversation.sessionStatus === "running") patch.sessionStatus = "idle";
+      // No session survives a restart: the context figures described the previous process.
+      if (conversation.contextTokens !== null || conversation.contextWindow !== null) {
+        patch.contextTokens = null;
+        patch.contextWindow = null;
+      }
+      if (Object.keys(patch).length > 0) this.store.updateConversation(conversation.id, patch);
     }
+  }
+
+  async compact(conversationId: string): Promise<CompactOutcome> {
+    const conversation = this.store.getConversation(conversationId);
+    if (!conversation) return { ok: false, reason: "not_found", message: "conversation introuvable" };
+    if (conversation.sessionStatus === "running") return { ok: false, reason: "conflict", message: COMPACT_RUNNING_MESSAGE };
+    const key = atelierSessionKey(conversationId);
+    if (!this.sessionHub.isConnected(key) || this.starting.has(conversationId)) {
+      return { ok: false, reason: "conflict", message: COMPACT_NO_SESSION_MESSAGE };
+    }
+    const turnId = nanoid(10);
+    const message = this.store.addConversationMessage({ conversationId, role: "user", content: COMPACT_LABEL, turnId });
+    this.hub.pushConversationMessage(message);
+    const runtime = this.runtime(conversationId);
+    runtime.lastUserTurnId = turnId;
+    runtime.turn = emptyTurn();
+    runtime.compaction = { before: conversation.contextTokens, after: null };
+    this.clearIdleTimer(runtime);
+    this.patchConversation(conversationId, { sessionStatus: "running", error: null });
+    try {
+      if (!(await this.sessionHub.compact(key))) throw new Error(COMPACT_NO_SESSION_MESSAGE);
+    } catch (error) {
+      runtime.compaction = null;
+      const reason = getErrorMessage(error);
+      log.warn("compactage atelier impossible", { conversationId, reason });
+      this.patchConversation(conversationId, { sessionStatus: "idle", error: reason });
+      // No compaction turn will end to re-arm the idle close cleared above.
+      this.armIdleTimer(conversationId, runtime);
+      return { ok: false, reason: "failed", message: reason };
+    }
+    log.info("compactage atelier démarré", { conversationId });
+    return { ok: true, conversation: this.requireConversation(conversationId) };
   }
 
   postMessage(conversationId: string, content: string): SubmittedTurn {
@@ -156,7 +211,7 @@ export class AtelierManager {
     this.closeSession(conversationId);
     const conversation = this.store.getConversation(conversationId);
     if (!conversation) return;
-    const patch: ConversationPatch = { sessionId: null };
+    const patch: ConversationPatch = { sessionId: null, contextTokens: null, contextWindow: null };
     if (conversation.sessionStatus === "running") patch.sessionStatus = "idle";
     this.patchConversation(conversationId, patch);
   }
@@ -283,6 +338,8 @@ export class AtelierManager {
         return;
       case "assistant_text":
         if (event.sourceId) return;
+        // A compaction turn gets a backend-written summary instead of the provider's own output.
+        if (this.runtimes.get(conversationId)?.compaction) return;
         this.appendAssistant(conversationId, event.text, event.stream?.itemId ?? null, event.stream?.mode === "delta");
         return;
       case "tool_use":
@@ -293,7 +350,11 @@ export class AtelierManager {
         this.addActivity(conversationId, truncate(event.message));
         return;
       case "turn_end":
-        this.onTurnEnd(conversationId);
+        this.onTurnEnd(conversationId, event.ok);
+        return;
+      case "context_usage":
+        if (event.sourceId) return;
+        this.onContextUsage(conversationId, event.usedTokens, event.maxTokens);
         return;
       default:
         return;
@@ -332,25 +393,70 @@ export class AtelierManager {
     this.hub.pushConversationMessage(message);
   }
 
-  private onTurnEnd(conversationId: string): void {
+  private onContextUsage(conversationId: string, rawUsed: number, rawMax: number | null): void {
+    // Provider figures are not schema-checked as integers; the conversation row requires them.
+    const usedTokens = Math.max(0, Math.round(rawUsed));
+    const maxTokens = rawMax !== null && rawMax >= 1 ? Math.round(rawMax) : null;
+    const compaction = this.runtimes.get(conversationId)?.compaction;
+    if (compaction) compaction.after = usedTokens;
+    const conversation = this.store.getConversation(conversationId);
+    if (!conversation || (conversation.contextTokens === usedTokens && conversation.contextWindow === maxTokens)) return;
+    this.patchConversation(conversationId, { contextTokens: usedTokens, contextWindow: maxTokens });
+  }
+
+  private onTurnEnd(conversationId: string, ok: boolean): void {
     this.flush(conversationId);
     const runtime = this.runtime(conversationId);
+    const compaction = runtime.compaction;
+    const turnId = runtime.turn.turnId ?? runtime.lastUserTurnId;
     runtime.turn = emptyTurn();
+    runtime.compaction = null;
+    if (compaction) this.addCompactionSummary(conversationId, turnId, ok, compaction);
     this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
+    this.armIdleTimer(conversationId, runtime);
+  }
+
+  /** Close the live session after `idleTimeoutMs` without a new turn. */
+  private armIdleTimer(conversationId: string, runtime: ConversationRuntime): void {
     this.clearIdleTimer(runtime);
     runtime.idleTimer = setTimeout(() => {
       runtime.idleTimer = null;
       log.info("session atelier fermée après inactivité", { conversationId });
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      this.clearContext(conversationId);
     }, this.idleTimeoutMs);
     runtime.idleTimer.unref?.();
+  }
+
+  private addCompactionSummary(
+    conversationId: string,
+    turnId: string | null,
+    ok: boolean,
+    compaction: { before: number | null; after: number | null },
+  ): void {
+    if (!this.store.getConversation(conversationId)) return;
+    const { before, after } = compaction;
+    const content = !ok
+      ? COMPACT_FAILED_MESSAGE
+      : before !== null && after !== null
+        ? `Contexte compacté : ${formatTokens(before)} → ${formatTokens(after)} tokens.`
+        : "Contexte compacté.";
+    const message = this.store.addConversationMessage({ conversationId, role: "assistant", content, turnId });
+    this.hub.pushConversationMessage(message);
+  }
+
+  private clearContext(conversationId: string): void {
+    const conversation = this.store.getConversation(conversationId);
+    if (!conversation || (conversation.contextTokens === null && conversation.contextWindow === null)) return;
+    this.patchConversation(conversationId, { contextTokens: null, contextWindow: null });
   }
 
   private onFailure(conversationId: string, reason: string): void {
     const runtime = this.runtime(conversationId);
     this.flush(conversationId);
     runtime.turn = emptyTurn();
-    const patch: ConversationPatch = { sessionStatus: "error", error: reason, unread: true };
+    runtime.compaction = null;
+    const patch: ConversationPatch = { sessionStatus: "error", error: reason, unread: true, contextTokens: null, contextWindow: null };
     if (runtime.resumed) patch.sessionId = null;
     runtime.resumed = false;
     log.warn("session atelier en échec", { conversationId, reason });
@@ -408,8 +514,10 @@ export class AtelierManager {
       this.clearIdleTimer(runtime);
       runtime.turn = emptyTurn();
       runtime.resumed = false;
+      runtime.compaction = null;
     }
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "cancelled");
+    this.clearContext(conversationId);
   }
 
   private clearIdleTimer(runtime: ConversationRuntime): void {
@@ -420,7 +528,7 @@ export class AtelierManager {
   private runtime(conversationId: string): ConversationRuntime {
     let runtime = this.runtimes.get(conversationId);
     if (!runtime) {
-      runtime = { turn: emptyTurn(), lastUserTurnId: null, flushTimer: null, idleTimer: null, resumed: false };
+      runtime = { turn: emptyTurn(), lastUserTurnId: null, flushTimer: null, idleTimer: null, resumed: false, compaction: null };
       this.runtimes.set(conversationId, runtime);
     }
     return runtime;

@@ -103,6 +103,38 @@ export function agentLabel(settings: AtelierAgentSettings, defaults: ResolvedAge
   return parts.join(" · ");
 }
 
+export const CONTEXT_WARNING_PERCENT = 80;
+
+const decimalFormatter = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 });
+
+/** Short French token count: `850`, `45,2k`, `1,2M`. */
+export function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${decimalFormatter.format(tokens / 1_000_000)}M`;
+  if (tokens >= 1_000) return `${decimalFormatter.format(Math.round(tokens / 100) / 10)}k`;
+  return decimalFormatter.format(Math.round(tokens));
+}
+
+export interface ContextUsageSummary {
+  label: string;
+  /** Rounded occupancy percentage, or null when the window is unknown. */
+  percent: number | null;
+  warn: boolean;
+}
+
+/** Live context figures of a conversation, or null when no session is live. */
+export function contextUsageSummary(contextTokens: number | null, contextWindow: number | null): ContextUsageSummary | null {
+  if (contextTokens === null) return null;
+  if (contextWindow === null || contextWindow <= 0) {
+    return { label: `Contexte : ${formatTokenCount(contextTokens)} tokens`, percent: null, warn: false };
+  }
+  const percent = Math.min(100, Math.round((contextTokens / contextWindow) * 100));
+  return {
+    label: `Contexte : ${formatTokenCount(contextTokens)} / ${formatTokenCount(contextWindow)} tokens (${percent} %)`,
+    percent,
+    warn: percent >= CONTEXT_WARNING_PERCENT,
+  };
+}
+
 /** Long-form agent summary for the conversation top bar ("Claude Opus, effort Moyen"). */
 export function agentSummary(settings: AtelierAgentSettings, defaults: ResolvedAgentDefaults): string {
   if (settings.orchestrator === "codex") {

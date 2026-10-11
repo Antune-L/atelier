@@ -113,9 +113,13 @@ const tokenUsageSchema = z.object({
       cachedInputTokens: z.number().nonnegative(),
       cacheWriteInputTokens: z.number().nonnegative(),
       outputTokens: z.number().nonnegative(),
+      totalTokens: z.number().nonnegative().optional(),
     }),
+    modelContextWindow: z.number().nonnegative().nullable().optional(),
   }),
 });
+// `thread/compact/start` answers before the compaction turn runs; its payload is not relied upon.
+const compactStartResponseSchema = z.unknown();
 const turnStartedSchema = z.object({ threadId: z.string(), turn: z.object({ id: z.string() }) });
 const turnCompletedSchema = z.object({
   threadId: z.string(),
@@ -155,6 +159,7 @@ const itemLifecycleSchema = z.object({
       result: z.unknown().optional(),
       error: z.unknown().optional(),
     }),
+    z.object({ type: z.literal("contextCompaction"), id: z.string() }),
     z.object({
       type: z.literal("collabAgentToolCall"),
       id: z.string(),
@@ -855,6 +860,10 @@ function createCodexAgentSession(
       emit({ type: "progress", kind: "subagent", message: `${item.tool} : ${item.status}` });
       return;
     }
+    if (item.type === "contextCompaction") {
+      if (completed) emit({ type: "progress", kind: "plan", message: "Contexte compacté" });
+      return;
+    }
     emit({ type: "progress", kind: "plan", message: item.text });
   }
 
@@ -915,6 +924,13 @@ function createCodexAgentSession(
           cacheCreationTokens: usage.cacheWriteInputTokens,
           costUsd: null,
         });
+        if (options.reportContextUsage) {
+          emit({
+            type: "context_usage",
+            usedTokens: usage.totalTokens ?? usage.inputTokens + usage.outputTokens,
+            maxTokens: parsed.data.tokenUsage.modelContextWindow ?? null,
+          });
+        }
       }
       return;
     }
@@ -1342,6 +1358,13 @@ function createCodexAgentSession(
         log.warn("interruption Codex en échec", { turnId, reason: getErrorMessage(error) });
         throw error;
       }
+    },
+    compact: async () => {
+      if (closing || cleaned || !connection || !threadId) throw new Error("Session Codex indisponible : compactage impossible.");
+      if (activeTurnId) throw new Error("Un tour Codex est déjà en cours : compactage impossible.");
+      // The compaction runs as a regular turn (turn/started … turn/completed), so the existing
+      // notification handlers track it and close it with a normal turn_end.
+      await connection.request("thread/compact/start", { threadId }, compactStartResponseSchema);
     },
     dispose: () => {
       closing = true;

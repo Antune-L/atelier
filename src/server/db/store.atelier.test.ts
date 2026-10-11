@@ -47,6 +47,15 @@ const NEW_CONVERSATION: NewConversation = {
 };
 
 describe("Store atelier", () => {
+  test("stores the live context figures without reordering the conversation", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    expect(conversation).toMatchObject({ contextTokens: null, contextWindow: null });
+    const updated = store.updateConversation(conversation.id, { contextTokens: 45_200, contextWindow: 258_400 });
+    expect(updated).toMatchObject({ contextTokens: 45_200, contextWindow: 258_400, updatedAt: conversation.updatedAt });
+    expect(store.updateConversation(conversation.id, { contextTokens: null, contextWindow: null })).toMatchObject({ contextTokens: null, contextWindow: null });
+  });
+
   test("creates, lists and updates conversations", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

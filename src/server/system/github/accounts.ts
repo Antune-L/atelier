@@ -78,8 +78,7 @@ export const spawnGh: GhProcessRunner = async (args, env, stdin) => {
 
 function failureDetail(result: GhProcessResult, token: string | null): string {
   const raw = result.timedOut ? "délai dépassé" : (result.stderr.trim() || result.stdout.trim());
-  const scrubbed = token ? raw.split(token).join("[redacted]") : raw;
-  return redactSecrets(scrubbed).slice(0, ERROR_DETAIL_LIMIT);
+  return redactSecrets(raw, token ? [token] : []).slice(0, ERROR_DETAIL_LIMIT);
 }
 
 export class RealGithubAccountRegistry implements GithubAccountRegistry {
@@ -141,7 +140,7 @@ export class RealGithubAccountRegistry implements GithubAccountRegistry {
       await rm(pending, { recursive: true, force: true });
       if (error instanceof GithubAccountError) throw error;
       const message = error instanceof Error ? error.message : String(error);
-      throw new GithubAccountError(`Ajout du compte GitHub impossible : ${redactSecrets(message.split(secret).join("[redacted]"))}`);
+      throw new GithubAccountError(`Ajout du compte GitHub impossible : ${redactSecrets(message, [secret])}`);
     }
   }
 

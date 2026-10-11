@@ -14,15 +14,23 @@ const SECRET_PATTERNS: { pattern: RegExp; replacement: string }[] = [
   { pattern: /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, replacement: `Bearer ${REDACTED}` },
   { pattern: /\bsk-[A-Za-z0-9_-]+\b/g, replacement: REDACTED },
   {
-    pattern: /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi,
+    // The value stops at a backslash too, so a JSON-escaped quote (`password=\"x\"`) stays intact.
+    pattern: /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)\\?["']?\s*[:=]\s*\\?["']?)[^"',\s}\\]+/gi,
     replacement: `$1${REDACTED}`,
   },
   // Any userinfo in an http(s) URL: `https://user:secret@host` and `https://token@host`.
   { pattern: /(https?:\/\/)[^/\s@]+@/gi, replacement: `$1${REDACTED}@` },
 ];
 
-export function redactSecrets(text: string): string {
+/**
+ * Mask every known secret pattern, plus each literal in `extraSecrets` (e.g. a token the user just
+ * pasted, whose shape may not match any pattern).
+ */
+export function redactSecrets(text: string, extraSecrets: readonly string[] = []): string {
   let redacted = text;
+  for (const secret of extraSecrets) {
+    if (secret.length > 0) redacted = redacted.split(secret).join(REDACTED);
+  }
   for (const { pattern, replacement } of SECRET_PATTERNS) redacted = redacted.replace(pattern, replacement);
   return redacted;
 }

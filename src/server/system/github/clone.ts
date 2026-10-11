@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { mkdir, rename, rm, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { GITHUB_CLONE_TIMEOUT_MS } from "../../../shared/github.ts";
@@ -17,7 +17,7 @@ import type { CloneResult, GithubRepoSummary } from "../../../shared/github.ts";
 import { runBoundedCommand, safeJsonParse } from "../boundedCommand.ts";
 import { redactSecrets } from "../secretRedaction.ts";
 
-import { githubAccountEnv, githubCloneRoot, GithubAccountError, verifyGithubIdentity } from "./accountEnv.ts";
+import { definedEnv, githubAccountEnv, githubAccountLabel, githubCloneRoot, GithubAccountError, isInsidePath, verifyGithubIdentity } from "./accountEnv.ts";
 import { parseCloneSource } from "./cloneSource.ts";
 import { parseGithubRemote } from "./remote.ts";
 
@@ -58,16 +58,8 @@ const ghRepoSchema = z.object({
 });
 const ghRepoPagesSchema = z.array(z.array(ghRepoSchema));
 
-function accountLabel(account: string | null): string {
-  return account === null ? "compte par défaut de la machine" : `compte « ${account} »`;
-}
-
 function commandEnv(account: string | null): Record<string, string> {
-  return account === null ? { ...withoutUndefined(process.env), GIT_TERMINAL_PROMPT: "0" } : githubAccountEnv(account, process.env);
-}
-
-function withoutUndefined(env: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).flatMap(([key, value]) => (value === undefined ? [] : [[key, value]])));
+  return account === null ? { ...definedEnv(process.env), GIT_TERMINAL_PROMPT: "0" } : githubAccountEnv(account, process.env);
 }
 
 /** Every page of owner, collaborator and organization-member repositories; no partial list. */
@@ -80,10 +72,10 @@ export async function listGithubRepositories(account: string | null): Promise<Gi
   );
   if (result.exitCode !== 0 || result.timedOut) {
     const detail = redactSecrets(result.timedOut ? "délai dépassé" : (result.stderr.trim() || result.stdout.trim())).slice(0, ERROR_DETAIL_LIMIT);
-    throw new GithubAccountError(`Liste des dépôts GitHub illisible pour le ${accountLabel(account)}${detail ? ` : ${detail}` : ""}.`);
+    throw new GithubAccountError(`Liste des dépôts GitHub illisible pour le ${githubAccountLabel(account)}${detail ? ` : ${detail}` : ""}.`);
   }
   const pages = ghRepoPagesSchema.safeParse(safeJsonParse(result.stdout));
-  if (!pages.success) throw new GithubAccountError(`Réponse GitHub inattendue pour les dépôts du ${accountLabel(account)}.`);
+  if (!pages.success) throw new GithubAccountError(`Réponse GitHub inattendue pour les dépôts du ${githubAccountLabel(account)}.`);
   const repos = new Map<string, GithubRepoSummary>();
   for (const repo of pages.data.flat()) {
     repos.set(repo.full_name.toLowerCase(), {
@@ -137,10 +129,6 @@ async function serialized<T>(key: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-function isInside(parent: string, child: string): boolean {
-  const rel = relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-}
 
 async function readOrigin(target: string): Promise<string | null> {
   const isRepo = await runBoundedCommand(["git", "-C", target, "rev-parse", "--show-toplevel"], target);
@@ -167,7 +155,7 @@ export async function cloneGithubRepository(opts: { source: string; account: str
     await mkdir(dirname(target), { recursive: true });
     const realRoot = realpathSync(root);
     const realParent = realpathSync(dirname(target));
-    if (!isInside(realRoot, realParent)) {
+    if (!isInsidePath(realRoot, realParent)) {
       throw new CloneSourceError("Le dossier cible sort de la racine des clones : clonage refusé.");
     }
     const realTarget = join(realParent, parsed.repo.toLowerCase());
@@ -187,7 +175,7 @@ export async function cloneGithubRepository(opts: { source: string; account: str
       }
       if (result.exitCode !== 0) {
         const detail = redactSecrets(result.stderr.trim()).slice(0, ERROR_DETAIL_LIMIT);
-        throw new Error(`Clonage de ${parsed.cloneUrl} échoué avec le ${accountLabel(opts.account)}${detail ? ` : ${detail}` : ""}`);
+        throw new Error(`Clonage de ${parsed.cloneUrl} échoué avec le ${githubAccountLabel(opts.account)}${detail ? ` : ${detail}` : ""}`);
       }
       await rename(partial, realTarget);
       return { repoPath: realTarget, cloneUrl: parsed.cloneUrl, reused: false };

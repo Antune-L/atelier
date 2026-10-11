@@ -27,6 +27,17 @@ describe("redactSecrets", () => {
     expect(redactSecrets("password=hunter2")).toBe("password=[redacted]");
   });
 
+  test("keeps JSON-escaped quotes intact so the payload still parses", () => {
+    const json = JSON.stringify({ body: 'use password="hunter2" here' });
+    const masked = redactSecrets(json);
+    expect(masked).not.toContain("hunter2");
+    expect(JSON.parse(masked).body).toContain("[redacted]");
+  });
+
+  test("masks extra literal secrets such as a freshly pasted token", () => {
+    expect(redactSecrets("bad credentials for abc123secret", ["abc123secret"])).toBe("bad credentials for [redacted]");
+  });
+
   test("leaves ordinary text and plain URLs untouched", () => {
     const text = "git push https://github.com/o/r.git (ghp short) gh pr create";
     expect(redactSecrets(text)).toBe(text);

@@ -62,11 +62,23 @@ describe("gh auth denial (shared by the Claude hook and the Codex hook script)",
     "/usr/local/bin/gh auth switch",
     "gh --hostname github.com auth logout",
     "true; gh auth setup-git",
+    "bash -c \"gh auth token\"",
+    "echo \"$(gh auth token)\"",
+    "env GH_HOST=x gh auth status",
   ])("denies %s", (command) => {
     expect(isGhAuthCommand(command)).toBe(true);
   });
 
-  test.each(["gh pr create --draft --base main", "gh api user", "git push origin HEAD", "echo 'oauth'", "ghauth"])("allows %s", (command) => {
+  test.each([
+    "gh pr create --draft --base main",
+    "gh api user",
+    "git push origin HEAD",
+    "echo 'oauth'",
+    "ghauth",
+    "git commit -m \"feat(agents): deny gh auth in sessions\"",
+    "rg \"gh auth\" src",
+    "grep -rn 'gh auth login' docs",
+  ])("allows %s", (command) => {
     expect(isGhAuthCommand(command)).toBe(false);
   });
 });

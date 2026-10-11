@@ -274,7 +274,6 @@ export interface SystemAdapter {
 
   // ---- Workspace trust seeding (slots at first-boot; the real repo before a triage session) ----
   seedWorkspaceTrust(paths: string[]): Promise<void>;
-  excludeAgentFilesInRepo(repoPath: string): Promise<void>;
 
   // ---- git worktree lifecycle ----
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;

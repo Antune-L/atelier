@@ -957,6 +957,8 @@ export const capabilitiesSchema = z.object({
   canUpdate: z.boolean(),
   /** Desktop app: the native folder picker (POST /api/native/pick-folder) is wired. */
   canPickFolder: z.boolean(),
+  /** Cloud host: only PRs are delivered (no auto-merge, direct push or autonomous merge); manual merge stays allowed. */
+  prOnly: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

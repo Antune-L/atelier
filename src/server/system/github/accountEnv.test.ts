@@ -186,6 +186,24 @@ describe("resolveGithubAccount", () => {
     expect((await resolveGithubAccount(repo)).account).toBeNull();
   });
 
+  test("the git probe runs untranslated so a localized git still reads as 'not a repository'", async () => {
+    makeAccount("judy");
+    const repo = makeRepo("judy-repo", "https://github.com/o/r.git");
+    setGithubProjectSource(() => [project({ repoPath: repo, githubAccount: "judy" })]);
+    const probeEnvs: (Record<string, string> | undefined)[] = [];
+    const base = fakeIdentityRunner(() => "judy");
+    setGithubCommandRunners({
+      sync: base.sync,
+      async: async (args, cwd, options) => {
+        if (args.includes("--git-common-dir")) probeEnvs.push(options?.env);
+        return base.async(args, cwd, options);
+      },
+    });
+    await resolveGithubAccount(repo);
+    expect(probeEnvs.length).toBeGreaterThan(0);
+    for (const env of probeEnvs) expect(env?.LC_ALL).toBe("C");
+  });
+
   test("a folder that is not a git repository still resolves to no project", async () => {
     makeAccount("ivan");
     const plain = join(root, "plain-folder");

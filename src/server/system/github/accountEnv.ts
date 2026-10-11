@@ -252,12 +252,17 @@ function interpretProbe(cwd: string, result: { exitCode: number; stdout: string;
   return path ? realpathOrSelf(path) : PROBE_FAILED;
 }
 
+/** The probe's stderr is matched in English: force git's untranslated messages. */
+function probeEnv(): Record<string, string> {
+  return { ...definedEnv(process.env), LC_ALL: "C", LANGUAGE: "C" };
+}
+
 async function commonDir(cwd: string): Promise<CommonDirProbe> {
-  return interpretProbe(cwd, await commandRunner(commonDirArgs(cwd), existingDirectory(cwd)));
+  return interpretProbe(cwd, await commandRunner(commonDirArgs(cwd), existingDirectory(cwd), { env: probeEnv() }));
 }
 
 function commonDirSync(cwd: string): CommonDirProbe {
-  return interpretProbe(cwd, syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd)));
+  return interpretProbe(cwd, syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd), probeEnv()));
 }
 
 /** Spawning in a missing cwd throws; the `-C` argument carries the real target anyway. */

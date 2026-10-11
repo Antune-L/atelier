@@ -36,5 +36,5 @@ function getSnapshot(): number {
 
 /** Returns `Date.now()` updated every minute via a shared singleton interval. */
 export function useTickTimer(): number {
-  return useSyncExternalStore(subscribe, getSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

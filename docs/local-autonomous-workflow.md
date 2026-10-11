@@ -21,6 +21,8 @@ The default correction budget is one correction and the default execution deadli
 7. PR-only delivery verifies the PR and never requests a merge. Merge delivery verifies native policies and uses GitHub's synchronous merge endpoint with the expected source commit. A repository requiring a merge queue blocks this pilot instead of silently enqueueing work. Only a confirmed merge counts as merged.
 8. The backend persists the confirmed host outcome, cleans the owned preview, then completes the card and releases its slot. Cleanup failure retains the confirmation and worktree for reconciliation without repeating delivery.
 
+The board card of an autonomous ticket shows a "Devin" marker followed by its current phase. The Overview tab shows a read-only stepper (planning, local checks, Coolify deployment, E2E verification, correction, delivery) with the correction count and the blocking error. It is derived from the current phase only: no dated history of the phases is stored.
+
 ## Recovery and access
 
 The plan, commit, run identifiers, preview ownership, delivery choice and host confirmation survive restart. Interrupted validation can be retried after its environment cleanup completes. A confirmed host outcome cannot be rolled back through abandonment or an agent failure while cleanup is pending.

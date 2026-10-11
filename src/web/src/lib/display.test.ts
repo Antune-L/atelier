@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
+import { autonomousStateSchema } from "@shared/autonomous";
+import type { AutonomousState } from "@shared/autonomous";
 import type { CodexRuntimeStatus } from "@shared/codexCapabilities";
 
-import { effectiveWorkDurationMs, isCodexFastAvailable, ticketImplementationDuration } from "./display";
+import { AUTONOMOUS_PHASE_LABELS, autonomousSteps, effectiveWorkDurationMs, isCodexFastAvailable, ticketImplementationDuration } from "./display";
 
 const runtime: CodexRuntimeStatus = {
   status: "ready",
@@ -69,5 +71,58 @@ describe("ticketImplementationDuration", () => {
   test("returns null when only finishedAt is set", () => {
     const ticket = { implementationStartedAt: 10_000, implementingStartedAt: 5_000, implementationFinishedAt: null, finishedAt: 70_000 };
     expect(ticketImplementationDuration(ticket)).toBeNull();
+  });
+});
+
+function autonomousState(phase: AutonomousState["phase"], corrections = 0): AutonomousState {
+  return autonomousStateSchema.parse({ phase, plan: null, acceptanceSnapshotId: null, functionalSnapshotId: null, revision: null, fullRunId: null, previewRunId: null, previewId: null, startedAt: 1, deadlineAt: 2, corrections, error: null });
+}
+
+function stepStatuses(phase: AutonomousState["phase"], corrections = 0): string[] {
+  return autonomousSteps(autonomousState(phase, corrections)).map((step) => step.status);
+}
+
+describe("AUTONOMOUS_PHASE_LABELS", () => {
+  test("labels every autonomous phase in French", () => {
+    expect(AUTONOMOUS_PHASE_LABELS).toEqual({ planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause" });
+  });
+});
+
+describe("autonomousSteps", () => {
+  test("returns the six ordered steps", () => {
+    const steps = autonomousSteps(autonomousState("planning"));
+    expect(steps.map((step) => step.key)).toEqual(["planning", "checks", "preview", "validating", "correcting", "delivering"]);
+    expect(steps.map((step) => step.label)).toEqual(["Planification", "Contrôles locaux", "Déploiement Coolify", "Vérification E2E", "Correction", "Livraison"]);
+  });
+
+  test("marks the active phase current, earlier steps done and later steps pending", () => {
+    expect(stepStatuses("planning")).toEqual(["current", "pending", "pending", "pending", "pending", "pending"]);
+    expect(stepStatuses("checks")).toEqual(["done", "current", "pending", "pending", "pending", "pending"]);
+    expect(stepStatuses("preview")).toEqual(["done", "done", "current", "pending", "pending", "pending"]);
+    expect(stepStatuses("validating")).toEqual(["done", "done", "done", "current", "pending", "pending"]);
+    expect(stepStatuses("correcting", 1)).toEqual(["done", "done", "done", "done", "current", "pending"]);
+  });
+
+  test("keeps the correction step done when a correction loop goes back to earlier phases", () => {
+    expect(stepStatuses("checks", 1)).toEqual(["done", "current", "pending", "pending", "done", "pending"]);
+    expect(stepStatuses("preview", 1)).toEqual(["done", "done", "current", "pending", "done", "pending"]);
+    expect(stepStatuses("validating", 2)).toEqual(["done", "done", "done", "current", "done", "pending"]);
+  });
+
+  test("ready and delivering put delivery current and resolve the correction step", () => {
+    expect(stepStatuses("ready", 0)).toEqual(["done", "done", "done", "done", "skipped", "current"]);
+    expect(stepStatuses("ready", 1)).toEqual(["done", "done", "done", "done", "done", "current"]);
+    expect(stepStatuses("delivering", 2)).toEqual(["done", "done", "done", "done", "done", "current"]);
+    expect(stepStatuses("delivering", 0)).toEqual(["done", "done", "done", "done", "skipped", "current"]);
+  });
+
+  test("completed marks every step done, correction skipped without corrections", () => {
+    expect(stepStatuses("completed", 0)).toEqual(["done", "done", "done", "done", "skipped", "done"]);
+    expect(stepStatuses("completed", 1)).toEqual(["done", "done", "done", "done", "done", "done"]);
+  });
+
+  test("paused has no current step and only keeps performed corrections done", () => {
+    expect(stepStatuses("paused", 0)).toEqual(["pending", "pending", "pending", "pending", "pending", "pending"]);
+    expect(stepStatuses("paused", 1)).toEqual(["pending", "pending", "pending", "pending", "done", "pending"]);
   });
 });

@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ExternalLink, GitMerge, Loader2 } from "lucide-react";
+import { Bot, ExternalLink, GitMerge, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
@@ -8,6 +8,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import {
+  AUTONOMOUS_PHASE_LABELS,
   formatDuration,
   formatRelativeDuration,
   isStageAnimated,
@@ -98,6 +99,16 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
         {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}
         {ticket.watchdogFlagged && <span className="text-warning">inactif</span>}
         {ticket.testing && <span>test</span>}
+        {ticket.autonomous && (
+          <span className="inline-flex items-center gap-1 rounded-sm bg-primary/10 px-1 text-primary" title="Mode Devin actif" aria-label="Mode Devin actif">
+            <Bot aria-hidden className="h-3 w-3" /> Devin
+          </span>
+        )}
+        {ticket.autonomous && ticket.autonomousState && (
+          <span className={cn(ticket.autonomousState.phase === "paused" && "text-warning")}>
+            {AUTONOMOUS_PHASE_LABELS[ticket.autonomousState.phase]}
+          </span>
+        )}
         {ticket.dependsOn && (
           <span className="max-w-full truncate" title={dependencyLabel}>
             ↳ {truncateParentTitle(parentTitle)}

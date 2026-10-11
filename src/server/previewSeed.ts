@@ -1,3 +1,5 @@
+import { autonomousStateSchema } from "../shared/autonomous.ts";
+import type { AutonomousState } from "../shared/autonomous.ts";
 import type { Column, Orchestrator, Stage } from "../shared/constants.ts";
 import type { ExecutionUsageByModel } from "../shared/schemas.ts";
 
@@ -19,6 +21,7 @@ const CODEX_USAGE_MODEL = "gpt-6.1-sol";
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
+const AUTONOMOUS_DEADLINE_MS = 7 * DAY_MS;
 const QUEUE_DELAY_MS = 5 * MINUTE_MS;
 const MERGE_DELAY_MS = 2 * HOUR_MS;
 const TOKENS_PER_MINUTE = 4_000;
@@ -45,6 +48,14 @@ interface SeedTicket {
   legacyDurationMs?: number;
   mergedAfterFinish?: boolean;
   error?: string;
+  autonomous?: boolean;
+  autonomousState?: SeedAutonomousState;
+}
+
+interface SeedAutonomousState {
+  phase: AutonomousState["phase"];
+  corrections: number;
+  error: string | null;
 }
 
 const SEED_TICKETS: SeedTicket[] = [
@@ -93,7 +104,41 @@ const SEED_TICKETS: SeedTicket[] = [
     column: "todo", stage: null, orchestrator: "claude", daysAgo: 1, prNumber: null,
     executions: [],
   },
+  {
+    title: "Ticket Devin à faire",
+    description: "Ticket en mode Devin pas encore lancé : aucun plan figé.",
+    column: "todo", stage: null, orchestrator: "claude", daysAgo: 1, prNumber: null, autonomous: true,
+    executions: [],
+  },
+  {
+    title: "Ticket Devin en correction",
+    description: "Ticket en mode Devin dont la vérification E2E a échoué, en cours de correction.",
+    column: "implementing", stage: "fixing", orchestrator: "claude", daysAgo: 1, prNumber: null, autonomous: true,
+    autonomousState: { phase: "correcting", corrections: 1, error: "La vérification E2E du panier a échoué." },
+    executions: [{ startOffsetMs: 0, durationMs: 50 * MINUTE_MS, status: "completed" }],
+  },
+  {
+    title: "Ticket Devin en pause",
+    description: "Ticket en mode Devin mis en pause après dépassement de son délai.",
+    column: "failed", stage: "failed", orchestrator: "claude", daysAgo: 4, prNumber: null, autonomous: true, error: "Le délai autonome est dépassé.",
+    autonomousState: { phase: "paused", corrections: 1, error: "Le délai autonome est dépassé." },
+    executions: [{ startOffsetMs: 0, durationMs: 3 * HOUR_MS, status: "failed" }],
+  },
+  {
+    title: "Ticket Devin livré",
+    description: "Ticket en mode Devin livré sans correction et mergé.",
+    column: "merged", stage: "done", orchestrator: "claude", daysAgo: 6, prNumber: 106, mergedAfterFinish: true, autonomous: true,
+    autonomousState: { phase: "completed", corrections: 0, error: null },
+    executions: [{ startOffsetMs: 0, durationMs: HOUR_MS + 30 * MINUTE_MS, status: "completed" }],
+  },
 ];
+
+function seedAutonomousState(seed: SeedAutonomousState, startedAt: number, now: number): AutonomousState {
+  return autonomousStateSchema.parse({
+    phase: seed.phase, plan: null, acceptanceSnapshotId: null, functionalSnapshotId: null, revision: null, fullRunId: null, previewRunId: null, previewId: null,
+    startedAt, deadlineAt: now + AUTONOMOUS_DEADLINE_MS, corrections: seed.corrections, error: seed.error,
+  });
+}
 
 function newSeedTicket(project: string, seed: SeedTicket): NewTicket {
   const claude = seed.orchestrator === "claude";
@@ -104,6 +149,7 @@ function newSeedTicket(project: string, seed: SeedTicket): NewTicket {
     model: claude ? "sonnet" : null, effort: claude ? "medium" : null, implementerModel: null, implementerEffort: null,
     implementer: seed.orchestrator, orchestrator: seed.orchestrator,
     codexModel: claude ? null : "gpt-6.1-sol", codexEffort: claude ? null : "medium",
+    autonomous: seed.autonomous ?? false,
   };
 }
 
@@ -140,6 +186,7 @@ function insertSeedTicket(store: Store, project: string, seed: SeedTicket, now: 
     branch: seed.prNumber === null ? null : `feat/seed-${seed.prNumber}`,
     prUrl: seed.prNumber === null ? null : `${SEED_PR_BASE_URL}${seed.prNumber}`,
     error: seed.error ?? null,
+    ...(seed.autonomousState === undefined ? {} : { autonomousState: seedAutonomousState(seed.autonomousState, startedAt ?? createdAt, now) }),
   });
   store.setTicketTimeline(ticket.id, {
     createdAt, updatedAt: finishedAt ?? createdAt, implementingStartedAt: startedAt,

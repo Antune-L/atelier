@@ -27,6 +27,7 @@ import {
   type Orchestrator,
   type Stage,
 } from "@shared/constants";
+import type { AutonomousState } from "@shared/autonomous";
 import { prNumberFromUrl } from "@shared/prUrl";
 import type { Ticket, TriageVerdict } from "@shared/schemas";
 import { isCodexFastServiceTier, type CodexRuntimeStatus } from "@shared/codexCapabilities";
@@ -393,4 +394,43 @@ export function finishedKindLabel(ticket: Pick<Ticket, "column" | "stage">): str
   if (ticket.stage === "stalled") return "Bloqué";
   if (ticket.stage === "interrupted") return "Interrompu";
   return "Terminé";
+}
+
+export const AUTONOMOUS_PHASE_LABELS: Record<AutonomousState["phase"], string> = { planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause" };
+
+export type AutonomousStepKey = "planning" | "checks" | "preview" | "validating" | "correcting" | "delivering";
+export type AutonomousStepStatus = "done" | "current" | "pending" | "skipped";
+export interface AutonomousStep {
+  key: AutonomousStepKey;
+  label: string;
+  status: AutonomousStepStatus;
+}
+
+const AUTONOMOUS_STEP_KEYS: readonly AutonomousStepKey[] = ["planning", "checks", "preview", "validating", "correcting", "delivering"];
+
+/** Index of the active stepper step for a phase; null when none is active (paused), past the end when completed. */
+function autonomousCurrentStepIndex(phase: AutonomousState["phase"]): number | null {
+  switch (phase) {
+    case "paused": return null;
+    case "ready":
+    case "delivering": return AUTONOMOUS_STEP_KEYS.indexOf("delivering");
+    case "completed": return AUTONOMOUS_STEP_KEYS.length;
+    default: return AUTONOMOUS_STEP_KEYS.indexOf(phase);
+  }
+}
+
+/** Read-only progression of an autonomous ticket, derived from its current phase only (no history is stored). */
+export function autonomousSteps(state: AutonomousState): AutonomousStep[] {
+  const current = autonomousCurrentStepIndex(state.phase);
+  const corrected: AutonomousStepStatus = state.corrections > 0 ? "done" : "skipped";
+  return AUTONOMOUS_STEP_KEYS.map((key, index) => {
+    let status: AutonomousStepStatus;
+    if (current === null) status = key === "correcting" && state.corrections > 0 ? "done" : "pending";
+    else if (index === current) status = "current";
+    // After a correction loop the ticket goes back to checks, so a past correction stays done even when ahead of the current step.
+    else if (key === "correcting" && state.corrections > 0) status = "done";
+    else if (index > current) status = "pending";
+    else status = key === "correcting" ? corrected : "done";
+    return { key, label: AUTONOMOUS_PHASE_LABELS[key], status };
+  });
 }

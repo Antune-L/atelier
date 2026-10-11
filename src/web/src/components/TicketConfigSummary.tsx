@@ -1,3 +1,4 @@
+import { Check, Minus } from "lucide-react";
 import type { z } from "zod";
 
 import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
@@ -19,8 +20,9 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { useCapabilities } from "@/hooks/useCapabilities";
-
-const AUTONOMOUS_PHASE_LABELS: Record<AutonomousState["phase"], string> = { planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause" };
+import { AUTONOMOUS_PHASE_LABELS, autonomousSteps } from "@/lib/display";
+import type { AutonomousStepStatus } from "@/lib/display";
+import { cn } from "@/lib/utils";
 
 const YES = "Oui";
 const NO = "Non";
@@ -56,6 +58,39 @@ function Row({ label, value }: { label: string; value: string }) {
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="text-right font-mono text-2xs">{value}</dd>
     </div>
+  );
+}
+
+function StepMarker({ status }: { status: AutonomousStepStatus }) {
+  if (status === "done") return <Check aria-hidden className="h-3 w-3 text-success" />;
+  if (status === "current") return <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-primary" />;
+  if (status === "skipped") return <Minus aria-hidden className="h-3 w-3 text-muted-foreground" />;
+  return <span aria-hidden className="h-2 w-2 rounded-full border border-muted-foreground" />;
+}
+
+/** Read-only Devin progression derived from the current phase; no dated history exists. */
+function AutonomousStepper({ state }: { state: AutonomousState }) {
+  return (
+    <ol aria-label="Étapes Devin" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+      {autonomousSteps(state).map((step) => (
+        <li
+          key={step.key}
+          data-status={step.status}
+          className={cn(
+            "inline-flex items-center gap-1",
+            step.status === "current" && "font-medium text-foreground",
+            step.status === "pending" && "text-muted-foreground",
+            step.status === "skipped" && "text-muted-foreground line-through",
+          )}
+        >
+          <span className="inline-flex h-3 w-3 items-center justify-center"><StepMarker status={step.status} /></span>
+          {step.label}
+          {step.key === "correcting" && state.corrections > 0 && (
+            <span className="font-mono text-2xs text-muted-foreground">{`(${state.corrections} correction${state.corrections > 1 ? "s" : ""})`}</span>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -233,7 +268,7 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
                 <Row label="Mode Devin" value="Autonome interne, sur ce Mac" />
                 <Row label="Livraison autonome" value={ticket.autonomousDelivery === "merge" ? "Fusion après contrôles" : "PR seule"} />
                 <Row label="Limites autonomes" value={`${ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS} correction(s), ${ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES} minutes`} />
-                {ticket.autonomousState && <Row label="État autonome" value={AUTONOMOUS_PHASE_LABELS[ticket.autonomousState.phase]} />}
+                <Row label="État autonome" value={ticket.autonomousState ? AUTONOMOUS_PHASE_LABELS[ticket.autonomousState.phase] : "Plan non encore figé"} />
                 {ticket.autonomousState?.error && <Row label="Blocage autonome" value={ticket.autonomousState.error} />}
               </>
             )}
@@ -259,6 +294,9 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
           </>
         )}
       </dl>
+      {ticket.kind === "feature" && ticket.autonomous && ticket.autonomousState && (
+        <AutonomousStepper state={ticket.autonomousState} />
+      )}
     </section>
   );
 }

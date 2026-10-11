@@ -41,6 +41,8 @@ import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } fro
 import { THEMES, type Theme } from "@/lib/theme";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
+import { matchingSettingsSection, sectionMatches, SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settingsSearch";
+import type { SettingsSectionId } from "@/lib/settingsSearch";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
@@ -58,109 +60,6 @@ const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
 }));
 
 const NO_MATCH_MESSAGE = "Aucun réglage ne correspond à cette recherche.";
-
-const SETTINGS_GROUPS = ["Application", "Connexions"] as const;
-type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
-
-type SettingsSectionId =
-  | "appearance"
-  | "defaults"
-  | "profiles"
-  | "projects"
-  | "providers"
-  | "skills"
-  | "coolify"
-  | "github"
-  | "mcp";
-
-interface SettingsSection {
-  id: SettingsSectionId;
-  label: string;
-  group: SettingsGroup;
-  keywords: string[];
-}
-
-const SETTINGS_SECTIONS: SettingsSection[] = [
-  {
-    id: "appearance",
-    label: "Apparence",
-    group: "Application",
-    keywords: ["thème", "clair", "sombre", "deep ocean", "couleurs", "interface"],
-  },
-  {
-    id: "defaults",
-    label: "Agents par défaut",
-    group: "Application",
-    keywords: [
-      "modèle",
-      "effort",
-      "langue",
-      "triage",
-      "faisabilité",
-      "implémentation",
-      "commit",
-      "pull request",
-      "étape",
-    ],
-  },
-  {
-    id: "profiles",
-    label: "Profils",
-    group: "Application",
-    keywords: ["profil", "orchestrateur", "implémenteur", "préréglage", "sous-agent"],
-  },
-  {
-    id: "projects",
-    label: "Projets",
-    group: "Application",
-    keywords: [
-      "projet",
-      "dépôt",
-      "branche",
-      "scripts",
-      "merge automatique",
-      "fournisseur",
-      "github",
-      "azure devops",
-      "connexion",
-      "tester la connexion",
-    ],
-  },
-  {
-    id: "providers",
-    label: "Fournisseurs",
-    group: "Connexions",
-    keywords: ["codex", "claude", "composer", "cursor", "connexion", "fast", "statut", "détection"],
-  },
-  {
-    id: "skills",
-    label: "Skills",
-    group: "Connexions",
-    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection"],
-  },
-  {
-    id: "github",
-    label: "Comptes GitHub",
-    group: "Connexions",
-    keywords: ["github", "compte", "token", "jeton", "gh", "organisation", "sso", "clone"],
-  },
-  {
-    id: "mcp",
-    label: "MCP",
-    group: "Connexions",
-    keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur"],
-  },
-  {
-    id: "coolify",
-    label: "Coolify",
-    group: "Connexions",
-    keywords: ["prévisualisation", "preview", "déploiement", "serveur", "github", "jeton", "mot de passe"],
-  },
-];
-
-function sectionMatches(section: SettingsSection, query: string): boolean {
-  return matchesQuery(query, section.label, ...section.keywords);
-}
 
 interface SettingsModalProps {
   open: boolean;
@@ -185,8 +84,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     setSearch(value);
     const nextQuery = normalizeSearch(value);
     if (nextQuery === "") return;
-    const firstMatch = SETTINGS_SECTIONS.find((section) => sectionMatches(section, nextQuery));
-    if (firstMatch !== undefined) setSectionId(firstMatch.id);
+    const firstMatch = matchingSettingsSection(nextQuery);
+    if (firstMatch !== undefined) setSectionId(firstMatch);
   };
 
   return (

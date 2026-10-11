@@ -51,6 +51,8 @@ import { createRequestGuard, resolveBindHost } from "./requestGuard.ts";
 import { createApiRoutes } from "./routes.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
+import { configureGithubAccountsRoot, setGithubProjectSource } from "./system/github/accountEnv.ts";
+import { redactSecrets } from "./system/secretRedaction.ts";
 import { createTicketOperations } from "./ticketOperations.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
@@ -238,6 +240,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     .map((run) => run.generationId);
   await migrateConfigJsonIfPresent(store, resolveDataFile(opts.dataRoot, CONFIG_FILENAME, process.env.KANBAN_CONFIG));
   initProjectRegistry(store);
+  // Per-project GitHub accounts: registry folders under dataRoot, project bindings read live from SQLite.
+  configureGithubAccountsRoot(dataRoot);
+  setGithubProjectSource(() => store.listProjectKeys().flatMap((key) => {
+    const project = store.getProjectRow(key);
+    return project
+      ? [{ key, label: project.label, repoPath: project.repoPath, vcsProvider: project.vcsProvider, githubAccount: project.githubAccount ?? null }]
+      : [];
+  }));
   const workerMcpManager = new WorkerMcpManager();
   workerMcpManager.backendPort = port;
   const system = createSystemAdapter(workerMcpManager, join(dataRoot, LOGS_SUBPATH));
@@ -415,7 +425,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
         return { error: "NOT_FOUND" };
       }
       set.status = 500;
-      return { error: getErrorMessage(error) };
+      return { error: redactSecrets(getErrorMessage(error)) };
     });
 
   const hostname = resolveBindHost();
@@ -498,7 +508,9 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   let uiServer: Server<SocketData> | null = null;
   if (socketPath !== null) {
     rmSync(socketPath, { force: true });
-    uiServer = Bun.serve<SocketData>({ unix: socketPath, fetch: handleRequest, websocket });
+    // Same idle budget as the TCP server: a 200 s clone or a PRD generation must not be cut at Bun's
+    // 10 s default (typed through src/server/bunServeUnix.d.ts).
+    uiServer = Bun.serve<SocketData>({ unix: socketPath, idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS, fetch: handleRequest, websocket });
     chmodSync(socketPath, UI_SOCKET_MODE);
   }
 

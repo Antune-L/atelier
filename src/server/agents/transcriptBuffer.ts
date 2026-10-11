@@ -1,5 +1,6 @@
 import type { TranscriptUpdate } from "../../shared/transcript.ts";
 import type { AgentStreamBlock } from "../system/agentSession.ts";
+import { redactSecrets } from "../system/secretRedaction.ts";
 
 interface Block {
   id: number;
@@ -71,7 +72,9 @@ export class TranscriptBuffer {
 
   constructor(private readonly maxChars = 200_000, private readonly maxBlocks = DEFAULT_MAX_BLOCKS) {}
 
-  append(text: string, prefix = "", stream?: AgentStreamBlock, source = "main"): void {
+  append(rawText: string, prefix = "", stream?: AgentStreamBlock, source = "main"): void {
+    // Tokens an agent prints (e.g. a failing `gh` call) never reach the live or persisted transcript.
+    const text = redactSecrets(rawText);
     if (!text && !stream) return;
     const key = stream ? `${source}:${stream.itemId}` : null;
     let block = key ? this.items.get(key) : undefined;

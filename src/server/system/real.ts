@@ -13,6 +13,7 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { isCloudHost, PR_ONLY_MESSAGE } from "../hostRole.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
@@ -34,6 +35,11 @@ import { DelegationWorkspace } from "./delegationWorkspace.ts";
 import { addDetachedWorktree, removeDetachedWorktree } from "./detachedWorktree.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
+import { createGithubAccountRegistry } from "./github/accounts.ts";
+import type { GithubAccountRegistry } from "./github/accounts.ts";
+import { applyGithubEnvSync, githubEnvForCwdSync, GITHUB_TOKEN_ENV_KEYS, GithubAccountError, runGithubCommand, verifyGithubAccountForCwd } from "./github/accountEnv.ts";
+import type { GithubCommandOptions } from "./github/accountEnv.ts";
+import { cloneGithubRepository, listGithubRepositories } from "./github/clone.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
@@ -149,6 +155,28 @@ const CLAUDE_BINARY_NAME = "claude";
 const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 /** Bound the boot-time auth probe so a hanging `status` can never block server start. */
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
+/** fetch/push/pull/ls-remote used to run unbounded; keep a generous ceiling now that they are bounded. */
+const NETWORK_GIT_TIMEOUT_MS = 10 * 60 * 1000;
+const GH_BINARY_NAME = "gh";
+
+/** Network git under the cwd's project GitHub account (machine default when unattached). */
+function networkGit(args: string[], cwd: string, options: GithubCommandOptions = {}) {
+  return runGithubCommand(["git", ...args], cwd, { timeoutMs: NETWORK_GIT_TIMEOUT_MS, ...options });
+}
+
+/**
+ * Identity gate of an attached project before push, merge, review publication and done
+ * transitions: null when allowed, else the failure naming the account. Never falls back.
+ */
+async function githubAccountGate(cwd: string): Promise<DoneGateResult | null> {
+  try {
+    await verifyGithubAccountForCwd(cwd);
+    return null;
+  } catch (error) {
+    if (error instanceof GithubAccountError) return { ok: false, reason: error.message };
+    throw error;
+  }
+}
 
 /** Trimmed stdout of a read-only query, or null when it failed or printed nothing. */
 async function commandOutputOrNull(command: ReturnType<typeof $>): Promise<string | null> {
@@ -239,6 +267,24 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcsClients[provider];
   }
 
+  private readonly githubAccountRegistry = createGithubAccountRegistry(false);
+
+  githubAccounts(): GithubAccountRegistry {
+    return this.githubAccountRegistry;
+  }
+
+  listGithubRepos(account: string | null): Promise<GithubRepoSummary[]> {
+    return listGithubRepositories(account);
+  }
+
+  cloneGithubRepo(opts: { source: string; account: string | null }): Promise<CloneResult> {
+    return cloneGithubRepository(opts);
+  }
+
+  async checkGithubAvailable(): Promise<boolean> {
+    return Bun.which(GH_BINARY_NAME) !== null;
+  }
+
   async seedWorkspaceTrust(paths: string[]): Promise<void> {
     const file = Bun.file(CLAUDE_JSON_PATH);
     const exists = await file.exists();
@@ -327,14 +373,14 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async fetch(repoPath: string, baseBranch: string): Promise<void> {
-    const res = await $`git -C ${repoPath} fetch origin ${baseBranch}`.nothrow().quiet();
-    if (res.exitCode !== 0) {
-      throw new Error(`git fetch origin ${baseBranch} a échoué (code ${res.exitCode}) : ${res.stderr.toString().trim()}`);
+    const res = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath);
+    if (res.exitCode !== 0 || res.timedOut) {
+      throw new Error(`git fetch origin ${baseBranch} a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}`);
     }
   }
 
   async prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void> {
-    const fetched = await runBoundedCommand(["git", "-C", repoPath, "fetch", "origin", baseBranch], repoPath);
+    const fetched = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath);
     if (fetched.exitCode !== 0 || fetched.timedOut) {
       throw new Error(`git fetch origin ${baseBranch} a échoué : ${boundedCommandDetail(fetched)}`);
     }
@@ -416,11 +462,9 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void> {
     await this.fetch(repoPath, baseBranch);
-    const res =
-      await $`git -C ${repoPath} push origin origin/${baseBranch}:refs/heads/${branch}`.nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      throw new Error(`création de la branche ${branch} depuis ${baseBranch} a échoué (code ${res.exitCode}) : ${detail}`);
+    const res = await networkGit(["-C", repoPath, "push", "origin", `origin/${baseBranch}:refs/heads/${branch}`], repoPath, { verifyIdentity: true });
+    if (res.exitCode !== 0 || res.timedOut) {
+      throw new Error(`création de la branche ${branch} depuis ${baseBranch} a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}`);
     }
   }
 
@@ -557,7 +601,7 @@ export class RealSystemAdapter implements SystemAdapter {
   ): Promise<ShellRunResult> {
     const proc = Bun.spawn(["sh", "-c", command], {
       cwd,
-      env: { ...envWithProjectNode(cwd), ...NON_INTERACTIVE_ENV, ...extraEnv },
+      env: applyGithubEnvSync({ ...envWithProjectNode(cwd), ...NON_INTERACTIVE_ENV, ...extraEnv }, cwd),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -574,7 +618,12 @@ export class RealSystemAdapter implements SystemAdapter {
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     log.info("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model, provider: opts.provider });
-    return this.providers[opts.provider].createSession(opts);
+    // The single injection point of every Claude and Codex session (all roles): an attached project
+    // gets its account's GH_CONFIG_DIR / GIT_CONFIG_GLOBAL after an identity check; a failure throws
+    // and the session never starts under another account.
+    const github = githubEnvForCwdSync(opts.cwd);
+    if (github === null) return this.providers[opts.provider].createSession(opts);
+    return this.providers[opts.provider].createSession({ ...opts, environment: { ...opts.environment, ...github } });
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
@@ -594,7 +643,7 @@ export class RealSystemAdapter implements SystemAdapter {
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "dontAsk",
       allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
-      env: envWithProjectNode(opts.cwd),
+      env: applyGithubEnvSync(envWithProjectNode(opts.cwd), opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
@@ -622,7 +671,7 @@ export class RealSystemAdapter implements SystemAdapter {
       permissionMode: "dontAsk",
       mcpServers: { [NOTION_MCP_SERVER_NAME]: { type: "http", url: NOTION_MCP_URL } },
       allowedTools: [...NOTION_IMPORT_ALLOWED_TOOLS],
-      env: envWithProjectNode(opts.cwd),
+      env: applyGithubEnvSync(envWithProjectNode(opts.cwd), opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
@@ -640,7 +689,7 @@ export class RealSystemAdapter implements SystemAdapter {
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      env: agentBaseEnv(),
+      env: applyGithubEnvSync(agentBaseEnv(), opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
     };
@@ -704,7 +753,14 @@ export class RealSystemAdapter implements SystemAdapter {
     const startupDirectory = await prepareProjectShell(opts.cwd);
     await this.killSession(opts.sessionName);
     if (startupDirectory) this.shellStartupDirectories.set(opts.sessionName, startupDirectory);
-    const environmentArgs = startupDirectory ? ["-e", `ZDOTDIR=${startupDirectory}`] : [];
+    // tmux applies its server-global environment to new panes, so the project's GitHub account keys
+    // are passed per session with `-e`. Attached shells blank GH_TOKEN/GITHUB_TOKEN the same way so an
+    // ambient token cannot override GH_CONFIG_DIR.
+    const github = githubEnvForCwdSync(opts.cwd);
+    const githubArgs = github === null
+      ? []
+      : [...GITHUB_TOKEN_ENV_KEYS.map((key) => `${key}=`), ...Object.entries(github).map(([key, value]) => `${key}=${value}`)].flatMap((assignment) => ["-e", assignment]);
+    const environmentArgs = [...(startupDirectory ? ["-e", `ZDOTDIR=${startupDirectory}`] : []), ...githubArgs];
     try {
       if (opts.initialCommand !== undefined) {
         // Auto-run the launch command, then `exec zsh -l` so the user keeps an interactive worktree
@@ -782,6 +838,8 @@ export class RealSystemAdapter implements SystemAdapter {
     if (ahead.exitCode === 0 && ahead.stdout.toString().trim() !== "0") {
       return { ok: false, reason: "la branche n'est pas poussée (commits en avance)" };
     }
+    const account = await githubAccountGate(slotPath);
+    if (account) return account;
     return this.vcs(provider).verifyPrExists(slotPath, prUrl);
   }
 
@@ -824,7 +882,7 @@ export class RealSystemAdapter implements SystemAdapter {
     if (ahead.stdout.toString().trim() !== "0") {
       return { ok: false, reason: "la branche n'est pas poussée (commits en avance)" };
     }
-    return { ok: true, reason: "" };
+    return (await githubAccountGate(slotPath)) ?? { ok: true, reason: "" };
   }
 
   async verifyDirectPushed(slotPath: string, baseBranch: string): Promise<DoneGateResult> {
@@ -833,8 +891,10 @@ export class RealSystemAdapter implements SystemAdapter {
     if (status.stdout.toString().trim().length > 0) {
       return { ok: false, reason: "arbre de travail non propre (modifications non commitées)" };
     }
-    const fetch = await $`git -C ${slotPath} fetch origin ${baseBranch}`.nothrow().quiet();
-    if (fetch.exitCode !== 0) {
+    const account = await githubAccountGate(slotPath);
+    if (account) return account;
+    const fetch = await networkGit(["-C", slotPath, "fetch", "origin", baseBranch], slotPath);
+    if (fetch.exitCode !== 0 || fetch.timedOut) {
       return { ok: false, reason: `git fetch origin ${baseBranch} a échoué` };
     }
     const anc = await $`git -C ${slotPath} merge-base --is-ancestor HEAD origin/${baseBranch}`.nothrow().quiet();
@@ -850,14 +910,15 @@ export class RealSystemAdapter implements SystemAdapter {
     opts: CreatePrOptions,
     provider: VcsProvider,
   ): Promise<{ ok: boolean; url: string; reason: string }> {
+    const account = await githubAccountGate(slotPath);
+    if (account) return { ok: false, url: "", reason: account.reason };
     // The base branch must exist on origin before the PR creation can target it.
-    const baseExists = await $`git -C ${slotPath} ls-remote --heads origin ${baseBranch}`.nothrow().quiet();
-    if (baseExists.exitCode !== 0 || baseExists.stdout.toString().trim().length === 0) {
+    const baseExists = await networkGit(["-C", slotPath, "ls-remote", "--heads", "origin", baseBranch], slotPath);
+    if (baseExists.exitCode !== 0 || baseExists.timedOut || baseExists.stdout.trim().length === 0) {
       if (opts.requireExistingBase) return { ok: false, url: "", reason: "Autonomous delivery requires an existing remote target branch." };
-      const push = await $`git -C ${slotPath} push origin HEAD:refs/heads/${baseBranch}`.nothrow().quiet();
-      if (push.exitCode !== 0) {
-        const detail = push.stderr.toString().trim() || push.stdout.toString().trim();
-        return { ok: false, url: "", reason: `création de la branche de base ${baseBranch} échouée : ${detail}` };
+      const push = await networkGit(["-C", slotPath, "push", "origin", `HEAD:refs/heads/${baseBranch}`], slotPath, { verifyIdentity: true });
+      if (push.exitCode !== 0 || push.timedOut) {
+        return { ok: false, url: "", reason: `création de la branche de base ${baseBranch} échouée : ${boundedCommandDetail(push)}` };
       }
     }
     return this.vcs(provider).createPr(slotPath, baseBranch, opts);
@@ -873,6 +934,8 @@ export class RealSystemAdapter implements SystemAdapter {
     opts: ReviewDoneOptions,
     provider: VcsProvider,
   ): Promise<DoneGateResult> {
+    const account = await githubAccountGate(slotPath);
+    if (account) return account;
     const client = this.vcs(provider);
     const head = await client.confirmPrHead(slotPath, prUrl);
     if (!head.ok || head.commitSha === null) return { ok: false, reason: head.reason };
@@ -907,6 +970,8 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async prepareReviewWorktree(opts: PrepareReviewWorktreeOptions): Promise<ReviewHeadResult> {
+    const account = await githubAccountGate(opts.slotPath);
+    if (account) return { ...account, commitSha: null };
     const client = this.vcs(opts.provider);
     const reset = await this.resetReviewWorktree(opts.slotPath);
     if (!reset.ok) return { ...reset, commitSha: null };
@@ -922,11 +987,8 @@ export class RealSystemAdapter implements SystemAdapter {
     }
     const temporaryRef = `refs/kanban/reviews/${randomUUID()}`;
     try {
-      const fetch = await runBoundedCommand(
-        ["git", "fetch", "--no-write-fetch-head", "origin", `${pullRef}:${temporaryRef}`],
-        opts.repoPath,
-      );
-      if (fetch.exitCode !== 0) {
+      const fetch = await networkGit(["fetch", "--no-write-fetch-head", "origin", `${pullRef}:${temporaryRef}`], opts.repoPath);
+      if (fetch.exitCode !== 0 || fetch.timedOut) {
         return { ok: false, reason: `rafraîchissement du head de PR impossible : ${boundedCommandDetail(fetch)}`, commitSha: null };
       }
       const fetched = await runBoundedCommand(["git", "rev-parse", temporaryRef], opts.repoPath);
@@ -979,6 +1041,8 @@ export class RealSystemAdapter implements SystemAdapter {
     opts: PublishReviewOptions,
     provider: VcsProvider,
   ): Promise<PublishReviewResult> {
+    const account = await githubAccountGate(slotPath);
+    if (account) return { ...account, reviewId: null };
     const current = await this.readReviewHead(slotPath, prUrl, provider);
     if (!current.ok || current.commitSha === null) return { ok: false, reason: current.reason, reviewId: null };
     if (current.commitSha !== opts.expectedCommitSha) {
@@ -1094,13 +1158,11 @@ export class RealSystemAdapter implements SystemAdapter {
   async listBranches(repoPath: string): Promise<string[]> {
     // Hit the remote so the picker reflects branches that exist on GitHub right now,
     // not just whatever this clone last fetched.
-    const res = await $`git -C ${repoPath} ls-remote --heads origin`.nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      throw new Error(`git ls-remote a échoué (code ${res.exitCode}) : ${detail}`);
+    const res = await networkGit(["-C", repoPath, "ls-remote", "--heads", "origin"], repoPath);
+    if (res.exitCode !== 0 || res.timedOut) {
+      throw new Error(`git ls-remote a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}`);
     }
     return res.stdout
-      .toString()
       .split("\n")
       .map((line) => line.split("\t")[1]?.replace(/^refs\/heads\//, "").trim() ?? "")
       .filter((name) => name !== "")
@@ -1118,14 +1180,17 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   private async mergeAndDeleteBranch(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    const account = await githubAccountGate(slotPath);
+    if (account) return account;
     const merged = await this.vcs(provider).mergePr(slotPath, prUrl, expected);
     if (!merged.ok) return merged;
     // Best-effort remote branch cleanup: the merge already succeeded, so a failed
     // deletion (e.g. branch protection) must not turn into a merge failure. We can't
     // use `gh pr merge --delete-branch` because its local cleanup checks out the base
     // branch, which is already checked out in the main worktree and would error.
-    if (expected) await runBoundedCommand(["git", "push", "origin", "--delete", branch], slotPath);
-    else await $`git push origin --delete ${branch}`.cwd(slotPath).nothrow().quiet();
+    await networkGit(["push", "origin", "--delete", branch], slotPath, { verifyIdentity: true }).catch((error: unknown) => {
+      log.warn("suppression de la branche distante ignorée", { branch, error: getErrorMessage(error) });
+    });
     return { ok: true, reason: "" };
   }
 
@@ -1165,10 +1230,14 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
-    const res = await $`git -C ${repoPath} pull --ff-only origin ${baseBranch}`.nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      return { ok: false, reason: `git pull --ff-only origin ${baseBranch} a échoué : ${detail}` };
+    try {
+      const res = await networkGit(["-C", repoPath, "pull", "--ff-only", "origin", baseBranch], repoPath);
+      if (res.exitCode !== 0 || res.timedOut) {
+        return { ok: false, reason: `git pull --ff-only origin ${baseBranch} a échoué : ${boundedCommandDetail(res)}` };
+      }
+    } catch (error) {
+      if (error instanceof GithubAccountError) return { ok: false, reason: error.message };
+      throw error;
     }
     return { ok: true, reason: "" };
   }

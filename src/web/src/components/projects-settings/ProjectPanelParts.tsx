@@ -6,6 +6,7 @@ import type { RepoInspection } from "@shared/schemas";
 
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { Tabs, type TabOption } from "@/components/ui/tabs";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
@@ -90,6 +91,13 @@ export function RepoPathInput({
   );
 }
 
+export type FolderSourceMode = "local" | "github";
+
+const FOLDER_SOURCE_OPTIONS: TabOption<FolderSourceMode>[] = [
+  { value: "local", label: "Dossier local" },
+  { value: "github", label: "Depuis GitHub" },
+];
+
 interface FolderStepProps {
   repoPath: string;
   canPickFolder: boolean;
@@ -98,6 +106,11 @@ interface FolderStepProps {
   onRepoPathChange: (value: string) => void;
   onPick: () => void;
   onAnalyze: () => void;
+  /** « Depuis GitHub » is offered only when the server reports the GitHub capability. */
+  githubAvailable: boolean;
+  mode: FolderSourceMode;
+  onModeChange: (mode: FolderSourceMode) => void;
+  githubStep: ReactNode;
 }
 
 export function FolderStep({
@@ -108,10 +121,29 @@ export function FolderStep({
   onRepoPathChange,
   onPick,
   onAnalyze,
+  githubAvailable,
+  mode,
+  onModeChange,
+  githubStep,
 }: FolderStepProps) {
   const locked = disabled || inspecting;
+  const modeTabs = githubAvailable && (
+    <Tabs options={FOLDER_SOURCE_OPTIONS} value={mode} onChange={onModeChange} aria-label="Source du projet" />
+  );
+  if (githubAvailable && mode === "github") {
+    return (
+      <div className="flex flex-col gap-3">
+        {modeTabs}
+        <p className="text-xs text-muted-foreground">
+          Choisissez un dépôt du compte ou collez un lien : il sera cloné en HTTPS sur le serveur puis analysé.
+        </p>
+        {githubStep}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-3">
+      {modeTabs}
       <p className="text-xs text-muted-foreground">
         Choisissez le dossier du dépôt : le nom, la branche, le fournisseur et la commande de démarrage seront
         préremplis.

@@ -38,6 +38,8 @@ import type {
   AgentTurnUsage,
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
+import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
+import { GH_AUTH_DENIAL_REASON, GH_AUTH_PERMISSION_DENY, isGhAuthCommand } from "./github/ghAuthGuard.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { qualityReadToolAllowed } from "./qualityReadPolicy.ts";
@@ -93,6 +95,9 @@ const denyNoVerifyHook = denyBashHook(
   (command) => NO_VERIFY_PATTERN.test(command),
   "L'option --no-verify est interdite (elle contourne les hooks git).",
 );
+
+/** `gh auth …` would let an agent read or switch the account chosen by the server. */
+const denyGhAuthHook = denyBashHook(isGhAuthCommand, GH_AUTH_DENIAL_REASON);
 
 const denyReviewPublishingHook = denyBashHook(isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON);
 
@@ -254,7 +259,7 @@ export function createSdkAgentSession(
   let disposed = false;
   const abortController = new AbortController();
   const sdkEffort = toSdkEffort(opts.effort);
-  const preToolUseHooks: HookCallback[] = [denyNoVerifyHook];
+  const preToolUseHooks: HookCallback[] = [denyNoVerifyHook, denyGhAuthHook];
   if (opts.blockReviewPublishing) preToolUseHooks.push(denyReviewPublishingHook);
   if (opts.blockTypecheck) preToolUseHooks.push(denyTypecheckHook(opts.cwd));
   const queryOptions: Options = {
@@ -272,14 +277,16 @@ export function createSdkAgentSession(
     allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
     includePartialMessages: false,
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
-    env: { ...envWithProjectNode(opts.cwd), ...opts.environment },
+    // An attached project's GH_CONFIG_DIR must not be overridden by an ambient GH_TOKEN/GITHUB_TOKEN.
+    env: scrubAmbientGithubTokens({ ...envWithProjectNode(opts.cwd), ...opts.environment }),
     stderr: () => {},
     hooks: { PreToolUse: [
       { matcher: "Bash", hooks: preToolUseHooks },
       ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts, reportedDenials)] }] : []),
     ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
-    ...buildSettings(opts.permissionAllow, opts.permissionDeny),
+    // `gh auth` is denied to every Claude session (settings rule + the PreToolUse hook above).
+    ...buildSettings(opts.permissionAllow, [...(opts.permissionDeny ?? []), GH_AUTH_PERMISSION_DENY]),
     ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
     ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),

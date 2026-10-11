@@ -10,38 +10,59 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const BOUNDED_COMMAND_TIMEOUT_MS = 30_000;
-/** French wording reused wherever a bounded command's timeout is surfaced to the user. */
-const BOUNDED_COMMAND_TIMEOUT_REASON = "délai de 30 s dépassé";
+const MS_PER_SECOND = 1000;
 
 export interface BoundedCommandResult {
   exitCode: number;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** Budget the command ran under; absent means the default {@link BOUNDED_COMMAND_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
 
-export async function runBoundedCommand(args: string[], cwd: string): Promise<BoundedCommandResult> {
-  const proc = Bun.spawn(args, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+export interface BoundedCommandOptions {
+  /** FULL child environment; omitted inherits the server's. */
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
+export async function runBoundedCommand(args: string[], cwd: string, options: BoundedCommandOptions = {}): Promise<BoundedCommandResult> {
+  const timeoutMs = options.timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS;
+  const proc = Bun.spawn(args, {
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(options.env ? { env: options.env } : {}),
+  });
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
     proc.kill(9);
-  }, BOUNDED_COMMAND_TIMEOUT_MS);
+  }, timeoutMs);
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
       proc.exited,
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ]);
-    return { exitCode, stdout, stderr, timedOut };
+    return { exitCode, stdout, stderr, timedOut, ...(options.timeoutMs !== undefined ? { timeoutMs } : {}) };
   } finally {
     clearTimeout(timer);
   }
 }
 
+/** French wording reused wherever a bounded command's timeout is surfaced to the user. */
+function boundedCommandTimeoutReason(timeoutMs: number): string {
+  return `délai de ${Math.round(timeoutMs / MS_PER_SECOND)} s dépassé`;
+}
+
 /** Timeout wording when the command expired, else its stderr (stdout as a fallback). */
 export function boundedCommandDetail(res: BoundedCommandResult): string {
-  return res.timedOut ? BOUNDED_COMMAND_TIMEOUT_REASON : (res.stderr.trim() || res.stdout.trim());
+  return res.timedOut
+    ? boundedCommandTimeoutReason(res.timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS)
+    : (res.stderr.trim() || res.stdout.trim());
 }
 
 /** Parse JSON, returning null instead of throwing so a malformed payload fails the zod guard. */

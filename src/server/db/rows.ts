@@ -200,6 +200,7 @@ const projectRowSchema = z.object({
   scripts_test: z.string().nullable(),
   worktree_ports: z.string().nullable(),
   hidden: z.number(),
+  github_account: z.string().nullable().default(null),
   sort_order: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
@@ -496,6 +497,7 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
   if (row.instructions !== null) project.instructions = row.instructions;
   if (row.color !== null) project.color = row.color;
   if (row.group_name !== null && row.group_name.trim().length > 0) project.group = row.group_name.trim();
+  if (row.github_account !== null && row.github_account.trim().length > 0) project.githubAccount = row.github_account.trim();
   const worktreePorts = parseWorktreePorts(row.worktree_ports);
   if (worktreePorts !== undefined) project.worktreePorts = worktreePorts;
   return project;

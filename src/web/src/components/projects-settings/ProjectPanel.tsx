@@ -11,6 +11,7 @@ import type {
 } from "@shared/schemas";
 import { vcsProviderSchema } from "@shared/schemas";
 
+import { GithubCloneStep } from "@/components/projects-settings/GithubCloneStep";
 import {
   AdvancedSection,
   Field,
@@ -18,6 +19,7 @@ import {
   InspectionBanners,
   RepoPathInput,
   suggestionHint,
+  type FolderSourceMode,
 } from "@/components/projects-settings/ProjectPanelParts";
 import { Button } from "@/components/ui/button";
 import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
@@ -26,8 +28,11 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SettingsFooter } from "@/components/ui/settings";
 import { ValidationConfigFields, validationDraft, validationDraftConfig } from "@/components/projects-settings/ValidationConfigFields";
+import { useCapabilities } from "@/hooks/useCapabilities";
+import { useGithubAccounts } from "@/hooks/useGithubAccounts";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { api } from "@/lib/api";
+import type { CloneProjectResponse } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { timeoutUnitMs, timeoutUnitOf, type TimeoutUnit } from "@/lib/projectDisplay";
 
@@ -37,6 +42,7 @@ const MUTED_TEXT_CLASS = "text-muted-foreground";
 const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 const NO_RUN_SCRIPT_LABEL = "aucune commande";
 const SUMMARY_SEPARATOR = " · ";
+const MACHINE_ACCOUNT_VALUE = "";
 
 type CreateStep = "folder" | "form";
 
@@ -116,6 +122,11 @@ export function ProjectPanel({
   const [inspecting, setInspecting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [validation, setValidation] = useState(() => validationDraft(project?.validation));
+  const [sourceMode, setSourceMode] = useState<FolderSourceMode>("local");
+  const [githubAccount, setGithubAccount] = useState<string | null>(project?.githubAccount ?? null);
+  const [clonedUrl, setClonedUrl] = useState<string | null>(null);
+  const { githubAvailable } = useCapabilities();
+  const { accounts: githubAccounts } = useGithubAccounts();
   const { saved: savedVisible, flashSaved } = useSavedFlag();
 
   const commitTimeoutMs = String(Number(timeoutValue) * timeoutUnitMs(unit));
@@ -139,10 +150,16 @@ export function ProjectPanel({
     baseBranch !== project.baseBranch ||
     runScript !== (project.runScript ?? "") ||
     vcsProvider !== project.vcsProvider ||
+    githubAccount !== project.githubAccount ||
     validationDirty ||
     (!grouped && color !== (project.color ?? DEFAULT_PROJECT_COLOR));
 
   const creating = project === null;
+  // Keep the current account selectable even if it is no longer registered (its status shows in Réglages).
+  const githubAccountOptions = Array.from(new Set([
+    ...githubAccounts.map((account) => account.login),
+    ...(githubAccount !== null ? [githubAccount] : []),
+  ])).sort((left, right) => left.localeCompare(right));
   const hint = connectionHint(testing, connection);
   const inspectionBlocks =
     creating && inspection !== null && (!inspection.isGitRepo || inspection.existingProjectKey !== null);
@@ -165,6 +182,13 @@ export function ProjectPanel({
 
   const changeVcsProvider = (value: VcsProvider): void => {
     setVcsProvider(value);
+    setConnection(null);
+    // An account only applies to GitHub projects; the server refuses it on Azure DevOps.
+    if (value !== "github") setGithubAccount(null);
+  };
+
+  const changeGithubAccount = (value: string | null): void => {
+    setGithubAccount(value);
     setConnection(null);
   };
 
@@ -190,6 +214,24 @@ export function ProjectPanel({
     if (result.runScript) setRunScript(result.runScript.value);
   };
 
+  const enterForm = (result: RepoInspection): void => {
+    applyInspection(result);
+    setStep("form");
+    const detected = result.vcsProvider;
+    if (result.isGitRepo && detected !== null) {
+      void runConnectionTest(() =>
+        api.testDraftConnection({ repoPath: result.repoPath, vcsProvider: detected.value }),
+      );
+    }
+  };
+
+  /** « Depuis GitHub »: the server-side clone joins the same form as an inspected local folder. */
+  const applyClone = (result: CloneProjectResponse, account: string | null): void => {
+    setClonedUrl(result.cloneUrl);
+    setGithubAccount(account);
+    enterForm(result.inspection);
+  };
+
   const inspect = async (path: string): Promise<void> => {
     const trimmed = path.trim();
     if (trimmed === "") return;
@@ -197,14 +239,9 @@ export function ProjectPanel({
     setInspecting(true);
     try {
       const result = await api.inspectProject({ repoPath: trimmed });
-      applyInspection(result);
-      setStep("form");
-      const detected = result.vcsProvider;
-      if (result.isGitRepo && detected !== null) {
-        void runConnectionTest(() =>
-          api.testDraftConnection({ repoPath: result.repoPath, vcsProvider: detected.value }),
-        );
-      }
+      setClonedUrl(null);
+      setGithubAccount(null);
+      enterForm(result);
     } catch (e) {
       onError(errorMessage(e));
     } finally {
@@ -238,6 +275,7 @@ export function ProjectPanel({
     if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
     if (!grouped && color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
     if (validationDirty) patch.validation = validationConfig;
+    if (githubAccount !== current.githubAccount) patch.githubAccount = githubAccount;
     return patch;
   };
 
@@ -251,6 +289,7 @@ export function ProjectPanel({
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
       ...(validationConfig !== null ? { validation: validationConfig } : {}),
+      ...(vcsProvider === "github" && githubAccount !== null ? { githubAccount } : {}),
     };
     if (!grouped) input.color = color;
     const created = await api.createProject(input);
@@ -265,6 +304,7 @@ export function ProjectPanel({
     setBaseBranch(saved.baseBranch);
     setRunScript(saved.runScript ?? "");
     setVcsProvider(saved.vcsProvider);
+    setGithubAccount(saved.githubAccount);
     setColor(saved.color ?? DEFAULT_PROJECT_COLOR);
     setValidation(validationDraft(saved.validation));
     setConnection(null);
@@ -328,6 +368,10 @@ export function ProjectPanel({
           onRepoPathChange={changeRepoPath}
           onPick={() => void pickFolder()}
           onAnalyze={() => void inspect(repoPath)}
+          githubAvailable={githubAvailable}
+          mode={sourceMode}
+          onModeChange={setSourceMode}
+          githubStep={<GithubCloneStep disabled={picking || busy} onCloned={applyClone} onError={onError} />}
         />
         {cancelButton && (
           <SettingsFooter dirty={false} justSaved={false}>
@@ -429,6 +473,11 @@ export function ProjectPanel({
             onPick={() => void pickFolder()}
           />
         </Field>
+        {creating && clonedUrl !== null && (
+          <p className="text-xs text-muted-foreground">
+            Cloné depuis <code>{clonedUrl}</code>
+          </p>
+        )}
         {inspecting && (
           <p role="status" className="text-xs text-muted-foreground">
             Analyse du dépôt…
@@ -465,6 +514,29 @@ export function ProjectPanel({
             </div>
           </div>
         </Field>
+        {vcsProvider === "github" && (
+          <Field label="Compte GitHub">
+            <div className="flex w-full flex-col items-start gap-1">
+              <Select
+                value={githubAccount ?? MACHINE_ACCOUNT_VALUE}
+                onChange={(e) => changeGithubAccount(e.target.value === MACHINE_ACCOUNT_VALUE ? null : e.target.value)}
+                aria-label="Compte GitHub du projet"
+                disabled={busy || inspecting || (creating && clonedUrl !== null)}
+              >
+                <option value={MACHINE_ACCOUNT_VALUE}>Compte par défaut de la machine</option>
+                {githubAccountOptions.map((login) => (
+                  <option key={login} value={login}>
+                    {login}
+                  </option>
+                ))}
+              </Select>
+              <span className="text-xs text-muted-foreground">
+                Toutes les opérations GitHub du projet (agents, push, PR) utilisent ce compte. Non modifiable tant que
+                des tickets sont en cours.
+              </span>
+            </div>
+          </Field>
+        )}
         {creating ? (
           <AdvancedSection
             open={advancedOpen}

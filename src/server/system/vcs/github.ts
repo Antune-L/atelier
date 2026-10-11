@@ -4,7 +4,6 @@
  * commands and the reasons handed back to the agent are unchanged.
  */
 
-import { $ } from "bun";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +16,11 @@ import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
 import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
+import type { BoundedCommandResult } from "../boundedCommand.ts";
+import { GithubAccountError, resolveGithubAccount, runGithubCommand } from "../github/accountEnv.ts";
+import type { GithubCommandOptions } from "../github/accountEnv.ts";
+import { parseGithubRemote } from "../github/remote.ts";
+import type { GithubRepoRef } from "../github/remote.ts";
 import { hostnameFromSshConfig, sshHostFromRemoteUrl } from "../repoInspection.ts";
 import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
@@ -43,7 +47,8 @@ const OPEN_PR_FIELDS = `
 `;
 const OPEN_PR_PAGE_SIZE = 100;
 const OPEN_PR_BATCH_SIZE = 10;
-const GIT_REMOTE_SCP_RE = /^(?:[^@/]+@)?([^@/:]+):(?!\/\/)(.+)$/;
+/** Bound of the PR mutations that used to run unbounded (create, ready, merge). */
+const GH_MUTATION_TIMEOUT_MS = 120_000;
 const GITHUB_API_HOST_BY_SSH_HOST: Record<string, string> = {
   "ssh.github.com": "github.com",
 };
@@ -134,38 +139,29 @@ const openPrResponseSchema = z.object({
   errors: z.array(z.unknown()).optional(),
 });
 
-interface GithubRepoRef {
-  host: string;
-  owner: string;
-  repository: string;
-}
-
 interface OpenPrPageRequest {
   ref: GithubRepoRef;
   cursor: string | null;
   seenCursors: Set<string>;
 }
 
-function parseGithubRemote(remote: string): GithubRepoRef | null {
-  const trimmed = remote.trim();
-  const scp = GIT_REMOTE_SCP_RE.exec(trimmed);
-  let host: string;
-  let path: string;
-  if (scp && scp[1] && scp[2]) {
-    host = scp[1].toLowerCase();
-    path = scp[2];
-  } else {
-    try {
-      const url = new URL(trimmed);
-      host = url.hostname.toLowerCase();
-      path = url.pathname;
-    } catch {
-      return null;
-    }
+/**
+ * Every `gh` / network `git` call of this client, run under the project's GitHub account. An account
+ * failure (missing, ambiguous, SSH remote…) becomes a failed command carrying its message, so each
+ * gate keeps its result shape and never falls back to the machine account.
+ */
+async function runGh(args: string[], cwd: string, options: GithubCommandOptions = {}): Promise<BoundedCommandResult> {
+  try {
+    return await runGithubCommand(args, cwd, options);
+  } catch (error) {
+    if (error instanceof GithubAccountError) return { exitCode: 1, stdout: "", stderr: error.message, timedOut: false };
+    throw error;
   }
-  const segments = path.replace(/^\/+/, "").replace(/\.git$/, "").split("/");
-  if (segments.length !== 2 || !segments[0] || !segments[1] || host === "") return null;
-  return { host, owner: segments[0], repository: segments[1] };
+}
+
+/** Command detail, or the account error itself when the command never ran under its account. */
+function ghFailure(result: BoundedCommandResult, fallback: string): string {
+  return boundedCommandDetail(result) || fallback;
 }
 
 function githubRepoKey(ref: GithubRepoRef): string {
@@ -242,7 +238,7 @@ async function fetchGithubOpenPrs(refs: GithubRepoRef[], cwd: string): Promise<M
         });
         const query = `query { ${fields.join(" ")} }`;
         try {
-          const result = await withJsonRequestFile({ query }, (inputPath) => runBoundedCommand(
+          const result = await withJsonRequestFile({ query }, (inputPath) => runGithubCommand(
             [GH_BINARY, "api", "graphql", "--hostname", host, "--input", inputPath],
             cwd,
           ));
@@ -357,7 +353,7 @@ function pullApiEndpoint(reviewsEndpoint: string): string {
 export class GithubVcsClient implements VcsClient {
   async testConnection(repoPath: string, checkedAt: number): Promise<VcsConnectionResult> {
     if (!Bun.which(GH_BINARY)) return connectionFailure("CLI `gh` introuvable dans le PATH", checkedAt);
-    const res = await runBoundedCommand(
+    const res = await runGh(
       [GH_BINARY, "pr", "list", "--limit", CONNECTION_TEST_PR_LIMIT, "--json", "number"],
       repoPath,
     );
@@ -366,12 +362,12 @@ export class GithubVcsClient implements VcsClient {
 
   async listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot> {
     const ref = await readGithubRepoRef(repoPath);
-    const userResult = await runBoundedCommand([GH_BINARY, "api", "user", "--hostname", ref.host], repoPath);
+    const userResult = await runGithubCommand([GH_BINARY, "api", "user", "--hostname", ref.host], repoPath);
     if (userResult.exitCode !== 0 || userResult.timedOut) throw new Error("GitHub authenticated identity could not be read");
     const user = ghAuthenticatedUserSchema.safeParse(safeJsonParse(userResult.stdout));
     if (!user.success) throw new Error("GitHub authenticated identity response is invalid");
     const endpoint = `repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repository)}/pulls?state=open&per_page=${OPEN_PR_PAGE_SIZE}`;
-    const result = await runBoundedCommand([GH_BINARY, "api", endpoint, "--hostname", ref.host, "--paginate", "--slurp"], repoPath);
+    const result = await runGithubCommand([GH_BINARY, "api", endpoint, "--hostname", ref.host, "--paginate", "--slurp"], repoPath);
     if (result.exitCode !== 0 || result.timedOut) throw new Error("GitHub review requests could not be read");
     const pages = ghRequestedPullPagesSchema.safeParse(safeJsonParse(result.stdout));
     if (!pages.success) throw new Error("GitHub review requests response is invalid");
@@ -395,33 +391,43 @@ export class GithubVcsClient implements VcsClient {
     return prs;
   }
 
+  /**
+   * One batched read per (host, account) group, merged: projects attached to different accounts are
+   * each counted under their own identity, and a project whose account cannot resolve stays null.
+   */
   async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
     const counts: Record<string, number | null> = {};
-    const pathsByRepo = new Map<string, string[]>();
-    const refs = new Map<string, GithubRepoRef>();
+    const groups = new Map<string, { cwd: string; refs: Map<string, GithubRepoRef>; pathsByRepo: Map<string, string[]> }>();
     await Promise.all(repoPaths.map(async (repoPath) => {
       counts[repoPath] = null;
       let ref;
+      let account;
       try {
         ref = await readGithubRepoRef(repoPath);
+        account = (await resolveGithubAccount(repoPath)).account;
       } catch {
         return;
       }
+      const groupKey = `${ref.host}\u0000${account ?? ""}`;
+      const group = groups.get(groupKey) ?? { cwd: repoPath, refs: new Map(), pathsByRepo: new Map() };
+      groups.set(groupKey, group);
       const key = githubRepoKey(ref);
-      refs.set(key, ref);
-      pathsByRepo.set(key, [...(pathsByRepo.get(key) ?? []), repoPath]);
+      group.refs.set(key, ref);
+      group.pathsByRepo.set(key, [...(group.pathsByRepo.get(key) ?? []), repoPath]);
     }));
-    const results = await fetchGithubOpenPrs([...refs.values()], repoPaths[0] ?? ".");
-    for (const [key, prs] of results) {
-      if (prs instanceof Error) continue;
-      const count = prs.filter(isPrNeedsAttention).length;
-      for (const repoPath of pathsByRepo.get(key) ?? []) counts[repoPath] = count;
-    }
+    await Promise.all([...groups.values()].map(async (group) => {
+      const results = await fetchGithubOpenPrs([...group.refs.values()], group.cwd);
+      for (const [key, prs] of results) {
+        if (prs instanceof Error) continue;
+        const count = prs.filter(isPrNeedsAttention).length;
+        for (const repoPath of group.pathsByRepo.get(key) ?? []) counts[repoPath] = count;
+      }
+    }));
     return counts;
   }
 
-  async verifyPrExists(_cwd: string, prUrl: string): Promise<DoneGateResult> {
-    const pr = await $`gh pr view ${prUrl} --json url`.nothrow().quiet();
+  async verifyPrExists(cwd: string, prUrl: string): Promise<DoneGateResult> {
+    const pr = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "url"], cwd);
     if (pr.exitCode !== 0) return { ok: false, reason: `la PR n'existe pas (${prUrl})` };
     return { ok: true, reason: "" };
   }
@@ -439,7 +445,7 @@ export class GithubVcsClient implements VcsClient {
         || githubRepoKey(slot).toLowerCase() !== githubRepoKey(expected).toLowerCase()) {
         return { ok: false, reason: "La PR ne correspond pas au dépôt configuré." };
       }
-      const response = await runBoundedCommand([
+      const response = await runGh([
         GH_BINARY, "api", "--hostname", expected.host,
         `repos/${expected.owner}/${expected.repository}/pulls/${target.number}`,
       ], opts.slotPath);
@@ -483,7 +489,7 @@ export class GithubVcsClient implements VcsClient {
   }
 
   private async readPrHeadCommit(cwd: string, prUrl: string): Promise<PrHeadRead> {
-    const pr = await runBoundedCommand(["gh", "pr", "view", prUrl, "--json", "url,headRefOid"], cwd);
+    const pr = await runGh(["gh", "pr", "view", prUrl, "--json", "url,headRefOid"], cwd);
     if (pr.exitCode !== 0) return { ok: false, failure: "unreadable" };
     const parsed = ghPrHeadSchema.safeParse(safeJsonParse(pr.stdout));
     if (!parsed.success || parsed.data.url !== prUrl) return { ok: false, failure: "unexpected" };
@@ -504,7 +510,7 @@ export class GithubVcsClient implements VcsClient {
         if (opts.draft) args.push("--draft");
         if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) throw new Error("Autonomous delivery deadline expired before pull request creation.");
         opts.assertCurrent?.();
-        const result = await runBoundedCommand(args, cwd);
+        const result = await runGh(args, cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
         const url = extractPrUrl(result.stdout);
         if (result.exitCode !== 0 || result.timedOut || !url.startsWith("http")) return { ok: false, url: "", reason: boundedCommandDetail(result) || "Pull request creation could not be confirmed." };
         return { ok: true, url, reason: "" };
@@ -512,14 +518,12 @@ export class GithubVcsClient implements VcsClient {
         await rm(directory, { recursive: true, force: true });
       }
     }
-    const res = opts.draft
-      ? await $`gh pr create --draft --base ${baseBranch} --fill`.cwd(cwd).nothrow().quiet()
-      : await $`gh pr create --base ${baseBranch} --fill`.cwd(cwd).nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      return { ok: false, url: "", reason: detail || `gh pr create a échoué (code ${res.exitCode})` };
+    const args = [GH_BINARY, "pr", "create", ...(opts.draft ? ["--draft"] : []), "--base", baseBranch, "--fill"];
+    const res = await runGh(args, cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+    if (res.exitCode !== 0 || res.timedOut) {
+      return { ok: false, url: "", reason: ghFailure(res, `gh pr create a échoué (code ${res.exitCode})`) };
     }
-    const url = extractPrUrl(res.stdout.toString());
+    const url = extractPrUrl(res.stdout);
     // gh can exit 0 without a parseable URL in stdout; treat that as failure rather than persisting an
     // empty prUrl and landing the card in "done" with a PR that has no link.
     if (!url.startsWith("http")) {
@@ -529,9 +533,9 @@ export class GithubVcsClient implements VcsClient {
   }
 
   async fetchPrSummary(cwd: string, prUrl: string): Promise<string | null> {
-    const res = await $`gh pr view ${prUrl} --json body`.cwd(cwd).nothrow().quiet();
+    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "body"], cwd);
     if (res.exitCode !== 0) return null;
-    const parsed = z.object({ body: z.string() }).safeParse(safeJsonParse(res.stdout.toString()));
+    const parsed = z.object({ body: z.string() }).safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return null;
     const body = parsed.data.body.trim();
     return body.length > 0 ? body : null;
@@ -579,7 +583,7 @@ export class GithubVcsClient implements VcsClient {
       const result = await withJsonRequestFile({ sha: expected.commitSha, merge_method: AUTONOMOUS_MERGE_METHOD }, (inputPath) => {
         if (expected.deadlineAt !== undefined && Date.now() >= expected.deadlineAt) throw new Error("Autonomous delivery deadline expired before merge.");
         expected.assertCurrent?.();
-        return runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, "--method", "PUT", `${pullApiEndpoint(endpoint)}/merge`, "--input", inputPath], cwd);
+        return runGh([GH_BINARY, "api", "--hostname", ref.host, "--method", "PUT", `${pullApiEndpoint(endpoint)}/merge`, "--input", inputPath], cwd, { verifyIdentity: true });
       });
       const response = ghSynchronousMergeSchema.safeParse(safeJsonParse(result.stdout));
       if (result.exitCode !== 0 || result.timedOut || !response.success || !response.data.merged || !response.data.sha) return { ok: false, reason: `Direct expected-head merge was not confirmed. Native policies requiring a merge queue are not supported by this pilot; no queue or auto-merge request is made. ${boundedCommandDetail(result) || "Keep the pull request and worktree for reconciliation."}` };
@@ -590,11 +594,10 @@ export class GithubVcsClient implements VcsClient {
       return { ok: true, reason: "" };
     }
     // A draft PR can't be merged; mark it ready first (harmless if already ready).
-    await $`gh pr ready ${prUrl}`.cwd(cwd).nothrow().quiet();
-    const res = await $`gh pr merge ${prUrl} ${PR_MERGE_STRATEGY}`.cwd(cwd).nothrow().quiet();
-    if (res.exitCode !== 0) {
-      const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-      return { ok: false, reason: `gh pr merge a échoué (code ${res.exitCode}) : ${detail}` };
+    await runGh([GH_BINARY, "pr", "ready", prUrl], cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+    const res = await runGh([GH_BINARY, "pr", "merge", prUrl, PR_MERGE_STRATEGY], cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+    if (res.exitCode !== 0 || res.timedOut) {
+      return { ok: false, reason: `gh pr merge a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}` };
     }
     // `gh pr merge` can exit 0 without the PR landing on the base branch: with required
     // checks still pending it silently enables auto-merge instead, and GitHub may queue
@@ -602,14 +605,14 @@ export class GithubVcsClient implements VcsClient {
     // false "PR mergée" badges, so confirm the real state before reporting success.
     const state = await confirmPrMerged(() => this.readPrState(cwd, prUrl));
     if (state !== "merged") {
-      const hint = res.stdout.toString().trim() || res.stderr.toString().trim();
+      const hint = res.stdout.trim() || res.stderr.trim();
       return { ok: false, reason: unmergedReason(VCS_PROVIDER_LABELS.github, state, hint) };
     }
     return { ok: true, reason: "" };
   }
 
   private async autonomousMergeGate(cwd: string, prUrl: string, expected: MergePrExpectation): Promise<DoneGateResult> {
-    const response = await runBoundedCommand([GH_BINARY, "pr", "view", prUrl, "--json", GH_AUTONOMOUS_PR_FIELDS], cwd);
+    const response = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", GH_AUTONOMOUS_PR_FIELDS], cwd);
     const parsed = ghAutonomousMergeSchema.safeParse(safeJsonParse(response.stdout));
     if (response.exitCode !== 0 || response.timedOut || !parsed.success) return { ok: false, reason: "Native pull request checks are unknown; autonomous merge is blocked." };
     const pr = parsed.data;
@@ -637,8 +640,8 @@ export class GithubVcsClient implements VcsClient {
       const ref = await readGithubRepoRef(cwd);
       const prefix = `repos/${ref.owner}/${ref.repository}/commits/${commitSha}`;
       const [checks, statuses] = await Promise.all([
-        runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/check-runs`], cwd),
-        runBoundedCommand([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/status`], cwd),
+        runGh([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/check-runs`], cwd),
+        runGh([GH_BINARY, "api", "--hostname", ref.host, `${prefix}/status`], cwd),
       ]);
       if (checks.exitCode !== 0 || checks.timedOut || statuses.exitCode !== 0 || statuses.timedOut) return false;
       const absentChecks = ghEmptyCheckRunsSchema.safeParse(safeJsonParse(checks.stdout));
@@ -650,10 +653,10 @@ export class GithubVcsClient implements VcsClient {
   }
 
   async readPrState(cwd: string, prUrl: string): Promise<PrState> {
-    const res = await $`gh pr view ${prUrl} --json state`.cwd(cwd).nothrow().quiet();
+    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "state"], cwd);
     if (res.exitCode !== 0) return "unknown";
     try {
-      const parsed = ghPrStateSchema.safeParse(JSON.parse(res.stdout.toString()));
+      const parsed = ghPrStateSchema.safeParse(JSON.parse(res.stdout));
       if (!parsed.success) return "unknown";
       return PR_STATE_BY_GITHUB_STATE[parsed.data.state] ?? "unknown";
     } catch {
@@ -662,9 +665,9 @@ export class GithubVcsClient implements VcsClient {
   }
 
   async readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability> {
-    const res = await $`gh pr view ${prUrl} --json mergeable`.cwd(cwd).nothrow().quiet();
+    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "mergeable"], cwd);
     if (res.exitCode !== 0) return "unknown";
-    const parsed = ghPrMergeableSchema.safeParse(safeJsonParse(res.stdout.toString()));
+    const parsed = ghPrMergeableSchema.safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return "unknown";
     return PR_MERGEABILITY_BY_GITHUB_MERGEABLE[parsed.data.mergeable] ?? "unknown";
   }
@@ -679,7 +682,7 @@ export class GithubVcsClient implements VcsClient {
   ): Promise<{ ok: true; own: boolean } | { ok: false; reason: string }> {
     const login = await this.currentGitHubLogin(cwd);
     if (login === null) return { ok: false, reason: "utilisateur gh courant indéterminé" };
-    const pull = await runBoundedCommand(["gh", "api", pullApiEndpoint(endpoint)], cwd);
+    const pull = await runGh(["gh", "api", pullApiEndpoint(endpoint)], cwd);
     if (pull.exitCode !== 0) {
       return { ok: false, reason: `lecture de la PR GitHub impossible : ${boundedCommandDetail(pull)}` };
     }
@@ -708,7 +711,7 @@ export class GithubVcsClient implements VcsClient {
     | { ok: false; reason: string }
   > {
     if (comments.length === 0) return { ok: true, inline: [], outsideDiff: [] };
-    const pull = await runBoundedCommand(["gh", "api", pullApiEndpoint(endpoint)], cwd);
+    const pull = await runGh(["gh", "api", pullApiEndpoint(endpoint)], cwd);
     if (pull.exitCode !== 0) {
       return { ok: false, reason: `lecture du diff GitHub impossible : ${boundedCommandDetail(pull)}` };
     }
@@ -766,9 +769,10 @@ export class GithubVcsClient implements VcsClient {
     expectedState: ReviewPublicationState,
   ): Promise<PublishReviewResult> {
     return withJsonRequestFile(payload, async (inputPath) => {
-      const posted = await runBoundedCommand(
+      const posted = await runGh(
         ["gh", "api", "--method", "POST", endpoint, "--input", inputPath],
         cwd,
+        { verifyIdentity: true },
       );
       if (posted.exitCode !== 0) {
         return { ok: false, reason: `publication de la review GitHub échouée : ${boundedCommandDetail(posted)}`, reviewId: null };
@@ -814,14 +818,14 @@ export class GithubVcsClient implements VcsClient {
     cwd: string,
     endpoint: string,
   ): Promise<{ ok: false } | { ok: true; pages: z.infer<typeof ghRestReviewsSchema> | null }> {
-    const res = await runBoundedCommand(["gh", "api", `${endpoint}?per_page=100`, "--paginate", "--slurp"], cwd);
+    const res = await runGh(["gh", "api", `${endpoint}?per_page=100`, "--paginate", "--slurp"], cwd);
     if (res.exitCode !== 0) return { ok: false };
     const parsed = ghRestReviewPagesSchema.safeParse(safeJsonParse(res.stdout));
     return { ok: true, pages: parsed.success ? parsed.data.flat() : null };
   }
 
   private async currentGitHubLogin(cwd: string): Promise<string | null> {
-    const result = await runBoundedCommand(["gh", "api", "user", "-q", ".login"], cwd);
+    const result = await runGh(["gh", "api", "user", "-q", ".login"], cwd);
     const login = result.stdout.trim();
     return result.exitCode === 0 && login.length > 0 ? login : null;
   }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { runBoundedCommand } from "./boundedCommand.ts";
+import { githubEnvForCwdSync, runGithubCommand } from "./github/accountEnv.ts";
 import { addDetachedWorktree, DetachedWorktreeError, removeDetachedWorktree } from "./detachedWorktree.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import type { ValidationCommandOptions, ValidationCommandResult, ValidationRevision, ValidationRevisionOptions, ValidationServiceHandle, ValidationWorkspaceOptions } from "./types.ts";
@@ -12,6 +13,7 @@ import type { ValidationCommandOptions, ValidationCommandResult, ValidationRevis
 const OUTPUT_LIMIT = 32_768;
 const VALIDATION_ROOT = join(tmpdir(), "kanban-quality-validation");
 const TERMINATION_SIGNAL = "SIGKILL";
+const NETWORK_GIT_TIMEOUT_MS = 10 * 60 * 1000;
 const SAFE_ENVIRONMENT_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "TERM"];
 const PARENT_WATCHDOG_SCRIPT = "const target = Number(process.argv[1]); const owner = Number(process.argv[2]); setInterval(() => { if (process.ppid !== owner) { try { process.kill(-target, 'SIGKILL'); } catch {} process.exit(0); } }, 500);";
 
@@ -54,10 +56,11 @@ export async function captureValidationRevision(options: ValidationRevisionOptio
     await gitOutput(options.repoPath, ["check-ref-format", `refs/heads/${options.branch}`]);
     const origin = await runBoundedCommand(["git", "config", "--get", "remote.origin.url"], options.repoPath);
     if (origin.exitCode === 0 && !origin.timedOut) {
-      const remote = await runBoundedCommand(["git", "ls-remote", "--heads", "origin", `refs/heads/${options.branch}`], options.repoPath);
+      const remote = await runGithubCommand(["git", "ls-remote", "--heads", "origin", `refs/heads/${options.branch}`], options.repoPath);
       if (remote.exitCode !== 0 || remote.timedOut) throw new Error(remote.stderr.trim() || "Cannot verify the current remote ticket revision.");
       if (remote.stdout.trim()) {
-        await gitOutput(options.repoPath, ["fetch", "origin", options.branch]);
+        const fetched = await runGithubCommand(["git", "fetch", "origin", options.branch], options.repoPath, { timeoutMs: NETWORK_GIT_TIMEOUT_MS });
+        if (fetched.exitCode !== 0 || fetched.timedOut) throw new Error(fetched.stderr.trim() || fetched.stdout.trim() || "Validation Git command failed.");
         commitSha = await gitOutput(options.repoPath, ["rev-parse", "FETCH_HEAD^{commit}"]);
       } else if (!options.revision) throw new Error("The ticket branch is no longer available on the remote.");
     } else if (origin.exitCode === 1 && !origin.timedOut) {
@@ -108,7 +111,10 @@ function commandEnvironment(options: ValidationCommandOptions): Record<string, s
   const projectEnvironment = envWithProjectNode(options.cwd);
   const environment: Record<string, string | undefined> = {};
   for (const key of SAFE_ENVIRONMENT_KEYS) environment[key] = projectEnvironment[key];
-  return { ...environment, CI: "1", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", ...options.environment };
+  // The allow-list above only copies server values: the project's GitHub account is added explicitly
+  // (the workspace is a worktree of the project, so it resolves to the project's account).
+  const github = githubEnvForCwdSync(options.cwd) ?? {};
+  return { ...environment, CI: "1", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0", ...github, ...options.environment };
 }
 
 function startProcess(options: ValidationCommandOptions): ValidationServiceHandle {

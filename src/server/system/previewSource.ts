@@ -5,7 +5,8 @@ import { z } from "zod";
 import { PREVIEW_AUTH_DISABLED_VALUE, PREVIEW_AUTH_HASH_ENV, PREVIEW_AUTH_USERNAME_ENV, previewRecipeSchema, previewGithubRepositorySchema, previewBranchSchema } from "../../shared/preview.ts";
 import type { PreviewReadiness, PreviewRecipe } from "../../shared/preview.ts";
 
-import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
+import { safeJsonParse } from "./boundedCommand.ts";
+import { runGithubCommand } from "./github/accountEnv.ts";
 
 class PreviewPreparationError extends Error {
   constructor(message: string, readonly revision: string) { super(message); }
@@ -56,7 +57,7 @@ function validateComposeGateway(text: string, recipe: Extract<PreviewRecipe, { b
 }
 
 export async function readPreviewRepository(repoPath: string) {
-  const repositoryResult = await runBoundedCommand(["gh", "repo", "view", "--json", "nameWithOwner,url,isPrivate"], repoPath);
+  const repositoryResult = await runGithubCommand(["gh", "repo", "view", "--json", "nameWithOwner,url,isPrivate"], repoPath);
   if (repositoryResult.exitCode !== 0 || repositoryResult.timedOut) throw new Error("The configured GitHub repository identity could not be read.");
   const identity = z.object({ nameWithOwner: z.string().regex(/^[^/]+\/[^/]+$/), url: z.url(), isPrivate: z.boolean() }).parse(JSON.parse(repositoryResult.stdout));
   const url = new URL(identity.url);
@@ -71,7 +72,7 @@ export async function readPreviewSource(repoPath: string, prUrl: string, recipeP
   const match = /^\/([^/]+)\/([^/]+)\/pull\/([0-9]+)$/.exec(url.pathname);
   const repository = identity.repository;
   if (url.protocol !== "https:" || url.hostname !== expectedHost || !match || `${match[1]}/${match[2]}`.toLowerCase() !== repository.toLowerCase()) throw new Error("The preview pull request must belong to the configured GitHub repository.");
-  const pull = await runBoundedCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/pulls/${match[3]}`], repoPath);
+  const pull = await runGithubCommand(["gh", "api", "--hostname", expectedHost, `repos/${repository}/pulls/${match[3]}`], repoPath);
   if (pull.exitCode !== 0 || pull.timedOut) throw new Error("The latest GitHub pull request revision could not be read.");
   const parsed = PULL_SCHEMA.parse(JSON.parse(pull.stdout));
   if (parsed.state !== "open" && !parsed.merged) throw new Error("The pull request is closed without being merged.");
@@ -82,10 +83,10 @@ export async function readPreviewSource(repoPath: string, prUrl: string, recipeP
 
 async function readPreviewFile(repoPath: string, identity: ReturnType<typeof previewGithubRepositorySchema.parse>, revision: string, filePath: string): Promise<string> {
   try {
-    const result = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${revision}`], repoPath);
+    const result = await runGithubCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/contents/${filePath.split("/").map(encodeURIComponent).join("/")}?ref=${revision}`], repoPath);
     if (result.exitCode !== 0 || result.timedOut) {
       if (!result.timedOut && /\(HTTP 404\)/.test(result.stderr)) {
-        const tree = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/git/trees/${revision}?recursive=1`], repoPath);
+        const tree = await runGithubCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/git/trees/${revision}?recursive=1`], repoPath);
         if (tree.exitCode === 0 && !tree.timedOut) {
           const parsed = z.object({ truncated: z.boolean(), tree: z.array(z.object({ path: z.string() })) }).safeParse(safeJsonParse(tree.stdout));
           if (parsed.success && !parsed.data.truncated && !parsed.data.tree.some((entry) => entry.path === filePath)) throw new PreviewPreparationError(`The preview file ${filePath} is missing from revision ${revision}. Prepare this branch before starting a preview.`, revision);
@@ -134,7 +135,7 @@ async function readPreviewRecipe(repoPath: string, identity: ReturnType<typeof p
 export async function readPreviewBranchSource(repoPath: string, branch: string, recipePath: string) {
   const selectedBranch = previewBranchSchema.parse(branch);
   const identity = await readPreviewRepository(repoPath);
-  const result = await runBoundedCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/branches/${encodeURIComponent(selectedBranch)}`], repoPath);
+  const result = await runGithubCommand(["gh", "api", "--hostname", identity.host, `repos/${identity.repository}/branches/${encodeURIComponent(selectedBranch)}`], repoPath);
   if (result.exitCode !== 0 || result.timedOut) throw new Error("The latest remote branch revision could not be read. Check the selected branch, GitHub access and connectivity.");
   const parsed = z.object({ name: z.string().min(1), commit: z.object({ sha: SHA_SCHEMA }) }).parse(JSON.parse(result.stdout));
   if (parsed.name !== selectedBranch) throw new Error("The returned GitHub branch does not match the selected branch.");

@@ -53,6 +53,13 @@ import { qualityFollowUpResponseSchema } from "@shared/quality";
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
+import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
+
+/** POST /api/projects/clone: the clone (or reused folder) plus the usual folder inspection. */
+export interface CloneProjectResponse extends CloneResult {
+  inspection: RepoInspection;
+  existingProjectKey: string | null;
+}
 
 const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
@@ -145,6 +152,25 @@ export const api = {
     if (body && typeof body === "object" && "path" in body && typeof body.path === "string") return body.path;
     return null;
   },
+  githubAccounts: (): Promise<GithubAccountSummary[]> => request("/api/github/accounts"),
+  /** The token only travels in this request body; the response carries the login alone. */
+  addGithubAccount: (token: string): Promise<{ login: string }> =>
+    request("/api/github/accounts", { method: "POST", body: JSON.stringify({ token }) }),
+  removeGithubAccount: async (login: string): Promise<void> => {
+    const response = await fetch(`/api/github/accounts/${encodeURIComponent(login)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ error: response.statusText }));
+      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
+      throw new Error(message);
+    }
+  },
+  githubRepos: (account: string | null): Promise<GithubRepoSummary[]> =>
+    request(`/api/github/repos${account === null ? "" : `?account=${encodeURIComponent(account)}`}`),
+  cloneProject: (input: CloneProjectRequest): Promise<CloneProjectResponse> =>
+    request("/api/projects/clone", { method: "POST", body: JSON.stringify(input) }),
   capabilities: (refresh = false): Promise<Capabilities> => request(`/api/capabilities${refresh ? "?refresh=1" : ""}`),
   settings: (): Promise<AppSettings> => request("/api/settings"),
   updateSettings: (input: UpdateAppSettingsInput): Promise<AppSettings> =>

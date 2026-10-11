@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AgentEffort, CodexEffort, CodexModel, VcsProvider } from "../shared/constants.ts";
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../shared/constants.ts";
 import type { AppSettings } from "../shared/schemas.ts";
+import { githubLoginSchema } from "../shared/github.ts";
 import { vcsProviderSchema } from "../shared/schemas.ts";
 import { projectValidationSchema } from "../shared/quality.ts";
 
@@ -71,6 +72,12 @@ export const projectConfigSchema = z.object({
   group: z.string().transform((value) => value.trim() || undefined).optional(),
   hidden: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  /**
+   * Login of the GitHub account the project runs under (a `gh` config folder under
+   * `<dataRoot>/gh-accounts`); absent = the machine's default gh account. Stored in SQLite only,
+   * never in the repository's `.git/config`.
+   */
+  githubAccount: githubLoginSchema.optional(),
   /**
    * Per-worktree app/service ports, displayed in the worktree session detail. Each address URL is
    * `http://localhost:${base + offset}` where `offset` is read from `<slot>/.wt-offset` (written by

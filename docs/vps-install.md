@@ -125,6 +125,8 @@ sudo -u kanban ln -sfn /var/lib/kanban/.codex/skills /var/lib/kanban/.claude/ski
 sudo -u kanban -H git clone https://github.com/Antune-L/atelier.git /var/lib/kanban/projects/atelier
 ```
 
+**Additional GitHub accounts (optional).** The login above is the machine's default account. To work on projects of other GitHub accounts without switching it, see [GitHub accounts and cloned projects](#github-accounts-and-cloned-projects).
+
 ### A5. Start the service
 
 Install the unit from the reviewed commit, then start it:
@@ -158,6 +160,49 @@ To open the board from a phone or any browser behind a Google login, follow [vps
 - On the VPS, `curl -s http://127.0.0.1:52817/api/settings` returns `forbidden`: the API only answers on the socket.
 - A card created with auto-merge, direct push or autonomous merge delivery is refused. A normal card ends with an open pull request, with your Mac off. Clicking **Merger la PR** on that card merges it.
 - `sudo systemctl restart kanban` interrupts the running card, which can be resumed without a duplicate PR.
+
+## GitHub accounts and cloned projects
+
+**Read this first: every agent session can read the tokens of every registered account.** All accounts live under the same `kanban` Unix user as the server and its agents, so attaching a project to an account only selects which identity its GitHub operations use. It is not a security barrier between projects or accounts. Backups of the data root contain the tokens in clear text.
+
+### Accounts
+
+- **Default account.** The machine's own `gh` login (A4) is used by every project without an account, exactly as before.
+- **Adding an account.** In **Settings → Comptes GitHub**, paste a token. The server passes it on stdin to `gh auth login --hostname github.com --with-token --insecure-storage` with `GH_CONFIG_DIR=<dataRoot>/gh-accounts/<login>/` (folder `0700`, files `0600`), then shows the login GitHub returned. The machine's default and active `gh` accounts are not changed. Pasting a new token for an existing login replaces it. The token is never stored in SQLite, `config.json`, logs or API responses.
+- **Status.** Each account shows `valide` or `invalide`, from a read-only `gh api user` probe. An account folder or file with permissions wider than `0700`/`0600` is refused and reported as invalid.
+- **Removing an account.** Allowed only when no project is attached to it; otherwise the projects are listed.
+- **Attaching a project.** Pick the account when creating the project or in its settings (GitHub projects only; Azure DevOps projects refuse an account). The account cannot change while the project has tickets in progress. It is stored in SQLite (`projects.github_account`), never in `.git/config`.
+
+### Token scopes
+
+- **Classic token:** `repo` and `read:org`.
+- **Fine-grained token:** repository permissions Contents and Pull requests in read and write, Metadata in read.
+- **Organization SSO:** an organization enforcing SAML SSO only accepts the token after you authorize it for that organization (**Configure SSO** next to the token on GitHub). Without it, the organization's repositories are missing from the list and pushes are refused.
+
+### What runs under the project's account
+
+Every `gh` call and network `git` call of the server for an attached project, and every Claude and Codex session (all roles), tmux shell, validation command and project script rooted in its repository, runs with that account's `GH_CONFIG_DIR` and a per-account `GIT_CONFIG_GLOBAL`. That file includes your `~/.gitconfig`, then replaces the `github.com` credential helpers with `gh auth git-credential`, so `git push` authenticates as the account. Guardrails:
+- The login answered by `gh api user` is compared, case-insensitively, with the expected account at session start and before push, merge and done. A missing folder, an invalid or expired token, or another login blocks the operation with a message naming the account. There is never a fallback to another account.
+- An attached project with an SSH remote is refused before any network operation: use an `https://github.com/...` origin.
+- Two projects attached to different accounts that share one git repository are refused.
+- Agents may not run `gh auth`.
+- `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_` tokens and `https://user:secret@` credentials are masked in logs, transcripts and errors. `GET /api/capabilities` only exposes a `githubAvailable` boolean.
+
+### Adding a project from GitHub
+
+In the project form, **Depuis GitHub** (shown when `gh` is installed) lists every repository the chosen account owns, collaborates on or reaches through an organization, or accepts a link (`git@github.com:owner/repo.git`, `https://github.com/owner/repo`, `owner/repo`). The server rebuilds the HTTPS URL and clones it, without a shell, into:
+
+- `<clone root>/<login>/<owner>/<repo>` with an account,
+- `<clone root>/_machine/<owner>/<repo>` with the default account,
+
+with lowercase segments. The clone root is `KANBAN_CLONE_ROOT`, default `~/kanban-projects` (on the VPS, `/var/lib/kanban/kanban-projects`). It is distinct from the data root. A folder that already holds the same origin is reused; a folder with another origin, or that is not a git repository, is a conflict and is left untouched. A clone is capped at 200 s; beyond that it is stopped, its partial folder removed and the request answered with an error.
+
+### Limits
+
+- HTTPS only: no SSH cloning, deploy keys or per-account SSH keys.
+- Only github.com: Azure DevOps and GitHub Enterprise repositories are added with **Dossier local** after cloning them yourself.
+- Deleting a project does not delete its clone.
+- A repository cloned while the server runs does not automatically get the agent-file exclusions in `.git/info/exclude` (`.claude/`, `.mcp.json`, `.pr-body.md`).
 
 ## Phase B: previews through the broker
 

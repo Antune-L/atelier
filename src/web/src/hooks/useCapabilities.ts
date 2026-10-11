@@ -21,6 +21,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   canUpdate: false,
   canPickFolder: false,
   prOnly: false,
+  githubAvailable: false,
   skills: [],
 };
 

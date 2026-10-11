@@ -7,6 +7,7 @@ import { getProject, isProjectKey, listProjectKeys } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
+import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
@@ -54,6 +55,8 @@ export class TriageManager {
     private readonly sessionHub: SessionHub,
     private readonly hub: ClientHub,
     private readonly notifier: Notifier,
+    /** The repo mutex shared with slot creation, so analysis worktree git ops never race it. */
+    private readonly repoMutex: KeyedMutex = new KeyedMutex(),
   ) {}
 
   /**
@@ -94,9 +97,9 @@ export class TriageManager {
       const execution = resolveFeasibilityExecution(ticket, "triage");
       await assertExecutionAvailable(this.system, execution);
       const driver = execution.provider;
-      const workspace = await prepareAnalysisWorkspace(this.system, project.repoPath, baseBranch, ticketId);
+      const workspace = await prepareAnalysisWorkspace(this.system, this.repoMutex, project.repoPath, baseBranch, ticketId);
       if (this.stopped) {
-        releaseAnalysisWorkspace(this.system, workspace);
+        void releaseAnalysisWorkspace(this.system, this.repoMutex, workspace);
         return;
       }
       this.sessions.set(ticketId, { timer: null, workspace });
@@ -173,7 +176,7 @@ export class TriageManager {
     for (const [ticketId, entry] of this.sessions) {
       if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(ticketId);
-      releaseAnalysisWorkspace(this.system, entry.workspace);
+      void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
     }
     this.sessions.clear();
   }
@@ -207,6 +210,6 @@ export class TriageManager {
     if (entry?.timer) clearTimeout(entry.timer);
     this.sessions.delete(ticketId);
     this.sessionHub.disconnect(ticketId, status);
-    if (entry) releaseAnalysisWorkspace(this.system, entry.workspace);
+    if (entry) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
   }
 }

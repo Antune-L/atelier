@@ -2,9 +2,10 @@ import { spawn } from "node:child_process";
 import { mkdir, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { runBoundedCommand } from "./boundedCommand.ts";
+import { addDetachedWorktree, DetachedWorktreeError, removeDetachedWorktree } from "./detachedWorktree.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
 import type { ValidationCommandOptions, ValidationCommandResult, ValidationRevision, ValidationRevisionOptions, ValidationServiceHandle, ValidationWorkspaceOptions } from "./types.ts";
 
@@ -27,6 +28,13 @@ async function gitOutput(repoPath: string, args: string[]): Promise<string> {
   const result = await runBoundedCommand(["git", ...args], repoPath);
   if (result.exitCode !== 0 || result.timedOut) throw new Error(result.stderr.trim() || result.stdout.trim() || "Validation Git command failed.");
   return result.stdout.trim();
+}
+
+/** Keep the validation subsystem's own error wording, which the board UI translates verbatim. */
+function validationGitError(error: unknown): unknown {
+  if (!(error instanceof DetachedWorktreeError)) return error;
+  if (error.step === "remove") return new Error("Validation workspace cleanup timed out.");
+  return new Error(error.result.stderr.trim() || error.result.stdout.trim() || "Validation Git command failed.");
 }
 
 export async function captureValidationRevision(options: ValidationRevisionOptions): Promise<ValidationRevision> {
@@ -64,8 +72,9 @@ export async function captureValidationRevision(options: ValidationRevisionOptio
 
 export async function prepareValidationWorkspace(options: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }> {
   const cwd = workspaceDirectory(options.runId);
-  await mkdir(dirname(cwd), { recursive: true });
-  await gitOutput(options.repoPath, ["worktree", "add", "--detach", cwd, options.commitSha]);
+  await addDetachedWorktree(options.repoPath, cwd, options.commitSha).catch((error: unknown) => {
+    throw validationGitError(error);
+  });
   const dataDirectory = `${cwd}-data`;
   await mkdir(dataDirectory, { recursive: true });
   const port = await new Promise<number>((resolvePort, reject) => {
@@ -86,11 +95,13 @@ export async function prepareValidationWorkspace(options: ValidationWorkspaceOpt
 
 export async function cleanupValidationWorkspace(options: ValidationWorkspaceOptions): Promise<void> {
   const cwd = workspaceDirectory(options.runId);
-  const result = await runBoundedCommand(["git", "worktree", "remove", "--force", cwd], options.repoPath);
-  if (result.timedOut) throw new Error("Validation workspace cleanup timed out.");
-  await rm(cwd, { recursive: true, force: true });
-  await rm(`${cwd}-data`, { recursive: true, force: true });
-  await gitOutput(options.repoPath, ["worktree", "prune"]);
+  try {
+    await removeDetachedWorktree(options.repoPath, cwd);
+  } catch (error) {
+    throw validationGitError(error);
+  } finally {
+    await rm(`${cwd}-data`, { recursive: true, force: true });
+  }
 }
 
 function commandEnvironment(options: ValidationCommandOptions): Record<string, string | undefined> {

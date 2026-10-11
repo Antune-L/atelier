@@ -14,6 +14,7 @@ import { getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
+import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
@@ -128,6 +129,8 @@ export class FeasibilityBatchManager {
     private readonly sessionHub: SessionHub,
     private readonly hub: ClientHub,
     private readonly notifier: Notifier,
+    /** The repo mutex shared with slot creation, so analysis worktree git ops never race it. */
+    private readonly repoMutex: KeyedMutex = new KeyedMutex(),
   ) {}
 
   /** Mark every ticket `running`, then spawn the batch session and deliver its contract once connected. */
@@ -220,9 +223,9 @@ export class FeasibilityBatchManager {
         workspace: null,
       };
       this.sessions.set(batchId, session);
-      session.workspace = await prepareAnalysisWorkspace(this.system, project.repoPath, baseBranch, batchId);
+      session.workspace = await prepareAnalysisWorkspace(this.system, this.repoMutex, project.repoPath, baseBranch, batchId);
       if (this.stopped || this.sessions.get(batchId) !== session) {
-        releaseAnalysisWorkspace(this.system, session.workspace);
+        void releaseAnalysisWorkspace(this.system, this.repoMutex, session.workspace);
         return;
       }
       const prompt = buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider);
@@ -323,7 +326,7 @@ export class FeasibilityBatchManager {
     for (const [batchId, entry] of this.sessions) {
       if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(batchId);
-      if (entry.workspace) releaseAnalysisWorkspace(this.system, entry.workspace);
+      if (entry.workspace) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
     }
     this.sessions.clear();
     this.ticketToBatch.clear();
@@ -408,7 +411,7 @@ export class FeasibilityBatchManager {
   private cleanup(batchId: string, status: "completed" | "failed" | "cancelled" = "cancelled"): void {
     const entry = this.sessions.get(batchId);
     if (entry?.timer) clearTimeout(entry.timer);
-    if (entry?.workspace) releaseAnalysisWorkspace(this.system, entry.workspace);
+    if (entry?.workspace) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
     this.sessions.delete(batchId);
     for (const [ticketId, id] of this.ticketToBatch) {
       if (id === batchId) this.ticketToBatch.delete(ticketId);

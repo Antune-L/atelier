@@ -246,14 +246,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const notifier = new Notifier(clientHub, opts.onNotify);
   const prNotificationMonitor = new PrNotificationMonitor(store, system, clientHub, notifier);
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
-  const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier);
-  const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier);
+  const repoMutex = new KeyedMutex();
+  const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier, repoMutex);
+  const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier, repoMutex);
   const splitManager = new SplitManager(store, system, sessionHub);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
   const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system });
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
-  const repoMutex = new KeyedMutex();
   const qualityManager = new QualityManager({
     store,
     system,

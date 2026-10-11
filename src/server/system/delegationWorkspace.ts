@@ -402,13 +402,13 @@ async function copyDependencies(source: string, destination: string): Promise<vo
   if (!info?.isDirectory()) return;
   const target = join(destination, DEPENDENCIES_DIR);
   try {
-    await cp(dependencies, target, { recursive: true, mode: constants.COPYFILE_FICLONE_FORCE });
+    await cp(dependencies, target, { recursive: true, mode: constants.COPYFILE_FICLONE_FORCE, verbatimSymlinks: true });
   } catch (error) {
     if (!(error instanceof Error && "code" in error && (
       error.code === "ENOTSUP" || error.code === "EOPNOTSUPP" || error.code === "EXDEV"
     ))) throw error;
     await rm(target, { recursive: true, force: true });
-    await cp(dependencies, target, { recursive: true });
+    await cp(dependencies, target, { recursive: true, verbatimSymlinks: true });
   }
   await validateDependencyLinks(destination, target);
 }

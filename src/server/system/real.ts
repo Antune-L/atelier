@@ -82,6 +82,7 @@ import type {
 } from "./types.ts";
 import { AzureDevopsVcsClient } from "./vcs/azureDevops.ts";
 import { GithubVcsClient } from "./vcs/github.ts";
+import { PR_BODY_FILE } from "./vcs/types.ts";
 import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const log = createLogger("system");
@@ -265,7 +266,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const lines = new Set(current.split("\n").map((l) => l.trim()).filter(Boolean));
     lines.add(".claude/");
     lines.add(".mcp.json");
-    lines.add(".pr-body.md");
+    lines.add(PR_BODY_FILE);
     await Bun.write(excludePath, `${[...lines].join("\n")}\n`);
   }
 

@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   finished_at INTEGER,
   implementing_started_at INTEGER,
   implementation_started_at INTEGER,
+  implementation_finished_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -460,6 +461,7 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "finished_at", ddl: "ALTER TABLE tickets ADD COLUMN finished_at INTEGER" },
   { column: "implementing_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementing_started_at INTEGER" },
   { column: "implementation_started_at", ddl: "ALTER TABLE tickets ADD COLUMN implementation_started_at INTEGER" },
+  { column: "implementation_finished_at", ddl: "ALTER TABLE tickets ADD COLUMN implementation_finished_at INTEGER" },
   { column: "model", ddl: "ALTER TABLE tickets ADD COLUMN model TEXT" },
   { column: "effort", ddl: "ALTER TABLE tickets ADD COLUMN effort TEXT" },
   { column: "implementer_model", ddl: "ALTER TABLE tickets ADD COLUMN implementer_model TEXT" },
@@ -604,6 +606,7 @@ export function createDatabase(path: string): Database {
   }
   migrateCodexCatalog(db, "upgrade");
   backfillOrchestrator(db);
+  backfillImplementationDuration(db);
   migrateFeasibilityEngines(db);
   seedSlots(db);
   seedProfiles(db);
@@ -721,6 +724,41 @@ function backfillOrchestrator(db: Database): void {
   db.exec("UPDATE profiles SET orchestrator = 'codex' WHERE implementer = 'codex'");
   // Flag LAST: a failed UPDATE must leave the backfill retryable on the next boot.
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(ORCHESTRATOR_BACKFILL_META_KEY);
+}
+
+const IMPLEMENTATION_DURATION_BACKFILL_META_KEY = "implementation_duration_backfilled";
+
+/**
+ * One-shot backfill of the implementation bounds on DBs that predate `implementation_finished_at`:
+ * markMerged used to overwrite finishedAt with the merge time, so a merged card's duration included
+ * the review/merge wait, and later agent runs on the PR (conflict resolution, quality correction)
+ * re-stamped it. The agent end that opened the PR is the FIRST `done` event; without one, non-merged
+ * tickets fall back to finished_at while merged ones stay NULL. The missing start is recovered
+ * from the first `update_stage → implementing` event. Meta-flagged so it runs EXACTLY once.
+ */
+function backfillImplementationDuration(db: Database): void {
+  const flagged = db.query("SELECT value FROM meta WHERE key = ?").get(IMPLEMENTATION_DURATION_BACKFILL_META_KEY);
+  if (flagged) return;
+  // Minimal legacy shapes (tests) lack the board columns the backfill reads: nothing to recover there.
+  const columns = new Set(
+    db
+      .query("PRAGMA table_info(tickets)")
+      .all()
+      .map((row) => (row !== null && typeof row === "object" && "name" in row ? row.name : null)),
+  );
+  if (!columns.has("column_name") || !columns.has("finished_at")) return;
+  db.transaction(() => {
+    db.exec(`UPDATE tickets SET implementation_finished_at = COALESCE(
+        (SELECT MIN(created_at) FROM events WHERE ticket_id = tickets.id AND type = 'done'),
+        CASE WHEN column_name <> 'merged' THEN finished_at END
+      ) WHERE implementation_finished_at IS NULL`);
+    db.exec(`UPDATE tickets SET implementation_started_at = (
+        SELECT MIN(created_at) FROM events
+        WHERE ticket_id = tickets.id AND type = 'update_stage' AND json_extract(payload, '$.stage') = 'implementing'
+      ) WHERE implementation_started_at IS NULL`);
+    // Flag LAST: a failed UPDATE must leave the backfill retryable on the next boot.
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')").run(IMPLEMENTATION_DURATION_BACKFILL_META_KEY);
+  })();
 }
 
 /** Adds new columns to a pre-existing table (no-op on fresh DBs). */

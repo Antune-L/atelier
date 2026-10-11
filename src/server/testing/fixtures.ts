@@ -77,6 +77,7 @@ const BASE_TICKET: Ticket = {
   finishedAt: null,
   implementingStartedAt: null,
   implementationStartedAt: null,
+  implementationFinishedAt: null,
   sessionUsage: {},
   createdAt: 1,
   updatedAt: 1,

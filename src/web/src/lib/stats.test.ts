@@ -21,6 +21,7 @@ function record(executions: ExecutionRun[]): StatRecord {
     createdAt: 0,
     implementingStartedAt: 0,
     implementationStartedAt: 0,
+    implementationFinishedAt: 10_000,
     finishedAt: 10_000,
     costUsd: null,
     knownCostUsd: 0,

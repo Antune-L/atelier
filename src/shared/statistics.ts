@@ -77,6 +77,7 @@ export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): S
     createdAt: ticket.createdAt,
     implementingStartedAt: ticket.implementingStartedAt,
     implementationStartedAt: ticket.implementationStartedAt,
+    implementationFinishedAt: ticket.implementationFinishedAt,
     finishedAt: ticket.finishedAt,
     costUsd: costs.costUsd,
     knownCostUsd: costs.knownCostUsd,

@@ -2,9 +2,12 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { ORCHESTRATOR_BACKFILL_META_KEY } from "../../shared/constants.ts";
+import { initProjectRegistry } from "../config.ts";
+import { makeTicket } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
 
 import { assertCodexDowngradeSafe, CODEX_CATALOG_MIGRATED_META_KEY, CODEX_CATALOG_SNAPSHOT_SUFFIX, createDatabase, migrateCodexCatalog } from "./schema.ts";
+import { Store } from "./store.ts";
 
 const createdPaths: string[] = [];
 
@@ -158,6 +161,70 @@ describe("orchestrator migration + backfill", () => {
     const second = createDatabase(path);
     expect(orchestratorOf(second, "tickets", "t-codex")).toBe("claude");
     second.close();
+  });
+});
+
+/** Read a nullable integer column of a single tickets row by id. */
+function ticketNumberOf(db: Database, column: "implementation_finished_at" | "implementation_started_at", id: string): number | null {
+  const row = db.query(`SELECT ${column} AS value FROM tickets WHERE id = ?`).get(id);
+  if (row !== null && typeof row === "object" && "value" in row) {
+    if (row.value === null) return null;
+    if (typeof row.value === "number") return row.value;
+  }
+  throw new Error(`no ${column} row for tickets.${id}`);
+}
+
+describe("implementation_finished_at backfill", () => {
+  test("backfills implementation bounds once on a DB that predates the column", () => {
+    const path = reserveDbPath();
+    const seed = createDatabase(path);
+    const store = new Store(seed);
+    store.createProject("p", { label: "P", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
+    initProjectRegistry(store);
+    const create = (): string => store.createTicket({ ...makeTicket({ project: "p" }), childOrder: null }).id;
+    const toReview = create();
+    const mergedWithDone = create();
+    const mergedNoDone = create();
+    const doneWithDone = create();
+    const noStart = create();
+    const withStart = create();
+    seed.exec("ALTER TABLE tickets DROP COLUMN implementation_finished_at");
+    seed.exec("DELETE FROM meta WHERE key LIKE '%implementation%'");
+    const setRow = seed.prepare("UPDATE tickets SET column_name = ?, finished_at = ?, implementation_started_at = ? WHERE id = ?");
+    setRow.run("to_review", 5_000, 1_000, toReview);
+    setRow.run("merged", 90_000, 1_000, mergedWithDone);
+    setRow.run("merged", 90_000, 1_000, mergedNoDone);
+    setRow.run("done", 40_000, 1_000, doneWithDone);
+    setRow.run("to_review", 9_000, null, noStart);
+    setRow.run("to_review", 9_000, 777, withStart);
+    const event = seed.prepare("INSERT INTO events (ticket_id, type, payload, created_at) VALUES (?, ?, ?, ?)");
+    event.run(mergedWithDone, "done", "{}", 10_000);
+    event.run(mergedWithDone, "done", "{}", 20_000);
+    event.run(doneWithDone, "done", "{}", 30_000);
+    event.run(doneWithDone, "done", "{}", 40_000);
+    event.run(noStart, "update_stage", JSON.stringify({ stage: "planning" }), 100);
+    event.run(noStart, "update_stage", JSON.stringify({ stage: "implementing" }), 200);
+    event.run(noStart, "update_stage", JSON.stringify({ stage: "implementing" }), 300);
+    event.run(withStart, "update_stage", JSON.stringify({ stage: "implementing" }), 200);
+    seed.close();
+
+    const db = createDatabase(path);
+    expect(hasColumn(db, "tickets", "implementation_finished_at")).toBe(true);
+    expect(ticketNumberOf(db, "implementation_finished_at", toReview)).toBe(5_000);
+    expect(ticketNumberOf(db, "implementation_finished_at", mergedWithDone)).toBe(10_000);
+    expect(ticketNumberOf(db, "implementation_finished_at", doneWithDone)).toBe(30_000);
+    expect(ticketNumberOf(db, "implementation_finished_at", mergedNoDone)).toBeNull();
+    expect(ticketNumberOf(db, "implementation_started_at", noStart)).toBe(200);
+    expect(ticketNumberOf(db, "implementation_started_at", withStart)).toBe(777);
+    db.exec(`UPDATE tickets SET implementation_finished_at = 1, implementation_started_at = NULL WHERE id = '${toReview}'`);
+    db.exec(`UPDATE tickets SET implementation_finished_at = NULL WHERE id = '${mergedWithDone}'`);
+    db.close();
+
+    const reopened = createDatabase(path);
+    expect(ticketNumberOf(reopened, "implementation_finished_at", toReview)).toBe(1);
+    expect(ticketNumberOf(reopened, "implementation_started_at", toReview)).toBeNull();
+    expect(ticketNumberOf(reopened, "implementation_finished_at", mergedWithDone)).toBeNull();
+    reopened.close();
   });
 });
 

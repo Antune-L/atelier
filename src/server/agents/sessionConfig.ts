@@ -19,6 +19,7 @@ import type { ResearchOptions, Ticket } from "../../shared/schemas.ts";
 import { COOLIFY_PREPARATION_MARKER } from "../../shared/skills.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSessionOptions, AgentSubagentDefinition, StdioMcpServerDefinition } from "../system/agentSession.ts";
+import { GH_AUTH_PERMISSION_DENY } from "../system/github/ghAuthGuard.ts";
 
 import { isReviewFixSession } from "./contract.ts";
 import { playwrightMcpArgs } from "./playwrightMcp.ts";
@@ -531,11 +532,12 @@ function sessionSkills(vcs: VcsCommandTable): string[] {
 
 export function delegatedImplementerPermissions(
   vcsProvider: VcsProvider,
-): Pick<AgentSessionOptions, "role" | "permissionMode" | "permissionAllow" | "allowedTools" | "disallowedTools" | "skills" | "disableWorkerTools"> {
+): Pick<AgentSessionOptions, "role" | "permissionMode" | "permissionAllow" | "permissionDeny" | "allowedTools" | "disallowedTools" | "skills" | "disableWorkerTools"> {
   return {
     role: "implementer",
     permissionMode: "dontAsk",
     permissionAllow: [...DELEGATED_BASH_ALLOWLIST],
+    permissionDeny: [GH_AUTH_PERMISSION_DENY],
     allowedTools: [...IMPLEMENTER_SAFE_TOOLS.filter((tool) => tool !== "Agent" && tool !== "Task"), "ToolSearch", ...SLACK_READONLY_TOOLS],
     disallowedTools: ["Agent", "Task"],
     skills: sessionSkills(vcsCommands(vcsProvider)),
@@ -635,6 +637,7 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
       role: "orchestrator",
       permissionMode: "dontAsk",
       permissionAllow: bashAllowlist(ticket, vcsProvider, composerScriptPath),
+      permissionDeny: [GH_AUTH_PERMISSION_DENY],
       ...reviewSessionGuards(ticket),
       // An ask ticket never writes: pin the Codex sandbox to read-only instead of tool-gating.
       ...(ticket.kind === "ask" ? { readOnly: true } : {}),
@@ -668,6 +671,8 @@ export function buildImplementSessionConfig(input: ImplementSessionInput): Sessi
     permissionMode: "dontAsk",
     ...reviewSessionGuards(ticket),
     permissionAllow: bashAllowlist(ticket, vcsProvider, composerScriptPath),
+    // Agents never manage gh credentials: the project's account is chosen by the server.
+    permissionDeny: [GH_AUTH_PERMISSION_DENY],
     allowedTools: [
       ...IMPLEMENTER_SAFE_TOOLS,
       "ToolSearch",

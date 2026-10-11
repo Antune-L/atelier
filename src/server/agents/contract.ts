@@ -528,12 +528,6 @@ function truncateDescription(description: string): string {
   return `${flat.slice(0, FEASIBILITY_DESC_MAX - 1)}…`;
 }
 
-/**
- * Builds the `ticket` channel payload for a batch feasibility session: ONE read-only orchestrator fans
- * out a scout then a verifier per imported ticket (Read/Glob/Grep only), settles the verdicts, and
- * submits them all at once via the `submit_feasibility` worker tool.
- * Non-readable attachments (e.g. Trello links) are flagged in `questions` with an explicit prefix.
- */
 export function buildFeasibilityBatchContract(
   tickets: Ticket[],
   project: ProjectConfig,
@@ -550,13 +544,17 @@ export function buildFeasibilityBatchContract(
     "Tu es une session orchestratrice de faisabilité en LECTURE SEULE sur le dépôt.",
     driver === "claude"
       ? "Seuls Read, Glob, Grep, les outils MCP Figma de lecture et Task (sous-agents) sont disponibles ;"
-      : "Seuls les outils de lecture exposés à Codex et les sous-agents bornés sont disponibles ;",
-    "Edit/Write/Bash sont inappelables.",
+      : "Lis les fichiers avec exec_command : une seule commande directe pwd, ls, cat, head, tail, wc ou rg, avec des chemins absolus explicites dans le dépôt pour toute lecture ; les sous-agents bornés ont le même accès de lecture.",
+    driver === "claude"
+      ? "Edit/Write/Bash sont inappelables."
+      : "Les écritures, pipes, expansions, redirections et accès hors du dépôt sont interdits. Ajoute toujours --no-config à rg ; utilise rg --no-config --files avec le chemin absolu du dépôt pour trouver les fichiers.",
     "Ne modifie JAMAIS le dépôt.",
     "",
     "## Tickets à évaluer",
     ...ticketList,
-    "Les descriptions peuvent référencer des chemins d'images locaux absolus (Read possible) et des liens externes.",
+    driver === "claude"
+      ? "Les descriptions peuvent référencer des chemins d'images locaux absolus (Read possible) et des liens externes."
+      : "Les descriptions peuvent référencer des images locales et des liens externes. Consulte une image uniquement si un outil de lecture d'image est réellement exposé ; sinon ajoute-la aux questions avec le préfixe `Lien non consultable:`. Les lectures par terminal restent limitées au dépôt.",
     ...(driver === "claude"
       ? [
           "Les liens figma.com sont consultables via les outils MCP Figma de lecture",

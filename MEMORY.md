@@ -63,3 +63,7 @@ Claude Code lists its sub-agent tool as `Task` in the `system/init` tool list ev
 ## Attributing independent source analysis
 
 Do not require an agent to cite backend/provider-internal observation IDs: Codex App Server command item IDs need not be visible in the model's tool context. Match exact normalized source paths and literal excerpts against completed single-file reads, then persist the server-observed tool ID and session identity. Discovery-only results, path substrings and ambiguous multi-file command outputs cannot attribute a source assertion.
+
+## Codex read-only analysis commands
+
+Codex triage and automatic feasibility must expose native exec_command reads to both the parent and the scout/verifier. Read/Glob/Grep names in subagent instructions do not create Codex tools, and native exec_command reaches the PreToolUse hook as Bash. Keep read-only analysis commands single, path-scoped, and limited to explicit absolute repository operands; the hook may lack the effective command working directory. Require rg --no-config and deny external preprocessors, compressed-search helpers, dereferencing escapes, writes, and child recursion. Preserve Claude and Atelier scout restrictions. Only promise local-image inspection when an image-reading tool is actually exposed; otherwise report the limitation.

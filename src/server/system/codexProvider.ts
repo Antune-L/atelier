@@ -32,6 +32,7 @@ import {
 } from "./codexAppServer.ts";
 import { resolveCodexBinary } from "./codexBinary.ts";
 import {
+  CODEX_ANALYSIS_DENIAL_REASON,
   CODEX_BASH_DENIAL_REASON,
   CODEX_DELEGATED_DENIAL_REASON,
   CODEX_NO_MATCHES_OBSERVATION,
@@ -547,6 +548,7 @@ esac
 ${ghAuthGuardScript()}policy=$(printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(policyPath)})
 case "$policy" in
   allow) ;;
+  analysis) ${shellDeny(CODEX_ANALYSIS_DENIAL_REASON)} ;;
   scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
   nested) ${shellDeny(CODEX_DELEGATED_DENIAL_REASON)} ;;
   validator) ${shellDeny(CODEX_VALIDATOR_DENIAL_REASON)} ;;

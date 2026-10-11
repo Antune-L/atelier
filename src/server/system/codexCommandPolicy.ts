@@ -2,6 +2,7 @@ import type { QualityPermissionBlockReason } from "../../shared/quality.ts";
 
 import { isQualityRepositoryPath, qualityReadScopeAllows, qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 
+export const CODEX_ANALYSIS_DENIAL_REASON = "Une session d'analyse en lecture seule ne peut ni modifier les fichiers ni déléguer depuis un sous-agent.";
 export const CODEX_BASH_DENIAL_REASON = "Commande Bash non autorisée. Utilise une commande directe de la liste permise, sans expansion, redirection ni wrapper.";
 export const CODEX_SCOUT_DENIAL_REASON = "Les sous-agents de recherche ne peuvent utiliser ni Bash, ni apply_patch, ni spawn_agent.";
 export const CODEX_DELEGATED_DENIAL_REASON = "Une session d'implémentation déléguée ne peut pas créer de sous-agent natif.";
@@ -128,11 +129,12 @@ const isQualityRepositoryPath = ${isQualityRepositoryPath.toString()};
 const qualityReadToolAllowed = ${qualityReadToolAllowed.toString()};
 const qualityReadScopeAllows = ${qualityReadScopeAllows.toString()};
 const matchesCodexBashAllowlist = ${matchesCodexBashAllowlist.toString()};
-const patterns = ${JSON.stringify(patterns ?? null)};
+const patterns = ${JSON.stringify(restrictAllSubagents ? CODEX_VALIDATOR_READ_ALLOW : patterns ?? null)};
 const scoutTypes = new Set(${JSON.stringify(scoutTypes)});
 const restrictAllSubagents = ${JSON.stringify(restrictAllSubagents)};
 const restrictNestedAgents = ${JSON.stringify(restrictNestedAgents)};
 const restrictValidator = ${JSON.stringify(restrictValidator)};
+const restrictReadCommands = restrictValidator || restrictAllSubagents;
 const cwd = ${JSON.stringify(cwd ?? null)};
 let blockReason = null;
 const onDenied = (reason) => { blockReason ??= reason; };
@@ -141,24 +143,29 @@ try { request = JSON.parse(await Bun.stdin.text()); } catch { process.stdout.wri
 const toolName = request?.tool_name;
 const isScout = (typeof request?.agent_type === "string" && scoutTypes.has(request.agent_type))
   || (restrictAllSubagents && typeof request?.agent_id === "string" && request.agent_id.length > 0);
-if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agent")) {
+if (restrictAllSubagents && (toolName === "apply_patch" || (isScout && toolName === "spawn_agent"))) {
+  process.stdout.write("analysis");
+} else if (restrictValidator && (toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("validator");
 } else if (restrictValidator && (toolName === "Read" || toolName === "Glob" || toolName === "Grep")) {
   process.stdout.write(typeof cwd === "string" && qualityReadToolAllowed(cwd, toolName, request?.tool_input, onDenied) ? "allow" : "deny:" + (blockReason ?? "invalid_tool_input"));
-} else if (isScout && (toolName === "Bash" || toolName === "apply_patch" || toolName === "spawn_agent")) {
+} else if (isScout && ((toolName === "Bash" && !restrictAllSubagents) || toolName === "apply_patch" || toolName === "spawn_agent")) {
   process.stdout.write("scout");
 } else if (restrictNestedAgents && toolName === "spawn_agent") {
   process.stdout.write("nested");
 } else if (toolName === "Bash" && patterns !== null) {
   const command = request?.tool_input?.command ?? request?.tool_input?.cmd;
   const requestedCwd = request?.tool_input?.cwd ?? request?.tool_input?.workdir ?? cwd;
-  let scoped = !restrictValidator;
-  if (restrictValidator && typeof requestedCwd === "string" && typeof cwd === "string") {
+  let scoped = !restrictReadCommands;
+  if (restrictReadCommands && typeof requestedCwd === "string" && typeof cwd === "string") {
     try { scoped = realpathSync(requestedCwd) === realpathSync(cwd); } catch { scoped = false; }
   }
   if (!scoped) onDenied("working_directory_mismatch");
   else if (typeof command !== "string") onDenied("invalid_tool_input");
-  process.stdout.write(scoped && typeof command === "string" && matchesCodexBashAllowlist(command, patterns, restrictValidator, cwd, false, undefined, onDenied) ? "allow" : "deny:" + (blockReason ?? "command_not_allowlisted"));
+  const inspectWords = restrictAllSubagents && typeof cwd === "string"
+    ? (words) => qualityReadScopeAllows(cwd, words, onDenied, true)
+    : undefined;
+  process.stdout.write(scoped && typeof command === "string" && matchesCodexBashAllowlist(command, patterns, restrictReadCommands, cwd, restrictAllSubagents, inspectWords, onDenied) ? "allow" : "deny:" + (blockReason ?? "command_not_allowlisted"));
 } else {
   process.stdout.write("allow");
 }

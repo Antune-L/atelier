@@ -51,13 +51,19 @@ export function isQualityRepositoryPath(cwd: string, path: string, onDenied?: (r
   }
 }
 
-export function qualityReadScopeAllows(cwd: string, words: readonly string[], onDenied?: (reason: QualityPermissionBlockReason) => void): boolean {
+export function qualityReadScopeAllows(cwd: string, words: readonly string[], onDenied?: (reason: QualityPermissionBlockReason) => void, absolutePathsOnly = false): boolean {
   const deny = (reason: QualityPermissionBlockReason): false => { onDenied?.(reason); return false; };
   const command = words[0];
   if (!command || !["pwd", "ls", "cat", "head", "tail", "wc", "rg"].includes(command)) return deny("command_not_allowlisted");
   const args = words.slice(1);
+  const HEAD_TAIL_VALUE_FLAGS = ["-n", "-c", "--lines", "--bytes"];
   const patternIndexes = new Set<number>();
+  const valueIndexes = new Set<number>();
+  let pathCount = 0;
   if (command === "rg") {
+    const optionsEnd = args.indexOf("--");
+    const options = optionsEnd < 0 ? args : args.slice(0, optionsEnd);
+    if (absolutePathsOnly && !options.includes("--no-config")) return deny("unsafe_read_option");
     const RG_SHORT_VALUE_FLAGS = "ABCEMTdgjmrt";
     const RG_LONG_VALUE_FLAGS = ["--after-context", "--before-context", "--context", "--encoding", "--max-columns", "--type-not", "--max-depth", "--glob", "--iglob", "--threads", "--max-count", "--replace", "--type", "--sort", "--sortr", "--type-add", "--max-filesize", "--context-separator", "--path-separator"];
     const RG_SHORT_SWITCHES = "0abciFHIlnNopPqsSuUvwxz";
@@ -77,7 +83,9 @@ export function qualityReadScopeAllows(cwd: string, words: readonly string[], on
         continue;
       }
       if (word.startsWith("--")) {
-        if (word === "--regexp") {
+        if (word === "--files") {
+          patternSupplied = true;
+        } else if (word === "--regexp") {
           patternSupplied = true;
           patternIndexes.add(index + 1);
           index += 1;
@@ -85,7 +93,10 @@ export function qualityReadScopeAllows(cwd: string, words: readonly string[], on
           patternSupplied = true;
           patternIndexes.add(index);
         } else if (RG_LONG_VALUE_FLAGS.includes(word)) {
+          valueIndexes.add(index + 1);
           index += 1;
+        } else if (RG_LONG_VALUE_FLAGS.some((flag) => word.startsWith(`${flag}=`))) {
+          valueIndexes.add(index);
         } else if (!word.includes("=") && !RG_LONG_SWITCHES.includes(word)) {
           optionsRecognized = false;
         }
@@ -101,6 +112,8 @@ export function qualityReadScopeAllows(cwd: string, words: readonly string[], on
         if (flag === "e") {
           patternSupplied = true;
           patternIndexes.add(attached ? index : index + 1);
+        } else {
+          valueIndexes.add(attached ? index : index + 1);
         }
         if (!attached) index += 1;
         break;
@@ -108,14 +121,27 @@ export function qualityReadScopeAllows(cwd: string, words: readonly string[], on
     }
     const firstPositional = positionals[0];
     if (!patternSupplied && firstPositional !== undefined) patternIndexes.add(firstPositional);
-    if (!optionsRecognized) patternIndexes.clear();
+    if (!optionsRecognized) {
+      patternIndexes.clear();
+      valueIndexes.clear();
+    }
+  } else if (command === "head" || command === "tail") {
+    for (let index = 0; index < args.length; index += 1) {
+      if (HEAD_TAIL_VALUE_FLAGS.includes(args[index] ?? "")) {
+        valueIndexes.add(index + 1);
+        index += 1;
+      }
+    }
   }
-  return args.every((word, index) => {
+  const allowed = args.every((word, index) => {
     if (word.includes("~")) return deny("home_expansion");
     if (word.startsWith("--pre") || word.startsWith("--follow") || word.startsWith("--files0-from")) return deny("unsafe_read_option");
+    if (absolutePathsOnly && command === "rg" && (word === "--search-zip" || /^-[^-]*z/.test(word))) return deny("unsafe_read_option");
+    if (command === "ls" && (word.startsWith("--dereference") || /^-[^-]*H/.test(word))) return deny("unsafe_read_option");
     if (command === "rg" && (word === "--file" || word.startsWith("--file=") || /^-[^-]*f/.test(word))) return deny("unsafe_read_option");
     if ((command === "rg" || command === "ls") && /^-[^-]*L/.test(word)) return deny("unsafe_read_option");
     if (patternIndexes.has(index)) return true;
+    if (absolutePathsOnly && valueIndexes.has(index)) return true;
     let value = word;
     if (word.startsWith("-")) {
       const assignment = word.indexOf("=");
@@ -123,6 +149,10 @@ export function qualityReadScopeAllows(cwd: string, words: readonly string[], on
       else if (word.includes("/")) value = word.slice(2);
       else return true;
     }
+    if (absolutePathsOnly && !isAbsolute(value)) return deny("path_outside_workspace");
+    pathCount += 1;
     return isQualityRepositoryPath(cwd, value, onDenied);
   });
+  if (!allowed) return false;
+  return !absolutePathsOnly || command === "pwd" || pathCount > 0 || deny("invalid_tool_input");
 }

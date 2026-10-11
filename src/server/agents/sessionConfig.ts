@@ -109,6 +109,10 @@ const PLAYWRIGHT_MCP_SERVER: StdioMcpServerDefinition = {
 /** Read-only tool surface for a triage/feasibility session (Edit/Write/Bash are structurally removed). */
 const READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch", ...FIGMA_READONLY_TOOLS, ...SLACK_READONLY_TOOLS];
 const CODEX_READONLY_TOOLS = ["Read", "Glob", "Grep", "ToolSearch"];
+const CODEX_ANALYSIS_TOOLS = ["exec_command"];
+const CODEX_ANALYSIS_DISALLOWED = ["Edit", "Write"];
+const CODEX_ANALYSIS_SCOUT_DISALLOWED = ["Task", "Agent", "Edit", "Write", "apply_patch", "spawn_agent"];
+const CODEX_ANALYSIS_READ_HINT = "Lis le dépôt avec exec_command : une seule commande directe pwd, ls, cat, head, tail, wc ou rg, avec des chemins absolus explicites dans le dépôt pour toute lecture. Aucun pipe, expansion, redirection, accès hors du dépôt ni modification n'est autorisé. Ajoute toujours --no-config à rg ; utilise rg --no-config --files avec le chemin absolu du dépôt pour trouver les fichiers.";
 /** Tools removed from a plain (non-fan-out) read-only session: no writes, no sub-agent recursion. */
 const READONLY_PLAIN_DISALLOWED = ["Edit", "Write", "Bash", "Task", "Agent"];
 /**
@@ -164,12 +168,12 @@ function feasibilitySubagent(driver: Orchestrator, description: string, prompt: 
   const { model, effort } = FEASIBILITY_SUBAGENTS[driver];
   return {
     description,
-    prompt: `${prompt} ${driver === "codex" ? CODEX_EXTERNAL_TOOLS_HINT : FIGMA_TOOLS_HINT}`,
+    prompt: `${prompt} ${driver === "codex" ? `${CODEX_ANALYSIS_READ_HINT} ${CODEX_EXTERNAL_TOOLS_HINT}` : FIGMA_TOOLS_HINT}`,
     model,
     effort,
     role: "scout",
-    tools: driver === "codex" ? CODEX_READONLY_TOOLS : SCOUT_TOOLS,
-    disallowedTools: SCOUT_DISALLOWED,
+    tools: driver === "codex" ? CODEX_ANALYSIS_TOOLS : SCOUT_TOOLS,
+    disallowedTools: driver === "codex" ? CODEX_ANALYSIS_SCOUT_DISALLOWED : SCOUT_DISALLOWED,
   };
 }
 
@@ -211,8 +215,8 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
       role: "triage",
       permissionMode: "dontAsk",
       readOnly: true,
-      allowedTools: [...CODEX_READONLY_TOOLS, "Agent"],
-      disallowedTools: READONLY_FANOUT_DISALLOWED,
+      allowedTools: [...CODEX_ANALYSIS_TOOLS, "Agent"],
+      disallowedTools: CODEX_ANALYSIS_DISALLOWED,
       skills: NO_SKILLS,
       agents: feasibilityAgents(driver, deep),
     };
@@ -419,8 +423,8 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     ownerId: batchId,
     permissionMode: "dontAsk",
     ...(driver === "codex" ? { readOnly: true } : {}),
-    allowedTools: [...(driver === "codex" ? CODEX_READONLY_TOOLS : READONLY_TOOLS), "Agent"],
-    disallowedTools: READONLY_FANOUT_DISALLOWED,
+    allowedTools: [...(driver === "codex" ? CODEX_ANALYSIS_TOOLS : READONLY_TOOLS), "Agent"],
+    disallowedTools: driver === "codex" ? CODEX_ANALYSIS_DISALLOWED : READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
     agents: feasibilityAgents(driver, false),
     skills: NO_SKILLS,

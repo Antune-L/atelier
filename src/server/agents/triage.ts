@@ -26,11 +26,13 @@ function readOnlyFramingLines(driver: Orchestrator, en: boolean, sessionKind: { 
     return en
       ? [
           `You are a READ-ONLY Codex ${sessionKind.en} session (read-only sandbox: any write to the`,
-          "repository is blocked). Explore the repository with your read tools only.",
+          "repository is blocked). Read files with exec_command: one direct pwd, ls, cat, head, tail, wc or rg command, using explicit absolute repository paths for every read.",
+          "The scouts have the same read access. Pipes, expansions, redirects and access outside the repository are forbidden. Always add --no-config to rg; use rg --no-config --files with the absolute repository path to find files.",
         ]
       : [
           `Tu es une session Codex de ${sessionKind.fr} en LECTURE SEULE (sandbox en lecture seule :`,
-          "toute écriture dans le dépôt est bloquée). Explore le dépôt avec tes outils de lecture uniquement.",
+          "toute écriture dans le dépôt est bloquée). Lis les fichiers avec exec_command : une seule commande directe pwd, ls, cat, head, tail, wc ou rg, avec des chemins absolus explicites dans le dépôt pour toute lecture.",
+          "Les scouts ont le même accès de lecture. Les pipes, expansions, redirections et accès hors du dépôt sont interdits. Ajoute toujours --no-config à rg ; utilise rg --no-config --files avec le chemin absolu du dépôt pour trouver les fichiers.",
         ];
   }
   return en
@@ -90,7 +92,10 @@ function buildTicketLines(ticket: Ticket, en: boolean, driver: Orchestrator): st
         ticket.description || "(empty)",
         "",
         "The description may reference absolute local image paths (e.g. /Users/.../uploads/xxx.png)",
-        "that you can read with the Read tool. Consult figma.com links only through a read-only Figma",
+        driver === "claude"
+          ? "that you can read with the Read tool."
+          : "Inspect referenced images only if an image-reading tool is actually exposed; otherwise report the image as unavailable. Shell reads remain restricted to the repository.",
+        "Consult figma.com links only through a read-only Figma",
         ...(driver === "claude"
           ? ["MCP tool (get_screenshot/get_design_context in `mcp__plugin_figma_figma`)."]
           : ["tool actually exposed to this Codex session; otherwise report the link as unavailable."]),
@@ -104,7 +109,10 @@ function buildTicketLines(ticket: Ticket, en: boolean, driver: Orchestrator): st
         ticket.description || "(vide)",
         "",
         "La description peut référencer des chemins d'images locaux absolus (ex. /Users/.../uploads/xxx.png)",
-        "que tu peux lire avec l'outil Read. Consulte les liens figma.com uniquement avec un outil Figma",
+        driver === "claude"
+          ? "que tu peux lire avec l'outil Read."
+          : "Consulte les images référencées uniquement si un outil de lecture d'image est réellement exposé ; sinon signale l'image non consultable. Les lectures par terminal restent limitées au dépôt.",
+        "Consulte les liens figma.com uniquement avec un outil Figma",
         ...(driver === "claude"
           ? ["MCP de lecture (get_screenshot/get_design_context dans `mcp__plugin_figma_figma`)."]
           : ["de lecture réellement exposé à cette session Codex ; sinon signale le lien non consultable."]),

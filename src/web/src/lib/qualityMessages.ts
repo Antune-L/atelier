@@ -254,6 +254,7 @@ export function qualityModeLabel(mode: QualityValidationMode | null): string {
 }
 
 export function qualityRunTitle(run: Pick<QualityValidationRun, "kind" | "mode">): string {
+  if (run.kind === "combined") return "Vérification combinée";
   if (run.kind === "checks") return "Contrôles techniques";
   if (run.kind === "full") return "Vérification complète du ticket";
   if (run.kind === "functional") return "Test fonctionnel dans le navigateur";

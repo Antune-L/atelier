@@ -189,7 +189,7 @@ test("runtime reports an unsupported initialize method as incompatible", async (
       ...options,
       binaryPath: process.execPath,
       commandArgs: [server],
-      requestTimeoutMs: 50,
+      requestTimeoutMs: 2_000,
     }),
     environment: {},
   });

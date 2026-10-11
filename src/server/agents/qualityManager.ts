@@ -18,6 +18,7 @@ import type { SystemAdapter, ValidationCommandResult, ValidationRevision, Valida
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
 
 import { resolveExecution } from "./executionConfig.ts";
+import { executeCombinedQuality, pendingVerification } from "./combinedQuality.ts";
 import { QualityBlockerError } from "./qualityBlocker.ts";
 import { prepareFunctionalScenarios, prepareQualityCriteria } from "./qualityCriteriaPreparation.ts";
 import type { FunctionalScenarioPlan } from "./qualityCriteriaPreparation.ts";
@@ -245,6 +246,10 @@ export class QualityManager {
 
   testFeature(ticketId: string, provider: Orchestrator): Promise<QualityValidationRun> {
     return this.start(ticketId, "functional", provider);
+  }
+
+  verifyCombined(ticketId: string, provider: Orchestrator): Promise<QualityValidationRun> {
+    return this.start(ticketId, "combined", provider);
   }
 
   verifyAutonomous(ticketId: string, provider: Orchestrator, expectedRevision: string): Promise<QualityValidationRun> {
@@ -734,11 +739,12 @@ export class QualityManager {
     if (this.dependencies.store.listActiveQualityRuns().length > 0 || this.dependencies.store.listActiveQualityIterations().some((entry) => entry.id !== iteration?.id)) throw new Error("A quality validation or correction is already active. Wait for it to finish.");
     const ticket = this.ticket(ticketId);
     const project = getProject(ticket.project);
-    const databaseProblem = preview ? null : databaseIsolationProblem(project);
+    const databaseProblem = preview || kind === "combined" ? null : databaseIsolationProblem(project);
     if (databaseProblem) throw new Error(databaseProblem);
     let criteria = iteration ? iteration.criteriaSnapshot ?? undefined : latestAcceptanceSnapshot(this.get(ticketId));
     if (kind === "functional" && !iteration) criteria = preview ? undefined : this.freshFunctionalSnapshot(ticket);
     if (frozenCriteria) criteria = frozenCriteria;
+    if (kind === "combined") criteria = undefined;
     const source = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
     if (iteration && (!source || source.configFingerprint !== configFingerprint(project) || sourceFingerprint(ticket) !== fingerprint([iteration.originalTicket.title, iteration.originalTicket.description, iteration.originalTicket.prdMarkdown]))) throw new Error("The ticket or validation configuration changed during the quality iteration.");
     if (kind === "behavior" && !criteria) throw new Error("Define acceptance criteria before starting behavioral validation.");
@@ -751,6 +757,18 @@ export class QualityManager {
       if (!this.dependencies.system.dryRun && revision.commitSha !== preview.revision) throw new Error(PREVIEW_STALE_MESSAGE);
       revision = { ...revision, commitSha: preview.revision, fingerprint: preview.revision };
     }
+    else if (kind === "combined") {
+      if (ticket.column !== "done" || !ticket.prUrl || ticket.slotId !== null || ticket.testing) throw new Error("Combined verification requires a completed feature with a pull request and no active workspace.");
+      const prUrl = ticket.prUrl;
+      revision = await this.repoMutex.run(project.repoPath, async () => {
+        const head = await this.dependencies.system.readPullRequestHead(project.repoPath, prUrl, project.vcsProvider);
+        if (!head.ok || !head.commitSha) throw new Error("The pull request head could not be resolved.");
+        await this.dependencies.system.fetch(project.repoPath, head.commitSha);
+        const captured = await this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, revision: head.commitSha });
+        if (!this.dependencies.system.dryRun && (!captured.clean || captured.commitSha !== head.commitSha)) throw new Error("The captured revision does not match the pull request head.");
+        return this.dependencies.system.dryRun ? { ...captured, commitSha: head.commitSha, fingerprint: head.commitSha } : captured;
+      });
+    }
     else if (sourcePath) revision = await this.repoMutex.run(project.repoPath, () => this.dependencies.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath, ...(iteration?.headBranch ? { branch: iteration.headBranch } : {}) }));
     else revision = await this.revision(ticket, true);
     if (expectedRevision && (!revision.clean || revision.commitSha !== expectedRevision)) throw new Error("The autonomous revision changed before independent verification.");
@@ -760,9 +778,13 @@ export class QualityManager {
     if (iteration?.mode === "correction" && (!revision.clean || revision.commitSha !== iteration.resultRevision)) throw new Error("The corrected revision changed before independent verification started.");
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     let selectedMode = criteria?.mode ?? (kind === "checks" ? "repository" : null);
-    if (kind === "functional") selectedMode = "browser";
+    if (kind === "functional" || kind === "combined") selectedMode = "browser";
     const run = this.dependencies.store.createQualityRun({ ticketId, criteriaSnapshotId: criteria?.id ?? null, mode: selectedMode, phase: null, failurePhase: null, kind, revision: revision.commitSha, fingerprint: revision.fingerprint, configFingerprint: configFingerprint(project), status: "queued", provider, simulated: this.dependencies.system.dryRun, evidenceAccepted: false, startedAt: Date.now(), completedAt: null, environment: null, cleanupStatus: "pending", error: null, ...(preview ? { preview: qualityPreviewBindingSchema.parse(preview) } : {}) }, iteration?.id);
     const controller = new AbortController();
+    if (kind === "combined") {
+      run.verification = pendingVerification(sourceFingerprint(ticket), latestAcceptanceSnapshot(this.get(ticket.id))?.id ?? null);
+      this.update(run.id, { verification: run.verification });
+    }
     if (iteration) this.dependencies.store.updateQualityIteration(iteration.id, { status: "verifying", resultRunId: run.id, resultRevision: run.revision });
     const settleRetainedSlot = iteration?.mode === "recovery" && this.parkedCorrection(ticket, iteration.sourceRunId, this.get(ticketId)) !== undefined;
     const completion = this.execute(run, ticket, project, criteria, controller.signal, iteration, preview).finally(async () => {
@@ -788,6 +810,19 @@ export class QualityManager {
   }
 
   private async execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget): Promise<void> {
+    if (run.kind === "combined") {
+      const execution = resolveExecution("quality-validator", { orchestrator: run.provider ?? ticket.orchestrator, model: ticket.model, effort: ticket.effort, codexModel: ticket.codexModel, codexEffort: ticket.codexEffort, codexFast: ticket.codexFast }, { model: MODELS.triage, effort: MODELS.triageEffort });
+      const acceptance = this.get(ticket.id).criteriaSnapshots.find((snapshot) => snapshot.id === run.verification?.acceptanceSnapshotId);
+      await executeCombinedQuality({ run, ticket, project, acceptance, system: this.dependencies.system, store: this.dependencies.store, repoMutex: this.repoMutex, execution, signal, artifactDirectory: join(this.dependencies.artifactDirectory ?? join(tmpdir(), "kanban-quality-artifacts"), run.id), environmentVariables: (environment) => environmentFor(environment, project), waitForHealth: (environment, service) => this.waitForHealth(environment, project, service, signal), update: (patch) => this.update(run.id, patch), assertCurrent: async () => {
+        const current = this.ticket(ticket.id);
+        const currentProject = getProject(ticket.project);
+        if (current.project !== ticket.project || current.prUrl !== ticket.prUrl || current.column !== "done" || current.testing || current.slotId !== null || sourceFingerprint(current) !== sourceFingerprint(ticket) || configFingerprint(currentProject) !== run.configFingerprint || currentProject.repoPath !== project.repoPath || currentProject.vcsProvider !== project.vcsProvider || (latestAcceptanceSnapshot(this.get(ticket.id))?.id ?? null) !== (run.verification?.acceptanceSnapshotId ?? null)) throw new Error("The ticket, acceptance criteria or validation configuration changed during combined verification.");
+        if (!ticket.prUrl) throw new Error("Pull request is missing.");
+        const head = await this.dependencies.system.readPullRequestHead(project.repoPath, ticket.prUrl, project.vcsProvider);
+        if (!head.ok || !this.dependencies.system.dryRun && head.commitSha !== run.revision) throw new Error("The pull request head changed during combined verification.");
+      } });
+      return;
+    }
     const options: ValidationWorkspaceOptions = { ticketId: ticket.id, runId: run.id, repoPath: project.repoPath, commitSha: run.revision };
     let environment: QualityEnvironment | null = null;
     let service: ValidationServiceHandle | null = null;
@@ -1092,12 +1127,21 @@ export class QualityManager {
     const project = getProject(ticket.project);
     const quality = this.get(ticketId);
     const snapshot = latestAcceptanceSnapshot(quality);
-    const localRuns = quality.runs.filter((run) => !run.preview);
+    const localRuns = quality.runs.filter((run) => !run.preview && run.kind !== "combined");
     const enabled = ticket.kind === "feature" && (project.validation?.enabled === true || localRuns.length > 0 || !!snapshot);
     const reservations: string[] = [];
     const requiredCriteria = snapshot?.criteria.filter((criterion) => criterion.required).map((criterion) => criterion.id) ?? [];
     const verifiedCriteria: string[] = [];
     const currentRunIds: string[] = [];
+    if (ticket.prUrl) {
+      const combined = quality.runs.filter((run) => run.kind === "combined");
+      if (combined.length > 0) {
+        try {
+          const head = await this.dependencies.system.readPullRequestHead(project.repoPath, ticket.prUrl, project.vcsProvider);
+          if (head.ok) currentRunIds.push(...combined.filter((run) => run.revision === head.commitSha && run.configFingerprint === configFingerprint(project) && run.verification?.sourceFingerprint === sourceFingerprint(ticket) && (run.verification.acceptanceSnapshotId ?? null) === (snapshot?.id ?? null)).map((run) => run.id));
+        } catch { /* A failed head lookup cannot establish current evidence. */ }
+      }
+    }
     let stale = false;
     if (enabled) {
       let current: ValidationRevision | null = null;
@@ -1202,7 +1246,7 @@ export class QualityManager {
     const project = getProject(ticket.project);
     const slot = ticket.slotId === null ? null : this.dependencies.store.getSlot(ticket.slotId);
     const sourcePath = slot?.ticketId === ticket.id ? join(SLOTS_ROOT, `slot-${slot.id}`) : undefined;
-    const recorded = this.get(ticket.id).runs.filter((run) => !run.preview).at(-1)?.revision;
+    const recorded = this.get(ticket.id).runs.filter((run) => !run.preview && run.kind !== "combined").at(-1)?.revision;
     const key = fingerprint([project.repoPath, ticket.branch, recorded]);
     const cached = this.revisions.get(ticket.id);
     if (!sourcePath && !refresh && cached?.key === key && Date.now() - cached.at < REVISION_CACHE_MS) return cached.revision;

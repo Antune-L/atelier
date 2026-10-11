@@ -195,6 +195,8 @@ export const api = {
     request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
   testTicketFeature: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
     request(`${ticketQualityPath(id)}/functional`, { method: "POST", body: JSON.stringify({ provider }) }),
+  verifyCombinedQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
+    request(`${ticketQualityPath(id)}/combined`, { method: "POST", body: JSON.stringify({ provider }) }),
   startQualityIteration: (id: string, input: StartQualityIterationInput): Promise<{ iteration: QualityIteration }> =>
     request(`${ticketQualityPath(id)}/iterations`, { method: "POST", body: JSON.stringify(input) }),
   createQualityFollowUp: async (id: string, input: CreateQualityFollowUpInput): Promise<QualityFollowUpResponse> =>

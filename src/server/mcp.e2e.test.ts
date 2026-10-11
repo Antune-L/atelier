@@ -308,8 +308,16 @@ test("an official MCP client lists, creates idempotently, starts, and updates RE
     const createNotification = await createNotificationPromise;
     expect(createNotification.column).toBe("todo");
 
+    const freshTickets = z.array(ticketSchema).parse(await (await fetch(`${baseUrl}/api/tickets`)).json());
+    expect(freshTickets.find((ticket) => ticket.id === created.ticket.id)).toMatchObject({ triageStatus: "done", triageVerdict: "needs_info" });
+    const fixtureDatabase = new Database(join(dataRoot, "kanban.db"));
+    fixtureDatabase.query("UPDATE tickets SET triage_report = 'Preserved feasibility report' WHERE id = ?").run(created.ticket.id);
+    fixtureDatabase.close();
+
     const replayed = createResultSchema.parse(structuredContent(await client.callTool(createCall)));
     expect(replayed).toMatchObject({ created: false, ticket: { id: created.ticket.id } });
+    const replayTickets = z.array(ticketSchema).parse(await (await fetch(`${baseUrl}/api/tickets`)).json());
+    expect(replayTickets.find((ticket) => ticket.id === created.ticket.id)?.triageReport).toBe("Preserved feasibility report");
 
     const conflict = await client.callTool({
       ...createCall,
@@ -518,7 +526,7 @@ test("update_ticket applies every option partially, broadcasts it, and preserves
       verifyFeature: true,
       column: "todo",
       stage: null,
-      triageStatus: "none",
+      triageStatus: "done",
     },
   });
 
@@ -594,7 +602,7 @@ test("update_ticket applies every option partially, broadcasts it, and preserves
       feasibilityContext: true,
       column: "todo",
       stage: null,
-      triageStatus: "none",
+      triageStatus: "done",
     });
     expect(await updateNotification).toMatchObject({
       id: created.ticket.id,

@@ -1,8 +1,8 @@
 import type { Database } from "bun:sqlite";
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { initProjectRegistry } from "../config.ts";
+import { DEFAULT_MODELS, initProjectRegistry, MODELS } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
@@ -55,7 +55,52 @@ afterAll(() => {
 });
 
 describe("groupFeasibilityTickets", () => {
-  test("batches only tickets sharing project, base branch and pinned provider", () => {
+  let previousModels = { ...MODELS };
+
+  beforeEach(() => {
+    previousModels = { ...MODELS };
+    Object.assign(MODELS, DEFAULT_MODELS);
+  });
+
+  afterEach(() => {
+    Object.assign(MODELS, previousModels);
+  });
+
+  test("feasibility engine overrides the orchestrator and preserves provider-specific study models", () => {
+    const tickets = [
+      makeTicket({ id: "claude-default", project: "project-a" }),
+      makeTicket({ id: "claude-override", project: "project-a", orchestrator: "codex", feasibilityEngine: "claude" }),
+      makeTicket({ id: "codex-default", project: "project-a", orchestrator: "codex" }),
+      makeTicket({ id: "codex-override", project: "project-a", feasibilityEngine: "codex" }),
+    ];
+    const result = groupFeasibilityTickets(tickets, (_ticket, project) => project.baseBranch);
+    expect(result.groups).toHaveLength(2);
+    expect(result.groups.find((group) => group.execution.provider === "claude")).toMatchObject({
+      ticketIds: ["claude-default", "claude-override"],
+      execution: { provider: "claude", model: "sonnet", effort: "low" },
+    });
+    expect(result.groups.find((group) => group.execution.provider === "codex")).toMatchObject({
+      ticketIds: ["codex-default", "codex-override"],
+      execution: { provider: "codex", model: "gpt-6.1-sol", effort: "medium" },
+    });
+  });
+
+  test("batches Claude tickets using configured study defaults instead of implementation overrides", () => {
+    MODELS.triage = "haiku";
+    MODELS.triageEffort = "high";
+    const result = groupFeasibilityTickets([
+      makeTicket({ id: "configured-default", project: "project-a", model: "opus", effort: "medium" }),
+      makeTicket({ id: "configured-override", project: "project-a", orchestrator: "codex", feasibilityEngine: "claude" }),
+    ], (_ticket, project) => project.baseBranch);
+    expect(result.invalidTicketIds).toEqual([]);
+    expect(result.groups).toHaveLength(1);
+    expect(result.groups[0]).toMatchObject({
+      ticketIds: ["configured-default", "configured-override"],
+      execution: { provider: "claude", model: "haiku", effort: "high", serviceTier: "default" },
+    });
+  });
+
+  test("batches only tickets sharing project, base branch and selected provider", () => {
     const tickets = [
       makeTicket({ id: "a-1", project: "project-a" }),
       makeTicket({ id: "a-2", project: "project-a" }),

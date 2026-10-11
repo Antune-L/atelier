@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
-import { MODELS } from "../config.ts";
+import { DEFAULT_MODELS, MODELS } from "../config.ts";
+import { createDatabase } from "../db/schema.ts";
+import { Store } from "../db/store.ts";
 import { makeTicket } from "../testing/fixtures.ts";
 
 import { assertExecutionAvailable, resolveExecution, resolveFeasibilityExecution, resolveTicketExecution } from "./executionConfig.ts";
@@ -88,6 +90,17 @@ describe("resolveTicketExecution", () => {
 });
 
 describe("resolveFeasibilityExecution", () => {
+  let previousModels = { ...MODELS };
+
+  beforeEach(() => {
+    previousModels = { ...MODELS };
+    Object.assign(MODELS, DEFAULT_MODELS);
+  });
+
+  afterEach(() => {
+    Object.assign(MODELS, previousModels);
+  });
+
   test("follows the ticket orchestrator on its pinned knobs when no provider is chosen", () => {
     const ticket = makeTicket({ feasibilityEngine: null, orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "max" });
     expect(resolveFeasibilityExecution(ticket, "feasibility")).toEqual({
@@ -99,19 +112,55 @@ describe("resolveFeasibilityExecution", () => {
     });
   });
 
-  test("pins Opus medium on Claude regardless of the ticket orchestrator", () => {
-    const ticket = makeTicket({ feasibilityEngine: "claude", orchestrator: "codex", codexModel: "gpt-6-astra", codexEffort: "max" });
-    expect(resolveFeasibilityExecution(ticket, "triage")).toEqual({
-      provider: "claude",
-      model: "opus",
-      effort: "medium",
-      serviceTier: "default",
-      role: "triage",
-    });
+  test("uses Sonnet low by default for Claude regardless of ticket implementation settings", () => {
+    for (const feasibilityEngine of [null, "claude"] satisfies (null | "claude")[]) {
+      const ticket = makeTicket({ feasibilityEngine, orchestrator: "claude", model: "opus", effort: "high" });
+      for (const role of ["feasibility", "triage"] satisfies ("feasibility" | "triage")[]) {
+        expect(resolveFeasibilityExecution(ticket, role)).toEqual({
+          provider: "claude",
+          model: "sonnet",
+          effort: "low",
+          serviceTier: "default",
+          role,
+        });
+      }
+    }
+  });
+
+  test("uses persisted Claude study settings for both roles and explicit provider selection", () => {
+    const db = createDatabase(":memory:");
+    try {
+      const store = new Store(db);
+      store.updateAppSettings({ triageModel: "haiku", triageEffort: "high" });
+      expect(store.getAppSettings()).toMatchObject({ triageModel: "haiku", triageEffort: "high" });
+      for (const orchestrator of ["claude", "codex"] satisfies ("claude" | "codex")[]) {
+        const ticket = makeTicket({
+          feasibilityEngine: orchestrator === "codex" ? "claude" : null,
+          orchestrator,
+          model: "opus",
+          effort: "medium",
+          codexModel: "gpt-6-astra",
+          codexEffort: "max",
+          codexFast: true,
+        });
+        for (const role of ["feasibility", "triage"] satisfies ("feasibility" | "triage")[]) {
+          expect(resolveFeasibilityExecution(ticket, role)).toEqual({
+            provider: "claude", model: "haiku", effort: "high", serviceTier: "default", role,
+          });
+        }
+      }
+    } finally {
+      db.close();
+    }
   });
 
   test("pins Sol medium on Codex regardless of the ticket orchestrator", () => {
-    const ticket = makeTicket({ feasibilityEngine: "codex", orchestrator: "claude", model: "sonnet", effort: "high" });
+    MODELS.triage = "haiku";
+    MODELS.triageEffort = "high";
+    MODELS.codexModel = "gpt-6-astra";
+    MODELS.codexEffort = "max";
+    MODELS.codexFast = true;
+    const ticket = makeTicket({ feasibilityEngine: "codex", orchestrator: "claude", model: "sonnet", effort: "high", codexFast: true });
     expect(resolveFeasibilityExecution(ticket, "triage")).toEqual({
       provider: "codex",
       model: "gpt-6.1-sol",

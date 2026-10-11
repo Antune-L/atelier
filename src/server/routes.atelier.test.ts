@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -102,8 +102,41 @@ function setupWith<System extends FakeSystemAdapter>(system: System) {
     headers: { "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }));
-  return { store, system, sessionHub, request };
+  return { store, system, sessionHub, request, app, feasibility, slots };
 }
+
+test("fresh parked REST cards start feasibility while immediate creation and import opt-out do not", async () => {
+  const { app, feasibility, slots } = setup();
+  const analysis = spyOn(feasibility, "start").mockResolvedValue(undefined);
+  const implementation = spyOn(slots, "startTicket").mockResolvedValue(undefined);
+  const post = (path: string, body: unknown) => app.handle(new Request(`http://localhost/api${path}`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }));
+  try {
+    const options = { project: FIXTURE_PROJECT_KEY, title: "Fresh card", description: "Requirements", orchestrator: "codex", implementer: "codex", feasibilityEngine: "claude" };
+    const parked = ticketSchema.parse(await (await post("/tickets", { ...options, start: false })).json());
+    expect(parked).toMatchObject({ column: "todo", stage: null, feasibilityEngine: "claude" });
+    expect(analysis.mock.calls).toEqual([[[parked.id], FIXTURE_PROJECT_KEY]]);
+    expect((await post("/tickets", { ...options, start: true })).status).toBe(HTTP_OK);
+    const blocked = ticketSchema.parse(await (await post("/tickets", { ...options, start: true, dependsOn: parked.id })).json());
+    expect(blocked).toMatchObject({ column: "todo", stage: null, dependsOn: parked.id });
+    expect(implementation).toHaveBeenCalledTimes(1);
+    expect((await post("/tickets", { ...options, project: "missing", start: false })).status).toBe(HTTP_BAD_REQUEST);
+    const rows = [{ title: "One", description: "First" }, { title: "Two", description: "Second" }];
+    expect((await post("/tickets/import", { project: FIXTURE_PROJECT_KEY, rows, runFeasibility: false })).status).toBe(HTTP_OK);
+    expect(analysis).toHaveBeenCalledTimes(1);
+    const imported = z.object({ created: z.array(ticketSchema), feasibilityStarted: z.boolean() }).parse(await (await post("/tickets/import", { project: FIXTURE_PROJECT_KEY, rows, runFeasibility: true })).json());
+    expect(imported.feasibilityStarted).toBe(true);
+    expect(analysis.mock.calls[1]).toEqual([imported.created.map((ticket) => ticket.id), FIXTURE_PROJECT_KEY]);
+    expect(analysis).toHaveBeenCalledTimes(2);
+    analysis.mockRejectedValueOnce(new Error("Background startup failed"));
+    expect((await post("/tickets", { ...options, start: false })).status).toBe(HTTP_OK);
+    await Bun.sleep(0);
+  } finally {
+    analysis.mockRestore();
+    implementation.mockRestore();
+  }
+});
 
 function loadTemplate(): PrdDocument {
   return prdDocumentSchema.parse(JSON.parse(readFileSync(TEMPLATE_PATH, "utf8")));
@@ -216,7 +249,9 @@ describe("Atelier routes", () => {
   });
 
   test("PRD review, exports and cards chained in tasks mode", async () => {
-    const { store, request } = setup();
+    const { store, request, feasibility, slots } = setup();
+    const analysis = spyOn(feasibility, "start");
+    const implementation = spyOn(slots, "startTicket").mockResolvedValue(undefined);
     const conversation = conversationSchema.parse(await (await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY, orchestrator: "codex" })).json());
     const record = store.createPrdDocument({ conversationId: conversation.id, document: loadTemplate() });
 
@@ -255,11 +290,18 @@ describe("Atelier routes", () => {
     expect(second.prdMarkdown).toContain("Saved catalogue searches");
     expect(second.sourcePrdId).toBe(record.id);
     expect(second.column).toBe("todo");
+    expect(analysis.mock.calls).toEqual([[[first.id], FIXTURE_PROJECT_KEY], [[second.id], FIXTURE_PROJECT_KEY]]);
     expect(store.getConversation(conversation.id)?.status).toBe("cards_created");
 
     const single = ticketsResponseSchema.parse(await (await request("POST", `/prd/${record.id}/tickets`, { split: "single", selection: ["single"] })).json());
     expect(single.tickets.map((ticket) => ticket.title)).toEqual(["Saved catalogue searches"]);
     const axes = ticketsResponseSchema.parse(await (await request("POST", `/prd/${record.id}/tickets`, { split: "axes", selection: ["A2"] })).json());
     expect(axes.tickets.map((ticket) => [ticket.title, ticket.sourcePrdTask])).toEqual([["A2 — Restore a search accessibly", null]]);
+    const immediate = ticketsResponseSchema.parse(await (await request("POST", `/prd/${record.id}/tickets`, { split: "tasks", selection: ["T1", "T2"], start: true })).json());
+    expect(immediate.tickets.map((ticket) => ticket.column)).toEqual(["implementing", "todo"]);
+    expect(analysis).toHaveBeenCalledTimes(4);
+    expect(implementation).toHaveBeenCalledTimes(1);
+    analysis.mockRestore();
+    implementation.mockRestore();
   });
 });

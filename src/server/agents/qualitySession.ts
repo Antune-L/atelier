@@ -7,6 +7,7 @@ import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
 import type { QualityPermissionBlockReason, QualityValidationMode } from "../../shared/quality.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { CODEX_VALIDATOR_READ_ALLOW } from "../system/codexCommandPolicy.ts";
+import { redactSecrets } from "../system/secretRedaction.ts";
 
 import type { ResolvedExecution } from "./executionConfig.ts";
 
@@ -75,12 +76,7 @@ export interface QualitySessionOptions {
 }
 
 export function qualityErrorMessage(message: string): string {
-  return message
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
-    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[redacted]")
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|authorization)["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, "$1[redacted]")
-    .replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1[redacted]@")
-    .slice(0, QUALITY_ERROR_LIMIT);
+  return redactSecrets(message).slice(0, QUALITY_ERROR_LIMIT);
 }
 
 function toolOutputText(output: unknown): string {

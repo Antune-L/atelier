@@ -305,6 +305,7 @@ export interface NewProject {
   worktreeTeardownScript?: string;
   scripts?: { typecheck?: string; lint?: string; test?: string };
   worktreePorts?: { label: string; base: number }[];
+  githubAccount?: string | null;
 }
 
 export interface ProjectPatch {
@@ -326,6 +327,7 @@ export interface ProjectPatch {
   worktreePorts?: { label: string; base: number }[] | null;
   hidden?: boolean;
   sortOrder?: number;
+  githubAccount?: string | null;
 }
 
 export interface NewReview {
@@ -1928,8 +1930,8 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
     this.db
       .query(
-        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider, validation_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider, validation_json, github_account)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         key,
@@ -1954,6 +1956,7 @@ export class Store {
         now,
         data.vcsProvider ?? DEFAULT_VCS_PROVIDER,
         data.validation ? JSON.stringify(projectValidationSchema.parse(data.validation)) : null,
+        data.githubAccount?.trim().toLowerCase() || null,
       );
     if (data.group?.trim()) {
       this.db.query("INSERT OR IGNORE INTO project_groups (name, color) VALUES (?, ?)")
@@ -1991,6 +1994,7 @@ export class Store {
     }
     if (patch.hidden !== undefined) builder.set("hidden", patch.hidden ? 1 : 0);
     if (patch.sortOrder !== undefined) builder.set("sort_order", patch.sortOrder);
+    if (patch.githubAccount !== undefined) builder.set("github_account", patch.githubAccount?.trim().toLowerCase() || null);
     builder.set("updated_at", Date.now());
     builder.runWhere(this.db, "projects", "key", key);
     if (patch.group?.trim()) {
@@ -1999,7 +2003,7 @@ export class Store {
     }
     const project = this.getProjectRow(key);
     if (!project) throw new Error(`updateProject: projet ${key} introuvable`);
-    if (previous?.repoPath !== project.repoPath || previous.vcsProvider !== project.vcsProvider) {
+    if (previous?.repoPath !== project.repoPath || previous.vcsProvider !== project.vcsProvider || previous.githubAccount !== project.githubAccount) {
       this.db.query("DELETE FROM pr_notification_sync WHERE project = ?").run(key);
     }
     return project;

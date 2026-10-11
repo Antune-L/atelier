@@ -672,6 +672,15 @@ test("workspace sessions install a PreToolUse guard that denies no-verify", asyn
     .parse(JSON.parse(await new Response(subagent.stdout).text()));
   expect(subagentResult.hookSpecificOutput.permissionDecision).toBe("deny");
   expect(await subagent.exited).toBe(0);
+
+  const ghAuth = Bun.spawn([hookPath], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  ghAuth.stdin.write(JSON.stringify({ tool_name: "Bash", tool_input: { command: "cd repo && gh auth token" } }));
+  ghAuth.stdin.end();
+  const ghAuthResult = z
+    .object({ hookSpecificOutput: z.object({ permissionDecision: z.literal("deny"), permissionDecisionReason: z.string() }) })
+    .parse(JSON.parse(await new Response(ghAuth.stdout).text()));
+  expect(ghAuthResult.hookSpecificOutput.permissionDecisionReason).toContain("gh auth");
+  expect(await ghAuth.exited).toBe(0);
   await session.close();
 });
 

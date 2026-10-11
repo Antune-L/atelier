@@ -10,9 +10,11 @@
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type { ReviewRequestSnapshot } from "./vcs/types.ts";
+import type { GithubAccountRegistry } from "./github/accounts.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 
@@ -411,6 +413,16 @@ export interface SystemAdapter {
    * refs, origin URL, lockfile) to prefill it. Throws "dossier introuvable" when it is not a directory.
    */
   inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
+
+  // ---- GitHub accounts and clones (« Depuis GitHub » project mode) ----
+  /** Registered GitHub accounts (one GH_CONFIG_DIR each); the fake keeps them in memory. */
+  githubAccounts(): GithubAccountRegistry;
+  /** Every owner/collaborator/organization repository of the account (null = machine account). Throws naming the account. */
+  listGithubRepos(account: string | null): Promise<GithubRepoSummary[]>;
+  /** HTTPS clone into `<clone root>/<login|_machine>/<owner>/<repo>`, reused when already cloned. The fake creates nothing. */
+  cloneGithubRepo(opts: { source: string; account: string | null }): Promise<CloneResult>;
+  /** Whether the `gh` CLI is installed (drives the « Depuis GitHub » mode). */
+  checkGithubAvailable(): Promise<boolean>;
 
   // ---- branch listing (base branch picker) ----
   /** Remote branch names of the project repo (`git ls-remote --heads origin`). Throws on CLI failure. */

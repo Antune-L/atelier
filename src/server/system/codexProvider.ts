@@ -46,6 +46,8 @@ import {
   type CodexCommandHook,
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
+import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
+import { GH_AUTH_DENIAL_REASON, GH_AUTH_PATTERN_SOURCE } from "./github/ghAuthGuard.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
@@ -479,6 +481,15 @@ function extractCommandScript(): string {
   return `command=$(printf '%s' "$input" | ${shellQuote(process.execPath)} -e ${shellQuote(extractor)})\n`;
 }
 
+/** Same `gh auth` matcher as the Claude PreToolUse hook, evaluated on the extracted command. */
+function ghAuthGuardScript(): string {
+  const matcher = `const source=${JSON.stringify(GH_AUTH_PATTERN_SOURCE)};process.exit(new RegExp(source).test(await Bun.stdin.text())?0:1)`;
+  return (
+    extractCommandScript() +
+    `if printf '%s' "$command" | ${shellQuote(process.execPath)} -e ${shellQuote(matcher)}; then\n  ${shellDeny(GH_AUTH_DENIAL_REASON)}\nfi\n`
+  );
+}
+
 function typecheckGuardScript(cwd: string): string {
   return (
     extractCommandScript() +
@@ -533,7 +544,7 @@ case "$input" in
     ${shellDeny(NO_VERIFY_DENIAL_REASON)}
     ;;
 esac
-policy=$(printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(policyPath)})
+${ghAuthGuardScript()}policy=$(printf '%s' "$input" | ${shellQuote(process.execPath)} ${shellQuote(policyPath)})
 case "$policy" in
   allow) ;;
   scout) ${shellDeny(CODEX_SCOUT_DENIAL_REASON)} ;;
@@ -1212,7 +1223,8 @@ function createCodexAgentSession(
     try {
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
       preparedHook = prepareNoVerifyHook(options);
-      const environment = { ...(dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd), ...options.environment };
+      // An attached project's GH_CONFIG_DIR must not be overridden by an ambient GH_TOKEN/GITHUB_TOKEN.
+      const environment = scrubAmbientGithubTokens({ ...(dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd), ...options.environment });
       // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;

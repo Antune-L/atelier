@@ -23,6 +23,7 @@ import { availableSkillProviders } from "@shared/skills";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
 import { CoolifySettings } from "@/components/CoolifySettings";
+import { GithubAccountsSettings } from "@/components/GithubAccountsSettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SkillsStatusList } from "@/components/SkillsStatusList";
@@ -69,6 +70,7 @@ type SettingsSectionId =
   | "providers"
   | "skills"
   | "coolify"
+  | "github"
   | "mcp";
 
 interface SettingsSection {
@@ -135,6 +137,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "Skills",
     group: "Connexions",
     keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection"],
+  },
+  {
+    id: "github",
+    label: "Comptes GitHub",
+    group: "Connexions",
+    keywords: ["github", "compte", "token", "jeton", "gh", "organisation", "sso", "clone"],
   },
   {
     id: "mcp",
@@ -295,6 +303,7 @@ function SettingsSectionPanel({
   if (sectionId === "providers") return <ProvidersSettings />;
   if (sectionId === "skills") return <SkillsSettings />;
   if (sectionId === "coolify") return <CoolifySettings />;
+  if (sectionId === "github") return <GithubAccountsSettings />;
   return <McpSettings />;
 }
 

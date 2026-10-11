@@ -5,6 +5,7 @@ import { transcriptUpdateSchema } from "./transcript.ts";
 
 import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import type { ResearchOptionKey } from "./constants.ts";
+import { githubLoginSchema } from "./github.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
 import { SKILL_TIERS } from "./skills.ts";
@@ -588,6 +589,8 @@ export const managedProjectSchema = z.object({
   group: z.string().optional(),
   hidden: z.boolean(),
   sortOrder: z.number().int(),
+  /** GitHub account login the project runs under; null = the machine's default gh account. */
+  githubAccount: z.string().nullable(),
 });
 export type ManagedProject = z.infer<typeof managedProjectSchema>;
 
@@ -602,6 +605,7 @@ export const createProjectSchema = z.object({
   validation: projectValidationSchema.optional(),
   color: z.string().optional(),
   group: z.string().transform((value) => value.trim() || undefined).optional(),
+  githubAccount: githubLoginSchema.nullable().optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 
@@ -618,6 +622,8 @@ export const updateProjectSchema = z.object({
   group: z.union([z.string().transform((value) => value.trim() || null), z.null()]).optional(),
   hidden: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
+  /** null detaches the project (machine default account); omitted leaves it unchanged. */
+  githubAccount: githubLoginSchema.nullable().optional(),
 });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 
@@ -1001,6 +1007,8 @@ export const capabilitiesSchema = z.object({
   canPickFolder: z.boolean(),
   /** Cloud host: only PRs are delivered (no auto-merge, direct push or autonomous merge); manual merge stays allowed. */
   prOnly: z.boolean(),
+  /** The `gh` CLI is available, enabling the « Depuis GitHub » project mode. Never carries a login or token. */
+  githubAvailable: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

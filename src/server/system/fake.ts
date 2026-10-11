@@ -5,12 +5,16 @@ import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from ".
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
+import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
 import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { createFakeCoolifyTransport } from "./coolifyClient.ts";
+import { FakeGithubAccountRegistry } from "./github/accounts.ts";
+import type { GithubAccountRegistry } from "./github/accounts.ts";
+import { plannedClonePath } from "./github/clone.ts";
 import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
@@ -47,6 +51,8 @@ import { FakeVcsClient } from "./vcs/fake.ts";
 import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
+/** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
+const FAKE_GITHUB_REPOS = ["Antune-L/atelier", "acme-org/api", "acme-org/web"];
 const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
 const FAKE_CONTEXT_WINDOW = 200_000;
 const FAKE_CONTEXT_BASE_TOKENS = 12_000;
@@ -537,6 +543,31 @@ export class FakeSystemAdapter implements SystemAdapter {
   async listBranches(repoPath: string): Promise<string[]> {
     this.log("listBranches", { repoPath });
     return ["main", "develop", "staging"];
+  }
+
+  private readonly fakeGithubAccounts = new FakeGithubAccountRegistry();
+
+  githubAccounts(): GithubAccountRegistry {
+    return this.fakeGithubAccounts;
+  }
+
+  async listGithubRepos(account: string | null): Promise<GithubRepoSummary[]> {
+    this.log("listGithubRepos", { account });
+    return FAKE_GITHUB_REPOS.map((fullName) => {
+      const [owner = "", name = ""] = fullName.split("/");
+      return { fullName, owner, name, private: owner !== "Antune-L", htmlUrl: `https://github.com/${fullName}` };
+    });
+  }
+
+  async cloneGithubRepo(opts: { source: string; account: string | null }): Promise<CloneResult> {
+    // Same validation as the real clone, but nothing is created: the planned path is returned as is.
+    const planned = plannedClonePath(opts.source, opts.account);
+    this.log("cloneGithubRepo", { ...opts, repoPath: planned.repoPath });
+    return planned;
+  }
+
+  async checkGithubAvailable(): Promise<boolean> {
+    return true;
   }
 
   async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {

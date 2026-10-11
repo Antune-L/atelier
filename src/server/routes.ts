@@ -65,6 +65,12 @@ import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
+import type { GithubAccountRegistry } from "./system/github/accounts.ts";
+import { GithubAccountError, normalizeGithubLogin } from "./system/github/accountEnv.ts";
+import { CloneConflictError, CloneSourceError, CloneTimeoutError } from "./system/github/clone.ts";
+import { redactSecrets } from "./system/secretRedaction.ts";
+import { addGithubAccountRequestSchema, cloneProjectRequestSchema, githubLoginSchema } from "../shared/github.ts";
+import type { CloneResult, GithubAccountSummary, GithubRepoSummary } from "../shared/github.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -111,6 +117,10 @@ interface PaneReader {
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
   checkClaudeAvailable(): Promise<boolean>;
   checkSkills(): Promise<SkillStatus[]>;
+  githubAccounts(): GithubAccountRegistry;
+  listGithubRepos(account: string | null): Promise<GithubRepoSummary[]>;
+  cloneGithubRepo(opts: { source: string; account: string | null }): Promise<CloneResult>;
+  checkGithubAvailable(): Promise<boolean>;
 }
 
 interface RouteDeps {
@@ -241,6 +251,7 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     vcsProvider: p.vcsProvider,
     hidden: p.hidden ?? false,
     sortOrder: p.sortOrder ?? 0,
+    githubAccount: p.githubAccount ?? null,
     ...(p.group !== undefined ? { group: p.group } : {}),
     ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
     ...(p.validation !== undefined ? { validation: p.validation } : {}),
@@ -251,6 +262,56 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
 function jsonError(set: { status?: number | string }, status: number, message: string): { error: string } {
   set.status = status;
   return { error: message };
+}
+
+const HTTP_GATEWAY_TIMEOUT = 504;
+const AZURE_ACCOUNT_REFUSED_MESSAGE = "Un compte GitHub ne peut pas être rattaché à un projet Azure DevOps.";
+
+/** Labels of the projects attached to `login` (case-insensitive). */
+function projectsAttachedTo(store: Store, login: string): string[] {
+  const normalized = normalizeGithubLogin(login);
+  return store.listProjectKeys().flatMap((key) => {
+    const row = store.getProjectRow(key);
+    return row?.githubAccount !== undefined && normalizeGithubLogin(row.githubAccount) === normalized ? [row.label] : [];
+  });
+}
+
+/** A ticket still running or holding a slot pins its project's account. */
+function hasActiveTickets(store: Store, projectKey: string): boolean {
+  return store.listTickets(false).some((ticket) => ticket.project === projectKey
+    && ((ticket.stage !== null && ACTIVE_STAGES.includes(ticket.stage)) || ticket.stage === "awaiting_answers" || ticket.slotId !== null));
+}
+
+/** Canonical (lowercase) registered login, null for the machine account, or an error message. */
+async function registeredGithubAccount(system: PaneReader, account: string | null): Promise<{ login: string | null } | { error: string }> {
+  if (account === null) return { login: null };
+  const normalized = normalizeGithubLogin(account);
+  const logins = (await system.githubAccounts().logins()).map(normalizeGithubLogin);
+  if (!logins.includes(normalized)) return { error: `Compte GitHub « ${account} » non enregistré : ajoute-le dans les Réglages.` };
+  return { login: normalized };
+}
+
+/** Same inspection as POST /projects/inspect: suggested fields plus an already-registered project. */
+async function inspectProjectFolder(store: Store, system: PaneReader, repoPath: string): Promise<RepoInspection> {
+  const requestedPath = normalizeRepoPath(repoPath);
+  const knownGroups = new Set<string>();
+  let existingProjectKey: string | null = null;
+  for (const key of store.listProjectKeys()) {
+    const row = store.getProjectRow(key);
+    if (!row) continue;
+    if (row.group) knownGroups.add(row.group);
+    if (existingProjectKey === null && normalizeRepoPath(row.repoPath) === requestedPath) existingProjectKey = key;
+  }
+  const inspection = await system.inspectRepo(repoPath, [...knownGroups]);
+  return { ...inspection, existingProjectKey } satisfies RepoInspection;
+}
+
+/** HTTP status of a clone/listing failure; the message is always redacted. */
+function githubFailureStatus(error: unknown): number {
+  if (error instanceof CloneSourceError) return HTTP_BAD_REQUEST;
+  if (error instanceof CloneConflictError) return HTTP_CONFLICT;
+  if (error instanceof CloneTimeoutError) return HTTP_GATEWAY_TIMEOUT;
+  return HTTP_BAD_GATEWAY;
 }
 
 const TRAILING_SLASHES = /\/+$/;
@@ -901,11 +962,15 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!store.setProjectGroupColor(group, color)) return jsonError(set, HTTP_NOT_FOUND, "groupe introuvable");
       return { group, color };
     })
-    .post("/projects", ({ body, set }) => {
+    .post("/projects", async ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, validation, color, group } = parsed.data;
       if (group !== undefined && color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
+      const requestedAccount = parsed.data.githubAccount ?? null;
+      if (requestedAccount !== null && vcsProvider !== "github") return jsonError(set, HTTP_BAD_REQUEST, AZURE_ACCOUNT_REFUSED_MESSAGE);
+      const account = await registeredGithubAccount(deps.system, requestedAccount);
+      if ("error" in account) return jsonError(set, HTTP_BAD_REQUEST, account.error);
       const key = nanoid(PROJECT_KEY_LENGTH);
       const created = store.createProject(key, {
         label,
@@ -919,6 +984,7 @@ export function createApiRoutes(deps: RouteDeps) {
         ...(validation !== undefined ? { validation } : {}),
         ...(color !== undefined ? { color } : {}),
         ...(group !== undefined ? { group } : {}),
+        ...(account.login !== null ? { githubAccount: account.login } : {}),
       });
       set.status = HTTP_CREATED;
       return toManagedProject(key, created);
@@ -926,21 +992,73 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects/inspect", async ({ body, set }) => {
       const parsed = inspectProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { repoPath } = parsed.data;
-      const requestedPath = normalizeRepoPath(repoPath);
-      const knownGroups = new Set<string>();
-      let existingProjectKey: string | null = null;
-      for (const key of store.listProjectKeys()) {
-        const row = store.getProjectRow(key);
-        if (!row) continue;
-        if (row.group) knownGroups.add(row.group);
-        if (existingProjectKey === null && normalizeRepoPath(row.repoPath) === requestedPath) existingProjectKey = key;
-      }
       try {
-        const inspection = await deps.system.inspectRepo(repoPath, [...knownGroups]);
-        return { ...inspection, existingProjectKey } satisfies RepoInspection;
+        return await inspectProjectFolder(store, deps.system, parsed.data.repoPath);
       } catch (error) {
         return jsonError(set, HTTP_BAD_REQUEST, getErrorMessage(error, REPO_INSPECTION_FAILURE_MESSAGE));
+      }
+    })
+    // « Depuis GitHub »: clone (or reuse) the repository under the chosen account, then the same
+    // inspection as a local folder. The created project then records that account.
+    .post("/projects/clone", async ({ body, set }) => {
+      const parsed = cloneProjectRequestSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const account = await registeredGithubAccount(deps.system, parsed.data.account);
+      if ("error" in account) return jsonError(set, HTTP_BAD_REQUEST, account.error);
+      let clone: CloneResult;
+      try {
+        clone = await deps.system.cloneGithubRepo({ source: parsed.data.source, account: account.login });
+      } catch (error) {
+        return jsonError(set, githubFailureStatus(error), redactSecrets(getErrorMessage(error, "Clonage du dépôt GitHub impossible.")));
+      }
+      try {
+        const inspection = await inspectProjectFolder(store, deps.system, clone.repoPath);
+        return { ...clone, inspection, existingProjectKey: inspection.existingProjectKey };
+      } catch (error) {
+        return jsonError(set, HTTP_BAD_REQUEST, getErrorMessage(error, REPO_INSPECTION_FAILURE_MESSAGE));
+      }
+    })
+    .get("/github/accounts", async () => {
+      const statuses = await deps.system.githubAccounts().list();
+      return statuses.map((status): GithubAccountSummary => ({ ...status, projects: projectsAttachedTo(store, status.login) }));
+    })
+    .post("/github/accounts", async ({ body, set }) => {
+      const parsed = addGithubAccountRequestSchema.safeParse(body);
+      // The zod message could echo the submitted value: never surface it for a token.
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "Token GitHub manquant ou invalide.");
+      try {
+        const added = await deps.system.githubAccounts().add(parsed.data.token);
+        set.status = HTTP_CREATED;
+        return added;
+      } catch (error) {
+        const message = getErrorMessage(error, "Ajout du compte GitHub impossible.").split(parsed.data.token).join("[redacted]");
+        return jsonError(set, HTTP_BAD_REQUEST, redactSecrets(message));
+      }
+    })
+    .delete("/github/accounts/:login", async ({ params, set }) => {
+      const login = githubLoginSchema.safeParse(params.login);
+      if (!login.success) return jsonError(set, HTTP_BAD_REQUEST, "Compte GitHub invalide.");
+      const attached = projectsAttachedTo(store, login.data);
+      if (attached.length > 0) {
+        return jsonError(set, HTTP_CONFLICT, `Compte GitHub « ${login.data} » rattaché aux projets : ${attached.join(", ")}. Détache-le de ces projets avant de le retirer.`);
+      }
+      try {
+        await deps.system.githubAccounts().remove(login.data);
+      } catch (error) {
+        return jsonError(set, error instanceof GithubAccountError ? HTTP_NOT_FOUND : HTTP_INTERNAL_ERROR, redactSecrets(getErrorMessage(error, "Retrait du compte impossible.")));
+      }
+      return new Response(null, { status: HTTP_NO_CONTENT });
+    })
+    .get("/github/repos", async ({ query, set }) => {
+      const requested = typeof query.account === "string" && query.account.trim() !== "" ? query.account.trim() : null;
+      const account = await registeredGithubAccount(deps.system, requested);
+      if ("error" in account) return jsonError(set, HTTP_BAD_REQUEST, account.error);
+      try {
+        return await deps.system.listGithubRepos(account.login);
+      } catch (error) {
+        const owner = account.login === null ? "compte par défaut de la machine" : `compte « ${account.login} »`;
+        const message = error instanceof GithubAccountError ? error.message : `Liste des dépôts illisible pour le ${owner}.`;
+        return jsonError(set, HTTP_BAD_GATEWAY, redactSecrets(message));
       }
     })
     .post("/projects/test-connection", async ({ body, set }) => {
@@ -952,13 +1070,26 @@ export function createApiRoutes(deps: RouteDeps) {
         return vcsConnectionFailure(error);
       }
     })
-    .patch("/projects/:key", ({ params, body, set }) => {
+    .patch("/projects/:key", async ({ params, body, set }) => {
       const project = store.getProjectRow(params.key);
       if (!project) return jsonError(set, HTTP_NOT_FOUND, "projet introuvable");
       const parsed = updateProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const resultingGroup = parsed.data.group === undefined ? project.group : parsed.data.group;
       if (resultingGroup && parsed.data.color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
+      const currentAccount = project.githubAccount ?? null;
+      const resultingAccount = parsed.data.githubAccount === undefined ? currentAccount : parsed.data.githubAccount;
+      const resultingProvider = parsed.data.vcsProvider ?? project.vcsProvider;
+      if (resultingAccount !== null && resultingProvider !== "github") return jsonError(set, HTTP_BAD_REQUEST, AZURE_ACCOUNT_REFUSED_MESSAGE);
+      const accountChanged = parsed.data.githubAccount !== undefined
+        && (parsed.data.githubAccount === null ? null : normalizeGithubLogin(parsed.data.githubAccount)) !== (currentAccount === null ? null : normalizeGithubLogin(currentAccount));
+      if (accountChanged) {
+        if (hasActiveTickets(store, params.key)) {
+          return jsonError(set, HTTP_CONFLICT, "Impossible de changer le compte GitHub : le projet a des tickets en cours. Attends leur fin ou arrête-les avant de changer de compte.");
+        }
+        const account = await registeredGithubAccount(deps.system, parsed.data.githubAccount ?? null);
+        if ("error" in account) return jsonError(set, HTTP_BAD_REQUEST, account.error);
+      }
       const updated = store.updateProject(params.key, parsed.data);
       hub.pushPrNotifications();
       // NOTE(ali): WS project broadcast (hub.pushProjects) lands with the projects-frontend ticket;
@@ -1030,6 +1161,7 @@ export function createApiRoutes(deps: RouteDeps) {
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
         canPickFolder: deps.pickFolder != null,
         prOnly: isCloudHost(),
+        githubAvailable: await deps.system.checkGithubAvailable(),
         skills: await deps.system.checkSkills(),
       };
     })

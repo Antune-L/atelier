@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS projects (
   scripts_test TEXT,
   worktree_ports TEXT,
   hidden INTEGER NOT NULL DEFAULT 0,
+  github_account TEXT,
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -548,6 +549,8 @@ const PROJECT_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "vcs_provider", ddl: `ALTER TABLE projects ADD COLUMN vcs_provider TEXT NOT NULL DEFAULT '${DEFAULT_VCS_PROVIDER}'` },
   { column: "hidden", ddl: "ALTER TABLE projects ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0" },
   { column: "group_name", ddl: "ALTER TABLE projects ADD COLUMN group_name TEXT" },
+  // Optional GitHub account login (folder under <dataRoot>/gh-accounts); NULL = machine default gh account.
+  { column: "github_account", ddl: "ALTER TABLE projects ADD COLUMN github_account TEXT" },
 ];
 
 const REVIEW_PASS_MIGRATIONS: { column: string; ddl: string }[] = [

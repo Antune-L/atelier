@@ -11,6 +11,8 @@ import { join } from "node:path";
 
 import { getErrorMessage } from "../shared/errors.ts";
 
+import { redactSecrets } from "./system/secretRedaction.ts";
+
 const LEVEL_ORDER = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 type Level = keyof typeof LEVEL_ORDER;
 
@@ -140,13 +142,15 @@ class ScopedLogger implements Logger {
   private emit(level: Level, message: string, fields?: Record<string, unknown>): void {
     if (LEVEL_ORDER[level] < LEVEL_ORDER[THRESHOLD]) return;
     const iso = new Date().toISOString();
-    const head = `${paint(ANSI.dim, timestamp(iso))} ${paint(ANSI[level], LEVEL_TAG[level])} ${paint(ANSI.dim, `[${this.scope}]`)} ${message}`;
-    const tail = fields && Object.keys(fields).length > 0 ? ` ${serializeFields(fields)}` : "";
+    // Every console and file line is masked here, so a token in an error or a field never persists.
+    const safeMessage = redactSecrets(message);
+    const head = `${paint(ANSI.dim, timestamp(iso))} ${paint(ANSI[level], LEVEL_TAG[level])} ${paint(ANSI.dim, `[${this.scope}]`)} ${safeMessage}`;
+    const tail = fields && Object.keys(fields).length > 0 ? ` ${redactSecrets(serializeFields(fields))}` : "";
     const line = `${head}${tail}`;
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
     else console.log(line);
-    appendToLogFile(`${iso} ${LEVEL_TAG[level]} [${this.scope}] ${message}${tail}`);
+    appendToLogFile(`${iso} ${LEVEL_TAG[level]} [${this.scope}] ${safeMessage}${tail}`);
   }
 
   debug(message: string, fields?: Record<string, unknown>): void {

@@ -5,7 +5,7 @@ import type { AutonomousPlanInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorStack } from "../../shared/errors.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
-import type { WorkerToolName } from "../../shared/schemas.ts";
+import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
   delegateImplementationArgsSchema,
@@ -35,7 +35,7 @@ import type { AgentTurnUsage } from "../system/agentSession.ts";
 
 import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
-import { unreviewedChangesReport } from "./reviewPass.ts";
+import { acceptsReviewLimit, unreviewedChangesReport } from "./reviewPass.ts";
 import type { UnreviewedChanges } from "./reviewPass.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { QualityManager } from "./qualityManager.ts";
@@ -431,7 +431,7 @@ export class AgentCoordinator {
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous validation is unavailable for this ticket." };
     if (this.delegation.hasActiveImplementations(ctx.ticketId)) return { ok: false, result: "Wait for every implementation lot before autonomous validation." };
-    const review = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, "approved", ctx.callId);
+    const review = await this.autonomousReviewGate(ctx, ticket);
     if (!review.ok) return { ok: false, result: review.reason };
     const outcome = await this.autonomousWorkflow.validate(ctx.ticketId);
     return { ok: true, result: JSON.stringify(outcome) };
@@ -447,7 +447,7 @@ export class AgentCoordinator {
     let backgroundStarted = false;
     try {
       if (this.delegation.hasActiveImplementations(ctx.ticketId)) return { ok: false, result: "Wait for every implementation lot before delivery." };
-      const review = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, "approved", ctx.callId);
+      const review = await this.autonomousReviewGate(ctx, ticket);
       if (!review.ok) return { ok: false, result: review.reason };
       const prepared = await this.slots.prepareAutonomousPr(ctx.ticketId, ctx.slotId, parsed.data);
       if (!prepared.ok) return { ok: false, result: prepared.reason };
@@ -465,6 +465,11 @@ export class AgentCoordinator {
     } finally {
       if (!backgroundStarted) this.completingTickets.delete(ctx.ticketId);
     }
+  }
+
+  private autonomousReviewGate(ctx: SessionToolCall, ticket: Ticket): ReturnType<DelegationManager["reviewGate"]> {
+    const atLimit = acceptsReviewLimit(ticket);
+    return this.delegation.reviewGate(ctx.ticketId, ctx.slotId, atLimit ? "approved_or_limit" : "approved", ctx.callId, { acceptChangesAfterBudget: atLimit });
   }
 
   private async continueAutonomousDelivery(ctx: SessionToolCall, prUrl: string): Promise<void> {
@@ -658,10 +663,9 @@ export class AgentCoordinator {
     const requiresApproval = this.delegation.reviewRequiresApproval(ctx.ticketId);
     const readOnlyReview = requiresApproval === false;
     const ticket = this.store.getTicket(ctx.ticketId);
-    const opensFeaturePr = ticket?.kind === "feature" && !ticket.stealth && !ticket.directPush;
     let requirement: "approved" | "approved_or_limit" | "completed" = "approved";
     if (readOnlyReview && !ticket?.autonomous) requirement = "completed";
-    else if (opensFeaturePr && !ticket?.autonomous) requirement = "approved_or_limit";
+    else if (acceptsReviewLimit(ticket)) requirement = "approved_or_limit";
     const reviewGate = await this.delegation.reviewGate(ctx.ticketId, ctx.slotId, requirement, ctx.callId, {
       acceptChangesAfterBudget: requirement === "approved_or_limit",
     });

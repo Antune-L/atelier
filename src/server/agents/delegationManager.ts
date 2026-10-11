@@ -1821,7 +1821,7 @@ export class DelegationManager {
     });
     return {
       ok: false,
-      result: `Budget de passes de review épuisé (${rounds}/${allowed}) : ne relance plus les reviewers. Poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale les findings encore ouverts dans sa description.`,
+      result: `Budget de passes de review épuisé (${rounds}/${allowed}) : ne relance plus les reviewers. Suis l'étape 4 (fixing) de ton contrat pour la suite.`,
     };
   }
 

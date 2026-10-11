@@ -55,6 +55,15 @@ export function allowedReviewPasses(ticket: Pick<Ticket, "argusMultiLoop"> | nul
   return ticket?.argusMultiLoop === true ? MAX_REVIEW_ROUNDS + 1 : MAX_REVIEW_ROUNDS;
 }
 
+/**
+ * Whether delivery may proceed once the review budget is spent, with the remaining findings fixed
+ * without a new pass. Only tickets that end in a pull request a human still merges qualify.
+ */
+export function acceptsReviewLimit(ticket: Pick<Ticket, "kind" | "stealth" | "directPush" | "autonomous" | "autonomousDelivery"> | null): boolean {
+  if (ticket?.kind !== "feature" || ticket.stealth || ticket.directPush) return false;
+  return !ticket.autonomous || ticket.autonomousDelivery === "pr_only";
+}
+
 export interface UnreviewedChanges {
   paths: string[];
   count: number | null;

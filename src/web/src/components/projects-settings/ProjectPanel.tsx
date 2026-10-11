@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { VcsProvider } from "@shared/constants";
 import { DEFAULT_PROJECT_COLOR, DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS } from "@shared/constants";
@@ -12,6 +12,7 @@ import type {
 import { vcsProviderSchema } from "@shared/schemas";
 
 import { GithubCloneStep } from "@/components/projects-settings/GithubCloneStep";
+import { GithubSetupGuide } from "@/components/projects-settings/GithubSetupGuide";
 import {
   AdvancedSection,
   Field,
@@ -34,11 +35,11 @@ import { useSavedFlag } from "@/hooks/useSavedFlash";
 import { api } from "@/lib/api";
 import type { CloneProjectResponse } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { connectionHint } from "@/lib/projectConnection";
 import { timeoutUnitMs, timeoutUnitOf, type TimeoutUnit } from "@/lib/projectDisplay";
 
 const DEFAULT_COMMIT_TIMEOUT_MS = 600000;
 const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
-const MUTED_TEXT_CLASS = "text-muted-foreground";
 const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 const NO_RUN_SCRIPT_LABEL = "aucune commande";
 const SUMMARY_SEPARATOR = " · ";
@@ -49,17 +50,6 @@ type CreateStep = "folder" | "form";
 function toVcsProvider(value: string): VcsProvider {
   const parsed = vcsProviderSchema.safeParse(value);
   return parsed.success ? parsed.data : DEFAULT_VCS_PROVIDER;
-}
-
-interface ConnectionHint {
-  message: string;
-  className: string;
-}
-
-function connectionHint(testing: boolean, result: VcsConnectionResult | null): ConnectionHint {
-  if (testing) return { message: "Test en cours…", className: MUTED_TEXT_CLASS };
-  if (result === null) return { message: "", className: MUTED_TEXT_CLASS };
-  return { message: result.message, className: result.ok ? "text-success" : "text-destructive" };
 }
 
 function isPositiveIntegerString(value: string): boolean {
@@ -112,6 +102,7 @@ export function ProjectPanel({
   const [vcsProvider, setVcsProvider] = useState<VcsProvider>(project?.vcsProvider ?? DEFAULT_VCS_PROVIDER);
   const [connection, setConnection] = useState<VcsConnectionResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const connectionGeneration = useRef(0);
   const [unit, setUnit] = useState<TimeoutUnit>(initialUnit);
   const [timeoutValue, setTimeoutValue] = useState(String(initialTimeoutMs / timeoutUnitMs(initialUnit)));
   const [color, setColor] = useState(project?.color ?? DEFAULT_PROJECT_COLOR);
@@ -160,7 +151,7 @@ export function ProjectPanel({
     ...githubAccounts.map((account) => account.login),
     ...(githubAccount !== null ? [githubAccount] : []),
   ])).sort((left, right) => left.localeCompare(right));
-  const hint = connectionHint(testing, connection);
+  const hint = connectionHint(testing, connection, vcsProvider);
   const inspectionBlocks =
     creating && inspection !== null && (!inspection.isGitRepo || inspection.existingProjectKey !== null);
   const colorSummary = grouped ? inheritedColor : color;
@@ -175,38 +166,46 @@ export function ProjectPanel({
     </>
   );
 
+  const clearConnection = (): void => {
+    connectionGeneration.current += 1;
+    setTesting(false);
+    setConnection(null);
+  };
+
   const changeRepoPath = (value: string): void => {
     setRepoPath(value);
-    setConnection(null);
+    clearConnection();
   };
 
   const changeVcsProvider = (value: VcsProvider): void => {
     setVcsProvider(value);
-    setConnection(null);
+    clearConnection();
     // An account only applies to GitHub projects; the server refuses it on Azure DevOps.
     if (value !== "github") setGithubAccount(null);
   };
 
   const changeGithubAccount = (value: string | null): void => {
     setGithubAccount(value);
-    setConnection(null);
+    clearConnection();
   };
 
   const runConnectionTest = async (request: () => Promise<VcsConnectionResult>): Promise<void> => {
+    const generation = ++connectionGeneration.current;
     setTesting(true);
     try {
-      setConnection(await request());
+      const result = await request();
+      if (generation === connectionGeneration.current) setConnection(result);
     } catch (e) {
-      setConnection({ ok: false, message: errorMessage(e), checkedAt: Date.now() });
+      if (generation === connectionGeneration.current) setConnection({ ok: false, message: errorMessage(e), checkedAt: Date.now() });
     } finally {
-      setTesting(false);
+      if (generation === connectionGeneration.current) setTesting(false);
     }
   };
 
   const applyInspection = (result: RepoInspection): void => {
     setInspection(result);
     setRepoPath(result.repoPath);
-    setConnection(null);
+    clearConnection();
     if (result.label) setLabel(result.label.value);
     if (result.group) setGroup(result.group.value);
     if (result.baseBranch) setBaseBranch(result.baseBranch.value);
@@ -307,7 +306,7 @@ export function ProjectPanel({
     setGithubAccount(saved.githubAccount);
     setColor(saved.color ?? DEFAULT_PROJECT_COLOR);
     setValidation(validationDraft(saved.validation));
-    setConnection(null);
+    clearConnection();
     await onSaved();
     flashSaved();
   };
@@ -373,6 +372,7 @@ export function ProjectPanel({
           onModeChange={setSourceMode}
           githubStep={<GithubCloneStep disabled={picking || busy} onCloned={applyClone} onError={onError} />}
         />
+        <GithubSetupGuide provider={vcsProvider} />
         {cancelButton && (
           <SettingsFooter dirty={false} justSaved={false}>
             {cancelButton}
@@ -512,6 +512,13 @@ export function ProjectPanel({
                 {hint.message}
               </span>
             </div>
+            {vcsProvider === "github" && dirty && (
+              <p className="text-xs text-muted-foreground">
+                Ce test de brouillon utilise le compte résolu depuis le dépôt et le serveur, pas le sélecteur non enregistré.
+                Enregistrez le projet puis retestez pour vérifier le compte enregistré.
+              </p>
+            )}
+            <GithubSetupGuide provider={vcsProvider} />
           </div>
         </Field>
         {vcsProvider === "github" && (

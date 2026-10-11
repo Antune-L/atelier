@@ -79,13 +79,9 @@ sudo kanban-release "$sha"
 
 ### A4. Logins for the `kanban` user
 
-**GitHub.** Create a fine-grained token on your account, limited to the repositories this VPS works on, with these repository permissions:
-- Contents: read and write.
-- Pull requests: read and write.
-- Issues: read and write.
-- Checks, Commit statuses and Actions: read.
+**GitHub.** Open a terminal on the VPS under the `kanban` OS user. Start the [interactive browser login documented by gh](https://cli.github.com/manual/gh_auth_login) there, choose the repository host and use the intended GitHub identity in the browser. Complete the flow initiated on the server: opening a token page or logging in on your client alone does not authenticate the server.
 
-Leave Workflows unset, so agents cannot change `.github/workflows`. For an organization repository where you are only a collaborator, a classic token with the `repo` scope is the fallback; it opens every repository your account can reach.
+Alternatively, create a token and configure gh manually outside Kanban. The stdin-based login below is for a **classic** token: gh documents minimum scopes `repo`, `read:org`, and `gist`. A classic `repo` scope can reach every repository available to the account; it is not restricted to VPS projects.
 
 ```bash
 sudo -u kanban -H gh auth login --hostname github.com --with-token < gh-token.txt
@@ -94,7 +90,13 @@ sudo -u kanban -H git config --global user.name "Your Name"
 sudo -u kanban -H git config --global user.email "you@example.com"
 ```
 
-Delete `gh-token.txt` afterwards.
+Keep `gh-token.txt` private and delete it afterwards. For a **fine-grained** token, gh recommends `GH_TOKEN` in the server environment instead of treating `--with-token` as a universal login method. For this deployment's machine-default account, configure it manually in `/etc/kanban/kanban.env` and restart the service. Terminal checks must use the same user and environment as the service.
+
+[Create a fine-grained token on github.com](https://github.com/settings/personal-access-tokens/new), [manage fine-grained tokens on github.com](https://github.com/settings/personal-access-tokens), or [manage classic tokens on github.com](https://github.com/settings/tokens). These are github.com destinations, not detected repository hosts. Enterprise users must choose their repository host and follow its official instructions.
+
+[gh environment documentation](https://cli.github.com/manual/gh_help_environment) specifies that `GH_TOKEN`, then `GITHUB_TOKEN`, override stored credentials for github.com and ghe.com. Enterprise Server uses `GH_ENTERPRISE_TOKEN`, then `GITHUB_ENTERPRISE_TOKEN`. This advice concerns the machine-default account: Kanban's existing managed accounts isolate their configuration and remove ambient GitHub credential variables. Check only variable presence, never print values. Use the [gh authentication status command](https://cli.github.com/manual/gh_auth_status) without `--show-token` for manual verification.
+
+Token permissions depend on operations, repositories and organization policies. Fine-grained tokens have [documented limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens), including outside collaborators, multiple organizations and the Checks API, and may require organization approval. No permission list guarantees all Kanban operations. The project connection test only confirms PR read access; push, PR creation and review publication remain unverified. Creation and dirty-project tests resolve the account from repository/server configuration, not an unsaved account selector: save, then retest to verify the saved account.
 
 **Codex.** Device login must be enabled in your ChatGPT security settings.
 
@@ -175,9 +177,9 @@ To open the board from a phone or any browser behind a Google login, follow [vps
 
 ### Token scopes
 
-- **Classic token:** `repo` and `read:org`.
-- **Fine-grained token:** repository permissions Contents and Pull requests in read and write, Metadata in read.
-- **Organization SSO:** an organization enforcing SAML SSO only accepts the token after you authorize it for that organization (**Configure SSO** next to the token on GitHub). Without it, the organization's repositories are missing from the list and pushes are refused.
+- **Classic token:** gh's documented minimum for `--with-token` is `repo`, `read:org`, and `gist`. Grant additional scopes only for required operations; these scopes do not guarantee every operation is allowed.
+- **Fine-grained token:** for the machine-default account, gh recommends `GH_TOKEN` in the server environment. Select repositories and permissions for required operations (for example, Contents and Pull requests read/write for code and PR writes). Outside collaborators, multiple organizations and the Checks API have documented limitations; organization approval may be required. The existing managed-account form still uses `--with-token`; this guide does not change that mechanism or promise universal fine-grained support through it. See the [gh login documentation](https://cli.github.com/manual/gh_auth_login) and [GitHub token limitations](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+- **Organization SSO:** authorize classic tokens for organizations enforcing SAML SSO (**Configure SSO** next to the token on GitHub). Fine-grained tokens are authorized during creation and can require organization approval. Organization policies can also restrict access.
 
 ### What runs under the project's account
 

@@ -1,5 +1,5 @@
 import type { Ticket } from "../../shared/schemas.ts";
-import { parseTriageReport } from "../../shared/schemas.ts";
+import { formatTriageQuestion, parseTriageReport } from "../../shared/schemas.ts";
 
 /** Build the one-shot Agent SDK query prompt that reformulates a ticket's need into clean markdown. */
 export function buildReformulatePrompt(ticket: Ticket): string {
@@ -21,7 +21,7 @@ export function buildReformulatePrompt(ticket: Ticket): string {
       lines.push("", "### Raisons", ...triage.reasons.map((reason) => `- ${reason}`));
     }
     if (triage.questions.length > 0) {
-      lines.push("", "### Questions ouvertes", ...triage.questions.map((question) => `- ${question}`));
+      lines.push("", "### Questions ouvertes", ...triage.questions.map((question) => `- ${formatTriageQuestion(question)}`));
     }
     if (triage.solutions.length > 0) {
       lines.push("", "### Solutions envisageables", ...triage.solutions.map((solution) => `- ${solution}`));

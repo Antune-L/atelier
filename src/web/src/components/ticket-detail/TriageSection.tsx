@@ -126,9 +126,14 @@ export function TriageSection({
           {result.questions.length > 0 && (
             <div>
               <SectionHeader>Questions</SectionHeader>
-              <ul className="list-disc pl-5 text-warning">
-                {result.questions.map((question) => (
-                  <li key={question}>{question}</li>
+              <ul className="list-disc pl-5">
+                {result.questions.map((q, index) => (
+                  <li key={`${index}-${q.question}`}>
+                    <span className="text-warning">{q.question}</span>
+                    {q.recommendedAnswer !== null && (
+                      <p className="text-muted-foreground">Réponse conseillée : {q.recommendedAnswer}</p>
+                    )}
+                  </li>
                 ))}
               </ul>
             </div>

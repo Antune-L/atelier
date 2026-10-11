@@ -22,6 +22,7 @@ const ADVERSARIAL_HEADING = "### Revue adversariale";
 const ADVERSARIAL_MIN_ANALYSTS = 2;
 const ADVERSARIAL_MAX_SUBAGENTS = 10;
 const ADVERSARIAL_MAX_QUESTIONS = 2;
+const ADVERSARIAL_BULLET_BUDGET = "une ligne, ~20 mots max";
 const HISTORY_HEADING = "## Historique de la conversation";
 
 const HISTORY_ROLE_LABELS: Record<Exclude<ConversationMessage["role"], "activity">, string> = {
@@ -116,8 +117,14 @@ function buildAdversarialReview(conversation: Conversation): string[] {
     `5. Vague 2 : les \`${ATELIER_REVIEWER_AGENT_NAME}\` en parallèle (fidélité à la spec, réalité du code, challenger) reçoivent d'abord le dossier, puis un bloc marqué « après recherche » avec le brouillon et les faits d'exploration — jamais les sorties brutes des analystes. Si tous les analystes convergent, durcis le brief du challenger.`,
     "6. Verdict : accepte ou rejette chaque objection en une ligne étayée par une preuve. Au plus UNE re-revue avec des relecteurs neufs si une objection critique acceptée change la solution (ou si une objection majeure acceptée invalide une affirmation d'absence). Les désaccords restants vont en questions ouvertes.",
     "### Restitution",
-    `- Affiche le résultat EN PREMIER sous le titre \`${ADVERSARIAL_HEADING}\` (après \`${RESEARCH_HEADING}\` s'il est présent) : taille du run, objections acceptées et comment elles ont changé la solution, alternatives rejetées (une ligne chacune).`,
-    `- Puis la solution recommandée, au plus ${ADVERSARIAL_MAX_QUESTIONS} questions avec un choix par défaut.`,
+    `- Affiche le résultat EN PREMIER sous le titre \`${ADVERSARIAL_HEADING}\` (après \`${RESEARCH_HEADING}\` s'il est présent), sous forme de SYNTHÈSE EN LISTES À PUCES : jamais de paragraphe ni de tableau.`,
+    `- Chaque liste est introduite par une ligne de libellé en gras ; une idée par puce, ${ADVERSARIAL_BULLET_BUDGET}.`,
+    "- Listes, dans cet ordre (une liste vide est omise, sauf les objections retenues) :",
+    "  - `**Run**` : taille du run (explorateurs / analystes / relecteurs, re-revue éventuelle).",
+    "  - `**Objections retenues**` : une puce par objection acceptée → ce qu'elle a changé dans la solution (« aucune » si vide).",
+    "  - `**Alternatives écartées**` : une puce par alternative, avec la raison du rejet.",
+    "  - `**Solution recommandée**` : une puce par élément clé (approche, fichiers concernés en chemins relatifs, points d'attention / hypothèses).",
+    `  - \`**Questions ouvertes**\` : au plus ${ADVERSARIAL_MAX_QUESTIONS} questions, chacune avec un choix par défaut.`,
     "- Termine par le verdict de faisabilité en deux listes à puces `✅ Faisable` / `❌ Non faisable` : chaque exigence dans exactement une liste ; une preuve manquante est une condition de validation, pas une impossibilité.",
     "- Si les sous-agents sont indisponibles dans cette session, dis-le explicitement au lieu de prétendre que la revue a eu lieu.",
   ];

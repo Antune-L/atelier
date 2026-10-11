@@ -405,6 +405,8 @@ export const ticketSchema = z.object({
   implementingStartedAt: z.number().int().nullable(),
   /** Epoch ms when the agent first entered the `implementing` stage (real work start, excludes queue wait); null until then. */
   implementationStartedAt: z.number().int().nullable(),
+  /** Epoch ms when the agent run ended (PR opened / terminal transition); unlike finishedAt, never overwritten by the merge. Null until then. */
+  implementationFinishedAt: z.number().int().nullable(),
   /** Token usage per session (sessionId → usage by model); empty until a Stop hook reports it. */
   sessionUsage: sessionUsageSchema,
   createdAt: z.number().int(),
@@ -431,6 +433,7 @@ export const statRecordSchema = z.object({
   createdAt: z.number().int(),
   implementingStartedAt: z.number().int().nullable(),
   implementationStartedAt: z.number().int().nullable(),
+  implementationFinishedAt: z.number().int().nullable(),
   finishedAt: z.number().int().nullable(),
   /** Derived total cost in USD across all sessions; null when no usage recorded. */
   costUsd: z.number().nullable(),

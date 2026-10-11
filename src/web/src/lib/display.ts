@@ -328,25 +328,26 @@ export function formatDuration(ms: number): string {
 
 /**
  * Wall-clock work duration in ms: from when the agent actually started (entering the
- * `implementing` stage, `implementationStartedAt`) to `finishedAt`. Falls back to
- * `implementingStartedAt` (column entry, queue-inclusive) for tickets created before the precise
- * stamp existed. Null when either bound is missing or the span is non-positive. Shared by the card
- * badge and the stats charts so both stay in sync.
+ * `implementing` stage, `implementationStartedAt`) to the end of the agent run
+ * (`implementationFinishedAt`) — never `finishedAt`, which becomes the merge time once merged. Falls
+ * back to `implementingStartedAt` (column entry, queue-inclusive) for tickets created before the
+ * precise stamp existed. Null when either bound is missing or the span is non-positive. Shared by
+ * the card badge and the stats charts so both stay in sync.
  */
 export function effectiveWorkDurationMs(span: {
   implementationStartedAt: number | null;
   implementingStartedAt: number | null;
-  finishedAt: number | null;
+  implementationFinishedAt: number | null;
 }): number | null {
   const start = span.implementationStartedAt ?? span.implementingStartedAt;
-  if (start === null || span.finishedAt === null) return null;
-  const duration = span.finishedAt - start;
+  if (start === null || span.implementationFinishedAt === null) return null;
+  const duration = span.implementationFinishedAt - start;
   return duration > 0 ? duration : null;
 }
 
 /** Card-badge duration: the agent's effective work time on a ticket. */
 export function ticketImplementationDuration(
-  ticket: Pick<Ticket, "implementationStartedAt" | "implementingStartedAt" | "finishedAt">,
+  ticket: Pick<Ticket, "implementationStartedAt" | "implementingStartedAt" | "implementationFinishedAt">,
 ): number | null {
   return effectiveWorkDurationMs(ticket);
 }

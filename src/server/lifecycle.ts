@@ -119,14 +119,21 @@ export class TicketLifecycle {
     return ticket;
   }
 
-  /** Mark a feature's PR as merged: column merged, drop any slot link, stamp finishedAt, push, log "merged". */
+  /**
+   * Mark a feature's PR as merged: column merged, drop any slot link, stamp finishedAt with the merge
+   * time while preserving the agent-run end in implementationFinishedAt (falls back to the pre-merge
+   * finishedAt for tickets finished before that column existed, unless already merged since that
+   * finishedAt is then the previous merge time), push, log "merged".
+   */
   markMerged(ticketId: string): Ticket {
+    const current = this.store.getTicket(ticketId);
     const ticket = this.store.updateTicket(ticketId, {
       column: "merged",
       slotId: null,
       testing: false,
       resolvingConflicts: false,
       finishedAt: Date.now(),
+      implementationFinishedAt: current?.implementationFinishedAt ?? (current?.column === "merged" ? null : (current?.finishedAt ?? null)),
     });
     this.hub.pushTicket(ticket);
     this.store.logEvent(ticketId, "merged", {});

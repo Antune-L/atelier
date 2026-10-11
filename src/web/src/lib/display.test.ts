@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { CodexRuntimeStatus } from "@shared/codexCapabilities";
 
-import { isCodexFastAvailable } from "./display";
+import { effectiveWorkDurationMs, isCodexFastAvailable, ticketImplementationDuration } from "./display";
 
 const runtime: CodexRuntimeStatus = {
   status: "ready",
@@ -35,5 +35,39 @@ describe("isCodexFastAvailable", () => {
 
   test("does not expose FAST while the catalog is unavailable", () => {
     expect(isCodexFastAvailable({ ...runtime, status: "temporarily_unavailable" }, "gpt-6-astra")).toBe(false);
+  });
+});
+
+describe("effectiveWorkDurationMs", () => {
+  test("ends at implementationFinishedAt, not at the merge time", () => {
+    expect(effectiveWorkDurationMs({ implementationStartedAt: 1_000, implementingStartedAt: 500, implementationFinishedAt: 61_000 })).toBe(60_000);
+  });
+
+  test("falls back to implementingStartedAt when implementationStartedAt is null", () => {
+    expect(effectiveWorkDurationMs({ implementationStartedAt: null, implementingStartedAt: 2_000, implementationFinishedAt: 5_000 })).toBe(3_000);
+  });
+
+  test("returns null when a bound is missing or the span is not positive", () => {
+    expect(effectiveWorkDurationMs({ implementationStartedAt: null, implementingStartedAt: null, implementationFinishedAt: 5_000 })).toBeNull();
+    expect(effectiveWorkDurationMs({ implementationStartedAt: 1_000, implementingStartedAt: null, implementationFinishedAt: null })).toBeNull();
+    expect(effectiveWorkDurationMs({ implementationStartedAt: 5_000, implementingStartedAt: null, implementationFinishedAt: 5_000 })).toBeNull();
+    expect(effectiveWorkDurationMs({ implementationStartedAt: 6_000, implementingStartedAt: null, implementationFinishedAt: 5_000 })).toBeNull();
+  });
+});
+
+describe("ticketImplementationDuration", () => {
+  test("excludes the review/merge wait on a merged ticket", () => {
+    const ticket = { implementationStartedAt: 10_000, implementingStartedAt: 5_000, implementationFinishedAt: 70_000, finishedAt: 10_000_000 };
+    expect(ticketImplementationDuration(ticket)).toBe(60_000);
+  });
+
+  test("falls back to implementingStartedAt", () => {
+    const ticket = { implementationStartedAt: null, implementingStartedAt: 5_000, implementationFinishedAt: 65_000, finishedAt: 10_000_000 };
+    expect(ticketImplementationDuration(ticket)).toBe(60_000);
+  });
+
+  test("returns null when only finishedAt is set", () => {
+    const ticket = { implementationStartedAt: 10_000, implementingStartedAt: 5_000, implementationFinishedAt: null, finishedAt: 70_000 };
+    expect(ticketImplementationDuration(ticket)).toBeNull();
   });
 });

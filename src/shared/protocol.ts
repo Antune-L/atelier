@@ -171,15 +171,23 @@ const triageVerdictSchema = z.enum(TRIAGE_VERDICTS);
 /**
  * TOLERANT mirror of the strict triage report (schemas.ts `triageResultSchema`), advertised to
  * the worker's session via MCP. Kept loose on purpose: `reasons`/`questions`/`files` default to
- * empty and `suggested*` accept any string, so the worker forwards a slightly-off report rather
- * than rejecting it locally. The backend re-validates strictly with `submitTriageArgsSchema`
+ * empty, `questions` accepts plain strings or `{ question, recommendedAnswer }` objects and
+ * `suggested*` accept any string, so the worker forwards a slightly-off report rather than
+ * rejecting it locally. The backend re-validates strictly with `submitTriageArgsSchema`
  * before persisting, so tolerance here never weakens what gets stored.
  */
 const submitTriageMcpArgsSchema = z.object({
   verdict: triageVerdictSchema,
   summary: z.string(),
   reasons: z.array(z.string()).default([]),
-  questions: z.array(z.string()).default([]),
+  questions: z
+    .array(
+      z.union([
+        z.string(),
+        z.object({ question: z.string(), recommendedAnswer: z.string().nullable().default(null) }),
+      ]),
+    )
+    .default([]),
   files: z.array(z.string()).default([]),
   suggestedModel: z.string().nullable().default(null),
   suggestedEffort: z.string().nullable().default(null),

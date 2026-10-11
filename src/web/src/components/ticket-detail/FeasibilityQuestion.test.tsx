@@ -11,7 +11,7 @@ const baseRun: FeasibilityAnswerRun = {
 function render(run?: FeasibilityAnswerRun): string {
   return renderToStaticMarkup(<FeasibilityQuestion
     ticket={makeTicket({ column: "todo", feasibilityReportVersion: 1, feasibilityAnswers: run ? [run] : [] })}
-    question="Colour?" index={0} onSubmit={async () => ({ started: true, id: "next" })} />);
+    question={{ question: "Colour?", recommendedAnswer: null }} index={0} onSubmit={async () => ({ started: true, id: "next" })} />);
 }
 
 test("question input has a label, bounded textarea and submit action", () => {

@@ -63,7 +63,7 @@ import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
-import { deliveryPolicyError, isCloudHost, PR_ONLY_MESSAGE } from "./hostRole.ts";
+import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
@@ -98,7 +98,7 @@ interface PaneReader {
   inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
-  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
+  mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -336,7 +336,10 @@ async function failSplitMother(deps: RouteDeps, ticket: Ticket, reason: string):
   hub.pushTicket(failed);
 }
 
-/** Default pipeline toggles a split child inherits (the family runs auto-merge stacked PRs). */
+/**
+ * Default pipeline toggles a split child inherits (the family runs auto-merge stacked PRs). A cloud
+ * host only delivers PRs, so its children start without auto-merge or direct push.
+ */
 function splitChildDefaults(ticket: Ticket): Pick<
   NewTicket,
   | "externalUrl"
@@ -368,7 +371,7 @@ function splitChildDefaults(ticket: Ticket): Pick<
     project: ticket.project,
     prdEnabled: false,
     prDraft: true,
-    autoMerge: true,
+    autoMerge: !isCloudHost(),
     addScreenshots: false,
     verifyFeature: false,
     argusMultiLoop: false,
@@ -1018,6 +1021,7 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultCodexFast: MODELS.codexFast,
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
         canPickFolder: deps.pickFolder != null,
+        prOnly: isCloudHost(),
         skills: await deps.system.checkSkills(),
       };
     })
@@ -1469,7 +1473,6 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/merge", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      if (isCloudHost()) return jsonError(set, HTTP_CONFLICT, PR_ONLY_MESSAGE);
       if (!canMergePr(ticket) || ticket.prUrl === null || ticket.branch === null) {
         return jsonError(set, HTTP_CONFLICT, "merge réservé aux features terminées avec une PR ouverte");
       }
@@ -1484,7 +1487,7 @@ export function createApiRoutes(deps: RouteDeps) {
         if (mergeability === "conflicting") {
           return { merged: false, conflicts: true, reason: conflictReason } satisfies MergePrResult;
         }
-        const merge = await deps.system.mergePr(project.repoPath, branch, prUrl, project.vcsProvider);
+        const merge = await deps.system.mergePrOnUserRequest(project.repoPath, branch, prUrl, project.vcsProvider);
         if (merge.ok) {
           store.logEvent(params.id, MANUAL_MERGED_EVENT, { prUrl });
           const merged = lifecycle.markMerged(params.id);

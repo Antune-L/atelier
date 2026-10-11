@@ -1,13 +1,13 @@
 import { useId, useRef, useState } from "react";
 import { ACTIVE_STAGES } from "@shared/constants";
-import type { FeasibilityAnswerInput, Ticket } from "@shared/schemas";
+import type { FeasibilityAnswerInput, Ticket, TriageQuestion } from "@shared/schemas";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 
 interface FeasibilityQuestionProps {
   ticket: Ticket;
-  question: string;
+  question: TriageQuestion;
   index: number;
   onSubmit: (input: FeasibilityAnswerInput) => Promise<{ started: boolean; id: string }>;
 }
@@ -46,7 +46,10 @@ export function FeasibilityQuestion({ ticket, question, index, onSubmit }: Feasi
 
   return (
     <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); void submit(); }} aria-busy={pending}>
-      <Label htmlFor={id}>{question}</Label>
+      <Label htmlFor={id}>{question.question}</Label>
+      {question.recommendedAnswer !== null && (
+        <p className="text-sm text-muted-foreground">Réponse conseillée : {question.recommendedAnswer}</p>
+      )}
       <Textarea id={id} value={answer} maxLength={10000}
         onChange={(event) => setAnswer(event.target.value)} disabled={pending || run?.status === "done"}
         aria-describedby={`${id}-status`} required />

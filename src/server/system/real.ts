@@ -82,6 +82,7 @@ import type {
 } from "./types.ts";
 import { AzureDevopsVcsClient } from "./vcs/azureDevops.ts";
 import { GithubVcsClient } from "./vcs/github.ts";
+import { PR_BODY_FILE } from "./vcs/types.ts";
 import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const log = createLogger("system");
@@ -265,7 +266,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const lines = new Set(current.split("\n").map((l) => l.trim()).filter(Boolean));
     lines.add(".claude/");
     lines.add(".mcp.json");
-    lines.add(".pr-body.md");
+    lines.add(PR_BODY_FILE);
     await Bun.write(excludePath, `${[...lines].join("\n")}\n`);
   }
 
@@ -1107,7 +1108,16 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
+    // Sole guard of the automatic merge paths (auto-merge, autonomous delivery) on a cloud host.
     if (isCloudHost()) return { ok: false, reason: PR_ONLY_MESSAGE };
+    return this.mergeAndDeleteBranch(slotPath, branch, prUrl, provider, expected);
+  }
+
+  async mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
+    return this.mergeAndDeleteBranch(slotPath, branch, prUrl, provider);
+  }
+
+  private async mergeAndDeleteBranch(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
     const merged = await this.vcs(provider).mergePr(slotPath, prUrl, expected);
     if (!merged.ok) return merged;
     // Best-effort remote branch cleanup: the merge already succeeded, so a failed

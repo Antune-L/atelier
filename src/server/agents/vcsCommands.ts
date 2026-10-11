@@ -19,6 +19,7 @@ import {
   HTTP_GET,
   HTTP_PATCH,
 } from "../system/vcs/azureRest.ts";
+import { PR_BODY_FILE } from "../system/vcs/types.ts";
 
 export interface PrDiffContext {
   /** PR identifier, null on a legacy card whose URL could not be parsed. */
@@ -103,8 +104,11 @@ function azureThreadsCommand(prNumber: number | null, method: string, opts?: { t
 
 const GITHUB_COMMANDS: VcsCommandTable = {
   label: VCS_PROVIDER_LABELS.github,
-  createPr: ({ draft, baseBranch }) => `${draft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch}`,
-  createPrHint: "",
+  createPr: ({ draft, baseBranch }) =>
+    `${draft ? "gh pr create --draft" : "gh pr create"} --base ${baseBranch} --title "<titre>" --body-file ${PR_BODY_FILE}`,
+  createPrHint: `Rédige d'abord la description de la PR avec l'outil d'écriture de fichiers dans \`${PR_BODY_FILE}\` à la racine du worktree (fichier ignoré par git).`
+    + ` Pour mettre à jour la description ensuite, réécris ce fichier puis lance \`gh pr edit <numéro> --body-file ${PR_BODY_FILE}\`.`
+    + ` Ne passe jamais une description multi-ligne en ligne via \`--body\` et ne crée aucun autre fichier de description.`,
   bannedCreatePr: "gh pr create",
   prDiff: ({ prNumber }) => `gh pr diff ${prNumber}`,
   prFeedbackRead:

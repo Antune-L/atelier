@@ -2,7 +2,7 @@ import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IM
 import type { CommitLanguage, Orchestrator, ReviewDepth } from "../../shared/constants.ts";
 import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
-import { triageResultSchema } from "../../shared/schemas.ts";
+import { formatTriageQuestion, triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT } from "../../shared/protocol.ts";
@@ -249,7 +249,7 @@ function buildFeasibilityContextSection(ticket: Ticket): string {
     `- Synthèse : ${summary}`,
     files.length > 0 ? `- Fichiers identifiés comme pertinents : ${files.join(", ")}` : "",
     reasons.length > 0 ? `- Raisons : ${reasons.join(" ; ")}` : "",
-    questions.length > 0 ? `- Questions : ${questions.join(" ; ")}` : "",
+    questions.length > 0 ? `- Questions : ${questions.map(formatTriageQuestion).join(" ; ")}` : "",
     "",
   ];
   return lines.filter((line) => line !== "").join("\n");
@@ -567,14 +567,15 @@ export function buildFeasibilityBatchContract(
     "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
     "- `summary` : 2-3 phrases",
     "- `reasons` : raisons (obligatoire si `needs_rework`)",
-    "- `questions` : questions (obligatoire si `needs_info`)",
+    "- `questions` : liste d'objets `{ question, recommendedAnswer }` (obligatoire si `needs_info`) ; `recommendedAnswer` est la réponse",
+    "  que tu recommandes (fondée sur le code lu et les conventions du dépôt, un choix par défaut raisonnable), `null` seulement si aucune recommandation raisonnable n'est possible",
     "- `files` : chemins réellement lus qui fondent l'analyse",
     "- `suggestedModel` / `suggestedEffort` : UNIQUEMENT si `implementable`, sinon `null`",
     "- `suggestedOrchestrator` et, pour GPT, `suggestedCodexModel` / `suggestedCodexEffort` : configuration réellement recommandée ; champs de l'autre moteur à `null`",
     "",
     "## Liens / pièces jointes non consultables",
     "Si une description référence une pièce jointe ou un lien que tu ne peux pas consulter (ex. lien Trello,",
-    "image absente), ajoute-le dans `questions` du ticket concerné avec le préfixe exact `Lien non consultable: <url>`.",
+    "image absente), ajoute-le dans `questions` du ticket concerné avec le préfixe exact `Lien non consultable: <url>` dans le champ `question`.",
     "Un lien figma.com va dans `questions` si aucun outil Figma de lecture n'est exposé ou si son appel échoue.",
     "",
     "## Règles strictes (reprises du triage)",

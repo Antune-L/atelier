@@ -5,7 +5,7 @@ import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES 
 import type { Orchestrator } from "@shared/constants";
 import type { ProjectInfo, Ticket, UpdateTicketInput } from "@shared/schemas";
 
-import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
+import { AutonomousOptions, autonomousEligibility, prOnlyAutonomousOptions } from "@/components/AutonomousOptions";
 import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { AgentProfileConfig } from "@/components/AgentProfileConfig";
 import { ProjectSelect } from "@/components/ProjectSelect";
@@ -14,6 +14,7 @@ import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { BranchCombobox, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { pairedImplementer } from "@/lib/agentPairing";
 import { api } from "@/lib/api";
 import { dependencyCandidates } from "@/lib/display";
@@ -34,6 +35,8 @@ const OPTIONS_HEADING_ID = "ticket-detail-options-heading";
 /** Pre-launch configuration of a TODO ticket: target, dependency and agent knobs. */
 export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps) {
   const { tickets: boardTickets } = useBoard();
+  // A cloud host refuses auto-merge, direct push and merge delivery: force them off, not only hide them.
+  const { prOnly } = useCapabilities();
   const [pendingAutonomous, setPendingAutonomous] = useState<AutonomousOptionValues | null>(null);
   const autonomousTicketId = useRef(ticket.id);
   if (autonomousTicketId.current !== ticket.id) {
@@ -65,12 +68,14 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
 
   const selectedProject = projects.find((project) => project.key === ticket.project);
   const autonomousAvailability = autonomousEligibility(selectedProject, ticket.implementer, ticket.dependsOn === null && ticket.childOrder === null);
-  const autonomousValues = pendingAutonomous ?? {
+  const autonomousValues = prOnlyAutonomousOptions(pendingAutonomous ?? {
     autonomous: ticket.autonomous ?? false,
     autonomousDelivery: ticket.autonomousDelivery ?? null,
     autonomousMaxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS,
     autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES,
-  };
+  }, prOnly);
+  const autoMerge = !prOnly && ticket.autoMerge;
+  const directPush = !prOnly && ticket.directPush;
   const autonomousDisabled = !canEditTarget || ticket.autonomousState != null;
   const updateAutonomousOptions = (next: AutonomousOptionValues): void => {
     if (next.autonomous && next.autonomousDelivery === null) {
@@ -78,7 +83,7 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
       return;
     }
     setPendingAutonomous(null);
-    patch({ ...next, autoMerge: next.autonomous ? false : ticket.autoMerge, stealth: next.autonomous ? false : ticket.stealth, directPush: next.autonomous ? false : ticket.directPush });
+    patch({ ...next, autoMerge: next.autonomous ? false : autoMerge, stealth: next.autonomous ? false : ticket.stealth, directPush: next.autonomous ? false : directPush });
   };
   const projectDefaultBranch = selectedProject?.baseBranch ?? "";
   // Current selection resolves null (no override) to the project default for display.
@@ -189,20 +194,21 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
             unavailableReason: autonomousAvailability.reason,
             onChange: (autonomous) => updateAutonomousOptions({ ...autonomousValues, autonomous }),
           }}
+          prOnly={prOnly}
           title="Options de PR"
           headingId={OPTIONS_HEADING_ID}
           values={{
             prdEnabled: ticket.prdEnabled,
             prDraft: ticket.prDraft,
-            autoMerge: ticket.autoMerge,
+            autoMerge,
             stealth: ticket.stealth,
-            directPush: ticket.directPush,
+            directPush,
             verifyFeature: ticket.verifyFeature,
             argusMultiLoop: ticket.argusMultiLoop,
           }}
           onChange={(next) => patch(next)}
         >
-          <AutonomousOptions id="ticket-autonomous" values={autonomousValues} disabled={autonomousDisabled} onChange={updateAutonomousOptions} />
+          <AutonomousOptions id="ticket-autonomous" values={autonomousValues} disabled={autonomousDisabled} prOnly={prOnly} onChange={updateAutonomousOptions} />
         </TicketOptionsToggleGroup>
       </div>
     </div>

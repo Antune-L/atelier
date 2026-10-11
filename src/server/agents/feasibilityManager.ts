@@ -36,7 +36,9 @@ const DRY_RUN_VERDICT: TriageResult = {
   verdict: "needs_info",
   summary: "Faisabilité simulée (dry-run) : aucune session claude n'est lancée dans le bac à sable.",
   reasons: [],
-  questions: ["Active le mode réel (KANBAN_DRY_RUN=0) pour une vraie analyse de faisabilité."],
+  questions: [
+    { question: "Active le mode réel (KANBAN_DRY_RUN=0) pour une vraie analyse de faisabilité.", recommendedAnswer: null },
+  ],
   files: [],
   suggestedModel: null,
   suggestedEffort: null,

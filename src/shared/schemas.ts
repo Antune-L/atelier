@@ -211,6 +211,24 @@ export const REFORMULATE_STATUSES = ["none", "running", "done", "failed"] as con
 export const reformulateStatusSchema = z.enum(REFORMULATE_STATUSES);
 export type ReformulateStatus = z.infer<typeof reformulateStatusSchema>;
 
+/** One open question of a triage report, with the answer the agent recommends (null = none). */
+export const triageQuestionSchema = z.object({
+  question: z.string(),
+  // A blank answer is no recommendation: normalize it to null so the UI never shows an empty one.
+  recommendedAnswer: z
+    .string()
+    .nullable()
+    .default(null)
+    .catch(null)
+    .transform((answer) => (answer?.trim() ? answer : null)),
+});
+export type TriageQuestion = z.infer<typeof triageQuestionSchema>;
+
+/** Format a triage question for text prompts, appending its recommended answer when present. */
+export function formatTriageQuestion(q: TriageQuestion): string {
+  return q.recommendedAnswer ? `${q.question} (réponse conseillée : ${q.recommendedAnswer})` : q.question;
+}
+
 export const feasibilityAnswerInputSchema = z.object({
   revision: z.number().int().nonnegative(),
   reportVersion: z.number().int().nonnegative(),
@@ -232,7 +250,12 @@ export const triageResultSchema = z.object({
   verdict: triageVerdictSchema,
   summary: z.string(),
   reasons: z.array(z.string()),
-  questions: z.array(z.string()),
+  // Legacy reports stored plain strings: normalize them to the object form.
+  questions: z.array(
+    z
+      .union([z.string(), triageQuestionSchema])
+      .transform((q): TriageQuestion => (typeof q === "string" ? { question: q, recommendedAnswer: null } : q)),
+  ),
   files: z.array(z.string()),
   // Suggestion fields fall back to null on a missing OR invalid value (.catch), so a malformed
   // suggestion never rejects the whole report — verdict/summary/reasons stay intact.
@@ -976,6 +999,8 @@ export const capabilitiesSchema = z.object({
   canUpdate: z.boolean(),
   /** Desktop app: the native folder picker (POST /api/native/pick-folder) is wired. */
   canPickFolder: z.boolean(),
+  /** Cloud host: only PRs are delivered (no auto-merge, direct push or autonomous merge); manual merge stays allowed. */
+  prOnly: z.boolean(),
 });
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 

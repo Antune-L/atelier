@@ -450,6 +450,7 @@ const BASH_ALLOWLIST = [
   "Bash(sleep:*)",
   "Bash(tail:*)",
   "Bash(gh pr create:*)",
+  "Bash(gh pr edit:*)",
   "Bash(gh pr view:*)",
   // Review pipeline: list/diff PRs, post one inline review via the API.
   "Bash(gh pr list:*)",

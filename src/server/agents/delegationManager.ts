@@ -67,6 +67,47 @@ const recoveryCoverageSchema = z.object({
   coverage: z.array(z.object({ label: z.string().min(1), covered: z.boolean(), evidence: z.string().trim().min(1) })),
 });
 const { $schema: _coverageSchemaDraft, ...RECOVERY_COVERAGE_OUTPUT_SCHEMA } = z.toJSONSchema(recoveryCoverageSchema, { io: "output" });
+const RECOVERY_EVIDENCE_REFERENCE = /[^\s]+:\d+/;
+
+interface RecoveryAssessorTurn {
+  ok: boolean;
+  structuredOutputValid: boolean;
+}
+
+function describeAssessorTurn(turn: RecoveryAssessorTurn | null): string {
+  if (turn === null) return "no turn_end received";
+  const structuredOutput = turn.structuredOutputValid ? "valid" : "missing or invalid";
+  return `last turn_end ok=${String(turn.ok)}, structured output ${structuredOutput}`;
+}
+
+function recoveryCoverageProblems(input: {
+  coverage: z.infer<typeof recoveryCoverageSchema>["coverage"] | null;
+  lastTurn: RecoveryAssessorTurn | null;
+  successfulReadToolCalls: number;
+  obligationLabels: readonly string[];
+}): string[] {
+  const problems: string[] = [];
+  if (input.successfulReadToolCalls === 0) problems.push("zero successful read tool calls");
+  if (input.coverage === null) {
+    problems.push(`no valid structured coverage output (${describeAssessorTurn(input.lastTurn)})`);
+    return problems;
+  }
+  const expected = new Set(input.obligationLabels);
+  const returned = input.coverage.map((entry) => entry.label);
+  if (returned.length !== input.obligationLabels.length) problems.push(`expected ${input.obligationLabels.length} coverage entries, got ${returned.length}`);
+  const missing = input.obligationLabels.filter((label) => !returned.includes(label));
+  if (missing.length > 0) problems.push(`missing labels: ${JSON.stringify(missing)}`);
+  const unexpected = returned.filter((label) => !expected.has(label));
+  if (unexpected.length > 0) problems.push(`unexpected labels: ${JSON.stringify(unexpected)}`);
+  const duplicates = [...new Set(returned.filter((label, index) => returned.indexOf(label) !== index))];
+  if (duplicates.length > 0) problems.push(`duplicate labels: ${JSON.stringify(duplicates)}`);
+  for (const entry of input.coverage) {
+    if (!expected.has(entry.label)) continue;
+    if (!entry.covered) problems.push(`${JSON.stringify(entry.label)}: covered=false`);
+    if (!RECOVERY_EVIDENCE_REFERENCE.test(entry.evidence)) problems.push(`${JSON.stringify(entry.label)}: evidence lacks a path:line reference`);
+  }
+  return problems;
+}
 
 /** Transcript prefix marking lines produced by one delegated child lot (vs the parent session). */
 function childTranscriptPrefix(label: string, provider: Orchestrator): string {
@@ -527,7 +568,8 @@ export class DelegationManager {
     const state: ClosableExecution = { handle: null, generationId, usageByModel: {} };
     this.recoveryAssessments.set(ticketId, state);
     this.store.startExecution({ id: generationId, ownerType: "ticket", ownerId: ticketId, generationId, sessionId: null, role: "reviewer", orchestrator: execution.provider, effectiveModel: execution.model, effectiveEffort: execution.effort, codexFast: execution.serviceTier === "fast" });
-    let assessmentError = "The independent assessor returned no complete structured coverage evidence.";
+    let assessmentError: string | null = null;
+    let lastTurn: RecoveryAssessorTurn | null = null;
     let coverageResult: z.infer<typeof recoveryCoverageSchema> | null = null;
     const readToolCalls = new Set<string>();
     const successfulReadToolCalls = new Set<string>();
@@ -553,12 +595,13 @@ export class DelegationManager {
             if (event.type === "turn_end") {
               state.usageByModel = mergeAgentUsageByModel(state.usageByModel, event.usageByModel);
               const parsed = recoveryCoverageSchema.safeParse(event.structuredOutput);
+              lastTurn = { ok: event.ok, structuredOutputValid: parsed.success };
               if (event.ok && parsed.success) coverageResult = parsed.data;
               resolve();
             }
           },
         });
-        state.handle.send(`You are an independent READ-ONLY recovery assessor. Inspect this exact clean candidate ${candidate.commitSha} and its actual code and diff. Assess every original remaining obligation, including blocked descendants. Return coverage with exactly one entry per obligation label, covered=true only when the implementation fulfills all requirements, and evidence with concrete inspected file/line references explaining the observed behavior. Missing, partial, unobservable or inconclusive work must have covered=false. Do not infer fulfillment from PR existence, filenames, orchestrator claims, normal review approval or review budget exhaustion. Do not change code or call pipeline tools.\nTicket: ${ticket.title}\nDescription: ${ticket.description}\nObligations: ${JSON.stringify(recovery.obligations)}`);
+        state.handle.send(`You are an independent READ-ONLY recovery assessor. Inspect this exact clean candidate ${candidate.commitSha} and its actual code and diff. Assess every original remaining obligation, including blocked descendants. Return coverage with exactly one entry per obligation: copy each label verbatim from Obligations[].label, with no extra and no duplicate entries. Set covered=true only when the implementation fulfills all requirements. Evidence must explain the observed behavior and include at least one inspected reference in the exact form path/to/file.ts:123. Inspect files with Read, Grep and Glob; running tests or Bash is neither available nor required. Missing, partial, unobservable or inconclusive work must have covered=false. Do not infer fulfillment from PR existence, filenames, orchestrator claims, normal review approval or review budget exhaustion. Do not change code or call pipeline tools.\nTicket: ${ticket.title}\nDescription: ${ticket.description}\nObligations: ${JSON.stringify(recovery.obligations)}`);
       });
       if (!await this.closeHandle(state)) throw new Error("The coverage assessor has not closed.");
       const assessed = recoveryCoverageSchema.safeParse(coverageResult);
@@ -570,13 +613,17 @@ export class DelegationManager {
       const finalRecovery = this.store.getImplementationPlan(ticketId)?.recovery;
       if (finalRecovery?.generation !== recovery.generation || finalRecovery.status !== "assessing" || finalRecovery.assessmentExecutionId !== generationId
         || !this.ownsRecovery(ticketId, slotId, recovery.generation, assessmentEpoch) || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership or assessment changed before coverage persistence.");
-      const labels = new Set(assessed.success ? assessed.data.coverage.map((entry) => entry.label) : []);
-      const complete = assessed.success && successfulReadToolCalls.size > 0 && labels.size === recovery.obligations.length && assessed.data.coverage.length === labels.size
-        && recovery.obligations.every((obligation) => assessed.data.coverage.some((entry) => entry.label === obligation.label && entry.covered && /[^\s]+:\d+/.test(entry.evidence)));
-      if (!complete) {
-        this.saveRecovery(ticketId, { ...finalRecovery, status: "pending", coverage: assessed.success ? assessed.data.coverage : [], diagnostic: assessmentError });
-        this.store.finalizeExecution({ generationId, status: "failed", usageByModel: state.usageByModel, error: assessmentError });
-        return { ok: false, result: assessmentError };
+      const problems = recoveryCoverageProblems({
+        coverage: assessed.success ? assessed.data.coverage : null,
+        lastTurn,
+        successfulReadToolCalls: successfulReadToolCalls.size,
+        obligationLabels: recovery.obligations.map((obligation) => obligation.label),
+      });
+      if (!assessed.success || problems.length > 0) {
+        const diagnostic = [assessmentError, `Independent recovery coverage is incomplete: ${problems.join("; ")}.`].filter((part) => part !== null).join(" ");
+        this.saveRecovery(ticketId, { ...finalRecovery, status: "pending", coverage: assessed.success ? assessed.data.coverage : [], diagnostic });
+        this.store.finalizeExecution({ generationId, status: "failed", usageByModel: state.usageByModel, error: diagnostic });
+        return { ok: false, result: diagnostic };
       }
       this.saveRecovery(ticketId, { ...finalRecovery, status: "assessed", coverage: assessed.data.coverage, diagnostic: null });
       this.store.finalizeExecution({ generationId, status: "completed", usageByModel: state.usageByModel });

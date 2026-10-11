@@ -19,10 +19,17 @@ export function autonomousEligibility(project: ProjectInfo | undefined, implemen
   return { eligible: true, reason: null };
 }
 
-export function AutonomousOptions({ values, onChange, disabled = false, id }: {
+/** A cloud host refuses the "merge" delivery: callers normalise it away before display and submit. */
+export function prOnlyAutonomousOptions(values: AutonomousOptionValues, prOnly: boolean): AutonomousOptionValues {
+  return prOnly && values.autonomousDelivery === "merge" ? { ...values, autonomousDelivery: null } : values;
+}
+
+export function AutonomousOptions({ values, onChange, disabled = false, prOnly = false, id }: {
   values: AutonomousOptionValues;
   onChange: (values: AutonomousOptionValues) => void;
   disabled?: boolean;
+  /** Cloud host: only "PR seulement" delivery is offered. */
+  prOnly?: boolean;
   id: string;
 }) {
   if (!values.autonomous) return null;
@@ -39,7 +46,7 @@ export function AutonomousOptions({ values, onChange, disabled = false, id }: {
           }}>
             <option value="">Choisir la livraison</option>
             <option value="pr_only">Créer la PR sans fusionner</option>
-            <option value="merge">Fusionner après contrôles satisfaisants</option>
+            {!prOnly && <option value="merge">Fusionner après contrôles satisfaisants</option>}
           </Select>
         </div>
         <div className="flex gap-3">

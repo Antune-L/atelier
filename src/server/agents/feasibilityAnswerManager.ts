@@ -58,7 +58,7 @@ export class FeasibilityAnswerManager {
     if (ticket.feasibilityRevision !== parsed.revision || ticket.feasibilityReportVersion !== parsed.reportVersion) {
       throw new FeasibilityAnswerError(409, "The ticket or feasibility report changed. Reload before submitting");
     }
-    const question = parseTriageReport(ticket.triageReport)?.questions[parsed.questionIndex];
+    const question = parseTriageReport(ticket.triageReport)?.questions[parsed.questionIndex]?.question;
     if (question === undefined) throw new FeasibilityAnswerError(409, "Question does not belong to the current report");
     if (ticket.feasibilityAnswers.some((run) => run.reportVersion === parsed.reportVersion && run.questionIndex === parsed.questionIndex && run.status === "done")) {
       throw new FeasibilityAnswerError(409, "This question has already been answered");

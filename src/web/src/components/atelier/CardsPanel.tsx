@@ -84,7 +84,8 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
   );
   const [prDraft, setPrDraft] = useState(true);
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = autoMergeChoice ?? project?.defaultAutoMerge ?? false;
+  // A cloud host refuses auto-merge: force it off, not only hide its switch.
+  const autoMerge = !capabilities.prOnly && (autoMergeChoice ?? project?.defaultAutoMerge ?? false);
   const { busy, error, run } = useBusyAction();
   const [created, setCreated] = useState<Ticket[]>([]);
 
@@ -240,10 +241,12 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
                 />
                 <span id={`${id}-draft`} className="text-sm">PR en draft</span>
               </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-labelledby={`${id}-merge`} />
-                <span id={`${id}-merge`} className="text-sm">Merge automatique</span>
-              </div>
+              {!capabilities.prOnly && (
+                <div className="flex items-center gap-2">
+                  <Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-labelledby={`${id}-merge`} />
+                  <span id={`${id}-merge`} className="text-sm">Merge automatique</span>
+                </div>
+              )}
             </div>
           </section>
 

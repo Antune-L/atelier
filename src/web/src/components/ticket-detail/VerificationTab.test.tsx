@@ -6,7 +6,7 @@ import { qualityValidationRunSchema } from "@shared/quality";
 import { makeTicket } from "../../../../server/testing/fixtures.ts";
 
 import { TicketTabs } from "./TicketTabs";
-import { canShowVerification, VerificationReport, VerificationTab } from "./VerificationTab";
+import { canShowVerification, LaunchLabel, toggleKey, VerificationProgress, VerificationReport, VerificationTab } from "./VerificationTab";
 
 const bullet = { summary: "La quantité recalcule le total", details: "cart.test.ts: expect(total(10, 2)).toBe(20)", evidenceId: "source-read", provider: "codex", sessionId: "independent-reviewer", artifactPath: null };
 const run = qualityValidationRunSchema.parse({ id: "run", ticketId: "ticket", criteriaSnapshotId: null, kind: "combined", revision: "sha", fingerprint: "sha", configFingerprint: "config", status: "inconclusive", provider: "codex", simulated: false, startedAt: 1, completedAt: 2, environment: null, cleanupStatus: "complete", error: null, verification: { sourceFingerprint: "source", technical: { status: "passed", tested: [bullet], improvements: [] }, relevance: { status: "failed", tested: [], improvements: [{ ...bullet, summary: "Une assertion cosmétique ne couvre pas le calcul" }] }, browser: { status: "blocked", tested: [], improvements: [{ ...bullet, summary: "Configuration du navigateur manquante" }] } } });
@@ -42,5 +42,41 @@ describe("combined verification card tab", () => {
     expect(html).toContain("Interrompu au redémarrage");
     expect(html).toContain("Preuves périmées");
     expect(html).not.toContain("Vérification acceptée");
+  });
+  test("a running verification shows an animated in-progress indicator", () => {
+    const html = renderToStaticMarkup(<VerificationReport run={{ ...run, status: "running" }} current />);
+    expect(html).toContain("animate-spin");
+    expect(html).toContain("En cours");
+  });
+  test("starting or running verification animates the launch button and shows a live status banner", () => {
+    expect(renderToStaticMarkup(<LaunchLabel busy={false} />)).toBe("Lancer la vérification combinée");
+    const busy = renderToStaticMarkup(<LaunchLabel busy />);
+    expect(busy).toContain("animate-spin");
+    expect(busy).toContain("Vérification en cours…");
+    expect(renderToStaticMarkup(<VerificationProgress pending={false} active={false} />)).toBe("");
+    const starting = renderToStaticMarkup(<VerificationProgress pending active={false} />);
+    expect(starting).toContain('role="status"');
+    expect(starting).toContain('aria-live="polite"');
+    expect(starting).toContain("animate-spin");
+    expect(starting).toContain("Démarrage de la vérification…");
+    const running = renderToStaticMarkup(<VerificationProgress pending={false} active />);
+    expect(running).toContain("Vérification en cours : tests");
+    expect(running).not.toContain("Démarrage");
+  });
+  test("expand and collapse all controls appear only when there are bullets", () => {
+    const html = renderToStaticMarkup(<VerificationReport run={run} current />);
+    expect(html).toContain("Tout déplier");
+    expect(html).toContain("Tout replier");
+    expect(html).not.toContain("<details open");
+    const empty = qualityValidationRunSchema.parse({ ...run, verification: { sourceFingerprint: "source", technical: { status: "pending", tested: [], improvements: [] }, relevance: { status: "pending", tested: [], improvements: [] }, browser: { status: "pending", tested: [], improvements: [] } } });
+    const bare = renderToStaticMarkup(<VerificationReport run={empty} current />);
+    expect(bare).not.toContain("Tout déplier");
+    expect(bare).not.toContain("Tout replier");
+  });
+  test("toggling a key keeps the set in sync and reuses it when unchanged", () => {
+    const keys = new Set(["a"]);
+    expect(toggleKey(keys, "a", true)).toBe(keys);
+    expect([...toggleKey(keys, "b", true)]).toEqual(["a", "b"]);
+    expect([...toggleKey(keys, "a", false)]).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ import {
   buildImplementSessionConfig,
   buildSplitSessionConfig,
   buildTriageSessionConfig,
+  delegatedImplementerPermissions,
 } from "./sessionConfig.ts";
 
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
@@ -34,6 +35,15 @@ function implementConfig(ticket: ReturnType<typeof makeTicket>, resumeSessionId?
     ...(resumeSessionId ? { resumeSessionId } : {}),
   });
 }
+
+describe("gh auth is denied to every Bash-allow-listed session", () => {
+  test.each(["claude", "codex"] as const)("%s orchestrator and its delegated implementer", (orchestrator) => {
+    const config = implementConfig(makeTicket({ orchestrator, implementer: orchestrator }));
+    expect(config.permissionDeny).toContain("Bash(gh auth:*)");
+    expect(config.permissionAllow ?? []).not.toContain("Bash(gh auth:*)");
+    expect(delegatedImplementerPermissions(DEFAULT_VCS_PROVIDER).permissionDeny).toContain("Bash(gh auth:*)");
+  });
+});
 
 describe("buildImplementSessionConfig — codex orchestrator", () => {
   test("runs on the codex provider with the ticket's codex knobs", () => {

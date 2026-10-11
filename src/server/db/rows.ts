@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
 
 import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 
@@ -121,6 +122,9 @@ const ticketRowSchema = z.object({
   triage_report: z.string().nullable(),
   reformulate_status: z.string(),
   reformulation: z.string().nullable(),
+  feasibility_revision: z.number().int().nonnegative(),
+  feasibility_report_version: z.number().int().nonnegative(),
+  feasibility_answers: z.string(),
   feasibility_context: z.number(),
   session_usage: z.string().nullable(),
   finished_at: z.number().nullable(),
@@ -396,6 +400,9 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     triageReport: row.triage_report,
     reformulateStatus: reformulateStatusSchema.parse(row.reformulate_status),
     reformulation: row.reformulation,
+    feasibilityRevision: row.feasibility_revision,
+    feasibilityReportVersion: row.feasibility_report_version,
+    feasibilityAnswers: feasibilityAnswerRunsSchema.parse(JSON.parse(row.feasibility_answers)),
     feasibilityContext: row.feasibility_context === 1,
     sessionUsage: parseSessionUsage(row.session_usage),
     finishedAt: row.finished_at,

@@ -43,6 +43,7 @@ import type { CreatePreviewInput, PreviewProjectSettings, PreviewRecord, UpdateP
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
+import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
 import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
@@ -434,6 +435,7 @@ export interface TicketPatch {
   triageReport?: string | null;
   reformulateStatus?: ReformulateStatus;
   reformulation?: string | null;
+  feasibilityAnswers?: Ticket["feasibilityAnswers"];
   feasibilityContext?: boolean;
   sessionUsage?: SessionUsage;
   finishedAt?: number | null;
@@ -1115,6 +1117,12 @@ export class Store {
     return { ...mapTicketRow(raw, this.pendingQuestions(id)), implementationPlan: this.getImplementationPlan(id) };
   }
 
+  /** Read identity before mapping a ticket whose project may have been removed. */
+  getTicketProject(id: string): string | null {
+    const raw = this.db.query("SELECT project FROM tickets WHERE id = ?").get(id);
+    return raw ? z.object({ project: z.string() }).parse(raw).project : null;
+  }
+
   listTickets(includeArchived: boolean): Ticket[] {
     const sql = includeArchived
       ? "SELECT * FROM tickets ORDER BY created_at ASC"
@@ -1330,6 +1338,16 @@ export class Store {
     }
     const builder = new SqlUpdateBuilder();
     const set = builder.set.bind(builder);
+
+    // Revision counters detect even same-value replacements and edit/revert races.
+    const before = this.getTicket(id);
+    if (before && [patch.description, patch.triageReport, patch.triageStatus, patch.column, patch.stage, patch.archived, patch.project].some((value) => value !== undefined)) {
+      set("feasibility_revision", before.feasibilityRevision + 1);
+    }
+    if (before && (patch.triageReport !== undefined || patch.triageStatus !== undefined)) {
+      set("feasibility_report_version", before.feasibilityReportVersion + 1);
+    }
+    if (patch.feasibilityAnswers !== undefined) set("feasibility_answers", JSON.stringify(feasibilityAnswerRunsSchema.parse(patch.feasibilityAnswers)));
 
     if (patch.title !== undefined) set("title", patch.title);
     if (patch.description !== undefined) set("description", patch.description);

@@ -2,7 +2,7 @@ import { Check, ChevronDown, ClipboardPaste, Copy, RotateCw, Sparkles } from "lu
 import { useId, useState } from "react";
 
 import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, type AgentEffort, type AgentModel, type FeasibilityEngine } from "@shared/constants";
-import type { Ticket } from "@shared/schemas";
+import type { FeasibilityAnswerInput, Ticket } from "@shared/schemas";
 import { TRIAGE_VERDICT_LABELS, parseTriageReport } from "@shared/schemas";
 
 import { TerminalView } from "@/components/TerminalView";
@@ -17,6 +17,7 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { cn } from "@/lib/utils";
 import { feasibilityEngineTabOptions, triageVerdictVariant } from "@/lib/display";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+import { FeasibilityQuestion } from "./FeasibilityQuestion";
 
 interface TriageSectionProps {
   ticket: Ticket;
@@ -26,6 +27,7 @@ interface TriageSectionProps {
   onToggleContext: (checked: boolean) => void;
   onFeasibilityEngineChange: (engine: FeasibilityEngine) => void;
   onReformulate: () => Promise<{ started: boolean }>;
+  onAnswerFeasibility: (input: FeasibilityAnswerInput) => Promise<{ started: boolean; id: string }>;
   onApplyReformulation: (text: string) => Promise<void>;
 }
 
@@ -41,6 +43,7 @@ export function TriageSection({
   onToggleContext,
   onFeasibilityEngineChange,
   onReformulate,
+  onAnswerFeasibility,
   onApplyReformulation,
 }: TriageSectionProps) {
   const { codex } = useCapabilities();
@@ -126,13 +129,10 @@ export function TriageSection({
           {result.questions.length > 0 && (
             <div>
               <SectionHeader>Questions</SectionHeader>
-              <ul className="list-disc pl-5">
-                {result.questions.map((q, index) => (
-                  <li key={`${index}-${q.question}`}>
-                    <span className="text-warning">{q.question}</span>
-                    {q.recommendedAnswer !== null && (
-                      <p className="text-muted-foreground">Réponse conseillée : {q.recommendedAnswer}</p>
-                    )}
+              <ul className="space-y-3">
+                {result.questions.map((question, index) => (
+                  <li key={`${ticket.id}:${ticket.feasibilityReportVersion}:${index}`}>
+                    <FeasibilityQuestion ticket={ticket} question={question} index={index} onSubmit={onAnswerFeasibility} />
                   </li>
                 ))}
               </ul>

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { capabilitiesSchema } from "../shared/schemas.ts";
+import { capabilitiesSchema, triageResultSchema } from "../shared/schemas.ts";
+import { initProjectRegistry } from "./config.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { AtelierManager } from "./agents/atelierManager.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -8,6 +9,7 @@ import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { SplitManager } from "./agents/splitManager.ts";
@@ -55,6 +57,7 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
   const app = createApiRoutes({
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
     reformulate: new ReformulateManager(store, system, hub, notifier),
+    feasibilityAnswers: new FeasibilityAnswerManager(store, system, hub),
     automations: new AutomationManager(store, system, hub),
     projectRoot: "/tmp", composerAvailable: true,
   });
@@ -104,6 +107,27 @@ test("HTTP contracts route GPT and Claude actions, reject retired models and per
     expect(system.runtimeChecks).toEqual([true, true, true, true]);
     expect(store.listExecutionRuns().length).toBe(3);
     expect((await app.handle(new Request("http://localhost/api/stats"))).status).toBe(200);
+    store.createProject("answers-http", { label: "Test", repoPath: "/tmp/answers-http", baseBranch: "main", commitTimeoutMs: 60000, defaultAutoMerge: false, defaultAddScreenshots: false });
+    initProjectRegistry(store);
+    db.query("INSERT INTO tickets (id, title, project, created_at, updated_at) VALUES ('answers-http-ticket', 'Test', 'answers-http', 1, 1)").run();
+    const ticket = store.updateTicket("answers-http-ticket", {
+      triageStatus: "done",
+      triageReport: JSON.stringify(triageResultSchema.parse({ verdict: "needs_info", summary: "Test", reasons: [], questions: ["Colour?"], files: [] })),
+    });
+    const answerInput = { revision: ticket.feasibilityRevision, reportVersion: ticket.feasibilityReportVersion, questionIndex: 0, answer: "Blue" };
+    const answerPath = "/tickets/answers-http-ticket/feasibility-answers";
+    for (const body of [{ ...answerInput, answer: " " }, { ...answerInput, answer: "x".repeat(10001) }, { ...answerInput, questionIndex: -1 }, { answer: "Blue" }]) {
+      expect((await post(answerPath, body)).status).toBe(400);
+    }
+    expect((await post("/tickets/missing/feasibility-answers", answerInput)).status).toBe(404);
+    expect((await post(answerPath, { ...answerInput, revision: 0 })).status).toBe(409);
+    expect((await post(answerPath, { ...answerInput, questionIndex: 1 })).status).toBe(409);
+    const started = await post(answerPath, answerInput);
+    expect(started.status).toBe(200);
+    expect(await started.json()).toMatchObject({ started: true, id: expect.any(String) });
+    expect((await post(answerPath, answerInput)).status).toBe(409);
+    await Bun.sleep(0);
+    expect(store.getTicket(ticket.id)?.feasibilityAnswers[0]?.status).toBe("done");
   } finally {
     db.close();
   }

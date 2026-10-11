@@ -3,11 +3,11 @@ import type { ZodType } from "zod";
 
 const DRAFT_KEY_PREFIX = "draft:";
 
-function readDraft(storageKey: string): string {
+function readDraft(storageKey: string, initialValue = ""): string {
   try {
-    return window.localStorage.getItem(storageKey) ?? "";
+    return window.localStorage.getItem(storageKey) ?? initialValue;
   } catch {
-    return "";
+    return initialValue;
   }
 }
 
@@ -35,14 +35,15 @@ type DraftUpdate = string | ((prev: string) => string);
  */
 function useDraftStorage(
   key: string,
+  initialValue = "",
 ): [raw: string, setRaw: (next: DraftUpdate) => void, clear: () => void] {
   const storageKey = `${DRAFT_KEY_PREFIX}${key}`;
   const [loadedKey, setLoadedKey] = useState(storageKey);
-  const [raw, setRawState] = useState<string>(() => readDraft(storageKey));
+  const [raw, setRawState] = useState<string>(() => readDraft(storageKey, initialValue));
 
   if (loadedKey !== storageKey) {
     setLoadedKey(storageKey);
-    setRawState(readDraft(storageKey));
+    setRawState(readDraft(storageKey, initialValue));
   }
 
   const setRaw = (next: DraftUpdate): void => {
@@ -64,8 +65,9 @@ function useDraftStorage(
 /** Text kept in localStorage under `draft:<key>` so closing a sheet never loses what the user typed. */
 export function useLocalDraft(
   key: string,
+  initialValue = "",
 ): [value: string, setValue: (next: DraftUpdate) => void, clear: () => void] {
-  return useDraftStorage(key);
+  return useDraftStorage(key, initialValue);
 }
 
 /** Structured draft (JSON) validated by `schema` on read; an invalid or missing draft yields `empty`. */

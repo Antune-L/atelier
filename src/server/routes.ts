@@ -55,6 +55,9 @@ import type { SessionHub } from "./agents/sessionHub.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { ReformulateManager } from "./agents/reformulateManager.ts";
+import { FeasibilityAnswerError } from "./agents/feasibilityAnswerManager.ts";
+import type { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
+import { feasibilityAnswerInputSchema } from "../shared/schemas.ts";
 import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
@@ -125,6 +128,7 @@ interface RouteDeps {
   split: SplitManager;
   atelier: AtelierManager;
   reformulate: ReformulateManager;
+  feasibilityAnswers: FeasibilityAnswerManager;
   automations: AutomationManager;
   projectRoot: string;
   resourcesRoot?: string;
@@ -1642,6 +1646,16 @@ export function createApiRoutes(deps: RouteDeps) {
         return await performSplit(deps, ticket, project);
       } catch (error) {
         return jsonError(set, HTTP_INTERNAL_ERROR, getErrorMessage(error, "échec du découpage"));
+      }
+    })
+    .post("/tickets/:id/feasibility-answers", ({ params, body, set }) => {
+      const parsed = feasibilityAnswerInputSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid feasibility answer");
+      try {
+        const id = deps.feasibilityAnswers.start(params.id, parsed.data);
+        return { started: true, id };
+      } catch (error) {
+        return jsonError(set, error instanceof FeasibilityAnswerError ? error.status : HTTP_INTERNAL_ERROR, getErrorMessage(error));
       }
     })
     .post("/tickets/:id/reformulate", ({ params, set }) => {

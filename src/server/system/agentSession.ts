@@ -75,6 +75,8 @@ export type AgentSessionEvent = (
   | { type: "error"; message: string }
   /** Current context-window occupancy of the live session (only with `reportContextUsage`). */
   | { type: "context_usage"; usedTokens: number; maxTokens: number | null }
+  /** Live non-ambient background tasks of the session (REPLACE semantics: the full set each time). Claude only. */
+  | { type: "background_tasks"; activeTaskIds: string[] }
 ) & { sourceId?: string };
 
 /**

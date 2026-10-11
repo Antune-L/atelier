@@ -438,6 +438,12 @@ export function dispatchClaudeMessage(
   switch (message.type) {
     case "system":
       if (message.subtype === "init") onEvent({ type: "init", sessionId: message.session_id });
+      else if (message.subtype === "background_tasks_changed") {
+        onEvent({
+          type: "background_tasks",
+          activeTaskIds: message.tasks.filter((task) => task.ambient !== true).map((task) => task.task_id),
+        });
+      }
       return;
     case "assistant":
       for (const block of message.message.content) {

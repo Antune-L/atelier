@@ -153,6 +153,9 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
   const loopBudget = ticket.argusMultiLoop ? "Max 2 boucles" : "1 seule boucle de correction";
   const depth = ticket.reviewDepth ?? "light";
   const kinds = reviewKinds(depth);
+  const unreviewedChangesHint = ticket.stealth || ticket.directPush
+    ? ""
+    : " Si tu modifies encore le code après cette dernière passe, done() reste accepté : le backend ajoute à la description de la PR la section « Fichiers modifiés après la dernière review (non relus) » ; ne la retire pas.";
   return [
     `   ${FORMAT_BEFORE_REVIEW_HINT}`,
     `   ${CHECKS_BEFORE_REVIEW_HINT}`,
@@ -164,7 +167,7 @@ function buildReviewSteps(ticket: Ticket, opts: { isUi: boolean; figmaUrls: stri
     `3b. indépendance : chaque dimension a sa propre session backend en lecture seule. N'appelle jamais \`${ticket.autonomous ? "validate_autonomous()" : "done()"}\` avant les ${kinds.length} résultats vérifiés sur le code courant ; un reviewer échoué ou une dimension manquante bloque la validation.`,
     ticket.autonomous
       ? `4. fixing : si un verdict vaut revise, délègue les corrections de tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, appelle fail et conserve les travaux. Aucun épuisement du budget de review ne peut autoriser une preview, une PR ou une fusion autonome.`
-      : `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, ne relance plus et ne fail pas pour ce seul motif : poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale clairement les findings encore ouverts dans sa description. Au-delà de ce budget, le backend refuse toute passe supplémentaire : \`delegate_review\` répond en erreur. Le backend désactive alors l'auto-merge.`,
+      : `4. fixing : si un verdict vaut revise, corrige tous les findings pertinents puis relance les ${kinds.length} reviewers sur le nouveau diff. ${loopBudget}. Si la dernière relecture demande encore revise après cette limite, ne relance plus et ne fail pas pour ce seul motif : poursuis les tests, le commit, le push et l'ouverture de la PR, puis signale clairement les findings encore ouverts dans sa description. Au-delà de ce budget, le backend refuse toute passe supplémentaire : \`delegate_review\` répond en erreur. Le backend désactive alors l'auto-merge.${unreviewedChangesHint}`,
   ];
 }
 

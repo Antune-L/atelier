@@ -396,6 +396,7 @@ export interface SystemAdapter {
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions, provider: VcsProvider): Promise<DoneGateResult>;
   /** PR description body, used as the agent-work summary. null when unreadable. */
   fetchPrSummary(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
+  updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult>;
 
   // ---- PR listing (review entry point) ----
   listReviewRequests(repoPath: string, provider: VcsProvider): Promise<ReviewRequestSnapshot>;

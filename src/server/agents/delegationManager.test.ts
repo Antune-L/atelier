@@ -13,11 +13,12 @@ import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
 import type { AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
-import type { PublishReviewOptions, PublishReviewResult } from "../system/types.ts";
+import type { CodeSnapshot, DoneGateResult, PublishReviewOptions, PublishReviewResult } from "../system/types.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
 
 import { DelegationManager } from "./delegationManager.ts";
+import { allowedReviewPasses, withUnreviewedChangesSection } from "./reviewPass.ts";
 import { SessionHub } from "./sessionHub.ts";
 import { reviewPublicationState } from "./slotManager.ts";
 
@@ -34,6 +35,8 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
   readonly sessions: RecordedSession[] = [];
   readonly publishedReviews: PublishReviewOptions[] = [];
   fingerprint = "code-v1";
+  fileHashes: Record<string, string> = {};
+  prBody = "";
   fingerprintCalls = 0;
   hangOnClose = false;
   throwOnClose = false;
@@ -42,6 +45,15 @@ class RecordingSystemAdapter extends FakeSystemAdapter {
   override async codeFingerprint(): Promise<string> {
     this.fingerprintCalls++;
     return this.fingerprint;
+  }
+
+  override async codeSnapshot(): Promise<CodeSnapshot> {
+    return { fingerprint: await this.codeFingerprint(), fileHashes: { ...this.fileHashes } };
+  }
+
+  override async updatePrBody(_slotPath: string, _prUrl: string, transform: (body: string) => string): Promise<DoneGateResult> {
+    this.prBody = transform(this.prBody);
+    return { ok: true, reason: "" };
   }
 
   override async publishReview(
@@ -547,6 +559,59 @@ describe("DelegationManager — independent reviews", () => {
 
     system.fingerprint = "code-v2";
     expect(await restarted.reviewsApproved(ticket.id, 3)).toBe(false);
+  });
+
+  test("an exhausted review budget accepts code changed after the last pass and reports the unreviewed files", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    system.fileHashes = { "src/a.ts": "1", "src/b.ts": "1" };
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+    store.updateTicket(ticket.id, { reviewRounds: allowedReviewPasses(ticket) });
+
+    system.fingerprint = "code-v2";
+    system.fileHashes = { "src/a.ts": "2", "src/b.ts": "1", "src/c.ts": "1" };
+    const gate = await delegation.reviewGate(ticket.id, 3, "approved_or_limit", "budget-spent", { acceptChangesAfterBudget: true });
+
+    expect(gate).toEqual({
+      ok: true,
+      passId: store.getReviewPass(ticket.id)?.passId ?? "",
+      acceptedWithFindings: false,
+      unreviewedChanges: { paths: ["src/a.ts", "src/c.ts"], count: 2 },
+    });
+    const refused = await delegation.reviewGate(ticket.id, 3, "approved_or_limit", "recovery");
+    expect(refused.ok === false && refused.reasonCode).toBe("code_changed");
+
+    system.prBody = "Résumé de la PR";
+    if (!gate.ok || gate.unreviewedChanges === null) throw new Error("unreviewed changes missing");
+    expect(await delegation.flagUnreviewedChanges(ticket.id, 3, "https://github.com/fake/repo/pull/1", gate.unreviewedChanges)).toEqual({ ok: true, reason: "" });
+    await delegation.flagUnreviewedChanges(ticket.id, 3, "https://github.com/fake/repo/pull/1", gate.unreviewedChanges);
+    expect(system.prBody).toBe(withUnreviewedChangesSection("Résumé de la PR", gate.unreviewedChanges));
+    expect(system.prBody.startsWith("Résumé de la PR\n\n")).toBe(true);
+    expect(system.prBody).toContain("## Fichiers modifiés après la dernière review (non relus)");
+    expect(system.prBody).toContain("- `src/a.ts`\n- `src/c.ts`");
+    expect(system.prBody.match(/Fichiers modifiés après la dernière review/g)).toHaveLength(1);
+  });
+
+  test("code changed after the last pass is still refused while the review budget remains", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    system.fileHashes = { "src/a.ts": "1" };
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+    store.updateTicket(ticket.id, { reviewRounds: allowedReviewPasses(ticket) - 1 });
+
+    system.fingerprint = "code-v2";
+    system.fileHashes = { "src/a.ts": "2" };
+    const gate = await delegation.reviewGate(ticket.id, 3, "approved_or_limit", "budget-left", { acceptChangesAfterBudget: true });
+
+    expect(gate).toEqual({
+      ok: false,
+      reason: "Les fichiers ont changé depuis la passe de review. Relance tous les reviewers sur le code courant.",
+      reasonCode: "code_changed",
+    });
   });
 
   test("a missing structured response never becomes an approval", async () => {

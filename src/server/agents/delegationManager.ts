@@ -22,7 +22,7 @@ import type { AgentSessionEvent, AgentSessionHandle, AgentTurnUsage } from "../s
 import { renderCollapsedDetails } from "../system/reviewMarkdown.ts";
 import { implementationFailureDiagnostic } from "../system/delegationWorkspace.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
-import type { CodeSnapshot, ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
+import type { CodeSnapshot, DoneGateResult, ImplementationLotOptions, SystemAdapter } from "../system/types.ts";
 
 import {
   DEFAULT_FINDING_RENDER_STYLE,
@@ -33,7 +33,8 @@ import {
   reviewPublicationEvent,
   type FindingRenderStyle,
 } from "./reviewFindings.ts";
-import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds } from "./reviewPass.ts";
+import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds, withUnreviewedChangesSection } from "./reviewPass.ts";
+import type { UnreviewedChanges } from "./reviewPass.ts";
 import { resolveBaseBranch } from "./baseBranch.ts";
 import { codexImplementerKnobs, delegatedImplementerPermissions } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
@@ -241,7 +242,7 @@ interface ActiveReviewPass {
 type ReviewGateRequirement = "approved" | "approved_or_limit" | "completed";
 
 type ReviewGateResult =
-  | { ok: true; passId: string; acceptedWithFindings: boolean }
+  | { ok: true; passId: string; acceptedWithFindings: boolean; unreviewedChanges: UnreviewedChanges | null }
   | { ok: false; reason: string; reasonCode: "code_changed" | "fingerprint_error" | "fingerprint_timeout" | "incomplete_review" | "missing_review" | "incomplete_implementation" };
 
 interface ClosableExecution {
@@ -1056,6 +1057,7 @@ export class DelegationManager {
     slotId: number,
     requirement: ReviewGateRequirement,
     correlationId: string,
+    options: { acceptChangesAfterBudget?: boolean } = {},
   ): Promise<ReviewGateResult> {
     const startedAt = Date.now();
     log.info("gate de review démarrée", { ticketId, slotId, correlationId, requirement });
@@ -1075,11 +1077,13 @@ export class DelegationManager {
     }
     const fingerprint = await this.boundedReviewGateFingerprint(ticketId, slotId, correlationId);
     if (!fingerprint.ok) return fingerprint;
+    let unreviewedChanges: UnreviewedChanges | null = null;
     if (reviewPass.codeFingerprint !== fingerprint.fingerprint) {
       const diagnosticsAvailable = reviewPass.fileHashes !== null;
       const changedPaths = new Set([...Object.keys(reviewPass.fileHashes ?? {}), ...Object.keys(fingerprint.fileHashes)]);
       const changed = [...changedPaths].filter((path) => reviewPass.fileHashes?.[path] !== fingerprint.fileHashes[path]).sort();
-      this.store.logEvent(ticketId, "review_code_changed", {
+      const acceptedAfterBudget = options.acceptChangesAfterBudget === true && this.reviewBudgetSpent(this.store.getTicket(ticketId), reviewPass);
+      this.store.logEvent(ticketId, acceptedAfterBudget ? "review_code_changed_after_budget" : "review_code_changed", {
         passId: reviewPass.passId,
         correlationId,
         diagnosticsAvailable,
@@ -1087,11 +1091,16 @@ export class DelegationManager {
         changedPathCount: diagnosticsAvailable ? changed.length : null,
         truncated: diagnosticsAvailable && changed.length > MAX_CHANGED_PATHS,
       });
-      return {
-        ok: false,
-        reason: "Les fichiers ont changé depuis la passe de review. Relance tous les reviewers sur le code courant.",
-        reasonCode: "code_changed",
-      };
+      if (!acceptedAfterBudget) {
+        return {
+          ok: false,
+          reason: "Les fichiers ont changé depuis la passe de review. Relance tous les reviewers sur le code courant.",
+          reasonCode: "code_changed",
+        };
+      }
+      unreviewedChanges = diagnosticsAvailable
+        ? { paths: changed.slice(0, MAX_CHANGED_PATHS), count: changed.length }
+        : { paths: [], count: null };
     }
     const requiredKinds = requiredReviewKinds(reviewPass.reviewDepth);
     const incompleteKinds = requiredKinds.filter((kind) => {
@@ -1111,7 +1120,7 @@ export class DelegationManager {
     if (requirement === "approved_or_limit" && hasOpenFindings) {
       const ticket = this.store.getTicket(ticketId);
       const allowed = allowedReviewPasses(ticket);
-      if (ticket?.kind !== "feature" || ticket.reviewRounds < allowed) {
+      if (!this.reviewBudgetSpent(ticket, reviewPass)) {
         return {
           ok: false,
           reason: `Review non approuvée : corrige les findings pertinents puis relance tous les reviewers (${ticket?.reviewRounds ?? 0}/${allowed} passes effectuées).`,
@@ -1127,7 +1136,24 @@ export class DelegationManager {
       passId: reviewPass.passId,
       elapsedMs: Date.now() - startedAt,
     });
-    return { ok: true, passId: reviewPass.passId, acceptedWithFindings: hasOpenFindings };
+    return { ok: true, passId: reviewPass.passId, acceptedWithFindings: hasOpenFindings, unreviewedChanges };
+  }
+
+  async flagUnreviewedChanges(ticketId: string, slotId: number, prUrl: string, changes: UnreviewedChanges): Promise<DoneGateResult> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return { ok: false, reason: "Ticket introuvable." };
+    const updated = await this.system.updatePrBody(slotPath(slotId), prUrl, (body) => withUnreviewedChangesSection(body, changes), projectVcsProvider(ticket.project));
+    this.store.logEvent(ticketId, updated.ok ? "pr_unreviewed_changes_flagged" : "pr_unreviewed_changes_flag_failed", {
+      prUrl,
+      changedPaths: changes.paths,
+      changedPathCount: changes.count,
+      reason: updated.ok ? null : updated.reason,
+    });
+    if (updated.ok) return updated;
+    return {
+      ok: false,
+      reason: `Impossible d'ajouter à la description de la PR la liste des fichiers modifiés après la dernière review : ${updated.reason}. Corrige la cause (par exemple une description trop longue) puis rappelle done().`,
+    };
   }
 
   async reviewsCompleted(ticketId: string, slotId: number): Promise<boolean> {
@@ -1773,22 +1799,21 @@ export class DelegationManager {
     }
   }
 
+  private reviewBudgetSpent(ticket: Ticket | null, stored: ReviewPass | null): boolean {
+    if (ticket?.kind !== "feature" || stored === null || ticket.reviewRounds < allowedReviewPasses(ticket)) return false;
+    return requiredReviewKinds(stored.reviewDepth).every((kind) => stored.results[kind]?.status === "completed");
+  }
+
   /**
    * Refusal for a brand new pass once the feature ticket burnt its budget, or `null` when a pass is
    * still allowed. Only a stored pass whose required dimensions all completed counts as consumed:
    * a pass whose reviewers crashed — or one lost across a backend restart — must stay re-runnable.
    */
   private reviewBudgetExhausted(ticket: Ticket): { ok: false; result: string } | null {
-    if (ticket.kind !== "feature") return null;
-    const allowed = allowedReviewPasses(ticket);
-    const rounds = this.store.getTicket(ticket.id)?.reviewRounds ?? ticket.reviewRounds;
-    if (rounds < allowed) return null;
-    const stored = this.store.getReviewPass(ticket.id);
-    if (!stored) return null;
-    const complete = requiredReviewKinds(stored.reviewDepth).every(
-      (kind) => stored.results[kind]?.status === "completed",
-    );
-    if (!complete) return null;
+    const current = this.store.getTicket(ticket.id) ?? ticket;
+    if (!this.reviewBudgetSpent(current, this.store.getReviewPass(ticket.id))) return null;
+    const allowed = allowedReviewPasses(current);
+    const rounds = current.reviewRounds;
     log.warn("budget de passes de review épuisé", {
       ticketId: ticket.id,
       rounds,

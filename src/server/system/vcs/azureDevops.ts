@@ -559,6 +559,16 @@ export class AzureDevopsVcsClient implements VcsClient {
     return body.length > 0 ? body : null;
   }
 
+  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string): Promise<DoneGateResult> {
+    const target = repoRefFromPrUrl(prUrl);
+    if (target === null) return { ok: false, reason: "URL de PR Azure DevOps invalide" };
+    const pr = await this.showPr(cwd, prUrl);
+    if (!pr.ok) return { ok: false, reason: "description de la PR Azure DevOps illisible" };
+    const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", transform(pr.data.description ?? "")]), cwd);
+    if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: `az repos pr update a échoué : ${boundedCommandDetail(res)}` };
+    return { ok: true, reason: "" };
+  }
+
   /**
    * One inline thread carries each finding whose file appears in the latest iteration's changes; a
    * finding Azure cannot anchor is folded into the summary body instead of failing the publication,

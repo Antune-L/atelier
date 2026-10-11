@@ -492,6 +492,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).fetchPrSummary(slotPath, prUrl);
   }
 
+  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult> {
+    this.log("updatePrBody", { slotPath, prUrl });
+    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform);
+  }
+
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {
     this.log("verifyReviewDone", {
       slotPath,

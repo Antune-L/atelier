@@ -211,12 +211,35 @@ export const REFORMULATE_STATUSES = ["none", "running", "done", "failed"] as con
 export const reformulateStatusSchema = z.enum(REFORMULATE_STATUSES);
 export type ReformulateStatus = z.infer<typeof reformulateStatusSchema>;
 
+/** One open question of a triage report, with the answer the agent recommends (null = none). */
+export const triageQuestionSchema = z.object({
+  question: z.string(),
+  // A blank answer is no recommendation: normalize it to null so the UI never shows an empty one.
+  recommendedAnswer: z
+    .string()
+    .nullable()
+    .default(null)
+    .catch(null)
+    .transform((answer) => (answer?.trim() ? answer : null)),
+});
+export type TriageQuestion = z.infer<typeof triageQuestionSchema>;
+
+/** Format a triage question for text prompts, appending its recommended answer when present. */
+export function formatTriageQuestion(q: TriageQuestion): string {
+  return q.recommendedAnswer ? `${q.question} (réponse conseillée : ${q.recommendedAnswer})` : q.question;
+}
+
 /** Shape the triage agent must emit (and we re-parse on both server and client). */
 export const triageResultSchema = z.object({
   verdict: triageVerdictSchema,
   summary: z.string(),
   reasons: z.array(z.string()),
-  questions: z.array(z.string()),
+  // Legacy reports stored plain strings: normalize them to the object form.
+  questions: z.array(
+    z
+      .union([z.string(), triageQuestionSchema])
+      .transform((q): TriageQuestion => (typeof q === "string" ? { question: q, recommendedAnswer: null } : q)),
+  ),
   files: z.array(z.string()),
   // Suggestion fields fall back to null on a missing OR invalid value (.catch), so a malformed
   // suggestion never rejects the whole report — verdict/summary/reasons stay intact.

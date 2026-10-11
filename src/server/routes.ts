@@ -1731,6 +1731,12 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
       return { ...outcome, ticket: store.getTicket(params.id), implementationPlan: store.getImplementationPlan(params.id) };
     })
+    .post("/tickets/:id/autonomous-resume", ({ params, set }) => {
+      if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
+      const outcome = coordinator.resumeAutonomous(params.id);
+      if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
+      return store.getTicket(params.id);
+    })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

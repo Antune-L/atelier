@@ -134,7 +134,7 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
   );
 }
 
-export function QualityRunExplanation({ run, quality, current, onOpenEvidence }: { run: QualityValidationRun; quality: TicketQuality; current: boolean; onOpenEvidence: (evidence: QualityEvidence) => void }) {
+export function QualityRunExplanation({ run, quality, current, onOpenEvidence, deferredToPreview = false }: { run: QualityValidationRun; quality: TicketQuality; current: boolean; onOpenEvidence: (evidence: QualityEvidence) => void; deferredToPreview?: boolean }) {
   if (QUALITY_ACTIVE_STATUSES.includes(run.status)) return null;
   const unresolved = qualityRunCriterionResults(quality, run).filter(({ criterion, evidence }) => criterion.required && evidence?.status !== "passed");
   if (unresolved.length === 0) return null;
@@ -143,6 +143,7 @@ export function QualityRunExplanation({ run, quality, current, onOpenEvidence }:
   let explanation = "Des critères requis restent à vérifier avant la livraison.";
   if (checksPassed) explanation = "Contrôles techniques réussis. La validation indépendante de ces critères reste incomplète.";
   if (checksPassed && unresolved.length === 1) explanation = "Contrôles techniques réussis. Ce critère n’a pas pu être vérifié.";
+  if (checksPassed && deferredToPreview) explanation = "Contrôles techniques réussis. Ces critères sont vérifiés dans le navigateur sur la preview du parcours autonome.";
   if (unresolved.some(({ evidence }) => evidence?.status === "failed")) {
     explanation = "Un critère requis est signalé en échec dans le compte rendu.";
     if (checksPassed) explanation = "Contrôles techniques réussis. Un critère requis est signalé en échec dans le compte rendu.";

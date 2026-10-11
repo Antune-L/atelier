@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousPlanInputSchema } from "../../shared/autonomous.ts";
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, autonomousPlanInputSchema } from "../../shared/autonomous.ts";
 import type { AutonomousPlanInput, AutonomousState } from "../../shared/autonomous.ts";
+import type { Stage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { latestAcceptanceSnapshot, latestFunctionalSnapshot } from "../../shared/quality.ts";
-import type { QualityValidationRun } from "../../shared/quality.ts";
+import type { QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationRun } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { getProject, isQualityOwner, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { Store } from "../db/store.ts";
@@ -19,6 +20,9 @@ const MINUTE_MS = 60_000;
 const POLL_MS = 250;
 const DELIVERY_CLEANUP_TIMEOUT_MS = 120_000;
 const TIMEOUT_MESSAGE = "The autonomous execution deadline has expired. The implementation worktree is retained.";
+const AUTONOMOUS_RETRYABLE_DIAGNOSTICS: Array<QualityRunDiagnostic["category"]> = ["environment_blocker", "timeout"];
+const AUTONOMOUS_PERMANENT_BLOCKERS: QualityFunctionalBlockerCode[] = ["authentication_required", "test_data_missing"];
+const AUTONOMOUS_RESUMED_STAGE: Stage = "testing";
 const READY_MESSAGE = "Les vérifications locales et tous les cas E2E de la preview Coolify ont accepté le même commit. Appelle deliver_autonomous avec le titre et le corps de la PR. Le serveur appliquera le choix de livraison enregistré. Ne crée ni ne fusionne de PR avec une commande externe.";
 
 export interface AutonomousWorkflowDependencies {
@@ -66,7 +70,7 @@ export class AutonomousWorkflow {
         this.persist(ticketId, {
           phase: "paused", plan: null, sourceFingerprint: null, configFingerprint: null, planFingerprint: null, deliveryConfirmation: null, hostMutation: null,
           acceptanceSnapshotId: null, functionalSnapshotId: null, revision: null, fullRunId: null, previewRunId: null, previewId: null,
-          startedAt, deadlineAt, corrections: ticket.autonomousState?.corrections ?? 0, error: this.deps.preview.redactError(getErrorMessage(error)),
+          startedAt, deadlineAt, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: 0, error: this.deps.preview.redactError(getErrorMessage(error)),
         });
         this.deps.store.updateTicket(ticketId, { stage: "stalled" });
         this.deps.onChange?.(ticketId);
@@ -81,7 +85,7 @@ export class AutonomousWorkflow {
       const state: AutonomousState = {
         phase: "planning", plan, sourceFingerprint: source, configFingerprint: this.configFingerprint(ticket), planFingerprint: fingerprint(plan), deliveryConfirmation: null, hostMutation: null,
         acceptanceSnapshotId: acceptance.id, functionalSnapshotId: functional.id, revision: null, fullRunId: null, previewRunId: null, previewId: null,
-        startedAt, deadlineAt: ticket.autonomousState?.deadlineAt ?? startedAt + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * MINUTE_MS, corrections: ticket.autonomousState?.corrections ?? 0, error: null,
+        startedAt, deadlineAt: ticket.autonomousState?.deadlineAt ?? startedAt + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * MINUTE_MS, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: 0, error: null,
       };
       this.persist(ticketId, state);
       this.armDeadline(ticketId, state);
@@ -188,8 +192,9 @@ export class AutonomousWorkflow {
     const revision = await this.requireRevision(ticket);
     this.requireRunning(ticketId);
     let state = this.state(ticket);
-    if (state.revision !== revision) state = { ...state, revision, fullRunId: null, previewRunId: null };
+    if (state.revision !== revision) state = { ...state, revision, fullRunId: null, previewRunId: null, environmentRetries: 0 };
     if (state.phase === "paused") {
+      this.deps.store.updateTicket(ticketId, { stage: AUTONOMOUS_RESUMED_STAGE });
       const full = state.fullRunId ? this.deps.store.getQualityRun(state.fullRunId) : null;
       const functional = state.previewRunId ? this.deps.store.getQualityRun(state.previewRunId) : null;
       if (full && ["inconclusive", "interrupted", "cancelled"].includes(full.status) && full.cleanupStatus === "complete") state = { ...state, fullRunId: null, previewRunId: null };
@@ -257,15 +262,28 @@ export class AutonomousWorkflow {
   private accepted(ticket: Ticket, run: QualityValidationRun, functional: boolean): boolean {
     this.requireFrozen(ticket);
     const state = this.state(ticket);
-    if (run.simulated || run.status !== "passed" || !run.evidenceAccepted || run.cleanupStatus !== "complete" || run.revision !== state.revision || run.provider !== ticket.orchestrator) return false;
+    const deferred = !functional && this.deferredToPreview(run);
+    if (run.simulated || (run.status !== "passed" && !deferred) || !run.evidenceAccepted || run.cleanupStatus !== "complete" || run.revision !== state.revision || run.provider !== ticket.orchestrator) return false;
     if (functional ? run.kind !== "functional" || !run.preview || run.criteriaSnapshotId !== state.functionalSnapshotId : run.kind !== "full" || !run.technicalEvidenceAccepted || run.criteriaSnapshotId !== state.acceptanceSnapshotId) return false;
     const project = getProject(ticket.project);
     if (run.configFingerprint !== fingerprint([project.scripts ?? null, project.validation ?? null])) return false;
     const quality = this.deps.quality.get(ticket.id);
     return state.plan?.criteria.every((criterion) => {
       const evidence = quality.evidence.filter((entry) => entry.runId === run.id && entry.criterionId === criterion.id && entry.authority === "agent").at(-1);
-      return evidence?.status === "passed" && !evidence.timedOut && evidence.provider === run.provider && !!evidence.sessionId && (!functional || !!evidence.scenario);
+      if (!evidence) return false;
+      const statusAccepted = evidence.status === "passed" || (deferred && evidence.status === "inconclusive");
+      return statusAccepted && !evidence.timedOut && evidence.provider === run.provider && !!evidence.sessionId && (!functional || !!evidence.scenario);
     }) === true;
+  }
+
+  private deferredToPreview(run: QualityValidationRun): boolean {
+    return run.status === "inconclusive" && run.technicalEvidenceAccepted && (!run.diagnostic || run.diagnostic.category === "validation_incomplete");
+  }
+
+  private environmentRetryable(run: QualityValidationRun): boolean {
+    if (run.simulated || run.status !== "inconclusive" || run.cleanupStatus !== "complete" || !run.diagnostic) return false;
+    if (!AUTONOMOUS_RETRYABLE_DIAGNOSTICS.includes(run.diagnostic.category)) return false;
+    return run.diagnostic.blockers.every((blocker) => !AUTONOMOUS_PERMANENT_BLOCKERS.includes(blocker.code));
   }
 
   private async failedRun(ticketId: string, run: QualityValidationRun): Promise<void> {
@@ -278,6 +296,11 @@ export class AutonomousWorkflow {
       const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed").map((entry) => entry.criterionId ?? entry.summary);
       await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté une non-conformité. Corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}. Correction ${state.corrections + 1}/${maxCorrections}.`));
       return;
+    }
+    if (this.environmentRetryable(run) && state.environmentRetries < AUTONOMOUS_MAX_ENVIRONMENT_RETRIES && Date.now() < state.deadlineAt) {
+      const runReset = run.kind === "functional" ? { previewRunId: null } : { fullRunId: null, previewRunId: null };
+      this.patch(ticketId, { ...runReset, environmentRetries: state.environmentRetries + 1, error: run.error ? this.deps.preview.redactError(run.error) : null });
+      return this.execute(ticketId);
     }
     await this.pause(ticketId, run.error ?? "Autonomous verification is incomplete or its correction budget is exhausted.");
   }

@@ -271,6 +271,7 @@ export const api = {
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
+  resumeAutonomous: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/autonomous-resume`, { method: "POST" }),
   startTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/test`, { method: "POST" }),
   stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
   createStealthPr: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/create-pr`, { method: "POST" }),

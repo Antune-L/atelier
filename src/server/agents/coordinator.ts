@@ -83,6 +83,8 @@ const SLOW_COORDINATOR_TOOL_MS = 15_000;
 const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
+const AUTONOMOUS_RESUME_REQUESTED_EVENT = "autonomous_resume_requested";
+const AUTONOMOUS_RESUME_PROMPT = "Reprise demandée par l’utilisateur. Si le worktree est propre et poussé et que la dernière review indépendante couvre le code courant, appelle validate_autonomous puis termine ton tour. Sinon, termine d’abord la correction, la review, le commit et le push. N’ouvre ni ne fusionne de PR.";
 const DIRECT_PUSH_AT_REVIEW_LIMIT_MESSAGE = "Gate échouée: le budget de passes de review est épuisé sans approbation du code courant ; le push direct sur la branche cible est refusé. Appelle fail(reason, findings) en conservant le travail pour une reprise manuelle.";
 
 interface ReviewLimitAcceptance {
@@ -1049,6 +1051,16 @@ export class AgentCoordinator {
       return `Soumets un plan durable via submit_implementation_plan (reprends le PRD validé, avec label, plan, files disjoints et dependsOn par lot, maxParallel=${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS} par défaut, ${MAX_PARALLEL_IMPLEMENTERS} maximum) pour les lots distincts ; utilise delegate_implementation pour un unique petit lot. Termine ensuite ton tour et attends les événements implementation_done ; ne poursuis pas l'implémentation dans cette session de planification.`;
     }
     return "";
+  }
+
+  resumeAutonomous(ticketId: string): ToolResult {
+    const ticket = this.store.getTicket(ticketId);
+    const state = ticket?.autonomousState;
+    if (!ticket?.autonomous || !state) return { ok: false, result: "Autonomous resume is unavailable for this ticket." };
+    if (state.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
+    if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: AUTONOMOUS_RESUME_PROMPT })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
+    this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
+    return { ok: true, result: "The implementation session was asked to resume autonomous validation." };
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */

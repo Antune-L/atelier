@@ -5,6 +5,7 @@ import { qualityCriterionSchema, qualityScenarioInteractionSchema } from "./qual
 export const AUTONOMOUS_DEFAULT_MAX_CORRECTIONS = 1;
 export const AUTONOMOUS_MAX_CORRECTIONS = 3;
 export const AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES = 180;
+export const AUTONOMOUS_MAX_ENVIRONMENT_RETRIES = 1;
 export const AUTONOMOUS_MAX_TIMEOUT_MINUTES = 1440;
 
 export const autonomousDeliverySchema = z.enum(["pr_only", "merge"]);
@@ -50,6 +51,7 @@ export const autonomousStateSchema = z.object({
   startedAt: z.number().int().nonnegative(),
   deadlineAt: z.number().int().nonnegative(),
   corrections: z.number().int().nonnegative(),
+  environmentRetries: z.number().int().nonnegative().default(0),
   error: z.string().nullable(),
 });
 export type AutonomousState = z.infer<typeof autonomousStateSchema>;

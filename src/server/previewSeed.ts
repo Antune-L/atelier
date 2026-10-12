@@ -1,5 +1,5 @@
 import type { Column, Orchestrator, Stage } from "../shared/constants.ts";
-import type { ExecutionUsageByModel } from "../shared/schemas.ts";
+import type { ExecutionUsageByModel, TriageResult } from "../shared/schemas.ts";
 
 import type { NewTicket, Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
@@ -11,6 +11,9 @@ const PREVIEW_SEED_ENABLED = "1";
 const REAL_MODE = "0";
 const PREVIEW_SEED_META_KEY = "preview_seed_version";
 const PREVIEW_SEED_VERSION = "1";
+// Tracked separately so stores already seeded at PREVIEW_SEED_VERSION still receive it once.
+const FEASIBILITY_SEED_META_KEY = "preview_seed_feasibility_version";
+const FEASIBILITY_SEED_VERSION = "1";
 const SEED_TITLE_PREFIX = "[seed]";
 const SEED_PR_BASE_URL = "https://github.com/example/preview-demo/pull/";
 const ORCHESTRATOR_ROLE = "orchestrator";
@@ -95,6 +98,25 @@ const SEED_TICKETS: SeedTicket[] = [
   },
 ];
 
+const FEASIBILITY_SEED: SeedTicket = {
+  title: "Ticket avec questions de faisabilité",
+  description: "Ticket TODO avec une analyse de faisabilité terminée et des questions à réponse conseillée.",
+  column: "todo", stage: null, orchestrator: "claude", daysAgo: 1, prNumber: null,
+  executions: [],
+};
+
+const FEASIBILITY_SEED_REPORT: TriageResult = {
+  verdict: "needs_info",
+  summary: "Le besoin est clair, mais quelques précisions sont nécessaires avant l'implémentation.",
+  reasons: [],
+  questions: [
+    { question: "Quelle couleur pour le bouton ?", recommendedAnswer: "Bleu" },
+    { question: "Quelle taille ?", recommendedAnswer: "Grande" },
+    { question: "Un commentaire libre ?", recommendedAnswer: null },
+  ],
+  files: [], suggestedModel: null, suggestedEffort: null, solutions: [],
+};
+
 function newSeedTicket(project: string, seed: SeedTicket): NewTicket {
   const claude = seed.orchestrator === "claude";
   return {
@@ -116,7 +138,7 @@ function seedUsage(orchestrator: Orchestrator, durationMs: number): ExecutionUsa
   return { [model]: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens: 0, costUsd } };
 }
 
-function insertSeedTicket(store: Store, project: string, seed: SeedTicket, now: number): void {
+function insertSeedTicket(store: Store, project: string, seed: SeedTicket, now: number): string {
   const ticket = store.createTicket(newSeedTicket(project, seed));
   const createdAt = now - seed.daysAgo * DAY_MS;
   const startedAt = seed.column === "todo" ? null : createdAt + QUEUE_DELAY_MS;
@@ -145,18 +167,29 @@ function insertSeedTicket(store: Store, project: string, seed: SeedTicket, now: 
     createdAt, updatedAt: finishedAt ?? createdAt, implementingStartedAt: startedAt,
     implementationStartedAt: seed.legacyDurationMs === undefined ? startedAt : null, finishedAt,
   });
+  return ticket.id;
 }
 
 export function seedPreviewDemoData(store: Store): void {
   if (process.env[PREVIEW_SEED_ENV] !== PREVIEW_SEED_ENABLED) return;
   if (process.env.KANBAN_DRY_RUN === REAL_MODE) throw new Error(`${PREVIEW_SEED_ENV} n'est autorisé qu'en mode dry-run.`);
-  if (store.getMeta(PREVIEW_SEED_META_KEY) === PREVIEW_SEED_VERSION) return;
+  const baseSeeded = store.getMeta(PREVIEW_SEED_META_KEY) === PREVIEW_SEED_VERSION;
+  const feasibilitySeeded = store.getMeta(FEASIBILITY_SEED_META_KEY) === FEASIBILITY_SEED_VERSION;
+  if (baseSeeded && feasibilitySeeded) return;
   const project = store.listProjectKeys()[0];
   if (project === undefined) throw new Error(`${PREVIEW_SEED_ENV} exige au moins un projet configuré.`);
   const now = Date.now();
   store.transaction(() => {
-    for (const seed of SEED_TICKETS) insertSeedTicket(store, project, seed, now);
-    store.setMeta(PREVIEW_SEED_META_KEY, PREVIEW_SEED_VERSION);
+    if (!baseSeeded) {
+      for (const seed of SEED_TICKETS) insertSeedTicket(store, project, seed, now);
+      store.setMeta(PREVIEW_SEED_META_KEY, PREVIEW_SEED_VERSION);
+    }
+    if (!feasibilitySeeded) {
+      const id = insertSeedTicket(store, project, FEASIBILITY_SEED, now);
+      store.updateTicket(id, { triageStatus: "done", triageVerdict: "needs_info", triageReport: JSON.stringify(FEASIBILITY_SEED_REPORT) });
+      store.setMeta(FEASIBILITY_SEED_META_KEY, FEASIBILITY_SEED_VERSION);
+    }
   });
-  log.info("données de démonstration de preview insérées", { project, tickets: SEED_TICKETS.length });
+  const tickets = (baseSeeded ? 0 : SEED_TICKETS.length) + (feasibilitySeeded ? 0 : 1);
+  log.info("données de démonstration de preview insérées", { project, tickets });
 }

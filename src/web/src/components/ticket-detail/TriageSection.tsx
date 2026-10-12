@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ClipboardPaste, Copy, RotateCw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ClipboardPaste, Copy, RotateCw, Sparkles, WandSparkles } from "lucide-react";
 import { useId, useState } from "react";
 
 import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, type AgentEffort, type AgentModel, type FeasibilityEngine } from "@shared/constants";
@@ -59,6 +59,7 @@ export function TriageSection({
   const [startError, setStartError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [fillSignal, setFillSignal] = useState(0);
   const reformulateError = startError ?? statusError;
 
   const handleReformulate = async (): Promise<void> => {
@@ -129,10 +130,17 @@ export function TriageSection({
           {result.questions.length > 0 && (
             <div>
               <SectionHeader>Questions</SectionHeader>
+              {result.questions.some((question) => question.recommendedAnswer?.trim()) && (
+                <Button type="button" size="sm" variant="outline" className="mb-3" onClick={() => setFillSignal((n) => n + 1)}>
+                  <WandSparkles className="size-4" />
+                  Remplir les champs vides avec les réponses conseillées
+                </Button>
+              )}
               <ul className="space-y-3">
                 {result.questions.map((question, index) => (
                   <li key={`${ticket.id}:${ticket.feasibilityReportVersion}:${index}`}>
-                    <FeasibilityQuestion ticket={ticket} question={question} index={index} onSubmit={onAnswerFeasibility} />
+                    <FeasibilityQuestion ticket={ticket} question={question} index={index} onSubmit={onAnswerFeasibility}
+                      fillRecommendedSignal={fillSignal} />
                   </li>
                 ))}
               </ul>

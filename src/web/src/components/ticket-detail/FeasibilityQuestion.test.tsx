@@ -260,6 +260,93 @@ test("copy is disabled while posting and after acceptance until the pushed run a
   });
 });
 
+const FILL_KEY = "draft:feasibility:copy-ticket:1:0";
+
+function signalled(props: QuestionProps, signal: number): QuestionProps {
+  const extra = { fillRecommendedSignal: signal };
+  return { ...props, ...extra };
+}
+
+test("fill signal copies the recommendation into an empty draft without submitting", async () => {
+  await withDraftStorage((drafts) => {
+    const submissions: unknown[] = [];
+    const props = questionProps({ onSubmit: async (input) => {
+      submissions.push(input);
+      return { started: true, id: "next" };
+    } });
+    const recommendation = props.question.recommendedAnswer;
+    if (recommendation === null) throw new Error("Recommendation missing");
+    const view = interactionHarness(signalled(props, 0));
+    expect(view.textarea().value).toBe("");
+    view.render(signalled(props, 1));
+    expect(view.textarea().value).toBe(recommendation);
+    expect(drafts.get(FILL_KEY)).toBe(recommendation);
+    expect(submissions).toHaveLength(0);
+    expect(view.textarea().disabled).toBe(false);
+  });
+});
+
+test("fill signal preserves an existing non-blank draft", async () => {
+  await withDraftStorage((drafts) => {
+    drafts.set(FILL_KEY, "Existing draft");
+    const props = questionProps();
+    const view = interactionHarness(signalled(props, 0));
+    view.render(signalled(props, 1));
+    expect(view.textarea().value).toBe("Existing draft");
+    expect(drafts.get(FILL_KEY)).toBe("Existing draft");
+  });
+});
+
+test("fill signal replaces a whitespace-only draft", async () => {
+  await withDraftStorage((drafts) => {
+    drafts.set(FILL_KEY, "   \n");
+    const props = questionProps();
+    const recommendation = props.question.recommendedAnswer;
+    const view = interactionHarness(signalled(props, 0));
+    view.render(signalled(props, 1));
+    expect(view.textarea().value).toBe(recommendation ?? "unexpected");
+    expect(drafts.get(FILL_KEY)).toBe(recommendation ?? "unexpected");
+  });
+});
+
+test("fill signal is ignored for running/done answers and unusable recommendations", async () => {
+  await withDraftStorage((drafts) => {
+    for (const status of ["running", "done"] satisfies FeasibilityAnswerRun["status"][]) {
+      const props = questionProps({ ticket: makeTicket({ id: "copy-ticket", column: "todo", feasibilityReportVersion: 1,
+        feasibilityAnswers: [{ ...baseRun, status, error: null }] }) });
+      const view = interactionHarness(signalled(props, 0));
+      view.render(signalled(props, 1));
+      expect(view.textarea().value).toBe("Blue");
+    }
+    for (const recommendedAnswer of [null, "", " \n\t ", "x".repeat(10001)]) {
+      drafts.clear();
+      const props = questionProps({ question: { question: "Colour?", recommendedAnswer } });
+      const view = interactionHarness(signalled(props, 0));
+      view.render(signalled(props, 1));
+      expect(view.textarea().value).toBe("");
+      expect(drafts.has(FILL_KEY)).toBe(false);
+    }
+  });
+});
+
+test("fill signal only reacts to changes, not to mount or same-value re-renders", async () => {
+  await withDraftStorage((drafts) => {
+    const props = questionProps();
+    const recommendation = props.question.recommendedAnswer;
+    if (recommendation === null) throw new Error("Recommendation missing");
+    const view = interactionHarness(signalled(props, 3));
+    expect(view.textarea().value).toBe("");
+    view.render(signalled(props, 3));
+    expect(view.textarea().value).toBe("");
+    expect(drafts.has(FILL_KEY)).toBe(false);
+    view.render(signalled(props, 4));
+    expect(view.textarea().value).toBe(recommendation);
+    view.edit("");
+    view.render(signalled(props, 4));
+    expect(view.textarea().value).toBe("");
+  });
+});
+
 test("oversized recommendations are explained and disabled without truncating or blocking manual edits", async () => {
   await withDraftStorage((drafts) => {
     const recommendedAnswer = "x".repeat(10001);

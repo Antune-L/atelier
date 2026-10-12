@@ -10,10 +10,12 @@ interface FeasibilityQuestionProps {
   question: TriageQuestion;
   index: number;
   onSubmit: (input: FeasibilityAnswerInput) => Promise<{ started: boolean; id: string }>;
+  /** Incrementing this fills a blank draft with the usable recommendation (never submits). */
+  fillRecommendedSignal?: number;
 }
 
 /** Each report/question owns a durable draft, including after a failed or interrupted run. */
-export function FeasibilityQuestion({ ticket, question, index, onSubmit }: FeasibilityQuestionProps) {
+export function FeasibilityQuestion({ ticket, question, index, onSubmit, fillRecommendedSignal = 0 }: FeasibilityQuestionProps) {
   const id = useId();
   const run = ticket.feasibilityAnswers.find((candidate) => candidate.reportVersion === ticket.feasibilityReportVersion && candidate.questionIndex === index);
   const [answer, setAnswer] = useLocalDraft(`feasibility:${ticket.id}:${ticket.feasibilityReportVersion}:${index}`, run?.answer ?? "");
@@ -30,6 +32,13 @@ export function FeasibilityQuestion({ ticket, question, index, onSubmit }: Feasi
   const answerDisabled = pending || run?.status === "done";
   const recommendation = question.recommendedAnswer;
   const recommendationTooLong = recommendation !== null && recommendation.length > 10000;
+  const fillable = recommendation !== null && recommendation.trim() !== "" && !recommendationTooLong && !answerDisabled;
+  // React to signal changes only (not the mount value), filling blank drafts without submitting.
+  const [seenSignal, setSeenSignal] = useState(fillRecommendedSignal);
+  if (seenSignal !== fillRecommendedSignal) {
+    setSeenSignal(fillRecommendedSignal);
+    if (fillable) setAnswer((prev) => prev.trim() === "" ? recommendation : prev);
+  }
 
   const submit = async (): Promise<void> => {
     if (postingRef.current || pending || blocked || run?.status === "done" || !answer.trim()) return;

@@ -19,6 +19,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { matchesCodexImplementer } from "@/lib/profileMatching";
+import { buildProfilePipeline } from "@/lib/profileSummary";
 import { cn } from "@/lib/utils";
 
 interface AgentProfileConfigProps {
@@ -166,8 +167,12 @@ export function AgentProfileConfig({
           ))}
         </Select>
       </div>
+      {selectedProfile !== undefined && <dl className="flex flex-wrap gap-3 rounded-md border bg-muted/20 p-3">{buildProfilePipeline(selectedProfile).map((node) => <div key={node.role} className="min-w-32 flex-1">
+        <dt className="text-2xs text-muted-foreground">{node.role}</dt>
+        <dd className="text-xs">{node.value}{node.detail !== null && <span className="block text-muted-foreground">{node.detail}</span>}</dd>
+      </div>)}</dl>}
       <details className="rounded-md border bg-muted/30 px-3 py-2">
-        <summary className={cn("cursor-pointer", FIELD_LABEL_CLASSES)}>Configuration avancée</summary>
+        <summary className={cn("cursor-pointer", FIELD_LABEL_CLASSES)}>Modifier cette configuration</summary>
         <div className="mt-3">
           <ImplementationAgentFields
             orchestrator={orchestrator}

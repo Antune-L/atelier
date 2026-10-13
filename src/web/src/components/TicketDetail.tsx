@@ -13,7 +13,7 @@ import { PrdTab } from "@/components/ticket-detail/PrdTab";
 import { TerminalTab } from "@/components/ticket-detail/TerminalTab";
 import { TicketActions } from "@/components/ticket-detail/TicketActions";
 import { TicketMeta } from "@/components/ticket-detail/TicketMeta";
-import { TicketTabs, type TicketTab } from "@/components/ticket-detail/TicketTabs";
+import { TicketSectionNavigation, TicketTabs, type TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { TriageSection } from "@/components/ticket-detail/TriageSection";
 import { ValidationTab } from "@/components/ticket-detail/ValidationTab";
 import { VerificationTab, canShowVerification } from "@/components/ticket-detail/VerificationTab";
@@ -84,7 +84,7 @@ function hasSessionPane(ticket: Ticket): boolean {
 }
 
 function availableTabs(ticket: Ticket): TicketTab[] {
-  const tabs: TicketTab[] = ["overview", "activity", "description"];
+  const tabs: TicketTab[] = ["overview", "activity", "description", "controls"];
   if (ticket.prdMarkdown !== null || ticket.column === "prd") tabs.push("prd");
   if (ticket.kind === "feature" && ticket.column !== "todo") tabs.push("validation");
   if (canShowVerification(ticket)) tabs.push("verification");
@@ -93,7 +93,7 @@ function availableTabs(ticket: Ticket): TicketTab[] {
 }
 
 function initialTab(ticket: Ticket): TicketTab {
-  if (canRecoverImplementation(ticket)) return "activity";
+  if (canRecoverImplementation(ticket)) return "overview";
   const remembered = TAB_MEMORY.get(ticket.id);
   if (remembered !== undefined) return remembered;
   return ticket.pendingQuestions > 0 ? "activity" : DEFAULT_TAB;
@@ -244,9 +244,9 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
           {stageLabel(current.stage)} {steps.index}/{steps.total}
         </span>
       )}
-      {current.slotId !== null && <span className="shrink-0">slot-{current.slotId}</span>}
+      {current.slotId !== null && <span className="shrink-0">Emplacement {current.slotId}</span>}
       {kindToken !== undefined && <span className="shrink-0">{kindToken}</span>}
-      {locked && <span className="shrink-0">verrouillé</span>}
+      {locked && <span className="shrink-0">Agent en cours</span>}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <button
           type="button"
@@ -307,7 +307,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         if (!isOpen) onClose();
       }}
       size={activeTab === "terminal" ? "xl" : "lg"}
-      className={activeTab === "overview" || activeTab === "validation" ? "w-[1280px]" : undefined}
+      className="w-[1280px]"
       pushedBy={prdOpen ? "lg" : null}
       breadcrumb={prdOpen ? ["Ticket"] : undefined}
       title={current.title}
@@ -318,6 +318,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
           value={activeTab}
           onChange={selectTab}
           questionCount={current.pendingQuestions}
+          testing={current.testing}
         />
       }
       onKeyDown={onSheetKeyDown}
@@ -326,9 +327,16 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         <TerminalTab ticket={current} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
-          <div className={cn("min-w-0 shrink-0 px-4 py-3 md:flex-1 md:shrink md:overflow-y-auto", activeTab === "overview" && "lg:overflow-hidden")}>
+          <div className="min-w-0 shrink-0 px-4 py-3 md:flex-1 md:shrink md:overflow-y-auto">
+            {(activeTab === "description" || activeTab === "prd") && (
+              <TicketSectionNavigation tabs={tabs.filter((section) => section === "description" || section === "prd")} value={activeTab} onChange={selectTab} />
+            )}
+            {(activeTab === "validation" || activeTab === "verification" || activeTab === "controls") && (
+              <TicketSectionNavigation tabs={tabs.filter((section) => section === "validation" || section === "verification")} value={activeTab} onChange={selectTab} />
+            )}
+            {activeTab === "controls" && <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">Les contrôles de cette vue concernent les tickets de fonctionnalité après leur lancement. Aucun contrôle n’est lancé à l’ouverture.</p>}
             {activeTab === "overview" && (
-              <OverviewTab ticket={current} projects={projects} locked={locked} />
+              <OverviewTab ticket={current} projects={projects} locked={locked} onNavigate={selectTab} triage={triage} />
             )}
             {activeTab === "activity" && (
               <div className="space-y-4">
@@ -345,7 +353,6 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
                   comments={comments}
                   onAnswer={answer}
                   onComment={addComment}
-                  triage={triage}
                 />
               </div>
             )}
@@ -356,7 +363,6 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               <PrdTab
                 ticket={current}
                 onExpand={() => setPrdOpen(true)}
-                onValidate={() => validatePrd()}
               />
             )}
             {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} />}

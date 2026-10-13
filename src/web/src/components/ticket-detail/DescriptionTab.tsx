@@ -61,7 +61,7 @@ export function DescriptionTab({ ticket, onSave }: DescriptionTabProps) {
 
   return (
     <div className="space-y-3">
-      <SectionHeader>Description</SectionHeader>
+      <SectionHeader>Brief du ticket</SectionHeader>
       <div className="space-y-1.5">
         <Label htmlFor={TITLE_ID}>Titre (optionnel)</Label>
         <Input
@@ -82,7 +82,7 @@ export function DescriptionTab({ ticket, onSave }: DescriptionTabProps) {
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor={DESCRIPTION_ID}>Description (markdown)</Label>
+        <Label htmlFor={DESCRIPTION_ID}>Brief (Markdown)</Label>
         <Textarea
           id={DESCRIPTION_ID}
           value={description}
@@ -96,7 +96,7 @@ export function DescriptionTab({ ticket, onSave }: DescriptionTabProps) {
       {conflict && <p role="alert" className="text-sm text-warning">La description a changé depuis ce brouillon. Copiez vos modifications si nécessaire, puis cliquez sur Annuler pour charger la description actuelle avant de les réappliquer.</p>}
       <div className="flex gap-2">
         <Button size="sm" disabled={conflict} onClick={() => void save()}>
-          Enregistrer
+          Enregistrer le brief
         </Button>
         <Button size="sm" variant="outline" onClick={cancel}>
           Annuler

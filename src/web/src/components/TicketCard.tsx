@@ -5,11 +5,14 @@ import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
+import { IMPLEMENTER_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
+import { summarizeSessionCosts } from "@shared/pricing";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import {
   formatDuration,
   formatRelativeDuration,
+  formatUsd,
   isStageAnimated,
   ticketCardState,
   ticketElapsedStart,
@@ -20,6 +23,7 @@ import {
 } from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
+import { needsImplementationRecovery } from "@/lib/implementationRecovery";
 
 interface TicketCardProps {
   ticket: Ticket;
@@ -43,6 +47,42 @@ const STATE_STRIPE_COLORS: Record<CardState, string> = {
 };
 
 const PARENT_TITLE_MAX_CHARS = 24;
+const RESOLVED_DECISION_COLUMNS: Ticket["column"][] = ["merged", "reviewed", "answered", "abandoned"];
+const KIND_LABELS: Record<Ticket["kind"], string> = {
+  feature: "Feature",
+  review: "Review",
+  clean: "Clean",
+  ask: "Question",
+};
+
+export function ticketDecisionLabel(ticket: Ticket): string | null {
+  if (RESOLVED_DECISION_COLUMNS.includes(ticket.column)) return null;
+  if (ticket.pendingQuestions > 0 || ticket.stage === "awaiting_answers") return "Répondre aux questions";
+  if (needsImplementationRecovery(ticket)) return "Examiner la récupération";
+  if (ticket.error || ticket.stage === "failed" || ticket.stage === "interrupted" || ticket.stage === "stalled") return "Examiner le blocage";
+  if (ticket.watchdogFlagged) return "Vérifier l’activité";
+  if (ticket.column === "prd" && ticket.prdMarkdown !== null) return "Valider le PRD";
+  if (ticket.column === "to_review") return "Relire le travail";
+  return null;
+}
+
+export function ticketCostLabel(ticket: Ticket): string {
+  const costs = summarizeSessionCosts(ticket.sessionUsage);
+  if (costs.partial) return `${formatUsd(costs.knownCostUsd)} (partiel)`;
+  if (costs.costUsd === null) return Object.keys(ticket.sessionUsage).length === 0 ? "Coût non reçu" : "Coût indisponible";
+  return formatUsd(costs.costUsd);
+}
+
+export function ticketDeliveryLabel(ticket: Ticket): string {
+  if (ticket.kind === "ask") return "Lecture seule";
+  if (ticket.kind === "review") return ticket.postComments ? "Publication sur PR" : "Revue locale";
+  if (ticket.kind === "clean") return "Correction de PR";
+  if (ticket.stealth) return "Relecture sans PR";
+  if (ticket.directPush) return "Push direct";
+  if (ticket.autonomous) return ticket.autonomousDelivery === "merge" ? "Fusion après contrôles" : "PR seule";
+  if (ticket.autoMerge) return "Fusion automatique";
+  return ticket.prDraft ? "PR en brouillon" : "PR";
+}
 
 function truncateParentTitle(title: string): string {
   if (title.length <= PARENT_TITLE_MAX_CHARS) return title;
@@ -58,6 +98,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
   const state = ticketCardState(ticket);
   const parentTitle = parent?.title ?? "?";
   const dependencyLabel = `${parentBlocked ? "en attente de" : "basé sur"} ${parentTitle}`;
+  const decisionLabel = ticketDecisionLabel(ticket);
   const elapsedLabel =
     implementationDuration !== null
       ? `Implémentée en ${formatDuration(implementationDuration)}`
@@ -93,6 +134,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
 
       <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
         <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
+        <span>{KIND_LABELS[ticket.kind]}</span>
         {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
         <span>{elapsedLabel}</span>
         {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}
@@ -100,7 +142,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
         {ticket.testing && <span>test</span>}
         {ticket.dependsOn && (
           <span className="max-w-full truncate" title={dependencyLabel}>
-            ↳ {truncateParentTitle(parentTitle)}
+            {parentBlocked ? "Attend" : "Basé sur"} {truncateParentTitle(parentTitle)}
           </span>
         )}
         {ticket.triageStatus === "running" && (
@@ -136,6 +178,14 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
           </button>
         )}
       </div>
+
+      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-2xs text-muted-foreground">
+        <span>{ORCHESTRATOR_LABELS[ticket.orchestrator]} · {IMPLEMENTER_LABELS[ticket.implementer]}</span>
+        <span>{ticketDeliveryLabel(ticket)}</span>
+        <span>{ticketCostLabel(ticket)}</span>
+      </div>
+      {decisionLabel && <p className="mt-2 text-xs font-medium text-warning">{decisionLabel}</p>}
+      {ticket.error && <p className="mt-1 line-clamp-2 break-words text-xs text-danger" title={ticket.error}>{ticket.error}</p>}
 
       {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
     </div>

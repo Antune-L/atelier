@@ -1223,6 +1223,11 @@ export type PrdTicketOptions = z.infer<typeof prdTicketOptionsSchema>;
 export const createTicketsFromPrdSchema = z.object({
   split: prdSplitModeSchema,
   selection: z.array(z.string().min(1)).min(1),
+  overrides: z.array(z.object({
+    candidateId: z.string().min(1),
+    title: z.string().refine((value) => value.trim().length > 0, { message: "Title is required" }),
+    description: z.string().refine((value) => value.trim().length > 0, { message: "Description is required" }),
+  }).strict()).optional(),
   options: prdTicketOptionsSchema.prefault({}),
   start: z.boolean().default(false),
 });

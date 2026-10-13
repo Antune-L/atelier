@@ -288,7 +288,14 @@ export function TokensByProjectChart({
 
 export function CostSummary({ records }: { records: StatRecord[] }): ReactNode {
   const withUsage = records.filter((record) => record.totalTokens !== null);
-  if (withUsage.length === 0) return <StatEmpty />;
+  if (withUsage.length === 0) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+        <p className="text-sm font-medium">Aucun usage enregistré</p>
+        <p className="text-xs text-muted-foreground">Le coût ne peut pas être calculé sans données d'usage pour les projets sélectionnés.</p>
+      </div>
+    );
+  }
   const knownCost = withUsage.reduce((total, record) => total + record.knownCostUsd, 0);
   const hasUnknown = withUsage.some((record) => record.costUsd === null);
   return (

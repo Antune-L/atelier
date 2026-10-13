@@ -14,8 +14,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, ChevronDown, GripVertical } from "lucide-react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { GripVertical } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   DEFAULT_CODEX_EFFORT,
@@ -42,8 +42,9 @@ import { pairedImplementer } from "@/lib/agentPairing";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
-import { buildProfilePipeline, describeProfile } from "@/lib/profileSummary";
+import { buildProfilePipeline } from "@/lib/profileSummary";
 import { cn } from "@/lib/utils";
+import { matchesQuery } from "@/lib/search";
 
 const DRAG_ACTIVATION_DISTANCE = 6;
 const COPY_SUFFIX = " (copie)";
@@ -102,12 +103,12 @@ function sameDraft(a: ProfileConfig, b: ProfileConfig): boolean {
   return DRAFT_KEYS.every((key) => a[key] === b[key]);
 }
 
-/** Implementation-agent profiles: an accordion list of presets, reorderable and editable in place. */
-export function ProfilesSettings() {
+export function ProfilesSettings({ query = "" }: { query?: string }) {
   const capabilities = useCapabilities();
   const remoteProfiles = useProfiles();
   const [localProfiles, setLocalProfiles] = useState<Profile[]>(remoteProfiles);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dismissedQuery, setDismissedQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -203,12 +204,17 @@ export function ProfilesSettings() {
   };
 
   const activeProfile = activeId !== null ? localProfiles.find((p) => p.id === activeId) : null;
+  let selectedId = expandedId;
+  if (selectedId === null && query !== "" && dismissedQuery !== query) {
+    const match = localProfiles.find((profile) => matchesQuery(query, profile.name, "profil modèles efforts sessions déléguées", ...buildProfilePipeline(profile).map((node) => `${node.role} ${node.value} ${node.detail ?? ""}`)));
+    selectedId = match?.id ?? null;
+  }
 
   return (
     <div className="space-y-4">
       <SectionHeader
         title="Profils d'implémentation"
-        subtitle="Un profil fixe qui orchestre et qui écrit le code. Il est choisi ticket par ticket."
+        subtitle="Comparez les agents et modèles, puis modifiez un profil. Chaque ticket conserve les valeurs du profil choisi."
       />
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <SortableContext
@@ -220,19 +226,18 @@ export function ProfilesSettings() {
               <p className="text-sm text-muted-foreground">Aucun profil.</p>
             )}
             {localProfiles.map((profile) => (
-              // Key on updatedAt so a saved row remounts and its local draft resyncs with the persisted value.
               <SortableProfileRow
-                key={`${profile.id}:${profile.updatedAt}`}
+                key={profile.id}
                 profile={profile}
-                expanded={expandedId === profile.id}
-                justSaved={savedId === profile.id}
-                onToggle={() =>
-                  setExpandedId((current) => (current === profile.id ? null : profile.id))
-                }
-                onError={setError}
-                onSaved={flashSaved}
-                onDuplicate={duplicateProfile}
-                onDelete={deleteProfile}
+                expanded={selectedId === profile.id}
+                onToggle={() => {
+                  if (selectedId === profile.id) {
+                    setExpandedId(null);
+                    setDismissedQuery(query);
+                    return;
+                  }
+                  setExpandedId(profile.id);
+                }}
               />
             ))}
           </div>
@@ -241,7 +246,21 @@ export function ProfilesSettings() {
           {activeProfile != null && <ProfileRowHeader profile={activeProfile} isDragOverlay />}
         </DragOverlay>
       </DndContext>
-      {error !== null && <p className="text-sm text-destructive">{error}</p>}
+      {localProfiles.map((profile) => (
+        <ProfileRow
+          key={`${profile.id}:${profile.updatedAt}`}
+          profile={profile}
+          expanded={selectedId === profile.id}
+          justSaved={savedId === profile.id}
+          onToggle={() => { setExpandedId(null); setDismissedQuery(query); }}
+          onError={setError}
+          onSaved={flashSaved}
+          onDuplicate={duplicateProfile}
+          onDelete={deleteProfile}
+          searching={query !== ""}
+        />
+      ))}
+      {error !== null && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <DashedAddButton
         label="Nouveau profil"
         onClick={() => void addProfile()}
@@ -263,12 +282,10 @@ interface ProfileRowProps {
   onSaved: (id: string) => void;
   onDuplicate: (config: ProfileConfig) => Promise<void>;
   onDelete: (profile: Profile) => Promise<void>;
-  dragHandleListeners?: DragHandleListeners;
-  dragHandleAttributes?: DragHandleAttributes;
-  setActivatorNodeRef?: (element: HTMLElement | null) => void;
+  searching?: boolean;
 }
 
-function SortableProfileRow(props: ProfileRowProps) {
+function SortableProfileRow(props: Pick<ProfileRowProps, "profile" | "expanded" | "onToggle">) {
   const {
     attributes,
     listeners,
@@ -287,7 +304,7 @@ function SortableProfileRow(props: ProfileRowProps) {
 
   return (
     <div ref={setNodeRef} style={style}>
-      <ProfileRow
+      <ProfileRowHeader
         {...props}
         dragHandleListeners={listeners}
         dragHandleAttributes={attributes}
@@ -299,7 +316,6 @@ function SortableProfileRow(props: ProfileRowProps) {
 
 interface ProfileRowHeaderProps {
   profile: Profile;
-  draft?: ProfileConfig;
   expanded?: boolean;
   onToggle?: () => void;
   isDragOverlay?: boolean;
@@ -308,10 +324,8 @@ interface ProfileRowHeaderProps {
   setActivatorNodeRef?: (element: HTMLElement | null) => void;
 }
 
-/** Collapsed row header: drag handle, profile name, one-line summary and the expand chevron. */
 function ProfileRowHeader({
   profile,
-  draft,
   expanded = false,
   onToggle,
   isDragOverlay = false,
@@ -319,69 +333,54 @@ function ProfileRowHeader({
   dragHandleAttributes,
   setActivatorNodeRef,
 }: ProfileRowHeaderProps) {
-  const config = draft ?? toDraft(profile);
+  const config = toDraft(profile);
 
   return (
     <div
-      className={cn(
-        "flex items-center gap-2 px-2 py-2",
-        isDragOverlay && "rounded-md border bg-background shadow-md",
-      )}
+      className={cn("rounded-lg border bg-background p-3", expanded && "border-primary/50 bg-primary/5", isDragOverlay && "shadow-md")}
     >
-      {!isDragOverlay && (
+      <div className="flex items-center gap-2">
+        {!isDragOverlay && (
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            className="cursor-grab text-muted-foreground active:cursor-grabbing"
+            aria-label={`Réorganiser ${profile.name}`}
+            {...dragHandleAttributes}
+            {...dragHandleListeners}
+          >
+            <GripVertical className="h-4 w-4" />
+          </button>
+        )}
+        {isDragOverlay && <GripVertical className="h-4 w-4 text-muted-foreground" />}
         <button
-          ref={setActivatorNodeRef}
           type="button"
-          className="cursor-grab text-muted-foreground active:cursor-grabbing"
-          aria-label={`Réorganiser ${profile.name}`}
-          {...dragHandleAttributes}
-          {...dragHandleListeners}
+          onClick={onToggle}
+          aria-expanded={expanded}
+          disabled={isDragOverlay}
+          className="flex min-w-0 flex-1 items-center justify-between gap-3 py-1 text-left disabled:cursor-default"
         >
-          <GripVertical className="h-4 w-4" />
+          <span className="text-sm font-semibold">{config.name}</span>
+          <span className="shrink-0 text-xs font-medium text-primary">{expanded ? "Fermer" : "Modifier"}</span>
         </button>
-      )}
-      {isDragOverlay && <GripVertical className="h-4 w-4 text-muted-foreground" />}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        disabled={isDragOverlay}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1 text-left disabled:cursor-default"
-      >
-        <span className="shrink-0 text-sm font-semibold">{config.name}</span>
-        <span className="truncate text-xs text-muted-foreground">{describeProfile(config)}</span>
-        <ChevronDown
-          className={cn(
-            "ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-            expanded && "rotate-180",
-          )}
-        />
-      </button>
+      </div>
+      <div className="mt-2">
+        <ProfilePipeline config={config} />
+      </div>
     </div>
   );
 }
 
-/** Read-only pipeline strip derived from the draft: orchestrator → implementer → sub-agent. */
 function ProfilePipeline({ config }: { config: ProfileConfig }) {
-  const nodes = buildProfilePipeline(config);
-
   return (
-    <div className="flex flex-wrap items-stretch gap-2 rounded-md border bg-muted/30 p-2">
-      {nodes.map((node, index) => (
-        <Fragment key={node.role}>
-          {index > 0 && (
-            <ArrowRight className="h-4 w-4 shrink-0 self-center text-muted-foreground" />
-          )}
-          <div className="min-w-[9rem] flex-1 rounded-md border bg-background px-3 py-2">
-            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{node.role}</p>
-            <p className="text-sm font-semibold">{node.value}</p>
-            {node.detail !== null && (
-              <p className="text-xs text-muted-foreground">{node.detail}</p>
-            )}
-          </div>
-        </Fragment>
+    <dl className="flex flex-wrap gap-3">
+      {buildProfilePipeline(config).map((node) => (
+        <div key={node.role} className="min-w-36 flex-1">
+          <dt className="text-2xs text-muted-foreground">{node.role}</dt>
+          <dd className="text-xs font-medium">{node.value}{node.detail !== null && <span className="block font-normal text-muted-foreground">{node.detail}</span>}</dd>
+        </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
@@ -394,9 +393,7 @@ function ProfileRow({
   onSaved,
   onDuplicate,
   onDelete,
-  dragHandleListeners,
-  dragHandleAttributes,
-  setActivatorNodeRef,
+  searching = false,
 }: ProfileRowProps) {
   const capabilities = useCapabilities();
   const defaults = resolveAgentDefaults(capabilities);
@@ -452,19 +449,16 @@ function ProfileRow({
   };
 
   return (
-    <div className="rounded-md border">
-      <ProfileRowHeader
-        profile={profile}
-        draft={draft}
-        expanded={expanded}
-        onToggle={onToggle}
-        dragHandleListeners={dragHandleListeners}
-        dragHandleAttributes={dragHandleAttributes}
-        setActivatorNodeRef={setActivatorNodeRef}
-      />
+    <div>
       {expanded && (
-        <div className="space-y-3 border-t p-3">
-          <ProfilePipeline config={draft} />
+        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="text-sm font-semibold">Modifier « {draft.name} »</h4>
+            <Button variant="ghost" size="sm" onClick={onToggle}>Fermer</Button>
+          </div>
+          <div className="rounded-md border bg-background p-3">
+            <ProfilePipeline config={draft} />
+          </div>
           <div className="flex flex-col items-start gap-1.5">
             <Label htmlFor={`profile-name-${profile.id}`} className={FIELD_LABEL_CLASSES}>Nom</Label>
             <Input
@@ -474,49 +468,52 @@ function ProfileRow({
               placeholder="Nom du profil"
             />
           </div>
-          <div className="rounded-md border p-3">
-            <ImplementationAgentFields
-              orchestrator={draft.orchestrator}
-              model={draft.model}
-              effort={draft.effort}
-              implementerModel={draft.implementerModel}
-              implementerEffort={draft.implementerEffort}
-              implementer={draft.implementer}
-              codexModel={draft.codexModel}
-              codexEffort={draft.codexEffort}
-              codexFast={draft.codexFast}
-              codexImplementerModel={draft.codexImplementerModel}
-              codexImplementerEffort={draft.codexImplementerEffort}
-              codexImplementerFast={draft.codexImplementerFast}
-              onOrchestratorChange={changeOrchestrator}
-              onModelChange={(next) =>
-                setDraft((c) => ({ ...c, model: resolveModel(next, c.model) }))
-              }
-              onEffortChange={(next) =>
-                setDraft((c) => ({ ...c, effort: resolveEffort(next, c.effort) }))
-              }
-              onImplementerModelChange={(next) =>
-                setDraft((c) => ({
-                  ...c,
-                  implementerModel: next ?? defaults.implementerModel ?? c.implementerModel,
-                }))
-              }
-              onImplementerEffortChange={(next) =>
-                setDraft((c) => ({
-                  ...c,
-                  implementerEffort: next ?? defaults.implementerEffort ?? c.implementerEffort,
-                }))
-              }
-              onImplementerChange={(next) => update({ implementer: next })}
-              onCodexModelChange={(next) => update({ codexModel: resolveCodexModel(next) })}
-              onCodexEffortChange={(next) => update({ codexEffort: resolveCodexEffort(next) })}
-              onCodexFastChange={(next) => update({ codexFast: next })}
-              onCodexImplementerModelChange={(next) => update({ codexImplementerModel: next })}
-              onCodexImplementerEffortChange={(next) => update({ codexImplementerEffort: next })}
-              onCodexImplementerFastChange={(next) => update({ codexImplementerFast: next })}
-              labelStyle="full"
-            />
-          </div>
+          <details className="rounded-md border bg-background p-3" open={searching || undefined}>
+            <summary className="cursor-pointer text-sm font-medium">Agents, modèles et sessions déléguées</summary>
+            <div className="mt-3">
+              <ImplementationAgentFields
+                orchestrator={draft.orchestrator}
+                model={draft.model}
+                effort={draft.effort}
+                implementerModel={draft.implementerModel}
+                implementerEffort={draft.implementerEffort}
+                implementer={draft.implementer}
+                codexModel={draft.codexModel}
+                codexEffort={draft.codexEffort}
+                codexFast={draft.codexFast}
+                codexImplementerModel={draft.codexImplementerModel}
+                codexImplementerEffort={draft.codexImplementerEffort}
+                codexImplementerFast={draft.codexImplementerFast}
+                onOrchestratorChange={changeOrchestrator}
+                onModelChange={(next) =>
+                  setDraft((c) => ({ ...c, model: resolveModel(next, c.model) }))
+                }
+                onEffortChange={(next) =>
+                  setDraft((c) => ({ ...c, effort: resolveEffort(next, c.effort) }))
+                }
+                onImplementerModelChange={(next) =>
+                  setDraft((c) => ({
+                    ...c,
+                    implementerModel: next ?? defaults.implementerModel ?? c.implementerModel,
+                  }))
+                }
+                onImplementerEffortChange={(next) =>
+                  setDraft((c) => ({
+                    ...c,
+                    implementerEffort: next ?? defaults.implementerEffort ?? c.implementerEffort,
+                  }))
+                }
+                onImplementerChange={(next) => update({ implementer: next })}
+                onCodexModelChange={(next) => update({ codexModel: resolveCodexModel(next) })}
+                onCodexEffortChange={(next) => update({ codexEffort: resolveCodexEffort(next) })}
+                onCodexFastChange={(next) => update({ codexFast: next })}
+                onCodexImplementerModelChange={(next) => update({ codexImplementerModel: next })}
+                onCodexImplementerEffortChange={(next) => update({ codexImplementerEffort: next })}
+                onCodexImplementerFastChange={(next) => update({ codexImplementerFast: next })}
+                labelStyle="full"
+              />
+            </div>
+          </details>
           <SettingsFooter dirty={dirty} justSaved={justSaved}>
             <Button variant="ghost" size="sm" onClick={() => void duplicate()} disabled={busy}>
               Dupliquer

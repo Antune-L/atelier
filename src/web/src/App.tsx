@@ -39,6 +39,7 @@ import { api } from "@/lib/api";
 import type { AtelierSeed, AtelierTarget } from "@/lib/atelier";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { matchesQuery, normalizeSearch } from "@/lib/search";
 
 /** Home sub-view: the Board/Agents/Worktree toggle (Stats moved to the sidebar). */
 type HomeView = "kanban" | "agents" | "worktree" | "previews";
@@ -74,6 +75,7 @@ export function App() {
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [toolSearch, setToolSearch] = useState("");
   const [openTool, setOpenTool] = useState<ToolKind | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -179,7 +181,7 @@ export function App() {
       );
     }
     if (homeView === "previews") return <PreviewsView projects={selectableProjects} projectFilter={effectiveFilter} searchQuery={search} />;
-    return <WorktreeSessionsView projects={projects} />;
+    return <WorktreeSessionsView projects={projects} projectFilter={effectiveFilter} searchQuery={search} />;
   };
 
   const renderView = (): ReactNode => {
@@ -204,13 +206,13 @@ export function App() {
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex h-9 shrink-0 items-center gap-4 border-b px-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
           <span className="font-mono text-xs font-medium tracking-wider text-brand">
             ATELIER
           </span>
 
           {view === "home" && (
-            <div className="flex items-center">
+            <div className="flex max-w-full items-center overflow-x-auto">
               {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
                 <button
                   key={value}
@@ -218,7 +220,7 @@ export function App() {
                   onClick={() => setHomeView(value)}
                   aria-pressed={homeView === value}
                   className={cn(
-                    "inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors",
+                    "inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors",
                     homeView === value
                       ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--info))]"
                       : "text-muted-foreground hover:text-foreground",
@@ -235,13 +237,13 @@ export function App() {
           <HostMetricsBadge />
 
           {view === "home" && (
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Rechercher…"
-                className="h-7 w-44 text-xs"
-                aria-label="Rechercher un ticket"
+                placeholder={homeView === "worktree" ? "Rechercher une session…" : "Rechercher…"}
+                className="h-8 w-44 text-xs"
+                aria-label={homeView === "worktree" ? "Rechercher une session de travail" : "Rechercher dans la vue actuelle"}
               />
               {projectFilterSelect}
               <div className="flex items-center gap-0.5">
@@ -255,7 +257,7 @@ export function App() {
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
-                <Popover open={toolsMenuOpen} onOpenChange={setToolsMenuOpen}>
+                <Popover open={toolsMenuOpen} onOpenChange={(open) => { setToolsMenuOpen(open); if (!open) setToolSearch(""); }}>
                   <PopoverTrigger>
                     <Button
                       variant="ghost"
@@ -268,8 +270,9 @@ export function App() {
                       <ChevronDown className="h-3.5 w-3.5" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-52">
-                    {TOOL_KINDS.map((kind) => {
+                  <PopoverContent className="w-64">
+                    <Input autoFocus value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="Rechercher un outil…" aria-label="Rechercher un outil" className="mb-2 h-8 text-xs" />
+                    {TOOL_KINDS.filter((kind) => matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)).map((kind) => {
                       const { label, Icon } = TOOLS[kind];
                       return (
                         <PopoverMenuItem
@@ -284,6 +287,7 @@ export function App() {
                         </PopoverMenuItem>
                       );
                     })}
+                    {TOOL_KINDS.every((kind) => !matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)) && <p className="px-2 py-3 text-xs text-muted-foreground">Aucun outil pour cette recherche.</p>}
                   </PopoverContent>
                 </Popover>
               </div>
@@ -326,7 +330,7 @@ export function App() {
       <Dialog
         open={showOnboarding}
         onOpenChange={NOOP_OPEN_CHANGE}
-        size="md"
+        size="lg"
         blocking
         title="Bienvenue"
         description="Ajoutez au moins un projet pour commencer à créer des tickets."

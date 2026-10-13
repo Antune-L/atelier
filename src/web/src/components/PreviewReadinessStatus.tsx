@@ -16,9 +16,9 @@ export function PreviewReadinessStatus({ readiness, loading, error }: { readines
       {loading && <p className="flex items-center gap-2 text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Vérification de la préparation du projet…</p>}
       {!loading && error && <p className="text-danger">{error}</p>}
       {!loading && !error && readiness !== null && <>
-        <p className={readiness.status === "ready" ? "font-medium text-primary" : "font-medium"}>{PREVIEW_READINESS_LABELS[readiness.status]}</p>
+        <p className={readiness.status === "ready" ? "font-medium text-primary" : "font-medium"}>{readiness.status === "ready" ? "Recette du projet vérifiée" : PREVIEW_READINESS_LABELS[readiness.status]}</p>
         <p className="text-xs text-muted-foreground">Branche vérifiée : <span className="font-mono">{readiness.branch}</span>{readiness.revision !== null && <> · commit <span className="font-mono">{readiness.revision.slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span></>}</p>
-        {readiness.diagnostics.map((diagnostic) => <p key={diagnostic} className="break-words text-xs text-muted-foreground">{diagnostic}</p>)}
+        {readiness.diagnostics.length > 0 && <details open={readiness.status !== "ready"} className="text-xs"><summary className="cursor-pointer font-medium">Diagnostic de préparation · {readiness.diagnostics.length}</summary><div className="mt-2 space-y-1">{readiness.diagnostics.map((diagnostic) => <p key={diagnostic} className="break-words text-muted-foreground">{diagnostic}</p>)}</div></details>}
         {readiness.status === "ready" && <p className="text-xs text-muted-foreground">La recette et ses fichiers sont présents et valides. La construction sera vérifiée pendant le déploiement.</p>}
         {readiness.preparationTicketId !== null && <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => { if (readiness.preparationTicketId !== null) boardStore.openTicket(readiness.preparationTicketId); }}>Ouvrir la carte de préparation</Button>

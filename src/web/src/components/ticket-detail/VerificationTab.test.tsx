@@ -18,10 +18,10 @@ describe("combined verification card tab", () => {
     expect(canShowVerification(makeTicket({ column: "done" }))).toBe(false);
     expect(canShowVerification(makeTicket({ kind: "review", column: "done", prUrl: "https://github.com/a/b/pull/1" }))).toBe(false);
     const html = renderToStaticMarkup(<TicketTabs tabs={["validation", "verification"]} value="verification" onChange={() => undefined} questionCount={0} />);
-    expect(html).toContain("Validation");
-    expect(html).toContain("Vérification");
+    expect(html).toContain("Contrôles");
+    expect(html).toContain("Documents");
     expect(html).toContain('aria-selected="true"');
-    expect(renderToStaticMarkup(<VerificationTab ticket={makeTicket({ column: "done", prUrl: "https://github.com/a/b/pull/1" })} />)).toContain("Lancer la vérification combinée");
+    expect(renderToStaticMarkup(<VerificationTab ticket={makeTicket({ column: "done", prUrl: "https://github.com/a/b/pull/1" })} />)).toContain("Lancer le contrôle croisé");
   });
   test("two macro bullet lists carry collapsed evidence directly underneath each bullet", () => {
     const html = renderToStaticMarkup(<VerificationReport run={run} current />);
@@ -49,7 +49,7 @@ describe("combined verification card tab", () => {
     expect(html).toContain("En cours");
   });
   test("starting or running verification animates the launch button and shows a live status banner", () => {
-    expect(renderToStaticMarkup(<LaunchLabel busy={false} />)).toBe("Lancer la vérification combinée");
+    expect(renderToStaticMarkup(<LaunchLabel busy={false} />)).toBe("Lancer le contrôle croisé");
     const busy = renderToStaticMarkup(<LaunchLabel busy />);
     expect(busy).toContain("animate-spin");
     expect(busy).toContain("Vérification en cours…");

@@ -5,6 +5,7 @@ import type { CoolifyPrivateKey, PreviewGithubSourceResolution, PreviewProjectSe
 import type { ManagedProject } from "@shared/schemas";
 
 import { PreviewQualificationPanel } from "@/components/projects-settings/PreviewQualificationPanel";
+import { AdvancedSection } from "@/components/projects-settings/ProjectPanelParts";
 import { PreviewReadinessStatus } from "@/components/PreviewReadinessStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,8 @@ import { PREVIEW_DEPLOY_KEY_SOURCE_ERROR, PREVIEW_DEPLOY_KEY_SOURCE_LABELS, PREV
 
 export function ProjectPreviewSettings({ project }: { project: ManagedProject }) {
   const [settings, setSettings] = useState<PreviewProjectSettings | null>(null);
+  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
   const [draft, setDraft] = useState<PreviewProjectSettings | null>(null);
   const [preparationMessage, setPreparationMessage] = useState<string | null>(null);
   const [source, setSource] = useState<PreviewGithubSourceResolution | null>(null);
@@ -147,11 +150,31 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
       {supported && draft === null && !error && <p className="text-xs text-muted-foreground">Chargement…</p>}
       {supported && draft !== null && (
         <>
+          <p className="text-xs text-muted-foreground">{settings?.enabled ? "Prévisualisations activées dans la configuration enregistrée." : "Prévisualisations désactivées dans la configuration enregistrée."} Les contrôles ci-dessous indiquent les prérequis connus du projet.</p>
+          <AdvancedSection title="Recette et durée de vie" open={recipeOpen} onToggle={() => setRecipeOpen((open) => !open)} summary={`${draft.recipePath || "Recette à renseigner"} · ${draft.ttlHours} heures`}>
           <div className="flex flex-col gap-3 sm:flex-row">
             <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Recette du projet</span><Input value={draft.recipePath} disabled={busy} onChange={(event) => setDraft({ ...draft, recipePath: event.target.value })} /><span className="text-xs text-muted-foreground">Fichier du dépôt qui décrit la construction et le démarrage.</span></label>
             <label className="flex flex-col gap-1.5 sm:w-40"><span className={FIELD_LABEL_CLASSES}>Durée de vie (heures)</span><Input type="number" value={draft.ttlHours} disabled={busy} onChange={(event) => setDraft({ ...draft, ttlHours: Number(event.target.value) })} /></label>
           </div>
-          <div className="space-y-2 rounded-md border border-border p-3">
+          </AdvancedSection>
+          <AdvancedSection
+            title="Accès au dépôt"
+            open={accessOpen}
+            onToggle={() => setAccessOpen((open) => !open)}
+            summary={
+              <div className="space-y-1">
+                <p>{privateKeySelected ? selectedPrivateKey?.name || "Clé de déploiement enregistrée" : "Connexion GitHub du projet"}</p>
+                {connectionDirty && <p>Sélection modifiée · enregistrement requis pour revérifier.</p>}
+                {!connectionDirty && source !== null && <p>{privateKeySelected && source.message !== null ? source.message : sourceLabels[source.status]}</p>}
+                {sourceLoading && <p>Vérification en cours…</p>}
+                {sourceError && <p className="text-danger">{sourceError}</p>}
+                {privateKeysError && <p className="text-danger">{privateKeysError}</p>}
+                {privateKeyUnavailable && <p className="text-danger">La clé enregistrée est introuvable dans Coolify.</p>}
+                <p>La configuration de l’accès ne prouve pas le succès d’un déploiement.</p>
+              </div>
+            }
+          >
+          <div className="space-y-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor={privateKeyId} className={FIELD_LABEL_CLASSES}>Clé de déploiement du projet (facultative)</label>
               <Select id={privateKeyId} value={draft.privateKeyUuid ?? ""} disabled={busy || privateKeysLoading} onChange={(event) => setDraft({ ...draft, privateKeyUuid: event.target.value || null })}>
@@ -198,6 +221,7 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
             )}
             <Button variant="outline" size="sm" disabled={busy || sourceLoading || connectionDirty} onClick={() => void checkSource()}>{privateKeySelected ? "Vérifier la disponibilité de la clé" : "Vérifier l'accès au dépôt"}</Button>
           </div>
+          </AdvancedSection>
           <PreviewReadinessStatus readiness={check.readiness} loading={check.loading} error={check.error} />
           <PreviewQualificationPanel key={project.key} project={project.key} initial={settings?.qualification ?? null} disabled={busy || dirty || !draft.enabled || check.readiness?.status !== "ready"} />
           {dirty && <p className="text-xs text-muted-foreground">La vérification utilise la recette enregistrée et la branche de base du projet. Enregistrez vos changements pour les revérifier.</p>}

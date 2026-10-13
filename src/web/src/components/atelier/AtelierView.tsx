@@ -57,7 +57,6 @@ async function findPrdConversation(candidates: Conversation[], prdId: string): P
   return null;
 }
 
-/** Sidebar view: converse with an agent, consolidate into a PRD, then turn it into TODO cards. */
 export function AtelierView({ projects, projectFilter, target }: AtelierViewProps) {
   const { conversations } = useBoard();
   const now = useTickTimer();
@@ -65,6 +64,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const [step, setStep] = useState<AtelierStep>("conversation");
   const [prdChoice, setPrdChoice] = useState<string | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
+  const [listOpen, setListOpen] = useState(false);
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
   const composeSeq = useRef(0);
@@ -90,11 +90,13 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     setStep(nextStep);
     setPrdChoice(prdId);
     setCompose(null);
+    setListOpen(false);
   };
 
   const openCompose = (seed: AtelierSeed | null): void => {
     composeSeq.current += 1;
     setCompose({ seed, key: composeSeq.current });
+    setListOpen(false);
   };
 
   const openPrdOrigin = (prdId: string, project: string): void => {
@@ -161,16 +163,26 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     }
     if (selectedId === null || conversation === null) {
       return (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-          <p className="max-w-sm text-sm text-muted-foreground">
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+          <h2 className="text-lg font-semibold">De l’idée aux cartes</h2>
+          <p className="max-w-md text-sm text-muted-foreground">
             {selectedId !== null && detail.error !== null
               ? detail.error
-              : "Élabore une feature ou un fix avec un agent, consolide-le en PRD, puis crée les cartes."}
+              : "Discutez avec un agent, relisez le PRD, puis confirmez les cartes à créer dans TODO."}
           </p>
-          <Button size="sm" onClick={() => openCompose(null)}>
-            <MessageSquarePlus className="h-4 w-4" />
-            Nouvelle conversation
-          </Button>
+          {visible[0] && (
+            <div className="w-full max-w-md space-y-3 rounded-lg border border-border bg-background p-4 text-left">
+              <p className="text-xs text-muted-foreground">Dernière discussion</p>
+              <h3 className="break-words text-sm font-medium">{visible[0].title || UNTITLED_CONVERSATION_LABEL}</h3>
+              <p className="text-xs text-muted-foreground">{resolveProjectLabel(projects, visible[0].project)}</p>
+              <Badge variant={CONVERSATION_STATUS_VARIANTS[visible[0].status]}>{CONVERSATION_STATUS_LABELS[visible[0].status]}</Badge>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => {
+                const latestConversation = visible[0];
+                if (latestConversation) select(latestConversation.id);
+              }}>Reprendre la discussion</Button>
+            </div>
+          )}
+          {!visible[0] && <p className="text-xs text-muted-foreground">Commencez avec « Nouvelle discussion ».</p>}
         </div>
       );
     }
@@ -198,13 +210,14 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const showStepper = compose === null && conversation !== null && selectedId !== null;
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
-      <aside className="flex w-64 shrink-0 flex-col gap-2 overflow-hidden">
-        <Button size="sm" variant="outline" onClick={() => openCompose(null)}>
+    <div className="flex h-full min-h-0 flex-col gap-4 md:flex-row">
+      <aside className="flex w-full shrink-0 flex-col gap-3 overflow-hidden md:w-72">
+        <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{visible.length}</span></h2><Button size="sm" variant="ghost" className="md:hidden" onClick={() => setListOpen(!listOpen)}>{listOpen ? "Masquer" : "Afficher"}</Button></div>
+        <Button size="sm" onClick={() => openCompose(null)}>
           <MessageSquarePlus className="h-4 w-4" />
-          Nouvelle conversation
+          Nouvelle discussion
         </Button>
-        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        <ul className={cn("max-h-52 min-h-0 flex-1 space-y-2 overflow-y-auto md:max-h-none", !listOpen && (selectedId !== null || compose !== null) && "hidden md:block")}>
           {visible.length === 0 && (
             <li className="px-2 py-3 text-xs text-muted-foreground">Aucune conversation pour ce filtre.</li>
           )}
@@ -212,28 +225,31 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
             <li key={item.id}>
               <div
                 className={cn(
-                  "group flex items-start gap-1 rounded-md border px-2 py-1.5 transition-colors",
+                  "group flex items-start gap-2 rounded-lg border px-3 py-3 transition-colors",
                   item.id === selectedId && compose === null
                     ? "border-border bg-accent"
-                    : "border-transparent hover:bg-accent/50",
+                    : "border-border/60 hover:bg-accent/50",
                 )}
               >
                 <button type="button" onClick={() => select(item.id)} className="min-w-0 flex-1 text-left">
                   <span className="flex items-center gap-1.5">
                     {item.sessionStatus === "running" && <LiveDot />}
                     {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
-                    <span className="truncate text-sm">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
+                    <span className="line-clamp-2 text-sm font-medium">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
                     {item.unread && (
                       <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
                     )}
                   </span>
-                  <span className="mt-1 flex items-center gap-1.5 font-mono text-2xs text-muted-foreground">
+                  <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>
                     <span className="shrink-0">· {formatRelativeDuration(item.updatedAt, now)}</span>
                   </span>
-                  <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="mt-1 px-1.5 py-0 text-2xs">
-                    {CONVERSATION_STATUS_LABELS[item.status]}
-                  </Badge>
+                  <span className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-2xs text-muted-foreground">Étape</span>
+                    <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="px-1.5 py-0 text-2xs">
+                      {CONVERSATION_STATUS_LABELS[item.status]}
+                    </Badge>
+                  </span>
                 </button>
                 <ConfirmPopover
                   title="Supprimer la conversation"

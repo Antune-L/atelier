@@ -96,12 +96,12 @@ export function CodexAgentFields({
             disabled={!fastAvailable && !codexFast}
             aria-labelledby={`${id}-codex-fast`}
           />
-          <span id={`${id}-codex-fast`} className="text-sm">Mode FAST</span>
+          <span id={`${id}-codex-fast`} className="text-sm">Mode rapide</span>
         </div>
         <p className="pl-11 text-xs text-muted-foreground">
           {fastAvailable
             ? "Réponses plus rapides, consommation accrue."
-            : "Mode FAST indisponible pour ce modèle et ce compte."}
+            : "Mode rapide indisponible pour ce modèle et ce compte."}
         </p>
       </div>
       {showConnectionStatus && <CodexConnectionStatus />}

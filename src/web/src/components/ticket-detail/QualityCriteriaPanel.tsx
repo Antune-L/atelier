@@ -12,6 +12,8 @@ import { Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { formatQualityCriterionText, qualityErrorMessage, qualityModeLabel } from "@/lib/qualityMessages";
 
+const CRITERION_PRIORITY = { failed: 0, required: 1, optional: 2, verified: 3 };
+
 const SOURCE_LABELS: Record<QualityCriterion["source"], string> = { ticket: "Ticket", prd: "PRD", user: "Utilisateur" };
 const CREATOR_LABELS: Record<QualityCriteriaSnapshot["createdBy"], string> = { user: "Définis par vous", agent: "Préparés par le validateur", system: "Préparés par Atelier" };
 
@@ -98,6 +100,24 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
   const planner = quality.runs.find((run) => run.criteriaSnapshotId === snapshot?.id && run.kind === "full" && run.provider !== null);
   let provenance = snapshot === undefined ? "" : CREATOR_LABELS[snapshot.createdBy];
   if (snapshot?.createdBy === "agent" && planner?.provider !== null && planner?.provider !== undefined) provenance = `Préparés par ${ORCHESTRATOR_LABELS[planner.provider]}`;
+  const rows = snapshot?.criteria.map((criterion, index) => {
+
+    const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.criteriaSnapshotId === snapshot.id));
+    const evidence = matchingEvidence.filter((item) => gate.currentRunIds.includes(item.runId)).at(-1) ?? matchingEvidence.at(-1);
+    const run = quality.runs.find((item) => item.id === evidence?.runId);
+    const evidenceCurrent = run !== undefined && gate.currentRunIds.includes(run.id);
+    const verified = gate.verifiedCriteria.includes(criterion.id);
+    let result: ReturnType<typeof qualityEvidenceResult> = "unverified";
+    if (evidence !== undefined) result = qualityEvidenceResult(evidence.status, evidenceCurrent, run?.evidenceAccepted === true, run?.simulated === true);
+    if (evidence !== undefined && !evidenceCurrent) result = "stale";
+    if (result === "passed") result = "unverified";
+    if (verified) result = "passed";
+    let priority = CRITERION_PRIORITY.optional;
+    if (criterion.required) priority = CRITERION_PRIORITY.required;
+    if (verified) priority = CRITERION_PRIORITY.verified;
+    if (result === "failed") priority = CRITERION_PRIORITY.failed;
+    return { criterion, index, evidence, run, evidenceCurrent, verified, result, priority };
+  }).sort((left, right) => left.priority - right.priority || left.index - right.index) ?? [];
   return (
     <QualitySection number={3} title="Critères d’acceptation" action={<Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>{snapshot === undefined ? "Définir les critères" : "Modifier les critères"}</Button>}>
       {snapshot === undefined ? <div className="rounded border border-border p-3 text-xs text-muted-foreground">Les critères seront préparés automatiquement depuis le ticket lorsque vous lancerez sa vérification. Vous pouvez aussi les définir manuellement.</div> : (
@@ -106,17 +126,7 @@ export function QualityCriteriaPanel({ quality, gate, busy, onSave, onEvidence, 
           <div className="rounded border border-border">
             <div className="flex items-center justify-between border-b border-border px-3 py-2 font-mono text-2xs text-muted-foreground"><span>CRITÈRE · PREUVE · VERSION {snapshot.version}</span><span>{gate.verifiedCriteria.length} / {gate.requiredCriteria.length} requis vérifiés</span></div>
             <div className="divide-y divide-border">
-              {snapshot.criteria.map((criterion, index) => {
-                const matchingEvidence = quality.evidence.filter((item) => item.criterionId === criterion.id && quality.runs.some((run) => run.id === item.runId && run.criteriaSnapshotId === snapshot.id));
-                const evidence = matchingEvidence.filter((item) => gate.currentRunIds.includes(item.runId)).at(-1) ?? matchingEvidence.at(-1);
-                const run = quality.runs.find((item) => item.id === evidence?.runId);
-                const evidenceCurrent = run !== undefined && gate.currentRunIds.includes(run.id);
-                const verified = gate.verifiedCriteria.includes(criterion.id);
-                let result: ReturnType<typeof qualityEvidenceResult> = "unverified";
-                if (evidence !== undefined) result = qualityEvidenceResult(evidence.status, evidenceCurrent, run?.evidenceAccepted === true, run?.simulated === true);
-                if (evidence !== undefined && !evidenceCurrent) result = "stale";
-                if (result === "passed") result = "unverified";
-                if (verified) result = "passed";
+              {rows.map(({ criterion, index, evidence, run, evidenceCurrent, verified, result }) => {
                 return (
                   <div key={criterion.id} className="px-3 py-3">
                     <div className="flex items-start justify-between gap-3"><div className="min-w-0 space-y-1"><p className="text-xs">{formatQualityCriterionText(criterion, snapshot.createdBy)}</p><p className="flex flex-wrap items-center gap-1 text-2xs text-muted-foreground"><FileText className="h-3 w-3" />{SOURCE_LABELS[criterion.source]} · critère {index + 1} · {criterion.required ? "requis" : "facultatif"}</p></div><QualityResult status={result} /></div>

@@ -117,7 +117,7 @@ export function PrdAnnotator({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 overflow-hidden">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
       <div
         ref={contentRef}
         onMouseUp={captureSelection}
@@ -199,7 +199,7 @@ export function PrdAnnotator({
       </div>
 
       {actionable && (
-        <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-l border-border">
+        <aside className="flex max-h-72 w-full shrink-0 flex-col overflow-hidden border-t border-border md:max-h-none md:w-64 md:border-l md:border-t-0">
           <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
             {composing !== null && (
               <div className="space-y-2 rounded-md border border-warning/50 bg-warning/10 p-3">

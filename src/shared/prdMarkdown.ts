@@ -159,6 +159,25 @@ export function renderPrdMarkdown(doc: PrdDocument): string {
   return joinBlocks(blocks);
 }
 
+export function orderSelectedPrdTasks(doc: PrdDocument, selected: ReadonlySet<string>): PrdTask[] {
+  const pending = doc.tasks.filter((task) => selected.has(task.id));
+  const ordered: PrdTask[] = [];
+  const placed = new Set<string>();
+  while (pending.length > 0) {
+    const index = pending.findIndex((task) => task.dependsOn.every((dependency) => !selected.has(dependency) || placed.has(dependency)));
+    const [next] = pending.splice(index === -1 ? 0 : index, 1);
+    if (!next) break;
+    ordered.push(next);
+    placed.add(next.id);
+  }
+  return ordered;
+}
+
+export function renderPrdSingleBrief(doc: PrdDocument): string {
+  const goals = doc.goals.length > 0 ? `\n\n${heading(H2, LABELS.goals)}\n${bulletList(doc.goals)}` : "";
+  return `${doc.summary}${goals}`;
+}
+
 export function renderPrdTaskBrief(doc: PrdDocument, taskId: string): string | null {
   const task = doc.tasks.find((candidate) => candidate.id === taskId);
   if (!task) return null;

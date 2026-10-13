@@ -182,11 +182,11 @@ export function TriageSection({
         ticket.triageStatus === "done" &&
         ticket.triageVerdict === "implementable" && (
           <label className="flex items-center justify-between gap-2 text-sm">
-            <span>Injecter le contexte de faisabilité dans le contrat</span>
+            <span>Utiliser l’analyse au lancement</span>
             <Switch
               checked={ticket.feasibilityContext}
               onCheckedChange={onToggleContext}
-              aria-label="Injecter le contexte de faisabilité dans le contrat"
+              aria-label="Utiliser l’analyse au lancement"
             />
           </label>
         )}
@@ -227,7 +227,7 @@ export function TriageSection({
           onClick={() => void onTriage()}
         >
           {running && <RotateCw className="h-4 w-4" />}
-          {ticket.triageStatus === "none" && !running ? "Analyse" : "Relancer l'analyse"}
+          {ticket.triageStatus === "none" && !running ? "Analyser le ticket" : "Relancer l’analyse"}
         </Button>
         <Button
           size="sm"
@@ -237,7 +237,7 @@ export function TriageSection({
           onClick={() => void onTriagePlus()}
         >
           <Sparkles className="h-4 w-4" />
-          Analyse +
+          Analyse approfondie
         </Button>
         <Button
           size="sm"
@@ -247,7 +247,7 @@ export function TriageSection({
           onClick={() => void handleReformulate()}
         >
           {reformulating ? <RotateCw className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          Reformuler le besoin
+          Reformuler
         </Button>
       </div>
 

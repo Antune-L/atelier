@@ -112,6 +112,9 @@ export function ProjectPanel({
   const [inspection, setInspection] = useState<RepoInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [executionOpen, setExecutionOpen] = useState(false);
   const [validation, setValidation] = useState(() => validationDraft(project?.validation));
   const [sourceMode, setSourceMode] = useState<FolderSourceMode>("local");
   const [githubAccount, setGithubAccount] = useState<string | null>(project?.githubAccount ?? null);
@@ -155,9 +158,13 @@ export function ProjectPanel({
   const inspectionBlocks =
     creating && inspection !== null && (!inspection.isGitRepo || inspection.existingProjectKey !== null);
   const colorSummary = grouped ? inheritedColor : color;
+  const identityOrigin = [suggestionHint(inspection?.label, label), suggestionHint(inspection?.group, group)]
+    .filter(Boolean).join(SUMMARY_SEPARATOR);
+  const deliveryOrigin = [suggestionHint(inspection?.baseBranch, baseBranch), suggestionHint(inspection?.vcsProvider, vcsProvider)]
+    .filter(Boolean).join(SUMMARY_SEPARATOR);
   const advancedSummary = (
     <>
-      {[runScript.trim() || NO_RUN_SCRIPT_LABEL, `${timeoutValue} ${unit}`, "couleur"].join(SUMMARY_SEPARATOR)}
+      {[`${timeoutValue} ${unit}`, "couleur"].join(SUMMARY_SEPARATOR)}
       <span
         className="h-3 w-3 shrink-0 rounded-sm border border-input"
         style={{ backgroundColor: colorSummary }}
@@ -357,8 +364,12 @@ export function ProjectPanel({
 
   if (creating && step === "folder") {
     return (
-      <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-        <p className="text-sm font-semibold">Nouveau projet</p>
+      <div className="space-y-5 rounded-xl border bg-background p-5 sm:p-6">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">Étape 1 sur 2 · Source du projet</p>
+          <h4 className="text-lg font-semibold">Ajouter un projet</h4>
+          <p className="text-sm text-muted-foreground">Sélectionnez un dépôt. Vous pourrez confirmer les réglages proposés avant de l’ajouter.</p>
+        </div>
         <FolderStep
           repoPath={repoPath}
           canPickFolder={canPickFolder}
@@ -384,13 +395,6 @@ export function ProjectPanel({
 
   const advancedFields = (
     <>
-      <Field label="Commande de démarrage" hint={suggestionHint(inspection?.runScript, runScript)}>
-        <Input
-          value={runScript}
-          onChange={(e) => setRunScript(e.target.value)}
-          placeholder="bun run dev"
-        />
-      </Field>
       <Field label="Délai max d'un commit">
         <div className="flex w-full items-center gap-2">
           <Input
@@ -438,14 +442,32 @@ export function ProjectPanel({
   );
 
   return (
-    <div className="space-y-3 rounded-md border bg-muted/30 p-4">
-      <p className="text-sm font-semibold">{project?.label ?? "Nouveau projet"}</p>
+    <div className="space-y-4">
+      <div className="rounded-xl border bg-muted/20 p-5">
+        {creating && <p className="mb-2 text-xs font-medium text-muted-foreground">Étape 2 sur 2 · Confirmer le projet</p>}
+        <h4 className="text-lg font-semibold">{label || "Nouveau projet"}</h4>
+        <p className="mt-1 break-all text-xs text-muted-foreground">{repoPath}</p>
+        <p className="mt-3 text-sm">{VCS_PROVIDER_LABELS[vcsProvider]} · branche {baseBranch || "à renseigner"}</p>
+        {creating && <p className="mt-2 text-xs text-muted-foreground">Les valeurs ci-dessous sont proposées depuis le dépôt. Vérifiez-les, puis confirmez l’ajout. Aucune commande de démarrage n’a été exécutée.</p>}
+      </div>
 
       {creating && inspection !== null && (
         <InspectionBanners inspection={inspection} onOpenExisting={onOpenExisting} />
       )}
 
       <div className="flex flex-col gap-3">
+        <AdvancedSection
+          title="Identité et dossier"
+          open={identityOpen || label.trim() === ""}
+          onToggle={() => setIdentityOpen((open) => !open)}
+          summary={
+            <div className="space-y-1">
+              <p>{label || "Nom à renseigner"}{normalizedGroup && ` · ${normalizedGroup}`}</p>
+              {identityOrigin && <p>{identityOrigin}</p>}
+              <p className="break-all">{repoPath}</p>
+            </div>
+          }
+        >
         <Field label="Nom" hint={suggestionHint(inspection?.label, label)}>
           <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nom du projet" />
         </Field>
@@ -483,6 +505,19 @@ export function ProjectPanel({
             Analyse du dépôt…
           </p>
         )}
+        </AdvancedSection>
+        <AdvancedSection
+          title="Livraison"
+          open={deliveryOpen || baseBranch.trim() === ""}
+          onToggle={() => setDeliveryOpen((open) => !open)}
+          summary={
+            <div className="space-y-1">
+              <p>{VCS_PROVIDER_LABELS[vcsProvider]} · {baseBranch || "Branche à renseigner"}{vcsProvider === "github" && ` · ${githubAccount ?? "compte de la machine"}`}</p>
+              {deliveryOrigin && <p>{deliveryOrigin}</p>}
+              <p role="status" className={hint.className}>{hint.message}</p>
+            </div>
+          }
+        >
         <Field label="Branche de base" hint={suggestionHint(inspection?.baseBranch, baseBranch)}>
           <Input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
         </Field>
@@ -544,17 +579,30 @@ export function ProjectPanel({
             </div>
           </Field>
         )}
-        {creating ? (
-          <AdvancedSection
-            open={advancedOpen}
-            summary={advancedSummary}
-            onToggle={() => setAdvancedOpen((open) => !open)}
-          >
-            {advancedFields}
-          </AdvancedSection>
-        ) : (
-          advancedFields
-        )}
+        </AdvancedSection>
+        <AdvancedSection
+          title="Démarrage du projet"
+          open={executionOpen}
+          onToggle={() => setExecutionOpen((open) => !open)}
+          summary={
+            <div className="space-y-1">
+              <p className="font-mono">{runScript.trim() || NO_RUN_SCRIPT_LABEL}</p>
+              <p>{suggestionHint(inspection?.runScript, runScript) ?? "Commande configurée"} · démarrage non vérifié ici</p>
+            </div>
+          }
+        >
+          <Field label="Commande de démarrage" hint={suggestionHint(inspection?.runScript, runScript)}>
+            <Input value={runScript} onChange={(e) => setRunScript(e.target.value)} placeholder="bun run dev" />
+          </Field>
+        </AdvancedSection>
+        <AdvancedSection
+          title="Réglages avancés"
+          open={advancedOpen}
+          summary={advancedSummary}
+          onToggle={() => setAdvancedOpen((open) => !open)}
+        >
+          {advancedFields}
+        </AdvancedSection>
         <ValidationConfigFields value={validation} onChange={setValidation} />
         {project !== null && <ProjectPreviewSettings key={project.key} project={project} />}
       </div>
@@ -575,7 +623,7 @@ export function ProjectPanel({
         )}
         {creating && (
           <Button variant="ghost" size="sm" onClick={() => setStep("folder")} disabled={busy || inspecting}>
-            Changer de dossier
+            Changer de source
           </Button>
         )}
         {cancelButton}

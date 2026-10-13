@@ -60,7 +60,7 @@ export function VerificationReport({ run, current }: { run: QualityValidationRun
 }
 
 export function LaunchLabel({ busy }: { busy: boolean }) {
-  return busy ? <><Loader2 className="size-3.5 animate-spin" aria-hidden />Vérification en cours…</> : "Lancer la vérification combinée";
+  return busy ? <><Loader2 className="size-3.5 animate-spin" aria-hidden />Vérification en cours…</> : "Lancer le contrôle croisé";
 }
 
 export function VerificationProgress({ pending, active }: { pending: boolean; active: boolean }) {
@@ -78,7 +78,7 @@ export function VerificationTab({ ticket }: { ticket: Ticket }) {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async (): Promise<void> => {
-      try { await refresh(controller.signal); } catch (failure) { if (!controller.signal.aborted) setError(qualityErrorMessage(failure)); }
+      try { if (!document.hidden) await refresh(controller.signal); } catch (failure) { if (!controller.signal.aborted) setError(qualityErrorMessage(failure)); }
       if (!controller.signal.aborted) timer = setTimeout(() => void poll(), 3_000);
     };
     void poll();
@@ -93,7 +93,7 @@ export function VerificationTab({ ticket }: { ticket: Ticket }) {
   const busy = pending || !!active;
   const run = response?.quality.runs.filter((candidate) => candidate.kind === "combined").at(-1);
   return <div className="mx-auto max-w-4xl space-y-5 pb-4">
-    <h2 className="text-lg font-medium">Vérification de la fonctionnalité</h2>
+    <h2 className="text-lg font-medium">Contrôle croisé</h2>
     <p className="text-xs text-muted-foreground">Une seule exécution vérifie les tests et contrôles existants, la pertinence de leurs assertions et les parcours réels dans le navigateur.</p>
     <div className="flex flex-wrap gap-2"><Select aria-label="Agent de vérification" value={provider} onChange={(event) => { const value = event.target.value; if (value === "claude" || value === "codex") setProvider(value); }} disabled={busy}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select><Button disabled={!canShowVerification(ticket) || response === null || busy || ticket.testing || ticket.slotId !== null} onClick={() => void act(() => api.verifyCombinedQuality(ticket.id, provider))}><LaunchLabel busy={busy} /></Button>{active && <Button variant="outline" disabled={pending} onClick={() => void act(() => api.cancelQualityValidation(ticket.id))}>Annuler la vérification</Button>}</div>
     <VerificationProgress pending={pending} active={!!active} />

@@ -122,19 +122,19 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
     setValidationMessage(null);
     await run(async () => {
       await previewApi.validatePreview(preview.id, validationProvider);
-      setValidationMessage(`Vérification locale ${validationProvider === "claude" ? "Claude" : "Codex"} lancée. Consultez l'onglet Validation pour les résultats.`);
+      setValidationMessage(`Vérification locale ${validationProvider === "claude" ? "Claude" : "Codex"} lancée. Consultez Contrôles pour les résultats.`);
     }, "Impossible de lancer la vérification locale.");
   }
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-semibold"><Cloud className="size-4 text-primary" />Prévisualisation Coolify</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold"><Cloud className="size-4 text-primary" />Aperçu de la fonctionnalité</h3>
         <Button variant="ghost" size="sm" aria-label="Actualiser la prévisualisation" disabled={busy} onClick={() => void refresh()}><RefreshCw className="size-3.5" /></Button>
       </div>
       {loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Chargement…</p>}
       {(error || readError || settingsError) && <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{error || readError || settingsError}</p>}
-      {provider === "azureDevops" && <p className="text-sm text-muted-foreground">Azure DevOps n'est pas disponible pour les prévisualisations. Son support est prévu en V2.</p>}
+      {provider === "azureDevops" && <p className="text-sm text-muted-foreground">Aperçu non disponible pour ce projet : les déploiements sont actuellement pris en charge pour GitHub uniquement.</p>}
       {!loading && supported && !setupReady && <p className="text-sm text-muted-foreground">Complétez la connexion, les ressources et les identifiants d'accès dans Paramètres · Coolify, puis actualisez ce panneau.</p>}
       {!loading && supported && setupReady && projectSettings?.enabled === false && <p className="text-sm text-muted-foreground">Activez les prévisualisations dans les paramètres de ce projet. « Préparer pour Coolify » crée la carte de préparation de sa recette.</p>}
       {!loading && supported && !eligible && <p className="text-sm text-muted-foreground">La création nécessite une fonctionnalité terminée avec une pull request GitHub associée.</p>}
@@ -142,11 +142,12 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
         <>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {(deploying || preview.status === "stopping") && <Loader2 className="size-4 animate-spin text-primary" />}
-            <span className={ready ? "font-medium text-primary" : "font-medium"}>{PREVIEW_STATUS_LABELS[preview.status]}</span>
+            <span className={ready ? "font-medium text-primary" : "font-medium"}>{ready ? "Aperçu déployé" : PREVIEW_STATUS_LABELS[preview.status]}</span>
             <span className="text-muted-foreground">·</span>
             <span className="font-mono text-xs">{(preview.deployedRevision ?? preview.revision).slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span>
             {preview.expiresAt !== null && <span className="text-xs text-muted-foreground">Expire le {formatDateTime(preview.expiresAt)}</span>}
           </div>
+          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs"><div className="flex gap-2"><dt className="text-muted-foreground">État demandé</dt><dd>{preview.desiredState === "running" ? "En fonctionnement" : "Arrêt et nettoyage"}</dd></div><div className="flex gap-2"><dt className="text-muted-foreground">État observé</dt><dd>{PREVIEW_STATUS_LABELS[preview.status]}</dd></div></dl>
           {preview.error && <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{preview.error}</p>}
           {ready && preview.url !== null && (
             <div className="space-y-2">
@@ -169,7 +170,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
                 <Button variant="outline" size="sm" disabled={busy} onClick={() => void validate("claude")}>Vérifier avec Claude</Button>
                 <Button variant="outline" size="sm" disabled={busy} onClick={() => void validate("codex")}>Vérifier avec Codex</Button>
               </div>
-              {preview.qualityRunId !== null && <p className="text-xs text-muted-foreground">Une vérification est associée à cette prévisualisation. Résultats dans l'onglet Validation.</p>}
+              {preview.qualityRunId !== null && <p className="text-xs text-muted-foreground">Une vérification est associée à cette prévisualisation. Résultats dans Contrôles.</p>}
               {validationMessage && <p role="status" className="text-sm text-primary">{validationMessage}</p>}
             </div>
           )}

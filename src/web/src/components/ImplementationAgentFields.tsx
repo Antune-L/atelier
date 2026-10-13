@@ -1,6 +1,10 @@
 import { useId } from "react";
 
 import {
+  CODEX_EFFORT_FULL_LABELS,
+  CODEX_MODEL_LABELS,
+  DEFAULT_CODEX_EFFORT,
+  DEFAULT_CODEX_MODEL,
   type AgentEffort,
   type AgentModel,
   type CodexEffort,
@@ -9,6 +13,7 @@ import {
   type Orchestrator,
 } from "@shared/constants";
 
+import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { CodexAgentFields } from "@/components/CodexAgentFields";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
@@ -125,7 +130,7 @@ export function ImplementationAgentFields({
     codexImplementerFast === null ? "FAST" : null,
   ].filter((field) => field !== null);
   const codexImplementerHint = inheritedCodexFields.length > 0
-    ? `Héritage des réglages Codex du ticket : ${inheritedCodexFields.join(", ")}.`
+    ? `Reprend les réglages Codex du profil ou du ticket : ${inheritedCodexFields.join(", ")}.`
     : "Modèle, effort et FAST indépendants de l’orchestrateur.";
 
   return (
@@ -235,22 +240,26 @@ export function ImplementationAgentFields({
                 }
               }}
             >
-              {inheritsCodexSettings ? "Personnaliser" : "Hériter des réglages Codex"}
+              {inheritsCodexSettings ? "Personnaliser" : "Reprendre le profil"}
             </Button>
           </div>
-          <CodexAgentFields
-            codexModel={codexImplementerModel}
-            codexEffort={codexImplementerEffort}
-            codexFast={codexImplementerFast ?? codexFast}
-            fallbackModel={codexModel ?? resolvedDefaultCodexModel}
-            fallbackEffort={codexEffort ?? resolvedDefaultCodexEffort}
-            preserveExplicit
-            showConnectionStatus={orchestrator !== "codex"}
-            labelStyle={labelStyle}
-            onCodexModelChange={onCodexImplementerModelChange}
-            onCodexEffortChange={onCodexImplementerEffortChange}
-            onCodexFastChange={onCodexImplementerFastChange}
-          />
+          {inheritsCodexSettings && <p className="text-sm">{CODEX_MODEL_LABELS[effectiveCodexModel ?? DEFAULT_CODEX_MODEL]} · {CODEX_EFFORT_FULL_LABELS[effectiveCodexEffort ?? DEFAULT_CODEX_EFFORT]}{codexFast && " · mode rapide"}</p>}
+          {inheritsCodexSettings && orchestrator !== "codex" && <CodexConnectionStatus />}
+          {!inheritsCodexSettings && (
+            <CodexAgentFields
+              codexModel={codexImplementerModel}
+              codexEffort={codexImplementerEffort}
+              codexFast={codexImplementerFast ?? codexFast}
+              fallbackModel={codexModel ?? resolvedDefaultCodexModel}
+              fallbackEffort={codexEffort ?? resolvedDefaultCodexEffort}
+              preserveExplicit
+              showConnectionStatus={orchestrator !== "codex"}
+              labelStyle={labelStyle}
+              onCodexModelChange={onCodexImplementerModelChange}
+              onCodexEffortChange={onCodexImplementerEffortChange}
+              onCodexFastChange={onCodexImplementerFastChange}
+            />
+          )}
           <p className="text-xs text-muted-foreground">
             {codexImplementerHint}
           </p>

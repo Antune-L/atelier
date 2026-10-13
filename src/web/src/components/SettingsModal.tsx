@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import {
   AGENT_EFFORTS,
@@ -7,6 +8,7 @@ import {
   AGENT_MODELS,
   AGENT_MODEL_FULL_LABELS,
   CODEX_EFFORT_FULL_LABELS,
+  CODEX_MODEL_LABELS,
   COMMIT_LANGUAGES,
   COMMIT_LANGUAGE_LABELS,
   DEFAULT_CODEX_EFFORT,
@@ -45,20 +47,19 @@ import { matchingSettingsSection, sectionMatches, SETTINGS_GROUPS, SETTINGS_SECT
 import type { SettingsSectionId } from "@/lib/settingsSearch";
 import { cn } from "@/lib/utils";
 
-const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((t) => ({ value: t.value, label: t.label }));
-const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((l) => ({
-  value: l,
-  label: COMMIT_LANGUAGE_LABELS[l],
+const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((theme) => ({ value: theme.value, label: theme.label }));
+const LANGUAGE_OPTIONS: TabOption<CommitLanguage>[] = COMMIT_LANGUAGES.map((language) => ({
+  value: language,
+  label: COMMIT_LANGUAGE_LABELS[language],
 }));
-const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((m) => ({
-  value: m,
-  label: AGENT_MODEL_FULL_LABELS[m],
+const MODEL_OPTIONS: TabOption<AgentModel>[] = AGENT_MODELS.map((model) => ({
+  value: model,
+  label: AGENT_MODEL_FULL_LABELS[model],
 }));
-const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((e) => ({
-  value: e,
-  label: AGENT_EFFORT_FULL_LABELS[e],
+const EFFORT_OPTIONS: TabOption<AgentEffort>[] = AGENT_EFFORTS.map((effort) => ({
+  value: effort,
+  label: AGENT_EFFORT_FULL_LABELS[effort],
 }));
-
 const NO_MATCH_MESSAGE = "Aucun réglage ne correspond à cette recherche.";
 
 interface SettingsModalProps {
@@ -66,20 +67,17 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-/** Settings modal: a grouped sidebar of sections plus a search box filtering sections and rows. */
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [sectionId, setSectionId] = useState<SettingsSectionId>("appearance");
   const [search, setSearch] = useState("");
   const profiles = useProfiles();
   const projects = useProjects();
-
   const query = normalizeSearch(search);
   const counts: Partial<Record<SettingsSectionId, number>> = {
     profiles: profiles.length,
     projects: projects.length,
   };
 
-  // Derived in the handler rather than an effect: typing jumps to the first section that still matches.
   const changeSearch = (value: string): void => {
     setSearch(value);
     const nextQuery = normalizeSearch(value);
@@ -91,14 +89,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose();
-      }}
+      onOpenChange={(next) => { if (!next) onClose(); }}
       size="lg"
       className="w-[calc(100vw-2rem)] max-w-[1152px]"
       title="Réglages"
     >
-    <div className="flex flex-col gap-5 md:flex-row">
+      <div className="flex flex-col gap-5 md:flex-row">
         <SettingsNav
           sectionId={sectionId}
           onSelect={setSectionId}
@@ -124,22 +120,17 @@ interface SettingsNavProps {
   onSearchChange: (value: string) => void;
 }
 
-function SettingsNav({
-  sectionId,
-  onSelect,
-  query,
-  counts,
-  search,
-  onSearchChange,
-}: SettingsNavProps) {
+function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChange }: SettingsNavProps) {
   return (
     <nav aria-label="Sections des réglages" className="flex w-full shrink-0 flex-col gap-3 md:w-48">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Search
+          className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+        />
         <Input
           type="search"
           value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
+          onChange={(event) => onSearchChange(event.target.value)}
           placeholder="Rechercher un réglage…"
           aria-label="Rechercher un réglage"
           className="h-7 w-full pl-7 text-xs"
@@ -147,12 +138,9 @@ function SettingsNav({
       </div>
       {SETTINGS_GROUPS.map((group) => (
         <div key={group} className="flex flex-wrap items-stretch gap-1 md:flex-col md:gap-0">
-          <p className={cn("hidden px-1 pb-1 md:block", FIELD_LABEL_CLASSES)}>
-            {group}
-          </p>
+          <p className={cn("hidden px-1 pb-1 md:block", FIELD_LABEL_CLASSES)}>{group}</p>
           {SETTINGS_SECTIONS.filter((section) => section.group === group).map((section) => {
             const active = section.id === sectionId;
-            const dimmed = !sectionMatches(section, query);
             const count = counts[section.id];
             return (
               <button
@@ -162,23 +150,12 @@ function SettingsNav({
                 onClick={() => onSelect(section.id)}
                 className={cn(
                   "flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors",
-                  active
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  dimmed && "opacity-40",
+                  active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  !sectionMatches(section, query) && "opacity-40",
                 )}
               >
                 <span>{section.label}</span>
-                {count !== undefined && (
-                  <span
-                    className={cn(
-                      "font-mono text-2xs",
-                      active ? "opacity-70" : "text-muted-foreground",
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
+                {count !== undefined && <span className={cn("font-mono text-2xs", active ? "opacity-70" : "text-muted-foreground")}>{count}</span>}
               </button>
             );
           })}
@@ -188,339 +165,343 @@ function SettingsNav({
   );
 }
 
-function SettingsSectionPanel({
-  sectionId,
-  query,
-}: {
-  sectionId: SettingsSectionId;
-  query: string;
-}) {
+function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSectionId; query: string }) {
   if (sectionId === "appearance") return <AppearanceSettings query={query} />;
   if (sectionId === "defaults") return <AgentDefaultsSettings query={query} />;
-  if (sectionId === "profiles") return <ProfilesSettings />;
+  if (sectionId === "quality") return <QualitySettings query={query} />;
+  if (sectionId === "profiles") return <ProfilesSettings query={query} />;
   if (sectionId === "projects") return <ProjectsSettings />;
-  if (sectionId === "providers") return <ProvidersSettings />;
-  if (sectionId === "skills") return <SkillsSettings />;
-  if (sectionId === "coolify") return <CoolifySettings />;
-  if (sectionId === "github") return <GithubAccountsSettings />;
-  return <McpSettings />;
+  if (sectionId === "providers") return <ProvidersSettings query={query} />;
+  if (sectionId === "skills") return <SkillsSettings query={query} />;
+  if (sectionId === "coolify") return <CoolifySettings query={query} />;
+  if (sectionId === "github") return <GithubAccountsSettings query={query} />;
+  return <McpSettings query={query} />;
 }
 
-/** Theme picker; the only row here, hidden when the search query doesn't match it. */
 function AppearanceSettings({ query }: { query: string }) {
   const { theme, setTheme } = useTheme();
   const themeVisible = matchesQuery(query, "Thème", "Apparence de l'interface", "clair sombre");
+  const currentTheme = THEMES.find((option) => option.value === theme)?.label;
 
   return (
     <div className="space-y-4">
-      <SectionHeader title="Apparence" subtitle="Réglages visuels de l'interface." />
+      <SectionHeader title="Apparence" subtitle="Choisissez le thème de votre espace de travail." />
       {themeVisible ? (
-        <div className="flex flex-col items-start gap-1.5 rounded-md border p-3">
-          <Label>Thème</Label>
-          <p className="text-sm text-muted-foreground">Apparence de l'interface</p>
-          <Tabs options={THEME_OPTIONS} value={theme} onChange={setTheme} aria-label="Thème" />
+        <div className="space-y-4 rounded-lg border p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <Label>Thème</Label>
+              <p className="text-sm text-muted-foreground">Choix actuel : {currentTheme}</p>
+            </div>
+            <Tabs options={THEME_OPTIONS} value={theme} onChange={setTheme} aria-label="Thème" />
+          </div>
+          <div className="rounded-md border bg-background p-3" aria-label={`Aperçu du thème ${currentTheme}`}>
+            <div className="mb-3 flex items-center justify-between border-b pb-2">
+              <span className="text-sm font-semibold">Votre tableau</span>
+              <span className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground">Nouvelle carte</span>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1 rounded-md bg-muted/40 p-2">
+                <p className="mb-2 text-xs text-muted-foreground">À faire</p>
+                <div className="rounded border bg-card p-3 text-sm text-card-foreground">Préparer la prochaine évolution</div>
+              </div>
+              <div className="flex-1 rounded-md bg-muted/40 p-2">
+                <p className="mb-2 text-xs text-muted-foreground">Terminé</p>
+                <div className="rounded border bg-card p-3 text-sm text-card-foreground">Relire une livraison</div>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Le thème s'applique immédiatement et reste enregistré sur cet appareil.</p>
         </div>
-      ) : (
-        <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>
-      )}
+      ) : <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>}
     </div>
   );
 }
 
-interface DefaultsRowSpec {
-  label: string;
-  hint: string;
-}
+interface DefaultsRowSpec { label: string; hint: string }
+const FEASIBILITY_ROW: DefaultsRowSpec = { label: "Analyse préalable", hint: "Étude de faisabilité, reformulation et découpage" };
+const IMPLEMENTATION_ROW: DefaultsRowSpec = { label: "Implémentation", hint: "Session de code, sans profil" };
+const COMMIT_ROW: DefaultsRowSpec = { label: "Livraison", hint: "Langue des PRs et commits" };
 
-const FEASIBILITY_ROW: DefaultsRowSpec = {
-  label: "Étude de faisabilité",
-  hint: "Reformulation, découpage (l'analyse tourne sur Opus ou Sol, effort medium)",
-};
-const IMPLEMENTATION_ROW: DefaultsRowSpec = {
-  label: "Implémentation",
-  hint: "Session de code, sans profil",
-};
-const COMMIT_ROW: DefaultsRowSpec = {
-  label: "PRs et commits",
-  hint: "Messages de commit, titre et description de PR",
-};
-
-/** Per-stage defaults used when a ticket carries no profile, laid out as a step × knob matrix. */
 function AgentDefaultsSettings({ query }: { query: string }) {
   const { settings, error, saved } = useAppSettings();
-  const showFeasibility = matchesQuery(query, FEASIBILITY_ROW.label, FEASIBILITY_ROW.hint);
-  const showImplementation = matchesQuery(query, IMPLEMENTATION_ROW.label, IMPLEMENTATION_ROW.hint);
-  const showCommit = matchesQuery(query, COMMIT_ROW.label, COMMIT_ROW.hint);
-  const hasVisibleRow = showFeasibility || showImplementation || showCommit;
+  const showFeasibility = matchesQuery(query, FEASIBILITY_ROW.label, FEASIBILITY_ROW.hint, "triage modèle effort langue agents par défaut");
+  const showImplementation = matchesQuery(query, IMPLEMENTATION_ROW.label, IMPLEMENTATION_ROW.hint, "modèle effort agents par défaut");
+  const showCommit = matchesQuery(query, COMMIT_ROW.label, COMMIT_ROW.hint, "langue pull request agents par défaut");
 
   return (
     <div className="space-y-4">
       <SectionHeader
-        title="Agents par défaut"
-        subtitle="Valeurs utilisées quand un ticket n'a pas de profil. Un profil les remplace entièrement."
+        title="Valeurs par défaut"
+        subtitle="Sans profil, les prochains tickets utilisent ces valeurs. Les profils conservent leur propre configuration."
       />
-      {!hasVisibleRow ? (
-        <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>
-      ) : (
-        <div className="divide-y rounded-md border">
+      {settings === null ? <p className="text-sm text-muted-foreground">Chargement des valeurs…</p> : (
+        <div className="space-y-3">
           {showFeasibility && (
-            <DefaultsStageRow row={FEASIBILITY_ROW}>
+            <DefaultsStageRow
+              row={FEASIBILITY_ROW}
+              summary={`${AGENT_MODEL_FULL_LABELS[settings.triageModel]} · ${AGENT_EFFORT_FULL_LABELS[settings.triageEffort]} · ${COMMIT_LANGUAGE_LABELS[settings.triageLanguage]}`}
+              searching={query !== ""}
+            >
               <KnobGroup
                 title="Modèle"
                 options={MODEL_OPTIONS}
-                value={settings?.triageModel ?? null}
-                onChange={(v) => void patchAppSettings({ triageModel: v })}
+                value={settings.triageModel}
+                onChange={(value) => void patchAppSettings({ triageModel: value })}
                 label="Modèle de l'étude de faisabilité"
               />
               <KnobGroup
                 title="Effort"
                 options={EFFORT_OPTIONS}
-                value={settings?.triageEffort ?? null}
-                onChange={(v) => void patchAppSettings({ triageEffort: v })}
+                value={settings.triageEffort}
+                onChange={(value) => void patchAppSettings({ triageEffort: value })}
                 label="Effort de l'étude de faisabilité"
               />
               <KnobGroup
                 title="Langue"
                 options={LANGUAGE_OPTIONS}
-                value={settings?.triageLanguage ?? null}
-                onChange={(v) => void patchAppSettings({ triageLanguage: v })}
+                value={settings.triageLanguage}
+                onChange={(value) => void patchAppSettings({ triageLanguage: value })}
                 label="Langue de l'étude de faisabilité"
               />
             </DefaultsStageRow>
           )}
           {showImplementation && (
-            <DefaultsStageRow row={IMPLEMENTATION_ROW}>
+            <DefaultsStageRow
+              row={IMPLEMENTATION_ROW}
+              summary={`Claude · ${AGENT_MODEL_FULL_LABELS[settings.implementModel]} · ${AGENT_EFFORT_FULL_LABELS[settings.implementEffort]}`}
+              searching={query !== ""}
+            >
               <KnobGroup
                 title="Modèle"
                 options={MODEL_OPTIONS}
-                value={settings?.implementModel ?? null}
-                onChange={(v) => void patchAppSettings({ implementModel: v })}
+                value={settings.implementModel}
+                onChange={(value) => void patchAppSettings({ implementModel: value })}
                 label="Modèle d'implémentation"
               />
               <KnobGroup
                 title="Effort"
                 options={EFFORT_OPTIONS}
-                value={settings?.implementEffort ?? null}
-                onChange={(v) => void patchAppSettings({ implementEffort: v })}
+                value={settings.implementEffort}
+                onChange={(value) => void patchAppSettings({ implementEffort: value })}
                 label="Effort d'implémentation"
               />
+              <p className="w-full text-xs text-muted-foreground">Les valeurs Codex se règlent dans Fournisseurs ; un profil fixe l'agent utilisé.</p>
             </DefaultsStageRow>
           )}
           {showCommit && (
-            <DefaultsStageRow row={COMMIT_ROW}>
+            <DefaultsStageRow
+              row={COMMIT_ROW}
+              summary={COMMIT_LANGUAGE_LABELS[settings.commitLanguage]}
+              searching={query !== ""}
+            >
               <KnobGroup
                 title="Langue"
                 options={LANGUAGE_OPTIONS}
-                value={settings?.commitLanguage ?? null}
-                onChange={(v) => void patchAppSettings({ commitLanguage: v })}
+                value={settings.commitLanguage}
+                onChange={(value) => void patchAppSettings({ commitLanguage: value })}
                 label="Langue des PRs et des commits"
               />
             </DefaultsStageRow>
           )}
+          {!showFeasibility && !showImplementation && !showCommit && <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>}
         </div>
       )}
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={settings?.qualityOwner ?? true}
-            onCheckedChange={(value) => void patchAppSettings({ qualityOwner: value }).then(refreshProjects)}
-          />
-          <span className="text-sm">Validation qualité sur ce poste</span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Un seul poste (Mac ou VPS) lance les validations qualité et Devin. Désactive-la ici avant de l'activer sur l'autre, quand aucune validation n'est en cours.
-        </p>
-      </div>
-      <div className="flex items-center gap-2">
-        <p className="text-xs text-muted-foreground">
-          Les changements s'appliquent aux prochains tickets. Enregistré automatiquement.
-        </p>
-        {saved && <span className="text-xs text-success">Enregistré</span>}
-      </div>
-      {error !== null && <p className="text-sm text-destructive">{error}</p>}
+      <div className="flex items-center gap-2 text-xs">
+        <p className="text-muted-foreground">Enregistré automatiquement pour les prochains tickets.</p>{saved && <span className="text-success" role="status">Enregistré</span>}</div>
+      {error !== null && <p className="text-sm text-destructive" role="alert">{error}</p>}
     </div>
   );
 }
 
-/** One stage block: the step identity on the left, its knob groups wrapping on the right. */
-function DefaultsStageRow({ row, children }: { row: DefaultsRowSpec; children: React.ReactNode }) {
+function QualitySettings({ query }: { query: string }) {
+  const { settings, error, saved } = useAppSettings();
   return (
-    <div className="flex items-start gap-x-6 gap-y-3 p-3">
-      <div className="w-44 shrink-0">
-        <p className="text-sm font-medium">{row.label}</p>
-        <p className="text-xs text-muted-foreground">{row.hint}</p>
-      </div>
-      <div className="flex min-w-0 flex-1 flex-wrap gap-x-6 gap-y-3">{children}</div>
-    </div>
-  );
-}
-
-interface KnobGroupProps<T extends string> {
-  title: string;
-  options: TabOption<T>[];
-  value: T | null;
-  onChange: (value: T) => void;
-  label: string;
-}
-
-/** One labeled knob: the segmented picker for a step's setting, saved on every click. */
-function KnobGroup<T extends string>({ title, options, value, onChange, label }: KnobGroupProps<T>) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className={FIELD_LABEL_CLASSES}>{title}</span>
-      <Tabs
-        options={options}
-        value={value}
-        onChange={onChange}
-        aria-label={label}
-        className="flex-nowrap"
+    <div className="space-y-4">
+      <SectionHeader
+        title="Contrôles requis avant livraison"
+        subtitle="Les exigences sont définies par projet. Chaque carte conserve les résultats de ses contrôles."
       />
+      {settings === null ? <p className="text-sm text-muted-foreground">Chargement de la politique…</p> : (
+        <DefaultsStageRow
+          row={{ label: "Qui réalise le contrôle ?", hint: "Validations qualité et Devin" }}
+          summary={settings.qualityOwner ? "Ce poste est responsable" : "Ce poste ne lance pas les validations"}
+          searching={query !== ""}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={settings.qualityOwner}
+                onCheckedChange={(value) => void patchAppSettings({ qualityOwner: value }).then(refreshProjects)}
+                aria-label="Validation qualité sur ce poste"
+              />
+              <span className="text-sm">Validation qualité sur ce poste</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Un seul poste (Mac ou serveur VPS) lance les validations. Désactivez ce rôle ici avant de l'activer ailleurs, quand aucune validation n'est en cours.</p>
+          </div>
+        </DefaultsStageRow>
+      )}
+      <details open={query !== "" || undefined} className="rounded-lg border p-4">
+        <summary className="cursor-pointer text-sm font-medium">Exigences et preuves</summary>
+        <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+          <p>Consultez les réglages de chaque projet pour ses contrôles requis avant livraison.</p>
+          <p>Une politique configurée n'est pas un contrôle réussi : les résultats et preuves sont disponibles dans la validation de la carte.</p>
+        </div>
+      </details>
+      {saved && <p className="text-xs text-success" role="status">Enregistré</p>}
+      {error !== null && <p className="text-sm text-destructive" role="alert">{error}</p>}
     </div>
   );
+}
+
+function DefaultsStageRow({ row, summary, searching, children }: { row: DefaultsRowSpec; summary: string; searching: boolean; children: ReactNode }) {
+  return (
+    <details className="rounded-lg border" open={searching || undefined}>
+      <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">{row.label}</p>
+          <p className="mt-1 text-sm">{summary}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{row.hint}</p>
+        </div>
+        <span className="text-xs font-medium text-primary">Modifier</span>
+      </summary>
+      <div className="flex flex-wrap gap-x-5 gap-y-3 border-t p-4">{children}</div>
+    </details>
+  );
+}
+
+interface KnobGroupProps<T extends string> { title: string; options: TabOption<T>[]; value: T | null; onChange: (value: T) => void; label: string }
+function KnobGroup<T extends string>({ title, options, value, onChange, label }: KnobGroupProps<T>) {
+  return <div className="flex flex-col gap-1.5">
+    <span className={FIELD_LABEL_CLASSES}>{title}</span>
+    <Tabs options={options} value={value} onChange={onChange} aria-label={label} />
+  </div>;
 }
 
 type ProviderTone = "success" | "warning" | "muted";
-
-const PROVIDER_DOT_CLASSES: Record<ProviderTone, string> = {
-  success: "bg-success",
-  warning: "bg-warning",
-  muted: "bg-muted-foreground",
-};
-
-interface ProviderRowProps {
-  name: string;
-  tone: ProviderTone;
-  status: string;
-  detail: string;
-  children?: React.ReactNode;
-}
-
-function ProviderRow({ name, tone, status, detail, children }: ProviderRowProps) {
+const PROVIDER_DOT_CLASSES: Record<ProviderTone, string> = { success: "bg-success", warning: "bg-warning", muted: "bg-muted-foreground" };
+interface ProviderRowProps { name: string; tone: ProviderTone; status: string; detail: string; children?: ReactNode; searching?: boolean }
+function ProviderRow({ name, tone, status, detail, children, searching = false }: ProviderRowProps) {
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <div className="space-y-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">{name}</p>
+        <p className="text-sm font-semibold">{name}</p>
         <div className="flex items-center gap-2">
           <span className={cn("h-2 w-2 rounded-full", PROVIDER_DOT_CLASSES[tone])} aria-hidden />
-          <span className="text-sm text-muted-foreground" role="status">
-            {status}
-          </span>
+          <span className="text-xs text-muted-foreground" role="status">{status}</span>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">{detail}</p>
-      {children}
+      <p className="text-sm text-muted-foreground">{detail}</p>
+      {children && <details open={searching || undefined}>
+        <summary className="cursor-pointer text-xs font-medium text-primary">Modifier et voir les détails</summary>
+        <div className="mt-3 space-y-3 border-t pt-3">{children}</div>
+      </details>}
     </div>
   );
 }
-
-const CODEX_STATUS_TONES: Record<string, ProviderTone> = {
-  ready: "success",
-  checking: "muted",
-};
-
-/** One row per engine: detection status plus, for Codex, the defaults seeding a new Codex profile. */
-function ProvidersSettings() {
+const CODEX_STATUS_TONES: Record<string, ProviderTone> = { ready: "success", checking: "muted" };
+function ProvidersSettings({ query }: { query: string }) {
   const { codex, composerAvailable, claudeAvailable } = useCapabilities();
   const { settings, error, saved } = useAppSettings();
-  const codexModel = settings?.codexModel ?? null;
-  const fastAvailable = isCodexFastAvailable(codex, codexModel ?? DEFAULT_CODEX_MODEL);
-  const codexEffortOptions = codexEffortTabOptions(codexModel ?? DEFAULT_CODEX_MODEL, codex).map(
-    (option) => ({ ...option, label: CODEX_EFFORT_FULL_LABELS[option.value] }),
-  );
-
+  const codexModel = settings?.codexModel ?? DEFAULT_CODEX_MODEL;
+  const codexEffort = settings?.codexEffort ?? DEFAULT_CODEX_EFFORT;
+  const codexFastSuffix = settings?.codexFast ? " · mode rapide" : "";
+  const codexDetail = settings === null
+    ? "Chargement du modèle configuré…"
+    : `${CODEX_MODEL_LABELS[codexModel]} · ${CODEX_EFFORT_FULL_LABELS[codexEffort]}${codexFastSuffix}`;
+  const fastAvailable = isCodexFastAvailable(codex, codexModel);
+  const codexEffortOptions = codexEffortTabOptions(codexModel, codex).map((option) => ({ ...option, label: CODEX_EFFORT_FULL_LABELS[option.value] }));
   const changeCodexModel = (next: CodexModel): void => {
-    const currentEffort = settings?.codexEffort ?? DEFAULT_CODEX_EFFORT;
-    const nextEffort: CodexEffort = pairedRuntimeCodexEffort(codex, next, currentEffort);
-    const effortPatch = nextEffort === currentEffort ? {} : { codexEffort: nextEffort };
+    const nextEffort: CodexEffort = pairedRuntimeCodexEffort(codex, next, codexEffort);
+    const effortPatch = nextEffort === codexEffort ? {} : { codexEffort: nextEffort };
     void patchAppSettings({ codexModel: next, ...effortPatch });
   };
 
   return (
     <div className="space-y-4">
       <SectionHeader
-        title="Fournisseurs"
-        subtitle="Moteurs détectés sur cette machine et leurs valeurs par défaut."
+        title="Agents disponibles"
+        subtitle="Détection sur cette machine. Elle ne prouve pas l'exécution d'une session."
       />
       <ProviderRow
         name="Claude"
         tone={claudeAvailable ? "success" : "warning"}
         status={claudeAvailable ? "Détecté" : "Non détecté"}
-        detail={
-          claudeAvailable
-            ? "Binaire claude résolu (paquet du SDK ou installation utilisateur)."
-            : "claude introuvable : il sera téléchargé au premier lancement d'agent."
-        }
-      />
+        detail={settings === null ? "Chargement du modèle configuré…" : `${AGENT_MODEL_FULL_LABELS[settings.implementModel]} · ${AGENT_EFFORT_FULL_LABELS[settings.implementEffort]} par défaut`}
+        searching={query !== ""}
+      >
+        <p className="text-xs text-muted-foreground">{claudeAvailable ? "Programme Claude résolu dans le SDK (bibliothèque de l'agent) ou l'installation utilisateur." : "Claude introuvable : il sera téléchargé au premier lancement d'agent."}</p>
+        <p className="text-xs text-muted-foreground">Les modèles Claude se règlent dans Agents par défaut et dans chaque profil.</p>
+      </ProviderRow>
       <ProviderRow
         name="Codex"
         tone={CODEX_STATUS_TONES[codex.status] ?? "warning"}
-        status={codex.status === "ready" ? "Connecté" : "Indisponible"}
-        detail="Valeurs pré-remplies pour un nouveau profil Codex."
+        status={codex.status === "ready" ? "Connecté" : "À vérifier"}
+        detail={codexDetail}
+        searching={query !== ""}
       >
         <CodexConnectionStatus />
-        <div className="flex flex-col items-start gap-1.5">
-          <Label>Modèle Codex</Label>
-          <Tabs
+        {settings !== null && <>
+          <KnobGroup
+            title="Modèle Codex"
             options={codexModelTabOptions(codex)}
-            value={codexModel}
+            value={settings.codexModel}
             onChange={changeCodexModel}
-            aria-label="Modèle Codex"
+            label="Modèle Codex"
           />
-        </div>
-        <div className="flex flex-col items-start gap-1.5">
-          <Label>Effort Codex</Label>
-          <Tabs
+          <KnobGroup
+            title="Effort Codex"
             options={codexEffortOptions}
-            value={settings?.codexEffort ?? null}
-            onChange={(v) => void patchAppSettings({ codexEffort: v })}
-            aria-label="Effort Codex"
+            value={settings.codexEffort}
+            onChange={(value) => void patchAppSettings({ codexEffort: value })}
+            label="Effort Codex"
           />
-        </div>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={settings?.codexFast ?? false}
-            onCheckedChange={(value) => void patchAppSettings({ codexFast: value })}
-            disabled={!fastAvailable && !(settings?.codexFast ?? false)}
-          />
-          <span className="text-sm">Mode FAST</span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {fastAvailable
-            ? "Réponses plus rapides, consommation accrue."
-            : "Mode FAST indisponible pour ce modèle et ce compte."}
-        </p>
-        {saved && <p className="text-xs text-success">Enregistré</p>}
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={settings.codexFast}
+              onCheckedChange={(value) => void patchAppSettings({ codexFast: value })}
+              disabled={!fastAvailable && !settings.codexFast}
+              aria-label="Mode rapide Codex"
+            />
+            <span className="text-sm">Mode rapide</span>
+          </div>
+          <p className="text-xs text-muted-foreground">{fastAvailable ? "Réponses plus rapides, consommation accrue." : "Mode rapide indisponible pour ce modèle et ce compte."}</p>
+        </>}
+        <p className="text-xs text-muted-foreground">Ces valeurs préremplissent les nouveaux profils Codex. Enregistré automatiquement.</p>
+        {saved && <p className="text-xs text-success" role="status">Enregistré</p>}
       </ProviderRow>
       <ProviderRow
         name="Composer"
         tone={composerAvailable ? "success" : "warning"}
         status={composerAvailable ? "Détecté" : "Non détecté"}
-        detail={
-          composerAvailable
-            ? "Cursor headless (cursor-agent) installé et authentifié."
-            : "cursor-agent introuvable dans le PATH"
-        }
-      />
-      {error !== null && <p className="text-sm text-destructive">{error}</p>}
+        detail="Écrit le code sous la responsabilité de Claude."
+        searching={query !== ""}
+      >
+        <p className="text-xs text-muted-foreground">{composerAvailable ? "Cursor sans interface (cursor-agent) installé et authentifié." : "cursor-agent introuvable dans les programmes de la machine."}</p>
+      </ProviderRow>
+      {error !== null && <p className="text-sm text-destructive" role="alert">{error}</p>}
     </div>
   );
 }
 
-/** Host skills detection per provider, reachable after the preflight dialog was dismissed. */
-function SkillsSettings() {
+function SkillsSettings({ query }: { query: string }) {
   const capabilities = useCapabilities();
   const roots = capabilities.skills[0]?.roots;
-  const skillPaths = roots === undefined
-    ? "dans les dossiers de skills de Claude et Codex"
-    : `dans ${roots.claude.join(" ou ")} pour Claude et ${roots.codex.join(" ou ")} pour Codex`;
-
   return (
     <div className="space-y-4">
       <SectionHeader
-        title="Skills"
-        subtitle={`Skills utilisés par les agents, détectés ${skillPaths}.`}
+        title="Compétences installées"
+        subtitle="Les compétences (skills) donnent aux agents leurs méthodes de travail."
       />
-      <SkillsStatusList skills={capabilities.skills} availableProviders={availableSkillProviders(capabilities)} />
+      <SkillsStatusList
+        skills={capabilities.skills}
+        availableProviders={availableSkillProviders(capabilities)}
+        query={query}
+      />
+      {roots !== undefined && <details open={query !== "" || undefined} className="rounded-md border p-3">
+        <summary className="cursor-pointer text-xs text-muted-foreground">Dossiers de détection</summary>
+        <p className="mt-2 break-all text-xs text-muted-foreground">Claude : {roots.claude.join(" ou ")}<br />Codex : {roots.codex.join(" ou ")}</p>
+      </details>}
     </div>
   );
 }

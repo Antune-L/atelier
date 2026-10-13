@@ -5,15 +5,12 @@ import type { ProjectInfo } from "@shared/schemas";
 import { type AgentEffort, type AgentModel, type CodexEffort, type CodexModel, type Orchestrator } from "@shared/constants";
 
 import { ProjectSelect } from "@/components/ProjectSelect";
-import { SessionDriverFields } from "@/components/SessionDriverFields";
+import { ToolAgentSettings } from "@/components/ToolAgentSettings";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
-import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
-import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
-import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 
@@ -41,7 +38,6 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { model: resolvedDefaultModel, effort: resolvedDefaultEffort } = resolveAgentDefaults(capabilities);
   const codexFast = codexFastOverride ?? capabilities.defaultCodexFast;
 
   const appendToQuestion = (markdown: string): void => {
@@ -87,18 +83,26 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
       <ProjectSelect id="ask-project" projects={projects} value={project} onChange={setProjectChoice} />
 
       <div className="space-y-1.5">
-        <Label htmlFor="ask-question" className={FIELD_LABEL_CLASSES}>Question (markdown)</Label>
+        <Label htmlFor="ask-question" className={FIELD_LABEL_CLASSES}>Votre question</Label>
         <Textarea
           id="ask-question"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onPaste={onPaste}
           className="min-h-[200px]"
-          placeholder="Ta question sur le projet… (colle une image pour l'attacher)"
+          placeholder="Que souhaitez-vous comprendre sur ce projet ?"
         />
+        <p className="text-xs text-muted-foreground">Markdown accepté. Collez une image pour l’attacher.</p>
       </div>
 
-      <SessionDriverFields
+      <p className="rounded-md border border-border bg-muted/30 p-3 text-sm">L’agent répond sur le projet en lecture seule. Sa réponse sera ajoutée à la carte.</p>
+
+      <ToolAgentSettings
+        id="ask"
+        model={model}
+        effort={effort}
+        onModelChange={setModel}
+        onEffortChange={setEffort}
         orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
@@ -109,31 +113,7 @@ export function AskPanel({ projects, onClose }: AskPanelProps) {
         onCodexFastChange={setCodexFast}
       />
 
-      {orchestrator === "claude" && (
-        <>
-          <div className="flex flex-col items-start gap-1.5">
-            <Label id="ask-model" className={FIELD_LABEL_CLASSES}>Modèle</Label>
-            <Tabs
-              options={AGENT_MODEL_OPTIONS}
-              value={model ?? resolvedDefaultModel}
-              onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
-              aria-labelledby="ask-model"
-            />
-          </div>
-
-          <div className="flex flex-col items-start gap-1.5">
-            <Label id="ask-effort" className={FIELD_LABEL_CLASSES}>Réflexion (effort)</Label>
-            <Tabs
-              options={AGENT_EFFORT_OPTIONS}
-              value={effort ?? resolvedDefaultEffort}
-              onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
-              aria-labelledby="ask-effort"
-            />
-          </div>
-        </>
-      )}
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       <div className={PANEL_FOOTER_CLASSES}>
         <Button size="sm" variant="ghost" onClick={onClose}>

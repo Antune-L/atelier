@@ -1,47 +1,20 @@
-import { Maximize2 } from "lucide-react";
+import { FileText } from "lucide-react";
 
 import type { Ticket } from "@shared/schemas";
 
-import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { Button } from "@/components/ui/button";
-import { Markdown } from "@/components/ui/markdown";
 
 interface PrdTabProps {
   ticket: Ticket;
   onExpand: () => void;
-  onValidate: () => Promise<void>;
 }
 
-/** Full-height PRD reading pane; annotation and validation happen in the stacked PRD sheet. */
-export function PrdTab({ ticket, onExpand, onValidate }: PrdTabProps) {
+export function PrdTab({ ticket, onExpand }: PrdTabProps) {
   const proposed = ticket.column === "prd";
-
   return (
-    <div className="space-y-3">
-      <SectionHeader
-        aside={
-          ticket.prdMarkdown === null ? undefined : (
-            <Button variant="ghost" size="sm" onClick={onExpand}>
-              <Maximize2 className="h-3.5 w-3.5" />
-              {proposed ? "Agrandir & annoter" : "Agrandir"}
-            </Button>
-          )
-        }
-      >
-        {proposed ? "PRD proposé" : "PRD validé"}
-      </SectionHeader>
-
-      {ticket.prdMarkdown === null ? (
-        <p className="text-sm text-muted-foreground">Le PRD n'a pas encore été soumis.</p>
-      ) : (
-        <Markdown content={ticket.prdMarkdown} />
-      )}
-
-      {proposed && ticket.prdMarkdown !== null && (
-        <Button size="sm" onClick={() => void onValidate()}>
-          Valider le PRD
-        </Button>
-      )}
-    </div>
+    <section className="space-y-4 rounded-lg border border-border p-5">
+      <div className="flex items-start gap-3"><FileText className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden /><div><h2 className="text-lg font-medium">{proposed ? "PRD · À valider" : "PRD · Lecture seule"}</h2><p className="mt-1 text-sm text-muted-foreground">Document soumis pour ce ticket. Les annotations restent liées au contenu de cette version.</p></div></div>
+      {ticket.prdMarkdown === null ? <p className="text-sm text-muted-foreground">Le PRD n’a pas encore été soumis.</p> : <><p className="text-xs text-muted-foreground">{proposed ? "Lisez le plan, puis validez-le ou demandez des corrections dans la barre de décision." : "Ce document est conservé pour consultation. Aucune décision ne peut être envoyée dans cet état."}</p><Button size="sm" onClick={onExpand}>Lire le PRD</Button></>}
+    </section>
   );
 }

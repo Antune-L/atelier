@@ -37,7 +37,6 @@ function seedMessage(seed: AtelierSeed | null): string {
   return title || description;
 }
 
-/** Start an Atelier conversation: project, agent, research mode and the first message. */
 export function NewConversationForm({ projects, defaultProject, seed, onCreated, onCancel }: NewConversationFormProps) {
   const capabilities = useCapabilities();
   const [projectChoice, setProjectChoice] = useState<string | null>(seed?.project ?? defaultProject);
@@ -86,60 +85,43 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 overflow-y-auto p-4">
-      <h2 className="text-sm font-medium">Nouvelle conversation</h2>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 overflow-y-auto p-4 md:p-6">
+      <header className="space-y-1">
+        <h2 className="text-lg font-semibold">Nouvelle discussion</h2>
+        <p className="text-sm text-muted-foreground">Précisez le résultat attendu. Vous pourrez préparer un PRD après la discussion.</p>
+      </header>
+      <div className="space-y-2 rounded-lg border border-border bg-card p-4">
+        <Label htmlFor="atelier-first-message" className={FIELD_LABEL_CLASSES}>Votre idée</Label>
+        <Textarea id="atelier-first-message" value={message} onChange={(e) => setMessage(e.target.value)} onPaste={onPaste} onKeyDown={onKeyDown} className="min-h-[200px]" placeholder="Décrivez la feature ou le correctif, le résultat attendu et les contraintes…" />
+        <p className="text-xs text-muted-foreground">Collez une image pour l’attacher. ⌘ ou Ctrl + Entrée démarre la discussion.</p>
+      </div>
+      <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
         <ProjectSelect id="atelier-project" projects={projects} value={project} onChange={setProjectChoice} />
-        <div className="space-y-1.5">
-          <Label htmlFor="atelier-title" className={FIELD_LABEL_CLASSES}>Titre (optionnel)</Label>
-          <Input
-            id="atelier-title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Déduit du premier message si vide"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="atelier-first-message" className={FIELD_LABEL_CLASSES}>Premier message</Label>
-        <Textarea
-          id="atelier-first-message"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onPaste={onPaste}
-          onKeyDown={onKeyDown}
-          className="min-h-[160px]"
-          placeholder="Décris la feature ou le fix… (colle une image pour l'attacher, ⌘+Entrée pour démarrer)"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="space-y-2 rounded-md border border-border p-3">
-          <h3 className={FIELD_LABEL_CLASSES}>Session</h3>
+        <div className="border-t border-border pt-4">
+          <h3 className="mb-2 text-sm font-medium">Agent</h3>
           <AtelierAgentFields value={agent} onChange={(patch) => setAgent((prev) => ({ ...prev, ...patch }))} />
         </div>
-        <div className="space-y-2 rounded-md border border-border p-3">
-          <h3 className={FIELD_LABEL_CLASSES}>Mode</h3>
-          <ResearchFields
-            enabled={researchEnabled}
-            options={researchOptions}
-            onEnabledChange={setResearchEnabled}
-            onOptionsChange={setResearchOptions}
-          />
-        </div>
       </div>
-
-      {error && <p className="text-sm text-danger">{error}</p>}
-
-      <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" onClick={onCancel}>
-          Annuler
-        </Button>
-        <Button size="sm" onClick={() => void submit()} disabled={submitDisabled}>
-          <MessageSquarePlus className="h-4 w-4" />
-          Démarrer la conversation
-        </Button>
+      <details className="rounded-lg border border-border p-4">
+        <summary className="cursor-pointer text-sm font-medium">Titre et vérifications avant de proposer</summary>
+        <div className="mt-4 flex flex-col gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="atelier-title" className={FIELD_LABEL_CLASSES}>Titre (facultatif)</Label>
+            <Input id="atelier-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Déduit du premier message si vide" />
+          </div>
+          <div className="space-y-2 border-t border-border pt-4">
+            <h3 className="text-sm font-medium">Avant de proposer</h3>
+            <ResearchFields enabled={researchEnabled} options={researchOptions} onEnabledChange={setResearchEnabled} onOptionsChange={setResearchOptions} />
+          </div>
+        </div>
+      </details>
+      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-background py-3">
+        <p className="text-xs text-muted-foreground">Le projet et l’agent ci-dessus seront utilisés.</p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="ghost" onClick={onCancel}>Annuler</Button>
+          <Button size="sm" onClick={() => void submit()} disabled={submitDisabled}><MessageSquarePlus className="h-4 w-4" />Commencer la discussion</Button>
+        </div>
       </div>
     </div>
   );

@@ -69,9 +69,8 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
   };
 
   return (
-    // NOTE: the dialog body scrolls (overflow-y-auto), which clips BranchCombobox's absolute
-    // listbox (max-h-48); this panel is short, so reserve the room the list needs below it.
     <div className="min-h-[20rem] space-y-4">
+      <p className="text-sm text-muted-foreground">Un espace de travail (worktree) est une copie isolée du dépôt pour préparer et tester le projet.</p>
       <ProjectSelect
         id="worktree-project"
         projects={projects}
@@ -79,7 +78,7 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
         onChange={setProjectChoice}
       />
       <div className="space-y-1.5">
-        <Label htmlFor="worktree-base-branch" className={FIELD_LABEL_CLASSES}>Branche de base du worktree</Label>
+        <Label htmlFor="worktree-base-branch" className={FIELD_LABEL_CLASSES}>Branche de départ</Label>
         <BranchCombobox
           id="worktree-base-branch"
           value={baseBranch}
@@ -89,7 +88,16 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
         />
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <section className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+        <h3 className="text-sm font-medium">Préparation demandée</h3>
+        <dl className="space-y-1 text-xs">
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Projet</dt><dd>{selectedProject?.label ?? "Choisissez un projet"}</dd></div>
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Branche de départ</dt><dd className="break-all font-mono">{baseBranch || "À renseigner"}</dd></div>
+        </dl>
+        <p className="text-xs text-muted-foreground">La création lance la préparation avec la configuration enregistrée du projet. Cette demande ne confirme pas encore que l’environnement fonctionne.</p>
+      </section>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       <div className={PANEL_FOOTER_CLASSES}>
         <Button size="sm" variant="ghost" onClick={onClose}>
@@ -97,7 +105,7 @@ export function WorktreePanel({ projects, onClose }: WorktreePanelProps) {
         </Button>
         <Button size="sm" onClick={() => void launch()} disabled={busy || !project || !baseBranch}>
           <GitBranch className="h-4 w-4" />
-          Lancer le worktree
+          {busy ? "Préparation en cours…" : "Créer l’espace de travail"}
         </Button>
       </div>
     </div>

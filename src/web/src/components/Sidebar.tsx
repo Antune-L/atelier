@@ -30,14 +30,14 @@ interface NavEntry {
 }
 
 const NAV_ENTRIES: NavEntry[] = [
-  { value: "home", label: "Home", Icon: LayoutGrid },
+  { value: "home", label: "Tableau", Icon: LayoutGrid },
   { value: "atelier", label: "Atelier", Icon: MessageSquare },
-  { value: "stats", label: "Stats", Icon: BarChart3 },
-  { value: "automation", label: "Automation", Icon: Zap },
+  { value: "stats", label: "Statistiques", Icon: BarChart3 },
+  { value: "automation", label: "Automatisations", Icon: Zap },
 ];
 
 const ITEM_BASE =
-  "flex h-7 w-7 items-center justify-center rounded-md transition-colors";
+  "flex h-9 w-9 items-center justify-center gap-2 rounded-md transition-colors xl:w-full xl:justify-start xl:px-3";
 const ITEM_INACTIVE =
   "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
 const ITEM_ACTIVE =
@@ -54,7 +54,7 @@ export function Sidebar({
   badges = {},
 }: SidebarProps): ReactNode {
   return (
-    <nav className="flex w-11 shrink-0 flex-col items-center gap-1 border-r bg-background py-2">
+    <nav aria-label="Navigation principale" className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2 xl:w-40">
       {NAV_ENTRIES.map(({ value, label, Icon }) => {
         const badged = badges[value] === true;
         const title = badged ? `${label} — nouvelles réponses` : label;
@@ -69,6 +69,7 @@ export function Sidebar({
             className={cn(ITEM_BASE, "relative", view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
           >
             <Icon className="h-4 w-4" />
+            <span className="hidden text-xs xl:inline">{label}</span>
             {badged && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-background" />}
           </button>
         );
@@ -86,6 +87,7 @@ export function Sidebar({
           className={cn(ITEM_BASE, ITEM_INACTIVE, "disabled:opacity-50")}
         >
           <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
+          <span className="hidden text-xs xl:inline">Mettre à jour</span>
         </button>
       )}
 
@@ -93,10 +95,12 @@ export function Sidebar({
         type="button"
         onClick={onOpenSettings}
         aria-pressed={false}
-        title="Settings"
+        title="Réglages"
+        aria-label="Ouvrir les réglages"
         className={cn(ITEM_BASE, ITEM_INACTIVE)}
       >
         <Settings className="h-4 w-4" />
+        <span className="hidden text-xs xl:inline">Réglages</span>
       </button>
     </nav>
   );

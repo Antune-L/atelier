@@ -81,7 +81,7 @@ function FollowUpCard({ issue, actions, ticketProject, busy, onCreate }: { issue
           {issue === "blocker" && <option value="" disabled>Choisir un dépôt</option>}
           {projects.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
         </Select>
-        <Button size="sm" variant="outline" disabled={busy || project === ""} onClick={() => onCreate({ sourceRunId, issue, project })}><FilePlus2 className="h-3.5 w-3.5" />Créer une carte de correction</Button>
+        <Button size="sm" variant="outline" disabled={busy || project === ""} onClick={() => onCreate({ sourceRunId, issue, project })}><FilePlus2 className="h-3.5 w-3.5" />Créer une tâche de suivi</Button>
       </div>
       {issue === "blocker" && project === "" && <p className="text-2xs text-muted-foreground">{BLOCKER_PROJECT_HINT}</p>}
       <p className="text-2xs text-muted-foreground">{FOLLOW_UP_NOTE}</p>

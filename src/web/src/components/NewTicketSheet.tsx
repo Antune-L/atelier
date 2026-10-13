@@ -358,7 +358,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
               {autonomousOptions.autonomous && autonomousOptions.autonomousDelivery === null && <p role="alert" className="text-xs text-danger">Choisissez la livraison autonome dans les options avant de créer le ticket.</p>}
               {prOnly && <p className="text-xs text-muted-foreground">Cet environnement livre uniquement une pull request ; fusion automatique et push direct ne sont pas disponibles.</p>}
             </section>
-            <details className="rounded-md border border-border p-3">
+            <details open className="rounded-md border border-border p-3">
               <summary className="cursor-pointer text-sm font-medium">Modifier la branche, les dépendances et les options</summary>
               <div className="mt-3 space-y-4 border-t border-border pt-3">
                 <div className="space-y-1.5">

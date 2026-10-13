@@ -3,6 +3,8 @@
 ## Current state
 
 - Branch: `feat/ux-simplification-recommended`, based on `73edcfad8d13faf14c9e6d25170c4dd5219145b2`.
+- Implementation revision: `5599960ffc8ca130535543a5af77d1916f00c6db`.
+- Draft delivery: [PR #221](https://github.com/Antune-L/atelier/pull/221), registered with the current T3 thread.
 - Worktree: `/private/tmp/kanban-ui-implementation`; the main checkout and VPS are unchanged.
 - Approved scope: all 49 audited surfaces, option A except option B for the Atelier agent panel.
 - All implementation lots are integrated and independently reviewed. Delivery is a draft pull request; no merge or deployment is included.
@@ -48,6 +50,7 @@
 - A custom Vite port can disagree with the existing Host/Origin guard. The built UI served from the backend origin was used for production-topology acceptance; the guard was not weakened.
 - A SQLite backup retained WAL journal mode without sidecars and failed the startup read-only snapshot. Only the isolated copy was repaired and integrity checked; the source data was unchanged.
 - Dependencies were installed from the frozen lockfile in this worktree. Package manifests and lockfiles were unchanged.
+- The built dry-run preview remains available at `http://localhost:53817` for review, using only `/private/tmp/kanban-ux-implementation/enriched-data`. Setup is disabled; the development frontend on port 53818 is no longer needed.
 
 ## Evidence
 
@@ -64,3 +67,4 @@ Review the draft pull request. VPS deployment remains outside this delivery.
 - 2026-10-13: User confirmed implementation after the initial regression checkpoint; baseline checks passed.
 - 2026-10-13: All recommended surfaces integrated; two PRD conversion findings corrected and verified.
 - 2026-10-13: Final existing checks, independent reviews and bounded browser acceptance completed.
+- 2026-10-13: Implementation committed, branch published and draft PR #221 linked to the thread.

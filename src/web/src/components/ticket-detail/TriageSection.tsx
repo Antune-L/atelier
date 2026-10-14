@@ -182,14 +182,6 @@ export function TriageSection({
           {result.questions.length > 0 && (
             <div>
               <SectionHeader>Questions</SectionHeader>
-              {result.questions.length > 1 && (
-                <div className="mb-3 space-y-1">
-                  <Button size="sm" variant="secondary" disabled={batchDisabled} onClick={() => void handleAnswerBatch()}>
-                    Intégrer toutes les réponses ({batchAnswers.length})
-                  </Button>
-                  {batchError && <p role="alert" className="text-sm text-danger">{batchError}</p>}
-                </div>
-              )}
               <ul className="space-y-3">
                 {result.questions.map((question, index) => (
                   <li key={`${ticket.id}:${ticket.feasibilityReportVersion}:${index}`}>
@@ -198,6 +190,15 @@ export function TriageSection({
                   </li>
                 ))}
               </ul>
+              {result.questions.length > 1 && (
+                // Sticky so the batch action stays reachable while scrolling through the questions.
+                <div className="sticky bottom-0 z-10 mt-3 space-y-1 border-t border-border bg-card py-2">
+                  <Button size="sm" variant="secondary" disabled={batchDisabled} onClick={() => void handleAnswerBatch()}>
+                    Intégrer toutes les réponses ({batchAnswers.length})
+                  </Button>
+                  {batchError && <p role="alert" className="text-sm text-danger">{batchError}</p>}
+                </div>
+              )}
             </div>
           )}
           {result.files.length > 0 && (

@@ -7,13 +7,23 @@ import type { FeasibilityAnswerRun } from "@shared/schemas";
 import { FeasibilityQuestion } from "./FeasibilityQuestion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { useLocalDraftList } from "@/hooks/useLocalDraft";
 
 const baseRun: FeasibilityAnswerRun = {
   id: "run", question: "Colour?", questionIndex: 0, answer: "Blue", revision: 0, reportVersion: 1, status: "failed", error: "Provider error",
 };
 
+type QuestionProps = Omit<Parameters<typeof FeasibilityQuestion>[0], "answer" | "onAnswerChange">;
+
+/** Mirrors TriageSection, which owns the per-question drafts. */
+function DraftedQuestion(props: QuestionProps) {
+  const run = props.ticket.feasibilityAnswers.find((candidate) => candidate.reportVersion === props.ticket.feasibilityReportVersion && candidate.questionIndex === props.index);
+  const [answers, setAnswerAt] = useLocalDraftList([`feasibility:${props.ticket.id}:${props.ticket.feasibilityReportVersion}:${props.index}`], [run?.answer ?? ""]);
+  return FeasibilityQuestion({ ...props, answer: answers[0] ?? "", onAnswerChange: (value) => setAnswerAt(0, value) });
+}
+
 function render(run?: FeasibilityAnswerRun): string {
-  return renderToStaticMarkup(<FeasibilityQuestion
+  return renderToStaticMarkup(<DraftedQuestion
     ticket={makeTicket({ column: "todo", feasibilityReportVersion: 1, feasibilityAnswers: run ? [run] : [] })}
     question={{ question: "Colour?", recommendedAnswer: null }} index={0} onSubmit={async () => ({ started: true, id: "next" })} />);
 }
@@ -45,7 +55,6 @@ test("pending, success and failure states are accessible and keep the persisted 
   expect(failed).toContain("Blue</textarea>");
 });
 
-type QuestionProps = Parameters<typeof FeasibilityQuestion>[0];
 interface InteractionProps {
   children?: ReactNode;
   value?: string;
@@ -58,7 +67,7 @@ interface InteractionProps {
 }
 
 /** No DOM renderer is installed. Drive the returned elements with a minimal React 18
- * dispatcher, keeping the component's handlers and useLocalDraft implementation real.
+ * dispatcher, keeping the component's handlers and draft hook implementation real.
  * This does not simulate browser event bubbling or native form validation. */
 function interactionHarness(initialProps: QuestionProps) {
   const internals: unknown = Reflect.get(React, "__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED");
@@ -96,7 +105,7 @@ function interactionHarness(initialProps: QuestionProps) {
       do {
         dirty = false;
         cursor = 0;
-        tree = FeasibilityQuestion(props);
+        tree = DraftedQuestion(props);
         if (++attempts > 10) throw new Error("Too many render-phase updates");
       } while (dirty);
     } finally {
@@ -264,7 +273,7 @@ test("oversized recommendations are explained and disabled without truncating or
   await withDraftStorage((drafts) => {
     const recommendedAnswer = "x".repeat(10001);
     const props = questionProps({ question: { question: "Colour?", recommendedAnswer } });
-    const html = renderToStaticMarkup(<FeasibilityQuestion {...props} />);
+    const html = renderToStaticMarkup(<DraftedQuestion {...props} />);
     expect(html).toContain(recommendedAnswer);
     expect(html).toContain("dépasse la limite de 10 000 caractères");
     expect(html).toContain("saisir une réponse plus courte manuellement");

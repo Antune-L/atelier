@@ -2,7 +2,7 @@ import { Check, ChevronDown, ClipboardPaste, Copy, RotateCw, Sparkles } from "lu
 import { useId, useState } from "react";
 
 import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, type AgentEffort, type AgentModel, type FeasibilityEngine } from "@shared/constants";
-import type { FeasibilityAnswerInput, Ticket } from "@shared/schemas";
+import type { FeasibilityAnswerBatchInput, FeasibilityAnswerInput, Ticket } from "@shared/schemas";
 import { TRIAGE_VERDICT_LABELS, parseTriageReport } from "@shared/schemas";
 
 import { TerminalView } from "@/components/TerminalView";
@@ -14,10 +14,11 @@ import { Markdown } from "@/components/ui/markdown";
 import { Switch } from "@/components/ui/switch";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { useLocalDraftList } from "@/hooks/useLocalDraft";
 import { cn } from "@/lib/utils";
 import { feasibilityEngineTabOptions, triageVerdictVariant } from "@/lib/display";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
-import { FeasibilityQuestion } from "./FeasibilityQuestion";
+import { FeasibilityQuestion, feasibilityAnswersBlocked } from "./FeasibilityQuestion";
 
 interface TriageSectionProps {
   ticket: Ticket;
@@ -28,6 +29,7 @@ interface TriageSectionProps {
   onFeasibilityEngineChange: (engine: FeasibilityEngine) => void;
   onReformulate: () => Promise<{ started: boolean }>;
   onAnswerFeasibility: (input: FeasibilityAnswerInput) => Promise<{ started: boolean; id: string }>;
+  onAnswerFeasibilityBatch: (input: FeasibilityAnswerBatchInput) => Promise<{ started: boolean; ids: string[] }>;
   onApplyReformulation: (text: string) => Promise<void>;
 }
 
@@ -44,6 +46,7 @@ export function TriageSection({
   onFeasibilityEngineChange,
   onReformulate,
   onAnswerFeasibility,
+  onAnswerFeasibilityBatch,
   onApplyReformulation,
 }: TriageSectionProps) {
   const { codex } = useCapabilities();
@@ -92,6 +95,56 @@ export function TriageSection({
     }
   };
 
+  const questions = result?.questions ?? [];
+  const currentRuns = questions.map((_question, index) => ticket.feasibilityAnswers.find((candidate) =>
+    candidate.reportVersion === ticket.feasibilityReportVersion && candidate.questionIndex === index));
+  const [answers, setAnswerAt] = useLocalDraftList(
+    questions.map((_question, index) => `feasibility:${ticket.id}:${ticket.feasibilityReportVersion}:${index}`),
+    currentRuns.map((run) => run?.answer ?? ""),
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const batchAnswers = answers.flatMap((answer, questionIndex) => {
+    const status = currentRuns[questionIndex]?.status;
+    if (!answer.trim() || status === "done" || status === "running") return [];
+    return [{ questionIndex, answer }];
+  });
+  const [acceptedIds, setAcceptedIds] = useState<string[] | null>(null);
+  const arrived = acceptedIds !== null
+    && acceptedIds.every((id) => ticket.feasibilityAnswers.some((run) => run.id === id));
+  if (arrived) setAcceptedIds(null);
+  const awaitingPush = acceptedIds !== null && !arrived;
+  const submissionPending = submitting || awaitingPush;
+  const batchDisabled = batchAnswers.length === 0 || submissionPending || feasibilityAnswersBlocked(ticket);
+
+  const trackSubmission = async <T,>(send: () => Promise<T>, idsOf: (response: T) => string[]): Promise<T> => {
+    setSubmitting(true);
+    setAcceptedIds(null);
+    try {
+      const response = await send();
+      setAcceptedIds(idsOf(response));
+      return response;
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAnswerQuestion = (input: FeasibilityAnswerInput): Promise<{ started: boolean; id: string }> =>
+    trackSubmission(() => onAnswerFeasibility(input), (response) => [response.id]);
+
+  const handleAnswerBatch = async (): Promise<void> => {
+    if (batchDisabled) return;
+    setBatchError(null);
+    try {
+      await trackSubmission(
+        () => onAnswerFeasibilityBatch({ revision: ticket.feasibilityRevision, reportVersion: ticket.feasibilityReportVersion, answers: batchAnswers }),
+        (response) => response.ids,
+      );
+    } catch (error) {
+      setBatchError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const suggestion =
     ticket.triageVerdict === "implementable" && result?.suggestedModel && result.suggestedEffort
       ? { model: result.suggestedModel, effort: result.suggestedEffort }
@@ -129,10 +182,19 @@ export function TriageSection({
           {result.questions.length > 0 && (
             <div>
               <SectionHeader>Questions</SectionHeader>
+              {result.questions.length > 1 && (
+                <div className="mb-3 space-y-1">
+                  <Button size="sm" variant="secondary" disabled={batchDisabled} onClick={() => void handleAnswerBatch()}>
+                    Intégrer toutes les réponses ({batchAnswers.length})
+                  </Button>
+                  {batchError && <p role="alert" className="text-sm text-danger">{batchError}</p>}
+                </div>
+              )}
               <ul className="space-y-3">
                 {result.questions.map((question, index) => (
                   <li key={`${ticket.id}:${ticket.feasibilityReportVersion}:${index}`}>
-                    <FeasibilityQuestion ticket={ticket} question={question} index={index} onSubmit={onAnswerFeasibility} />
+                    <FeasibilityQuestion ticket={ticket} question={question} index={index}
+                      answer={answers[index] ?? ""} submissionPending={submissionPending} onAnswerChange={(value) => setAnswerAt(index, value)} onSubmit={handleAnswerQuestion} />
                   </li>
                 ))}
               </ul>

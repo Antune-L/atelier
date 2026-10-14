@@ -294,6 +294,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
         }}
         onReformulate={() => api.reformulate(current.id)}
         onAnswerFeasibility={(input) => api.answerFeasibility(current.id, input)}
+        onAnswerFeasibilityBatch={(input) => api.answerFeasibilityBatch(current.id, input)}
         onApplyReformulation={(text) =>
           api.updateTicket(current.id, { description: text }).then(() => undefined)
         }

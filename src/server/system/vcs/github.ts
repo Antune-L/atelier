@@ -27,6 +27,7 @@ import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
   DoneGateResult,
   CreatePrOptions,
+  PrMutationOptions,
   MergePrExpectation,
   PublishReviewOptions,
   PublishReviewResult,
@@ -61,6 +62,7 @@ const PR_STATE_CLOSED = "CLOSED";
 const PR_STATE_OPEN = "OPEN";
 
 const ghPrBodySchema = z.object({ body: z.string() });
+const ghPrPublicationSchema = z.object({ url: z.string(), body: z.string(), isDraft: z.boolean() });
 const ghAuthenticatedUserSchema = z.object({ id: z.number().int(), login: z.string().min(1) });
 const ghRequestedPullSchema = z.object({
   number: z.number().int(), title: z.string(), html_url: z.string(), draft: z.boolean(),
@@ -541,16 +543,16 @@ export class GithubVcsClient implements VcsClient {
   }
 
   async createPr(cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult> {
-    if (opts.title && opts.body && opts.headBranch) {
+    if (opts.title && opts.body !== undefined && opts.headBranch) {
       const directory = await mkdtemp(join(tmpdir(), "kanban-pr-"));
       try {
         const bodyPath = join(directory, "body.md");
         await writeFile(bodyPath, opts.body, { mode: 0o600 });
         const args = [GH_BINARY, "pr", "create", "--base", baseBranch, "--head", opts.headBranch, "--title", opts.title, "--body-file", bodyPath, "--no-maintainer-edit"];
         if (opts.draft) args.push("--draft");
-        if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) throw new Error("Autonomous delivery deadline expired before pull request creation.");
+        if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, url: "", reason: "Autonomous delivery deadline expired before pull request creation." };
         opts.assertCurrent?.();
-        const result = await runGh(args, cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+        const result = await runGh(args, cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
         const url = extractPrUrl(result.stdout);
         if (result.exitCode !== 0 || result.timedOut || !url.startsWith("http")) return { ok: false, url: "", reason: boundedCommandDetail(result) || "Pull request creation could not be confirmed." };
         return { ok: true, url, reason: "" };
@@ -559,7 +561,9 @@ export class GithubVcsClient implements VcsClient {
       }
     }
     const args = [GH_BINARY, "pr", "create", ...(opts.draft ? ["--draft"] : []), "--base", baseBranch, "--fill"];
-    const res = await runGh(args, cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, url: "", reason: "Autonomous delivery deadline expired before pull request creation." };
+    opts.assertCurrent?.();
+    const res = await runGh(args, cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
     if (res.exitCode !== 0 || res.timedOut) {
       return { ok: false, url: "", reason: ghFailure(res, `gh pr create a échoué (code ${res.exitCode})`) };
     }
@@ -581,17 +585,45 @@ export class GithubVcsClient implements VcsClient {
     return body.length > 0 ? body : null;
   }
 
-  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string): Promise<DoneGateResult> {
-    const read = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "body"], cwd);
-    if (read.exitCode !== 0 || read.timedOut) return { ok: false, reason: ghFailure(read, "gh pr view a échoué") };
-    const parsed = ghPrBodySchema.safeParse(safeJsonParse(read.stdout));
-    if (!parsed.success) return { ok: false, reason: "description de la PR GitHub illisible" };
+  async readPrBody(cwd: string, prUrl: string): Promise<string | null> {
+    const read = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "url,body,isDraft"], cwd);
+    const parsed = ghPrPublicationSchema.safeParse(safeJsonParse(read.stdout));
+    if (read.exitCode !== 0 || read.timedOut || !parsed.success || parsed.data.url !== prUrl) return null;
+    return parsed.data.body;
+  }
+
+  async convertPrToDraft(cwd: string, prUrl: string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    const read = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "url,body,isDraft"], cwd);
+    const parsed = ghPrPublicationSchema.safeParse(safeJsonParse(read.stdout));
+    if (read.exitCode !== 0 || read.timedOut || !parsed.success || parsed.data.url !== prUrl) {
+      return { ok: false, reason: "Pull request identity and draft state could not be read." };
+    }
+    if (parsed.data.isDraft) return { ok: true, reason: "" };
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before draft conversion." };
+    opts.assertCurrent?.();
+    const result = await runGh([GH_BINARY, "pr", "ready", prUrl, "--undo"], cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
+    if (result.exitCode !== 0 || result.timedOut) return { ok: false, reason: ghFailure(result, "Draft conversion could not be confirmed.") };
+    const confirmation = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "url,body,isDraft"], cwd);
+    const confirmed = ghPrPublicationSchema.safeParse(safeJsonParse(confirmation.stdout));
+    if (confirmation.exitCode !== 0 || confirmation.timedOut || !confirmed.success || confirmed.data.url !== prUrl || !confirmed.data.isDraft) {
+      return { ok: false, reason: "Draft conversion readback did not confirm the requested pull request." };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    const body = await this.readPrBody(cwd, prUrl);
+    if (body === null) return { ok: false, reason: "Pull request description and identity could not be read." };
+    const expectedBody = transform(body);
     const directory = await mkdtemp(join(tmpdir(), "kanban-pr-"));
     try {
       const bodyPath = join(directory, "body.md");
-      await writeFile(bodyPath, transform(parsed.data.body), { mode: 0o600 });
-      const res = await runGh([GH_BINARY, "pr", "edit", prUrl, "--body-file", bodyPath], cwd, { timeoutMs: GH_MUTATION_TIMEOUT_MS, verifyIdentity: true });
-      if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: ghFailure(res, "gh pr edit a échoué") };
+      await writeFile(bodyPath, expectedBody, { mode: 0o600 });
+      if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before description update." };
+      opts.assertCurrent?.();
+      const res = await runGh([GH_BINARY, "pr", "edit", prUrl, "--body-file", bodyPath], cwd, { timeoutMs: opts.deadlineAt === undefined ? GH_MUTATION_TIMEOUT_MS : Math.min(GH_MUTATION_TIMEOUT_MS, opts.deadlineAt - Date.now()), verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
+      if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: ghFailure(res, "Pull request description update failed.") };
+      if (await this.readPrBody(cwd, prUrl) !== expectedBody) return { ok: false, reason: "Pull request description readback did not match the requested body." };
       return { ok: true, reason: "" };
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -640,7 +672,7 @@ export class GithubVcsClient implements VcsClient {
       const result = await withJsonRequestFile({ sha: expected.commitSha, merge_method: AUTONOMOUS_MERGE_METHOD }, (inputPath) => {
         if (expected.deadlineAt !== undefined && Date.now() >= expected.deadlineAt) throw new Error("Autonomous delivery deadline expired before merge.");
         expected.assertCurrent?.();
-        return runGh([GH_BINARY, "api", "--hostname", ref.host, "--method", "PUT", `${pullApiEndpoint(endpoint)}/merge`, "--input", inputPath], cwd, { verifyIdentity: true });
+        return runGh([GH_BINARY, "api", "--hostname", ref.host, "--method", "PUT", `${pullApiEndpoint(endpoint)}/merge`, "--input", inputPath], cwd, { verifyIdentity: true, deadlineAt: expected.deadlineAt, beforeRun: expected.assertCurrent });
       });
       const response = ghSynchronousMergeSchema.safeParse(safeJsonParse(result.stdout));
       if (result.exitCode !== 0 || result.timedOut || !response.success || !response.data.merged || !response.data.sha) return { ok: false, reason: `Direct expected-head merge was not confirmed. Native policies requiring a merge queue are not supported by this pilot; no queue or auto-merge request is made. ${boundedCommandDetail(result) || "Keep the pull request and worktree for reconciliation."}` };

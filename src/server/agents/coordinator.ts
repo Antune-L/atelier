@@ -1,9 +1,9 @@
 import { nanoid } from "nanoid";
 
-import { autonomousPlanInputSchema } from "../../shared/autonomous.ts";
-import type { AutonomousPlanInput } from "../../shared/autonomous.ts";
+import { autonomousPlanInputSchema, autonomousResumeSchema } from "../../shared/autonomous.ts";
+import type { AutonomousPlanInput, AutonomousResumeInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
-import { getErrorStack } from "../../shared/errors.ts";
+import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
 import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
 import {
@@ -105,6 +105,9 @@ interface AutonomousCoordinatorWorkflow {
   submitPlan(ticketId: string, input: AutonomousPlanInput): Promise<void>;
   validate(ticketId: string): Promise<{ status: "pending" | "ready" | "paused" }>;
   assertDelivery(ticketId: string, revision: string): Promise<void>;
+  assertResumeConfiguration?(ticketId: string): void;
+  prepareResume?(ticketId: string): Promise<"planning" | "validation" | "delivery">;
+  startExecution?(ticketId: string): void;
 }
 
 /**
@@ -305,6 +308,14 @@ export class AgentCoordinator {
   private async onExecutionFailure(ticketId: string, reason: string, context: SessionExecutionContext): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null || !ACTIVE_STAGES.includes(ticket.stage)) return;
+    if (ticket.autonomousState?.execution) {
+      const execution = ticket.autonomousState.execution;
+      if (execution.workRevokedAt !== null || execution.userStopRequestedAt !== null) return;
+      this.store.logEvent(ticketId, "autonomous_session_failure", { reason, generationId: context.generationId });
+      this.sessionHub.disconnect(ticketId, "failed");
+      await this.slots.tryAutoReclaim(ticketId, reason);
+      return;
+    }
     const errorDetails = this.lifecycle.errorDetailsFor(ticketId, reason, "session_error", {
       slotId: context.slotId,
       sessionId: context.sessionId,
@@ -358,6 +369,11 @@ export class AgentCoordinator {
     const testingTicket = this.store.getTicket(ctx.ticketId);
     if (testingTicket?.testing) {
       return { ok: false, result: "Session de test interactive : aucun tool de pipeline n'est disponible." };
+    }
+    if (testingTicket?.autonomousState?.execution) {
+      try { this.store.assertAutonomousWork(ctx.ticketId); } catch (error) {
+        return { ok: false, result: getErrorMessage(error) };
+      }
     }
     if (this.store.getActiveQualityIteration(ctx.ticketId)?.status === "verifying" && ctx.name !== "quality") {
       return { ok: false, result: "La correction est terminée ; la vérification indépendante est désormais pilotée par le backend." };
@@ -927,6 +943,11 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     if (ticket?.autonomous && ticket.autonomousState?.deliveryConfirmation) return { ok: false, result: "The chosen autonomous delivery is already confirmed. Preserve its delivery state and reconcile the retained preview cleanup." };
+    if (ticket?.autonomousState?.execution) {
+      this.store.beginAutonomousFinalization(ctx.ticketId, parsed.data.reason);
+      this.autonomousWorkflow?.startExecution?.(ctx.ticketId);
+      return { ok: true, result: "Le travail autonome est arrêté. Le backend conserve les travaux et tente une PR en brouillon avec les réserves observées.", pending: true };
+    }
     if (ticket?.autonomousState && ticket.autonomous) this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { autonomousState: { ...ticket.autonomousState, phase: "paused", error: parsed.data.reason } }));
     const iteration = this.store.getActiveQualityIteration(ctx.ticketId);
     if (iteration?.mode === "correction") this.store.updateQualityIteration(iteration.id, { status: "failed", diagnostic: parsed.data.reason, completedAt: Date.now() });
@@ -960,6 +981,7 @@ export class AgentCoordinator {
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.stage === null) return;
+    if (ticket.autonomousState?.execution?.workRevokedAt !== null && ticket.autonomousState?.execution) return;
     if (this.autonomousDeliveries.has(ticketId)) return;
     if (ticket.autonomous && ticket.autonomousState && ["checks", "preview", "validating", "paused"].includes(ticket.autonomousState.phase)) return;
     if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return;
@@ -1053,14 +1075,51 @@ export class AgentCoordinator {
     return "";
   }
 
-  resumeAutonomous(ticketId: string): ToolResult {
+  async resumeAutonomous(ticketId: string, input: AutonomousResumeInput = { action: "resume" }): Promise<ToolResult> {
     const ticket = this.store.getTicket(ticketId);
     const state = ticket?.autonomousState;
     if (!ticket?.autonomous || !state) return { ok: false, result: "Autonomous resume is unavailable for this ticket." };
-    if (state.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
-    if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: AUTONOMOUS_RESUME_PROMPT })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
-    this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
-    return { ok: true, result: "The implementation session was asked to resume autonomous validation." };
+    if (!state.execution) {
+      if (state.phase !== "paused" || state.hostMutation) return { ok: false, result: "Only a paused autonomous run without an unresolved host operation can be resumed." };
+      if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: AUTONOMOUS_RESUME_PROMPT })) return { ok: false, result: "The implementation session is unreachable. Relaunch the ticket before resuming its autonomous run." };
+      this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, {});
+      return { ok: true, result: "The implementation session was asked to resume autonomous validation." };
+    }
+    const parsed = autonomousResumeSchema.safeParse(input);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (this.userRecoveryOperations.has(ticketId)) return { ok: false, result: "Une reprise est déjà en cours pour cette carte." };
+    if (state.phase === "completed" || ticket.archived || ticket.column === "abandoned") return { ok: false, result: "Cette exécution ne peut plus être reprise." };
+    this.userRecoveryOperations.add(ticketId);
+    try {
+      this.autonomousWorkflow?.assertResumeConfiguration?.(ticketId);
+      if (state.hostMutation) await this.slots.reconcileAutonomousPartial(ticketId);
+      if (!await this.slots.closeAutonomousWork(ticketId)) throw new Error("La fermeture d’une session reste inconnue. Le travail est conservé et doit être réconcilié avant une reprise.");
+      if (parsed.data.action === "publish") {
+        this.store.extendAutonomousExecution(ticketId, parsed.data);
+        this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, parsed.data);
+        void this.slots.publishAutonomousPartial(ticketId, "Publication explicitement demandée par l’utilisateur.").catch(logRejection("publication partielle impossible", ticketId));
+        return { ok: true, result: "La réserve de publication explicitement accordée est ouverte. Le backend réconcilie la même PR en brouillon.", pending: true };
+      }
+      if (parsed.data.action === "extend") this.store.extendAutonomousExecution(ticketId, parsed.data);
+      else this.store.resumeAutonomousExecution(ticketId);
+      const checkpoint = await this.autonomousWorkflow?.prepareResume?.(ticketId) ?? "validation";
+      await this.slots.resumeAutonomousSession(ticketId);
+      const prompt = checkpoint === "planning"
+        ? "Reprise explicite avec l’enveloppe restante. Termine le plan autonome initial avant toute modification et conserve tous les travaux précédents."
+        : AUTONOMOUS_RESUME_PROMPT;
+      if (!this.sessionHub.sendEvent(ticketId, { type: "nudge", message: prompt })) throw new Error("La session de reprise est inaccessible.");
+      this.store.logEvent(ticketId, AUTONOMOUS_RESUME_REQUESTED_EVENT, { ...parsed.data, checkpoint });
+      return { ok: true, result: "La reprise est démarrée dans le slot conservé, avec la même PR et les crédits cumulés." };
+    } catch (error) {
+      const current = this.store.getTicket(ticketId);
+      if (current?.autonomousState?.execution && current.autonomousState.execution.workRevokedAt === null) {
+        this.store.beginAutonomousFinalization(ticketId, getErrorMessage(error));
+        this.autonomousWorkflow?.startExecution?.(ticketId);
+      }
+      return { ok: false, result: getErrorMessage(error) };
+    } finally {
+      this.userRecoveryOperations.delete(ticketId);
+    }
   }
 
   /** Free-form user comment (no questionId) → steer the live session. Not agent progress. */

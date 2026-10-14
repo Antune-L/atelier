@@ -1,12 +1,14 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
+
+import { z } from "zod";
 
 import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, autonomousPlanInputSchema } from "../../shared/autonomous.ts";
 import type { AutonomousPlanInput, AutonomousState } from "../../shared/autonomous.ts";
 import type { Stage } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { latestAcceptanceSnapshot, latestFunctionalSnapshot } from "../../shared/quality.ts";
-import type { QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationRun } from "../../shared/quality.ts";
+import type { QualityEvidence, QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationRun } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { getProject, isQualityOwner, NOT_QUALITY_OWNER_MESSAGE, SLOTS_ROOT } from "../config.ts";
 import type { Store } from "../db/store.ts";
@@ -20,8 +22,17 @@ const MINUTE_MS = 60_000;
 const POLL_MS = 250;
 const DELIVERY_CLEANUP_TIMEOUT_MS = 120_000;
 const TIMEOUT_MESSAGE = "The autonomous execution deadline has expired. The implementation worktree is retained.";
-const AUTONOMOUS_RETRYABLE_DIAGNOSTICS: Array<QualityRunDiagnostic["category"]> = ["environment_blocker", "timeout"];
+const AUTONOMOUS_RETRYABLE_DIAGNOSTICS: Array<QualityRunDiagnostic["category"]> = ["environment_blocker", "timeout", "validation_incomplete", "permission_denial"];
 const AUTONOMOUS_PERMANENT_BLOCKERS: QualityFunctionalBlockerCode[] = ["authentication_required", "test_data_missing"];
+const DEFECT_SOURCE_LOCATION = /(?:[\w.-]+\/)*[\w.-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|php|rb):\d+(?::\d+)?/;
+const UNKNOWN_DEFECT_OBSERVATION = /^(?:failed|fail|false|error|unknown|inconclusive|(?:test|tests|criterion|check|checks)(?:\s+\S+)?\s+failed)[.!]?$/i;
+const DEFECT_ASSERTION_DETAIL = /(?:Expected:\s*\S|Received:\s*\S|AssertionError:\s*\S|TS\d+:\s*\S|expected\s+.+?\s+(?:to|but)\s+\S)/i;
+const failureArtifactSchema = z.object({
+  runId: z.string(), provider: z.string(), sessionId: z.string().nullable(),
+  observations: z.array(z.object({ tool: z.string(), output: z.string(), ok: z.boolean() })),
+  serverCheckObservations: z.array(z.object({ id: z.string(), output: z.string() })).default([]),
+  response: z.object({ results: z.array(z.object({ criterionId: z.string(), status: z.string(), summary: z.string(), output: z.string(), observedText: z.string(), tools: z.array(z.string()), checkEvidenceIds: z.array(z.string()).default([]) })) }).nullable(),
+});
 const AUTONOMOUS_RESUMED_STAGE: Stage = "testing";
 const READY_MESSAGE = "Les vérifications locales et tous les cas E2E de la preview Coolify ont accepté le même commit. Appelle deliver_autonomous avec le titre et le corps de la PR. Le serveur appliquera le choix de livraison enregistré. Ne crée ni ne fusionne de PR avec une commande externe.";
 
@@ -34,6 +45,8 @@ export interface AutonomousWorkflowDependencies {
   acknowledgeDeliveryStop: (ticketId: string) => void;
   inject: (ticketId: string, prompt: string) => Promise<void>;
   onChange?: (ticketId: string) => void;
+  finalizePartial?: (ticketId: string, reason: string) => Promise<void>;
+  closeWriters?: (ticketId: string) => Promise<boolean>;
 }
 
 function fingerprint(value: unknown): string {
@@ -49,12 +62,84 @@ export class AutonomousWorkflow {
   private readonly active = new Map<string, Promise<void>>();
   private readonly deadlines = new Map<string, ReturnType<typeof setTimeout>>();
   private shuttingDown = false;
+  private readonly subscriptions = new Map<string, () => void>();
+  private readonly finalizations = new Map<string, Promise<void>>();
+  private readonly explicitStops = new Set<string>();
+  private readonly executionGenerations = new Map<string, number>();
+
+  startExecution(ticketId: string): void {
+    const state = this.deps.store.ensureAutonomousExecution(ticketId);
+    if (!state?.execution) return;
+    if (state.execution.userStopRequestedAt !== null) {
+      this.explicitStops.add(ticketId);
+      return;
+    }
+    if (this.executionGenerations.get(ticketId) !== state.execution.generation) {
+      this.explicitStops.delete(ticketId);
+      this.finalizations.delete(ticketId);
+      this.executionGenerations.set(ticketId, state.execution.generation);
+    }
+    this.armDeadline(ticketId, state);
+    if (!this.subscriptions.has(ticketId)) {
+      this.subscriptions.set(ticketId, this.deps.store.subscribeAutonomousExecution(ticketId, () => {
+        const current = this.deps.store.getTicket(ticketId)?.autonomousState;
+        if (!current?.execution || current.execution.userStopRequestedAt !== null || this.explicitStops.has(ticketId) || current.deliveryConfirmation || ["completed", "published_partial", "publication_failed"].includes(current.phase)) return;
+        if (current.execution.workRevokedAt !== null) {
+          void this.finalizePartial(ticketId, current.execution.revocationReason ?? TIMEOUT_MESSAGE);
+        }
+      }));
+    }
+    if (state.execution.workRevokedAt !== null && !["published_partial", "publication_failed"].includes(state.phase)) void this.finalizePartial(ticketId, state.execution.revocationReason ?? TIMEOUT_MESSAGE);
+  }
+
+  assertResumeConfiguration(ticketId: string): void {
+    const ticket = this.ticket(ticketId);
+    if (ticket.autonomousState?.plan) this.requireFrozen(ticket);
+  }
+
+  async prepareResume(ticketId: string): Promise<"planning" | "validation" | "delivery"> {
+    const ticket = this.ticket(ticketId);
+    const state = this.state(ticket);
+    this.deps.store.assertAutonomousWork(ticketId);
+    if (state.execution?.closure.status === "unknown") throw new Error("Reconcile the uncertain writer closure before resuming autonomous work.");
+    this.startExecution(ticketId);
+    if (!state.plan) {
+      await this.deps.preview.autonomousPreflight(ticketId);
+      this.patch(ticketId, { phase: "planning", error: null });
+      return "planning";
+    }
+    this.requireFrozen(ticket);
+    if (state.deliveryConfirmation || state.hostMutation) return "delivery";
+    this.patch(ticketId, { phase: "checks", error: null });
+    return "validation";
+  }
+
+  private finalizePartial(ticketId: string, reason: string): Promise<void> {
+    const previous = this.finalizations.get(ticketId);
+    if (previous) return previous;
+    const completion = Promise.resolve().then(async () => {
+      const ticket = this.deps.store.getTicket(ticketId);
+      if (!ticket?.autonomousState?.execution || ticket.autonomousState.execution.userStopRequestedAt !== null || ticket.autonomousState.deliveryConfirmation || this.explicitStops.has(ticketId)) return;
+      this.deps.store.beginAutonomousFinalization(ticketId, reason);
+      if (this.deps.finalizePartial) await this.deps.finalizePartial(ticketId, reason);
+      else await this.deps.quality.cancel(ticketId);
+      try { await this.stopOwnedPreviews(ticketId); } catch (error) {
+        this.patch(ticketId, { error: this.deps.preview.redactError(getErrorMessage(error)) });
+      }
+    }).catch((error: unknown) => {
+      const state = this.deps.store.getTicket(ticketId)?.autonomousState;
+      if (state) this.patch(ticketId, { phase: "publication_failed", error: this.deps.preview.redactError(getErrorMessage(error)) });
+    });
+    this.finalizations.set(ticketId, completion);
+    return completion;
+  }
 
   constructor(private readonly deps: AutonomousWorkflowDependencies) {}
 
   async submitPlan(ticketId: string, input: AutonomousPlanInput): Promise<void> {
     await this.starts.run(ticketId, async () => {
       const ticket = this.ticket(ticketId);
+      if (ticket.autonomousState?.execution) this.deps.store.assertAutonomousWork(ticketId);
       const plan = autonomousPlanInputSchema.parse(input);
       if (ticket.autonomousState?.plan) {
         if (ticket.autonomousState.planFingerprint !== fingerprint(plan)) throw new Error("The initial autonomous plan is frozen and cannot be replaced.");
@@ -70,10 +155,12 @@ export class AutonomousWorkflow {
         this.persist(ticketId, {
           phase: "paused", plan: null, sourceFingerprint: null, configFingerprint: null, planFingerprint: null, deliveryConfirmation: null, hostMutation: null,
           acceptanceSnapshotId: null, functionalSnapshotId: null, revision: null, fullRunId: null, previewRunId: null, previewId: null,
-          startedAt, deadlineAt, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: 0, error: this.deps.preview.redactError(getErrorMessage(error)),
+          ...(ticket.autonomousState?.execution ? { execution: ticket.autonomousState.execution } : {}),
+          startedAt, deadlineAt, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: ticket.autonomousState?.environmentRetries ?? 0, error: this.deps.preview.redactError(getErrorMessage(error)),
         });
         this.deps.store.updateTicket(ticketId, { stage: "stalled" });
         this.deps.onChange?.(ticketId);
+        if (ticket.autonomousState?.execution) await this.pause(ticketId, getErrorMessage(error));
         throw error;
       }
       const quality = this.deps.quality.get(ticketId);
@@ -85,7 +172,8 @@ export class AutonomousWorkflow {
       const state: AutonomousState = {
         phase: "planning", plan, sourceFingerprint: source, configFingerprint: this.configFingerprint(ticket), planFingerprint: fingerprint(plan), deliveryConfirmation: null, hostMutation: null,
         acceptanceSnapshotId: acceptance.id, functionalSnapshotId: functional.id, revision: null, fullRunId: null, previewRunId: null, previewId: null,
-        startedAt, deadlineAt: ticket.autonomousState?.deadlineAt ?? startedAt + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * MINUTE_MS, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: 0, error: null,
+        ...(ticket.autonomousState?.execution ? { execution: ticket.autonomousState.execution } : {}),
+        startedAt, deadlineAt: ticket.autonomousState?.deadlineAt ?? startedAt + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * MINUTE_MS, corrections: ticket.autonomousState?.corrections ?? 0, environmentRetries: ticket.autonomousState?.environmentRetries ?? 0, error: null,
       };
       this.persist(ticketId, state);
       this.armDeadline(ticketId, state);
@@ -115,7 +203,7 @@ export class AutonomousWorkflow {
         this.persist(ticketId, state);
       }
       if (state.phase === "completed") throw new Error("The autonomous execution is already completed.");
-      if (Date.now() >= state.deadlineAt) {
+      if (Date.now() >= this.workDeadline(state)) {
         await this.pause(ticketId, TIMEOUT_MESSAGE);
         return { status: "paused" };
       }
@@ -134,7 +222,7 @@ export class AutonomousWorkflow {
     const state = this.state(ticket);
     const reconciling = state.hostMutation?.revision === revision;
     if ((!reconciling && !["ready", "delivering"].includes(state.phase)) || state.revision !== revision) throw new Error("Autonomous delivery requires completed verification of this exact revision.");
-    if (!reconciling && !state.deliveryConfirmation && Date.now() >= state.deadlineAt) throw new Error(TIMEOUT_MESSAGE);
+    if (!reconciling && !state.deliveryConfirmation && Date.now() >= this.workDeadline(state)) throw new Error(TIMEOUT_MESSAGE);
     const full = state.fullRunId ? this.deps.store.getQualityRun(state.fullRunId) : null;
     const functional = state.previewRunId ? this.deps.store.getQualityRun(state.previewRunId) : null;
     if (!full || !functional || !this.accepted(ticket, full, false) || !this.accepted(ticket, functional, true)) throw new Error("Both independent local and preview proofs must accept every frozen case at the current revision.");
@@ -192,7 +280,7 @@ export class AutonomousWorkflow {
     const revision = await this.requireRevision(ticket);
     this.requireRunning(ticketId);
     let state = this.state(ticket);
-    if (state.revision !== revision) state = { ...state, revision, fullRunId: null, previewRunId: null, environmentRetries: 0 };
+    if (state.revision !== revision) state = { ...state, revision, fullRunId: null, previewRunId: null };
     if (state.phase === "paused") {
       this.deps.store.updateTicket(ticketId, { stage: AUTONOMOUS_RESUMED_STAGE });
       const full = state.fullRunId ? this.deps.store.getQualityRun(state.fullRunId) : null;
@@ -229,6 +317,7 @@ export class AutonomousWorkflow {
       }
     }
     this.requireRunning(ticketId);
+    this.deps.store.admitAutonomousStart(ticketId, randomUUID(), "preview");
     const preview = await this.deps.preview.createAutonomous(ticketId, ticket.branch ?? "", revision);
     this.patch(ticketId, { previewId: preview.id });
     try { this.requireRunning(ticketId); } catch (error) {
@@ -280,24 +369,80 @@ export class AutonomousWorkflow {
     return run.status === "inconclusive" && run.technicalEvidenceAccepted && (!run.diagnostic || run.diagnostic.category === "validation_incomplete");
   }
 
-  private environmentRetryable(run: QualityValidationRun): boolean {
+  private environmentRetryable(run: QualityValidationRun, bounded = false): boolean {
     if (run.simulated || run.status !== "inconclusive" || run.cleanupStatus !== "complete" || !run.diagnostic) return false;
+    if (!bounded && !["environment_blocker", "timeout"].includes(run.diagnostic.category)) return false;
     if (!AUTONOMOUS_RETRYABLE_DIAGNOSTICS.includes(run.diagnostic.category)) return false;
     return run.diagnostic.blockers.every((blocker) => !AUTONOMOUS_PERMANENT_BLOCKERS.includes(blocker.code));
+  }
+
+  private async defectFingerprints(state: AutonomousState, run: QualityValidationRun, evidence: QualityEvidence[]): Promise<string[]> {
+    const defects: Array<unknown[]> = [];
+    for (const entry of evidence) {
+      const criterion = state.plan?.criteria.find((candidate) => candidate.id === entry.criterionId);
+      if (!criterion || !entry.provider || !entry.sessionId) continue;
+      const scenario = entry.scenario;
+      if (scenario) {
+        const observed = scenario.observed.trim();
+        const expected = scenario.expected.trim();
+        if (scenario.expected !== criterion.expected || scenario.interaction !== criterion.interaction || !observed || UNKNOWN_DEFECT_OBSERVATION.test(observed) || observed === expected || scenario.actions.length === 0 || !scenario.actions.every((action) => action.ok)) continue;
+        defects.push([entry.provider, criterion.text, scenario.interaction, expected, observed, scenario.actions.map((action) => action.tool), entry.output]);
+        continue;
+      }
+      if (!entry.artifactPath) continue;
+      try {
+        const parsed = failureArtifactSchema.safeParse(await Bun.file(entry.artifactPath).json());
+        if (!parsed.success || parsed.data.runId !== run.id || parsed.data.provider !== entry.provider || parsed.data.sessionId !== entry.sessionId) continue;
+        const matching = parsed.data.response?.results.filter((result) => result.criterionId === criterion.id && result.status === "failed");
+        if (matching?.length !== 1) continue;
+        const result = matching[0];
+        if (!result || result.output !== entry.output || result.summary !== entry.summary) continue;
+        const observed = result.observedText.trim();
+        if (!observed) continue;
+        const reads = parsed.data.observations.filter((observation) => observation.ok && result.tools.includes(observation.tool) && observation.output.includes(observed));
+        const checks = parsed.data.serverCheckObservations.filter((check) => result.checkEvidenceIds.includes(check.id) && check.output.includes(observed));
+        const attributedDetails = [...reads.map((read) => read.output), ...checks.map((check) => check.output)].filter((detail) => DEFECT_SOURCE_LOCATION.test(detail) && DEFECT_ASSERTION_DETAIL.test(detail));
+        if (attributedDetails.length === 0) continue;
+        defects.push([entry.provider, criterion.text, criterion.expected, criterion.interaction, observed, attributedDetails]);
+      } catch {
+        continue;
+      }
+    }
+    return [...new Set(defects.map((defect) => fingerprint(defect)))];
   }
 
   private async failedRun(ticketId: string, run: QualityValidationRun): Promise<void> {
     const ticket = this.ticket(ticketId);
     const state = this.state(ticket);
-    const maxCorrections = ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
-    const correctable = !run.simulated && run.status === "failed" && run.evidenceAccepted && run.cleanupStatus === "complete" && (!run.diagnostic || ["code_nonconformance", "backend_checks_failed"].includes(run.diagnostic.category));
-    if (correctable && state.corrections < maxCorrections && Date.now() < state.deadlineAt) {
-      this.patch(ticketId, { phase: "correcting", corrections: state.corrections + 1, fullRunId: null, previewRunId: null, error: run.error ? this.deps.preview.redactError(run.error) : null });
-      const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed").map((entry) => entry.criterionId ?? entry.summary);
-      await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté une non-conformité. Corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}. Correction ${state.corrections + 1}/${maxCorrections}.`));
+    const maxCorrections = state.execution?.maxCorrections ?? ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS;
+    const evidence = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id);
+    const failedCriteria = evidence.filter((entry) => entry.authority === "agent" && entry.status === "failed" && entry.criterionId && entry.sessionId && entry.provider === run.provider && entry.output.trim().length > 0 && !entry.timedOut);
+    const technicalFailure = run.technicalEvidenceAccepted && evidence.some((entry) => entry.status === "failed" && entry.authority === "server" && entry.kind === "command" && entry.exitCode !== null && entry.exitCode !== 0 && !entry.timedOut);
+    const acceptedFailure = state.execution ? run.evidenceAccepted || technicalFailure || failedCriteria.length > 0 : run.evidenceAccepted;
+    const failureCategories = state.execution ? ["code_nonconformance", "backend_checks_failed", "validation_incomplete"] : ["code_nonconformance", "backend_checks_failed"];
+    const failedStatus = run.status === "failed" || state.execution !== undefined && run.status === "inconclusive" && (technicalFailure || failedCriteria.length > 0);
+    const correctable = !run.simulated && failedStatus && run.cleanupStatus === "complete" && acceptedFailure && (!run.diagnostic || failureCategories.includes(run.diagnostic.category));
+    const failureFingerprints = state.execution ? await this.defectFingerprints(state, run, failedCriteria) : [];
+    const repeatedFailure = state.execution?.failureRepairs.find((entry) => failureFingerprints.includes(entry.fingerprint) && entry.count >= (state.execution?.maxSameFailureRepairs ?? 0));
+    if (repeatedFailure) {
+      await this.pause(ticketId, "The same independently observed criterion failure exhausted its repair allowance.");
       return;
     }
-    if (this.environmentRetryable(run) && state.environmentRetries < AUTONOMOUS_MAX_ENVIRONMENT_RETRIES && Date.now() < state.deadlineAt) {
+    if (correctable && state.corrections < maxCorrections && Date.now() < this.workDeadline(state)) {
+      this.deps.store.admitAutonomousStart(ticketId, `repair:${run.id}`, "repair");
+      const current = this.state(this.ticket(ticketId));
+      if (current.execution && failureFingerprints.length > 0) {
+        const history = current.execution.failureRepairs.filter((entry) => !failureFingerprints.includes(entry.fingerprint));
+        const repairs = failureFingerprints.map((failureFingerprint) => ({ fingerprint: failureFingerprint, count: (current.execution?.failureRepairs.find((entry) => entry.fingerprint === failureFingerprint)?.count ?? 0) + 1, lastRunId: run.id }));
+        this.deps.store.updateTicket(ticketId, { autonomousState: { ...current, execution: { ...current.execution, failureRepairs: [...history, ...repairs] } } });
+      }
+      this.patch(ticketId, { phase: "correcting", corrections: state.corrections + 1, fullRunId: null, previewRunId: null, error: run.error ? this.deps.preview.redactError(run.error) : null });
+      const observations = this.deps.quality.get(ticketId).evidence.filter((entry) => entry.runId === run.id && entry.status !== "passed").map((entry) => entry.criterionId ?? entry.summary);
+      await this.deps.inject(ticketId, this.deps.preview.redactError(`La validation indépendante ${run.id} a constaté un échec attribué. Distingue ses preuves des vérifications encore inconclusives, diagnostique la cause et corrige dans le même worktree, conserve le plan initial, relance la review indépendante, commit et push puis appelle validate_autonomous. N’ouvre pas de PR. Consulte les preuves du run pour le diagnostic. Cas concernés : ${observations.join("; ")}. Correction ${state.corrections + 1}/${maxCorrections}.`));
+      return;
+    }
+    if (this.environmentRetryable(run, state.execution !== undefined) && state.environmentRetries < (state.execution?.maxEnvironmentRetries ?? AUTONOMOUS_MAX_ENVIRONMENT_RETRIES) && Date.now() < this.workDeadline(state)) {
+      this.deps.store.admitAutonomousStart(ticketId, `retry:${run.id}`, "retry");
       const runReset = run.kind === "functional" ? { previewRunId: null } : { fullRunId: null, previewRunId: null };
       this.patch(ticketId, { ...runReset, environmentRetries: state.environmentRetries + 1, error: run.error ? this.deps.preview.redactError(run.error) : null });
       return this.execute(ticketId);
@@ -344,8 +489,9 @@ export class AutonomousWorkflow {
     if (this.shuttingDown) throw new Error("Autonomous validation interrupted by backend shutdown.");
     const ticket = this.ticket(ticketId);
     const state = this.state(ticket);
+    if (!state.deliveryConfirmation) this.deps.store.assertAutonomousWork(ticketId);
     if (state.phase === "paused" || ["abandoned", "failed"].includes(ticket.column)) throw new Error(state.error ?? "Autonomous execution was stopped.");
-    if (!state.deliveryConfirmation && Date.now() >= state.deadlineAt) throw new Error(TIMEOUT_MESSAGE);
+    if (!state.deliveryConfirmation && Date.now() >= this.workDeadline(state)) throw new Error(TIMEOUT_MESSAGE);
   }
 
   private waitForAdmission(ticketId: string): Promise<void> {
@@ -355,20 +501,34 @@ export class AutonomousWorkflow {
     });
   }
 
+  private workDeadline(state: AutonomousState): number {
+    return state.execution?.deadlineAt ?? state.deadlineAt;
+  }
+
   private armDeadline(ticketId: string, state: AutonomousState): void {
     const previous = this.deadlines.get(ticketId);
     if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       const current = this.deps.store.getTicket(ticketId)?.autonomousState;
-      if (!current || current.phase === "completed" || current.phase === "delivering" && current.deliveryConfirmation !== null) return;
+      if (!current || ["completed", "published_partial", "publication_failed"].includes(current.phase) || current.phase === "delivering" && current.deliveryConfirmation !== null) return;
       void this.cancelAtDeadline(ticketId);
-    }, Math.max(0, state.deadlineAt - Date.now()));
+    }, Math.max(0, this.workDeadline(state) - Date.now()));
     this.deadlines.set(ticketId, timer);
   }
 
   private async pause(ticketId: string, error: string): Promise<void> {
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket?.autonomousState || ticket.autonomousState.phase === "completed" || ticket.autonomousState.phase === "delivering" && ticket.autonomousState.deliveryConfirmation !== null) return;
+    if (ticket.autonomousState.execution && (this.explicitStops.has(ticketId) || ticket.autonomousState.execution.userStopRequestedAt !== null)) return;
+    if (this.shuttingDown && ticket.autonomousState.execution) {
+      this.patch(ticketId, { error: this.deps.preview.redactError(error) });
+      return;
+    }
+    if (ticket.autonomousState.execution && !ticket.autonomousState.deliveryConfirmation) {
+      this.deps.store.beginAutonomousFinalization(ticketId, error);
+      await this.finalizePartial(ticketId, error);
+      return;
+    }
     if (ticket.autonomousState.hostMutation) {
       this.patch(ticketId, { error: "An issued host operation has an unresolved outcome. Preserve its proofs and owned resources until read-only reconciliation completes." });
       return;
@@ -402,7 +562,8 @@ export class AutonomousWorkflow {
   }
 
   private persist(ticketId: string, state: AutonomousState): void {
-    this.deps.store.updateTicket(ticketId, { autonomousState: state });
+    const execution = this.deps.store.getTicket(ticketId)?.autonomousState?.execution;
+    this.deps.store.updateTicket(ticketId, { autonomousState: execution ? { ...state, execution } : state });
     this.deps.onChange?.(ticketId);
   }
 
@@ -411,6 +572,18 @@ export class AutonomousWorkflow {
     for (const ticket of this.deps.store.listTickets(false)) {
       const state = ticket.autonomousState;
       if (!ticket.autonomous || !state || state.phase === "completed") continue;
+      if (state.execution?.userStopRequestedAt !== null && state.execution?.userStopRequestedAt !== undefined) {
+        this.explicitStops.add(ticket.id);
+        continue;
+      }
+      if (state.execution) {
+        this.startExecution(ticket.id);
+        if (state.execution.workRevokedAt !== null) {
+          if (["published_partial", "publication_failed"].includes(state.phase)) continue;
+          await this.finalizePartial(ticket.id, state.execution.revocationReason ?? TIMEOUT_MESSAGE);
+          continue;
+        }
+      }
       if (state.hostMutation) {
         this.patch(ticket.id, { phase: "delivering", error: "An issued host operation needs read-only reconciliation before any new effect or cleanup." });
         try { await this.deps.inject(ticket.id, "Une opération de livraison déjà émise a un résultat incertain. Appelle deliver_autonomous pour réconcilier la PR existante en lecture seule. N’émets aucune nouvelle création ni fusion et conserve les preuves, la preview et le worktree tant que le résultat reste incertain."); } catch { continue; }
@@ -440,12 +613,20 @@ export class AutonomousWorkflow {
     this.shuttingDown = true;
     for (const timer of this.deadlines.values()) clearTimeout(timer);
     this.deadlines.clear();
+    for (const unsubscribe of this.subscriptions.values()) unsubscribe();
+    this.subscriptions.clear();
     await Promise.allSettled([...this.active.keys()].map((ticketId) => this.deps.quality.cancel(ticketId)));
     await Promise.allSettled([...this.active.values()]);
   }
 
   async cancel(ticketId: string): Promise<void> {
+    this.explicitStops.add(ticketId);
     if (!this.deps.store.getTicket(ticketId)?.autonomousState) return;
+    const initial = this.deps.store.getTicket(ticketId)?.autonomousState;
+    if (initial?.execution) {
+      await this.cancelBounded(ticketId);
+      return;
+    }
     await this.drainDelivery(ticketId);
     const ticket = this.deps.store.getTicket(ticketId);
     if (!ticket?.autonomousState) return;
@@ -466,6 +647,48 @@ export class AutonomousWorkflow {
     await this.stopOwnedPreviews(ticketId);
   }
 
+  private async cancelBounded(ticketId: string): Promise<void> {
+    const state = this.deps.store.cancelAutonomousExecution(ticketId);
+    if (!state) return;
+    const timer = this.deadlines.get(ticketId);
+    if (timer) clearTimeout(timer);
+    this.deadlines.delete(ticketId);
+    if (state.phase === "completed") {
+      this.deps.acknowledgeDeliveryStop(ticketId);
+      return;
+    }
+    if (state.deliveryConfirmation) {
+      this.patch(ticketId, { phase: "delivering", error: "The host outcome is already confirmed. Preview cleanup remains recoverable; no new delivery effect is needed." });
+    } else {
+      this.patch(ticketId, { phase: "paused", error: "Autonomous execution was cancelled. The implementation worktree is retained." });
+      this.deps.acknowledgeDeliveryStop(ticketId);
+    }
+    const closures = await Promise.allSettled([this.deps.quality.cancel(ticketId), this.deps.closeWriters?.(ticketId) ?? Promise.resolve(false)]);
+    const closureFailed = closures.some((result) => result.status === "rejected" || result.value === false);
+    if (closureFailed) {
+      const current = this.state(this.ticket(ticketId));
+      if (current.execution) this.deps.store.updateTicket(ticketId, { autonomousState: { ...current, execution: { ...current.execution, closure: { ...current.execution.closure, status: "unknown", confirmedAt: null, retention: "retained" } } } });
+      this.patch(ticketId, { error: "Autonomous execution was cancelled, but writer closure remains unconfirmed. Retain all workspaces and reconcile closure." });
+    }
+    let deliveryError: unknown;
+    try { await this.drainDelivery(ticketId); } catch (error) { deliveryError = error; }
+    const current = this.deps.store.getTicket(ticketId)?.autonomousState;
+    let cleanupError: unknown;
+    try {
+      if (current?.deliveryConfirmation) await this.stopConfirmedPreview(ticketId);
+      else await this.stopOwnedPreviews(ticketId);
+    } catch (error) { cleanupError = error; }
+    if (deliveryError !== undefined) {
+      this.patch(ticketId, { error: this.deps.preview.redactError(getErrorMessage(deliveryError)) });
+      throw deliveryError;
+    }
+    if (cleanupError !== undefined) {
+      this.patch(ticketId, { error: this.deps.preview.redactError(getErrorMessage(cleanupError)) });
+      throw cleanupError;
+    }
+    if (closureFailed) throw new Error("Cancelled autonomous writer closure remains unconfirmed.");
+  }
+
   private async drainDelivery(ticketId: string): Promise<void> {
     try { await this.deps.waitForDelivery(ticketId); } catch (error) {
       const ticket = this.deps.store.getTicket(ticketId);
@@ -479,6 +702,13 @@ export class AutonomousWorkflow {
   }
 
   private async cancelAtDeadline(ticketId: string): Promise<void> {
+    const state = this.deps.store.getTicket(ticketId)?.autonomousState;
+    if (state?.execution?.userStopRequestedAt !== null && state?.execution?.userStopRequestedAt !== undefined) return;
+    if (state?.execution && !state.deliveryConfirmation) {
+      this.deps.store.beginAutonomousFinalization(ticketId, TIMEOUT_MESSAGE);
+      await this.finalizePartial(ticketId, TIMEOUT_MESSAGE);
+      return;
+    }
     try {
       await this.drainDelivery(ticketId);
       const state = this.deps.store.getTicket(ticketId)?.autonomousState;

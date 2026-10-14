@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
+import { autonomousResumeSchema, isAutonomousParentIncomplete } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
@@ -373,7 +374,7 @@ function isSplitMother(ticket: Ticket): boolean {
 function isBlocked(ticket: Ticket, store: Store): boolean {
   if (!ticket.dependsOn) return false;
   const parent = store.getTicket(ticket.dependsOn);
-  if (!parent || parent.branch === null) return true;
+  if (!parent || parent.branch === null || isAutonomousParentIncomplete(parent)) return true;
   // A split mother lands in "done" with its integration branch (split/…) set but no PR; its children
   // must still be allowed to start. Every other parent is blocked until it opens its PR (this keeps the
   // stacked-PR blocking behavior, incl. directPush parents whose feat/… branch has no PR either).
@@ -1276,6 +1277,9 @@ export function createApiRoutes(deps: RouteDeps) {
         autonomousDelivery: parsed.data.autonomousDelivery,
         autonomousMaxCorrections: parsed.data.autonomousMaxCorrections,
         autonomousTimeoutMinutes: parsed.data.autonomousTimeoutMinutes,
+        autonomousMaxStarts: parsed.data.autonomousMaxStarts,
+        autonomousFinalizationMinutes: parsed.data.autonomousFinalizationMinutes,
+        autonomousMaxPublicationAttempts: parsed.data.autonomousMaxPublicationAttempts,
         stealth: resultingStealth,
         directPush,
         addScreenshots: parsed.data.addScreenshots,
@@ -1726,9 +1730,16 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
       return { ...outcome, ticket: store.getTicket(params.id), implementationPlan: store.getImplementationPlan(params.id) };
     })
-    .post("/tickets/:id/autonomous-resume", ({ params, set }) => {
+    .get("/tickets/:id/autonomous-workspaces", async ({ params, set }) => {
       if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
-      const outcome = coordinator.resumeAutonomous(params.id);
+      return slots.autonomousWorkspaces(params.id);
+    })
+    .post("/tickets/:id/autonomous-resume", async ({ params, body, set }) => {
+      if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
+      const emptyBody = body == null || (typeof body === "object" && Object.keys(body).length === 0);
+      const parsed = autonomousResumeSchema.safeParse(emptyBody ? { action: "resume" } : body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const outcome = await coordinator.resumeAutonomous(params.id, parsed.data);
       if (!outcome.ok) return jsonError(set, HTTP_CONFLICT, outcome.result);
       return store.getTicket(params.id);
     })

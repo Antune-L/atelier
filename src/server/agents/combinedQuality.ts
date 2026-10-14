@@ -9,6 +9,7 @@ import type { KeyedMutex } from "../mutex.ts";
 import { LOCKFILE_NAMES, parsePackageManifest } from "../system/repoInspection.ts";
 import type { SystemAdapter, ValidationServiceHandle } from "../system/types.ts";
 
+import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
 import { prepareFunctionalScenarios } from "./qualityCriteriaPreparation.ts";
 import { qualityErrorMessage } from "./qualitySession.ts";
@@ -78,6 +79,11 @@ export async function executeCombinedQuality(options: CombinedQualityOptions): P
   let evidenceError: string | null = null;
   let setupSucceeded = !project.validation?.setupCommand;
   const persist = (): void => options.update({ verification: report });
+  const markClosureUnknown = (): void => {
+    const state = store.getTicket(ticket.id)?.autonomousState;
+    if (!state?.execution) return;
+    store.updateTicket(ticket.id, { autonomousState: { ...state, execution: { ...state.execution, closure: { ...state.execution.closure, status: "unknown", confirmedAt: null, retention: "retained" } } } });
+  };
   const assertSource = async (): Promise<void> => {
     if (signal.aborted) throw new Error("Quality run cancelled.");
     if (!environment || baseline !== await system.codeFingerprint(environment.directory)) { valid = false; throw new Error("Validated source changed; evidence cannot be accepted."); }
@@ -97,7 +103,11 @@ export async function executeCombinedQuality(options: CombinedQualityOptions): P
     const currentEnvironment = environment;
     const variables = options.environmentVariables(currentEnvironment);
     const timeoutMs = project.validation?.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS;
-    const common = { ticketId: ticket.id, runId: run.id, cwd: prepared.cwd, execution: options.execution, environment: variables, signal, timeoutMs, startSession: (sessionOptions: Parameters<SystemAdapter["startAgentSession"]>[0]) => system.startAgentSession(sessionOptions) };
+    const common = { onClosureUnknown: markClosureUnknown, ticketId: ticket.id, runId: run.id, cwd: prepared.cwd, execution: options.execution, environment: variables, signal, timeoutMs, startSession: (sessionOptions: Parameters<SystemAdapter["startAgentSession"]>[0]) => {
+      const executionGuard = sessionOptions.executionGuard ?? createAutonomousSessionGuard(store, ticket.id, "other");
+      executionGuard?.beforeStart();
+      return system.startAgentSession({ ...sessionOptions, executionGuard: executionGuard ?? undefined });
+    } };
     baseline = await system.codeFingerprint(prepared.cwd);
     await attempt("technical", async () => {
       const component: QualityVerificationComponent = { status: "inconclusive", tested: [], improvements: [] };
@@ -164,12 +174,14 @@ export async function executeCombinedQuality(options: CombinedQualityOptions): P
       assertDatabaseIsolation(project);
       const plan = await prepareFunctionalScenarios({ ...common, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", acceptanceCriteria: options.acceptance?.criteria ?? [], previousScenarios: [] });
       await assertSource();
+      const executionGuard = createAutonomousSessionGuard(store, ticket.id, "other");
+      executionGuard?.beforeStart();
       environment = { ...currentEnvironment, ...(project.validation.teardownCommand ? { teardownCommand: project.validation.teardownCommand } : {}), addresses: [{ label: "Validation application", url: `http://127.0.0.1:${prepared.port}` }] };
       options.update({ environment });
       await assertSource();
       resources.service = system.startValidationService({ cwd: prepared.cwd, command: project.validation.startCommand, environment: variables, timeoutMs, signal });
       await options.waitForHealth(environment, resources.service);
-      const result = await (options.browserValidator ?? runQualityValidator)({ ...common, criteria: plan.scenarios, revisionSha: run.revision, checks: [], addresses: environment.addresses ?? [], mode: "browser", functional: true, artifactDirectory: join(options.artifactDirectory, "browser") });
+      const result = await (options.browserValidator ?? runQualityValidator)({ ...common, executionGuard: executionGuard ?? undefined, criteria: plan.scenarios, revisionSha: run.revision, checks: [], addresses: environment.addresses ?? [], mode: "browser", functional: true, artifactDirectory: join(options.artifactDirectory, "browser") });
       await assertSource();
       const component: QualityVerificationComponent = { status: "inconclusive", tested: [], improvements: [] };
       for (const evidence of result.evidence) {
@@ -205,6 +217,7 @@ export async function executeCombinedQuality(options: CombinedQualityOptions): P
     } catch (error) { valid = false; evidenceError = qualityErrorMessage(String(error)); }
     try { if (cleanupError === null) await options.repoMutex.run(project.repoPath, () => system.cleanupValidationWorkspace(workspace)); }
     catch (error) { cleanupError = qualityErrorMessage(String(error)); }
+    if (cleanupError) markClosureUnknown();
     if (!valid || cleanupError || signal.aborted) report.browser.improvements.push(verificationProblem("Preuves incomplètes ou non acceptables", cleanupError ?? evidenceError ?? "Revision changed or validation cancelled before final acceptance."));
     const components = [report.technical, report.relevance, report.browser];
     const passed = valid && !cleanupError && !system.dryRun && components.every((component) => component.status === "passed");

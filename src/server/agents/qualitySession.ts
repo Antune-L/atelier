@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { QUALITY_DEFAULT_TIMEOUT_MS } from "../../shared/quality.ts";
 import type { QualityPermissionBlockReason, QualityValidationMode } from "../../shared/quality.ts";
-import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
+import type { AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { CODEX_VALIDATOR_READ_ALLOW } from "../system/codexCommandPolicy.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
 
@@ -62,6 +62,8 @@ export interface QualitySessionOptions {
   runId: string;
   cwd: string;
   startSession(options: AgentSessionOptions): AgentSessionHandle;
+  executionGuard?: AgentExecutionGuard;
+  onClosureUnknown?(): void;
   execution: Pick<ResolvedExecution, "provider" | "model" | "effort" | "serviceTier">;
   environment: Record<string, string | undefined>;
   signal: AbortSignal;
@@ -99,6 +101,7 @@ function deniedCommandShape(command: string | null): string | null {
 
 export async function runQualitySession(options: QualitySessionOptions) {
   if (options.signal.aborted) throw new Error("Validation cancelled before session startup");
+  options.executionGuard?.beforeStart();
   const startedAt = Date.now();
   const observations: QualityObservation[] = [];
   const pendingTools = new Map<string, Pick<QualityObservation, "tool" | "input">>();
@@ -136,6 +139,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
   try {
     handle = options.startSession({
       ticketId: `${options.ticketId}-quality-${options.runId}`,
+      executionGuard: options.executionGuard,
       slotId: QUALITY_SLOT_ID,
       cwd: options.cwd,
       environment: { ...options.environment, RIPGREP_CONFIG_PATH: undefined },
@@ -225,6 +229,7 @@ export async function runQualitySession(options: QualitySessionOptions) {
       ]);
     } catch {
       cleanupFailed = true;
+      options.onClosureUnknown?.();
       handle?.dispose?.();
     } finally {
       if (cleanupTimer) clearTimeout(cleanupTimer);

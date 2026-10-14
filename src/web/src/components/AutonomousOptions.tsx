@@ -1,4 +1,4 @@
-import { autonomousDeliverySchema, AUTONOMOUS_MAX_CORRECTIONS, AUTONOMOUS_MAX_TIMEOUT_MINUTES } from "@shared/autonomous";
+import { autonomousDeliverySchema, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_MAX_CORRECTIONS, AUTONOMOUS_MAX_TIMEOUT_MINUTES } from "@shared/autonomous";
 import type { AutonomousDelivery } from "@shared/autonomous";
 import type { ProjectInfo } from "@shared/schemas";
 
@@ -10,6 +10,9 @@ export interface AutonomousOptionValues {
   autonomousDelivery: AutonomousDelivery | null;
   autonomousMaxCorrections: number;
   autonomousTimeoutMinutes: number;
+  autonomousMaxStarts: number;
+  autonomousFinalizationMinutes: number;
+  autonomousMaxPublicationAttempts: number;
 }
 
 export function autonomousEligibility(project: ProjectInfo | undefined, implementer: string, independent: boolean): { eligible: boolean; reason: string | null } {
@@ -65,6 +68,18 @@ export function AutonomousOptions({ values, onChange, disabled = false, prOnly =
             }} />
           </div>
         </div>
+        {([
+          { field: "autonomousMaxStarts", label: "Garde-fou des démarrages (expérimental, à calibrer)", schema: autonomousMaxStartsSchema },
+          { field: "autonomousFinalizationMinutes", label: "Réserve de finalisation (minutes)", schema: autonomousFinalizationMinutesSchema },
+          { field: "autonomousMaxPublicationAttempts", label: "Tentatives de publication maximum", schema: autonomousMaxPublicationAttemptsSchema },
+        ] satisfies { field: keyof Pick<AutonomousOptionValues, "autonomousMaxStarts" | "autonomousFinalizationMinutes" | "autonomousMaxPublicationAttempts">; label: string; schema: typeof autonomousMaxStartsSchema }[]).map(({ field, label, schema }) => <div key={field} className="space-y-1">
+          <Label htmlFor={`${id}-${field}`}>{label}</Label>
+          <Input id={`${id}-${field}`} type="number" min={1} value={values[field]} disabled={disabled} onChange={(event) => {
+            const parsed = schema.safeParse(event.target.valueAsNumber);
+            if (parsed.success) onChange({ ...values, [field]: parsed.data });
+          }} />
+        </div>)}
+        <p className="text-xs text-muted-foreground">Le nombre de démarrages est une limite de sécurité, pas une mesure d’avancement. Une limite atteinte déclenche une publication partielle avec réserves.</p>
       </div>
     </div>
   );

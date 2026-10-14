@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS } from "@shared/autonomous";
 import type { AutonomousState } from "@shared/autonomous";
 
 import {
@@ -20,7 +20,7 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { useCapabilities } from "@/hooks/useCapabilities";
 
-const AUTONOMOUS_PHASE_LABELS: Record<AutonomousState["phase"], string> = { planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause" };
+const AUTONOMOUS_PHASE_LABELS: Record<AutonomousState["phase"], string> = { planning: "Planification", checks: "Contrôles locaux", preview: "Déploiement Coolify", validating: "Vérification E2E", correcting: "Correction", ready: "Prêt à livrer", delivering: "Livraison", completed: "Terminé", paused: "En pause", closing: "Arrêt et conservation", publishing_partial: "Publication partielle en cours", published_partial: "PR partielle publiée avec réserves", publication_failed: "Publication partielle non confirmée" };
 
 const YES = "Oui";
 const NO = "Non";
@@ -234,6 +234,8 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
                 <Row label="Mode Devin" value="Autonome interne, sur ce Mac" />
                 <Row label="Livraison autonome" value={ticket.autonomousDelivery === "merge" ? "Fusion après contrôles" : "PR seule"} />
                 <Row label="Limites autonomes" value={`${ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS} correction(s), ${ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES} minutes`} />
+                <Row label="Garde-fou expérimental" value={`${ticket.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS} démarrages maximum, à calibrer`} />
+                <Row label="Finalisation partielle" value={`${ticket.autonomousFinalizationMinutes ?? AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES} minutes de réserve, ${ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS} tentative(s) de publication`} />
                 {ticket.autonomousState && <Row label="État autonome" value={AUTONOMOUS_PHASE_LABELS[ticket.autonomousState.phase]} />}
                 {ticket.autonomousState?.error && <Row label="Blocage autonome" value={ticket.autonomousState.error} />}
               </>

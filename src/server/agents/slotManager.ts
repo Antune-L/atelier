@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { isAutonomousParentIncomplete } from "../../shared/autonomous.ts";
+import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
 import {
   ACTIVE_STAGES,
   AUTO_MERGE_RESOLVE_EVENT,
@@ -30,10 +32,13 @@ import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import { autonomousOptionsError } from "../ticketOperations.ts";
 import type { SystemAdapter } from "../system/index.ts";
+import type { AgentExecutionGuard } from "../system/agentSession.ts";
 import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 
 import { resolveBaseBranch } from "./baseBranch.ts";
+import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
+import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
 import { reviewPublicationEvent } from "./reviewFindings.ts";
 import { publishedReviewFindings } from "./reviewPass.ts";
@@ -72,6 +77,7 @@ async function assertCodexImplementerAvailable(
 }
 
 const AUTONOMOUS_DELIVERY_CANCEL_WAIT_MS = 120_000;
+const MIN_PREPARATION_TIMEOUT_MS = 1;
 const QUALITY_TECHNICAL_CHECK_NAMES: string[] = ["typecheck", "lint", "test"];
 const QUALITY_TECHNICAL_OUTPUT_LIMIT = 4_000;
 const MAX_SLUG_WORDS = 6;
@@ -120,6 +126,13 @@ export interface SlotManagerConfig {
   projectRoot: string;
 }
 
+interface AutonomousSlotWorkflow {
+  assertDelivery(ticketId: string, revision: string): Promise<void>;
+  finishDelivery(ticketId: string): Promise<void>;
+  startExecution?(ticketId: string): void;
+  assertResumeConfiguration?(ticketId: string): void;
+}
+
 export function slugify(title: string): string {
   return title
     .toLowerCase()
@@ -146,8 +159,13 @@ function featureBranch(ticket: Ticket): string {
  * copy env → install → tmux spawn → done gate → release. Serializes git ops per repo.
  */
 export class SlotManager {
-  private autonomousWorkflow: { assertDelivery(ticketId: string, revision: string): Promise<void>; finishDelivery(ticketId: string): Promise<void> } | null = null;
+  private autonomousWorkflow: AutonomousSlotWorkflow | null = null;
+  private autonomousPartialDelivery: AutonomousPartialDelivery | null = null;
+  private autonomousQuiesce: ((ticketId: string) => Promise<boolean>) | null = null;
+  private autonomousHasWriters: ((ticketId: string) => boolean) | null = null;
+  private autonomousRetainedWorkspaces: ((ticketId: string) => Promise<AutonomousWorkspaces["children"]>) | null = null;
   private readonly autonomousDeliveries = new Map<string, Promise<void>>();
+  private readonly autonomousPartialPublications = new Map<string, Promise<void>>();
   private readonly autonomousDeliveryStops = new Set<string>();
   private readonly repoMutex: KeyedMutex;
   private readonly queue: string[] = [];
@@ -218,8 +236,128 @@ export class SlotManager {
     this.implementationRecoveryGuard = guard;
   }
 
-  setAutonomousWorkflow(workflow: { assertDelivery(ticketId: string, revision: string): Promise<void>; finishDelivery(ticketId: string): Promise<void> }): void {
+  setAutonomousWorkflow(workflow: AutonomousSlotWorkflow): void {
     this.autonomousWorkflow = workflow;
+  }
+
+  setAutonomousRecovery(callbacks: {
+    quiesce(ticketId: string): Promise<boolean>;
+    hasWriters(ticketId: string): boolean;
+    workspaces(ticketId: string): Promise<AutonomousWorkspaces["children"]>;
+  }): void {
+    this.autonomousQuiesce = callbacks.quiesce;
+    this.autonomousHasWriters = callbacks.hasWriters;
+    this.autonomousRetainedWorkspaces = callbacks.workspaces;
+    this.autonomousPartialDelivery = new AutonomousPartialDelivery({
+      store: this.store,
+      system: this.system,
+      onChange: (ticketId) => { const ticket = this.store.getTicket(ticketId); if (ticket) this.touch(ticket); },
+      quiesce: (ticketId) => this.closeAutonomousWork(ticketId),
+      hasWriters: (ticketId) => callbacks.hasWriters(ticketId) || this.isLaunching(ticketId) || this.sessionHub.hasUnclosedSession(ticketId),
+      worktreePath: slotPath,
+      assertFrozen: (ticketId) => this.autonomousWorkflow?.assertResumeConfiguration?.(ticketId),
+    });
+  }
+
+  publishAutonomousPartial(ticketId: string, reason: string): Promise<void> {
+    const previous = this.autonomousPartialPublications.get(ticketId);
+    if (previous) return previous;
+    const completion = Promise.resolve().then(() => this.publishAutonomousPartialNow(ticketId, reason));
+    this.autonomousPartialPublications.set(ticketId, completion);
+    void completion.finally(() => this.autonomousPartialPublications.delete(ticketId)).catch(() => {});
+    return completion;
+  }
+
+  private async publishAutonomousPartialNow(ticketId: string, reason: string): Promise<void> {
+    this.store.beginAutonomousFinalization(ticketId, reason);
+    const active = this.autonomousDeliveries.get(ticketId);
+    if (active) {
+      const remaining = (this.store.getTicket(ticketId)?.autonomousState?.execution?.finalizationDeadlineAt ?? Date.now()) - Date.now();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        if (remaining <= 0) throw new Error("The finalization reserve expired while delivery was in flight.");
+        await Promise.race([active, new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("The host operation remains in flight; its candidate and journals are retained.")), remaining);
+        })]);
+      } catch (error) {
+        const state = this.store.getTicket(ticketId)?.autonomousState;
+        if (state) this.touch(this.store.updateTicket(ticketId, { autonomousState: { ...state, phase: "publication_failed", error: getErrorMessage(error) } }));
+        return;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    if (!this.autonomousPartialDelivery) throw new Error("Autonomous partial publication is unavailable.");
+    await this.reserveAutonomousDelivery(ticketId, () => this.autonomousPartialDelivery?.publish(ticketId, reason) ?? Promise.resolve());
+  }
+
+  async reconcileAutonomousPartial(ticketId: string): Promise<void> {
+    if (!this.autonomousPartialDelivery) throw new Error("Autonomous publication reconciliation is unavailable.");
+    await this.reserveAutonomousDelivery(ticketId, () => this.autonomousPartialDelivery?.reconcile(ticketId) ?? Promise.resolve());
+  }
+
+  async drainAutonomousPublications(): Promise<void> {
+    await Promise.allSettled([...this.autonomousPartialPublications.values()]);
+  }
+
+  async closeAutonomousWork(ticketId: string): Promise<boolean> {
+    const ticket = this.store.getTicket(ticketId);
+    const state = ticket?.autonomousState;
+    if (!state?.execution || !this.autonomousQuiesce) return false;
+    if (state.execution.closure.status === "unknown") return false;
+    this.touch(this.store.updateTicket(ticketId, { autonomousState: {
+      ...state,
+      execution: { ...state.execution, closure: { ...state.execution.closure, status: "requested", requestedAt: state.execution.closure.requestedAt ?? Date.now() } },
+    } }));
+    let closed = false;
+    try { closed = await this.autonomousQuiesce(ticketId); } catch { closed = false; }
+    const current = this.store.getTicket(ticketId)?.autonomousState;
+    if (!current?.execution) return false;
+    const phase = this.setupPhase.get(ticketId);
+    const preparing = phase === SETUP_PHASES.worktree || phase === SETUP_PHASES.setup || phase === SETUP_PHASES.deps;
+    closed = closed && current.execution.closure.status !== "unknown" && !preparing && !this.autonomousHasWriters?.(ticketId) && !this.sessionHub.hasUnclosedSession(ticketId);
+    this.touch(this.store.updateTicket(ticketId, { autonomousState: {
+      ...current,
+      execution: { ...current.execution, closure: { ...current.execution.closure, status: closed ? "confirmed" : "unknown", confirmedAt: closed ? Date.now() : null, retention: "retained" } },
+    } }));
+    return closed;
+  }
+
+  async autonomousWorkspaces(ticketId: string): Promise<AutonomousWorkspaces> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket?.autonomous) throw new Error("Autonomous workspaces are unavailable for this ticket.");
+    let parent: AutonomousWorkspaces["parent"] = null;
+    const children = await this.autonomousRetainedWorkspaces?.(ticketId) ?? [];
+    if (ticket.slotId !== null && this.store.getSlot(ticket.slotId)?.ticketId === ticketId) {
+      const path = slotPath(ticket.slotId);
+      parent = { path, available: await this.system.worktreeExists(path), simulated: this.system.dryRun };
+      if (isProjectKey(ticket.project)) {
+        const retained = await this.system.listAutonomousWorkspaces({ repoPath: getProject(ticket.project).repoPath, slotPath: path, ticketId });
+        for (const workspace of retained) {
+          children.push({ ...workspace, label: workspace.label ?? "Espace sans identité confirmée" });
+        }
+        for (const lot of this.store.getImplementationQueue(ticketId)) {
+          if (lot.files.length === 0 && !children.some((child) => child.label === lot.label && child.workspacePath === path)) {
+            children.push({ label: lot.label, workspacePath: path, journalPath: null, archivePath: null, status: "retained", verified: parent.available && !this.system.dryRun });
+          }
+        }
+      }
+    }
+    const unique = new Map<string, AutonomousWorkspaces["children"][number]>();
+    for (const child of children) unique.set(JSON.stringify([child.label, child.workspacePath, child.archivePath, child.journalPath]), child);
+    return {
+      parent,
+      children: [...unique.values()],
+      diagnostic: ticket.autonomousState?.execution?.closure.status === "unknown" ? "La fermeture d’une session reste inconnue. Les emplacements sont conservés ; aucune nouvelle écriture ni publication n’est autorisée." : ticket.autonomousState?.error ?? null,
+    };
+  }
+
+  async resumeAutonomousSession(ticketId: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket?.autonomous || ticket.slotId === null || this.store.getSlot(ticket.slotId)?.ticketId !== ticketId) throw new Error("The retained autonomous slot is unavailable.");
+    if (ticket.autonomousState?.hostMutation || ticket.autonomousState?.execution?.closure.status === "unknown") throw new Error("Reconcile the retained host operation and writer closure before resuming.");
+    this.store.assertAutonomousWork(ticketId);
+    if (!this.sessionHub.isConnected(ticketId)) await this.relaunchInPlace(ticket.slotId, ticketId);
   }
 
   private async reserveAutonomousDelivery<T>(ticketId: string, action: () => Promise<T>): Promise<T> {
@@ -262,15 +400,20 @@ export class SlotManager {
     return Boolean(ticket.autonomous && (ticket.autonomousState?.hostMutation || ticket.autonomousState?.deliveryConfirmation));
   }
 
-  private assertAutonomousMutation(ticket: Ticket, slotId: number, revision: string, kind: "create_pr" | "merge"): void {
+  private assertAutonomousMutation(ticket: Ticket, slotId: number, revision: string, kind: "create_pr" | "merge", operationId: string): void {
     const current = this.store.getTicket(ticket.id);
     const state = current?.autonomousState;
     if (current) {
       const qualification = autonomousOptionsError(current, projectVcsProvider(current.project));
       if (qualification) throw new Error(qualification);
     }
-    if (!current?.autonomous || current.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || current.branch !== ticket.branch || current.project !== ticket.project || current.baseBranch !== ticket.baseBranch || current.autonomousDelivery !== ticket.autonomousDelivery || state?.planFingerprint !== ticket.autonomousState?.planFingerprint || state?.configFingerprint !== ticket.autonomousState?.configFingerprint || state?.sourceFingerprint !== ticket.autonomousState?.sourceFingerprint || current.column === "abandoned" || current.column === "failed" || state?.phase !== "delivering" || state.revision !== revision || this.autonomousDeliveryStops.has(ticket.id) || Date.now() >= state.deadlineAt || state.hostMutation) throw new Error("Autonomous delivery was stopped, expired, changed, or still needs host reconciliation.");
-    this.touch(this.store.updateTicket(ticket.id, { autonomousState: { ...state, hostMutation: { kind, revision, startedAt: Date.now() } } }));
+    if (!current?.autonomous || current.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || current.branch !== ticket.branch || current.project !== ticket.project || current.baseBranch !== ticket.baseBranch || current.autonomousDelivery !== ticket.autonomousDelivery || state?.planFingerprint !== ticket.autonomousState?.planFingerprint || state?.configFingerprint !== ticket.autonomousState?.configFingerprint || state?.sourceFingerprint !== ticket.autonomousState?.sourceFingerprint || current.column === "abandoned" || current.column === "failed" || state?.phase !== "delivering" || state.revision !== revision || this.autonomousDeliveryStops.has(ticket.id) || Date.now() >= (state.execution?.deadlineAt ?? state.deadlineAt)) throw new Error("Autonomous delivery was stopped, expired, changed, or still needs host reconciliation.");
+    this.store.assertAutonomousWork(ticket.id);
+    if (state.hostMutation) {
+      if (state.hostMutation.operationId !== operationId || state.hostMutation.kind !== kind || state.hostMutation.revision !== revision) throw new Error("Another autonomous host operation requires reconciliation.");
+      return;
+    }
+    this.touch(this.store.updateTicket(ticket.id, { autonomousState: { ...state, hostMutation: { kind, revision, operationId, startedAt: Date.now() } } }));
   }
 
   private implementationPlanBlocksDelivery(ticketId: string): boolean {
@@ -431,6 +574,7 @@ export class SlotManager {
   async startTicket(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    if (ticket.dependsOn !== null && isAutonomousParentIncomplete(this.store.getTicket(ticket.dependsOn) ?? {})) throw new Error("The autonomous parent still has an incomplete delivery. Its dependent ticket cannot start.");
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
       if (autonomousError) throw new Error(autonomousError);
@@ -557,6 +701,7 @@ export class SlotManager {
    * Recursive by nature (each child's own done releases its children).
    */
   private async startDependents(parentId: string): Promise<void> {
+    if (isAutonomousParentIncomplete(this.store.getTicket(parentId) ?? {})) return;
     for (const child of this.store.listDependents(parentId)) {
       if (child.column !== "todo") continue;
       this.lifecycle.enqueue(child.id);
@@ -959,6 +1104,11 @@ export class SlotManager {
     log.info("lancement du ticket", { ticketId, slotId, project: ticket.project, branch });
 
     try {
+      if (ticket.autonomous && !ticket.autonomousState) this.store.ensureAutonomousExecution(ticketId);
+      this.autonomousWorkflow?.startExecution?.(ticketId);
+      const executionGuard = createAutonomousSessionGuard(this.store, ticketId, "orchestrator");
+      executionGuard?.beforeStart();
+      const assertWork = (): void => executionGuard?.assertAllowed();
       if (qualityCorrection) {
         await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
         if (this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant le lancement.");
@@ -971,14 +1121,17 @@ export class SlotManager {
       });
       await assertExecutionAvailable(this.system, execution);
       await assertCodexImplementerAvailable(this.system, executionTicket, execution);
+      assertWork();
       this.setPhase(ticketId, SETUP_PHASES.worktree);
       await this.repoMutex.run(project.repoPath, async () => {
+        assertWork();
         if (reuseWorktree) {
           const attachedPath = await this.system.findWorktreeByBranch(project.repoPath, branch);
           if (attachedPath !== path) throw new Error(`la branche ${branch} n'est plus attachée au slot Atelier ${slotId}`);
         } else {
           const previous = this.store.getSlot(slotId);
           await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
+          assertWork();
           await this.system.fetch(project.repoPath, baseBranch);
         }
         if (!reuseWorktree && (resolving || reviewFix || cleanFix || qualityCorrection)) {
@@ -987,8 +1140,10 @@ export class SlotManager {
           // fetched) base; a review-fix or clean applies and pushes fixes onto this same PR head branch.
           const start = startBranch ?? branch;
           await this.system.fetch(project.repoPath, start);
+          assertWork();
           await this.system.worktreeAddExisting(project.repoPath, path, branch, start);
         } else if (!reuseWorktree) {
+          assertWork();
           await this.system.worktreeAdd({
             repoPath: project.repoPath,
             slotPath: path,
@@ -1007,6 +1162,7 @@ export class SlotManager {
           }
         }
       });
+      assertWork();
 
       if (qualityCorrection) {
         await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
@@ -1015,6 +1171,7 @@ export class SlotManager {
       }
 
       if (!reuseWorktree) await this.system.copyEnvFiles(project.repoPath, path);
+      assertWork();
       // An ask ticket is read-only (explore + answer); the project setup script and dep install are
       // pure overhead, so skip both to start answering faster. Feature/review tickets need a built
       // tree (typecheck/lint/argus) and the project's own setup (e.g. generated .env). The setup
@@ -1027,33 +1184,41 @@ export class SlotManager {
           branch,
           baseBranch,
           script: project.worktreeScript ?? null,
-          timeoutMs: project.commitTimeoutMs,
+          timeoutMs: this.autonomousPreparationTimeout(ticketId, project.commitTimeoutMs),
         });
+        assertWork();
         this.setPhase(ticketId, SETUP_PHASES.deps);
-        await this.system.installDeps(path, project.commitTimeoutMs);
+        await this.system.installDeps(path, this.autonomousPreparationTimeout(ticketId, project.commitTimeoutMs));
+        assertWork();
       }
 
       this.setPhase(ticketId, SETUP_PHASES.spawning);
       if (qualityCorrection && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la préparation.");
-      this.startAgentSession(ticket, slotId, path);
+      this.startAgentSession(this.store.getTicket(ticketId) ?? ticket, slotId, path, { ...(executionGuard ? { executionGuard } : {}) });
       this.touch(this.store.updateTicket(ticketId, { stage: "implementing", lastProgressAt: Date.now() }));
       this.store.logEvent(ticketId, "session_spawned", { slotId });
       log.info("session spawnée", { ticketId, slotId });
 
       // The contract is the session's first user turn — no connect poll, no ack, no re-push race.
-      this.deliverContract(ticket);
+      this.deliverContract(this.store.getTicket(ticketId) ?? ticket);
     } catch (error) {
       this.clearPhase(ticketId);
       if (qualityCorrection && this.store.getQualityIteration(iteration.id)?.status === "cancelled") return;
+      const current = this.store.getTicket(ticketId);
+      if (current?.autonomousState?.execution && current.autonomousState.phase !== "completed") {
+        this.store.beginAutonomousFinalization(ticketId, getErrorMessage(error));
+        this.autonomousWorkflow?.startExecution?.(ticketId);
+        return;
+      }
       this.markFailed(ticketId, slotId, getErrorMessage(error), error);
     }
   }
 
   /** Start the implementation SDK session for a ticket in its slot worktree. */
-  private startAgentSession(ticket: Ticket, slotId: number, path: string, opts?: { resume?: boolean }): void {
+  private startAgentSession(ticket: Ticket, slotId: number, path: string, opts?: { resume?: boolean; executionGuard?: AgentExecutionGuard }): void {
     const executionTicket = this.qualityCorrectionTicket(ticket);
     this.sessionHub.start(
-      buildImplementSessionConfig({
+      { ...buildImplementSessionConfig({
         ticket: executionTicket,
         slotId,
         cwd: path,
@@ -1061,7 +1226,7 @@ export class SlotManager {
         vcsProvider: projectVcsProvider(ticket.project),
         // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
         ...(opts?.resume && ticket.sessionId && executionTicket.orchestrator === ticket.orchestrator ? { resumeSessionId: ticket.sessionId } : {}),
-      }),
+      }), ...(opts?.executionGuard ? { executionGuard: opts.executionGuard } : {}) },
     );
   }
 
@@ -1070,6 +1235,13 @@ export class SlotManager {
     if (iteration?.mode !== "correction") return ticket;
     const implementer = isAllowedAgentPair(iteration.provider, ticket.implementer) ? ticket.implementer : iteration.provider;
     return { ...ticket, orchestrator: iteration.provider, implementer };
+  }
+
+  private autonomousPreparationTimeout(ticketId: string, timeoutMs: number): number {
+    const execution = this.store.getTicket(ticketId)?.autonomousState?.execution;
+    if (!execution) return timeoutMs;
+    this.store.assertAutonomousWork(ticketId);
+    return Math.max(MIN_PREPARATION_TIMEOUT_MS, Math.min(timeoutMs, execution.deadlineAt - Date.now()));
   }
 
   /** Inject the ticket contract as the session's first user turn; idempotent marker + phase clear. */
@@ -1209,7 +1381,8 @@ export class SlotManager {
       this.touch(this.store.updateTicket(ticketId, { autonomousState: { ...beforeCreate.autonomousState, phase: "delivering", error: null }, stage: "opening_pr" }));
       if (!prUrl) {
         if (beforeCreate.autonomousState.hostMutation) return { ok: false, url: "", reason: "Previous pull request creation has an uncertain result; only reconciliation is allowed." };
-        const created = await this.system.createPr(path, baseBranch, { draft: ticket.autonomousDelivery === "pr_only" && ticket.prDraft, title: input.title, body: input.body, headBranch: ticket.branch, requireExistingBase: true, deadlineAt: beforeCreate.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(ticket, slotId, revision, "create_pr") }, project.vcsProvider);
+        const operationId = crypto.randomUUID();
+        const created = await this.system.createPr(path, baseBranch, { draft: ticket.autonomousDelivery === "pr_only" && ticket.prDraft, title: input.title, body: input.body, headBranch: ticket.branch, requireExistingBase: true, deadlineAt: beforeCreate.autonomousState.execution?.deadlineAt ?? beforeCreate.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(ticket, slotId, revision, "create_pr", operationId) }, project.vcsProvider);
         if (!created.ok) return created;
         prUrl = created.url;
       }
@@ -1327,7 +1500,10 @@ export class SlotManager {
         const project = getProject(currentTicket.project);
         const merged = await this.system.checkPrMerged(path, prUrl, project.vcsProvider);
         let merge: DoneGateResult = { ok: merged.merged, reason: "" };
-        if (!merged.merged) merge = await this.system.mergePr(path, ticket.branch, prUrl, project.vcsProvider, { commitSha: currentTicket.autonomousState.revision, baseBranch: resolveBaseBranch(currentTicket, project, this.store), deadlineAt: currentTicket.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(currentTicket, slotId, currentTicket.autonomousState?.revision ?? "", "merge") });
+        if (!merged.merged) {
+          const operationId = crypto.randomUUID();
+          merge = await this.system.mergePr(path, ticket.branch, prUrl, project.vcsProvider, { commitSha: currentTicket.autonomousState.revision, baseBranch: resolveBaseBranch(currentTicket, project, this.store), deadlineAt: currentTicket.autonomousState.execution?.deadlineAt ?? currentTicket.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(currentTicket, slotId, currentTicket.autonomousState?.revision ?? "", "merge", operationId) });
+        }
         if (!merge.ok) {
           const stopped = this.store.getTicket(ticketId)?.autonomousState;
           if (!stopped || stopped.phase !== "delivering") return { ok: false, reason: "Autonomous delivery was stopped during native host checks.", slotReleased: false };
@@ -1724,6 +1900,10 @@ export class SlotManager {
     }
     const current = this.store.getTicket(ticket.id);
     if (current?.autonomous && (current.autonomousState?.hostMutation || this.autonomousDeliveries.has(ticket.id) && current.autonomousState?.phase !== "completed")) throw new Error("The autonomous worktree is reserved until its host operation is reconciled.");
+    if (current?.autonomousState?.execution) {
+      if (current.autonomousState.phase !== "completed") throw new Error("The partial autonomous worktree is retained for explicit recovery.");
+      if (!await this.closeAutonomousWork(ticket.id)) throw new Error("Writer closure is unconfirmed. The autonomous worktree is retained.");
+    }
     this.clearPhase(ticket.id);
     // Stop the in-process SDK session (no-op for a test/worktree shell slot); kill any tmux shell.
     this.sessionHub.disconnect(ticket.id, executionStatus);
@@ -1745,6 +1925,22 @@ export class SlotManager {
   }
 
   async abandonTicket(ticketId: string): Promise<void> {
+    const bounded = this.store.getTicket(ticketId)?.autonomousState?.execution;
+    if (bounded) {
+      this.store.cancelAutonomousExecution(ticketId);
+      const results = await Promise.allSettled([this.qualityCancel?.(ticketId), this.closeAutonomousWork(ticketId)]);
+      const current = this.store.getTicket(ticketId);
+      if (!current) return;
+      const diagnostic = results.find((result) => result.status === "rejected");
+      this.touch(this.store.updateTicket(ticketId, { column: "abandoned", stage: null, autoMerge: false,
+        error: diagnostic?.status === "rejected" ? getErrorMessage(diagnostic.reason) : "Exécution arrêtée par l’utilisateur ; les travaux sont conservés pour récupération.",
+        finishedAt: Date.now(),
+      }));
+      if (current.slotId !== null && this.store.getSlot(current.slotId)?.ticketId === ticketId) this.store.updateSlot(current.slotId, { status: "interrupted" });
+      this.store.logEvent(ticketId, "abandoned", { retained: true });
+      this.hub.pushSlots(this.store.listSlots());
+      return;
+    }
     if (this.store.getTicket(ticketId)?.autonomous) await this.waitForAutonomousDelivery(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
@@ -1823,6 +2019,19 @@ export class SlotManager {
       const ticketId = slot.ticketId;
       const recovered = this.store.getTicket(ticketId);
       if (!recovered) continue;
+      const execution = recovered.autonomousState?.execution;
+      if (execution && execution.closure.status !== "confirmed" && (execution.closure.status === "requested" || this.store.listExecutionRuns("ticket", ticketId).some((run) => run.status === "running"))) {
+        const state = this.store.beginAutonomousFinalization(ticketId, "startup_writer_closure_unknown");
+        if (state?.execution) this.touch(this.store.updateTicket(ticketId, { autonomousState: {
+          ...state, execution: { ...state.execution, closure: { ...state.execution.closure, status: "unknown", confirmedAt: null, retention: "retained" } },
+        } }));
+        this.store.updateSlot(slot.id, { status: "interrupted" });
+        continue;
+      }
+      if (recovered.autonomousState?.execution && (recovered.autonomousState.execution.workRevokedAt !== null || recovered.autonomousState.execution.closure.status === "unknown")) {
+        this.store.updateSlot(slot.id, { status: "interrupted" });
+        continue;
+      }
       if (recovered.autonomous && recovered.slotId !== null && recovered.autonomousState?.phase !== "completed") {
         const autonomousError = autonomousOptionsError(recovered, projectVcsProvider(recovered.project));
         if (autonomousError && !this.isAutonomousDeliveryReconciliation(recovered)) {
@@ -2029,6 +2238,7 @@ export class SlotManager {
   async tryAutoReclaim(ticketId: string, reason: string): Promise<ReclaimOutcome> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.slotId === null) return "ignore";
+    if (ticket.autonomousState?.execution?.workRevokedAt !== null && ticket.autonomousState?.execution) return "ignore";
     if (this.store.getActiveQualityIteration(ticketId)?.status === "verifying") return "ignore";
     // A test session is ephemeral and lives on a "done" card: never resurrect it as a pipeline run.
     if (ticket.testing) return "ignore";
@@ -2038,6 +2248,10 @@ export class SlotManager {
     }
     const reclaims = this.store.getReclaimCount(ticketId);
     if (reclaims >= AUTO_RECLAIM_MAX) {
+      if (ticket.autonomousState?.execution) {
+        this.store.beginAutonomousFinalization(ticketId, reason);
+        return "ignore";
+      }
       this.interruptQualityCorrection(ticketId, reason);
       return "escalate";
     }
@@ -2049,6 +2263,10 @@ export class SlotManager {
       await this.relaunchInPlace(ticket.slotId, ticketId);
     } catch (error) {
       this.clearPhase(ticketId);
+      if (this.store.getTicket(ticketId)?.autonomousState?.execution) {
+        this.store.beginAutonomousFinalization(ticketId, getErrorMessage(error));
+        return "ignore";
+      }
       this.interruptQualityCorrection(ticketId, getErrorMessage(error));
       log.error("auto-reclaim échoué", { ticketId, error: getErrorMessage(error) });
       return "escalate";
@@ -2064,6 +2282,13 @@ export class SlotManager {
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
     const storedTicket = this.store.getTicket(ticketId);
     if (!storedTicket || !isProjectKey(storedTicket.project)) return;
+    const executionGuard = createAutonomousSessionGuard(this.store, ticketId, "retry");
+    if (executionGuard) {
+      this.store.assertAutonomousWork(ticketId);
+      if (!await this.closeAutonomousWork(ticketId)) throw new Error("The previous autonomous sessions have not confirmed closure.");
+      executionGuard.beforeStart();
+      this.autonomousWorkflow?.startExecution?.(ticketId);
+    }
     const autonomousError = autonomousOptionsError(storedTicket, projectVcsProvider(storedTicket.project));
     if (autonomousError && !this.isAutonomousDeliveryReconciliation(storedTicket)) throw new Error(autonomousError);
     // A test session must never be relaunched with a pipeline contract; the user stops it manually.
@@ -2126,15 +2351,18 @@ export class SlotManager {
     await assertCodexImplementerAvailable(this.system, executionTicket, execution);
 
     // Drop any live/stale SDK session before starting the fresh one (the worktree is preserved).
-    this.sessionHub.disconnect(ticketId);
-    await this.delegationDrain?.(ticketId);
+    if (!executionGuard) {
+      this.sessionHub.disconnect(ticketId);
+      await this.delegationDrain?.(ticketId);
+    }
+    executionGuard?.assertAllowed();
     const recoveryContext = buildRecoveryContext(ticket, this.store, restoredStage);
     if (iteration?.mode === "correction" && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la reprise.");
     const currentTicket = this.store.getTicket(ticketId);
     if (!currentTicket || currentTicket.testing || currentTicket.archived || currentTicket.column === "abandoned" || currentTicket.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId
       || currentTicket.branch !== ticket.branch || currentTicket.project !== ticket.project || (recoveryGeneration && this.store.getImplementationPlan(ticketId)?.recovery?.generation !== recoveryGeneration)) throw new Error("Le propriétaire du worktree a changé pendant la reprise.");
     this.setPhase(ticketId, SETUP_PHASES.spawning);
-    this.startAgentSession(ticket, slotId, path, { resume: true });
+    this.startAgentSession(ticket, slotId, path, { resume: true, ...(executionGuard ? { executionGuard } : {}) });
     this.setPhase(ticketId, SETUP_PHASES.waiting);
     this.store.updateSlot(slotId, { status: "busy", tmuxSession: null });
     this.store.logEvent(ticketId, "session_spawned", { slotId });

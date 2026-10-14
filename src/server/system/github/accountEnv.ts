@@ -13,7 +13,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { VcsProvider } from "../../../shared/constants.ts";
 import { GITHUB_LOGIN_PATTERN, MACHINE_ACCOUNT_SEGMENT } from "../../../shared/github.ts";
-import { runBoundedCommand } from "../boundedCommand.ts";
+import { BOUNDED_COMMAND_TIMEOUT_MS, runBoundedCommand } from "../boundedCommand.ts";
 import type { BoundedCommandOptions, BoundedCommandResult } from "../boundedCommand.ts";
 import { redactSecrets } from "../secretRedaction.ts";
 
@@ -440,6 +440,8 @@ export function verifyGithubIdentitySync(login: string): void {
 }
 
 export interface GithubCommandOptions {
+  beforeRun?: () => void;
+  deadlineAt?: number;
   timeoutMs?: number;
   /** Check the account's identity first (push, merge, done transitions). */
   verifyIdentity?: boolean;
@@ -459,10 +461,17 @@ function redactResult(result: BoundedCommandResult): BoundedCommandResult {
  */
 export async function runGithubCommand(args: string[], cwd: string, options: GithubCommandOptions = {}): Promise<BoundedCommandResult> {
   const resolution = await resolveGithubAccount(cwd);
-  const timeout = options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
-  if (resolution.account === null) return redactResult(await commandRunner(args, cwd, timeout));
-  if (options.verifyIdentity) await verifyGithubIdentity(resolution.account);
-  return redactResult(await commandRunner(args, cwd, { ...timeout, env: githubAccountEnv(resolution.account, process.env) }));
+  if (resolution.account !== null && options.verifyIdentity) await verifyGithubIdentity(resolution.account);
+  options.beforeRun?.();
+  let timeoutMs = options.timeoutMs;
+  if (options.deadlineAt !== undefined) {
+    const remaining = options.deadlineAt - Date.now();
+    if (remaining <= 0) throw new Error("The operation deadline expired before command execution.");
+    timeoutMs = Math.min(timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS, remaining);
+  }
+  const timeout = timeoutMs === undefined ? {} : { timeoutMs };
+  const env = resolution.account === null ? {} : { env: githubAccountEnv(resolution.account, process.env) };
+  return redactResult(await commandRunner(args, cwd, { ...timeout, ...env }));
 }
 
 /** Account of the cwd for an identity check outside a command (merge, done gates). */

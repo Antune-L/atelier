@@ -1,3 +1,4 @@
+import { isAutonomousParentIncomplete } from "@shared/autonomous";
 import {
   ACTIVE_STAGES,
   AGENT_EFFORTS,
@@ -382,7 +383,7 @@ export function dependencyCandidates(
       t.id !== selfId &&
       // The current dependsOn parent stays selectable even from a normally non-dependable column
       // (e.g. a split mother in "done"), so the select renders the real current value.
-      (t.id === currentDependsOn || !NON_DEPENDABLE_COLUMNS.includes(t.column)),
+      (t.id === currentDependsOn || (!NON_DEPENDABLE_COLUMNS.includes(t.column) && !isAutonomousParentIncomplete(t))),
   );
 }
 

@@ -7,7 +7,7 @@ import type { PrMergeability, PrState } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
-import type { DoneGateResult, PublishReviewResult, ReviewHeadResult, RecoveryCandidateOptions } from "../types.ts";
+import type { DoneGateResult, PublishReviewResult, ReviewHeadResult, RecoveryCandidateOptions, PrMutationOptions, CreatePrOptions } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
 import type { CreatePrResult, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
@@ -15,6 +15,7 @@ import type { CreatePrResult, ReviewRequestSnapshot, VcsClient } from "./types.t
 const FAKE_STEALTH_PR_BASE = 900;
 const FAKE_REVIEW_HEAD = "dry-run-review-head";
 const FAKE_REVIEW_ID = 1;
+const FAKE_PR_BODY = "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
 
 /** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
 const FAKE_OPEN_PRS: OpenPr[] = [
@@ -60,6 +61,8 @@ const FAKE_OPEN_PRS: OpenPr[] = [
 ];
 
 export class FakeVcsClient implements VcsClient {
+  private readonly bodies = new Map<string, string>();
+  private readonly createdPrs = new Map<string, OpenPr>();
   async testConnection(_repoPath: string, checkedAt: number): Promise<VcsConnectionResult> {
     // Same dry-run stance as checkClaudeAvailable: the pipeline stays exerciseable end-to-end.
     return { ok: true, message: "Mode simulation", checkedAt };
@@ -70,7 +73,7 @@ export class FakeVcsClient implements VcsClient {
   }
 
   async listOpenPrs(_repoPath: string): Promise<OpenPr[]> {
-    return FAKE_OPEN_PRS;
+    return [...FAKE_OPEN_PRS, ...this.createdPrs.values()];
   }
 
   async listReviewCounts(repoPaths: string[]): Promise<Record<string, number | null>> {
@@ -101,17 +104,35 @@ export class FakeVcsClient implements VcsClient {
     return githubPrHeadRef(prNumber);
   }
 
-  async createPr(_cwd: string, baseBranch: string, _opts: { draft: boolean }): Promise<CreatePrResult> {
+  async createPr(_cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult> {
     // Deterministic fake PR number derived from the base branch (no Math.random/Date.now).
     const prNumber = FAKE_STEALTH_PR_BASE + baseBranch.length;
-    return { ok: true, url: `https://github.com/fake/repo/pull/${prNumber}`, reason: "" };
+    const url = `https://github.com/fake/repo/pull/${prNumber}`;
+    this.bodies.set(url, opts.body ?? FAKE_PR_BODY);
+    this.createdPrs.set(url, { number: prNumber, title: opts.title ?? baseBranch, url, headBranch: opts.headBranch ?? baseBranch, baseBranch, isDraft: opts.draft, reviewStatus: "none", updatedAt: new Date().toISOString(), author: "simulation", additions: 0, deletions: 0 });
+    return { ok: true, url, reason: "" };
   }
 
-  async fetchPrSummary(_cwd: string, _prUrl: string): Promise<string | null> {
-    return "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
+  async fetchPrSummary(cwd: string, prUrl: string): Promise<string | null> {
+    const body = (await this.readPrBody(cwd, prUrl))?.trim() ?? "";
+    return body.length > 0 ? body : null;
   }
 
-  async updatePrBody(_cwd: string, _prUrl: string): Promise<DoneGateResult> {
+  async readPrBody(_cwd: string, prUrl: string): Promise<string | null> {
+    return this.bodies.get(prUrl) ?? FAKE_PR_BODY;
+  }
+
+  async convertPrToDraft(_cwd: string, prUrl: string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    opts.assertCurrent?.();
+    const pr = this.createdPrs.get(prUrl) ?? FAKE_OPEN_PRS.find((entry) => entry.url === prUrl);
+    if (pr) this.createdPrs.set(prUrl, { ...pr, isDraft: true });
+    return { ok: true, reason: "" };
+  }
+
+  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    opts.assertCurrent?.();
+    const body = await this.readPrBody(cwd, prUrl);
+    this.bodies.set(prUrl, transform(body ?? ""));
     return { ok: true, reason: "" };
   }
 

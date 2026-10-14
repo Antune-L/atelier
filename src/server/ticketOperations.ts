@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isAutonomousParentIncomplete } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
 import type { Column } from "../shared/constants.ts";
 import {
@@ -55,6 +56,9 @@ export const createTodoTicketInputSchema = ticketBatchOptionsSchema
     autonomousDelivery: ticketBatchOptionsSchema.shape.autonomousDelivery.removeDefault().optional().describe("Explicit autonomous delivery choice: PR only, or merge after verified checks."),
     autonomousMaxCorrections: ticketBatchOptionsSchema.shape.autonomousMaxCorrections.removeDefault().optional().describe("Maximum automatic correction cycles, between zero and three."),
     autonomousTimeoutMinutes: ticketBatchOptionsSchema.shape.autonomousTimeoutMinutes.removeDefault().optional().describe("Total autonomous execution deadline in minutes, between one and 1440."),
+    autonomousMaxStarts: ticketBatchOptionsSchema.shape.autonomousMaxStarts.removeDefault().optional().describe("Experimental secondary safety guard for total execution starts, between one and 10000; not a progress measure."),
+    autonomousFinalizationMinutes: ticketBatchOptionsSchema.shape.autonomousFinalizationMinutes.removeDefault().optional().describe("Bounded finalization reserve in minutes, between one and 60."),
+    autonomousMaxPublicationAttempts: ticketBatchOptionsSchema.shape.autonomousMaxPublicationAttempts.removeDefault().optional().describe("Maximum bounded partial publication attempts, between one and ten."),
     stealth: ticketBatchOptionsSchema.shape.stealth.removeDefault().optional().describe("Implement without opening a pull request."),
     directPush: ticketBatchOptionsSchema.shape.directPush.removeDefault().optional().describe("Push directly to the base branch, without a pull request; disables stealth and autoMerge."),
     addScreenshots: ticketBatchOptionsSchema.shape.addScreenshots.removeDefault().optional().describe("Add screenshots to the pull request."),
@@ -136,6 +140,9 @@ export interface CompactTicket {
   autonomousDelivery?: Ticket["autonomousDelivery"];
   autonomousMaxCorrections?: number;
   autonomousTimeoutMinutes?: number;
+  autonomousMaxStarts?: number;
+  autonomousFinalizationMinutes?: number;
+  autonomousMaxPublicationAttempts?: number;
   dependsOn: string | null;
   createdAt: number;
   updatedAt: number;
@@ -186,6 +193,9 @@ function compactTicket(ticket: Ticket): CompactTicket {
     autonomousDelivery: ticket.autonomousDelivery ?? null,
     autonomousMaxCorrections: ticket.autonomousMaxCorrections,
     autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes,
+    autonomousMaxStarts: ticket.autonomousMaxStarts,
+    autonomousFinalizationMinutes: ticket.autonomousFinalizationMinutes,
+    autonomousMaxPublicationAttempts: ticket.autonomousMaxPublicationAttempts,
     dependsOn: ticket.dependsOn,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
@@ -195,7 +205,7 @@ function compactTicket(ticket: Ticket): CompactTicket {
 function isBlocked(ticket: Ticket, store: Store): boolean {
   if (ticket.dependsOn === null) return false;
   const parent = store.getTicket(ticket.dependsOn);
-  if (!parent || parent.branch === null) return true;
+  if (!parent || parent.branch === null || isAutonomousParentIncomplete(parent)) return true;
   const splitMother = parent.branch.startsWith("split/") && parent.prUrl === null;
   return parent.prUrl === null && !splitMother;
 }
@@ -338,6 +348,9 @@ export class TicketOperations {
       autonomousDelivery: normalized.autonomousDelivery ?? null,
       autonomousMaxCorrections: normalized.autonomousMaxCorrections,
       autonomousTimeoutMinutes: normalized.autonomousTimeoutMinutes,
+      autonomousMaxStarts: normalized.autonomousMaxStarts,
+      autonomousFinalizationMinutes: normalized.autonomousFinalizationMinutes,
+      autonomousMaxPublicationAttempts: normalized.autonomousMaxPublicationAttempts,
       addScreenshots: normalized.addScreenshots ?? (!autoMerge && project.defaultAddScreenshots),
       verifyFeature: normalized.verifyFeature ?? false,
       argusMultiLoop: normalized.argusMultiLoop ?? false,
@@ -458,7 +471,7 @@ export class TicketOperations {
       }
     }
 
-    const autonomousKeys = ["autonomous", "autonomousDelivery", "autonomousMaxCorrections", "autonomousTimeoutMinutes"];
+    const autonomousKeys = ["autonomous", "autonomousDelivery", "autonomousMaxCorrections", "autonomousTimeoutMinutes", "autonomousMaxStarts", "autonomousFinalizationMinutes", "autonomousMaxPublicationAttempts"];
     if ((ticket.column !== "todo" || ticket.autonomousState != null) && autonomousKeys.some((key) => Object.hasOwn(parsed.data, key))) {
       throw new TicketOperationError("CONFLICT", "Autonomous settings can only be changed before the first launch.");
     }

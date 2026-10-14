@@ -31,6 +31,7 @@ import {
   type CodexAppServerOptions,
 } from "./codexAppServer.ts";
 import { resolveCodexBinary } from "./codexBinary.ts";
+import { AUTONOMOUS_NATIVE_DELEGATION_DENIAL, autonomousPermissionScript, prepareAutonomousPermission, watchAutonomousPermission } from "./autonomousPermission.ts";
 import {
   CODEX_ANALYSIS_DENIAL_REASON,
   CODEX_BASH_DENIAL_REASON,
@@ -193,6 +194,7 @@ interface PreparedAgents {
 }
 
 interface PreparedHook {
+  revoke?(): void;
   config: ConfigObject;
   drainDenials(): void;
   cleanup(): void;
@@ -506,6 +508,14 @@ function prepareNoVerifyHook(options: AgentSessionOptions): PreparedHook {
   const policyPath = join(directory, "command-policy.js");
   const denialWriterPath = join(directory, "permission-denial.js");
   const denialJournalPath = join(directory, "permission-denials.jsonl");
+  const autonomousPolicyPath = join(directory, "autonomous-policy.json");
+  const autonomousCheckPath = join(directory, "autonomous-check.js");
+  const autonomousPermission = prepareAutonomousPermission(options.executionGuard, autonomousPolicyPath);
+  let autonomousGuard = "";
+  if (options.executionGuard) {
+    writeFileSync(autonomousCheckPath, autonomousPermissionScript(autonomousPolicyPath), { encoding: "utf8", mode: 0o600 });
+    autonomousGuard = `if ! ${shellQuote(process.execPath)} ${shellQuote(autonomousCheckPath)}; then\n  ${shellDeny("Autonomous execution permission revoked or expired")}\nfi\nif printf '%s' "$input" | grep -Eq '"tool_name"[[:space:]]*:[[:space:]]*"spawn_agent"'; then\n  ${shellDeny(AUTONOMOUS_NATIVE_DELEGATION_DENIAL)}\nfi\n`;
+  }
   writeFileSync(denialJournalPath, "", { encoding: "utf8", mode: 0o600 });
   writeFileSync(denialWriterPath, `import { appendFileSync } from "node:fs";
 try {
@@ -540,7 +550,7 @@ deny() {
   exit 0
 }
 input=$(cat)
-case "$input" in
+${autonomousGuard}case "$input" in
   *--no-verify*)
     ${shellDeny(NO_VERIFY_DENIAL_REASON)}
     ;;
@@ -597,7 +607,11 @@ fi
         log.warn("lecture d'un refus de permission impossible", { ticketId: options.ticketId, reason: getErrorMessage(error) });
       }
     },
-    cleanup: () => rmSync(directory, { recursive: true, force: true }),
+    revoke: autonomousPermission.revoke,
+    cleanup: () => {
+      autonomousPermission.cleanup();
+      rmSync(directory, { recursive: true, force: true });
+    },
   };
 }
 
@@ -671,6 +685,7 @@ function createCodexAgentSession(
   mcpManager: WorkerMcpManager,
   dependencies: CodexProviderDependencies,
 ): AgentSessionHandle {
+  options.executionGuard?.beforeStart();
   const inbox: QueuedMessage[] = [];
   const usageByTurn = new Map<string, AgentTurnUsage>();
   const finalAgentMessageByTurn = new Map<string, string>();
@@ -689,6 +704,7 @@ function createCodexAgentSession(
   let firstTurn = true;
   let dispatching = false;
   let closing = false;
+  let disposing = false;
   let cleaned = false;
   let fatalReported = false;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -700,6 +716,7 @@ function createCodexAgentSession(
   const closedPromise = new Promise<void>((resolve) => {
     resolveClosed = resolve;
   });
+  let stopMonitoring = () => {};
 
   function emit(event: AgentSessionEvent): void {
     try {
@@ -756,6 +773,7 @@ function createCodexAgentSession(
     if (cleaned) return;
     preparedHook.drainDenials();
     cleaned = true;
+    stopMonitoring();
     if (workerToken) mcpManager.unregister(workerToken);
     preparedAgents.cleanup();
     preparedHook.cleanup();
@@ -881,6 +899,7 @@ function createCodexAgentSession(
   }
 
   function handleNotification(notification: CodexAppServerNotification): void {
+    if (disposing) return;
     if (cleaned) return;
     if (notification.method === "thread/started") {
       const parsed = z.object({ thread: z.object({ id: z.string(), parentThreadId: z.string().nullable() }) }).safeParse(notification.params);
@@ -1171,12 +1190,9 @@ function createCodexAgentSession(
 
   async function finishConnection(): Promise<void> {
     const current = connection;
-    try {
-      if (current) await current.close();
-    } finally {
-      if (connection === current) connection = null;
-      cleanup();
-    }
+    if (current) await current.close();
+    if (connection === current) connection = null;
+    cleanup();
   }
 
   async function finishIfDrained(): Promise<void> {
@@ -1223,6 +1239,7 @@ function createCodexAgentSession(
   async function bootstrap(): Promise<void> {
     let lastStderr = "";
     try {
+      options.executionGuard?.assertAllowed();
       preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
       preparedHook = prepareNoVerifyHook(options);
       // An attached project's GH_CONFIG_DIR must not be overridden by an ambient GH_TOKEN/GITHUB_TOKEN.
@@ -1230,6 +1247,7 @@ function createCodexAgentSession(
       // NOTE(ali): envWithProjectNode strips every KANBAN_* key, so the worker token is re-added here
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
+      options.executionGuard?.assertAllowed();
       const liveConnection = await (dependencies.connect ?? connectCodexAppServer)({
         binaryPath: (dependencies.resolveBinary ?? resolveCodexBinary)(),
         cwd: options.cwd,
@@ -1335,6 +1353,29 @@ function createCodexAgentSession(
       onToolCall: options.onToolCall,
     });
   }
+  function disposeSession(): void {
+    if (disposing) return;
+    disposing = true;
+    preparedHook.revoke?.();
+    closing = true;
+    rejectQueuedMessages();
+    const turnId = activeTurnId;
+    clearActiveTurn(turnId);
+    if (turnId) emitTurnEnd(false, "interrupted", turnId);
+    const current = connection;
+    connection = null;
+    if (!current) {
+      cleanup();
+      return;
+    }
+    if (current.dispose) {
+      current.dispose();
+      void current.exited.then(() => cleanup()).catch(() => undefined);
+    } else {
+      void current.close().then(() => cleanup()).catch(() => undefined);
+    }
+  }
+  stopMonitoring = watchAutonomousPermission(options.executionGuard, disposeSession);
   void bootstrap();
 
   return {
@@ -1380,18 +1421,9 @@ function createCodexAgentSession(
       // notification handlers track it and close it with a normal turn_end.
       await connection.request("thread/compact/start", { threadId }, compactStartResponseSchema);
     },
-    dispose: () => {
-      closing = true;
-      rejectQueuedMessages();
-      const turnId = activeTurnId;
-      clearActiveTurn(turnId);
-      if (turnId) emitTurnEnd(false, "interrupted", turnId);
-      if (connection?.dispose) connection.dispose();
-      else void connection?.close().catch(() => undefined);
-      connection = null;
-      cleanup();
-    },
+    dispose: disposeSession,
     close: async () => {
+      preparedHook.revoke?.();
       if (!closing) {
         closing = true;
         clearBlockedSteerProbe();

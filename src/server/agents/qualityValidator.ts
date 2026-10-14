@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { Orchestrator } from "../../shared/constants.ts";
 import { qualityEvidenceSchema } from "../../shared/quality.ts";
 import type { QualityCriterion, QualityEvidence, QualityFunctionalBlocker, QualityFunctionalBlockerCode, QualityRunDiagnostic, QualityValidationMode } from "../../shared/quality.ts";
-import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, StdioMcpServerDefinition } from "../system/agentSession.ts";
+import type { AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions, StdioMcpServerDefinition } from "../system/agentSession.ts";
 import { safeJsonParse } from "../system/boundedCommand.ts";
 import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
@@ -96,6 +96,8 @@ export interface QualityValidatorOptions {
   runId: string;
   cwd: string;
   startSession(options: AgentSessionOptions): AgentSessionHandle;
+  executionGuard?: AgentExecutionGuard;
+  onClosureUnknown?(): void;
   execution: Pick<ResolvedExecution, "provider" | "model" | "effort" | "serviceTier">;
   criteria: QualityCriterion[];
   revisionSha: string;
@@ -335,6 +337,7 @@ async function preflightQualityBrowser(options: QualityValidatorOptions, server:
 
 export async function runQualityValidator(options: QualityValidatorOptions): Promise<QualityValidatorResult> {
   if (options.signal.aborted) throw new Error("Validation cancelled before session startup");
+  options.executionGuard?.beforeStart();
   const functional = options.functional === true;
   const mode = functional ? "browser" : options.mode ?? "browser";
   const artifactDirectory = options.artifactDirectory ?? join(tmpdir(), `kanban-quality-${randomUUID()}`);

@@ -121,8 +121,16 @@ export interface HttpMcpServerDefinition {
 
 export type AgentMcpServerDefinition = StdioMcpServerDefinition | HttpMcpServerDefinition;
 
+export interface AgentExecutionGuard {
+  beforeStart(): void;
+  assertAllowed(): void;
+  snapshot(): { allowed: boolean; deadlineAt: number | null };
+  subscribe(listener: () => void): () => void;
+}
+
 export interface AgentSessionOptions {
   ticketId: string;
+  executionGuard?: AgentExecutionGuard;
   slotId: number;
   cwd: string;
   environment?: Record<string, string | undefined>;

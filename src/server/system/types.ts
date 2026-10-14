@@ -49,6 +49,22 @@ export interface ImplementationRecoveryOptions {
   repoPath: string;
 }
 
+export interface AutonomousWorkspaceOptions {
+  repoPath: string;
+  slotPath: string;
+  ticketId: string;
+}
+
+export interface AutonomousWorkspace {
+  label: string | null;
+  cycleId?: string;
+  workspacePath: string | null;
+  journalPath: string | null;
+  archivePath: string | null;
+  status: "retained" | "archived" | "integrated" | "unknown";
+  verified: boolean;
+}
+
 export interface RecoveryCandidateOptions {
   repoPath: string;
   slotPath: string;
@@ -57,6 +73,12 @@ export interface RecoveryCandidateOptions {
   prUrl: string;
   commitSha: string;
   allowMerged?: boolean;
+}
+
+export interface PrMutationOptions {
+  workspace?: { repoPath: string; branch: string; commitSha?: string };
+  deadlineAt?: number;
+  assertCurrent?: () => void;
 }
 
 export interface CreatePrOptions {
@@ -295,6 +317,7 @@ export interface SystemAdapter {
   worktreeAddExisting(repoPath: string, slotPath: string, localBranch: string, startBranch?: string): Promise<void>;
   prepareImplementationLot(opts: ImplementationLotOptions): Promise<{ cwd: string; integrated?: boolean }>;
   finishImplementationLot(opts: ImplementationLotOptions): Promise<void>;
+  listAutonomousWorkspaces(opts: AutonomousWorkspaceOptions): Promise<AutonomousWorkspace[]>;
   preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]>;
   cancelImplementationLot(opts: ImplementationLotOptions): void;
   discardImplementationLot(opts: ImplementationLotOptions): Promise<void>;
@@ -396,7 +419,13 @@ export interface SystemAdapter {
   verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions, provider: VcsProvider): Promise<DoneGateResult>;
   /** PR description body, used as the agent-work summary. null when unreadable. */
   fetchPrSummary(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
-  updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult>;
+  readAutonomousBranchHead(slotPath: string, branch: string): Promise<ReviewHeadResult>;
+  verifyAutonomousWorkspace(slotPath: string, repoPath: string, branch: string): Promise<DoneGateResult>;
+  prepareAutonomousCandidate(slotPath: string, opts: PrMutationOptions): Promise<ReviewHeadResult>;
+  pushAutonomousCandidate(slotPath: string, branch: string, opts: PrMutationOptions): Promise<DoneGateResult>;
+  readPrBody(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
+  convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult>;
+  updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult>;
 
   // ---- PR listing (review entry point) ----
   listReviewRequests(repoPath: string, provider: VcsProvider): Promise<ReviewRequestSnapshot>;

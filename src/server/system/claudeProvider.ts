@@ -38,6 +38,7 @@ import type {
   AgentTurnUsage,
 } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
+import { AUTONOMOUS_NATIVE_DELEGATION_DENIAL, watchAutonomousPermission } from "./autonomousPermission.ts";
 import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
 import { GH_AUTH_DENIAL_REASON, GH_AUTH_PERMISSION_DENY, isGhAuthCommand } from "./github/ghAuthGuard.ts";
 import { envWithProjectNode } from "./nvmNode.ts";
@@ -167,6 +168,7 @@ export function createSdkAgentSession(
   opts: AgentSessionOptions,
   dependencies: ClaudeSessionDependencies = DEFAULT_DEPENDENCIES,
 ): AgentSessionHandle {
+  opts.executionGuard?.beforeStart();
   const reportedDenials = new Set<string>();
   // ---- streaming input: a queue feeding a never-returning generator keeps the session alive ----
   const inbox: Array<{ id: string; prompt: SDKUserMessage }> = [];
@@ -260,6 +262,18 @@ export function createSdkAgentSession(
   const abortController = new AbortController();
   const sdkEffort = toSdkEffort(opts.effort);
   const preToolUseHooks: HookCallback[] = [denyNoVerifyHook, denyGhAuthHook];
+  const autonomousHook: HookCallback = async (input) => {
+    try {
+      if (closed) throw new Error("Autonomous session closed");
+      opts.executionGuard?.assertAllowed();
+      if (input.hook_event_name === "PreToolUse" && (input.tool_name === "Agent" || input.tool_name === "Task")) {
+        throw new Error(AUTONOMOUS_NATIVE_DELEGATION_DENIAL);
+      }
+      return {};
+    } catch (error) {
+      return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: getErrorMessage(error) } };
+    }
+  };
   if (opts.blockReviewPublishing) preToolUseHooks.push(denyReviewPublishingHook);
   if (opts.blockTypecheck) preToolUseHooks.push(denyTypecheckHook(opts.cwd));
   const queryOptions: Options = {
@@ -281,6 +295,7 @@ export function createSdkAgentSession(
     env: scrubAmbientGithubTokens({ ...envWithProjectNode(opts.cwd), ...opts.environment }),
     stderr: () => {},
     hooks: { PreToolUse: [
+      ...(opts.executionGuard ? [{ matcher: ".*", hooks: [autonomousHook] }] : []),
       { matcher: "Bash", hooks: preToolUseHooks },
       ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts, reportedDenials)] }] : []),
     ] },
@@ -306,11 +321,22 @@ export function createSdkAgentSession(
     opts.onEvent({ type: "assistant_text", text: message }),
   ).then((binary) => {
     if (disposed) throw new Error("Session fermée avant démarrage");
+    opts.executionGuard?.assertAllowed();
     return dependencies.query({ prompt: prompts(), options: { ...queryOptions, pathToClaudeCodeExecutable: binary } });
   });
 
   // ---- consume the stream in the background; parse each message into an AgentSessionEvent ----
   const pumping = pumpStream(sessionPromise, opts, reportedDenials);
+  const stopMonitoring = watchAutonomousPermission(opts.executionGuard, disposeSession);
+  function disposeSession(): void {
+    stopMonitoring();
+    disposed = true;
+    closed = true;
+    wake();
+    abortController.abort();
+    void sessionPromise.then((session) => session.close()).catch(() => undefined);
+  }
+  void pumping.finally(stopMonitoring).catch(() => undefined);
 
   return {
     ticketId: opts.ticketId,
@@ -328,14 +354,9 @@ export function createSdkAgentSession(
         // interrupt() can reject if the turn already ended; the turn_end event is the source of truth.
       }
     },
-    dispose: () => {
-      disposed = true;
-      closed = true;
-      wake();
-      abortController.abort();
-      void sessionPromise.then((session) => session.close()).catch(() => undefined);
-    },
+    dispose: disposeSession,
     close: async () => {
+      stopMonitoring();
       // Graceful teardown: flag EOF and wake the parked generator so it returns (no bogus user turn).
       // Crucially do NOT hard-abort the stream here — a turn still in flight (e.g. the one in which
       // done()/fail() ran) must be allowed to emit its final `result`, which carries that turn's

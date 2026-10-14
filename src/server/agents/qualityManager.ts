@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { nanoid } from "nanoid";
+
 import type { Orchestrator } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { QUALITY_DEFAULT_TIMEOUT_MS, latestAcceptanceSnapshot, latestFunctionalSnapshot, qualityBlockerCategory, qualityFollowUpIssueSchema, qualityPreviewBindingSchema } from "../../shared/quality.ts";
@@ -12,11 +14,13 @@ import type { ProjectConfig } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
+import type { AgentSessionOptions } from "../system/agentSession.ts";
 import { isSuccessStatus, previewStatus } from "../system/previewNetwork.ts";
 import { parsePackageManifest, LOCKFILE_NAMES } from "../system/repoInspection.ts";
 import type { SystemAdapter, ValidationCommandResult, ValidationRevision, ValidationServiceHandle, ValidationWorkspaceOptions } from "../system/types.ts";
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
 
+import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { resolveExecution } from "./executionConfig.ts";
 import { executeCombinedQuality, pendingVerification } from "./combinedQuality.ts";
 import { QualityBlockerError } from "./qualityBlocker.ts";
@@ -748,6 +752,7 @@ export class QualityManager {
     const source = iteration ? this.dependencies.store.getQualityRun(iteration.sourceRunId) : null;
     if (iteration && (!source || source.configFingerprint !== configFingerprint(project) || sourceFingerprint(ticket) !== fingerprint([iteration.originalTicket.title, iteration.originalTicket.description, iteration.originalTicket.prdMarkdown]))) throw new Error("The ticket or validation configuration changed during the quality iteration.");
     if (kind === "behavior" && !criteria) throw new Error("Define acceptance criteria before starting behavioral validation.");
+    if (ticket.autonomous && ticket.autonomousState?.execution) this.dependencies.store.admitAutonomousStart(ticketId, nanoid(), "check");
     let revision: ValidationRevision;
     if (preview) {
       revision = await this.repoMutex.run(project.repoPath, async () => {
@@ -809,6 +814,25 @@ export class QualityManager {
     return run;
   }
 
+  hasAutonomousWriters(ticketId: string): boolean {
+    return this.active.has(ticketId) || this.dependencies.store.getTicket(ticketId)?.autonomousState?.execution?.closure.status === "unknown"
+      || this.get(ticketId).runs.some((run) => run.status === "queued" || run.status === "running" || run.cleanupStatus !== "complete");
+  }
+
+  private markClosureUnknown(ticketId: string): void {
+    const state = this.dependencies.store.getTicket(ticketId)?.autonomousState;
+    if (!state?.execution) return;
+    this.dependencies.store.updateTicket(ticketId, { autonomousState: { ...state, execution: {
+      ...state.execution, closure: { ...state.execution.closure, status: "unknown", confirmedAt: null, retention: "retained" },
+    } } });
+  }
+
+  private startSession(ticketId: string, options: AgentSessionOptions) {
+    const executionGuard = options.executionGuard ?? createAutonomousSessionGuard(this.dependencies.store, ticketId, "other");
+    executionGuard?.beforeStart();
+    return this.dependencies.system.startAgentSession({ ...options, executionGuard: executionGuard ?? undefined });
+  }
+
   private async execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget): Promise<void> {
     if (run.kind === "combined") {
       const execution = resolveExecution("quality-validator", { orchestrator: run.provider ?? ticket.orchestrator, model: ticket.model, effort: ticket.effort, codexModel: ticket.codexModel, codexEffort: ticket.codexEffort, codexFast: ticket.codexFast }, { model: MODELS.triage, effort: MODELS.triageEffort });
@@ -847,7 +871,7 @@ export class QualityManager {
         this.update(run.id, { phase });
         const plan = this.dependencies.system.dryRun
           ? { mode: "repository", criteria: [{ id: SIMULATED_CRITERION_ID, text: SIMULATED_CRITERION_TEXT, source: "ticket", required: true, independent: true }] } satisfies QualityCriteriaPlan
-          : await prepareQualityCriteria({ ticketId: ticket.id, cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+          : await prepareQualityCriteria({ ticketId: ticket.id, onClosureUnknown: () => this.markClosureUnknown(ticket.id), cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions) });
         if (signal.aborted) throw new Error("Quality run cancelled.");
         if (originalFingerprint !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Criteria preparation modified the committed validation source.");
         const currentTicket = this.ticket(ticket.id);
@@ -863,7 +887,7 @@ export class QualityManager {
         const previous = preview ? planningQuality.criteriaSnapshots.filter((snapshot) => snapshot.purpose === "functional" && snapshot.previewId === preview.previewId).at(-1) : latestFunctionalSnapshot(planningQuality);
         const plan: FunctionalScenarioPlan = this.dependencies.system.dryRun
           ? { scenarios: [{ id: SIMULATED_CRITERION_ID, text: SIMULATED_CRITERION_TEXT, source: "ticket", required: true, independent: true, interaction: "display", expected: SIMULATED_CRITERION_TEXT, covers: [] }], uncovered: [] }
-          : await prepareFunctionalScenarios({ ticketId: ticket.id, cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", acceptanceCriteria: acceptance?.criteria ?? [], previousScenarios: previous?.criteria ?? [], environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+          : await prepareFunctionalScenarios({ ticketId: ticket.id, onClosureUnknown: () => this.markClosureUnknown(ticket.id), cwd: environment.directory, execution, title: ticket.title, description: ticket.description, prd: ticket.prdMarkdown ?? "", acceptanceCriteria: acceptance?.criteria ?? [], previousScenarios: previous?.criteria ?? [], environment: variables, signal, timeoutMs, startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions) });
         if (signal.aborted) throw new Error("Quality run cancelled.");
         if (originalFingerprint !== await this.dependencies.system.codeFingerprint(environment.directory)) throw new Error("Scenario preparation modified the committed validation source.");
         const currentTicket = this.ticket(ticket.id);
@@ -930,6 +954,8 @@ export class QualityManager {
           outcome = { status: "inconclusive", evidenceAccepted: false, failurePhase: "validating", error: SIMULATED_VALIDATION_MESSAGE };
           return;
         }
+        const executionGuard = createAutonomousSessionGuard(this.dependencies.store, ticket.id, "other");
+        executionGuard?.beforeStart();
         if (preview) {
           await this.requirePreviewHead(ticket, preview);
           environment = { ...environment, addresses: [{ label: "Remote preview application", url: preview.url }] };
@@ -953,7 +979,7 @@ export class QualityManager {
           revision: sourceRun.revision, error: sourceRun.error, diagnostic: sourceRun.diagnostic,
           observations: quality.evidence.filter((entry) => entry.runId === sourceRun.id).map(({ criterionId, status, summary, output, timedOut }) => ({ criterionId, status, summary, output: output.slice(-PREVIOUS_OBSERVATION_LIMIT), timedOut })),
         } : undefined;
-        const result = await runQualityValidator({ previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, ...(preview?.auth ? { browserAuth: preview.auth } : {}), ...(preview?.testData ? { testData: preview.testData } : {}), startSession: (sessionOptions) => this.dependencies.system.startAgentSession(sessionOptions) });
+        const result = await runQualityValidator({ executionGuard: executionGuard ?? undefined, onClosureUnknown: () => this.markClosureUnknown(ticket.id), previousValidation, ticketId: ticket.id, runId: run.id, cwd: environment.directory, execution, criteria: activeCriteria.criteria, mode: functional ? "browser" : activeCriteria.mode, functional, revisionSha: run.revision, environment: variables, checks, addresses: environment.addresses ?? [], signal, timeoutMs, artifactDirectory, ...(preview?.auth ? { browserAuth: preview.auth } : {}), ...(preview?.testData ? { testData: preview.testData } : {}), startSession: (sessionOptions) => this.startSession(ticket.id, sessionOptions) });
         if (!result.sessionId) throw new Error("Validator returned no independently attributable session identity.");
         if (signal.aborted) throw new Error("Quality run cancelled.");
         const criterionIds = result.evidence.map((evidence) => evidence.criterionId);
@@ -1030,6 +1056,7 @@ export class QualityManager {
           outcome = { ...outcome, status: "inconclusive", evidenceAccepted: false, error: getErrorMessage(error) };
         }
       }
+      if (cleanupError) this.markClosureUnknown(ticket.id);
       this.update(run.id, { ...outcome, technicalEvidenceAccepted, completedAt: Date.now(), cleanupStatus: cleanupError ? "failed" : "complete", ...(cleanupError ? { error: cleanupError } : {}) });
     }
   }

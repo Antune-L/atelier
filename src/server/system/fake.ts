@@ -18,8 +18,11 @@ import { plannedClonePath } from "./github/clone.ts";
 import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
+  AutonomousWorkspace,
+  AutonomousWorkspaceOptions,
   DoneGateResult,
   CreatePrOptions,
+  PrMutationOptions,
   MergePrExpectation,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
@@ -167,6 +170,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("finishImplementationLot", { ...opts });
     const lot = this.implementationLots.get(implementationLotKey(opts));
     if (lot) lot.integrated = true;
+  }
+
+  async listAutonomousWorkspaces(opts: AutonomousWorkspaceOptions): Promise<AutonomousWorkspace[]> {
+    this.log("listAutonomousWorkspaces", { ...opts, simulated: true });
+    return [];
   }
 
   async preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
@@ -491,9 +499,39 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).fetchPrSummary(slotPath, prUrl);
   }
 
-  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult> {
+  async readAutonomousBranchHead(slotPath: string, branch: string): Promise<ReviewHeadResult> {
+    this.log("readAutonomousBranchHead", { slotPath, branch, simulated: true });
+    return { ok: true, reason: "Mode simulation", commitSha: "simulated-revision" };
+  }
+
+  async verifyAutonomousWorkspace(slotPath: string, repoPath: string, branch: string): Promise<DoneGateResult> {
+    this.log("verifyAutonomousWorkspace", { slotPath, repoPath, branch, simulated: true });
+    return { ok: true, reason: "Mode simulation" };
+  }
+
+  async prepareAutonomousCandidate(slotPath: string, opts: PrMutationOptions): Promise<ReviewHeadResult> {
+    opts.assertCurrent?.();
+    this.log("prepareAutonomousCandidate", { slotPath, simulated: true });
+    return { ok: true, reason: "Mode simulation", commitSha: "simulated-revision" };
+  }
+
+  async pushAutonomousCandidate(slotPath: string, branch: string, opts: PrMutationOptions): Promise<DoneGateResult> {
+    opts.assertCurrent?.();
+    this.log("pushAutonomousCandidate", { slotPath, branch, simulated: true });
+    return { ok: true, reason: "Mode simulation" };
+  }
+
+  async readPrBody(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
+    return this.vcs(provider).readPrBody(slotPath, prUrl);
+  }
+
+  async convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {
+    return this.vcs(provider).convertPrToDraft(slotPath, prUrl, opts);
+  }
+
+  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {
     this.log("updatePrBody", { slotPath, prUrl });
-    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform);
+    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform, opts);
   }
 
   async verifyReviewDone(slotPath: string, prUrl: string, opts: ReviewDoneOptions): Promise<DoneGateResult> {

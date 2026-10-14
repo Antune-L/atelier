@@ -1,5 +1,8 @@
 import type { z } from "zod";
 
+import { autonomousWorkspacesSchema } from "@shared/autonomous";
+import type { AutonomousResumeInput, AutonomousWorkspaces } from "@shared/autonomous";
+
 import type {
   AnalyzeTicketsInput,
   FeasibilityAnswerBatchInput,
@@ -272,7 +275,8 @@ export const api = {
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),
-  resumeAutonomous: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/autonomous-resume`, { method: "POST" }),
+  autonomousWorkspaces: async (id: string): Promise<AutonomousWorkspaces> => autonomousWorkspacesSchema.parse(await request(`/api/tickets/${id}/autonomous-workspaces`)),
+  resumeAutonomous: (id: string, input: AutonomousResumeInput = { action: "resume" }): Promise<Ticket> => request(`/api/tickets/${id}/autonomous-resume`, { method: "POST", body: JSON.stringify(input) }),
   startTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/test`, { method: "POST" }),
   stopTest: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/stop-test`, { method: "POST" }),
   createStealthPr: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/create-pr`, { method: "POST" }),

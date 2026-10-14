@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS } from "@shared/autonomous";
 
 import type { Orchestrator } from "@shared/constants";
 import type { ProjectInfo, Ticket, UpdateTicketInput } from "@shared/schemas";
@@ -73,6 +73,9 @@ export function LaunchForm({ ticket, projects, canEditTarget }: LaunchFormProps)
     autonomousDelivery: ticket.autonomousDelivery ?? null,
     autonomousMaxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS,
     autonomousTimeoutMinutes: ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES,
+    autonomousMaxStarts: ticket.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS,
+    autonomousFinalizationMinutes: ticket.autonomousFinalizationMinutes ?? AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES,
+    autonomousMaxPublicationAttempts: ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS,
   }, prOnly);
   const autoMerge = !prOnly && ticket.autoMerge;
   const directPush = !prOnly && ticket.directPush;

@@ -7,6 +7,7 @@ import { QUALITY_ACTIVE_STATUSES, QUALITY_ITERATION_ACTIVE_STATUSES } from "@sha
 import type { CreateQualityFollowUpInput, QualityEvidence, QualityPreflight, QualityResponse, StartQualityIterationInput } from "@shared/quality";
 import type { Ticket } from "@shared/schemas";
 
+import { AutonomousRecoveryPanel } from "@/components/ticket-detail/AutonomousRecoveryPanel";
 import { FunctionalTestPanel } from "@/components/ticket-detail/FunctionalTestPanel";
 import { QualityCriteriaPanel } from "@/components/ticket-detail/QualityCriteriaPanel";
 import { QualityIterations } from "@/components/ticket-detail/QualityIterations";
@@ -24,7 +25,7 @@ const QUALITY_RUNNING_POLL_MS = 3_000;
 const QUALITY_IDLE_POLL_MS = 10_000;
 const REVISION_DISPLAY_LENGTH = 12;
 
-export function ValidationTab({ ticket }: { ticket: Ticket }) {
+export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOpenTerminal?: () => void }) {
   const [response, setResponse] = useState<QualityResponse | null>(null);
   const [preflight, setPreflight] = useState<QualityPreflight | null>(null);
   const [pending, setPending] = useState(false);
@@ -84,6 +85,8 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
 
   const { quality, gate, iterationActions } = response;
   const autonomousState = ticket.autonomous ? ticket.autonomousState : null;
+  const partialDelivery = autonomousState?.phase === "closing" || autonomousState?.phase === "publishing_partial" || autonomousState?.phase === "published_partial" || autonomousState?.phase === "publication_failed";
+  const deliveryComplete = gate.enabled && gate.complete && !partialDelivery;
   const activeRun = quality.runs.find((run) => QUALITY_ACTIVE_STATUSES.includes(run.status));
   const latestIteration = quality.latestIteration;
   const iterationActive = latestIteration !== null && QUALITY_ITERATION_ACTIVE_STATUSES.includes(latestIteration.status);
@@ -115,10 +118,14 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
   const reservations = [...new Set([...gate.reservations, ...gate.reasons].map((message) => formatQualityGateMessage(message, quality)))];
   const simulated = quality.runs.some((run) => run.simulated);
   let deliveryLabel = "Validation à préparer";
-  if (gate.enabled) deliveryLabel = gate.complete ? "Validation complète" : "Livraison avec réserves";
+  if (gate.enabled) deliveryLabel = deliveryComplete ? "Validation complète" : "Livraison avec réserves";
   let deliveryNote = "Les vérifications manquantes, périmées ou en échec restent des réserves. Une observation humaine garde sa provenance.";
-  if (gate.enabled && gate.complete) deliveryNote = "Toutes les preuves requises correspondent à la version livrée.";
+  if (deliveryComplete) deliveryNote = "Toutes les preuves requises correspondent à la version livrée.";
   if (!gate.enabled) deliveryNote = "La validation de ce ticket reste à préparer.";
+  if (partialDelivery) {
+    deliveryLabel = "Livraison partielle avec réserves";
+    deliveryNote = "Le travail conservé ne constitue pas une validation complète ; la reprise garde les réserves enregistrées.";
+  }
   let preparationStatus: "passed" | "inconclusive" | "preparation" = "preparation";
   if (preflight?.ok === false) preparationStatus = "inconclusive";
   if (preflight?.ok === true && preflight.reservations.length === 0) preparationStatus = "passed";
@@ -147,20 +154,20 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
         <p className="text-xs text-muted-foreground">Chaque opération garde son propre résultat. Les parcours navigateur ne remplacent pas les contrôles techniques.</p>
       </section>
 
-      <details className="rounded-lg border border-border" open={activeRun !== undefined || iterationActive || autonomousState?.phase === "paused" || (iterationActions !== undefined && iterationActions.problems.length > 0)}>
+      <details className="rounded-lg border border-border" open={activeRun !== undefined || iterationActive || (autonomousState !== null && autonomousState !== undefined) || (iterationActions !== undefined && iterationActions.problems.length > 0)}>
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Rapports, blocages et suites</summary>
         <div className="space-y-3 border-t border-border p-4">
         {functionalRun !== undefined && latestIteration?.resultRunId !== functionalRun.id && <FunctionalTestPanel run={functionalRun} quality={quality} current={functionalCurrent} onOpenEvidence={setSelectedEvidence} />}
         {independentRun !== undefined && latestIteration?.resultRunId !== independentRun.id && <div className="space-y-3 rounded border border-border px-3 py-3"><QualityRunStatus run={independentRun} current={independentCurrent} quality={quality}><QualityRunExplanation run={independentRun} quality={quality} current={independentCurrent} onOpenEvidence={setSelectedEvidence} deferredToPreview={ticket.autonomous && independentRun.kind === "full"} /></QualityRunStatus></div>}
-        {autonomousState?.phase === "paused" && <div role="status" className="space-y-2 rounded border border-warning/30 bg-warning/5 px-3 py-3 text-xs"><p className="font-medium">Parcours autonome suspendu</p>{autonomousState.error !== null && <p className="text-muted-foreground">{formatQualityMessage(autonomousState.error)}</p>}<Button size="sm" variant="outline" disabled={pending || autonomousState.hostMutation !== null} onClick={() => void act(() => api.resumeAutonomous(ticket.id))}><Play className="h-3.5 w-3.5" />Reprendre le parcours</Button><p className="text-2xs text-muted-foreground">L’agent relance les contrôles, la preview et les tests E2E sur le commit poussé.</p></div>}
+        <AutonomousRecoveryPanel ticket={ticket} pending={pending} act={act} onOpenTerminal={onOpenTerminal} />
         {iterationActions !== undefined && !iterationActive && !ticket.autonomous && <QualityRemediation quality={quality} actions={iterationActions} ticketProject={ticket.project} busy={busy} starting={startingIteration} onOpenEvidence={setSelectedEvidence} onStartIteration={(request) => void startIteration(request)} onCreateFollowUp={createFollowUp} />}
         {(activeRun !== undefined || iterationActive) && <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-info/30 bg-info/5 px-3 py-2 text-xs"><span>{activeRun !== undefined ? `${activeRun.phase === null ? qualityRunTitle(activeRun) : qualityPhaseLabel(activeRun.phase)} · ${activeRun.simulated ? "simulation" : "exécution réelle"}` : "Le cycle prépare une nouvelle vérification indépendante."}</span><Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(async () => setResponse(await api.cancelQualityValidation(ticket.id)))}><Square className="h-3 w-3" />{iterationActive ? "Annuler le cycle" : "Annuler la vérification"}</Button></div>}
         <QualityIterations quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
         </div>
       </details>
 
-      <div className={cn("flex gap-3 rounded border p-3", gate.enabled && gate.complete ? "border-success/30 bg-success/5" : "border-border bg-muted/20")}>
-        {gate.enabled && gate.complete ? <ShieldCheck className="h-4 w-4 shrink-0 text-success" /> : <TriangleAlert className="h-4 w-4 shrink-0 text-warning" />}
+      <div className={cn("flex gap-3 rounded border p-3", deliveryComplete ? "border-success/30 bg-success/5" : "border-border bg-muted/20")}>
+        {deliveryComplete ? <ShieldCheck className="h-4 w-4 shrink-0 text-success" /> : <TriangleAlert className="h-4 w-4 shrink-0 text-warning" />}
         <div className="space-y-1"><p className="text-xs font-medium">{deliveryLabel}</p><p className="text-xs text-muted-foreground">{gate.enabled ? "Les preuves enregistrées déterminent les réserves de livraison." : "Lancez la vérification pour préparer et valider ce ticket."}</p>{gate.stale && <p className="text-xs text-warning">Le code, les critères ou la configuration ont changé. Renouvelez les preuves ; les anciennes restent dans l’historique.</p>}{simulated && <p className="text-xs text-warning">Des exécutions simulées sont présentes. Elles ne valident pas une livraison réelle.</p>}</div>
       </div>
 
@@ -185,7 +192,7 @@ export function ValidationTab({ ticket }: { ticket: Ticket }) {
       <QualityRunHistory quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
 
       <QualitySection number={4} title="Bilan avant livraison">
-        <div className="space-y-3 rounded border border-border p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium">{deliveryLabel}</p><span className={cn("text-2xs", gate.enabled && gate.complete ? "text-success" : "text-warning")}>Preuves {gate.enabled && gate.complete ? "complètes" : "à compléter"}</span></div>{reservations.length > 0 && <ul className="space-y-1.5 text-xs text-muted-foreground">{reservations.map((reservation) => <li key={reservation} className="flex gap-2"><TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-warning" /><span>{reservation}</span></li>)}</ul>}<p className="text-xs text-muted-foreground">{deliveryNote}</p></div>
+        <div className="space-y-3 rounded border border-border p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium">{deliveryLabel}</p><span className={cn("text-2xs", deliveryComplete ? "text-success" : "text-warning")}>Preuves {deliveryComplete ? "complètes" : "à compléter"}</span></div>{reservations.length > 0 && <ul className="space-y-1.5 text-xs text-muted-foreground">{reservations.map((reservation) => <li key={reservation} className="flex gap-2"><TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-warning" /><span>{reservation}</span></li>)}</ul>}<p className="text-xs text-muted-foreground">{deliveryNote}</p></div>
       </QualitySection>
 
       <p className="border-t border-border pt-3 text-2xs text-muted-foreground">Les preuves sont liées à la version du code, aux critères et à la configuration. Toute modification impose une nouvelle vérification.</p>

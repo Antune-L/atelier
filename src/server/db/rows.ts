@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
+import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
@@ -76,6 +76,9 @@ const ticketRowSchema = z.object({
   autonomous_delivery: autonomousDeliverySchema.nullable().default(null),
   autonomous_max_corrections: autonomousMaxCorrectionsSchema.default(AUTONOMOUS_DEFAULT_MAX_CORRECTIONS),
   autonomous_timeout_minutes: autonomousTimeoutMinutesSchema.default(AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES),
+  autonomous_max_starts: autonomousMaxStartsSchema.default(AUTONOMOUS_DEFAULT_MAX_STARTS),
+  autonomous_finalization_minutes: autonomousFinalizationMinutesSchema.default(AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES),
+  autonomous_max_publication_attempts: autonomousMaxPublicationAttemptsSchema.default(AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
   autonomous_state: z.string().nullable().default(null),
   add_screenshots: z.number(),
   verify_feature: z.number(),
@@ -355,6 +358,9 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     autonomousDelivery: row.autonomous_delivery,
     autonomousMaxCorrections: row.autonomous_max_corrections,
     autonomousTimeoutMinutes: row.autonomous_timeout_minutes,
+    autonomousMaxStarts: row.autonomous_max_starts,
+    autonomousFinalizationMinutes: row.autonomous_finalization_minutes,
+    autonomousMaxPublicationAttempts: row.autonomous_max_publication_attempts,
     autonomousState: row.autonomous_state === null ? null : autonomousStateSchema.parse(JSON.parse(row.autonomous_state)),
     addScreenshots: row.add_screenshots === 1,
     verifyFeature: row.verify_feature === 1,

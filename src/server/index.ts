@@ -19,6 +19,7 @@ import { terminalViewportSchema } from "../shared/schemas.ts";
 
 import { AtelierManager } from "./agents/atelierManager.ts";
 import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
+import { createAutonomousSessionGuard } from "./agents/autonomousSessionGuard.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
@@ -282,6 +283,21 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     projectRoot: resourcesRoot,
   }, repoMutex);
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
+  sessionHub.setAutonomousGuardFactory((config) => createAutonomousSessionGuard(store, config.ticketId, "orchestrator"));
+  slotManager.setAutonomousRecovery({
+    quiesce: async (ticketId) => {
+      const results = await Promise.allSettled([
+        delegationManager.quiesceAutonomous(ticketId),
+        sessionHub.closeAutonomous(ticketId),
+        qualityManager.cancel(ticketId),
+      ]);
+      return results.every((result) => result.status === "fulfilled" && result.value !== false)
+        && !delegationManager.hasAutonomousWriters(ticketId) && !qualityManager.hasAutonomousWriters(ticketId)
+        && !sessionHub.hasUnclosedSession(ticketId);
+    },
+    hasWriters: (ticketId) => delegationManager.hasAutonomousWriters(ticketId) || qualityManager.hasAutonomousWriters(ticketId),
+    workspaces: (ticketId) => delegationManager.retainedAutonomousWorkspaces(ticketId),
+  });
   slotManager.setDelegationDrain((ticketId) => delegationManager.drainTicket(ticketId));
   slotManager.setImplementationPlanResume(async (ticket, slotId) => {
     const current = store.getTicket(ticket.id);
@@ -336,6 +352,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     preview: previewManager,
     waitForDelivery: (ticketId) => slotManager.waitForAutonomousDelivery(ticketId),
     acknowledgeDeliveryStop: (ticketId) => slotManager.acknowledgeAutonomousDeliveryStop(ticketId),
+    finalizePartial: (ticketId, reason) => slotManager.publishAutonomousPartial(ticketId, reason),
+    closeWriters: (ticketId) => slotManager.closeAutonomousWork(ticketId),
     onChange: (ticketId) => {
       const ticket = store.getTicket(ticketId);
       if (ticket) clientHub.pushTicket(ticket);
@@ -531,6 +549,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     async teardownSessions() {
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
+      await slotManager.drainAutonomousPublications();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await slotManager.teardownSessions();
@@ -541,6 +560,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     async stop() {
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
+      await slotManager.drainAutonomousPublications();
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await prNotificationMonitor.stop();

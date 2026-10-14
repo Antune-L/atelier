@@ -366,7 +366,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
                 onExpand={() => setPrdOpen(true)}
               />
             )}
-            {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} />}
+            {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} onOpenTerminal={tabs.includes("terminal") ? () => selectTab("terminal") : undefined} />}
             {activeTab === "verification" && <VerificationTab key={current.id} ticket={current} />}
           </div>
           <aside className="w-full shrink-0 space-y-4 border-t border-border px-3 py-3 md:w-56 md:overflow-y-auto md:border-l md:border-t-0">

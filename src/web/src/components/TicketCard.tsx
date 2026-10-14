@@ -4,6 +4,7 @@ import { ExternalLink, GitMerge, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
+import { isAutonomousParentIncomplete } from "@shared/autonomous";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { IMPLEMENTER_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
 import { summarizeSessionCosts } from "@shared/pricing";
@@ -57,6 +58,8 @@ const KIND_LABELS: Record<Ticket["kind"], string> = {
 
 export function ticketDecisionLabel(ticket: Ticket): string | null {
   if (RESOLVED_DECISION_COLUMNS.includes(ticket.column)) return null;
+  if (ticket.autonomousState?.phase === "published_partial") return "Relire la PR partielle et ses réserves";
+  if (ticket.autonomousState?.phase === "publication_failed") return "Reprendre la publication";
   if (ticket.pendingQuestions > 0 || ticket.stage === "awaiting_answers") return "Répondre aux questions";
   if (needsImplementationRecovery(ticket)) return "Examiner la récupération";
   if (ticket.error || ticket.stage === "failed" || ticket.stage === "interrupted" || ticket.stage === "stalled") return "Examiner le blocage";
@@ -74,6 +77,7 @@ export function ticketCostLabel(ticket: Ticket): string {
 }
 
 export function ticketDeliveryLabel(ticket: Ticket): string {
+  if (ticket.autonomousState?.phase === "published_partial") return "PR partielle avec réserves";
   if (ticket.kind === "ask") return "Lecture seule";
   if (ticket.kind === "review") return ticket.postComments ? "Publication sur PR" : "Revue locale";
   if (ticket.kind === "clean") return "Correction de PR";
@@ -91,11 +95,12 @@ function truncateParentTitle(title: string): string {
 
 export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
-  const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null : false;
+  const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null || isAutonomousParentIncomplete(parent) : false;
   const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
-  const state = ticketCardState(ticket);
+  const partial = ticket.autonomousState?.phase === "published_partial" || ticket.autonomousState?.phase === "publication_failed";
+  const state = partial ? "attention" : ticketCardState(ticket);
   const parentTitle = parent?.title ?? "?";
   const dependencyLabel = `${parentBlocked ? "en attente de" : "basé sur"} ${parentTitle}`;
   const decisionLabel = ticketDecisionLabel(ticket);
@@ -162,7 +167,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
             {prNumber !== null ? `PR #${prNumber}` : "PR"}
           </a>
         )}
-        {ticket.column === "done" && ticket.kind === "feature" && onCheckMerge && (
+        {ticket.column === "done" && ticket.kind === "feature" && !partial && onCheckMerge && (
           <button
             type="button"
             disabled={checkingMerge}

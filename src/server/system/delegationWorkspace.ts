@@ -6,7 +6,8 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { z } from "zod";
 
-import type { ImplementationLotOptions, ImplementationRecoveryArchive, ImplementationRecoveryOptions } from "./types.ts";
+import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
+import type { AutonomousWorkspace, AutonomousWorkspaceOptions, ImplementationLotOptions, ImplementationRecoveryArchive, ImplementationRecoveryOptions } from "./types.ts";
 
 interface WorktreeIdentity {
   canonicalPath: string;
@@ -536,6 +537,124 @@ export class DelegationWorkspace {
   private readonly lots = new Map<string, LotSnapshot>();
   private readonly locks = new Map<string, Promise<void>>();
   private readonly cancelled = new Set<string>();
+
+  async listRetained(opts: AutonomousWorkspaceOptions): Promise<AutonomousWorkspace[]> {
+    const canonicalSlot = await realpath(opts.slotPath).catch(() => null);
+    const slotInfo = canonicalSlot ? await lstatIfExists(canonicalSlot) : null;
+    const repoCommon = await this.readCommonDirectory(opts.repoPath);
+    const slotCommon = await this.readCommonDirectory(opts.slotPath);
+    const slotVerified = canonicalSlot !== null && slotInfo?.isDirectory() === true && repoCommon !== null && repoCommon === slotCommon;
+    const canonicalParent = await realpath(dirname(opts.slotPath));
+    const prefix = `${basename(opts.slotPath)}${WORKSPACE_MARKER}`;
+    const identities = new Set<string>();
+    for (const entry of await readdirIfExists(dirname(opts.slotPath))) {
+      if (!entry.startsWith(prefix)) continue;
+      const suffix = entry.slice(prefix.length);
+      const identity = suffix.endsWith(JOURNAL_SUFFIX) ? suffix.slice(0, -JOURNAL_SUFFIX.length) : suffix;
+      if (new RegExp(`^[a-f0-9]{${WORKSPACE_HASH_LENGTH}}$`).test(identity)) identities.add(identity);
+    }
+    const entries: AutonomousWorkspace[] = [];
+    for (const identity of identities) {
+      const cwd = join(dirname(opts.slotPath), `${prefix}${identity}`);
+      const workspaceInfo = await lstatIfExists(cwd);
+      const journalPath = `${cwd}${JOURNAL_SUFFIX}`;
+      const journalInfo = await lstatIfExists(journalPath);
+      const workspaceBound = workspaceInfo?.isDirectory() === true && !workspaceInfo.isSymbolicLink()
+        && dirname(await realpath(cwd)) === canonicalParent;
+      const record: AutonomousWorkspace = { label: null, workspacePath: workspaceBound ? cwd : null, journalPath: journalInfo ? journalPath : null, archivePath: null, status: "unknown", verified: false };
+      if (journalInfo?.isFile() && !journalInfo.isSymbolicLink()) {
+        const parsed = lotJournalSchema.safeParse(safeJsonParse(await readFile(journalPath, "utf8")));
+        if (parsed.success) {
+          const journal = parsed.data;
+          if (journal.ticketId !== opts.ticketId) continue;
+          const expectedPath = workspacePath({ ticketId: journal.ticketId, label: journal.label, cycleId: journal.cycleId, files: journal.files, slotPath: opts.slotPath });
+          const parentMatches = slotVerified && canonicalSlot === journal.canonicalSlot && slotInfo?.dev === journal.slotDevice && slotInfo.ino === journal.slotInode;
+          const childCommon = workspaceInfo?.isDirectory() && !workspaceInfo.isSymbolicLink() ? await this.readCommonDirectory(cwd) : null;
+          const childMatches = workspaceInfo?.isDirectory() === true && !workspaceInfo.isSymbolicLink()
+            && workspaceInfo.dev === journal.workspaceDevice && workspaceInfo.ino === journal.workspaceInode
+            && await realpath(cwd) === resolve(cwd) && childCommon === repoCommon;
+          record.label = journal.label;
+          record.cycleId = journal.cycleId;
+          const currentInfo = await lstatIfExists(cwd);
+          record.verified = parentMatches && childMatches && resolve(expectedPath) === resolve(cwd)
+            && currentInfo?.dev === workspaceInfo?.dev && currentInfo?.ino === workspaceInfo?.ino;
+          if (record.verified) record.status = journal.phase === "integrated" ? "integrated" : "retained";
+        }
+      }
+      if (record.workspacePath || record.journalPath) entries.push(record);
+    }
+    const archiveRoot = join(dirname(opts.slotPath), ARCHIVE_DIRECTORY);
+    const archiveRootInfo = await lstatIfExists(archiveRoot);
+    if (!archiveRootInfo?.isDirectory() || archiveRootInfo.isSymbolicLink()) return this.recheckInventorySlot(entries, canonicalSlot, slotInfo);
+    for (const name of await readdirIfExists(archiveRoot)) {
+      const archivePath = join(archiveRoot, name);
+      const info = await lstatIfExists(archivePath);
+      if (!info?.isDirectory() || info.isSymbolicLink()) continue;
+      const manifestPath = join(archivePath, ARCHIVE_MANIFEST);
+      const manifestInfo = await lstatIfExists(manifestPath);
+      if (!manifestInfo?.isFile() || manifestInfo.isSymbolicLink()) continue;
+      const parsed = archiveManifestSchema.safeParse(safeJsonParse(await readFile(manifestPath, "utf8")));
+      if (!parsed.success || parsed.data.ticketId !== opts.ticketId || resolve(parsed.data.originalSlot) !== resolve(opts.slotPath)) continue;
+      const manifest = parsed.data;
+      const journalPath = join(archivePath, ARCHIVE_JOURNAL);
+      const journalInfo = await lstatIfExists(journalPath);
+      const originalUnderParent = dirname(resolve(manifest.originalWorkspace)) === dirname(resolve(opts.slotPath))
+        && basename(manifest.originalWorkspace).startsWith(prefix)
+        && new RegExp(`^[a-f0-9]{${WORKSPACE_HASH_LENGTH}}$`).test(basename(manifest.originalWorkspace).slice(prefix.length));
+      const originalInfo = originalUnderParent ? await lstatIfExists(manifest.originalWorkspace) : null;
+      const originalBound = originalInfo?.isDirectory() === true && !originalInfo.isSymbolicLink()
+        && dirname(await realpath(manifest.originalWorkspace)) === canonicalParent;
+      const record: AutonomousWorkspace = { label: manifest.label, cycleId: manifest.cycleId, workspacePath: originalBound ? manifest.originalWorkspace : null, journalPath: journalInfo ? journalPath : null, archivePath, status: "unknown", verified: false };
+      if (journalInfo?.isFile() && !journalInfo.isSymbolicLink()) {
+        const journalBytes = await readFile(journalPath);
+        const journalParsed = lotJournalSchema.safeParse(safeJsonParse(journalBytes.toString()));
+        if (journalParsed.success) {
+          const journal = journalParsed.data;
+          const expectedPath = workspacePath({ ticketId: journal.ticketId, label: journal.label, cycleId: journal.cycleId, files: journal.files, slotPath: opts.slotPath });
+          const key = createHash("sha256").update(JSON.stringify([manifest.originalWorkspace, manifest.contentFingerprint, manifest.journalHash, manifest.head])).digest("hex");
+          let intact = false;
+          try {
+            const contentInfo = await lstatIfExists(join(archivePath, ARCHIVE_CONTENT));
+            const contentMatches = manifest.contentFingerprint === null || contentInfo?.isDirectory() === true && !contentInfo.isSymbolicLink()
+              && await archiveFingerprint(join(archivePath, ARCHIVE_CONTENT)) === manifest.contentFingerprint;
+            const bundlePath = join(archivePath, ARCHIVE_BUNDLE);
+            const bundleInfo = await lstatIfExists(bundlePath);
+            const bundle = manifest.head && bundleInfo?.isFile() && !bundleInfo.isSymbolicLink()
+              ? await runBoundedCommand(["git", "bundle", "list-heads", bundlePath, "HEAD"], opts.repoPath) : null;
+            const bundleMatches = manifest.head === null || bundle !== null && bundle.exitCode === 0 && !bundle.timedOut && bundle.stdout.trim() === `${manifest.head} HEAD`;
+            intact = contentMatches && bundleMatches;
+          } catch {
+            intact = false;
+          }
+          record.verified = slotVerified && canonicalSlot === journal.canonicalSlot && slotInfo?.dev === journal.slotDevice && slotInfo.ino === journal.slotInode
+            && journal.ticketId === manifest.ticketId && journal.label === manifest.label && journal.cycleId === manifest.cycleId
+            && resolve(expectedPath) === resolve(manifest.originalWorkspace) && basename(archivePath) === key
+            && manifest.journalHash === createHash("sha256").update(journalBytes).digest("hex") && intact;
+          if (record.verified) record.status = "archived";
+        }
+      }
+      entries.push(record);
+    }
+    return this.recheckInventorySlot(entries, canonicalSlot, slotInfo);
+  }
+
+  private async recheckInventorySlot(entries: AutonomousWorkspace[], canonicalSlot: string | null, slotInfo: Stats | null): Promise<AutonomousWorkspace[]> {
+    const currentSlotInfo = canonicalSlot ? await lstatIfExists(canonicalSlot) : null;
+    if (currentSlotInfo?.dev !== slotInfo?.dev || currentSlotInfo?.ino !== slotInfo?.ino) {
+      return entries.map((entry) => ({ ...entry, status: "unknown", verified: false }));
+    }
+    return entries;
+  }
+
+  private async readCommonDirectory(cwd: string): Promise<string | null> {
+    try {
+      const result = await runBoundedCommand(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd);
+      if (result.exitCode !== 0 || result.timedOut || !result.stdout.trim()) return null;
+      return await realpath(result.stdout.trim());
+    } catch {
+      return null;
+    }
+  }
 
   private async withSlotLock<T>(slotPath: string, action: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(slotPath) ?? Promise.resolve();

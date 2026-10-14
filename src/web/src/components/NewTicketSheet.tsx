@@ -1,7 +1,7 @@
 import { MessageSquare } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES } from "@shared/autonomous";
+import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS } from "@shared/autonomous";
 import { isNotionUrl } from "@shared/notion";
 import type { ProjectInfo } from "@shared/schemas";
 
@@ -75,7 +75,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   const [optionsKey, setOptionsKey] = useState(0);
   // A cloud host refuses auto-merge, direct push and merge delivery: force them off, not only hide them.
   const { prOnly } = useCapabilities();
-  const [autonomousChoice, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
+  const [autonomousChoice, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousMaxStarts: AUTONOMOUS_DEFAULT_MAX_STARTS, autonomousFinalizationMinutes: AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, autonomousMaxPublicationAttempts: AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS });
   const autonomousOptions = prOnlyAutonomousOptions(autonomousChoice, prOnly);
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
@@ -132,7 +132,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     setImportingNotion(false);
     clearDescription();
     setBaseBranchChoice(null);
-    setAutonomousOptions({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES });
+    setAutonomousOptions({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousMaxStarts: AUTONOMOUS_DEFAULT_MAX_STARTS, autonomousFinalizationMinutes: AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, autonomousMaxPublicationAttempts: AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS });
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);

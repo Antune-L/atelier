@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
-import type { AutonomousDelivery, AutonomousState } from "../../shared/autonomous.ts";
+import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, serializeAutonomousState, AutonomousExecutionError, autonomousResumeSchema, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, AUTONOMOUS_MAX_SAME_FAILURE_REPAIRS, AUTONOMOUS_MINUTE_MS, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
+import type { AutonomousDelivery, AutonomousState, AutonomousStartKind, AutonomousResumeInput } from "../../shared/autonomous.ts";
 
 import {
   AUTO_MERGE_RESOLVE_EVENT,
@@ -157,6 +157,9 @@ export interface NewTicket {
   autonomousDelivery?: AutonomousDelivery | null;
   autonomousMaxCorrections?: number;
   autonomousTimeoutMinutes?: number;
+  autonomousMaxStarts?: number;
+  autonomousFinalizationMinutes?: number;
+  autonomousMaxPublicationAttempts?: number;
   addScreenshots: boolean;
   verifyFeature: boolean;
   argusMultiLoop: boolean;
@@ -391,6 +394,9 @@ export interface TicketPatch {
   autonomousDelivery?: AutonomousDelivery | null;
   autonomousMaxCorrections?: number;
   autonomousTimeoutMinutes?: number;
+  autonomousMaxStarts?: number;
+  autonomousFinalizationMinutes?: number;
+  autonomousMaxPublicationAttempts?: number;
   autonomousState?: AutonomousState | null;
   addScreenshots?: boolean;
   verifyFeature?: boolean;
@@ -572,6 +578,202 @@ export class ProjectInUseError extends Error {
 }
 
 export class Store {
+  private readonly autonomousListeners = new Map<string, Set<() => void>>();
+
+  subscribeAutonomousExecution(ticketId: string, listener: () => void): () => void {
+    const listeners = this.autonomousListeners.get(ticketId) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.autonomousListeners.set(ticketId, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.autonomousListeners.delete(ticketId);
+    };
+  }
+
+  private notifyAutonomousExecution(ticketId: string): void {
+    for (const listener of this.autonomousListeners.get(ticketId) ?? []) listener();
+  }
+
+  ensureAutonomousExecution(ticketId: string, now = Date.now()): AutonomousState | null {
+    return this.transaction(() => {
+      const ticket = this.getTicket(ticketId);
+      if (!ticket?.autonomous) return null;
+      if (ticket.autonomousState?.execution) return ticket.autonomousState;
+      const deadlineAt = now + (ticket.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES) * AUTONOMOUS_MINUTE_MS;
+      const state = autonomousStateSchema.parse({
+        phase: "planning", plan: null, acceptanceSnapshotId: null, functionalSnapshotId: null,
+        revision: null, fullRunId: null, previewRunId: null, previewId: null,
+        startedAt: now, deadlineAt, corrections: 0, error: null,
+        ...ticket.autonomousState,
+        execution: {
+          version: 1, generation: 0,
+          maxStarts: ticket.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS,
+          starts: [], deadlineAt: ticket.autonomousState?.deadlineAt ?? deadlineAt,
+          maxCorrections: ticket.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS,
+          maxEnvironmentRetries: AUTONOMOUS_MAX_ENVIRONMENT_RETRIES,
+          maxSameFailureRepairs: AUTONOMOUS_MAX_SAME_FAILURE_REPAIRS,
+          workRevokedAt: null, revocationReason: null, userStopRequestedAt: null, finalizationStartedAt: null, finalizationDeadlineAt: null,
+          finalizationMinutes: ticket.autonomousFinalizationMinutes ?? AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES,
+          maxPublicationAttempts: ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS,
+          publicationAttempts: 0,
+          closure: { status: "not_requested", requestedAt: null, confirmedAt: null, retention: "retained" },
+          publication: { status: "none", candidatePrUrl: null, prUrl: null, revision: null, bodyConfirmed: false, error: null },
+        },
+      });
+      this.updateTicket(ticketId, { autonomousState: state });
+      this.logEvent(ticketId, "autonomous_execution_initialized", { legacyStateAdopted: ticket.autonomousState !== null && ticket.autonomousState !== undefined, deadlineAt: state.execution?.deadlineAt });
+      return state;
+    });
+  }
+
+  assertAutonomousWork(ticketId: string, now = Date.now()): void {
+    const execution = this.getTicket(ticketId)?.autonomousState?.execution;
+    if (!execution) return;
+    if (execution.workRevokedAt !== null || execution.userStopRequestedAt !== null) throw new AutonomousExecutionError("revoked");
+    if (now >= execution.deadlineAt) {
+      this.beginAutonomousFinalization(ticketId, "deadline", now);
+      throw new AutonomousExecutionError("deadline");
+    }
+  }
+
+  admitAutonomousStart(ticketId: string, actionId: string, kind: AutonomousStartKind, now = Date.now()): boolean {
+    this.assertAutonomousWork(ticketId, now);
+    const refused = this.transaction(() => {
+      const state = this.getTicket(ticketId)?.autonomousState;
+      if (!state?.execution) return "admitted";
+      if (state.execution.starts.some((start) => start.actionId === actionId)) return "duplicate";
+      if (state.execution.closure.status === "requested" || state.execution.closure.status === "unknown") throw new AutonomousExecutionError("revoked");
+      if (state.execution.starts.length >= state.execution.maxStarts) {
+        this.beginAutonomousFinalization(ticketId, "starts_exhausted", now);
+        return "refused";
+      }
+      this.updateTicket(ticketId, { autonomousState: autonomousStateSchema.parse({ ...state, execution: { ...state.execution, closure: { ...state.execution.closure, status: "not_requested" }, starts: [...state.execution.starts, { actionId, kind, startedAt: now }] } }) });
+      return "admitted";
+    });
+    if (refused === "refused") throw new AutonomousExecutionError("starts_exhausted");
+    return refused === "admitted";
+  }
+
+  beginAutonomousFinalization(ticketId: string, reason: string, now = Date.now()): AutonomousState | null {
+    return this.transaction(() => {
+      const state = this.getTicket(ticketId)?.autonomousState;
+      if (!state?.execution) return state ?? null;
+      const execution = state.execution;
+      if (execution.workRevokedAt !== null) return state;
+      const next = autonomousStateSchema.parse({ ...state, phase: "closing", execution: {
+        ...execution, workRevokedAt: execution.workRevokedAt ?? now,
+        revocationReason: execution.revocationReason ?? reason,
+        finalizationStartedAt: execution.finalizationStartedAt ?? now,
+        finalizationDeadlineAt: execution.finalizationDeadlineAt ?? now + execution.finalizationMinutes * AUTONOMOUS_MINUTE_MS,
+      } });
+      this.updateTicket(ticketId, { autonomousState: next });
+      return next;
+    });
+  }
+
+  cancelAutonomousExecution(ticketId: string, now = Date.now()): AutonomousState | null {
+    return this.transaction(() => {
+      const state = this.beginAutonomousFinalization(ticketId, "user_cancelled", now);
+      if (!state?.execution) return state;
+      const next = autonomousStateSchema.parse({ ...state, execution: { ...state.execution, userStopRequestedAt: now } });
+      this.updateTicket(ticketId, { autonomousState: next });
+      return next;
+    });
+  }
+
+  admitAutonomousPublication(ticketId: string, now = Date.now()): boolean {
+    return this.transaction(() => {
+      const state = this.getTicket(ticketId)?.autonomousState;
+      if (!state?.execution) return true;
+      const execution = state.execution;
+      if (execution.userStopRequestedAt !== null) throw new AutonomousExecutionError("revoked");
+      if (execution.finalizationDeadlineAt === null || now >= execution.finalizationDeadlineAt) throw new AutonomousExecutionError("finalization_expired");
+      if (execution.publicationAttempts >= execution.maxPublicationAttempts) throw new AutonomousExecutionError("publication_exhausted");
+      this.updateTicket(ticketId, { autonomousState: { ...state, phase: "publishing_partial", execution: { ...execution, publicationAttempts: execution.publicationAttempts + 1 } } });
+      return true;
+    });
+  }
+
+  resumeAutonomousExecution(ticketId: string, now = Date.now()): AutonomousState {
+    return this.transaction(() => {
+      const ticket = this.getTicket(ticketId);
+      if (!ticket?.autonomous) throw new Error("An autonomous ticket is required to resume execution");
+      if (ticket.archived || ticket.column === "abandoned") throw new Error("Archived or abandoned tickets cannot resume autonomous execution");
+      const state = ticket.autonomousState;
+      if (!state?.execution) throw new Error("Initialize the autonomous execution policy before resuming work");
+      const execution = state.execution;
+      if (execution.closure.status !== "confirmed") throw new Error("Previous writer closure must be confirmed before resuming execution");
+      if (state.hostMutation !== null || state.deliveryConfirmation !== null) throw new Error("Reconcile host mutation or delivery confirmation before resuming execution");
+      if (now >= execution.deadlineAt || execution.starts.length >= execution.maxStarts) throw new Error("No remaining execution allowance; an explicit additional allowance is required");
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
+        ...execution, generation: execution.generation + 1,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null,
+        publication: {
+          ...execution.publication,
+          status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
+          bodyConfirmed: false,
+        },
+      } });
+      this.updateTicket(ticketId, { autonomousState: next });
+      this.logEvent(ticketId, "autonomous_execution_resumed", { generation: next.execution?.generation });
+      return next;
+    });
+  }
+
+  extendAutonomousExecution(ticketId: string, input: AutonomousResumeInput, now = Date.now()): AutonomousState | null {
+    const grant = autonomousResumeSchema.parse(input);
+    return this.transaction(() => {
+      const ticket = this.getTicket(ticketId);
+      if (!ticket?.autonomous) throw new Error("An autonomous ticket is required for an execution grant");
+      if (ticket.archived || ticket.column === "abandoned") throw new Error("Archived or abandoned tickets cannot receive execution grants");
+      const state = ticket.autonomousState;
+      if (!state?.execution) throw new Error("Initialize the autonomous execution policy before granting additional work");
+      const execution = state.execution;
+      if (execution.closure.status === "requested" || execution.closure.status === "unknown") throw new Error("Previous writer closure must be confirmed before an execution grant");
+      if (execution.workRevokedAt !== null && execution.closure.status !== "confirmed") throw new Error("Previous writer closure must be confirmed before an execution grant");
+      if (grant.action === "publish") {
+        if (execution.closure.status !== "confirmed") throw new Error("Writer closure must be confirmed before a publication grant");
+        const next = autonomousStateSchema.parse({ ...state, phase: "closing", execution: {
+          ...execution,
+          generation: execution.generation + 1,
+          workRevokedAt: execution.workRevokedAt ?? now,
+          revocationReason: "user_publication_requested",
+          userStopRequestedAt: null,
+          publication: {
+            ...execution.publication,
+            status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
+            bodyConfirmed: false,
+          },
+          finalizationStartedAt: now,
+          finalizationDeadlineAt: now + execution.finalizationMinutes * AUTONOMOUS_MINUTE_MS,
+          maxPublicationAttempts: execution.publicationAttempts + (ticket.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS),
+        } });
+        this.updateTicket(ticketId, { autonomousState: next });
+        this.logEvent(ticketId, "autonomous_execution_grant", grant);
+        return next;
+      }
+      if (grant.additionalStarts === undefined && grant.additionalMinutes === undefined && grant.additionalCorrections === undefined) throw new Error("An explicit bounded work grant is required");
+      const deadlineAt = Math.max(now, execution.deadlineAt) + (grant.additionalMinutes ?? 0) * AUTONOMOUS_MINUTE_MS;
+      if (deadlineAt <= now) throw new Error("The work grant must provide a future deadline");
+      if (execution.starts.length >= execution.maxStarts + (grant.additionalStarts ?? 0)) throw new Error("The work grant must provide additional starts");
+      const next = autonomousStateSchema.parse({ ...state, phase: "planning", execution: {
+        ...execution, generation: execution.generation + 1,
+        maxStarts: execution.maxStarts + (grant.additionalStarts ?? 0),
+        maxCorrections: execution.maxCorrections + (grant.additionalCorrections ?? 0),
+        deadlineAt,
+        workRevokedAt: null, revocationReason: null, userStopRequestedAt: null,
+        publication: {
+          ...execution.publication,
+          status: execution.publication.candidatePrUrl !== null || execution.publication.prUrl !== null ? "candidate" : "none",
+          bodyConfirmed: false,
+        },
+      } });
+      this.updateTicket(ticketId, { autonomousState: next });
+      this.logEvent(ticketId, "autonomous_execution_grant", grant);
+      return next;
+    });
+  }
+
   constructor(private readonly db: Database) {}
 
   listPrNotifications(): PrNotification[] {
@@ -1174,6 +1376,9 @@ export class Store {
   }
 
   createTicket(input: NewTicket): Ticket {
+    const autonomousMaxStarts = autonomousMaxStartsSchema.parse(input.autonomousMaxStarts ?? AUTONOMOUS_DEFAULT_MAX_STARTS);
+    const autonomousFinalizationMinutes = autonomousFinalizationMinutesSchema.parse(input.autonomousFinalizationMinutes ?? AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES);
+    const autonomousMaxPublicationAttempts = autonomousMaxPublicationAttemptsSchema.parse(input.autonomousMaxPublicationAttempts ?? AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS);
     const autonomousMaxCorrections = autonomousMaxCorrectionsSchema.parse(input.autonomousMaxCorrections ?? AUTONOMOUS_DEFAULT_MAX_CORRECTIONS);
     const autonomousTimeoutMinutes = autonomousTimeoutMinutesSchema.parse(input.autonomousTimeoutMinutes ?? AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES);
     const autonomousDelivery = autonomousDeliverySchema.nullable().parse(input.autonomousDelivery ?? null);
@@ -1226,6 +1431,7 @@ export class Store {
         autonomousMaxCorrections,
         autonomousTimeoutMinutes,
       );
+    this.updateTicket(id, { autonomousMaxStarts, autonomousFinalizationMinutes, autonomousMaxPublicationAttempts });
     return this.finalizeCreate(id, "createTicket", { title: input.title });
   }
 
@@ -1377,7 +1583,10 @@ export class Store {
     if (patch.autonomousDelivery !== undefined) set("autonomous_delivery", autonomousDeliverySchema.nullable().parse(patch.autonomousDelivery));
     if (patch.autonomousMaxCorrections !== undefined) set("autonomous_max_corrections", autonomousMaxCorrectionsSchema.parse(patch.autonomousMaxCorrections));
     if (patch.autonomousTimeoutMinutes !== undefined) set("autonomous_timeout_minutes", autonomousTimeoutMinutesSchema.parse(patch.autonomousTimeoutMinutes));
-    if (patch.autonomousState !== undefined) set("autonomous_state", patch.autonomousState === null ? null : JSON.stringify(autonomousStateSchema.parse(patch.autonomousState)));
+    if (patch.autonomousMaxStarts !== undefined) set("autonomous_max_starts", autonomousMaxStartsSchema.parse(patch.autonomousMaxStarts));
+    if (patch.autonomousFinalizationMinutes !== undefined) set("autonomous_finalization_minutes", autonomousFinalizationMinutesSchema.parse(patch.autonomousFinalizationMinutes));
+    if (patch.autonomousMaxPublicationAttempts !== undefined) set("autonomous_max_publication_attempts", autonomousMaxPublicationAttemptsSchema.parse(patch.autonomousMaxPublicationAttempts));
+    if (patch.autonomousState !== undefined) set("autonomous_state", patch.autonomousState === null ? null : serializeAutonomousState(patch.autonomousState));
     if (patch.addScreenshots !== undefined) set("add_screenshots", patch.addScreenshots ? 1 : 0);
     if (patch.verifyFeature !== undefined) set("verify_feature", patch.verifyFeature ? 1 : 0);
     if (patch.argusMultiLoop !== undefined) set("argus_multi_loop", patch.argusMultiLoop ? 1 : 0);
@@ -1454,6 +1663,7 @@ export class Store {
 
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error(`updateTicket: ticket ${id} not found`);
+    if (patch.autonomousState !== undefined || patch.autonomous !== undefined) this.notifyAutonomousExecution(id);
     return ticket;
   }
 
@@ -1522,6 +1732,7 @@ export class Store {
       }
     });
     tx();
+    this.notifyAutonomousExecution(ticketId);
   }
 
   // ---- Profiles (implementation-agent presets) ----

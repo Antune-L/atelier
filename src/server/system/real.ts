@@ -19,7 +19,7 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
+import { BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
@@ -57,8 +57,11 @@ import {
 import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
+  AutonomousWorkspace,
+  AutonomousWorkspaceOptions,
   DoneGateResult,
   CreatePrOptions,
+  PrMutationOptions,
   MergePrExpectation,
   GitWorktreeAddOptions,
   ImplementationLotOptions,
@@ -160,6 +163,7 @@ const COMPOSER_BINARIES = ["cursor-agent", "agent"] as const;
 const COMPOSER_PROBE_TIMEOUT_MS = 10_000;
 /** fetch/push/pull/ls-remote used to run unbounded; keep a generous ceiling now that they are bounded. */
 const NETWORK_GIT_TIMEOUT_MS = 10 * 60 * 1000;
+const AUTONOMOUS_CANDIDATE_COMMIT_MESSAGE = "chore: preserve autonomous candidate";
 const GH_BINARY_NAME = "gh";
 
 /** Network git under the cwd's project GitHub account (machine default when unattached). */
@@ -344,6 +348,10 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async finishImplementationLot(opts: ImplementationLotOptions): Promise<void> {
     await this.delegationWorkspace.finish(opts);
+  }
+
+  listAutonomousWorkspaces(opts: AutonomousWorkspaceOptions): Promise<AutonomousWorkspace[]> {
+    return this.delegationWorkspace.listRetained(opts);
   }
 
   preserveImplementationRecovery(opts: ImplementationRecoveryOptions): Promise<ImplementationRecoveryArchive[]> {
@@ -930,7 +938,7 @@ export class RealSystemAdapter implements SystemAdapter {
     const baseExists = await networkGit(["-C", slotPath, "ls-remote", "--heads", "origin", baseBranch], slotPath);
     if (baseExists.exitCode !== 0 || baseExists.timedOut || baseExists.stdout.trim().length === 0) {
       if (opts.requireExistingBase) return { ok: false, url: "", reason: "Autonomous delivery requires an existing remote target branch." };
-      const push = await networkGit(["-C", slotPath, "push", "origin", `HEAD:refs/heads/${baseBranch}`], slotPath, { verifyIdentity: true });
+      const push = await networkGit(["-C", slotPath, "push", "origin", `HEAD:refs/heads/${baseBranch}`], slotPath, { verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
       if (push.exitCode !== 0 || push.timedOut) {
         return { ok: false, url: "", reason: `création de la branche de base ${baseBranch} échouée : ${boundedCommandDetail(push)}` };
       }
@@ -942,8 +950,105 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcs(provider).fetchPrSummary(slotPath, prUrl);
   }
 
-  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider): Promise<DoneGateResult> {
-    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform);
+  async readAutonomousBranchHead(slotPath: string, branch: string): Promise<ReviewHeadResult> {
+    const ref = `refs/heads/${branch}`;
+    const result = await networkGit(["ls-remote", "--heads", "origin", ref], slotPath);
+    const lines = result.stdout.trim().split("\n");
+    const fields = lines[0]?.split("\t");
+    if (result.exitCode !== 0 || result.timedOut || lines.length !== 1 || fields?.[1] !== ref || !fields[0]) {
+      return { ok: false, reason: "Remote candidate branch head could not be confirmed.", commitSha: null };
+    }
+    return { ok: true, reason: "", commitSha: fields[0] };
+  }
+
+  async verifyAutonomousWorkspace(slotPath: string, repoPath: string, branch: string): Promise<DoneGateResult> {
+    const parent = await runBoundedCommand(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], repoPath);
+    const child = await runBoundedCommand(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], slotPath);
+    const current = await runBoundedCommand(["git", "branch", "--show-current"], slotPath);
+    const parentOrigin = await runBoundedCommand(["git", "config", "--get", "remote.origin.url"], repoPath);
+    const childOrigin = await runBoundedCommand(["git", "config", "--get", "remote.origin.url"], slotPath);
+    if ([parent, child, current, parentOrigin, childOrigin].some((result) => result.exitCode !== 0 || result.timedOut)
+      || !parentOrigin.stdout.trim() || parentOrigin.stdout.trim() !== childOrigin.stdout.trim()
+      || current.stdout.trim() !== branch || realpathSync(parent.stdout.trim()) !== realpathSync(child.stdout.trim())) {
+      return { ok: false, reason: "Autonomous worktree repository, origin or branch ownership could not be confirmed." };
+    }
+    return { ok: true, reason: "" };
+  }
+
+  async prepareAutonomousCandidate(slotPath: string, opts: PrMutationOptions): Promise<ReviewHeadResult> {
+    const status = await runBoundedCommand(["git", "status", "--porcelain"], slotPath);
+    if (status.exitCode !== 0 || status.timedOut) return { ok: false, reason: "Candidate working tree could not be read.", commitSha: null };
+    if (status.stdout.trim().length > 0) {
+      if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before candidate staging.", commitSha: null };
+      if (opts.workspace) {
+        const ownership = await this.verifyAutonomousWorkspace(slotPath, opts.workspace.repoPath, opts.workspace.branch);
+        if (!ownership.ok) return { ok: false, reason: ownership.reason, commitSha: null };
+      }
+      opts.assertCurrent?.();
+      const staged = await runBoundedCommand(["git", "add", "--all"], slotPath, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
+      if (staged.exitCode !== 0 || staged.timedOut) return { ok: false, reason: `Candidate staging failed: ${boundedCommandDetail(staged)}`, commitSha: null };
+      const diff = await runBoundedCommand(["git", "diff", "--cached", "--quiet"], slotPath);
+      if (diff.timedOut || diff.exitCode !== 1) return { ok: false, reason: "Candidate has no confirmed staged changes.", commitSha: null };
+      if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before candidate commit.", commitSha: null };
+      if (opts.workspace) {
+        const ownership = await this.verifyAutonomousWorkspace(slotPath, opts.workspace.repoPath, opts.workspace.branch);
+        if (!ownership.ok) return { ok: false, reason: ownership.reason, commitSha: null };
+      }
+      opts.assertCurrent?.();
+      const committed = await runBoundedCommand(["git", "commit", "-m", AUTONOMOUS_CANDIDATE_COMMIT_MESSAGE], slotPath, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
+      if (committed.exitCode !== 0 || committed.timedOut) return { ok: false, reason: `Candidate commit failed: ${boundedCommandDetail(committed)}`, commitSha: null };
+    }
+    const finalStatus = await runBoundedCommand(["git", "status", "--porcelain"], slotPath);
+    const head = await runBoundedCommand(["git", "rev-parse", "--verify", "HEAD"], slotPath);
+    if (finalStatus.exitCode !== 0 || finalStatus.timedOut || finalStatus.stdout.trim().length > 0
+      || head.exitCode !== 0 || head.timedOut || head.stdout.trim().length === 0) {
+      return { ok: false, reason: "Candidate commit and clean working tree could not be confirmed.", commitSha: null };
+    }
+    if (opts.workspace) {
+      const ownership = await this.verifyAutonomousWorkspace(slotPath, opts.workspace.repoPath, opts.workspace.branch);
+      if (!ownership.ok) return { ok: false, reason: ownership.reason, commitSha: null };
+    }
+    opts.assertCurrent?.();
+    return { ok: true, reason: "", commitSha: head.stdout.trim() };
+  }
+
+  async pushAutonomousCandidate(slotPath: string, branch: string, opts: PrMutationOptions): Promise<DoneGateResult> {
+    const ref = `refs/heads/${branch}`;
+    const valid = await runBoundedCommand(["git", "check-ref-format", ref], slotPath);
+    const head = await runBoundedCommand(["git", "rev-parse", "--verify", "HEAD"], slotPath);
+    if (valid.exitCode !== 0 || valid.timedOut || head.exitCode !== 0 || head.timedOut || head.stdout.trim().length === 0) {
+      return { ok: false, reason: "Candidate branch and commit could not be confirmed before push." };
+    }
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before candidate push." };
+    if (opts.workspace) {
+      const ownership = await this.verifyAutonomousWorkspace(slotPath, opts.workspace.repoPath, opts.workspace.branch);
+      if (!ownership.ok) return ownership;
+      if (opts.workspace.commitSha && head.stdout.trim() !== opts.workspace.commitSha) return { ok: false, reason: "The candidate commit changed before push." };
+    }
+    opts.assertCurrent?.();
+    const timeoutMs = opts.deadlineAt === undefined ? NETWORK_GIT_TIMEOUT_MS : Math.min(NETWORK_GIT_TIMEOUT_MS, opts.deadlineAt - Date.now());
+    if (timeoutMs <= 0) return { ok: false, reason: "Autonomous delivery deadline expired before candidate push." };
+    const push = await networkGit(["push", "origin", `${head.stdout.trim()}:${ref}`], slotPath, { verifyIdentity: true, timeoutMs, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
+    if (push.exitCode !== 0 || push.timedOut) return { ok: false, reason: `Candidate push failed: ${boundedCommandDetail(push)}` };
+    const confirmationTimeoutMs = opts.deadlineAt === undefined ? NETWORK_GIT_TIMEOUT_MS : Math.min(NETWORK_GIT_TIMEOUT_MS, opts.deadlineAt - Date.now());
+    if (confirmationTimeoutMs <= 0) return { ok: false, reason: "Autonomous delivery deadline expired before candidate push readback." };
+    const remote = await networkGit(["ls-remote", "--heads", "origin", ref], slotPath, { timeoutMs: confirmationTimeoutMs });
+    const expected = `${head.stdout.trim()}\t${ref}`;
+    if (remote.exitCode !== 0 || remote.timedOut || remote.stdout.trim() !== expected) return { ok: false, reason: "Pushed candidate commit could not be confirmed on the remote branch." };
+    opts.assertCurrent?.();
+    return { ok: true, reason: "" };
+  }
+
+  async readPrBody(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
+    return this.vcs(provider).readPrBody(slotPath, prUrl);
+  }
+
+  async convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {
+    return this.vcs(provider).convertPrToDraft(slotPath, prUrl, opts);
+  }
+
+  async updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {
+    return this.vcs(provider).updatePrBody(slotPath, prUrl, transform, opts);
   }
 
   async verifyReviewDone(

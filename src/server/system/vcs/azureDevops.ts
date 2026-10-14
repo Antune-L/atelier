@@ -18,11 +18,13 @@ import { parsePrUrl } from "../../../shared/prUrl.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 
-import { boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
+import { BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand, safeJsonParse, withJsonRequestFile } from "../boundedCommand.ts";
 import { renderOutsideDiffSection } from "../reviewMarkdown.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../types.ts";
 import type {
   DoneGateResult,
+  CreatePrOptions,
+  PrMutationOptions,
   MergePrExpectation,
   PublishReviewOptions,
   PublishReviewResult,
@@ -187,9 +189,11 @@ const azurePrShowSchema = z.object({
   mergeStatus: z.string().nullable().default(null),
   sourceRefName: z.string(),
   description: z.string().nullable().default(null),
+  isDraft: z.boolean().optional(),
   lastMergeSourceCommit: z.object({ commitId: z.string().min(1) }).nullable().default(null),
   repository: z.object({
     id: z.string().min(1),
+    name: z.string().optional(),
     project: z.object({ name: z.string().min(1) }).nullable().default(null),
   }).nullable().default(null),
 });
@@ -518,19 +522,21 @@ export class AzureDevopsVcsClient implements VcsClient {
     return pr.ok ? pr.data.sourceRefName : null;
   }
 
-  async createPr(cwd: string, baseBranch: string, opts: { draft: boolean }): Promise<CreatePrResult> {
+  async createPr(cwd: string, baseBranch: string, opts: CreatePrOptions): Promise<CreatePrResult> {
     const ref = await repoRefFromRemote(cwd);
     if (ref === null) return { ok: false, url: "", reason: "création de PR : remote origin Azure DevOps introuvable" };
-    const sourceBranch = await this.currentBranch(cwd);
+    const sourceBranch = opts.headBranch ?? await this.currentBranch(cwd);
     if (sourceBranch === null) return { ok: false, url: "", reason: "branche courante introuvable pour la création de PR" };
     // `az repos pr create` has no `--fill`: derive the title and the description from the commits,
     // the way `gh pr create --fill` does.
     const subjects = await this.commitSubjects(cwd, baseBranch);
-    if (subjects.length === 0) {
+    if (subjects.length === 0 && opts.title === undefined) {
       return { ok: false, url: "", reason: `aucun commit entre origin/${baseBranch} et HEAD : rien à proposer en PR` };
     }
-    const title = subjects[subjects.length - 1] ?? sourceBranch;
-    const description = subjects.map((subject) => `- ${subject}`);
+    const title = opts.title ?? subjects[subjects.length - 1] ?? sourceBranch;
+    const description = opts.body === undefined ? subjects.map((subject) => `- ${subject}`) : [opts.body];
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, url: "", reason: "Autonomous delivery deadline expired before pull request creation." };
+    opts.assertCurrent?.();
     const res = await runBoundedCommand(
       [
         ...this.repoArgs(ref, ["repos", "pr", "create"]),
@@ -541,6 +547,7 @@ export class AzureDevopsVcsClient implements VcsClient {
         "--draft", String(opts.draft),
       ],
       cwd,
+      { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) },
     );
     if (res.exitCode !== 0 || res.timedOut) {
       return { ok: false, url: "", reason: `az repos pr create a échoué : ${boundedCommandDetail(res)}` };
@@ -559,13 +566,43 @@ export class AzureDevopsVcsClient implements VcsClient {
     return body.length > 0 ? body : null;
   }
 
-  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string): Promise<DoneGateResult> {
-    const target = repoRefFromPrUrl(prUrl);
-    if (target === null) return { ok: false, reason: "URL de PR Azure DevOps invalide" };
+  async readPrBody(cwd: string, prUrl: string): Promise<string | null> {
     const pr = await this.showPr(cwd, prUrl);
-    if (!pr.ok) return { ok: false, reason: "description de la PR Azure DevOps illisible" };
-    const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", transform(pr.data.description ?? "")]), cwd);
-    if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: `az repos pr update a échoué : ${boundedCommandDetail(res)}` };
+    const target = repoRefFromPrUrl(prUrl);
+    if (!pr.ok || target === null || pr.data.repository?.name?.toLowerCase() !== target.ref.repository.toLowerCase()
+      || pr.data.repository.project?.name.toLowerCase() !== target.ref.project.toLowerCase()) return null;
+    return pr.data.description ?? "";
+  }
+
+  async convertPrToDraft(cwd: string, prUrl: string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    const target = repoRefFromPrUrl(prUrl);
+    const pr = await this.showPr(cwd, prUrl);
+    if (target === null || !pr.ok || pr.data.isDraft === undefined
+      || pr.data.repository?.name?.toLowerCase() !== target.ref.repository.toLowerCase()
+      || pr.data.repository.project?.name.toLowerCase() !== target.ref.project.toLowerCase()) return { ok: false, reason: "Pull request identity and draft state could not be read." };
+    if (pr.data.isDraft) return { ok: true, reason: "" };
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before draft conversion." };
+    opts.assertCurrent?.();
+    const result = await runBoundedCommand(this.prUpdateArgs(target, ["--draft", "true"]), cwd, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
+    if (result.exitCode !== 0 || result.timedOut) return { ok: false, reason: `Draft conversion failed: ${boundedCommandDetail(result)}` };
+    const confirmation = await this.showPr(cwd, prUrl);
+    if (!confirmation.ok || confirmation.data.isDraft !== true
+      || confirmation.data.repository?.name?.toLowerCase() !== target.ref.repository.toLowerCase()
+      || confirmation.data.repository.project?.name.toLowerCase() !== target.ref.project.toLowerCase()) return { ok: false, reason: "Draft conversion readback did not confirm the requested pull request." };
+    return { ok: true, reason: "" };
+  }
+
+  async updatePrBody(cwd: string, prUrl: string, transform: (body: string) => string, opts: PrMutationOptions = {}): Promise<DoneGateResult> {
+    const target = repoRefFromPrUrl(prUrl);
+    if (target === null) return { ok: false, reason: "Invalid Azure DevOps pull request URL." };
+    const body = await this.readPrBody(cwd, prUrl);
+    if (body === null) return { ok: false, reason: "Pull request description and identity could not be read." };
+    const expectedBody = transform(body);
+    if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before description update." };
+    opts.assertCurrent?.();
+    const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", expectedBody]), cwd, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });
+    if (res.exitCode !== 0 || res.timedOut) return { ok: false, reason: `Pull request description update failed: ${boundedCommandDetail(res)}` };
+    if (await this.readPrBody(cwd, prUrl) !== expectedBody) return { ok: false, reason: "Pull request description readback did not match the requested body." };
     return { ok: true, reason: "" };
   }
 

@@ -21,6 +21,7 @@ import { TranscriptBuffer } from "./transcriptBuffer.ts";
 import { createLogger } from "../logger.ts";
 import type {
   AgentPermissionMode,
+  AgentExecutionGuard,
   AgentSessionEvent,
   AgentSessionHandle,
   AgentSessionRole,
@@ -34,6 +35,7 @@ const log = createLogger("session-hub");
 
 /** Everything the hub needs to start one agent session; built per ticket kind by the slot manager. */
 export interface SessionStartConfig {
+  executionGuard?: AgentExecutionGuard;
   ticketId: string;
   slotId: number;
   cwd: string;
@@ -185,6 +187,7 @@ export interface SessionHandlerError {
 }
 
 interface LiveSession {
+  executionGuard: AgentExecutionGuard | null;
   handle: AgentSessionHandle | null;
   slotId: number;
   sessionId: string | null;
@@ -308,6 +311,9 @@ export function renderSessionEvent(event: AgentSessionEvent, messageChannel?: Ch
 export class SessionHub {
   private readonly sessions = new Map<string, LiveSession>();
   private readonly closingSessions = new Set<Promise<void>>();
+  private readonly autonomousClosures = new Map<string, Promise<boolean>>();
+  private readonly unclosedAutonomousSessions = new Set<string>();
+  private autonomousGuardFactory: ((config: SessionStartConfig) => AgentExecutionGuard | null) | null = null;
   private readonly generations = new Map<string, number>();
   /** Per-session live transcript (rendered stream events), read by the polled agent viewer. */
   private readonly transcripts = new Map<string, TranscriptBuffer>();
@@ -319,6 +325,22 @@ export class SessionHub {
 
   setHandlers(handlers: SessionHubHandlers): void {
     this.handlers = handlers;
+  }
+
+  setAutonomousGuardFactory(factory: (config: SessionStartConfig) => AgentExecutionGuard | null): void {
+    this.autonomousGuardFactory = factory;
+  }
+
+  hasUnclosedSession(ticketId: string): boolean {
+    return this.unclosedAutonomousSessions.has(ticketId);
+  }
+
+  async closeAutonomous(ticketId: string): Promise<boolean> {
+    this.disconnect(ticketId);
+    if (!this.hasUnclosedSession(ticketId)) return true;
+    const closing = this.autonomousClosures.get(ticketId);
+    if (closing) return closing;
+    return !this.hasUnclosedSession(ticketId);
   }
 
   onDisconnect(listener: (ticketId: string) => void): void {
@@ -357,6 +379,11 @@ export class SessionHub {
 
   /** Start an agent session for a ticket. Replaces any prior session for the same ticket (reclaim). */
   start(config: SessionStartConfig, callbacks: SessionStartCallbacks = {}): number {
+    const executionGuard = config.executionGuard ?? this.autonomousGuardFactory?.(config) ?? null;
+    if (this.hasUnclosedSession(config.ticketId) || (executionGuard && this.sessions.has(config.ticketId))) {
+      throw new Error("Previous autonomous session closure is not confirmed");
+    }
+    executionGuard?.beforeStart();
     this.disconnect(config.ticketId);
     // A fresh session starts a fresh transcript (a relaunch must not stack on the dead run's output).
     this.transcripts.delete(config.ticketId);
@@ -364,6 +391,7 @@ export class SessionHub {
     const generationId = nanoid(16);
     this.generations.set(config.ticketId, generation);
     const live: LiveSession = {
+      executionGuard,
       handle: null,
       slotId: config.slotId,
       sessionId: null,
@@ -385,6 +413,7 @@ export class SessionHub {
       executionStarted = true;
       live.handle = this.system.startAgentSession({
         ticketId: config.ticketId,
+        ...(executionGuard ? { executionGuard } : {}),
         slotId: config.slotId,
         cwd: config.cwd,
         provider: config.provider,
@@ -490,8 +519,18 @@ export class SessionHub {
 
   private trackClose(live: LiveSession, status: ExecutionFinishStatus): void {
     const closing = this.closeSession(live, status);
-    this.closingSessions.add(closing);
-    void closing.finally(() => this.closingSessions.delete(closing)).catch((error: unknown) => {
+    if (live.executionGuard) {
+      const ticketId = live.config.ticketId;
+      this.unclosedAutonomousSessions.add(ticketId);
+      const confirmed = closing.then((closed) => {
+        if (closed) this.unclosedAutonomousSessions.delete(ticketId);
+        return closed;
+      });
+      this.autonomousClosures.set(ticketId, confirmed);
+    }
+    const tracked = closing.then(() => undefined);
+    this.closingSessions.add(tracked);
+    void tracked.finally(() => this.closingSessions.delete(tracked)).catch((error: unknown) => {
       log.warn("finalisation de session impossible", { reason: String(error) });
     });
   }
@@ -669,16 +708,22 @@ export class SessionHub {
     }
   }
 
-  private async closeSession(live: LiveSession, status: ExecutionFinishStatus): Promise<void> {
+  private async closeSession(live: LiveSession, status: ExecutionFinishStatus): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
     try {
+      const providerClosing = live.handle?.close() ?? Promise.resolve();
+      if (live.executionGuard) {
+        void providerClosing.then(() => this.unclosedAutonomousSessions.delete(live.config.ticketId)).catch(() => undefined);
+      }
       await Promise.race([
-        live.handle?.close(),
+        providerClosing,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error("Délai de fermeture de session dépassé")), this.closeTimeoutMs);
           timer.unref();
         }),
       ]);
+      closed = true;
     } catch (error) {
       live.error ??= error instanceof Error ? error.message : String(error);
       live.handle?.dispose?.();
@@ -692,6 +737,7 @@ export class SessionHub {
         error: live.error,
       });
     }
+    return closed;
   }
 
   appendExternalEvent(id: string, sourceId: string, event: AgentSessionEvent, prefix = "", messageChannel?: ChannelEvent["type"]): void {

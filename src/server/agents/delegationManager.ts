@@ -35,6 +35,7 @@ import {
 } from "./reviewFindings.ts";
 import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds, withUnreviewedChangesSection } from "./reviewPass.ts";
 import type { UnreviewedChanges } from "./reviewPass.ts";
+import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { resolveBaseBranch } from "./baseBranch.ts";
 import { codexImplementerKnobs, delegatedImplementerPermissions } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
@@ -423,6 +424,15 @@ function verifiedFindings(source: ReviewResult, verification: ReviewResult): Rev
   });
 }
 
+interface RetainedAutonomousWorkspace {
+  label: string;
+  workspacePath: string | null;
+  journalPath: string | null;
+  archivePath: string | null;
+  status: "retained" | "archived" | "integrated" | "unknown";
+  verified: boolean;
+}
+
 export class DelegationManager {
   /** ticketId → label → child. One entry per running implementation lot of that ticket. */
   private readonly active = new Map<string, Map<string, ActiveDelegation>>();
@@ -445,6 +455,7 @@ export class DelegationManager {
   private readonly recoveryOperations = new Map<string, Promise<{ ok: boolean; result: string }>>();
   private readonly recoveryAssessments = new Map<string, ClosableExecution>();
   private readonly unclosedWriters = new Set<string>();
+  private readonly unclosedChildren = new Set<string>();
   private readonly writerOwners = new Map<string, string>();
   private readonly integratingTickets = new Set<string>();
 
@@ -472,6 +483,41 @@ export class DelegationManager {
     return (this.active.get(ticketId)?.size ?? 0) > 0
       || [...this.startingImplementations.keys()].some((key) => key.startsWith(`${ticketId}:`))
       || (this.closingByTicket.get(ticketId)?.size ?? 0) > 0 || this.unclosedWriters.has(ticketId) || this.integratingTickets.has(ticketId);
+  }
+
+  hasAutonomousWriters(ticketId: string): boolean {
+    return this.hasImplementationWriters(ticketId) || this.unclosedChildren.has(ticketId)
+      || this.hasActiveReviews(ticketId) || this.recoveryAssessments.has(ticketId)
+      || this.reviewStartQueues.has(ticketId)
+      || this.store.getTicket(ticketId)?.autonomousState?.execution?.closure.status === "unknown";
+  }
+
+  retainedAutonomousWorkspaces(ticketId: string): Promise<RetainedAutonomousWorkspace[]> {
+    const plan = this.store.getImplementationPlan(ticketId);
+    const archives = plan?.recovery?.archives ?? [];
+    const children: RetainedAutonomousWorkspace[] = archives.map((archive) => ({
+      label: archive.label, workspacePath: null, journalPath: archive.journalPath,
+      archivePath: archive.archivePath, status: "archived", verified: archive.verified,
+    }));
+    const labels = new Set(children.map((child) => child.label));
+    const diagnosticSchema = z.object({ workspacePath: z.string().min(1) });
+    for (const lot of plan?.lots ?? []) {
+      if (labels.has(lot.label)) continue;
+      const diagnostic = lot.failureHistory?.map((entry) => diagnosticSchema.safeParse(entry.diagnostic)).filter((entry) => entry.success).at(-1);
+      let status: RetainedAutonomousWorkspace["status"] = "unknown";
+      if (lot.status === "completed") status = "integrated";
+      else if (diagnostic?.success) status = "retained";
+      children.push({ label: lot.label, workspacePath: diagnostic?.success ? diagnostic.data.workspacePath : null, journalPath: null, archivePath: null, status, verified: false });
+      labels.add(lot.label);
+    }
+    const ticket = this.store.getTicket(ticketId);
+    for (const lot of this.store.getImplementationQueue(ticketId)) {
+      if (labels.has(lot.label)) continue;
+      const workspacePath = lot.files.length === 0 && ticket?.slotId === lot.slotId ? slotPath(lot.slotId) : null;
+      children.push({ label: lot.label, workspacePath, journalPath: null, archivePath: null, status: workspacePath ? "retained" : "unknown", verified: false });
+      labels.add(lot.label);
+    }
+    return Promise.resolve(children);
   }
 
   private saveRecovery(ticketId: string, recovery: ImplementationRecovery): void {
@@ -558,6 +604,8 @@ export class DelegationManager {
     }
     if (this.hasImplementationWriters(ticketId) || this.hasActiveReviews(ticketId)) return { ok: false, result: "Wait for delegated writers and reviewers to close before assessment." };
     const project = getProject(ticket.project);
+    const executionGuard = createAutonomousSessionGuard(this.store, ticketId, "other");
+    executionGuard?.beforeStart();
     const assessmentEpoch = this.reviewEpochs.get(ticketId) ?? 0;
     const revision = await this.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: slotPath(slotId), ...(ticket.branch ? { branch: ticket.branch } : {}) });
     if (!revision.clean) return { ok: false, result: "Commit the recovered candidate before assessment; its worktree must be clean." };
@@ -580,7 +628,9 @@ export class DelegationManager {
       if (!this.ownsRecovery(ticketId, slotId, recovery.generation, assessmentEpoch) || this.recoveryAssessments.get(ticketId) !== state || this.hasImplementationWriters(ticketId)) throw new Error("Recovery ownership changed before independent assessor startup.");
       await new Promise<void>((resolve, reject) => {
         timer = setTimeout(() => reject(new Error("Independent recovery assessment timed out.")), RECOVERY_ASSESSMENT_TIMEOUT_MS);
+        executionGuard?.assertAllowed();
         state.handle = this.system.startAgentSession({
+          ...(executionGuard ? { executionGuard } : {}),
           ticketId: `${ticketId}-recovery-${recovery.generation}`, slotId: DELEGATION_SLOT_ID, cwd: slotPath(slotId),
           provider: execution.provider, model: execution.model, effort: execution.effort, serviceTier: execution.serviceTier,
           role: "reviewer", generation: 1, permissionMode: "dontAsk", readOnly: true, blockTypecheck: true,
@@ -679,6 +729,7 @@ export class DelegationManager {
   }
 
   private async retryImplementationIntegration(ticket: Ticket, slotId: number, plan: ImplementationPlan, label: string | undefined): Promise<{ ok: boolean; result: string }> {
+    this.store.assertAutonomousWork(ticket.id);
     if (plan.recovery) return { ok: false, result: "The frozen recovery plan cannot resume delegated integration." };
     const lot = plan.lots.find((entry) => entry.label === label);
     if (!lot || lot.failurePhase !== "integration" || !lot.childResult || this.hasImplementationWriters(ticket.id)) return { ok: false, result: "Integration retry requires a successful closed child result and no active writers." };
@@ -690,6 +741,7 @@ export class DelegationManager {
       const options = { ticketId: ticket.id, cycleId: plan.id, slotPath: slotPath(slotId), label: lot.label, files: lot.files, recoveryOnly: true };
       const prepared = await this.system.prepareImplementationLot(options);
       if (this.store.getTicket(ticket.id)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || this.store.getImplementationPlan(ticket.id)?.id !== plan.id || this.store.getImplementationPlan(ticket.id)?.recovery) throw new Error("Implementation ownership changed before retained integration.");
+      this.store.assertAutonomousWork(ticket.id);
       if (!prepared.integrated) await this.system.finishImplementationLot(options);
       if (this.store.getTicket(ticket.id)?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticket.id || this.store.getImplementationPlan(ticket.id)?.recovery) throw new Error("Implementation ownership changed during integration.");
       this.updatePlannedLot(ticket.id, plan.id, lot.label, { status: "completed", failurePhase: null, summary: lot.childResult.summary });
@@ -973,6 +1025,11 @@ export class DelegationManager {
   }
 
   private canScheduleImplementation(ticket: Ticket): boolean {
+    try {
+      this.store.assertAutonomousWork(ticket.id);
+    } catch {
+      return false;
+    }
     return !ticket.testing && ticket.stage !== "awaiting_answers" && ticket.stage !== "planning"
       && ticket.stage !== "stalled" && ticket.stage !== "interrupted"
       && (ticket.stage === null || !TERMINAL_STAGES.includes(ticket.stage))
@@ -1408,6 +1465,7 @@ export class DelegationManager {
     if (lot?.status === "completed") {
       return Promise.resolve({ ok: false, result: `Le lot «${label}» est déjà terminé. Utilise un nouveau label pour une nouvelle correction.` });
     }
+    this.store.assertAutonomousWork(ticket.id);
     const normalizedFiles = normalizeImplementationScope(files);
     if (lot && storedPlan && lot.plan === plan && JSON.stringify(lot.files) === JSON.stringify(normalizedFiles)) {
       if (lot.status === "pending" || lot.status === "running") {
@@ -1442,6 +1500,8 @@ export class DelegationManager {
   }
 
   private async startNow(ticket: Ticket, slotId: number, plan: string, label: string, files: readonly string[]): Promise<{ ok: boolean; result: string }> {
+    const executionGuard = createAutonomousSessionGuard(this.store, ticket.id, "implementation");
+    this.store.assertAutonomousWork(ticket.id);
     const normalizedFiles = normalizeImplementationScope(files);
     if (normalizedFiles === null) {
       return { ok: false, result: "Périmètre invalide : utilise des chemins relatifs au dépôt, sans glob ni segment . ou ..." };
@@ -1498,7 +1558,7 @@ export class DelegationManager {
       return { ok: true, result: `Le lot «${label}» attend la capacité globale de ${MAX_GLOBAL_IMPLEMENTERS} implémenteurs. Le backend le lancera automatiquement. Termine ton tour et attends implementation_done.` };
     }
     const persistedPlan = this.store.getImplementationPlan(ticket.id);
-    const queuedLot = this.store.getImplementationQueue(ticket.id).find((lot) => lot.label === label);
+    let queuedLot = this.store.getImplementationQueue(ticket.id).find((lot) => lot.label === label);
     const plannedLot = persistedPlan?.lots.find((lot) => lot.label === label);
     if (plannedLot && persistedPlan && this.lotCount(ticket.id) >= persistedPlan.maxParallel) {
       return { ok: false, result: "La capacité parallèle du plan est occupée." };
@@ -1507,7 +1567,12 @@ export class DelegationManager {
       return { ok: false, result: `Le lot «${label}» doit conserver le plan et le périmètre enregistrés.` };
     }
     const planId = plannedLot && persistedPlan ? persistedPlan.id : null;
-    const durableWorkspace = planId !== null || queuedLot !== undefined;
+    executionGuard?.beforeStart();
+    if (executionGuard && planId === null && !queuedLot) {
+      queuedLot = { label, plan, files: normalizedFiles, slotId, started: false, executionRunId: null };
+      this.store.saveImplementationQueue(ticket.id, [...this.store.getImplementationQueue(ticket.id), queuedLot]);
+    }
+    const durableWorkspace = executionGuard !== null || planId !== null || queuedLot !== undefined;
     if (plannedLot && persistedPlan) {
       const ready = plannedLot.dependsOn.every((dependency) => persistedPlan.lots.some((lot) => lot.label === dependency && lot.status === "completed"));
       if (!ready) return { ok: false, result: `Les dépendances du lot «${label}» ne sont pas terminées.` };
@@ -1559,6 +1624,7 @@ export class DelegationManager {
         preparationPhase = "preparation";
         const prepared = await this.system.prepareImplementationLot(lotOptions);
         childCwd = prepared.cwd;
+        executionGuard?.assertAllowed();
         if (prepared.integrated) {
           this.startingImplementations.delete(startingKey);
           if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
@@ -1597,7 +1663,7 @@ export class DelegationManager {
     this.startingImplementations.delete(startingKey);
     if ((this.reviewEpochs.get(ticket.id) ?? 0) !== epoch) {
       try {
-        if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions);
+        if (lotOptions !== null && !durableWorkspace && !this.unclosedWriters.has(ticket.id)) await this.system.discardImplementationLot(lotOptions);
         if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
       } finally {
         this.releaseImplementationReservation(reservationId);
@@ -1660,7 +1726,9 @@ export class DelegationManager {
       executionStarted = true;
       this.updatePlannedLot(ticket.id, planId, label, { executionRunId: generationId });
       if (queuedLot) this.store.saveImplementationQueue(ticket.id, this.store.getImplementationQueue(ticket.id).map((lot) => lot.label === label ? { ...lot, executionRunId: generationId } : lot));
+      executionGuard?.assertAllowed();
       const handle = this.system.startAgentSession({
+        ...(executionGuard ? { executionGuard } : {}),
         ticketId: ticket.id,
         slotId: DELEGATION_SLOT_ID,
         cwd: childCwd,
@@ -1693,7 +1761,7 @@ export class DelegationManager {
       this.recordLotFailure(ticket.id, planId, label, "startup", message, error);
       try {
         if (executionStarted) await this.closeAndFinalize(state, "failed", message);
-        if (lotOptions !== null && !durableWorkspace) await this.system.discardImplementationLot(lotOptions);
+        if (lotOptions !== null && !durableWorkspace && !this.unclosedWriters.has(ticket.id)) await this.system.discardImplementationLot(lotOptions);
         if (lotOptions !== null && durableWorkspace) this.system.cancelImplementationLot(lotOptions);
       } finally {
         this.removeLot(ticket.id, label, state);
@@ -1987,6 +2055,8 @@ export class DelegationManager {
         });
     const cwd = slotPath(slotId);
     const depth = ticket.reviewDepth ?? "light";
+    const executionGuard = createAutonomousSessionGuard(this.store, ticket.id, "review");
+    executionGuard?.beforeStart();
     const resolved = await this.resolveReviewPass(ticket, slotId, cwd, kind, depth, epoch, requestedExecution, startId);
     if (!resolved.ok) return { ok: false, result: resolved.result };
     const reviewPass = resolved.pass;
@@ -2037,7 +2107,9 @@ export class DelegationManager {
         codexFast: execution.serviceTier === "fast",
       });
       executionStarted = true;
+      executionGuard?.assertAllowed();
       const handle = this.system.startAgentSession({
+        ...(executionGuard ? { executionGuard } : {}),
         ticketId: `${ticket.id}-review-${kind}-${generation}`,
         slotId: DELEGATION_SLOT_ID,
         cwd,
@@ -2090,7 +2162,7 @@ export class DelegationManager {
     }
     const ticket = this.store.getTicket(ticketId);
     const terminal = !ticket || (ticket.stage !== null && TERMINAL_STAGES.includes(ticket.stage));
-    if (terminal) this.store.resetImplementationQueue(ticketId);
+    if (terminal && !ticket?.autonomousState?.execution) this.store.resetImplementationQueue(ticketId);
     const plan = this.store.getImplementationPlan(ticketId);
     const assessment = this.recoveryAssessments.get(ticketId);
     if (assessment) {
@@ -2125,7 +2197,7 @@ export class DelegationManager {
       this.active.delete(ticketId);
       for (const state of lots.values()) {
         state.cancelled = true;
-        state.preserveWorkspace = !!plan?.recovery || (!terminal && (state.planId !== null || this.store.getImplementationQueue(ticketId).some((lot) => lot.label === state.label)));
+        state.preserveWorkspace = !!ticket?.autonomousState?.execution || !!plan?.recovery || (!terminal && (state.planId !== null || this.store.getImplementationQueue(ticketId).some((lot) => lot.label === state.label)));
         if (state.lotOptions !== null) this.system.cancelImplementationLot(state.lotOptions);
         void state.handle?.interrupt().catch((error: unknown) => {
           log.warn("interruption de session enfant impossible", { ticketId, reason: String(error) });
@@ -2134,7 +2206,7 @@ export class DelegationManager {
           const cleanup = (async (): Promise<void> => {
             try {
               await this.closeAndFinalize(state, "cancelled", null);
-              if (state.lotOptions !== null && !state.preserveWorkspace) await this.system.discardImplementationLot(state.lotOptions);
+              if (state.lotOptions !== null && !state.preserveWorkspace && !this.unclosedWriters.has(ticketId)) await this.system.discardImplementationLot(state.lotOptions);
             } finally {
               this.releaseImplementationReservation(state.reservationId);
             }
@@ -2153,9 +2225,38 @@ export class DelegationManager {
       void review.handle?.interrupt().catch((error: unknown) => {
         log.warn("interruption de reviewer impossible", { ticketId, reason: String(error) });
       });
-      this.closeAndFinalize(review, "cancelled", null);
+      this.trackClosing(this.closeAndFinalize(review, "cancelled", null), ticketId);
     }
     this.activeReviewPasses.delete(ticketId);
+  }
+
+  async quiesceAutonomous(ticketId: string): Promise<boolean> {
+    this.stop(ticketId);
+    const recovery = this.recoveryOperations.get(ticketId);
+    if (recovery) await Promise.allSettled([recovery]);
+    const starts = this.reviewStartQueues.get(ticketId);
+    if (starts) await Promise.allSettled([starts]);
+    try {
+      await this.drainTicket(ticketId);
+    } catch {
+      this.persistUnknownClosure(ticketId);
+      return false;
+    }
+    const closureUnknown = this.store.getTicket(ticketId)?.autonomousState?.execution?.closure.status === "unknown";
+    const closed = !closureUnknown && !this.hasImplementationWriters(ticketId) && !this.unclosedChildren.has(ticketId)
+      && !this.hasActiveReviews(ticketId) && !this.recoveryAssessments.has(ticketId);
+    if (!closed) this.persistUnknownClosure(ticketId);
+    return closed;
+  }
+
+  private persistUnknownClosure(ticketId: string): void {
+    const ticket = this.store.getTicket(ticketId);
+    const state = ticket?.autonomousState;
+    if (!state?.execution) return;
+    this.store.updateTicket(ticketId, { autonomousState: {
+      ...state,
+      execution: { ...state.execution, closure: { ...state.execution.closure, status: "unknown", confirmedAt: null, retention: "retained" } },
+    } });
   }
 
   async drainClosingSessions(): Promise<void> {
@@ -2337,8 +2438,20 @@ export class DelegationManager {
     return true;
   }
 
-  private async startVerification(source: ActiveReview, result: ReviewResult, attempt: number): Promise<void> {
+  private startVerification(source: ActiveReview, result: ReviewResult, attempt: number): Promise<void> {
+    const started = this.startVerificationNow(source, result, attempt);
+    this.trackClosing(started, source.ticketId);
+    return started;
+  }
+
+  private async startVerificationNow(source: ActiveReview, result: ReviewResult, attempt: number): Promise<void> {
     if ((this.reviewEpochs.get(source.ticketId) ?? 0) !== source.epoch) return;
+    const executionGuard = createAutonomousSessionGuard(this.store, source.ticketId, "review");
+    try {
+      executionGuard?.beforeStart();
+    } catch {
+      return;
+    }
     const key = reviewKey(source.ticketId, source.kind);
     const execution = source.execution;
     const generation = (this.generations.get(key) ?? 0) + 1;
@@ -2392,7 +2505,9 @@ export class DelegationManager {
         effectiveEffort: execution.effort,
         codexFast: execution.serviceTier === "fast",
       });
+      executionGuard?.assertAllowed();
       state.handle = this.system.startAgentSession({
+        ...(executionGuard ? { executionGuard } : {}),
         ticketId: `${state.ticketId}-verify-${state.kind}-${generation}`,
         slotId: DELEGATION_SLOT_ID,
         cwd: slotPath(source.slotId),
@@ -2528,7 +2643,13 @@ export class DelegationManager {
   private async settleImplementation(ticketId: string, state: ActiveDelegation, turnOk: boolean): Promise<void> {
     const closed = await this.closeHandle(state);
     if (!closed) this.unclosedWriters.add(ticketId);
-    state.childClosed = true;
+    state.childClosed = closed;
+    try {
+      this.store.assertAutonomousWork(ticketId);
+    } catch {
+      state.cancelled = true;
+      state.preserveWorkspace = true;
+    }
     let ok = turnOk && closed;
     let summary = ok
       ? state.lastAssistantText
@@ -2547,7 +2668,7 @@ export class DelegationManager {
       if (state.lotOptions !== null) {
         if (ok) failurePhase = "integration";
         if (ok && !state.cancelled) await this.system.finishImplementationLot(state.lotOptions);
-        else if (!state.preserveWorkspace && !state.durableWorkspace) await this.system.discardImplementationLot(state.lotOptions);
+        else if (closed && !state.preserveWorkspace && !state.durableWorkspace) await this.system.discardImplementationLot(state.lotOptions);
         else this.system.cancelImplementationLot(state.lotOptions);
       }
     } catch (error) {
@@ -2607,6 +2728,11 @@ export class DelegationManager {
       this.writerOwners.delete(state.generationId);
       return true;
     } catch (closeError) {
+      const owner = this.store.listExecutionRuns("ticket").find((execution) => execution.generationId === state.generationId)?.ownerId;
+      if (owner) {
+        this.unclosedChildren.add(owner);
+        this.persistUnknownClosure(owner);
+      }
       const writerOwner = this.writerOwners.get(state.generationId);
       if (writerOwner) this.unclosedWriters.add(writerOwner);
       handle.dispose?.();
@@ -2644,7 +2770,8 @@ export class DelegationManager {
     status: "completed" | "failed" | "cancelled",
     error: string | null,
   ): Promise<void> {
-    const closing = this.closeHandle(state).then(() => {
+    const closing = this.closeHandle(state).then((closed) => {
+      if (!closed) error = error ?? "Child session closure is unconfirmed.";
       this.store.finalizeExecution({
         generationId: state.generationId,
         status,
@@ -2652,7 +2779,8 @@ export class DelegationManager {
         error,
       });
     });
-    this.trackClosing(closing);
+    const ownerId = this.store.listExecutionRuns("ticket").find((execution) => execution.generationId === state.generationId)?.ownerId;
+    this.trackClosing(closing, ownerId);
     return closing;
   }
 

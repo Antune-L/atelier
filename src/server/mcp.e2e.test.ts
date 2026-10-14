@@ -169,8 +169,17 @@ const textContentResultSchema = z.object({
   })),
 });
 
-/** Env keys the desktop app exports; a stray one here would boot this test server on the live data. */
-const ISOLATED_ENV_KEYS = ["KANBAN_DB", "KANBAN_CONFIG", "KANBAN_SETUP", "KANBAN_DRY_RUN"] as const;
+/**
+ * Env keys the desktop app or a preview environment exports; a stray one here would boot this test
+ * server on live data or seed demo tickets.
+ */
+const ISOLATED_ENV_KEYS = [
+  "KANBAN_DB",
+  "KANBAN_CONFIG",
+  "KANBAN_SETUP",
+  "KANBAN_DRY_RUN",
+  "KANBAN_PREVIEW_SEED",
+] as const;
 
 let dataRoot = "";
 const savedEnv = new Map<string, string | undefined>();

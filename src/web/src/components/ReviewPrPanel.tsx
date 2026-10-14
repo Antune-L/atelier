@@ -29,7 +29,6 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { refreshReviewCounts, useReviewCounts } from "@/hooks/useReviewCounts";
 import { api } from "@/lib/api";
-import { boardStore } from "@/lib/store";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
 
 interface ReviewPrPanelProps {
@@ -105,9 +104,7 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         codexFast,
       };
       if (notification) {
-        const result = await api.createPrNotificationReview(notification.id, options);
-        boardStore.closeNotificationCenter();
-        boardStore.openTicket(result.ticket.id);
+        await api.createPrNotificationReview(notification.id, options);
       } else {
         await api.createReviews({ ...options, project, prs: (prs ?? []).filter((pr) => selected.has(pr.number)) });
       }

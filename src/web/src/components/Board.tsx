@@ -263,14 +263,10 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
       <div className="flex h-full min-h-0 flex-col gap-3">
-        <section className="space-y-2" aria-label="Décisions du tableau">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant={decisionsOnly ? "secondary" : "outline"} aria-pressed={decisionsOnly} onClick={() => selectDecisions(!decisionsOnly)}>À décider · {decisions.length}</Button>
-              <span className="text-xs text-muted-foreground">{visible.length} carte(s) dans cette sélection</span>
-            </div>
-            {decisionsOnly && <Button size="sm" variant="ghost" onClick={() => selectDecisions(false)}>Afficher toutes les cartes</Button>}
-          </div>
+        {(decisions.length > 0 || decisionsOnly) && <section className="space-y-2" aria-label="Décisions du tableau">
+          {decisionsOnly && <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button size="sm" variant="ghost" onClick={() => selectDecisions(false)}>Afficher toutes les cartes</Button>
+          </div>}
           {decisions.length > 0 && <div className="flex flex-wrap gap-2">
             {decisions.slice(0, PINNED_DECISIONS_LIMIT).map((ticket) => <button key={ticket.id} type="button" onClick={() => onOpenTicket(ticket)} className="flex min-w-0 max-w-full items-center gap-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-left text-xs hover:bg-warning/10">
               <span className="shrink-0 font-medium text-warning">{ticketDecisionLabel(ticket)}</span>
@@ -278,7 +274,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             </button>)}
             {decisions.length > PINNED_DECISIONS_LIMIT && <Button size="sm" variant="ghost" onClick={() => selectDecisions(true)}>Voir les {decisions.length} décisions</Button>}
           </div>}
-        </section>
+        </section>}
         <div className="flex min-h-0 flex-1 overflow-x-auto">
           {ACTIVE_COLUMNS.map(renderLane)}
         {displayedTerminalColumns.map(renderLane)}

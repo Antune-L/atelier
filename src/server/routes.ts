@@ -1384,7 +1384,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const pr: OpenPr = {
         number: notification.prNumber, title: notification.title, url: notification.prUrl,
         headBranch: notification.headRefName, baseBranch: notification.baseRefName,
-        isDraft: false, reviewStatus: "needs_review", updatedAt: new Date(notification.detectedAt).toISOString(),
+        isDraft: false, reviewStatus: "needs_review", updatedAt: new Date(notification.requestedAt ?? notification.detectedAt).toISOString(),
         author: notification.author, additions: null, deletions: null,
       };
       const input = createReviewSchema.parse({ ...options.data, project: notification.project, prs: [pr] });

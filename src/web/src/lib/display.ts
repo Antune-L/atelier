@@ -28,7 +28,7 @@ import {
   type Stage,
 } from "@shared/constants";
 import { prNumberFromUrl } from "@shared/prUrl";
-import type { Ticket, TriageVerdict } from "@shared/schemas";
+import type { PrNotification, Ticket, TriageVerdict } from "@shared/schemas";
 import { isCodexFastServiceTier, type CodexRuntimeStatus } from "@shared/codexCapabilities";
 
 import type { TabOption } from "@/components/ui/tabs";
@@ -280,6 +280,10 @@ export function formatTokens(n: number): string {
 }
 
 const DATETIME_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
+
+export function notificationReceivedAt(notification: Pick<PrNotification, "requestedAt" | "detectedAt">): number {
+  return notification.requestedAt ?? notification.detectedAt;
+}
 
 export function formatDateTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DATETIME_FORMAT);

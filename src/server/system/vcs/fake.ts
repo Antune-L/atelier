@@ -66,7 +66,7 @@ export class FakeVcsClient implements VcsClient {
   }
 
   async listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot> {
-    return { identityKey: `fake:${repoPath}:reviewer`, prs: FAKE_OPEN_PRS.filter((pr) => !pr.isDraft && pr.reviewStatus === "needs_review") };
+    return { identityKey: `fake:${repoPath}:reviewer`, prs: FAKE_OPEN_PRS.filter((pr) => !pr.isDraft && pr.reviewStatus === "needs_review").map((pr) => ({ ...pr, requestedAt: pr.updatedAt })) };
   }
 
   async listOpenPrs(_repoPath: string): Promise<OpenPr[]> {

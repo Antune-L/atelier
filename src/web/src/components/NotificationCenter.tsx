@@ -10,7 +10,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/display";
+import { formatDateTime, notificationReceivedAt } from "@/lib/display";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -147,7 +147,7 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
                     {isPending(notification) ? <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-brand" aria-label="Non lue" /> : <span className="ml-auto">{notification.resolvedAt !== null ? "Clôturée" : "Lue"}</span>}
                   </div>
                   <h2 className="mt-2 text-sm font-medium leading-5">{notification.title}</h2>
-                  <p className="mt-1 text-2xs text-muted-foreground">{notification.author} · {formatDateTime(notification.detectedAt)}</p>
+                  <p className="mt-1 text-2xs text-muted-foreground">{notification.author} · {formatDateTime(notificationReceivedAt(notification))}</p>
                   <p className="mt-2 flex items-center gap-1.5 text-2xs text-muted-foreground"><UserRound className="h-3 w-3 shrink-0" />{reason}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-1.5">
                     {notification.ticketId !== null ? (

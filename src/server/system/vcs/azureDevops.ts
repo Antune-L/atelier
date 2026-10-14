@@ -389,7 +389,7 @@ export class AzureDevopsVcsClient implements VcsClient {
         number: pr.pullRequestId, title: pr.title, url: prWebUrl(ref, pr.pullRequestId),
         headBranch: stripHeadsPrefix(pr.sourceRefName), baseBranch: stripHeadsPrefix(pr.targetRefName), isDraft: pr.isDraft,
         reviewStatus: "needs_review", updatedAt: pr.creationDate, author: pr.createdBy?.displayName ?? pr.createdBy?.uniqueName ?? "?",
-        additions: null, deletions: null,
+        additions: null, deletions: null, requestedAt: pr.creationDate,
       })),
     };
   }

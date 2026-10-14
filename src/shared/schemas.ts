@@ -1245,6 +1245,7 @@ export const prNotificationSchema = z.object({
   headRefName: z.string(),
   baseRefName: baseBranchSchema,
   detectedAt: z.number().int(),
+  requestedAt: z.number().int().nullable().optional(),
   readAt: z.number().int().nullable(),
   resolvedAt: z.number().int().nullable(),
   ticketId: z.string().nullable(),

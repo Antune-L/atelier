@@ -38,9 +38,11 @@ export interface ReviewPublicationCheck {
   expectedState: ReviewPublicationState;
 }
 
+export type ReviewRequestPr = OpenPr & { requestedAt: string | null };
+
 export interface ReviewRequestSnapshot {
   identityKey: string;
-  prs: OpenPr[];
+  prs: ReviewRequestPr[];
 }
 
 export interface VcsClient {

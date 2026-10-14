@@ -612,7 +612,7 @@ export class Store {
       .run(notification.id, notification.project, JSON.stringify(notification));
   }
 
-  syncPrNotifications(project: string, repoPath: string, identityKey: string, prs: OpenPr[]): PrNotification[] {
+  syncPrNotifications(project: string, repoPath: string, identityKey: string, prs: (OpenPr & { requestedAt: string | null })[]): PrNotification[] {
     return this.transaction(() => {
       const now = Date.now();
       const state = this.getPrNotificationState(project);
@@ -633,10 +633,11 @@ export class Store {
       const detected: PrNotification[] = [];
       for (const pr of current.values()) {
         if (active.has(pr.url)) continue;
+        const requestedAt = pr.requestedAt === null ? Number.NaN : Date.parse(pr.requestedAt);
         const notification: PrNotification = {
           id: nanoid(), project, repoPath, identityKey, prNumber: pr.number, prUrl: pr.url,
           title: pr.title, author: pr.author, headRefName: pr.headBranch, baseRefName: pr.baseBranch,
-          detectedAt: now, readAt: null, resolvedAt: null, ticketId: null,
+          detectedAt: now, requestedAt: Number.isFinite(requestedAt) ? requestedAt : null, readAt: null, resolvedAt: null, ticketId: null,
         };
         this.savePrNotification(notification);
         if (!baseline) detected.push(notification);

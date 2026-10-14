@@ -69,6 +69,12 @@ const ghRequestedPullSchema = z.object({
   requested_reviewers: z.array(z.object({ id: z.number().int() })),
 });
 const ghRequestedPullPagesSchema = z.array(z.array(ghRequestedPullSchema));
+const ghIssueEventSchema = z.object({
+  event: z.string(), created_at: z.string(),
+  requested_reviewer: z.object({ id: z.number().int() }).nullable().optional(),
+});
+const ghIssueEventPagesSchema = z.array(z.array(ghIssueEventSchema));
+const GH_REVIEW_REQUESTED_EVENT = "review_requested";
 
 const ghPrHeadSchema = z.object({ url: z.string(), headRefOid: z.string().min(1) });
 const ghCandidateSchema = z.object({
@@ -352,6 +358,22 @@ function pullApiEndpoint(reviewsEndpoint: string): string {
 }
 
 export class GithubVcsClient implements VcsClient {
+  private readonly requestedAtCache = new Map<string, string>();
+
+  private async readRequestedAt(repoPath: string, ref: GithubRepoRef, prNumber: number, userId: number, fallback: string): Promise<string | null> {
+    const endpoint = `repos/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.repository)}/issues/${prNumber}/events?per_page=${OPEN_PR_PAGE_SIZE}`;
+    try {
+      const result = await runGithubCommand([GH_BINARY, "api", endpoint, "--hostname", ref.host, "--paginate", "--slurp"], repoPath);
+      if (result.exitCode !== 0 || result.timedOut) return null;
+      const pages = ghIssueEventPagesSchema.safeParse(safeJsonParse(result.stdout));
+      if (!pages.success) return null;
+      const requested = pages.data.flat().filter((event) => event.event === GH_REVIEW_REQUESTED_EVENT && event.requested_reviewer?.id === userId);
+      return requested.at(-1)?.created_at ?? fallback;
+    } catch {
+      return null;
+    }
+  }
+
   async testConnection(repoPath: string, checkedAt: number): Promise<VcsConnectionResult> {
     if (!Bun.which(GH_BINARY)) return connectionFailure("CLI `gh` introuvable dans le PATH", checkedAt);
     const res = await runGh(
@@ -373,12 +395,29 @@ export class GithubVcsClient implements VcsClient {
     const pages = ghRequestedPullPagesSchema.safeParse(safeJsonParse(result.stdout));
     if (!pages.success) throw new Error("GitHub review requests response is invalid");
     const prs = pages.data.flat().filter((pr) => !pr.draft && pr.requested_reviewers.some((reviewer) => reviewer.id === user.data.id));
+    const identityKey = `github:${githubRepoKey(ref).toLowerCase()}:${user.data.id}`;
+    const cacheKeys = new Set<string>();
+    const requestedAts: string[] = [];
+    for (const pr of prs) {
+      const cacheKey = `${identityKey}:${pr.html_url}:${pr.updated_at}`;
+      cacheKeys.add(cacheKey);
+      let requestedAt = this.requestedAtCache.get(cacheKey);
+      if (requestedAt === undefined) {
+        const resolved = await this.readRequestedAt(repoPath, ref, pr.number, user.data.id, pr.updated_at);
+        if (resolved !== null) this.requestedAtCache.set(cacheKey, resolved);
+        requestedAt = resolved ?? pr.updated_at;
+      }
+      requestedAts.push(requestedAt);
+    }
+    for (const key of this.requestedAtCache.keys()) {
+      if (key.startsWith(`${identityKey}:`) && !cacheKeys.has(key)) this.requestedAtCache.delete(key);
+    }
     return {
-      identityKey: `github:${githubRepoKey(ref).toLowerCase()}:${user.data.id}`,
-      prs: prs.map((pr) => ({
+      identityKey,
+      prs: prs.map((pr, index) => ({
         number: pr.number, title: pr.title, url: pr.html_url, headBranch: pr.head.ref, baseBranch: pr.base.ref,
         isDraft: pr.draft, reviewStatus: "needs_review", updatedAt: pr.updated_at, author: pr.user?.login ?? "?",
-        additions: null, deletions: null,
+        additions: null, deletions: null, requestedAt: requestedAts[index] ?? pr.updated_at,
       })),
     };
   }

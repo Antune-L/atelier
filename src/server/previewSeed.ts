@@ -1,5 +1,5 @@
 import type { Column, Orchestrator, Stage } from "../shared/constants.ts";
-import type { ExecutionUsageByModel } from "../shared/schemas.ts";
+import type { ExecutionUsageByModel, TriageVerdict } from "../shared/schemas.ts";
 
 import type { NewTicket, Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
@@ -10,7 +10,7 @@ export const PREVIEW_SEED_ENV = "KANBAN_PREVIEW_SEED";
 const PREVIEW_SEED_ENABLED = "1";
 const REAL_MODE = "0";
 const PREVIEW_SEED_META_KEY = "preview_seed_version";
-const PREVIEW_SEED_VERSION = "1";
+const PREVIEW_SEED_VERSION = "2";
 const SEED_TITLE_PREFIX = "[seed]";
 const SEED_PR_BASE_URL = "https://github.com/example/preview-demo/pull/";
 const ORCHESTRATOR_ROLE = "orchestrator";
@@ -45,6 +45,16 @@ interface SeedTicket {
   legacyDurationMs?: number;
   mergedAfterFinish?: boolean;
   error?: string;
+  /** Finished feasibility study stored as the ticket's triage report. */
+  feasibility?: SeedFeasibility;
+}
+
+interface SeedFeasibility {
+  verdict: TriageVerdict;
+  summary: string;
+  reasons: string[];
+  questions: { question: string; recommendedAnswer: string }[];
+  files: string[];
 }
 
 const SEED_TICKETS: SeedTicket[] = [
@@ -92,6 +102,29 @@ const SEED_TICKETS: SeedTicket[] = [
     description: "Ticket en attente dans la colonne TODO.",
     column: "todo", stage: null, orchestrator: "claude", daysAgo: 1, prNumber: null,
     executions: [],
+  },
+  {
+    title: "Ticket avec questions de faisabilité",
+    description: "Ticket TODO dont l'étude de faisabilité est terminée et pose plusieurs questions avec réponses recommandées.",
+    column: "todo", stage: null, orchestrator: "claude", daysAgo: 1, prNumber: null,
+    executions: [],
+    feasibility: {
+      verdict: "implementable",
+      summary: "La fonctionnalité est réalisable, mais quelques choix produit restent à confirmer avant l'implémentation.",
+      reasons: [
+        "Le composant concerné existe déjà et peut être étendu sans refonte.",
+        "Plusieurs comportements d'interface ne sont pas précisés dans la description.",
+      ],
+      questions: [
+        { question: "Le bouton doit-il rester visible pendant le défilement des questions ?", recommendedAnswer: "Oui, le fixer en bas du panneau pour qu'il reste accessible." },
+        { question: "Faut-il demander une confirmation avant d'intégrer toutes les réponses ?", recommendedAnswer: "Non, l'action reste réversible en modifiant la description." },
+        { question: "Les questions sans réponse doivent-elles bloquer l'intégration groupée ?", recommendedAnswer: "Non, seules les réponses remplies sont intégrées." },
+        { question: "Doit-on afficher le nombre de réponses prises en compte ?", recommendedAnswer: "Oui, directement dans le libellé du bouton." },
+        { question: "Les réponses recommandées doivent-elles pré-remplir les champs ?", recommendedAnswer: "Non, elles restent affichées comme suggestions à accepter." },
+        { question: "Faut-il relancer l'étude après l'intégration des réponses ?", recommendedAnswer: "Oui, pour vérifier que les réponses lèvent les ambiguïtés." },
+      ],
+      files: ["src/web/src/components/ticket-detail/TriageSection.tsx"],
+    },
   },
 ];
 
@@ -141,6 +174,9 @@ function insertSeedTicket(store: Store, project: string, seed: SeedTicket, now: 
     prUrl: seed.prNumber === null ? null : `${SEED_PR_BASE_URL}${seed.prNumber}`,
     error: seed.error ?? null,
   });
+  if (seed.feasibility !== undefined) {
+    store.updateTicket(ticket.id, { triageStatus: "done", triageVerdict: seed.feasibility.verdict, triageReport: JSON.stringify(seed.feasibility) });
+  }
   store.setTicketTimeline(ticket.id, {
     createdAt, updatedAt: finishedAt ?? createdAt, implementingStartedAt: startedAt,
     implementationStartedAt: seed.legacyDurationMs === undefined ? startedAt : null, finishedAt,
@@ -155,7 +191,11 @@ export function seedPreviewDemoData(store: Store): void {
   if (project === undefined) throw new Error(`${PREVIEW_SEED_ENV} exige au moins un projet configuré.`);
   const now = Date.now();
   store.transaction(() => {
-    for (const seed of SEED_TICKETS) insertSeedTicket(store, project, seed, now);
+    // Earlier seed versions already inserted some tickets: only add the missing ones.
+    const existingTitles = new Set(store.listTickets(true).filter((ticket) => ticket.project === project).map((ticket) => ticket.title));
+    for (const seed of SEED_TICKETS) {
+      if (!existingTitles.has(`${SEED_TITLE_PREFIX} ${seed.title}`)) insertSeedTicket(store, project, seed, now);
+    }
     store.setMeta(PREVIEW_SEED_META_KEY, PREVIEW_SEED_VERSION);
   });
   log.info("données de démonstration de preview insérées", { project, tickets: SEED_TICKETS.length });

@@ -230,13 +230,21 @@ export function formatTriageQuestion(q: TriageQuestion): string {
   return q.recommendedAnswer ? `${q.question} (réponse conseillée : ${q.recommendedAnswer})` : q.question;
 }
 
-export const feasibilityAnswerInputSchema = z.object({
-  revision: z.number().int().nonnegative(),
-  reportVersion: z.number().int().nonnegative(),
+const feasibilityAnswerEntrySchema = z.object({
   questionIndex: z.number().int().nonnegative(),
   answer: z.string().max(10000).trim().min(1),
 }).strict();
+const feasibilityAnswerTargetSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  reportVersion: z.number().int().nonnegative(),
+}).strict();
+export const feasibilityAnswerInputSchema = feasibilityAnswerTargetSchema.extend(feasibilityAnswerEntrySchema.shape).strict();
 export type FeasibilityAnswerInput = z.infer<typeof feasibilityAnswerInputSchema>;
+export const feasibilityAnswerBatchInputSchema = feasibilityAnswerTargetSchema.extend({
+  answers: z.array(feasibilityAnswerEntrySchema).min(1)
+    .refine((answers) => new Set(answers.map((entry) => entry.questionIndex)).size === answers.length, "Duplicate questionIndex"),
+}).strict();
+export type FeasibilityAnswerBatchInput = z.infer<typeof feasibilityAnswerBatchInputSchema>;
 export const feasibilityAnswerRunSchema = feasibilityAnswerInputSchema.extend({
   id: z.string().min(1),
   question: z.string(),

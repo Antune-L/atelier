@@ -70,6 +70,32 @@ export function useLocalDraft(
   return useDraftStorage(key, initialValue);
 }
 
+/** One `draft:<key>` text per key, reset in render when the key list changes. */
+export function useLocalDraftList(
+  keys: string[],
+  initialValues: string[],
+): [values: string[], setValueAt: (index: number, value: string) => void] {
+  const storageKeys = keys.map((key) => `${DRAFT_KEY_PREFIX}${key}`);
+  const joinedKeys = storageKeys.join("\n");
+  const read = (): string[] => storageKeys.map((storageKey, index) => readDraft(storageKey, initialValues[index] ?? ""));
+  const [loadedKeys, setLoadedKeys] = useState(joinedKeys);
+  const [values, setValues] = useState<string[]>(read);
+
+  if (loadedKeys !== joinedKeys) {
+    setLoadedKeys(joinedKeys);
+    setValues(read());
+  }
+
+  const setValueAt = (index: number, value: string): void => {
+    const storageKey = storageKeys[index];
+    if (storageKey === undefined) return;
+    writeDraft(storageKey, value);
+    setValues((prev) => prev.map((current, position) => position === index ? value : current));
+  };
+
+  return [values, setValueAt];
+}
+
 /** Structured draft (JSON) validated by `schema` on read; an invalid or missing draft yields `empty`. */
 export function useLocalJsonDraft<T>(
   key: string,

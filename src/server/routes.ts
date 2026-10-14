@@ -57,7 +57,7 @@ import type { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import type { ReformulateManager } from "./agents/reformulateManager.ts";
 import { FeasibilityAnswerError } from "./agents/feasibilityAnswerManager.ts";
 import type { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
-import { feasibilityAnswerInputSchema } from "../shared/schemas.ts";
+import { feasibilityAnswerBatchInputSchema, feasibilityAnswerInputSchema } from "../shared/schemas.ts";
 import type { SplitManager } from "./agents/splitManager.ts";
 import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
@@ -1808,6 +1808,16 @@ export function createApiRoutes(deps: RouteDeps) {
       try {
         const id = deps.feasibilityAnswers.start(params.id, parsed.data);
         return { started: true, id };
+      } catch (error) {
+        return jsonError(set, error instanceof FeasibilityAnswerError ? error.status : HTTP_INTERNAL_ERROR, getErrorMessage(error));
+      }
+    })
+    .post("/tickets/:id/feasibility-answers/batch", ({ params, body, set }) => {
+      const parsed = feasibilityAnswerBatchInputSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid feasibility answers");
+      try {
+        const ids = deps.feasibilityAnswers.startBatch(params.id, parsed.data);
+        return { started: true, ids };
       } catch (error) {
         return jsonError(set, error instanceof FeasibilityAnswerError ? error.status : HTTP_INTERNAL_ERROR, getErrorMessage(error));
       }

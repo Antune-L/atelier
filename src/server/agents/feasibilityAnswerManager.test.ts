@@ -80,7 +80,7 @@ for (const [orchestrator, engine, expected] of [
     expect(store.listExecutionRuns("ticket", ticket().id)[0]).toMatchObject({ orchestrator: expected, status: "completed", sessionId: "answer-session" });
     expect(store.listExecutionRuns("ticket", ticket().id)[0]?.usageByModel["test-model"]?.inputTokens).toBe(11);
     expect(() => manager.start(ticket().id, input())).toThrow("already been answered");
-    const prompt = buildFeasibilityAnswerPrompt(ticket(), { ...input(1), id: "next", question: "Which size?", status: "running", error: null });
+    const prompt = buildFeasibilityAnswerPrompt(ticket(), [{ ...input(1), id: "next", question: "Which size?", status: "running", error: null }]);
     expect(prompt).toContain('"answer":"Blue"');
   });
 }

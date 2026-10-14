@@ -9,6 +9,7 @@ import { PrdAnnotator } from "@/components/PrdAnnotator";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { api, atelierPrdExportUrl } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
@@ -39,7 +40,6 @@ function draftOf(prd: PrdDocumentRecord): FeedbackDraft {
   return { prdId: prd.id, annotations: prd.annotations, generalNote: prd.generalNote };
 }
 
-/** Step 2 of the Atelier: review a PRD revision, annotate it, regenerate, validate and export. */
 export function PrdPanel({
   conversation,
   prd,
@@ -101,6 +101,8 @@ export function PrdPanel({
 
   const setStatus = (status: PrdDocumentRecord["status"]): void => {
     void run(async () => {
+      cancelPendingSave();
+      await persist(draft);
       onApplyPrd(await api.atelierUpdatePrd(prd.id, { status }));
     }, "Mise à jour du statut impossible");
   };
@@ -114,9 +116,27 @@ export function PrdPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        <h2 className="text-sm font-medium">PRD</h2>
-        <div className="flex items-center gap-1" role="radiogroup" aria-label="Révision du PRD">
+      <header className="shrink-0 space-y-3 border-b border-border bg-card px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <h2 className="break-words text-base font-semibold">{prd.document.title}</h2>
+            <p className="text-xs text-muted-foreground">PRD · Le JSON est la source du document et de ses exports.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="ghost" onClick={onBackToConversation}>
+              <ArrowLeft className="h-3.5 w-3.5" />Discussion
+            </Button>
+            <Popover>
+              <PopoverTrigger><Button size="sm" variant="outline"><Download className="h-3.5 w-3.5" />Exporter</Button></PopoverTrigger>
+              <PopoverContent className="flex w-56 flex-col gap-2 p-3">
+                <a href={atelierPrdExportUrl(prd.id, "json")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />JSON source</a>
+                <a href={atelierPrdExportUrl(prd.id, "html")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />HTML généré</a>
+                <Button size="sm" variant="ghost" onClick={copyJson}><Copy className="h-3.5 w-3.5" />Copier le JSON</Button>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Révision du PRD">
           {prds.map((revision) => (
             <button
               key={revision.id}
@@ -126,87 +146,43 @@ export function PrdPanel({
               onClick={() => onSelectPrd(revision.id)}
               className={cn(
                 "rounded-full border px-2 py-0.5 font-mono text-2xs transition-colors",
-                revision.id === prd.id
-                  ? "border-foreground/40 bg-accent text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
+                revision.id === prd.id ? "border-foreground/40 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground",
               )}
-            >
-              rév. {revision.revision}
-            </button>
+            >rév. {revision.revision}</button>
           ))}
+          <Badge variant={validated ? "success" : "outline"}>{validated ? "Validé" : "Brouillon"}</Badge>
+          {!isLatest && <Badge variant="outline">Historique · lecture seule</Badge>}
         </div>
-        <Badge variant={validated ? "success" : "outline"}>{validated ? "validé" : "brouillon"}</Badge>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onBackToConversation}>
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Reprendre la conversation
-          </Button>
-          <a href={atelierPrdExportUrl(prd.id, "json")} download className={EXPORT_LINK_CLASSES}>
-            <Download className="h-3.5 w-3.5" />
-            Exporter JSON
-          </a>
-          <a href={atelierPrdExportUrl(prd.id, "html")} download className={EXPORT_LINK_CLASSES}>
-            <Download className="h-3.5 w-3.5" />
-            Exporter HTML
-          </a>
-          <Button size="sm" variant="outline" onClick={copyJson}>
-            <Copy className="h-3.5 w-3.5" />
-            Copier le JSON
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background p-3">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {!isLatest ? "Cette révision est en lecture seule. Vous pouvez préparer ses cartes ou sélectionner la dernière pour la modifier." : validated ? "PRD validé. Choisissez ensuite les cartes à créer dans TODO." : "Relisez le document et ajoutez vos commentaires avant de le valider."}
+          </p>
           {validated ? (
-            <Button size="sm" variant="outline" onClick={() => setStatus("draft")} disabled={busy}>
-              <RotateCcw className="h-3.5 w-3.5" />
-              Rouvrir
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => setStatus("draft")} disabled={busy || regenerating || !isLatest}><RotateCcw className="h-3.5 w-3.5" />Rouvrir</Button>
+              <Button size="sm" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
+            </>
           ) : (
-            <Button size="sm" variant="outline" onClick={() => setStatus("validated")} disabled={busy || regenerating}>
-              <Check className="h-3.5 w-3.5" />
-              Marquer comme validé
-            </Button>
-          )}
-          <Button size="sm" onClick={onCreateCards}>
-            Créer les cartes
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid max-h-48 shrink-0 grid-cols-1 gap-4 overflow-y-auto border-b border-border px-4 py-3 md:grid-cols-2">
-        <div className="space-y-1.5">
-          <SectionHeader
-            aside={
-              <Badge variant={openQuestions.length > 0 ? "warning" : "success"}>
-                {openQuestions.length > 0 ? openQuestions.length : "aucune"}
-              </Badge>
-            }
-          >
-            Décisions attendues
-          </SectionHeader>
-          {openQuestions.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Toutes les questions ouvertes sont tranchées.</p>
-          ) : (
-            <ol className="list-decimal space-y-1 pl-4 text-xs">
-              {openQuestions.map((question) => (
-                <li key={question}>{question}</li>
-              ))}
-            </ol>
+            <>
+              <Button size="sm" variant="outline" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
+              <Button size="sm" onClick={() => setStatus("validated")} disabled={busy || regenerating || !isLatest}><Check className="h-3.5 w-3.5" />Valider le PRD</Button>
+            </>
           )}
         </div>
-        <div className="space-y-1.5">
-          <SectionHeader>Axes</SectionHeader>
-          <ul className="space-y-1 text-xs">
-            {prd.document.axes.map((axis) => (
-              <li key={axis.id} className="flex gap-2">
-                <span className="shrink-0 font-mono text-2xs text-muted-foreground">{axis.id}</span>
-                <span className="min-w-0">
-                  <span className="font-medium">{axis.title}</span>
-                  <span className="text-muted-foreground"> · {axis.summary}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+        <details className="rounded-md border border-border px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-medium">Décisions attendues · {openQuestions.length} · Axes · {prd.document.axes.length}</summary>
+          <div className="mt-3 flex flex-col gap-4 md:flex-row">
+            <div className="min-w-0 flex-1 space-y-2">
+              <SectionHeader>Décisions attendues</SectionHeader>
+              {openQuestions.length === 0 ? <p className="text-muted-foreground">Toutes les questions ouvertes sont tranchées.</p> : <ol className="list-decimal space-y-1 pl-4">{openQuestions.map((question) => <li key={question}>{question}</li>)}</ol>}
+            </div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <SectionHeader>Axes</SectionHeader>
+              <ul className="space-y-2">{prd.document.axes.map((axis) => <li key={axis.id}><span className="mr-2 font-mono text-muted-foreground">{axis.id}</span><strong className="font-medium">{axis.title}</strong><span className="text-muted-foreground"> · {axis.summary}</span></li>)}</ul>
+            </div>
+          </div>
+        </details>
+      </header>
 
       {regenerating && (
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
@@ -228,7 +204,7 @@ export function PrdPanel({
       {actionable && (
         <div className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2">
           {error && <p className="min-w-0 flex-1 truncate text-xs text-danger">{error}</p>}
-          <Button size="sm" className="ml-auto" onClick={regenerate} disabled={busy || !hasFeedback}>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={regenerate} disabled={busy || !hasFeedback}>
             <RefreshCw className="h-3.5 w-3.5" />
             Régénérer avec les commentaires
           </Button>

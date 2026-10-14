@@ -32,7 +32,7 @@ test("legacy and conflicting drafts cannot be saved over integrated answers", ()
   ]) {
     const html = renderDescription(drafts);
     expect(html).toContain('role="alert"');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Enregistrer<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Enregistrer le brief<\/button>/);
     expect(html).toContain("Annuler");
   }
 });

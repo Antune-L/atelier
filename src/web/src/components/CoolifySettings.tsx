@@ -25,7 +25,12 @@ function ResourceSelect({ label, value, items, disabled, onChange }: {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       <label htmlFor={id} className={FIELD_LABEL_CLASSES}>{label}</label>
-      <Select id={id} value={value ?? ""} disabled={disabled} onChange={(event) => onChange(event.target.value || null)}>
+      <Select
+        id={id}
+        value={value ?? ""}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value || null)}
+      >
         <option value="">Sélectionner…</option>
         {selectedMissing && <option value={value}>Ressource enregistrée · à vérifier</option>}
         {items.map((item) => <option key={item.uuid} value={item.uuid}>{item.name || "Ressource sans nom"}</option>)}
@@ -46,7 +51,7 @@ function settingsInput(settings: PreviewSettings): UpdatePreviewSettingsInput {
   };
 }
 
-export function CoolifySettings() {
+export function CoolifySettings({ query = "" }: { query?: string }) {
   const [settings, setSettings] = useState<PreviewSettings | null>(null);
   const [draft, setDraft] = useState<PreviewSettings | null>(null);
   const [token, setToken] = useState("");
@@ -75,6 +80,9 @@ export function CoolifySettings() {
     JSON.stringify(settingsInput(settings)) !== JSON.stringify(settingsInput(draft)) ||
     token !== "" || usernameChanged || password !== ""
   );
+
+  const serverName = inventory?.servers.find((item) => item.uuid === settings?.serverUuid)?.name;
+  const projectName = inventory?.projects.find((item) => item.uuid === settings?.projectUuid)?.name;
 
   async function save(testConnection: boolean) {
     if (draft === null) return;
@@ -105,64 +113,188 @@ export function CoolifySettings() {
 
   return (
     <div className="space-y-5">
-      <SectionHeader title="Coolify" subtitle="Créez une prévisualisation temporaire et protégée à partir d'une pull request GitHub." />
+      <SectionHeader
+        title="Connexion des aperçus"
+        subtitle="Configurez Coolify, la destination et l'accès protégé des prévisualisations GitHub."
+      />
       {error && <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{error}</p>}
       {draft === null ? (
         <div className="space-y-2">
           {!error && <p className="text-sm text-muted-foreground">Chargement de la connexion…</p>}
-          {error && <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(async () => {
-            const result = await previewApi.settings();
-            setSettings(result.settings);
-            setDraft(result.settings);
-            setUsername(result.settings.previewAuthUsername ?? "");
-          }, "Impossible de charger la connexion Coolify.")}>Réessayer</Button>}
+          {error && <Button
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            onClick={() => void run(async () => {
+              const result = await previewApi.settings();
+              setSettings(result.settings);
+              setDraft(result.settings);
+              setUsername(result.settings.previewAuthUsername ?? "");
+            }, "Impossible de charger la connexion Coolify.")}
+          >Réessayer</Button>}
         </div>
       ) : (
         <>
-          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-            <div className="flex items-center gap-2 text-sm font-medium"><Cloud className="size-4 text-primary" />Connexion à votre instance</div>
-            <label className="flex flex-col gap-1.5">
-              <span className={FIELD_LABEL_CLASSES}>Adresse Coolify</span>
-              <Input type="url" placeholder="https://coolify.example.com" value={draft.baseUrl ?? ""} onChange={(event) => { setInventory(null); setDraft({ ...draft, baseUrl: event.target.value || null }); }} disabled={busy} />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className={FIELD_LABEL_CLASSES}>Jeton API</span>
-              <Input type="password" autoComplete="new-password" placeholder={settings?.tokenConfigured ? "Jeton enregistré · saisir pour remplacer" : "Collez votre jeton Coolify"} value={token} onChange={(event) => setToken(event.target.value)} disabled={busy} />
-            </label>
-            <p className="text-xs text-muted-foreground">Les secrets sont enregistrés sur votre machine et ne sont jamais renvoyés par l'API.</p>
-            <Button variant="outline" size="sm" disabled={busy || !draft.baseUrl || (!token && !settings?.tokenConfigured)} onClick={() => void save(true)}>
-              {busy && <Loader2 className="size-3.5 animate-spin" />}Enregistrer et tester la connexion
-            </Button>
-            {inventory !== null && <p className="flex items-center gap-2 text-sm text-primary"><CheckCircle2 className="size-4" />Connexion vérifiée. Choisissez les ressources ci-dessous.</p>}
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+            <p className="text-sm font-semibold" role="status">{inventory !== null ? "Connexion confirmée pendant cette ouverture" : "Connexion non vérifiée pendant cette ouverture"}</p>
+            <p className="text-xs text-muted-foreground">Une connexion confirmée ne qualifie pas un déploiement. La qualification reste disponible dans chaque projet.</p>
+            {settings !== null && <ul className="space-y-1 text-xs text-warning" aria-label="Configuration à compléter">
+              {!settings.baseUrl && <li>Adresse Coolify à renseigner.</li>}
+              {!settings.tokenConfigured && <li>Jeton Coolify manquant.</li>}
+              {!settings.serverUuid && <li>Serveur de destination à choisir.</li>}
+              {!settings.projectUuid && <li>Projet Coolify à choisir.</li>}
+              {!settings.domainBase && <li>Domaine des prévisualisations à renseigner.</li>}
+              {!settings.previewAuthConfigured && <li>Identifiants de protection à définir avant le déploiement.</li>}
+            </ul>}
           </div>
+          <details className="rounded-lg border p-4" open={query !== "" || undefined}>
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  <Cloud className="size-4 text-primary" />Connexion Coolify</p>
+                <p className="mt-1 break-all text-xs text-muted-foreground">{settings?.baseUrl ?? "Adresse non renseignée"} · {settings?.tokenConfigured ? "Jeton enregistré" : "Jeton manquant"}</p>
+              </div>
+              <span className="text-xs font-medium text-primary">Modifier</span>
+            </summary>
+            <div className="mt-4 space-y-3 border-t pt-4">
+              <label className="flex flex-col gap-1.5">
+                <span className={FIELD_LABEL_CLASSES}>Adresse Coolify</span>
+                <Input
+                  type="url"
+                  placeholder="https://coolify.example.com"
+                  value={draft.baseUrl ?? ""}
+                  onChange={(event) => { setInventory(null); setDraft({ ...draft, baseUrl: event.target.value || null }); }}
+                  disabled={busy}
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className={FIELD_LABEL_CLASSES}>Jeton API</span>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder={settings?.tokenConfigured ? "Jeton enregistré · saisir pour remplacer" : "Collez votre jeton Coolify"}
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  disabled={busy}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">Les secrets sont enregistrés sur votre machine et ne sont jamais renvoyés par l'API.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy || !draft.baseUrl || (!token && !settings?.tokenConfigured)}
+                onClick={() => void save(true)}
+              >
+                {busy && <Loader2 className="size-3.5 animate-spin" />}Enregistrer et tester la connexion
+              </Button>
+              {inventory !== null && <p className="flex items-center gap-2 text-sm text-primary">
+                <CheckCircle2 className="size-4" />Connexion vérifiée. Choisissez les ressources ci-dessous.</p>}
+            </div>
+          </details>
 
-          <div className="space-y-3">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <ResourceSelect label="Serveur" value={draft.serverUuid} items={inventory?.servers ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, serverUuid: value })} />
-              <ResourceSelect label="Projet Coolify" value={draft.projectUuid} items={inventory?.projects ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, projectUuid: value })} />
+          <details className="rounded-lg border p-4" open={query !== "" || undefined}>
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Destination des aperçus</p>
+                <p className="mt-1 text-xs text-muted-foreground">{serverName || (settings?.serverUuid ? "Serveur enregistré" : "Serveur à choisir")} · {projectName || (settings?.projectUuid ? "Projet enregistré" : "Projet à choisir")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{settings?.domainBase ?? "Domaine non renseigné"} · {settings?.environmentName}</p>
+              </div>
+              <span className="text-xs font-medium text-primary">Modifier</span>
+            </summary>
+            <div className="mt-4 space-y-3 border-t pt-4">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <ResourceSelect
+                  label="Serveur"
+                  value={draft.serverUuid}
+                  items={inventory?.servers ?? []}
+                  disabled={busy || inventory === null}
+                  onChange={(value) => setDraft({ ...draft, serverUuid: value })}
+                />
+                <ResourceSelect
+                  label="Projet Coolify"
+                  value={draft.projectUuid}
+                  items={inventory?.projects ?? []}
+                  disabled={busy || inventory === null}
+                  onChange={(value) => setDraft({ ...draft, projectUuid: value })}
+                />
+              </div>
+              <ResourceSelect
+                label="GitHub App par défaut"
+                value={draft.githubAppUuid}
+                items={inventory?.githubApps ?? []}
+                disabled={busy || inventory === null}
+                onChange={(value) => setDraft({ ...draft, githubAppUuid: value })}
+              />
+              <p className="text-xs text-muted-foreground">Chaque projet choisit une connexion autorisée pour son dépôt. Cette GitHub App (connexion GitHub dans Coolify) est préférée seulement si son accès est vérifié ; un dépôt public peut fonctionner sans elle.</p>
+              {inventory === null && <p className="text-xs text-muted-foreground">Testez la connexion pour charger les serveurs, projets et applications GitHub disponibles.</p>}
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={FIELD_LABEL_CLASSES}>Environnement</span>
+                  <Input
+                    value={draft.environmentName}
+                    onChange={(event) => setDraft({ ...draft, environmentName: event.target.value })}
+                    disabled={busy}
+                  />
+                </label>
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={FIELD_LABEL_CLASSES}>Domaine des prévisualisations</span>
+                  <Input
+                    placeholder="preview.example.com"
+                    value={draft.domainBase ?? ""}
+                    onChange={(event) => setDraft({ ...draft, domainBase: event.target.value || null })}
+                    disabled={busy}
+                  />
+                </label>
+              </div>
+              <label className="flex flex-col gap-1.5">
+                <span className={FIELD_LABEL_CLASSES}>Alias SSH pour le nettoyage (facultatif)</span>
+                <Input
+                  placeholder="Alias déjà défini dans votre configuration SSH"
+                  value={draft.sshHostAlias ?? ""}
+                  onChange={(event) => setDraft({ ...draft, sshHostAlias: event.target.value || null })}
+                  disabled={busy}
+                />
+                <span className="text-xs text-muted-foreground">SSH (connexion sécurisée au serveur) permet de vérifier la suppression des ressources Docker de la prévisualisation.</span>
+              </label>
             </div>
-            <ResourceSelect label="GitHub App par défaut" value={draft.githubAppUuid} items={inventory?.githubApps ?? []} disabled={busy || inventory === null} onChange={(value) => setDraft({ ...draft, githubAppUuid: value })} />
-            <p className="text-xs text-muted-foreground">Chaque projet choisit une connexion autorisée pour son dépôt. Cette GitHub App (connexion GitHub dans Coolify) est préférée seulement si son accès est vérifié ; un dépôt public peut fonctionner sans elle.</p>
-            {inventory === null && <p className="text-xs text-muted-foreground">Testez la connexion pour charger les serveurs, projets et applications GitHub disponibles.</p>}
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Environnement</span><Input value={draft.environmentName} onChange={(event) => setDraft({ ...draft, environmentName: event.target.value })} disabled={busy} /></label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Domaine des prévisualisations</span><Input placeholder="preview.example.com" value={draft.domainBase ?? ""} onChange={(event) => setDraft({ ...draft, domainBase: event.target.value || null })} disabled={busy} /></label>
-            </div>
-          </div>
+          </details>
 
-          <div className="space-y-3 rounded-lg border border-border p-4">
-            <div className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4 text-primary" />Accès protégé</div>
-            <p className="text-xs text-muted-foreground">Chaque prévisualisation demande ces identifiants dans le navigateur. {settings?.previewAuthConfigured ? "Des identifiants sont déjà enregistrés." : "Définissez-les avant le premier déploiement."}</p>
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Nom d'utilisateur</span><Input autoComplete="off" placeholder={settings?.previewAuthConfigured ? "Saisir pour remplacer" : "Choisissez un identifiant"} value={username} onChange={(event) => setUsername(event.target.value)} disabled={busy} /></label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5"><span className={FIELD_LABEL_CLASSES}>Mot de passe</span><Input type="password" autoComplete="new-password" placeholder={settings?.previewAuthConfigured ? "••••••••" : "Choisissez un mot de passe"} value={password} onChange={(event) => setPassword(event.target.value)} disabled={busy} /></label>
+          <details className="rounded-lg border p-4" open={query !== "" || undefined}>
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-semibold">
+                  <ShieldCheck className="size-4 text-primary" />Accès protégé</p>
+                <p className="mt-1 text-xs text-muted-foreground">{settings?.previewAuthConfigured ? "Identifiants enregistrés" : "Identifiants à définir avant le premier déploiement"}</p>
+              </div>
+              <span className="text-xs font-medium text-primary">Modifier</span>
+            </summary>
+            <div className="mt-4 space-y-3 border-t pt-4">
+              <p className="text-xs text-muted-foreground">Chaque prévisualisation demande ces identifiants dans le navigateur. Les mots de passe enregistrés restent masqués.</p>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={FIELD_LABEL_CLASSES}>Nom d'utilisateur</span>
+                  <Input
+                    autoComplete="off"
+                    placeholder={settings?.previewAuthConfigured ? "Saisir pour remplacer" : "Choisissez un identifiant"}
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <span className={FIELD_LABEL_CLASSES}>Mot de passe</span>
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder={settings?.previewAuthConfigured ? "••••••••" : "Choisissez un mot de passe"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+              </div>
             </div>
-          </div>
-          <label className="flex flex-col gap-1.5">
-            <span className={FIELD_LABEL_CLASSES}>Alias SSH pour le nettoyage (facultatif)</span>
-            <Input placeholder="Alias déjà défini dans votre configuration SSH" value={draft.sshHostAlias ?? ""} onChange={(event) => setDraft({ ...draft, sshHostAlias: event.target.value || null })} disabled={busy} />
-            <span className="text-xs text-muted-foreground">SSH (connexion sécurisée au serveur) permet de vérifier la suppression des ressources Docker appartenant à la prévisualisation.</span>
-          </label>
+          </details>
           <SettingsFooter dirty={dirty} justSaved={saved}>
             <Button size="sm" disabled={busy || !dirty || !draft.environmentName.trim()} onClick={() => void save(false)}>Enregistrer</Button>
           </SettingsFooter>

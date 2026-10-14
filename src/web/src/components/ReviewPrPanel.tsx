@@ -19,21 +19,18 @@ import type { PrNotification, PrNotificationReviewOptions, ProjectInfo } from "@
 import { commitLanguageSchema, reviewDepthSchema } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
-import { SessionDriverFields } from "@/components/SessionDriverFields";
+import { ToolAgentSettings } from "@/components/ToolAgentSettings";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Tabs } from "@/components/ui/tabs";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectPanel } from "@/hooks/useProjectPanel";
 import { refreshReviewCounts, useReviewCounts } from "@/hooks/useReviewCounts";
-import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { boardStore } from "@/lib/store";
 import { FIELD_LABEL_CLASSES, PANEL_FOOTER_CLASSES } from "@/lib/overlayStyles";
-import { AGENT_EFFORT_OPTIONS, AGENT_MODEL_OPTIONS } from "@/lib/display";
 
 interface ReviewPrPanelProps {
   projects: ProjectInfo[];
@@ -60,7 +57,6 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);
-  const { model: resolvedDefaultModel, effort: resolvedDefaultEffort } = resolveAgentDefaults(capabilities);
   const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const [codexModel, setCodexModel] = useState<CodexModel | null>(null);
   const [codexEffort, setCodexEffort] = useState<CodexEffort | null>(null);
@@ -139,67 +135,86 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         onRefreshCounts={() => { void refreshReviewCounts(); }}
       />}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="review-depth" className={FIELD_LABEL_CLASSES}>Niveau de review</Label>
-        <Select
-          className="ml-2"
-          id="review-depth"
-          value={depth}
-          onChange={(e) => setDepth(reviewDepthSchema.parse(e.target.value))}
-        >
-          {REVIEW_DEPTHS.map((d) => (
-            <option key={d} value={d}>
-              {REVIEW_DEPTH_LABELS[d]}
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="review-language" className={FIELD_LABEL_CLASSES}>Langue de la review</Label>
-        <Select
-          className="ml-2"
-          id="review-language"
-          value={resolvedLanguage}
-          onChange={(e) => setLanguage(commitLanguageSchema.parse(e.target.value))}
-        >
-          {COMMIT_LANGUAGES.map((l) => (
-            <option key={l} value={l}>
-              {COMMIT_LANGUAGE_LABELS[l]}
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <Switch checked={humanTone} onCheckedChange={setHumanTone} aria-labelledby="human-tone-label" />
-          <span id="human-tone-label" className="text-sm">Commentaires plus humains</span>
+      <section className="space-y-3 rounded-md border border-border p-3">
+        <h3 className="text-sm font-medium">Langue et ton des commentaires</h3>
+        <div className="space-y-1.5">
+          <Label htmlFor="review-language" className={FIELD_LABEL_CLASSES}>Langue des commentaires</Label>
+          <Select
+            className="w-full"
+            id="review-language"
+            value={resolvedLanguage}
+            onChange={(e) => setLanguage(commitLanguageSchema.parse(e.target.value))}
+          >
+            {COMMIT_LANGUAGES.map((l) => (
+              <option key={l} value={l}>
+                {COMMIT_LANGUAGE_LABELS[l]}
+              </option>
+            ))}
+          </Select>
         </div>
-        <p className="pl-11 text-xs text-muted-foreground">
-          Ton de collègue : remarques courtes et directes, sans jargon de reviewer.
-        </p>
-      </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="review-base-branch" className={FIELD_LABEL_CLASSES}>Branche de review (cible)</Label>
-        <Select
-          className="ml-2"
-          id="review-base-branch"
-          value={baseBranch}
-          onChange={(e) => setBaseBranch(e.target.value)}
-          disabled={branches === null}
-        >
-          <option value={BASE_BRANCH_AUTO}>Auto — cible réelle de chaque PR</option>
-          {(branches ?? []).map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </Select>
-      </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Switch checked={humanTone} onCheckedChange={setHumanTone} aria-labelledby="human-tone-label" />
+            <span id="human-tone-label" className="text-sm">Commentaires plus humains</span>
+          </div>
+          <p className="pl-11 text-xs text-muted-foreground">
+            Ton de collègue : remarques courtes et directes, sans jargon de reviewer.
+          </p>
+        </div>
 
-      <SessionDriverFields
+      </section>
+
+      <section className="space-y-2 rounded-md border border-border p-3">
+        <h3 className="text-sm font-medium">Périmètre de la relecture</h3>
+        <p className="text-xs text-muted-foreground">{REVIEW_DEPTH_LABELS[depth]} · Cible : {baseBranch || "branche cible de chaque PR"}</p>
+        <details>
+          <summary className="cursor-pointer text-xs font-medium text-primary">Modifier le périmètre et la branche cible</summary>
+          <div className="mt-3 space-y-3 border-t border-border pt-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="review-depth" className={FIELD_LABEL_CLASSES}>Niveau de relecture</Label>
+              <Select
+                className="w-full"
+                id="review-depth"
+                value={depth}
+                onChange={(e) => setDepth(reviewDepthSchema.parse(e.target.value))}
+              >
+                {REVIEW_DEPTHS.map((d) => (
+                  <option key={d} value={d}>
+                    {REVIEW_DEPTH_LABELS[d]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="review-base-branch" className={FIELD_LABEL_CLASSES}>Branche cible de la relecture</Label>
+              <Select
+                className="w-full"
+                id="review-base-branch"
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                disabled={branches === null}
+              >
+                <option value={BASE_BRANCH_AUTO}>Auto — cible réelle de chaque PR</option>
+                {(branches ?? []).map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+          </div>
+        </details>
+      </section>
+
+      <ToolAgentSettings
+        id="review"
+        model={model}
+        effort={effort}
+        onModelChange={setModel}
+        onEffortChange={setEffort}
         orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
@@ -209,30 +224,6 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         onCodexEffortChange={setCodexEffort}
         onCodexFastChange={setCodexFast}
       />
-
-      {orchestrator === "claude" && (
-        <>
-          <div className="flex flex-col items-start gap-1.5">
-            <Label id="review-model" className={FIELD_LABEL_CLASSES}>Modèle</Label>
-            <Tabs
-              options={AGENT_MODEL_OPTIONS}
-              value={model ?? resolvedDefaultModel}
-              onChange={(value) => setModel(value === resolvedDefaultModel ? null : value)}
-              aria-labelledby="review-model"
-            />
-          </div>
-
-          <div className="flex flex-col items-start gap-1.5">
-            <Label id="review-effort" className={FIELD_LABEL_CLASSES}>Réflexion (effort)</Label>
-            <Tabs
-              options={AGENT_EFFORT_OPTIONS}
-              value={effort ?? resolvedDefaultEffort}
-              onChange={(value) => setEffort(value === resolvedDefaultEffort ? null : value)}
-              aria-labelledby="review-effort"
-            />
-          </div>
-        </>
-      )}
 
       <div className="space-y-1">
         <div className="flex items-center gap-2">
@@ -244,7 +235,13 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         </p>
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">
+        <p className="text-sm font-medium">Publication sur {selectedCount} PR sélectionnée(s)</p>
+        <p className="text-xs text-muted-foreground">Les commentaires et le verdict seront publiés sur les PR du projet. Langue : {COMMIT_LANGUAGE_LABELS[resolvedLanguage]}. Ton : {humanTone ? "collègue, court et direct" : "standard"}.</p>
+        <p className="text-xs text-muted-foreground">{fixComments ? "Les corrections pertinentes seront appliquées puis poussées sur la branche de la PR." : "Relecture seule : les branches des PR ne seront pas modifiées."}</p>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       <div className={PANEL_FOOTER_CLASSES}>
         <Button size="sm" variant="ghost" onClick={onClose}>
@@ -252,7 +249,7 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         </Button>
         <Button size="sm" onClick={launch} disabled={busy || selectedCount === 0}>
           <GitPullRequest className="h-4 w-4" />
-          Lancer la revue{selectedCount > 0 ? ` (${selectedCount})` : ""}
+          Lancer la relecture{selectedCount > 0 ? ` (${selectedCount})` : ""}
         </Button>
       </div>
     </div>

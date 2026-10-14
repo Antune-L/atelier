@@ -21,10 +21,6 @@ const SCP_LINK_PATTERN = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i
 const HTTPS_LINK_PATTERN = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i;
 const SHORTHAND_PATTERN = /^([^/\s:]+)\/([^/\s:]+?)(?:\.git)?$/;
 
-/**
- * HTTPS URL the server will rebuild from a link, shown before cloning. Display only: the server
- * validates the source again and returns the URL it actually used.
- */
 export function previewCloneUrl(source: string): string | null {
   const trimmed = source.trim();
   const match = SCP_LINK_PATTERN.exec(trimmed) ?? HTTPS_LINK_PATTERN.exec(trimmed) ?? SHORTHAND_PATTERN.exec(trimmed);
@@ -44,7 +40,6 @@ interface GithubCloneStepProps {
   onError: (message: string | null) => void;
 }
 
-/** « Depuis GitHub »: pick an account, then a repository from its list or a git link, and clone it. */
 export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStepProps) {
   const { accounts } = useGithubAccounts();
   const [account, setAccount] = useState<string | null>(null);
@@ -67,7 +62,6 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
         if (active) setRepos(list);
       })
       .catch((cause: unknown) => {
-        // No partial list: the error replaces it entirely and names the account.
         if (active) setReposError(errorMessage(cause, `Liste des dépôts ${accountName(account)} indisponible`));
       })
       .finally(() => {
@@ -101,11 +95,14 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
   };
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <Field label="Compte GitHub">
         <Select
           value={account ?? MACHINE_ACCOUNT_VALUE}
-          onChange={(event) => setAccount(event.target.value === MACHINE_ACCOUNT_VALUE ? null : event.target.value)}
+          onChange={(event) => {
+            setSelected(null);
+            setAccount(event.target.value === MACHINE_ACCOUNT_VALUE ? null : event.target.value);
+          }}
           aria-label="Compte GitHub"
           disabled={locked}
         >
@@ -117,12 +114,12 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
           ))}
         </Select>
       </Field>
-      <Field label="Dépôts">
+      <Field label="Choisir un dépôt">
         <div className="flex w-full flex-col gap-2">
           <Input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Filtrer owner/dépôt"
+            placeholder="Rechercher un dépôt…"
             aria-label="Filtrer les dépôts"
             disabled={locked || reposError !== null}
           />
@@ -135,7 +132,9 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
             ) : reposError !== null ? (
               <p className="p-2 text-xs text-destructive" role="alert">{reposError}</p>
             ) : visibleRepos.length === 0 ? (
-              <p className="p-2 text-xs text-muted-foreground">Aucun dépôt.</p>
+              <p className="p-3 text-xs text-muted-foreground">
+                {repos.length === 0 ? "Aucun dépôt disponible pour ce compte." : "Aucun dépôt ne correspond à votre recherche."}
+              </p>
             ) : (
               visibleRepos.map((repo) => (
                 <button
@@ -147,10 +146,9 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
                   onClick={() => {
                     setLink("");
                     setSelected(repo.fullName);
-                    void clone(repo.fullName);
                   }}
                   className={cn(
-                    "flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-muted disabled:opacity-60",
+                    "flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted disabled:opacity-60",
                     selected === repo.fullName && link.trim() === "" && "bg-muted",
                   )}
                 >
@@ -162,32 +160,50 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
           </div>
         </div>
       </Field>
-      <Field label="Lien git">
-        <div className="flex w-full items-center gap-2">
-          <Input
-            value={link}
-            onChange={(event) => setLink(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || link.trim() === "") return;
-              event.preventDefault();
-              void clone(link.trim());
-            }}
-            placeholder="git@github.com:owner/repo.git, https://github.com/owner/repo ou owner/repo"
-            aria-label="Lien git"
-            disabled={locked}
-          />
-          <Button variant="outline" onClick={() => void clone(link.trim())} disabled={locked || link.trim() === ""}>
-            Cloner
-          </Button>
+      <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3">
+        <div aria-live="polite" className="min-w-0 text-sm">
+          {source === null ? (
+            <p className="text-muted-foreground">Sélectionnez un dépôt pour continuer.</p>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">Dépôt à cloner</p>
+              <p className="mt-1 break-all font-medium">{source}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {plannedUrl === null
+                  ? "Lien non reconnu : seuls les dépôts github.com sont clonés ici (sinon, utilisez « Dossier local »)."
+                  : <>Clone HTTPS : <code className="break-all">{plannedUrl}</code></>}
+              </p>
+            </>
+          )}
         </div>
-      </Field>
-      {source !== null && (
-        <p className="text-xs text-muted-foreground">
-          {plannedUrl === null
-            ? "Lien non reconnu : seuls les dépôts github.com sont clonés ici (sinon, utilise « Dossier local »)."
-            : <>Clone HTTPS : <code>{plannedUrl}</code></>}
-        </p>
-      )}
+        <Button onClick={() => { if (source !== null) void clone(source); }} disabled={locked || source === null} className="self-start">
+          {cloning && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+          Cloner ce dépôt
+        </Button>
+      </div>
+      <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-xs font-medium">Utiliser un lien GitHub</summary>
+        <div className="mt-3 flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">Pour un dépôt absent de la liste, collez son adresse puis confirmez le clonage.</p>
+          <Field label="Lien git">
+            <Input
+              value={link}
+              onChange={(event) => {
+                setLink(event.target.value);
+                if (event.target.value.trim() !== "") setSelected(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || link.trim() === "") return;
+                event.preventDefault();
+                void clone(link.trim());
+              }}
+              placeholder="git@github.com:owner/repo.git, https://github.com/owner/repo ou owner/repo"
+              aria-label="Lien git"
+              disabled={locked}
+            />
+          </Field>
+        </div>
+      </details>
       {cloning && (
         <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />

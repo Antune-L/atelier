@@ -208,7 +208,7 @@ export function ProjectsSettings() {
       </div>
 
       <div className="flex flex-col gap-4 min-[720px]:flex-row min-[720px]:items-start">
-        <ProjectList
+        {!showCreate && <ProjectList
           totalCount={projects.length}
           hiddenCount={hiddenCount}
           groups={listGroups}
@@ -232,7 +232,7 @@ export function ProjectsSettings() {
           onProjectMove={(group, activeKey, overKey) =>
             void persistOrder(moveVisibleProject(projects, group, activeKey, overKey))
           }
-        />
+        />}
 
         <div className="min-w-0 flex-1">{renderPanel()}</div>
       </div>

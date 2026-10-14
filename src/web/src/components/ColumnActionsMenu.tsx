@@ -32,11 +32,12 @@ export function ColumnActionsMenu({ items, ariaLabel }: ColumnActionsMenuProps) 
       <PopoverTrigger>
         <button
           type="button"
-          className="flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center justify-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           aria-label={ariaLabel}
           aria-haspopup="menu"
         >
           <MoreHorizontal className="h-3.5 w-3.5" />
+          Actions
         </button>
       </PopoverTrigger>
       <PopoverContent role="menu" className={MENU_CONTENT_CLASSES}>
@@ -51,7 +52,7 @@ export function ColumnActionsMenu({ items, ariaLabel }: ColumnActionsMenuProps) 
               title={item.title}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              {item.label}
+              <span className="flex flex-col gap-0.5 text-left"><span>{item.label}</span>{item.title && <span className="text-2xs font-normal text-muted-foreground">{item.title}</span>}</span>
             </PopoverMenuItem>
           );
         })}

@@ -56,7 +56,9 @@ export function PreviewQualificationPanel({ project, initial, disabled }: { proj
             <span>Branche <span className="font-mono">{qualification.branch}</span>{qualification.revision !== null && <> · commit <span className="font-mono">{qualification.revision.slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span></>}</span>
           </div>
           {qualification.error && <p className="break-words text-xs text-danger">{qualification.error}</p>}
-          <ul className="space-y-1.5">
+          <details>
+            <summary className="cursor-pointer text-xs font-medium">Détail des vérifications</summary>
+          <ul className="mt-3 space-y-1.5">
             {qualification.steps.map((step) => (
               <li key={step.id} className="space-y-0.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -67,6 +69,7 @@ export function PreviewQualificationPanel({ project, initial, disabled }: { proj
               </li>
             ))}
           </ul>
+          </details>
         </div>
       )}
     </div>

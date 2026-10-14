@@ -29,21 +29,21 @@ interface ToolMeta {
 export const TOOLS: Record<ToolKind, ToolMeta> = {
   import: {
     label: "Importer un CSV",
-    title: "Import CSV",
+    title: "Importer un CSV",
     Icon: FileUp,
-    size: "md",
+    size: "lg",
     Panel: ImportTicketsPanel,
   },
   review: {
-    label: "Reviewer une PR",
-    title: "PR Review",
+    label: "Relire une PR",
+    title: "Relire une pull request",
     Icon: GitPullRequest,
     size: "lg",
     Panel: ReviewPrPanel,
   },
   clean: {
-    label: "Nettoyer une PR",
-    title: "PR Cleaner",
+    label: "Corriger les retours d’une PR",
+    title: "Corriger les retours d’une PR",
     Icon: Sparkles,
     size: "lg",
     Panel: CleanPrPanel,
@@ -56,8 +56,8 @@ export const TOOLS: Record<ToolKind, ToolMeta> = {
     Panel: AskPanel,
   },
   worktree: {
-    label: "Worktree",
-    title: "Worktree",
+    label: "Créer un espace de travail",
+    title: "Créer un espace de travail",
     Icon: GitBranch,
     size: "md",
     Panel: WorktreePanel,

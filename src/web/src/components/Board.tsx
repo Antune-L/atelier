@@ -11,6 +11,7 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, type Column } from "@shared/constants";
 
 import { BoardColumn } from "@/components/BoardColumn";
+import { ticketDecisionLabel } from "@/components/TicketCard";
 import {
   TerminalColumnsPanel,
   readTerminalColumnOpen,
@@ -18,10 +19,12 @@ import {
 } from "@/components/TerminalColumnsPanel";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { useBoard } from "@/hooks/useBoard";
 import { boardStore } from "@/lib/store";
+import { matchesQuery, normalizeSearch } from "@/lib/search";
 
 interface BoardProps {
   projects: ProjectInfo[];
@@ -32,19 +35,12 @@ interface BoardProps {
 }
 
 const DRAG_ACTIVATION_DISTANCE = 6;
+const PINNED_DECISIONS_LIMIT = 4;
 
 /** Lanes whose tickets are done with: folded into the right-edge panel until the user opens one. */
 const TERMINAL_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
 
 const ACTIVE_COLUMNS: Column[] = COLUMN_ORDER.filter((column) => !TERMINAL_COLUMNS.includes(column));
-
-/** Case- and diacritics-insensitive normalization for client-side search. */
-function normalize(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "");
-}
 
 function isLocked(ticket: Ticket): boolean {
   if (ticket.stage === null) return false;
@@ -66,6 +62,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const [checkingAll, setCheckingAll] = useState(false);
   const checkingAllRef = useRef(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
+  const [decisionsOnly, setDecisionsOnly] = useState(false);
   const analyzingAllRef = useRef(false);
   const [openTerminalColumns, setOpenTerminalColumns] = useState<Set<Column>>(
     () => new Set(TERMINAL_COLUMNS.filter(readTerminalColumnOpen)),
@@ -87,10 +84,14 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   // Full-board lookup so a card can resolve its dependency parent (possibly in another column).
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
   const byProject = projectFilter === "all" ? tickets : tickets.filter((t) => t.project === projectFilter);
-  const needle = normalize(searchQuery.trim());
-  const visible = needle
-    ? byProject.filter((t) => normalize(`${t.title} ${t.description}`).includes(needle))
-    : byProject;
+  const needle = normalizeSearch(searchQuery);
+  const searched = byProject.filter((ticket) => matchesQuery(needle, ticket.title, ticket.description, ticket.id, ticket.branch ?? ""));
+  const decisions = searched.filter((ticket) => ticketDecisionLabel(ticket) !== null);
+  const visible = decisionsOnly ? decisions : searched;
+  const selectDecisions = (only: boolean): void => {
+    setDecisionsOnly(only);
+    if (only) setOpenTerminalColumns((current) => new Set([...current, ...TERMINAL_COLUMNS.filter((column) => decisions.some((ticket) => ticket.column === column))]));
+  };
 
   // Sorting (and its per-column asc/desc UI) is owned by BoardColumn.
   const ticketsByColumn = (column: Column): Ticket[] => visible.filter((t) => t.column === column);
@@ -235,7 +236,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     <BoardColumn
       key={column}
       column={column}
-      collapsible={!TERMINAL_COLUMNS.includes(column)}
+      collapsible={!TERMINAL_COLUMNS.includes(column) && !decisionsOnly}
       tickets={ticketsByColumn(column)}
       projects={projects}
       ticketsById={ticketsById}
@@ -243,6 +244,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       onAddTicket={onAddTicket}
       onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
       moveAllCount={moveAllCount}
+      eligibleTodoCount={eligibleTodo.length}
+      freeSlotCount={freeSlotCount}
       moveAllBusy={movingAll}
       onAnalyzeAll={column === "todo" ? handleAnalyzeAll : undefined}
       analyzeAllCount={analyzeAllCount}
@@ -255,18 +258,37 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   );
 
   const terminalCounts = new Map(TERMINAL_COLUMNS.map((column) => [column, ticketsByColumn(column).length]));
+  const displayedTerminalColumns = TERMINAL_COLUMNS.filter((column) => openTerminalColumns.has(column));
 
   return (
     <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-      <div className="flex h-full overflow-x-auto">
-        {ACTIVE_COLUMNS.map(renderLane)}
-        {TERMINAL_COLUMNS.filter((column) => openTerminalColumns.has(column)).map(renderLane)}
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <section className="space-y-2" aria-label="Décisions du tableau">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant={decisionsOnly ? "secondary" : "outline"} aria-pressed={decisionsOnly} onClick={() => selectDecisions(!decisionsOnly)}>À décider · {decisions.length}</Button>
+              <span className="text-xs text-muted-foreground">{visible.length} carte(s) dans cette sélection</span>
+            </div>
+            {decisionsOnly && <Button size="sm" variant="ghost" onClick={() => selectDecisions(false)}>Afficher toutes les cartes</Button>}
+          </div>
+          {decisions.length > 0 && <div className="flex flex-wrap gap-2">
+            {decisions.slice(0, PINNED_DECISIONS_LIMIT).map((ticket) => <button key={ticket.id} type="button" onClick={() => onOpenTicket(ticket)} className="flex min-w-0 max-w-full items-center gap-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-left text-xs hover:bg-warning/10">
+              <span className="shrink-0 font-medium text-warning">{ticketDecisionLabel(ticket)}</span>
+              <span className="truncate">{ticket.title}</span>
+            </button>)}
+            {decisions.length > PINNED_DECISIONS_LIMIT && <Button size="sm" variant="ghost" onClick={() => selectDecisions(true)}>Voir les {decisions.length} décisions</Button>}
+          </div>}
+        </section>
+        <div className="flex min-h-0 flex-1 overflow-x-auto">
+          {ACTIVE_COLUMNS.map(renderLane)}
+        {displayedTerminalColumns.map(renderLane)}
         <TerminalColumnsPanel
           columns={TERMINAL_COLUMNS}
           countByColumn={terminalCounts}
           expanded={openTerminalColumns}
           onToggle={toggleTerminalColumn}
         />
+      </div>
       </div>
 
       <ConfirmDialog

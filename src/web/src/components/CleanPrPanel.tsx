@@ -5,7 +5,7 @@ import type { CodexEffort, CodexModel, Orchestrator } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
 
 import { ProjectPrPicker } from "@/components/ProjectPrPicker";
-import { SessionDriverFields } from "@/components/SessionDriverFields";
+import { ToolAgentSettings } from "@/components/ToolAgentSettings";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -58,12 +58,13 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
           placeholder="Décris l'intention de la PR…"
         />
         <p className="text-xs text-muted-foreground">
-          Le nettoyage n'applique que les retours qui respectent ce contexte ; les retours
+          La correction n'applique que les retours qui respectent ce contexte ; les retours
           hors-périmètre sont ignorés.
         </p>
       </div>
 
-      <SessionDriverFields
+      <ToolAgentSettings
+        id="clean"
         orchestrator={orchestrator}
         codexModel={codexModel}
         codexEffort={codexEffort}
@@ -74,7 +75,12 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
         onCodexFastChange={setCodexFast}
       />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      <div className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-sm">
+        <p className="font-medium">{selected.size} PR sélectionnée(s) pour correction</p>
+        <p className="text-xs text-muted-foreground">L’agent examine les retours, applique les corrections pertinentes et met à jour la branche de chaque PR. Les retours hors périmètre sont ignorés.</p>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       <div className={PANEL_FOOTER_CLASSES}>
         <Button size="sm" variant="ghost" onClick={onClose}>
@@ -82,7 +88,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
         </Button>
         <Button size="sm" onClick={launch} disabled={busy || selected.size === 0}>
           <GitPullRequest className="h-4 w-4" />
-          Lancer le nettoyage{selected.size > 0 ? ` (${selected.size})` : ""}
+          Corriger les retours{selected.size > 0 ? ` (${selected.size})` : ""}
         </Button>
       </div>
     </div>

@@ -145,8 +145,9 @@ export function FolderStep({
     <div className="flex flex-col gap-3">
       {modeTabs}
       <p className="text-xs text-muted-foreground">
-        Choisissez le dossier du dépôt : le nom, la branche, le fournisseur et la commande de démarrage seront
-        préremplis.
+        {canPickFolder
+          ? "Choisissez un dossier sur cette machine. Atelier propose ensuite les réglages détectés dans le dépôt."
+          : "Indiquez le chemin du dépôt sur la machine qui héberge Atelier. Ce chemin ne désigne pas un dossier de votre navigateur."}
       </p>
       <Field label="Chemin">
         <div className="flex w-full items-center gap-2">
@@ -159,7 +160,7 @@ export function FolderStep({
             onSubmit={onAnalyze}
           />
           <Button variant="outline" onClick={onAnalyze} disabled={locked || repoPath.trim() === ""}>
-            Analyser
+            Analyser le dossier
           </Button>
         </div>
       </Field>
@@ -201,26 +202,31 @@ export function InspectionBanners({ inspection, onOpenExisting }: InspectionBann
 interface AdvancedSectionProps {
   open: boolean;
   summary: ReactNode;
+  title?: string;
   onToggle: () => void;
   children: ReactNode;
 }
 
-export function AdvancedSection({ open, summary, onToggle, children }: AdvancedSectionProps) {
+export function AdvancedSection({ open, summary, title = "Avancé", onToggle, children }: AdvancedSectionProps) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex min-w-0 items-center gap-2">
+    <section className="flex flex-col gap-4 rounded-lg border border-border bg-background p-4">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 space-y-1">
+          <h4 className="text-sm font-semibold">{title}</h4>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">{summary}</div>
+        </div>
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          className="flex items-center gap-1 text-sm font-medium hover:text-foreground"
+          aria-label={`${open ? "Fermer" : "Modifier"} ${title.toLocaleLowerCase()}`}
+          className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
           <ChevronRight className={cn("h-4 w-4 transition-transform", open && "rotate-90")} />
-          Avancé
+          {open ? "Fermer" : "Modifier"}
         </button>
-        {!open && <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">{summary}</span>}
       </div>
       {open && children}
-    </div>
+    </section>
   );
 }

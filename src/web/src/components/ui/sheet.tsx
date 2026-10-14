@@ -25,10 +25,10 @@ const OVERLAY_CLASSES =
   "fixed inset-0 z-sheet bg-background/60 duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-100 motion-reduce:animate-none";
 
 const CONTENT_CLASSES =
-  "fixed inset-y-0 right-0 z-sheet flex max-w-full flex-col border-l border-border bg-card text-card-foreground shadow-xl outline-none duration-150 data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-100 motion-reduce:animate-none";
+  "fixed inset-y-0 right-0 z-sheet flex max-h-[100dvh] min-w-0 max-w-full flex-col overflow-hidden border-l border-border bg-card text-card-foreground shadow-xl outline-none duration-150 data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-100 motion-reduce:animate-none";
 
 const CLOSE_CLASSES =
-  "ml-auto shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 const BREADCRUMB_SEPARATOR = "›";
 
@@ -83,7 +83,7 @@ export function Sheet({
         >
           <div className="shrink-0">
             {hasBreadcrumb ? (
-              <div className={cn("flex items-center gap-1 px-4 pt-2", FIELD_LABEL_CLASSES)}>
+              <div className={cn("flex flex-wrap items-center gap-1 px-4 pt-2", FIELD_LABEL_CLASSES)}>
                 {breadcrumb.map((segment, index) => (
                   <span
                     key={`${segment}-${index}`}
@@ -95,8 +95,8 @@ export function Sheet({
                 ))}
               </div>
             ) : null}
-            <div className="flex h-10 items-center gap-2 border-b border-border px-4">
-              <DialogPrimitive.Title className="truncate text-sm font-medium">
+            <div className="flex min-h-12 items-center gap-2 border-b border-border px-4 py-2">
+              <DialogPrimitive.Title className="min-w-0 break-words text-sm font-semibold">
                 {title}
               </DialogPrimitive.Title>
               {titleAside}

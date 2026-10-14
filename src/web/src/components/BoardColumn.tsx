@@ -35,6 +35,8 @@ interface BoardColumnProps {
   onMoveAllToImplementing?: () => void;
   /** How many tickets the bulk action would actually start (capped by free slots); disables the button at 0. */
   moveAllCount?: number;
+  eligibleTodoCount?: number;
+  freeSlotCount?: number;
   /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
   moveAllBusy?: boolean;
   /** When set on the TODO column, runs the batch feasibility analysis on eligible tickets. */
@@ -191,7 +193,7 @@ function groupTicketsByFamily(tickets: Ticket[], ticketsById: Map<string, Ticket
     }
     const existing = familyGroupByKey.get(familyKey);
     if (existing === undefined) {
-      const group = { kind: "family" as const, familyKey, members: [ticket] };
+      const group: Extract<RenderGroup, { kind: "family" }> = { kind: "family", familyKey, members: [ticket] };
       familyGroupByKey.set(familyKey, group);
       groups.push(group);
       continue;
@@ -233,6 +235,8 @@ export function BoardColumn({
   onAddTicket,
   onMoveAllToImplementing,
   moveAllCount = 0,
+  eligibleTodoCount = 0,
+  freeSlotCount = 0,
   moveAllBusy = false,
   onAnalyzeAll,
   analyzeAllCount = 0,
@@ -290,54 +294,36 @@ export function BoardColumn({
 
   const canAdd = column === "todo" && onAddTicket !== undefined;
   const canCheckAll = column === "done" && onCheckAllMerges !== undefined;
-  const canColumnMenu = column === "todo" && (onMoveAllToImplementing !== undefined || onAnalyzeAll !== undefined);
-  const moveAllButtonTitle = resolveMoveAllTitle(moveAllCount, moveAllBusy);
+  const canColumnMenu = (column === "todo" && (onMoveAllToImplementing !== undefined || onAnalyzeAll !== undefined)) || canCheckAll;
+  const moveAllButtonTitle = eligibleTodoCount === 0 && !moveAllBusy ? "Aucune carte éligible dans cette sélection" : resolveMoveAllTitle(moveAllCount, moveAllBusy);
   const analyzeAllButtonTitle = resolveAnalyzeAllTitle(analyzeAllCount, analyzeAllBusy);
   const checkAllButtonTitle = resolveCheckAllTitle(checkAllCount, checkAllBusy);
-  const columnMenuItems = useMemo(
-    () => [
-      {
-        label: "Lancer tous les tickets",
-        icon: Rocket,
-        onSelect: onMoveAllToImplementing ?? NOOP,
-        disabled: onMoveAllToImplementing === undefined || moveAllCount === 0 || moveAllBusy,
-        title: moveAllButtonTitle,
-      },
-      {
-        label: "Lancer l'analyse de tous les tickets",
-        icon: ScanSearch,
-        onSelect: onAnalyzeAll ?? NOOP,
-        disabled: onAnalyzeAll === undefined || analyzeAllCount === 0 || analyzeAllBusy,
-        title: analyzeAllButtonTitle,
-      },
-    ],
-    [
-      onMoveAllToImplementing,
-      moveAllCount,
-      moveAllBusy,
-      moveAllButtonTitle,
-      onAnalyzeAll,
-      analyzeAllCount,
-      analyzeAllBusy,
-      analyzeAllButtonTitle,
-    ],
-  );
+  const columnMenuItems = column === "done" ? [{
+    label: `Vérifier le merge de ${checkAllCount} carte(s)`,
+    icon: GitMerge,
+    onSelect: onCheckAllMerges ?? NOOP,
+    disabled: onCheckAllMerges === undefined || checkAllCount === 0 || checkAllBusy,
+    title: checkAllButtonTitle,
+  }] : [
+    {
+      label: `Lancer ${moveAllCount} carte(s) éligible(s)`,
+      icon: Rocket,
+      onSelect: onMoveAllToImplementing ?? NOOP,
+      disabled: onMoveAllToImplementing === undefined || moveAllCount === 0 || moveAllBusy,
+      title: moveAllButtonTitle,
+    },
+    {
+      label: `Analyser ${analyzeAllCount} carte(s) éligible(s)`,
+      icon: ScanSearch,
+      onSelect: onAnalyzeAll ?? NOOP,
+      disabled: onAnalyzeAll === undefined || analyzeAllCount === 0 || analyzeAllBusy,
+      title: analyzeAllButtonTitle,
+    },
+  ];
   const headerTrailing =
-    canAdd || canColumnMenu || canCheckAll ? (
+    canAdd || canColumnMenu ? (
       <div className="flex items-center gap-1">
         {countBadge}
-        {canCheckAll && (
-          <button
-            type="button"
-            onClick={onCheckAllMerges}
-            disabled={checkAllCount === 0 || checkAllBusy}
-            className="flex items-center justify-center text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground"
-            title={checkAllButtonTitle}
-            aria-label="Vérifier le merge de toutes les cartes"
-          >
-            <GitMerge className="h-3.5 w-3.5" />
-          </button>
-        )}
         {canAdd && (
           <button
             type="button"
@@ -349,7 +335,7 @@ export function BoardColumn({
             <Plus className="h-3.5 w-3.5" />
           </button>
         )}
-        {canColumnMenu && <ColumnActionsMenu items={columnMenuItems} ariaLabel="Actions de la colonne" />}
+        {canColumnMenu && <ColumnActionsMenu items={columnMenuItems} ariaLabel={`Actions de la colonne ${label}`} />}
       </div>
     ) : (
       countBadge
@@ -382,8 +368,8 @@ export function BoardColumn({
   }
 
   return (
-    <div className="flex h-full w-64 shrink-0 flex-col border-r border-border">
-      <div className="flex items-center justify-between px-2.5 pb-2 pt-1">
+    <div className="flex h-full w-72 shrink-0 flex-col border-r border-border">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 pt-1">
         <div className="flex items-center gap-1.5">
           {collapsible && (
             <button
@@ -397,11 +383,14 @@ export function BoardColumn({
             </button>
           )}
           <h2 className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">{label}</h2>
+        </div>
+        {headerTrailing}
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 text-2xs text-muted-foreground">
           {sortField !== undefined && (
             <button
               type="button"
               onClick={toggleSort}
-              className="text-muted-foreground transition-colors hover:text-foreground"
+              className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
               title={sortDir === "desc" ? "Tri : plus récents d'abord" : "Tri : plus anciens d'abord"}
               aria-label={sortDir === "desc" ? "Tri : plus récents d'abord, cliquer pour inverser" : "Tri : plus anciens d'abord, cliquer pour inverser"}
             >
@@ -410,10 +399,11 @@ export function BoardColumn({
               ) : (
                 <ArrowUpNarrowWide className="h-3.5 w-3.5" />
               )}
+              {sortDir === "desc" ? "Plus récents" : "Plus anciens"}
             </button>
           )}
+          {column === "todo" && <span>{eligibleTodoCount} éligible(s) · {freeSlotCount} slot(s) libre(s)</span>}
         </div>
-        {headerTrailing}
       </div>
       <div
         ref={setCardContainerRef}

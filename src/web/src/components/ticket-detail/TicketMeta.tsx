@@ -6,7 +6,6 @@ import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { columnSchema } from "@shared/schemas";
 
 import { resolveProjectLabel } from "@/components/TicketCard";
-import { TicketCost } from "@/components/TicketCost";
 import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Select } from "@/components/ui/select";
@@ -122,10 +121,9 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
       </div>
 
       <MetaRow label="Projet">{resolveProjectLabel(projects, ticket.project)}</MetaRow>
-      {ticket.slotId !== null && <MetaRow label="Slot">slot-{ticket.slotId}</MetaRow>}
+      {ticket.slotId !== null && <MetaRow label="Slot">Emplacement {ticket.slotId}</MetaRow>}
       {ticket.branch !== null && <MetaRow label="Branche">{ticket.branch}</MetaRow>}
       <MetaRow label="Profil">{ORCHESTRATOR_LABELS[ticket.orchestrator]}</MetaRow>
-      <TicketCost ticket={ticket} />
       <MetaRow label="Créé">{formatDateTime(ticket.createdAt)}</MetaRow>
       {ticket.finishedAt !== null && (
         <MetaRow label={finishedKindLabel(ticket)}>{formatDateTime(ticket.finishedAt)}</MetaRow>

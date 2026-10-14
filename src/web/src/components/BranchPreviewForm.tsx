@@ -94,12 +94,33 @@ function ProjectBranchPreviewForm({ project, onCreated, onOpenTicket }: { projec
       {branches === null && <p className="text-xs text-muted-foreground">Chargement des branches…</p>}
       {branchError && <p role="alert" className="text-xs text-danger">{branchError}</p>}
     </div>
+    <section className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+      <h3 className="text-sm font-medium">Configuration de la cible</h3>
+      <dl className="space-y-1 text-xs">
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Projet et branche</dt><dd className="break-all">{project.label} · {branch.trim() || "branche à renseigner"}</dd></div>
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Service Coolify</dt><dd className="break-all">{settings === null ? "Chargement…" : settings.baseUrl ?? "Connexion à configurer"}</dd></div>
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Environnement</dt><dd>{settings?.environmentName ?? "Chargement…"}</dd></div>
+        {settings !== null && <>
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Serveur cible</dt><dd>{settings.serverUuid ? "Sélectionné dans les paramètres" : "À sélectionner"}</dd></div>
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Projet Coolify</dt><dd>{settings.projectUuid ? "Sélectionné dans les paramètres" : "À sélectionner"}</dd></div>
+        </>}
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Domaine</dt><dd className="break-all">{settings === null ? "Chargement…" : settings.domainBase ?? "À configurer"}</dd></div>
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Recette du dépôt</dt><dd className="break-all font-mono">{projectSettings?.recipePath ?? "Chargement…"}</dd></div>
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Durée de vie</dt><dd>{projectSettings === null ? "Chargement…" : `${projectSettings.ttlHours} h`}</dd></div>
+        <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Protection d’accès</dt><dd>{settings !== null && (settings.previewAuthConfigured ? "Identifiants configurés" : "À configurer")}{settings === null && "Chargement…"}</dd></div>
+        {settings !== null && projectSettings !== null && <>
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">GitHub App pour le dépôt</dt><dd>{(projectSettings.githubAppUuid ?? settings.githubAppUuid) ? "Sélection enregistrée" : "Aucune sélection enregistrée"}</dd></div>
+          <div className="flex flex-wrap justify-between gap-2"><dt className="text-muted-foreground">Clé de déploiement du projet</dt><dd>{projectSettings.privateKeyUuid ? "Sélection enregistrée" : "Aucune sélection enregistrée"}</dd></div>
+        </>}
+      </dl>
+      <p className="text-xs text-muted-foreground">Coolify est le service de déploiement. Les ressources affichées sont les sélections enregistrées, pas une preuve d’accès. La préparation de la branche reste vérifiée séparément.</p>
+    </section>
     <PreviewReadinessStatus readiness={checkedBranch ? check.readiness : null} loading={check.loading || (check.error === null && check.readiness !== null && !checkedBranch)} error={check.error} />
     {settings !== null && !previewConnectionReady(settings) && <p className="text-sm text-muted-foreground">Complétez la connexion, les ressources et les identifiants d'accès dans Paramètres · Coolify.</p>}
     {projectSettings?.enabled === false && <div className="flex flex-wrap items-center gap-2"><p className="text-sm text-muted-foreground">Les prévisualisations sont désactivées pour ce projet.</p><Button size="sm" variant="outline" disabled={busy} onClick={() => void enable()}>Activer pour ce projet</Button></div>}
     {(error || settingsError) && <p role="alert" className="text-sm text-danger">{error || settingsError}</p>}
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" disabled={busy || !canLaunch} onClick={() => void launch()}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Cloud className="size-3.5" />}Lancer la prévisualisation</Button>
+      <Button size="sm" disabled={busy || !canLaunch} onClick={() => void launch()}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Cloud className="size-3.5" />}Créer la prévisualisation</Button>
       <Button size="sm" variant="outline" disabled={busy || check.loading || !branch.trim()} onClick={() => void refresh()}><RefreshCw className="size-3.5" />Revérifier la branche</Button>
       {!check.loading && checkedBranch && check.readiness?.status === "not_ready" && check.readiness.preparationTicketId === null && <Button size="sm" variant="outline" disabled={busy} onClick={() => void prepare()}>{check.readiness.preparationRetryAvailable ? "Relancer la préparation" : "Préparer pour Coolify"}</Button>}
     </div>
@@ -115,10 +136,11 @@ export function BranchPreviewForm({ projects, projectFilter, onCreated, onOpenTi
 
   return <section className="space-y-4 rounded-lg border bg-card p-4">
     <div className="space-y-1">
-      <h2 className="flex items-center gap-2 text-sm font-semibold"><Cloud className="size-4 text-primary" />Nouvelle prévisualisation</h2>
+      <h2 className="flex items-center gap-2 text-sm font-semibold"><Cloud className="size-4 text-primary" />Créer une prévisualisation</h2>
       <p className="text-xs text-muted-foreground">Déployez une branche dans un environnement temporaire.</p>
     </div>
     <ProjectSelect id="preview-project" projects={choices} value={projectKey} onChange={setProjectChoice} />
     {project !== undefined && <ProjectBranchPreviewForm key={project.key} project={project} onCreated={onCreated} onOpenTicket={onOpenTicket} />}
+    {project === undefined && <p className="text-sm text-muted-foreground">Choisissez un projet pour consulter sa configuration et les conditions de création.</p>}
   </section>;
 }

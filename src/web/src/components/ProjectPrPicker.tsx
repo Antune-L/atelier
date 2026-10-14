@@ -25,7 +25,7 @@ export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRef
 
   let list: ReactNode;
   if (loading) {
-    list = <p className="text-sm text-muted-foreground">Chargement des PRs…</p>;
+    list = <p role="status" className="text-sm text-muted-foreground">Chargement des pull requests…</p>;
   } else if (prs && prs.length > 0) {
     list = (
       <div className="space-y-1.5">
@@ -35,7 +35,7 @@ export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRef
       </div>
     );
   } else {
-    list = <p className="text-sm text-muted-foreground">Aucune PR ouverte sur ce projet.</p>;
+    list = <p className="text-sm text-muted-foreground">Aucune pull request ouverte sur ce projet.</p>;
   }
 
   return (
@@ -62,7 +62,13 @@ export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRef
         </Button>
       </div>
 
-      <div className="max-h-[320px] overflow-y-auto">{list}</div>
+      <section className="space-y-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
+          <h3 className="font-medium">Pull requests à traiter</h3>
+          <p role="status" className="text-muted-foreground">{selected.size} sélectionnée(s)</p>
+        </div>
+        <div className="max-h-64 overflow-y-auto overscroll-contain">{list}</div>
+      </section>
     </>
   );
 }

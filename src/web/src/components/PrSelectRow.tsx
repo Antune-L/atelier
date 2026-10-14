@@ -24,8 +24,9 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
     >
       <button
         type="button"
+        aria-pressed={selected}
         onClick={onToggle}
-        className="flex min-w-0 flex-1 items-start gap-3 p-2.5 text-left"
+        className="flex min-w-0 flex-1 items-start gap-3 rounded-md p-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span
           className={cn(
@@ -37,15 +38,15 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{pr.title}</span>
+            <span className="min-w-0 break-words text-sm font-medium">{pr.title}</span>
             <span className="shrink-0 text-xs text-muted-foreground">#{pr.number}</span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="font-mono">{pr.headBranch}</span>
+            <span className="break-all font-mono">{pr.headBranch}</span>
             <span>· {pr.author}</span>
             {pr.additions !== null && <span className="text-success">+{pr.additions}</span>}
             {pr.deletions !== null && <span className="text-destructive">-{pr.deletions}</span>}
-            {needsAttention && <Badge variant="warning">À reviewer</Badge>}
+            {needsAttention && <Badge variant="warning">À relire</Badge>}
             {pr.reviewStatus === "reviewed" && <Badge variant="secondary">Déjà revue</Badge>}
             {pr.isDraft && <Badge variant="secondary">Draft</Badge>}
           </div>
@@ -57,7 +58,7 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
         rel="noopener noreferrer"
         aria-label={`Ouvrir la PR #${pr.number} dans le navigateur`}
         title="Ouvrir la PR dans le navigateur"
-        className="m-2.5 shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+        className="m-2.5 shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <ExternalLink className="h-4 w-4" />
       </a>

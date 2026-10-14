@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input, Label } from "@/components/ui/input";
 import { SectionHeader } from "@/components/ui/settings";
+import { Tabs } from "@/components/ui/tabs";
+import type { TabOption } from "@/components/ui/tabs";
 import { errorMessage } from "@/lib/errors";
 import { getMcpSettingsClient } from "@/lib/mcpSettings";
 import { boardStore } from "@/lib/store";
@@ -14,8 +16,32 @@ import { boardStore } from "@/lib/store";
 const DESKTOP_ONLY_MESSAGE =
   "La gestion du jeton MCP est disponible dans l’application desktop Atelier.";
 
-export function McpSettings() {
+type McpClientKind = "manual" | "claude" | "codex";
+const MCP_CLIENT_OPTIONS: TabOption<McpClientKind>[] = [
+  { value: "manual", label: "Autre client" },
+  { value: "claude", label: "Claude Code" },
+  { value: "codex", label: "Codex" },
+];
+const MCP_TOKEN_ENVIRONMENT_NAME = "KANBAN_MCP_TOKEN";
+
+function clientConfiguration(client: McpClientKind, endpointUrl: string): string {
+  if (client === "codex") {
+    return `[mcp_servers.atelier]\nurl = ${JSON.stringify(endpointUrl)}\nbearer_token_env_var = "${MCP_TOKEN_ENVIRONMENT_NAME}"`;
+  }
+  return JSON.stringify({
+    mcpServers: {
+      atelier: {
+        type: "http",
+        url: endpointUrl,
+        headers: { Authorization: `Bearer \${${MCP_TOKEN_ENVIRONMENT_NAME}}` },
+      },
+    },
+  }, null, 2);
+}
+
+export function McpSettings({ query = "" }: { query?: string }) {
   const mcpClient = getMcpSettingsClient();
+  const [clientKind, setClientKind] = useState<McpClientKind>("manual");
   const [settings, setSettings] = useState<McpSettingsMetadata | null>(null);
   const [loading, setLoading] = useState(mcpClient !== null);
   const [copyingToken, setCopyingToken] = useState(false);
@@ -50,6 +76,17 @@ export function McpSettings() {
       boardStore.notify("Adresse MCP copiée", settings.endpointUrl);
     } catch (cause) {
       setError(errorMessage(cause, "Impossible de copier l’adresse MCP"));
+    }
+  };
+
+  const copyConfiguration = async (): Promise<void> => {
+    if (settings === null) return;
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(clientConfiguration(clientKind, settings.endpointUrl));
+      boardStore.notify("Configuration MCP copiée", "Le modèle de configuration ne contient pas le jeton d'accès.");
+    } catch (cause) {
+      setError(errorMessage(cause, "Impossible de copier la configuration MCP"));
     }
   };
 
@@ -88,7 +125,10 @@ export function McpSettings() {
   };
 
   const header = (
-    <SectionHeader title="MCP" subtitle="Connexion des agents externes au tableau Atelier." />
+    <SectionHeader
+      title="Connecter un outil"
+      subtitle="MCP (protocole de connexion des outils) permet à un client externe d'accéder au tableau Atelier."
+    />
   );
 
   if (mcpClient === null) {
@@ -133,75 +173,72 @@ export function McpSettings() {
   return (
     <div className="space-y-4">
       {header}
-      <div className="space-y-4 rounded-md border p-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="mcp-endpoint">Adresse de connexion</Label>
-          <p className="text-xs text-muted-foreground">
-            À renseigner dans le client MCP de l’agent.
-          </p>
-          <div className="flex gap-2">
-            <Input
-              id="mcp-endpoint"
-              value={settings.endpointUrl}
-              readOnly
-              className="min-w-0 font-mono"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              onClick={() => void copyEndpoint()}
-            >
-              <Copy className="h-4 w-4" aria-hidden />
-              Copier l’adresse
-            </Button>
-          </div>
+      <div className="space-y-4 rounded-lg border p-4">
+        <div className="space-y-2">
+          <Label>Votre client</Label>
+          <Tabs options={MCP_CLIENT_OPTIONS} value={clientKind} onChange={setClientKind} aria-label="Client MCP" />
+          <p className="text-xs text-muted-foreground">Ajoutez Atelier comme serveur MCP distant. Le jeton Bearer est le secret qui autorise l'accès.</p>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="mcp-token">Jeton d’accès</Label>
-          <p className="text-xs text-muted-foreground">
-            Le jeton reste masqué dans Atelier et est copié par l’application desktop.
-          </p>
-          <div className="flex gap-2">
-            <Input id="mcp-token" value={settings.maskedToken} readOnly className="min-w-0 font-mono" />
-            <Button
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-              disabled={!settings.canCopyToken || copyingToken || regenerating}
-              onClick={() => void copyToken()}
-            >
-              {copyingToken ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : (
-                <Copy className="h-4 w-4" aria-hidden />
-              )}
-              Copier le jeton
-            </Button>
+        {clientKind !== "manual" && (
+          <div className="space-y-3 rounded-md border p-3">
+            <p className="text-sm font-medium">Configuration {clientKind === "claude" ? "Claude Code" : "Codex"}</p>
+            <p className="text-xs text-muted-foreground">Ajoutez ce serveur à votre configuration MCP. Placez le jeton copié dans la variable {MCP_TOKEN_ENVIRONMENT_NAME}, accessible au client avant son lancement.</p>
+            <Button variant="outline" size="sm" onClick={() => void copyConfiguration()}>
+              <Copy className="h-4 w-4" aria-hidden />Copier la configuration sans jeton</Button>
+            <details open={query !== "" || undefined}>
+              <summary className="cursor-pointer text-xs text-muted-foreground">Voir la configuration</summary>
+              <pre className="mt-2 overflow-x-auto rounded bg-muted/30 p-3 text-xs">{clientConfiguration(clientKind, settings.endpointUrl)}</pre>
+            </details>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/30 p-3">
           <div>
-            <p className="text-sm font-medium">Régénération</p>
-            <p className="text-xs text-muted-foreground">
-              {settings.regenerationUnavailableReason ??
-                "Crée un nouveau jeton et déconnecte immédiatement les clients existants."}
-            </p>
+            <p className="text-sm font-medium">1. Adresse du serveur</p>
+            <p className="text-xs text-muted-foreground">Collez-la dans la connexion MCP de votre outil.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => void copyEndpoint()}>
+            <Copy className="h-4 w-4" aria-hidden />Copier l’adresse</Button>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/30 p-3">
+          <div>
+            <p className="text-sm font-medium">2. Jeton d'accès</p>
+            <p className="text-xs text-muted-foreground">Le secret reste masqué dans Atelier.</p>
           </div>
           <Button
             variant="outline"
             size="sm"
-            disabled={!settings.canRegenerateToken || regenerating || copyingToken}
-            onClick={() => setConfirmRegeneration(true)}
-          >
-            <RotateCw className="h-4 w-4" aria-hidden />
-            Régénérer le jeton
-          </Button>
+            disabled={!settings.canCopyToken || copyingToken || regenerating}
+            onClick={() => void copyToken()}
+          >{copyingToken ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}Copier le jeton</Button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Source du jeton : {settings.tokenSource === "managed" ? "géré par Atelier" : "variable d’environnement"}.
-        </p>
+        <p className="text-xs text-muted-foreground">La copie prépare la configuration. Vérifiez ensuite la connexion depuis votre client.</p>
       </div>
+      <details className="rounded-lg border p-4" open={query !== "" || undefined}>
+        <summary className="cursor-pointer text-sm font-medium">Connexion manuelle et maintenance</summary>
+        <div className="mt-4 space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="mcp-endpoint">Adresse de connexion</Label>
+            <Input id="mcp-endpoint" value={settings.endpointUrl} readOnly className="font-mono" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mcp-token">Jeton d’accès masqué</Label>
+            <Input id="mcp-token" value={settings.maskedToken} readOnly className="font-mono" />
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-sm font-medium">Renouveler le jeton d’accès</p>
+            <p className="mt-1 text-xs text-muted-foreground">{settings.regenerationUnavailableReason ?? "Crée un nouveau jeton et déconnecte immédiatement les clients existants."}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3"
+              disabled={!settings.canRegenerateToken || regenerating || copyingToken}
+              onClick={() => setConfirmRegeneration(true)}
+            >
+              <RotateCw className="h-4 w-4" aria-hidden />Renouveler le jeton d'accès</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Source du jeton : {settings.tokenSource === "managed" ? "géré par Atelier" : "variable d’environnement"}.</p>
+        </div>
+      </details>
       {error !== null && (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -210,9 +247,9 @@ export function McpSettings() {
       <ConfirmDialog
         open={confirmRegeneration}
         onCancel={() => setConfirmRegeneration(false)}
-        title="Régénérer le jeton MCP ?"
+        title="Renouveler le jeton MCP ?"
         description="Le jeton actuel cessera immédiatement de fonctionner. Tous les clients MCP déjà configurés seront déconnectés et devront recevoir le nouveau jeton."
-        confirmLabel="Régénérer"
+        confirmLabel="Renouveler"
         destructive
         busy={regenerating}
         onConfirm={regenerateToken}

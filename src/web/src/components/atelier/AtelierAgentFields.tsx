@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
-import type { AtelierAgentSettings } from "@/lib/atelier";
+import { agentSummary, type AtelierAgentSettings } from "@/lib/atelier";
 import { AGENT_EFFORT_FULL_OPTIONS, AGENT_MODEL_FULL_OPTIONS } from "@/lib/display";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 
@@ -14,7 +14,6 @@ interface AtelierAgentFieldsProps {
   onChange: (patch: Partial<AtelierAgentSettings>) => void;
 }
 
-/** Agent picker of an Atelier session: Claude or Codex, with the matching model and effort knobs. */
 export function AtelierAgentFields({ value, onChange }: AtelierAgentFieldsProps) {
   const capabilities = useCapabilities();
   const id = useId();
@@ -22,6 +21,13 @@ export function AtelierAgentFields({ value, onChange }: AtelierAgentFieldsProps)
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="space-y-1">
+        <p className="break-words text-sm font-medium">{agentSummary(value, defaults)}</p>
+        <p className="text-xs text-muted-foreground">Configuration sélectionnée de l’agent. Le modèle et la durée de la session influent sur la consommation.</p>
+      </div>
+      <details className="rounded-md border border-border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Provider, modèle et réflexion</summary>
+        <div className="mt-3 flex flex-col gap-3">
       <SessionDriverFields
         orchestrator={value.orchestrator}
         codexModel={value.codexModel}
@@ -44,7 +50,7 @@ export function AtelierAgentFields({ value, onChange }: AtelierAgentFieldsProps)
             />
           </div>
           <div className="flex flex-col items-start gap-1.5">
-            <Label id={`${id}-effort`} className={FIELD_LABEL_CLASSES}>Réflexion (effort)</Label>
+            <Label id={`${id}-effort`} className={FIELD_LABEL_CLASSES}>Niveau de réflexion du modèle</Label>
             <Tabs
               options={AGENT_EFFORT_FULL_OPTIONS}
               value={value.effort ?? defaults.effort}
@@ -54,6 +60,8 @@ export function AtelierAgentFields({ value, onChange }: AtelierAgentFieldsProps)
           </div>
         </>
       )}
+        </div>
+      </details>
     </div>
   );
 }

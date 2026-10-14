@@ -15,10 +15,9 @@ import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const MAX_BADGE_COUNT = 99;
-type NotificationFilter = "active" | "unread" | "history";
+type NotificationFilter = "new" | "history";
 const FILTERS: { value: NotificationFilter; label: string }[] = [
-  { value: "active", label: "À relire" },
-  { value: "unread", label: "Non lues" },
+  { value: "new", label: "Nouvelles" },
   { value: "history", label: "Historique" },
 ];
 
@@ -28,13 +27,14 @@ function isPending(notification: PrNotification): boolean {
 
 export function NotificationCenter({ projects, className }: { projects: ProjectInfo[]; className?: string }) {
   const { prNotifications, prNotificationSync, notificationCenterOpen, soundEnabled, connected } = useBoard();
-  const [filter, setFilter] = useState<NotificationFilter>("active");
+  const [filter, setFilter] = useState<NotificationFilter>("new");
   const [pending, setPending] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [reviewNotification, setReviewNotification] = useState<PrNotification | null>(null);
   const pendingIds = useRef(new Set<string>());
   const unread = prNotifications.filter(isPending);
   const history = prNotifications.filter((notification) => !isPending(notification));
+  const readPending = history.filter((notification) => notification.resolvedAt === null);
   const visible = filter === "history" ? history : unread;
   const syncErrors = prNotificationSync.filter((status) => status.error !== null);
   const syncUnavailable = !connected || syncErrors.length > 0;
@@ -100,7 +100,15 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
         className="w-[390px] max-w-[100vw]"
         subheader={
           <>
-            <p className="px-4 py-3 text-xs text-muted-foreground">Les PR qui attendent votre regard.</p>
+            <p className="px-4 py-3 text-xs text-muted-foreground">Les nouvelles demandes de review. Retrouvez les alertes consultées dans l'historique.</p>
+            {readPending.length > 0 && (
+              <div className="mx-4 mb-3 rounded-md border bg-muted/30 p-3">
+                <p className="text-xs font-medium">{readPending.length} PR lue{readPending.length > 1 ? "s" : ""}, encore à relire</p>
+                <Button variant="ghost" size="sm" className="mt-1 h-auto p-0 text-xs underline underline-offset-4" onClick={() => setFilter("history")}>
+                  Retrouver ces PR dans l'historique
+                </Button>
+              </div>
+            )}
             <div role="group" aria-label="Filtrer les notifications" className="flex border-b px-2">
               {FILTERS.map((option) => (
                 <button key={option.value} type="button" aria-pressed={filter === option.value} onClick={() => setFilter(option.value)} className={cn("flex h-9 items-center gap-1.5 px-2 text-xs transition-colors", filter === option.value ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--brand))]" : "text-muted-foreground hover:text-foreground")}>
@@ -114,14 +122,14 @@ export function NotificationCenter({ projects, className }: { projects: ProjectI
         <div className="flex min-h-0 w-full flex-col">
           <div className="flex items-center justify-between px-4 py-3 text-2xs text-muted-foreground">
             <span>{visible.length} notification{visible.length > 1 ? "s" : ""}</span>
-            {filter !== "history" && unread.length > 0 && <Button variant="ghost" size="sm" className="h-5 px-0 text-2xs" disabled={pending.length > 0} onClick={() => { for (const notification of unread) void runAction(notification, false); }}>Tout marquer lu</Button>}
+            {filter === "new" && unread.length > 0 && <Button variant="ghost" size="sm" className="h-5 px-0 text-2xs" disabled={pending.length > 0} onClick={() => { for (const notification of unread) void runAction(notification, false); }}>Tout marquer lu</Button>}
           </div>
           {error && <p role="alert" className="mx-4 mb-3 rounded border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">{error}</p>}
           <div className="min-h-0 flex-1 overflow-y-auto px-4">
             {visible.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-xs text-muted-foreground">
                 {!syncUnavailable ? <CheckCircle2 className="h-6 w-6 text-brand" /> : <Loader2 className="h-6 w-6 animate-spin" />}
-                <strong className="text-sm font-medium text-foreground">{syncUnavailable ? "Synchronisation en attente" : "Tout est à jour"}</strong>
+                <strong className="text-sm font-medium text-foreground">{syncUnavailable ? "Synchronisation en attente" : "Aucune notification ici"}</strong>
                 <p>{filter === "history" ? "Les notifications lues et les alertes closes apparaissent ici." : "Aucune nouvelle PR à relire. Retrouvez les notifications lues dans l’historique."}</p>
               </div>
             ) : visible.map((notification) => {

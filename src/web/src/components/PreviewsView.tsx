@@ -8,6 +8,7 @@ import { BranchPreviewForm } from "@/components/BranchPreviewForm";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Dialog } from "@/components/ui/dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBusyAction } from "@/hooks/useBusyAction";
@@ -55,31 +56,35 @@ function PreviewDetails({ preview, projectLabel, onAction, onOpenTicket }: { pre
   const ready = preview.status === "ready" && preview.desiredState === "running";
   const canRedeploy = preview.ticketId === null && preview.desiredState === "stopped" && preview.cleanupStatus === "complete";
   const ticketId = preview.ticketId;
+  const [confirmStop, setConfirmStop] = useState(false);
 
   return <article className="w-full space-y-5 overflow-y-auto p-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="min-w-0 space-y-1">
         <h3 className="flex items-center gap-2 text-sm font-medium"><Cloud className="size-4 shrink-0 text-muted-foreground" /><span className="break-all font-mono">{preview.branch}</span></h3>
-        <p className="text-xs text-muted-foreground">{projectLabel} · {ticketId === null ? "Branche indépendante" : "Prévisualisation de ticket"} · commit <span className="font-mono">{(preview.deployedRevision ?? preview.revision).slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span></p>
+        <p className="text-xs text-muted-foreground">{projectLabel} · {ticketId === null ? "Branche indépendante" : "Prévisualisation de ticket"}</p>
         {preview.expiresAt !== null && <p className="text-xs text-muted-foreground">Expire le {formatDateTime(preview.expiresAt)}</p>}
       </div>
       <PreviewStatus preview={preview} />
     </div>
     <dl className="space-y-3 text-sm">
       <div><dt className="text-xs text-muted-foreground">Création</dt><dd>{formatDateTime(preview.createdAt)}</dd></div>
-      <div><dt className="text-xs text-muted-foreground">Dernière mise à jour</dt><dd>{formatDateTime(preview.updatedAt)}</dd></div>
-      <div><dt className="text-xs text-muted-foreground">Version déployée</dt><dd className="break-all font-mono">{preview.deployedRevision ?? preview.revision}</dd></div>
+      <div><dt className="text-xs text-muted-foreground">État mis à jour</dt><dd>{formatDateTime(preview.updatedAt)}</dd></div>
+      <div><dt className="text-xs text-muted-foreground">Version demandée</dt><dd className="break-all font-mono">{preview.revision}</dd></div>
+      <div><dt className="text-xs text-muted-foreground">Version déployée enregistrée</dt><dd className="break-all font-mono">{preview.deployedRevision ?? "Non enregistrée"}</dd></div>
     </dl>
     {preview.url !== null && <a href={preview.url} target="_blank" rel="noreferrer" className="block break-all text-sm text-primary hover:underline">{preview.url}</a>}
     {(preview.error || error) && <p role="alert" className="break-words text-sm text-danger">{error || preview.error}</p>}
     {preview.desiredState === "stopped" && <p role="status" className={preview.cleanupStatus === "failed" ? "text-sm text-danger" : "text-xs text-muted-foreground"}>{preview.cleanupStatus === "complete" && preview.cleanupWatch ? PREVIEW_CLEANUP_WATCH_LABEL : PREVIEW_CLEANUP_LABELS[preview.cleanupStatus]}</p>}
+    <details className="rounded-md border p-3 text-xs"><summary className="cursor-pointer font-medium">Diagnostic de déploiement</summary><dl className="mt-3 space-y-2"><div><dt className="text-muted-foreground">État demandé</dt><dd>{preview.desiredState === "running" ? "En service" : "Arrêt"}</dd></div><div><dt className="text-muted-foreground">Nettoyage</dt><dd>{PREVIEW_CLEANUP_LABELS[preview.cleanupStatus]}</dd></div><div><dt className="text-muted-foreground">Identifiant de déploiement</dt><dd className="break-all font-mono">{preview.deploymentUuid ?? "Non reçu"}</dd></div><div><dt className="text-muted-foreground">Dépôt</dt><dd className="break-all">{preview.repository ?? "Non enregistré"}</dd></div>{preview.prUrl !== null && <div><dt className="text-muted-foreground">Pull request</dt><dd><a href={preview.prUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">{preview.prUrl}</a></dd></div>}</dl></details>
     <div className="flex flex-wrap gap-2">
       {ready && preview.url !== null && <a className={buttonVariants({ size: "sm" })} href={preview.url} target="_blank" rel="noreferrer"><ExternalLink className="size-3.5" />Ouvrir</a>}
       {ticketId !== null && <Button variant="outline" size="sm" onClick={() => onOpenTicket(ticketId)}>Ouvrir le ticket</Button>}
-      {preview.desiredState === "running" && <Button variant="destructive" size="sm" disabled={busy} onClick={() => void run(() => onAction(preview, "stop"), "Impossible de supprimer la prévisualisation.")}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}Supprimer la prévisualisation</Button>}
+      {preview.desiredState === "running" && <Button variant="destructive" size="sm" disabled={busy} onClick={() => setConfirmStop(true)}>{busy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}Supprimer la prévisualisation</Button>}
       {preview.desiredState === "stopped" && preview.cleanupStatus === "failed" && <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => onAction(preview, "cleanup"), "Impossible de relancer le nettoyage.")}>Réessayer le nettoyage</Button>}
       {canRedeploy && <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(() => onAction(preview, "redeploy"), "Impossible de relancer la prévisualisation.")}><RefreshCw className="size-3.5" />Relancer le dernier commit distant</Button>}
     </div>
+    <ConfirmDialog open={confirmStop} title="Supprimer cette prévisualisation" description={`${projectLabel} · ${preview.branch}. Le déploiement et ses ressources seront arrêtés et supprimés.`} confirmLabel="Supprimer" destructive busy={busy} onCancel={() => setConfirmStop(false)} onConfirm={async () => { await run(() => onAction(preview, "stop"), "Impossible de supprimer la prévisualisation."); }} />
   </article>;
 }
 
@@ -148,7 +153,7 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
 
   const query = normalizeSearch(searchQuery);
   const visiblePreviews = previews.filter((preview) => (projectFilter === "all" || preview.project === projectFilter) &&
-    matchesPreviewFilter(preview, statusFilter) && matchesQuery(query, preview.branch, preview.project, projects.find((project) => project.key === preview.project)?.label ?? "", PREVIEW_STATUS_LABELS[preview.status]));
+    matchesPreviewFilter(preview, statusFilter) && matchesQuery(query, preview.branch, preview.project, projects.find((project) => project.key === preview.project)?.label ?? "", PREVIEW_STATUS_LABELS[preview.status], preview.revision, preview.deployedRevision ?? "", preview.ticketId ?? ""));
   const sortedPreviews = sortPreviewHistory(visiblePreviews);
   const filterKey = JSON.stringify([projectFilter, query, statusFilter]);
   const pageCount = Math.max(1, Math.ceil(sortedPreviews.length / PREVIEW_HISTORY_LIMIT));
@@ -161,7 +166,7 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="space-y-1">
         <h2 className="text-sm font-semibold">Prévisualisations <span className="font-normal text-muted-foreground">· {visiblePreviews.length}</span></h2>
-        <p className="text-xs text-muted-foreground">Toutes les branches, l’essentiel en un regard.</p>
+        <p className="text-xs text-muted-foreground">Versions enregistrées, état du déploiement et dernière mise à jour.</p>
       </div>
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}><RefreshCw className="size-3.5" /><span className="hidden sm:inline">Actualiser la liste</span><span className="sr-only sm:hidden">Actualiser la liste</span></Button>
@@ -179,7 +184,7 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
         <table className="w-full text-left text-sm">
           <caption className="sr-only">Prévisualisations de branches et de tickets</caption>
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground">
-            <tr><th scope="col" className="px-4 py-3 font-medium">Branche / travail</th><th scope="col" className="hidden px-4 py-3 font-medium md:table-cell">Projet</th><th scope="col" className="hidden px-4 py-3 font-medium sm:table-cell">État</th><th scope="col" className="hidden px-4 py-3 font-medium lg:table-cell">Expiration</th><th scope="col" className="px-4 py-3 text-right font-medium">Actions</th></tr>
+            <tr><th scope="col" className="px-4 py-3 font-medium">Branche / version</th><th scope="col" className="hidden px-4 py-3 font-medium md:table-cell">Projet</th><th scope="col" className="hidden px-4 py-3 font-medium sm:table-cell">État</th><th scope="col" className="hidden px-4 py-3 font-medium lg:table-cell">Expiration / mise à jour</th><th scope="col" className="px-4 py-3 text-right font-medium">Actions</th></tr>
           </thead>
           <tbody className="divide-y">
             {displayedPreviews.map((preview) => {
@@ -189,12 +194,14 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
                 <td className="w-3/4 px-4 py-3 sm:w-auto sm:max-w-0">
                   <button type="button" className="flex max-w-full items-start gap-2 rounded-sm text-left font-medium sm:items-center hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setSelectedId(preview.id)} aria-label={`Détails de ${preview.branch}`}><GitBranch className="size-3.5 shrink-0 text-muted-foreground" /><span className="min-w-0 break-all font-mono sm:truncate" title={preview.branch}>{preview.branch}</span></button>
                   <p className="mt-1 truncate text-xs text-muted-foreground"><span className="md:hidden">{projectLabel} · </span>{preview.ticketId === null ? "Branche indépendante" : `Ticket · ${preview.ticketId}`}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{preview.deployedRevision === null ? "Demandée" : "Déployée enregistrée"} · <span className="font-mono">{(preview.deployedRevision ?? preview.revision).slice(0, PREVIEW_REVISION_LABEL_LENGTH)}</span></p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 sm:hidden"><PreviewStatus preview={preview} />{(preview.error || preview.cleanupStatus === "failed") && <span className="text-xs text-danger">Diagnostic disponible</span>}</div>
+                  <p className="mt-1 text-xs text-muted-foreground lg:hidden">État mis à jour le {formatDateTime(preview.updatedAt)}</p>
                   <p className="mt-1 text-xs text-muted-foreground lg:hidden">{preview.expiresAt === null ? "Expiration non définie" : `Expire le ${formatDateTime(preview.expiresAt)}`}</p>
                 </td>
                 <td className="hidden max-w-48 truncate px-4 py-3 text-muted-foreground md:table-cell" title={projectLabel}>{projectLabel}</td>
                 <td className="hidden px-4 py-3 sm:table-cell"><PreviewStatus preview={preview} />{(preview.error || preview.cleanupStatus === "failed") && <p className="mt-1 text-xs text-danger">Diagnostic disponible</p>}</td>
-                <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-muted-foreground lg:table-cell">{preview.expiresAt === null ? "Non définie" : formatDateTime(preview.expiresAt)}</td>
+                <td className="hidden whitespace-nowrap px-4 py-3 text-xs text-muted-foreground lg:table-cell"><p>{preview.expiresAt === null ? "Expiration non définie" : `Expire le ${formatDateTime(preview.expiresAt)}`}</p><p className="mt-1 text-2xs">État mis à jour le {formatDateTime(preview.updatedAt)}</p></td>
                 <td className="px-4 py-3"><div className="flex items-center justify-end gap-1">
                   {ready && preview.url !== null && <a className={buttonVariants({ size: "sm", variant: "outline" })} href={preview.url} target="_blank" rel="noreferrer" aria-label={`Ouvrir ${preview.branch}`}><ExternalLink className="size-3.5" /><span className="hidden sm:inline">Ouvrir</span></a>}
                   <Button variant="ghost" size="sm" className="px-2" onClick={() => setSelectedId(preview.id)} aria-label={`Détails de ${preview.branch}`} title="Détails"><MoreHorizontal className="size-4" /></Button>
@@ -213,7 +220,7 @@ export function PreviewsView({ projects, projectFilter, searchQuery }: { project
         </nav>
       </div>
     </div>}
-    <Dialog open={creating} onOpenChange={setCreating} title="Nouvelle prévisualisation" description="Choisissez le projet et la branche à déployer." size="lg">
+    <Dialog open={creating} onOpenChange={setCreating} title="Créer une prévisualisation" description="Choisissez le projet et la branche à déployer." size="lg">
       <BranchPreviewForm projects={projects} projectFilter={projectFilter} onCreated={(preview) => { accept(preview); setCreating(false); }} onOpenTicket={(ticketId) => { setCreating(false); boardStore.openTicket(ticketId); }} />
     </Dialog>
     <Sheet open={selectedPreview !== undefined} onOpenChange={(open) => { if (!open) setSelectedId(null); }} title="Détails de la prévisualisation" size="md">

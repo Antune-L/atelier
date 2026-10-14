@@ -6,6 +6,7 @@ export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 export type SettingsSectionId =
   | "appearance"
   | "defaults"
+  | "quality"
   | "profiles"
   | "projects"
   | "providers"
@@ -38,6 +39,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
       "langue",
       "triage",
       "faisabilité",
+      "analyse préalable",
+      "livraison",
       "implémentation",
       "commit",
       "pull request",
@@ -45,10 +48,16 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     ],
   },
   {
+    id: "quality",
+    label: "Qualité",
+    group: "Application",
+    keywords: ["contrôles", "relecture", "validation", "responsable", "poste", "vps", "devin"],
+  },
+  {
     id: "profiles",
     label: "Profils",
     group: "Application",
-    keywords: ["profil", "orchestrateur", "implémenteur", "préréglage", "sous-agent"],
+    keywords: ["profil", "orchestrateur", "implémenteur", "préréglage", "sous-agent", "sessions déléguées", "personnaliser"],
   },
   {
     id: "projects",
@@ -74,31 +83,31 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "providers",
     label: "Fournisseurs",
     group: "Connexions",
-    keywords: ["codex", "claude", "composer", "cursor", "connexion", "fast", "statut", "détection"],
+    keywords: ["codex", "claude", "composer", "cursor", "connexion", "fast", "statut", "détection", "mode rapide", "effort Codex", "modèle Codex", "effort", "modèle"],
   },
   {
     id: "skills",
     label: "Skills",
     group: "Connexions",
-    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection"],
+    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection", "compétences", "installation", "dossiers", "chemins"],
   },
   {
     id: "github",
     label: "Comptes GitHub",
     group: "Connexions",
-    keywords: ["github", "compte", "token", "jeton", "gh", "organisation", "sso", "clone"],
+    keywords: ["github", "compte", "token", "jeton", "gh", "organisation", "sso", "clone", "permissions", "stockage", "jeton d’accès", "read:org"],
   },
   {
     id: "mcp",
     label: "MCP",
     group: "Connexions",
-    keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur"],
+    keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur", "outil", "client", "renouveler", "maintenance", "copier", "secret", "jeton d’accès", "adresse de connexion"],
   },
   {
     id: "coolify",
     label: "Coolify",
     group: "Connexions",
-    keywords: ["prévisualisation", "preview", "déploiement", "serveur", "github", "jeton", "mot de passe"],
+    keywords: ["prévisualisation", "preview", "déploiement", "serveur", "github", "jeton", "mot de passe", "destination", "protection", "identifiants", "domaine", "environnement", "alias SSH", "GitHub App", "projet Coolify", "adresse Coolify", "domaine des prévisualisations", "nom d’utilisateur", "ssh", "alias", "nettoyage"],
   },
 ];
 
@@ -107,5 +116,8 @@ export function sectionMatches(section: SettingsSection, query: string): boolean
 }
 
 export function matchingSettingsSection(query: string): SettingsSectionId | undefined {
-  return SETTINGS_SECTIONS.find((section) => sectionMatches(section, normalizeSearch(query)))?.id;
+  const normalizedQuery = normalizeSearch(query);
+  const labelMatch = SETTINGS_SECTIONS.find((section) => matchesQuery(normalizedQuery, section.label));
+  if (labelMatch !== undefined) return labelMatch.id;
+  return SETTINGS_SECTIONS.find((section) => sectionMatches(section, normalizedQuery))?.id;
 }

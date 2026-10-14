@@ -74,7 +74,8 @@ export function TerminalColumnsPanel({ columns, countByColumn, expanded, onToggl
   return (
     <div className="flex h-full w-40 shrink-0 flex-col border-l border-border">
       <div className="px-2.5 pb-2 pt-1">
-        <h2 className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Terminé</h2>
+        <h2 className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Livraison et historique</h2>
+        <p className="mt-1 text-2xs text-muted-foreground">Ouvrir un état pour ses cartes</p>
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {columns.map((column) => {

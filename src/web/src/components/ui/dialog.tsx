@@ -17,13 +17,13 @@ const DEFAULT_SIZE: DialogSize = "md";
 const OVERLAY_CLASSES =
   "fixed inset-0 z-dialog bg-background/60 duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-100 motion-reduce:animate-none";
 
-const POSITIONER_CLASSES = "pointer-events-none fixed inset-0 z-dialog grid place-items-center p-4";
+const POSITIONER_CLASSES = "pointer-events-none fixed inset-0 z-dialog flex items-center justify-center p-2 sm:p-4";
 
 const CONTENT_CLASSES =
-  "pointer-events-auto flex max-h-[85vh] max-w-full flex-col rounded-md border border-border bg-card text-card-foreground shadow-lg outline-none duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.98] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.98] data-[state=closed]:duration-100 motion-reduce:animate-none";
+  "pointer-events-auto flex max-h-[calc(100dvh-1rem)] min-w-0 max-w-full flex-col overflow-hidden rounded-md border border-border bg-card text-card-foreground shadow-lg outline-none duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.98] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-[0.98] data-[state=closed]:duration-100 motion-reduce:animate-none sm:max-h-[85dvh]";
 
 const CLOSE_CLASSES =
-  "ml-auto shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export interface DialogProps {
   open: boolean;
@@ -65,7 +65,7 @@ export function Dialog({
             onInteractOutside={preventWhenBlocking}
           >
             <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
-              <DialogPrimitive.Title className="truncate text-sm font-medium">
+              <DialogPrimitive.Title className="min-w-0 break-words text-sm font-semibold">
                 {title}
               </DialogPrimitive.Title>
               {blocking ? null : (
@@ -74,7 +74,7 @@ export function Dialog({
                 </DialogPrimitive.Close>
               )}
             </div>
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
               {description === undefined ? null : (
                 <DialogPrimitive.Description className="text-xs text-muted-foreground">
                   {description}
@@ -83,7 +83,7 @@ export function Dialog({
               {children}
             </div>
             {footer === undefined ? null : (
-              <div className="flex shrink-0 justify-end gap-2 border-t border-border px-4 py-3">
+              <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-border bg-card px-4 py-3">
                 {footer}
               </div>
             )}

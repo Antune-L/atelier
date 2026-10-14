@@ -49,15 +49,18 @@ export function PrdReviewDialog({
   );
   const [note, setNote, clearNote] = useLocalDraft(`prd-note:${ticketId}`);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const hasFeedback = annotations.length > 0 || note.trim().length > 0;
 
   const runAction = async (action: () => Promise<void> | void): Promise<void> => {
     if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       await action();
-    } catch {
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "La décision n’a pas été enregistrée. Vos retours sont conservés.");
       // Keep the sheet open so the user can retry; reset only on failure
       // (on success the parent unmounts us, so no setState-after-unmount).
       setBusy(false);
@@ -86,9 +89,10 @@ export function PrdReviewDialog({
       }}
       size="lg"
       breadcrumb={BREADCRUMB}
-      title={actionable ? "PRD proposé" : "PRD validé"}
+      title={actionable ? "PRD · À valider" : "PRD · Lecture seule"}
     >
       <div className="flex min-h-0 flex-1 flex-col">
+        <p className="shrink-0 border-b border-border px-4 py-2 text-xs text-muted-foreground">Document soumis pour ce ticket · Annotations liées à cette version du contenu{!actionable && " · Lecture seule"}</p>
         <PrdAnnotator
           key={prdMarkdown}
           markdown={prdMarkdown}
@@ -100,6 +104,7 @@ export function PrdReviewDialog({
         />
         {actionable && (
           <div className={SHEET_FOOTER_CLASSES}>
+            {error !== null && <p role="alert" className="mr-auto text-xs text-danger">{error}</p>}
             <Button variant="outline" size="sm" disabled={busy || !hasFeedback} onClick={requestChanges}>
               Demander des corrections
             </Button>

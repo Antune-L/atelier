@@ -49,7 +49,7 @@ export function SlotPips({ slots }: SlotPipsProps) {
   };
 
   return (
-    <div role="group" aria-label="Slots" className="flex items-center gap-1.5">
+    <div role="group" aria-label="Places d’exécution" className="flex flex-wrap items-center gap-1.5">
       <div className="flex items-center gap-1">
         {slots.map((slot) => {
           const session = sessionOf(slot);
@@ -61,6 +61,7 @@ export function SlotPips({ slots }: SlotPipsProps) {
               disabled={!session}
               onClick={() => copySession(slot)}
               title={`slot-${slot.id} · ${STATUS_LABELS[slot.status]}${ticketSuffix}`}
+              aria-label={`Slot ${slot.id} · ${STATUS_LABELS[slot.status]}${ticketSuffix}${session ? " · Copier la commande de connexion" : ""}`}
               className={cn(
                 "h-2 w-[18px] rounded-[1px] transition-opacity",
                 STATUS_PIP_CLASSES[slot.status],
@@ -71,7 +72,7 @@ export function SlotPips({ slots }: SlotPipsProps) {
         })}
       </div>
       <span className="font-mono text-2xs text-muted-foreground tabular-nums">
-        {`${used}/${slots.length}`}
+        {`${used}/${slots.length} occupés`}
         {attention > 0 && ` · ${attention} en attente`}
       </span>
     </div>

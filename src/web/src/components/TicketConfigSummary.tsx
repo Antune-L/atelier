@@ -132,7 +132,8 @@ export function TicketConfigSummary({ ticket }: { ticket: Ticket }) {
 
   return (
     <section className="space-y-2">
-      <SectionHeader>Options de création</SectionHeader>
+      <SectionHeader>Réglages utilisés</SectionHeader>
+      <p className="text-xs text-muted-foreground">Configuration demandée pour ce ticket. Les valeurs par défaut affichées peuvent différer de celles d’une exécution passée.</p>
       <dl className="grid grid-cols-1 gap-x-6 gap-y-1 lg:grid-cols-2">
         <Row label="Orchestrateur" value={ORCHESTRATOR_LABELS[ticket.orchestrator]} />
         {ticket.feasibilityEngine !== null && (

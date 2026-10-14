@@ -66,23 +66,74 @@ interface SkillsStatusListProps {
   skills: SkillStatus[];
   /** Providers detected on this Mac; the others are greyed out. Defaults to every provider. */
   availableProviders?: readonly Orchestrator[];
+  query?: string;
 }
 
 /** Host skills grouped by tier with their per-provider detection state, plus install commands for the missing ones. */
-export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS }: SkillsStatusListProps) {
+export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, query = "" }: SkillsStatusListProps) {
   const missing = skills.filter((skill) => !isFullyInstalled(skill));
+  const requiredMissing = missing.filter((skill) => skill.tier === "required");
 
   return (
     <div className="space-y-4">
-      {SKILL_TIERS.map((tier) => (
-        <SkillTierGroup
-          key={tier}
-          tier={tier}
-          skills={skills.filter((skill) => skill.tier === tier)}
-          availableProviders={availableProviders}
-        />
-      ))}
-      {missing.length > 0 && <InstallBlock missing={missing} />}
+      <div className="space-y-3 rounded-lg border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold">État des compétences</p>
+          <span
+            className={cn("text-xs", requiredMissing.length > 0 ? "text-danger" : "text-muted-foreground")}
+            role="status"
+          >
+            {skills.length === 0 && "Aucune compétence détectée"}
+            {skills.length > 0 && (requiredMissing.length > 0 ? `${requiredMissing.length} compétence(s) requise(s) manquante(s)` : "Compétences requises détectées")}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {ORCHESTRATORS.map((provider) => (
+            <div key={provider} className="min-w-40 flex-1 rounded-md bg-muted/30 px-3 py-2">
+              <p className="text-sm font-medium">{ORCHESTRATOR_LABELS[provider]}</p>
+              <p className="text-xs text-muted-foreground">
+                {skills.filter((skill) => skill.installed[provider]).length}/{skills.length} détectées
+                {!availableProviders.includes(provider) && " · agent non configuré"}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">La détection des fichiers ne prouve pas leur invocation par un agent.</p>
+      </div>
+      {missing.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">À compléter</p>
+          {SKILL_TIERS.map((tier) => (
+            <SkillTierGroup
+              key={tier}
+              tier={tier}
+              skills={missing.filter((skill) => skill.tier === tier)}
+              availableProviders={availableProviders}
+              searching={query !== ""}
+            />
+          ))}
+          <details className="rounded-md border p-3" open={query !== "" || undefined}>
+            <summary className="cursor-pointer text-xs font-medium text-primary">Installer les compétences manquantes</summary>
+            <div className="mt-3">
+              <InstallBlock missing={missing} />
+            </div>
+          </details>
+        </div>
+      )}
+      <details className="rounded-md border p-3" open={query !== "" || undefined}>
+        <summary className="cursor-pointer text-sm font-medium">Voir toutes les compétences ({skills.length})</summary>
+        <div className="mt-3 space-y-3">
+          {SKILL_TIERS.map((tier) => (
+            <SkillTierGroup
+              key={tier}
+              tier={tier}
+              skills={skills.filter((skill) => skill.tier === tier)}
+              availableProviders={availableProviders}
+              searching={query !== ""}
+            />
+          ))}
+        </div>
+      </details>
       <SkillsActions />
     </div>
   );
@@ -92,9 +143,10 @@ interface SkillTierGroupProps {
   tier: SkillTier;
   skills: SkillStatus[];
   availableProviders: readonly Orchestrator[];
+  searching?: boolean;
 }
 
-function SkillTierGroup({ tier, skills, availableProviders }: SkillTierGroupProps) {
+function SkillTierGroup({ tier, skills, availableProviders, searching = false }: SkillTierGroupProps) {
   if (skills.length === 0) return null;
   const installedCount = skills.filter(isFullyInstalled).length;
 
@@ -108,7 +160,7 @@ function SkillTierGroup({ tier, skills, availableProviders }: SkillTierGroupProp
       </div>
       <ul className="divide-y rounded-md border">
         {skills.map((skill) => (
-          <SkillRow key={skill.name} skill={skill} availableProviders={availableProviders} />
+          <SkillRow key={skill.name} skill={skill} availableProviders={availableProviders} searching={searching} />
         ))}
       </ul>
     </section>
@@ -118,9 +170,10 @@ function SkillTierGroup({ tier, skills, availableProviders }: SkillTierGroupProp
 interface SkillRowProps {
   skill: SkillStatus;
   availableProviders: readonly Orchestrator[];
+  searching?: boolean;
 }
 
-function SkillRow({ skill, availableProviders }: SkillRowProps) {
+function SkillRow({ skill, availableProviders, searching = false }: SkillRowProps) {
   return (
     <li className="px-3 py-2">
       <p className="font-mono text-sm">{skill.name}</p>
@@ -132,6 +185,7 @@ function SkillRow({ skill, availableProviders }: SkillRowProps) {
             skill={skill}
             provider={provider}
             available={availableProviders.includes(provider)}
+            searching={searching}
           />
         ))}
       </ul>
@@ -143,9 +197,10 @@ interface ProviderStatusProps {
   skill: SkillStatus;
   provider: Orchestrator;
   available: boolean;
+  searching: boolean;
 }
 
-function ProviderStatus({ skill, provider, available }: ProviderStatusProps) {
+function ProviderStatus({ skill, provider, available, searching }: ProviderStatusProps) {
   const installed = skill.installed[provider];
   const dotClass = installed ? INSTALLED_DOT_CLASS : MISSING_DOT_CLASSES[skill.tier];
 
@@ -160,9 +215,10 @@ function ProviderStatus({ skill, provider, available }: ProviderStatusProps) {
         </span>
       </span>
       {!installed && available && (
-        <span className="block pl-3 font-mono">
-          attendu : {expectedSkillPaths(skill.name, provider, skill.roots?.[provider]).join(EXPECTED_PATHS_SEPARATOR)}
-        </span>
+        <details className="ml-3 mt-1" open={searching || undefined}>
+          <summary className="cursor-pointer">Voir les chemins attendus</summary>
+          <span className="block break-all font-mono">{expectedSkillPaths(skill.name, provider, skill.roots?.[provider]).join(EXPECTED_PATHS_SEPARATOR)}</span>
+        </details>
       )}
     </li>
   );

@@ -1,4 +1,4 @@
-import { TERMINAL_STAGES } from "@shared/constants";
+import { ORCHESTRATOR_LABELS, TERMINAL_STAGES } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
 
 import { LiveTerminal } from "@/components/LiveTerminal";
@@ -18,6 +18,7 @@ export function TerminalTab({ ticket }: TerminalTabProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3">
+      <div className="mb-3 shrink-0 rounded-md border border-border px-3 py-2"><h2 className="text-sm font-medium">{ticket.testing ? "Terminal de test · Interactif" : "Session agent · Lecture seule"}</h2><p className="mt-1 text-xs text-muted-foreground">{ORCHESTRATOR_LABELS[ticket.orchestrator]} · {sessionLive ? "Session active" : "Session terminée"}{ticket.testing ? " · Vos commandes sont exécutées dans la session de test." : " · La sortie est consultable sans champ de commande."}</p></div>
       {ticket.testing ? (
         // An interactive test session is a real tmux shell — keep the xterm (input + resize).
         <LiveTerminal ticketId={ticket.id} live={sessionLive} fill defaultInput />

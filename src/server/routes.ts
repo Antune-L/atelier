@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
-import { ACTIVE_STAGES, isAllowedAgentPair, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
+import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
@@ -42,8 +42,8 @@ import {
   updateProjectGroupColorSchema,
   validatePrdSchema,
 } from "../shared/schemas.ts";
-import type { Conversation, CreateReviewInput, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, PrdTask, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
-import { renderPrdAxisBrief, renderPrdMarkdown, renderPrdTaskBrief } from "../shared/prdMarkdown.ts";
+import type { Conversation, CreateReviewInput, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
+import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief } from "../shared/prdMarkdown.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
@@ -615,7 +615,6 @@ const ATELIER_SETTING_KEYS = [
   "researchEnabled",
   "researchOptions",
 ] as const satisfies readonly (keyof UpdateConversationInput & keyof Conversation)[];
-const PRD_GOALS_HEADING = "## Objectifs";
 const PRD_JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const PRD_HTML_CONTENT_TYPE = "text/html; charset=utf-8";
 const CONVERSATION_NOT_FOUND = "conversation introuvable";
@@ -648,21 +647,8 @@ function prdExportName(record: PrdDocumentRecord, extension: string): string {
   return `${record.document.id}-rev${record.revision}.${extension}`;
 }
 
-function orderSelectedTasks(doc: PrdDocument, selected: ReadonlySet<string>): PrdTask[] {
-  const pending = doc.tasks.filter((task) => selected.has(task.id));
-  const ordered: PrdTask[] = [];
-  const placed = new Set<string>();
-  while (pending.length > 0) {
-    const index = pending.findIndex((task) => task.dependsOn.every((dependency) => !selected.has(dependency) || placed.has(dependency)));
-    const [next] = pending.splice(index === -1 ? 0 : index, 1);
-    if (!next) break;
-    ordered.push(next);
-    placed.add(next.id);
-  }
-  return ordered;
-}
-
 interface PrdCardDraft {
+  candidateId: string;
   title: string;
   description: string;
   sourcePrdTask: string | null;
@@ -672,13 +658,13 @@ interface PrdCardDraft {
 function prdCardDrafts(doc: PrdDocument, input: CreateTicketsFromPrdInput): PrdCardDraft[] | string {
   const selected = new Set(input.selection);
   if (input.split === "single") {
-    const goals = doc.goals.length > 0 ? `\n\n${PRD_GOALS_HEADING}\n${doc.goals.map((goal) => `- ${goal}`).join("\n")}` : "";
-    return [{ title: doc.title, description: `${doc.summary}${goals}`, sourcePrdTask: null, dependsOnTask: null }];
+    return [{ candidateId: PRD_SINGLE_SELECTION, title: doc.title, description: renderPrdSingleBrief(doc), sourcePrdTask: null, dependsOnTask: null }];
   }
   if (input.split === "axes") {
     const unknown = input.selection.find((id) => !doc.axes.some((axis) => axis.id === id));
     if (unknown !== undefined) return `axe inconnu : ${unknown}`;
     return doc.axes.filter((axis) => selected.has(axis.id)).map((axis) => ({
+      candidateId: axis.id,
       title: `${axis.id} — ${axis.title}`,
       description: renderPrdAxisBrief(doc, axis.id) ?? axis.summary,
       sourcePrdTask: null,
@@ -687,7 +673,8 @@ function prdCardDrafts(doc: PrdDocument, input: CreateTicketsFromPrdInput): PrdC
   }
   const unknown = input.selection.find((id) => !doc.tasks.some((task) => task.id === id));
   if (unknown !== undefined) return `tâche inconnue : ${unknown}`;
-  return orderSelectedTasks(doc, selected).map((task) => ({
+  return orderSelectedPrdTasks(doc, selected).map((task) => ({
+    candidateId: task.id,
     title: `${task.id} — ${task.title}`,
     description: renderPrdTaskBrief(doc, task.id) ?? task.expectedOutcome,
     sourcePrdTask: task.id,
@@ -836,11 +823,19 @@ function createAtelierRoutes(deps: RouteDeps) {
       if (deliveryError) return jsonError(set, HTTP_BAD_REQUEST, deliveryError);
       const drafts = prdCardDrafts(record.document, parsed.data);
       if (typeof drafts === "string") return jsonError(set, HTTP_BAD_REQUEST, drafts);
+      const overrides = new Map<string, NonNullable<CreateTicketsFromPrdInput["overrides"]>[number]>();
+      for (const override of parsed.data.overrides ?? []) {
+        if (overrides.has(override.candidateId)) return jsonError(set, HTTP_BAD_REQUEST, `Duplicate candidate override: ${override.candidateId}`);
+        if (!parsed.data.selection.includes(override.candidateId) || !drafts.some((draft) => draft.candidateId === override.candidateId)) return jsonError(set, HTTP_BAD_REQUEST, `Override candidate is not a valid selection: ${override.candidateId}`);
+        overrides.set(override.candidateId, override);
+      }
+      if (overrides.size > 0 && parsed.data.split === "single" && parsed.data.selection.some((id) => id !== PRD_SINGLE_SELECTION)) return jsonError(set, HTTP_BAD_REQUEST, "Unknown candidate in single-card selection");
       const prdMarkdown = renderPrdMarkdown(record.document);
       const stealth = options.directPush ? false : options.stealth;
       const autoMerge = stealth || options.directPush ? false : options.autoMerge;
       const created = new Map<string, string>();
       const tickets = drafts.map((draft) => {
+        const override = overrides.get(draft.candidateId);
         const ticket = store.createTicket({
           ...options,
           stealth,
@@ -848,8 +843,8 @@ function createAtelierRoutes(deps: RouteDeps) {
           project: conversation.project,
           prdEnabled: false,
           externalUrl: null,
-          title: draft.title,
-          description: draft.description,
+          title: override?.title ?? draft.title,
+          description: override?.description ?? draft.description,
           dependsOn: draft.dependsOnTask === null ? null : created.get(draft.dependsOnTask) ?? null,
           prdMarkdown,
           sourcePrdId: record.id,

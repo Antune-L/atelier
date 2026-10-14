@@ -28,9 +28,9 @@ interface SettingsFooterProps {
 /** Editor footer: the save state on the left, the panel's action buttons on the right. */
 export function SettingsFooter({ dirty, justSaved, children }: SettingsFooterProps) {
   return (
-    <div className="flex items-center justify-between gap-2 border-t pt-3">
-      <p className="text-xs text-muted-foreground">{footerMessage(dirty, justSaved)}</p>
-      <div className="flex items-center gap-2">{children}</div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+      <p role="status" className="text-xs text-muted-foreground">{footerMessage(dirty, justSaved)}</p>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }
@@ -48,7 +48,7 @@ export function DashedAddButton({ label, onClick, disabled = false }: DashedAddB
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-input px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+      className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-input px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
     >
       <Plus className="h-4 w-4" />
       {label}

@@ -104,7 +104,6 @@ const CODEX_HOME_ENV = "CODEX_HOME";
 const DEFAULT_CODEX_HOME = join(homedir(), ".codex");
 const AGENTS_SKILLS_DIR = join(homedir(), ".agents", SKILLS_DIR_NAME);
 const PROD_ENV_MARKER = "prod";
-const SECURE_WEBSOCKET_PROTOCOL = "wss:";
 const PREVIEW_WEBSOCKET_TIMEOUT_MS = 10_000;
 /** Bound the synchronous one-shot reformulation SDK query (2 min). */
 const REFORMULATE_TIMEOUT_MS = 120_000;
@@ -257,7 +256,6 @@ export class RealSystemAdapter implements SystemAdapter {
     const origin = new URL(url);
     const target = new URL(path, origin);
     if (target.origin !== origin.origin || target.protocol !== "https:") throw new Error("Preview WebSocket checks must stay on the preview HTTPS origin.");
-    target.protocol = SECURE_WEBSOCKET_PROTOCOL;
     return previewWebSocketOpens(target, { authorization: previewBasicAuthorization(auth) }, PREVIEW_WEBSOCKET_TIMEOUT_MS);
   }
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */

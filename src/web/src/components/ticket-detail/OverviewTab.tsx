@@ -2,7 +2,7 @@ import { ArrowRight, ChevronDown, ChevronUp, ExternalLink, FileText } from "luci
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { COLUMN_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
+import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import type { ErrorDetails, ProjectInfo, Ticket } from "@shared/schemas";
 
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
@@ -15,7 +15,7 @@ import type { TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { useCapabilities } from "@/hooks/useCapabilities";
-import { formatDateTime, stageLabel } from "@/lib/display";
+import { formatDateTime } from "@/lib/display";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 
 interface OverviewTabProps {
@@ -75,21 +75,10 @@ function formatErrorDetails(details: ErrorDetails): string {
   return lines.join("\n");
 }
 
-function nextStep(ticket: Ticket): { title: string; description: string; tab: TicketTab; label: string } {
-  if (canRecoverImplementation(ticket)) return { title: "Exécution interrompue", description: "Les lots et leurs changements conservés demandent une reprise explicite.", tab: "activity", label: "Voir la reprise" };
-  if (ticket.pendingQuestions > 0) return { title: "Réponse attendue", description: "L’agent attend votre réponse avant de poursuivre.", tab: "activity", label: "Répondre dans la conversation" };
-  if (ticket.column === "prd") return { title: "Plan à valider", description: "Consultez le document puis validez-le ou demandez des corrections.", tab: "prd", label: "Lire le PRD" };
-  if (ticket.error !== null) return { title: "Une intervention est nécessaire", description: "Consultez le diagnostic et les actions disponibles pour poursuivre.", tab: "activity", label: "Voir la conversation" };
-  if (ticket.column === "todo") return { title: "Prêt à préparer", description: "Vérifiez le brief et les réglages avant de lancer le ticket.", tab: "description", label: "Lire le brief" };
-  if (ticket.kind === "feature" && ticket.column === "done") return { title: "Résultat à vérifier", description: "Consultez les preuves et les réserves avant de décider de la livraison.", tab: "validation", label: "Consulter les contrôles" };
-  return { title: COLUMN_LABELS[ticket.column], description: ticket.stage === null ? "Les échanges et documents restent accessibles." : stageLabel(ticket.stage), tab: "activity", label: "Voir la conversation" };
-}
-
 export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: OverviewTabProps) {
   const { prOnly } = useCapabilities();
   const isTodo = ticket.column === "todo";
   const showSummary = ticket.agentSummary !== null && SUMMARY_COLUMNS.includes(ticket.column);
-  const expected = nextStep(ticket);
   const recordedModels = [...new Set(Object.values(ticket.sessionUsage).flatMap((usage) => Object.keys(usage)))];
   let requestedDelivery = "PR uniquement";
   if (ticket.autoMerge || (ticket.autonomous && ticket.autonomousDelivery === "merge")) requestedDelivery = "Fusion après contrôles";
@@ -100,14 +89,6 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
   return (
     <div className="space-y-5 pb-4">
       <TicketBrief key={ticket.id} description={ticket.description} onEdit={() => onNavigate("description")} />
-
-      <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
-        <p className="text-xs text-muted-foreground">Prochaine action</p>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1"><h2 className="text-lg font-semibold">{expected.title}</h2><p className="mt-1 text-sm text-muted-foreground">{expected.description}</p></div>
-          <Button size="sm" variant="outline" onClick={() => onNavigate(expected.tab)}>{expected.label}<ArrowRight className="size-3.5" aria-hidden /></Button>
-        </div>
-      </section>
 
       {ticket.error && <p role="alert" className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{ticket.error}</p>}
       {ticket.implementationPlan && (ticket.implementationPlan.recovery || canRecoverImplementation(ticket)) && <ImplementationRecovery key={`${ticket.id}:${ticket.implementationPlan.id}:${ticket.implementationPlan.recovery?.generation ?? "delegated"}:${ticket.slotId}`} ticket={ticket} plan={ticket.implementationPlan} />}

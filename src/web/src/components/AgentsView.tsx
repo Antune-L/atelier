@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronUp, Clock, Cpu } from "lucide-react";
 import { useState } from "react";
 
-import { IMPLEMENTER_LABELS, ORCHESTRATOR_LABELS, TERMINAL_STAGES } from "@shared/constants";
+import { TERMINAL_STAGES } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
@@ -13,7 +13,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBoard } from "@/hooks/useBoard";
 import { useTickTimer } from "@/hooks/useTickTimer";
-import { formatDateTime, formatRelativeDuration, isStageAnimated, stageLabel, ticketElapsedStart } from "@/lib/display";
+import {
+  agentPairLabel,
+  formatDateTime,
+  formatRelativeDuration,
+  isStageAnimated,
+  stageLabel,
+  ticketElapsedStart,
+} from "@/lib/display";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
 
 interface AgentsViewProps {
@@ -78,7 +85,7 @@ function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProp
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
-        <span>{ORCHESTRATOR_LABELS[ticket.orchestrator]} · {IMPLEMENTER_LABELS[ticket.implementer]}</span>
+        <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
         <TicketBadges ticket={ticket} />
       </div>
       <p className="mt-4 text-sm font-medium">{ticket.stage === null ? "Aucune étape enregistrée" : stageLabel(ticket.stage)}</p>

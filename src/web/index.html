@@ -6,12 +6,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Atelier</title>
     <script>
-      // Apply the stored theme before first paint to avoid a flash of the default palette.
-      // Dark is the default: anything but an explicit "light" falls back to it.
       (function () {
         if (localStorage.getItem("theme") !== "light") {
           document.documentElement.classList.add("dark");
         }
+        document.documentElement.dataset.palette = localStorage.getItem("theme-palette") || "atelier";
       })();
     </script>
   </head>

@@ -113,7 +113,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
       <pre
         ref={preRef}
         aria-label={`${TERMINAL_TITLE} (aperçu)`}
-        className="pointer-events-none h-full min-h-0 w-full flex-1 overflow-hidden rounded-md bg-[#001219] p-2 font-mono text-[10px] leading-snug text-[#94d2bd]"
+        className="pointer-events-none h-full min-h-0 w-full flex-1 overflow-hidden rounded-md bg-[var(--terminal-background)] p-2 font-mono text-[10px] leading-snug text-[var(--terminal-foreground)]"
       >
         {error ?? (data.output || placeholder)}
       </pre>
@@ -153,7 +153,7 @@ export function TerminalView({ ticketId, fill = false, compact = false }: Termin
             role="log"
             aria-label={`${TERMINAL_TITLE} (sortie, lecture seule)`}
             className={cn(
-              "overflow-auto rounded-md bg-[#001219] p-3 font-mono text-xs leading-relaxed text-[#94d2bd]",
+              "overflow-auto rounded-md bg-[var(--terminal-background)] p-3 font-mono text-xs leading-relaxed text-[var(--terminal-foreground)]",
               fullscreen || fill ? "min-h-0 flex-1" : "max-h-[60vh] min-h-[12rem]",
             )}
           >

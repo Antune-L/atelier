@@ -40,7 +40,7 @@ import { useProfiles } from "@/hooks/useProfiles";
 import { refreshProjects, useProjects } from "@/hooks/useProjects";
 import { useTheme } from "@/hooks/useTheme";
 import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } from "@/lib/display";
-import { THEMES, type Theme } from "@/lib/theme";
+import { THEMES, THEME_PALETTES, type Theme } from "@/lib/theme";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
 import { matchingSettingsSection, sectionMatches, SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settingsSearch";
@@ -179,9 +179,16 @@ function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSection
 }
 
 function AppearanceSettings({ query }: { query: string }) {
-  const { theme, setTheme } = useTheme();
-  const themeVisible = matchesQuery(query, "Thème", "Apparence de l'interface", "clair sombre");
+  const { theme, setTheme, palette, setPalette } = useTheme();
+  const themeVisible = matchesQuery(
+    query,
+    "Thème",
+    "Apparence de l'interface",
+    "clair sombre palette",
+    ...THEME_PALETTES.flatMap((option) => [option.label, option.value]),
+  );
   const currentTheme = THEMES.find((option) => option.value === theme)?.label;
+  const currentPalette = THEME_PALETTES.find((option) => option.value === palette)?.label;
 
   return (
     <div className="space-y-4">
@@ -190,12 +197,46 @@ function AppearanceSettings({ query }: { query: string }) {
         <div className="space-y-4 rounded-lg border p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <Label>Thème</Label>
-              <p className="text-sm text-muted-foreground">Choix actuel : {currentTheme}</p>
+              <Label>Apparence</Label>
+              <p className="text-sm text-muted-foreground">Choix actuel : {currentPalette} · {currentTheme}</p>
             </div>
             <Tabs options={THEME_OPTIONS} value={theme} onChange={setTheme} aria-label="Thème" />
           </div>
-          <div className="rounded-md border bg-background p-3" aria-label={`Aperçu du thème ${currentTheme}`}>
+          <fieldset className="space-y-3" style={{ colorScheme: theme }}>
+            <legend className="text-sm font-medium">Palette</legend>
+            <div className="flex flex-wrap gap-2">
+              {THEME_PALETTES.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex min-w-0 flex-1 basis-44 cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-accent has-[:checked]:border-ring has-[:checked]:bg-accent focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background"
+                >
+                  <input
+                    type="radio"
+                    name="theme-palette"
+                    value={option.value}
+                    checked={palette === option.value}
+                    onChange={() => setPalette(option.value)}
+                    className="mt-1 shrink-0 accent-[hsl(var(--brand))]"
+                  />
+                  <span className="min-w-0 flex-1 space-y-1">
+                    <span className="block text-sm font-medium">{option.label}</span>
+                    <span className="block text-xs text-muted-foreground">{option.description}</span>
+                  </span>
+                  <span
+                    className="theme-swatch flex shrink-0 gap-0.5"
+                    data-palette={option.value}
+                    data-appearance={theme}
+                    aria-hidden="true"
+                  >
+                    <span className="h-6 w-2 rounded-sm border border-border bg-background" />
+                    <span className="h-6 w-2 rounded-sm border border-border bg-card" />
+                    <span className="h-6 w-2 rounded-sm bg-brand" />
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className="rounded-md border bg-background p-3" aria-label={`Aperçu du thème ${currentPalette} ${currentTheme}`}>
             <div className="mb-3 flex items-center justify-between border-b pb-2">
               <span className="text-sm font-semibold">Votre tableau</span>
               <span className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground">Nouvelle carte</span>
@@ -211,7 +252,7 @@ function AppearanceSettings({ query }: { query: string }) {
               </div>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">Le thème s'applique immédiatement et reste enregistré sur cet appareil.</p>
+          <p className="text-xs text-muted-foreground">La palette et l’apparence s’appliquent immédiatement et restent enregistrées sur cet appareil.</p>
         </div>
       ) : <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>}
     </div>

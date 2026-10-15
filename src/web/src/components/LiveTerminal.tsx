@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { FullscreenToggle, TERMINAL_TITLE } from "@/components/FullscreenToggle";
 import { useCaptureEscape } from "@/hooks/useCaptureEscape";
-import { TERMINAL_BG, terminalWsUrl, useXtermSocket } from "@/hooks/useXtermSocket";
+import { terminalWsUrl, useXtermSocket } from "@/hooks/useXtermSocket";
 import { cn } from "@/lib/utils";
 
 interface LiveTerminalOptions {
@@ -127,7 +127,7 @@ export function LiveTerminal(props: LiveTerminalProps) {
         ref={containerRef}
         role="group"
         aria-label={`${TERMINAL_TITLE} interactif`}
-        style={{ backgroundColor: TERMINAL_BG }}
+        style={{ backgroundColor: "var(--terminal-background)" }}
         className={cn(
           "overflow-hidden rounded-md p-2",
           fullscreen || fill ? "min-h-0 flex-1" : "h-[60vh] min-h-[12rem]",

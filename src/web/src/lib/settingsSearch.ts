@@ -1,4 +1,5 @@
 import { matchesQuery, normalizeSearch } from "./search";
+import { THEME_PALETTES } from "./theme";
 
 export const SETTINGS_GROUPS = ["Application", "Connexions"] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
@@ -27,7 +28,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "appearance",
     label: "Apparence",
     group: "Application",
-    keywords: ["thème", "clair", "sombre", "deep ocean", "couleurs", "interface"],
+    keywords: [
+      "thème", "clair", "sombre", "deep ocean", "couleurs", "interface", "palette",
+      ...THEME_PALETTES.flatMap((palette) => [palette.label, palette.value]),
+    ],
   },
   {
     id: "defaults",

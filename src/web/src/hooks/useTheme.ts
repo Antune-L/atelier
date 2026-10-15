@@ -1,20 +1,34 @@
 import { useState } from "react";
 
-import { applyTheme, getStoredTheme, type Theme } from "@/lib/theme";
+import {
+  applyTheme,
+  applyThemePalette,
+  getStoredTheme,
+  getStoredThemePalette,
+  type Theme,
+  type ThemePalette,
+} from "@/lib/theme";
 
 interface UseThemeResult {
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  palette: ThemePalette;
+  setPalette: (palette: ThemePalette) => void;
 }
 
-/** Theme is applied to <html> at startup (main.tsx); this only re-renders the picker. */
 export function useTheme(): UseThemeResult {
   const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [palette, setPaletteState] = useState<ThemePalette>(getStoredThemePalette);
 
   const setTheme = (next: Theme): void => {
     applyTheme(next);
     setThemeState(next);
   };
 
-  return { theme, setTheme };
+  const setPalette = (next: ThemePalette): void => {
+    applyThemePalette(next);
+    setPaletteState(next);
+  };
+
+  return { theme, setTheme, palette, setPalette };
 }

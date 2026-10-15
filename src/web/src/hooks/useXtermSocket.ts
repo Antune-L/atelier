@@ -1,10 +1,12 @@
 import { FitAddon } from "@xterm/addon-fit";
-import { Terminal, type IDisposable } from "@xterm/xterm";
+import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import "@xterm/xterm/css/xterm.css";
 
 import { terminalServerMessageSchema } from "@shared/schemas";
+
+import { THEME_CHANGED_EVENT } from "@/lib/theme";
 
 const TERMINAL_FONT_SIZE = 12;
 const TERMINAL_SCROLLBACK = 5000;
@@ -23,15 +25,20 @@ const MAX_CONNECT_ATTEMPTS = 300;
 const INITIAL_CONNECT_DELAY_MS = 250;
 /** Coalesce rapid panel layout changes (split/resize) before refitting an open terminal. */
 const RESIZE_DEBOUNCE_MS = 50;
-/** Shared background so the xterm theme and the wrapper never desync. */
-export const TERMINAL_BG = "#001219";
 
-const TERMINAL_THEME = {
-  background: TERMINAL_BG,
-  foreground: "#94d2bd",
-  cursor: "#94d2bd",
-  cursorAccent: TERMINAL_BG,
-} as const;
+function getTerminalTheme(): ITheme {
+  const colors = getComputedStyle(document.documentElement);
+  const background = colors.getPropertyValue("--terminal-background").trim();
+  const selectionBackground = colors.getPropertyValue("--terminal-selection").trim();
+
+  return {
+    background,
+    foreground: colors.getPropertyValue("--terminal-foreground").trim(),
+    cursor: colors.getPropertyValue("--terminal-cursor").trim(),
+    cursorAccent: background,
+    ...(selectionBackground ? { selectionBackground } : {}),
+  };
+}
 
 const textEncoder = new TextEncoder();
 
@@ -112,7 +119,7 @@ export function useXtermSocket({
       convertEol: false,
       fontSize: TERMINAL_FONT_SIZE,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      theme: { ...TERMINAL_THEME },
+      theme: getTerminalTheme(),
       scrollback: TERMINAL_SCROLLBACK,
       cursorBlink: true,
     });
@@ -122,6 +129,11 @@ export function useXtermSocket({
     termRef.current = term;
     fitRef.current = fit;
     setExited(false);
+
+    const updateTheme = (): void => {
+      term.options.theme = getTerminalTheme();
+    };
+    window.addEventListener(THEME_CHANGED_EVENT, updateTheme);
 
     let socket: WebSocket | null = null;
     let dataSub: IDisposable | null = null;
@@ -234,6 +246,7 @@ export function useXtermSocket({
 
     return () => {
       disposed = true;
+      window.removeEventListener(THEME_CHANGED_EVENT, updateTheme);
       if (retryTimer) clearTimeout(retryTimer);
       if (initialConnectTimer) clearTimeout(initialConnectTimer);
       if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);

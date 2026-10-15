@@ -3,6 +3,7 @@
 @import "@fontsource/ibm-plex-sans/600.css";
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
+@import "./themePalettes.css";
 
 @tailwind base;
 @tailwind components;
@@ -10,7 +11,11 @@
 
 @layer base {
   /* NOTE: light is the secondary theme; the dark block below is the default (see index.html). */
-  :root {
+  :root,
+  .theme-swatch[data-palette="atelier"][data-appearance="light"] {
+    --terminal-background: #001219;
+    --terminal-foreground: #94d2bd;
+    --terminal-cursor: #94d2bd;
     --background: 48 18.5% 94.7%;
     --foreground: 220 10% 11.8%;
     --card: 0 0% 100%;
@@ -54,7 +59,8 @@
     --chart-5: 5.6 63.4% 46.1%;
   }
 
-  .dark {
+  .dark,
+  .theme-swatch[data-palette="atelier"][data-appearance="dark"] {
     --background: 202.5 9.3% 16.9%;
     --foreground: 108 8.5% 88.4%;
     --card: 200 8.6% 20.6%;

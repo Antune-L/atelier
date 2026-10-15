@@ -236,23 +236,6 @@ function AppearanceSettings({ query }: { query: string }) {
               ))}
             </div>
           </fieldset>
-          <div className="rounded-md border bg-background p-3" aria-label={`Aperçu du thème ${currentPalette} ${currentTheme}`}>
-            <div className="mb-3 flex items-center justify-between border-b pb-2">
-              <span className="text-sm font-semibold">Votre tableau</span>
-              <span className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground">Nouvelle carte</span>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-1 rounded-md bg-muted/40 p-2">
-                <p className="mb-2 text-xs text-muted-foreground">À faire</p>
-                <div className="rounded border bg-card p-3 text-sm text-card-foreground">Préparer la prochaine évolution</div>
-              </div>
-              <div className="flex-1 rounded-md bg-muted/40 p-2">
-                <p className="mb-2 text-xs text-muted-foreground">Terminé</p>
-                <div className="rounded border bg-card p-3 text-sm text-card-foreground">Relire une livraison</div>
-              </div>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">La palette et l’apparence s’appliquent immédiatement et restent enregistrées sur cet appareil.</p>
         </div>
       ) : <p className="text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>}
     </div>

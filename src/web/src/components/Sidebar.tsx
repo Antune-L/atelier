@@ -55,6 +55,9 @@ export function Sidebar({
 }: SidebarProps): ReactNode {
   return (
     <nav aria-label="Navigation principale" className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2 xl:w-40">
+      <span className="hidden w-full px-3 py-2 font-mono text-xs font-medium tracking-wider text-brand xl:block">
+        ATELIER
+      </span>
       {NAV_ENTRIES.map(({ value, label, Icon }) => {
         const badged = badges[value] === true;
         const title = badged ? `${label} — nouvelles réponses` : label;

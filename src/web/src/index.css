@@ -55,46 +55,46 @@
   }
 
   .dark {
-    --background: 210 11.8% 6.7%;
-    --foreground: 42 16.7% 88.2%;
-    --card: 210 12.5% 9.4%;
-    --card-foreground: 42 16.7% 88.2%;
-    --popover: 210 12.5% 9.4%;
-    --popover-foreground: 42 16.7% 88.2%;
+    --background: 202.5 9.3% 16.9%;
+    --foreground: 108 8.5% 88.4%;
+    --card: 200 8.6% 20.6%;
+    --card-foreground: 108 8.5% 88.4%;
+    --popover: 200 8.6% 20.6%;
+    --popover-foreground: 108 8.5% 88.4%;
 
-    --primary: 42 16.7% 88.2%;
-    --primary-foreground: 210 11.8% 6.7%;
-    --secondary: 210 12.9% 12.2%;
-    --secondary-foreground: 42 16.7% 88.2%;
-    --muted: 210 12.9% 12.2%;
-    --muted-foreground: 215 5.4% 56.5%;
-    --accent: 210 12.8% 15.3%;
-    --accent-foreground: 42 16.7% 88.2%;
+    --primary: 144 8.2% 76.1%;
+    --primary-foreground: 202.5 9.3% 16.9%;
+    --secondary: 198 8.3% 23.5%;
+    --secondary-foreground: 108 8.5% 88.4%;
+    --muted: 198 8.3% 23.5%;
+    --muted-foreground: 163.6 7.5% 71.2%;
+    --accent: 195 8.3% 28.2%;
+    --accent-foreground: 108 8.5% 88.4%;
 
-    --brand: 172.5 66% 50.4%;
-    --brand-foreground: 210 11.8% 6.7%;
+    --brand: 164 18.5% 68.2%;
+    --brand-foreground: 202.5 9.3% 16.9%;
 
-    --destructive: 0 83.6% 68.8%;
-    --destructive-foreground: 210 11.8% 6.7%;
+    --destructive: 6.4 38.9% 71.8%;
+    --destructive-foreground: 202.5 9.3% 16.9%;
 
-    --border: 210 11.6% 16.9%;
-    --input: 210 11.6% 16.9%;
-    --ring: 172.5 66% 50.4%;
+    --border: 192.9 8.5% 32.2%;
+    --input: 192.9 8.5% 32.2%;
+    --ring: 164 18.5% 68.2%;
 
-    --success: 112 45.5% 61.2%;
-    --success-foreground: 210 11.8% 6.7%;
-    --info: 172.5 66% 50.4%;
-    --info-foreground: 210 11.8% 6.7%;
-    --warning: 37 91.3% 55.1%;
-    --warning-foreground: 210 11.8% 6.7%;
-    --danger: 0 83.6% 68.8%;
-    --danger-foreground: 210 11.8% 6.7%;
+    --success: 102.4 21% 68.2%;
+    --success-foreground: 202.5 9.3% 16.9%;
+    --info: 164 18.5% 68.2%;
+    --info-foreground: 202.5 9.3% 16.9%;
+    --warning: 39.3 41.5% 71.2%;
+    --warning-foreground: 202.5 9.3% 16.9%;
+    --danger: 6.4 38.9% 71.8%;
+    --danger-foreground: 202.5 9.3% 16.9%;
 
-    --chart-1: 172.5 66% 50.4%;
-    --chart-2: 112 45.5% 61.2%;
-    --chart-3: 37 91.3% 55.1%;
-    --chart-4: 255.1 91.7% 76.3%;
-    --chart-5: 0 83.6% 68.8%;
+    --chart-1: 164 18.5% 68.2%;
+    --chart-2: 102.4 21% 68.2%;
+    --chart-3: 39.3 41.5% 71.2%;
+    --chart-4: 260 20.3% 73.9%;
+    --chart-5: 6.4 38.9% 71.8%;
   }
 }
 

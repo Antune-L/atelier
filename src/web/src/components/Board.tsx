@@ -20,6 +20,7 @@ import {
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { Button } from "@/components/ui/button";
+import { canMergePr } from "@shared/ticketMerge";
 import { api } from "@/lib/api";
 import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { useBoard } from "@/hooks/useBoard";
@@ -61,6 +62,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const movingAllRef = useRef(false);
   const [checkingAll, setCheckingAll] = useState(false);
   const checkingAllRef = useRef(false);
+  const [mergingAll, setMergingAll] = useState(false);
+  const mergingAllRef = useRef(false);
+  const [confirmMergeAll, setConfirmMergeAll] = useState(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const [decisionsOnly, setDecisionsOnly] = useState(false);
   const analyzingAllRef = useRef(false);
@@ -204,6 +208,48 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     boardStore.notify("Merge vérifié", `${parts.join(", ")}.`);
   };
 
+  // Only PRs targeting the project base branch: split children target their mother's branch instead.
+  const targetsProjectBase = (ticket: Ticket): boolean => {
+    const project = projects.find((p) => p.key === ticket.project);
+    if (project === undefined) return false;
+    const parent = ticket.dependsOn === null ? undefined : ticketsById.get(ticket.dependsOn);
+    const target = parent?.branch ?? ticket.baseBranch ?? project.baseBranch;
+    return target === project.baseBranch;
+  };
+  const mergeableTickets = ticketsByColumn("done").filter((t) => canMergePr(t) && targetsProjectBase(t));
+  const mergeAllCount = mergeableTickets.length;
+
+  const handleMergeAll = async (): Promise<void> => {
+    if (mergingAllRef.current) return;
+    const toMerge = mergeableTickets;
+    if (toMerge.length === 0) return;
+    mergingAllRef.current = true;
+    setMergingAll(true);
+    let merged = 0;
+    let conflicts = 0;
+    let failures = 0;
+    try {
+      // Sequential: each merge moves the base branch, so the next PR's mergeability must be read afterwards.
+      for (const ticket of toMerge) {
+        try {
+          const result = await api.mergePr(ticket.id);
+          if (result.merged) merged += 1;
+          else if (result.conflicts) conflicts += 1;
+          else failures += 1;
+        } catch {
+          failures += 1;
+        }
+      }
+    } finally {
+      mergingAllRef.current = false;
+      setMergingAll(false);
+    }
+    const parts = [`${merged} mergée(s)`];
+    if (conflicts > 0) parts.push(`${conflicts} en conflit`);
+    if (failures > 0) parts.push(`${failures} échec(s)`);
+    boardStore.notify("Merge des PR", `${parts.join(", ")}.`);
+  };
+
   const handleDragEnd = async (event: DragEndEvent): Promise<void> => {
     const { active, over } = event;
     if (!over) return;
@@ -254,6 +300,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       onCheckAllMerges={column === "done" ? handleCheckAllMerges : undefined}
       checkAllCount={checkAllCount}
       checkAllBusy={checkingAll}
+      onMergeAll={column === "done" ? () => setConfirmMergeAll(true) : undefined}
+      mergeAllCount={mergeAllCount}
+      mergeAllBusy={mergingAll}
     />
   );
 
@@ -298,6 +347,18 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
           const id = pendingAbandon;
           setPendingAbandon(null);
           if (id) await api.moveTicket(id, "abandoned", true);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmMergeAll}
+        title="Merger les PR"
+        description={`${mergeAllCount} PR seront mergées dans leur branche principale et les cartes archivées.`}
+        confirmLabel="Merger"
+        onCancel={() => setConfirmMergeAll(false)}
+        onConfirm={async () => {
+          setConfirmMergeAll(false);
+          await handleMergeAll();
         }}
       />
 

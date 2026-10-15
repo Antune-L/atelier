@@ -53,6 +53,12 @@ interface BoardColumnProps {
   checkAllCount?: number;
   /** True while a bulk merge check is in flight — disables the button to prevent re-entry. */
   checkAllBusy?: boolean;
+  /** When set on the "Fini" column, merges every mergeable PR targeting the project base branch. */
+  onMergeAll?: () => void;
+  /** How many "Fini" PRs the bulk merge targets; disables the item at 0. */
+  mergeAllCount?: number;
+  /** True while a bulk merge is in flight. */
+  mergeAllBusy?: boolean;
 }
 
 /** Stable placeholder so a menu item with an undefined handler still has a callable onSelect. */
@@ -156,6 +162,12 @@ function resolveCheckAllTitle(count: number, busy: boolean): string {
   return `Vérifier le merge de ${count} carte(s)`;
 }
 
+function resolveMergeAllTitle(count: number, busy: boolean): string {
+  if (busy) return "Merge en cours…";
+  if (count === 0) return "Aucune PR à merger";
+  return `Merger la PR de ${count} carte(s)`;
+}
+
 /** A split mother carries a branch under the dedicated split prefix. */
 function isSplitMother(ticket: Ticket): boolean {
   return ticket.branch !== null && ticket.branch.startsWith(SPLIT_BRANCH_PREFIX);
@@ -245,6 +257,9 @@ export function BoardColumn({
   onCheckAllMerges,
   checkAllCount = 0,
   checkAllBusy = false,
+  onMergeAll,
+  mergeAllCount = 0,
+  mergeAllBusy = false,
 }: BoardColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column });
   const [collapsed, setCollapsed] = useState(() => readCollapsed(column));
@@ -304,6 +319,12 @@ export function BoardColumn({
     onSelect: onCheckAllMerges ?? NOOP,
     disabled: onCheckAllMerges === undefined || checkAllCount === 0 || checkAllBusy,
     title: checkAllButtonTitle,
+  }, {
+    label: `Merger la PR de ${mergeAllCount} carte(s)`,
+    icon: GitMerge,
+    onSelect: onMergeAll ?? NOOP,
+    disabled: onMergeAll === undefined || mergeAllCount === 0 || mergeAllBusy,
+    title: resolveMergeAllTitle(mergeAllCount, mergeAllBusy),
   }] : [
     {
       label: `Lancer ${moveAllCount} carte(s) éligible(s)`,

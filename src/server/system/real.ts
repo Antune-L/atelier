@@ -19,7 +19,7 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import { BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
+import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
@@ -81,6 +81,7 @@ import type {
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
+  OperationDeadlineOptions,
   ValidationCommandOptions,
   ValidationCommandResult,
   ValidationDependencyResult,
@@ -384,6 +385,7 @@ export class RealSystemAdapter implements SystemAdapter {
 
   async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
     if (!(await Bun.file(join(opts.cwd, PACKAGE_MANIFEST_FILE)).exists())) return null;
+    assertOperationActive(opts);
     const command = await detectInstallCommand(opts.cwd, true);
     return { command, result: await this.runValidationCommand({ ...opts, command }) };
   }
@@ -392,8 +394,8 @@ export class RealSystemAdapter implements SystemAdapter {
     return startValidationService(opts);
   }
 
-  async fetch(repoPath: string, baseBranch: string): Promise<void> {
-    const res = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath);
+  async fetch(repoPath: string, baseBranch: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    const res = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath, options);
     if (res.exitCode !== 0 || res.timedOut) {
       throw new Error(`git fetch origin ${baseBranch} a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}`);
     }

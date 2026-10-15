@@ -1,4 +1,5 @@
 import { Elysia } from "elysia";
+import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
@@ -9,7 +10,7 @@ import type { PreviewManager } from "./previewManager.ts";
 const HTTP_BAD_REQUEST = 400;
 const HTTP_CONFLICT = 409;
 const HTTP_ACCEPTED = 202;
-const VALIDATION_INPUT_SCHEMA = z.object({ provider: z.enum(["claude", "codex"]) }).strict();
+const VALIDATION_INPUT_SCHEMA = z.object({ provider: z.enum(["claude", "codex"]), requestId: z.string().trim().min(1).max(200).optional() }).strict();
 
 export function createPreviewRoutes({ previews }: { previews: PreviewManager }) {
   return new Elysia()
@@ -81,7 +82,7 @@ export function createPreviewRoutes({ previews }: { previews: PreviewManager }) 
     .post("/previews/:previewId/validate", async ({ params, body, set }) => {
       const parsed = VALIDATION_INPUT_SCHEMA.safeParse(body);
       if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Select Claude or Codex for preview validation." }; }
-      const run = await previews.validate(params.previewId, parsed.data.provider);
+      const run = await previews.validateManual(params.previewId, parsed.data.provider, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     });

@@ -13,8 +13,9 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { VcsProvider } from "../../../shared/constants.ts";
 import { GITHUB_LOGIN_PATTERN, MACHINE_ACCOUNT_SEGMENT } from "../../../shared/github.ts";
-import { BOUNDED_COMMAND_TIMEOUT_MS, runBoundedCommand } from "../boundedCommand.ts";
+import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, runBoundedCommand } from "../boundedCommand.ts";
 import type { BoundedCommandOptions, BoundedCommandResult } from "../boundedCommand.ts";
+import type { OperationDeadlineOptions } from "../types.ts";
 import { redactSecrets } from "../secretRedaction.ts";
 
 import { isSshRemote } from "./remote.ts";
@@ -59,15 +60,17 @@ export class GithubAccountError extends Error {
 }
 
 export type GithubCommandRunner = (args: string[], cwd: string, options?: BoundedCommandOptions) => Promise<BoundedCommandResult>;
-export type GithubSyncCommandRunner = (args: string[], cwd: string, env?: Record<string, string>) => { exitCode: number; stdout: string; stderr: string };
+export type GithubSyncCommandRunner = (args: string[], cwd: string, env?: Record<string, string>, options?: OperationDeadlineOptions) => { exitCode: number; stdout: string; stderr: string };
 
-const defaultSyncRunner: GithubSyncCommandRunner = (args, cwd, env) => {
+const defaultSyncRunner: GithubSyncCommandRunner = (args, cwd, env, options = {}) => {
+  assertOperationActive(options);
+  const timeout = options.deadlineAt === undefined ? SYNC_COMMAND_TIMEOUT_MS : Math.min(SYNC_COMMAND_TIMEOUT_MS, options.deadlineAt - Date.now());
   const result = Bun.spawnSync(args, {
     cwd,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
-    timeout: SYNC_COMMAND_TIMEOUT_MS,
+    timeout,
     ...(env ? { env } : {}),
   });
   return { exitCode: result.exitCode ?? 1, stdout: result.stdout.toString(), stderr: result.stderr.toString() };
@@ -257,12 +260,12 @@ function probeEnv(): Record<string, string> {
   return { ...definedEnv(process.env), LC_ALL: "C", LANGUAGE: "C" };
 }
 
-async function commonDir(cwd: string): Promise<CommonDirProbe> {
-  return interpretProbe(cwd, await commandRunner(commonDirArgs(cwd), existingDirectory(cwd), { env: probeEnv() }));
+async function commonDir(cwd: string, options: OperationDeadlineOptions = {}): Promise<CommonDirProbe> {
+  return interpretProbe(cwd, await commandRunner(commonDirArgs(cwd), existingDirectory(cwd), { ...options, env: probeEnv() }));
 }
 
-function commonDirSync(cwd: string): CommonDirProbe {
-  return interpretProbe(cwd, syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd), probeEnv()));
+function commonDirSync(cwd: string, options: OperationDeadlineOptions = {}): CommonDirProbe {
+  return interpretProbe(cwd, syncCommandRunner(commonDirArgs(cwd), existingDirectory(cwd), probeEnv(), options));
 }
 
 /** Spawning in a missing cwd throws; the `-C` argument carries the real target anyway. */
@@ -270,18 +273,20 @@ function existingDirectory(cwd: string): string {
   return existsSync(cwd) ? cwd : process.cwd();
 }
 
-async function projectCommonDir(repoPath: string): Promise<CommonDirProbe> {
+async function projectCommonDir(repoPath: string, options: OperationDeadlineOptions = {}): Promise<CommonDirProbe> {
   const cached = commonDirCache.get(repoPath);
   if (cached !== undefined) return cached;
-  const dir = await commonDir(repoPath);
+  const dir = await commonDir(repoPath, options);
+  assertOperationActive(options);
   if (dir !== null && dir !== PROBE_FAILED) commonDirCache.set(repoPath, dir);
   return dir;
 }
 
-function projectCommonDirSync(repoPath: string): CommonDirProbe {
+function projectCommonDirSync(repoPath: string, options: OperationDeadlineOptions = {}): CommonDirProbe {
   const cached = commonDirCache.get(repoPath);
   if (cached !== undefined) return cached;
-  const dir = commonDirSync(repoPath);
+  const dir = commonDirSync(repoPath, options);
+  assertOperationActive(options);
   if (dir !== null && dir !== PROBE_FAILED) commonDirCache.set(repoPath, dir);
   return dir;
 }
@@ -367,34 +372,38 @@ function prepareAccount(account: string): void {
   ensureAccountGitConfig(account);
 }
 
-export async function resolveGithubAccount(cwd: string): Promise<GithubResolution> {
+export async function resolveGithubAccount(cwd: string, options: OperationDeadlineOptions = {}): Promise<GithubResolution> {
+  assertOperationActive(options);
   const projects = projectSource();
-  const dir = projects.length > 0 ? await commonDir(cwd) : null;
+  const dir = projects.length > 0 ? await commonDir(cwd, options) : null;
   assertProbeAnswered(dir, cwd, projects);
   const matches: GithubProjectBinding[] = [];
   if (dir !== null && dir !== PROBE_FAILED) {
     const probes = new Map<string, CommonDirProbe>();
-    for (const project of projects) probes.set(project.repoPath, await projectCommonDir(project.repoPath));
+    for (const project of projects) probes.set(project.repoPath, await projectCommonDir(project.repoPath, options));
     matches.push(...matchProjects(dir, projects, (repoPath) => probes.get(repoPath) ?? null));
   }
   const decision = decide(cwd, matches);
   if (decision.check !== null && decision.account !== null) {
+    assertOperationActive(options);
     prepareAccount(decision.account);
-    const origin = await commandRunner(["git", "-C", cwd, "remote", "get-url", "origin"], existingDirectory(cwd));
+    const origin = await commandRunner(["git", "-C", cwd, "remote", "get-url", "origin"], existingDirectory(cwd), options);
     assertHttpsOrigin(decision.check, decision.account, origin);
   }
   return { project: decision.project, account: decision.account, projects: decision.projects };
 }
 
-export function resolveGithubAccountSync(cwd: string): GithubResolution {
+export function resolveGithubAccountSync(cwd: string, options: OperationDeadlineOptions = {}): GithubResolution {
   const projects = projectSource();
-  const dir = projects.length > 0 ? commonDirSync(cwd) : null;
+  assertOperationActive(options);
+  const dir = projects.length > 0 ? commonDirSync(cwd, options) : null;
   assertProbeAnswered(dir, cwd, projects);
-  const matches = dir === null || dir === PROBE_FAILED ? [] : matchProjects(dir, projects, projectCommonDirSync);
+  const matches = dir === null || dir === PROBE_FAILED ? [] : matchProjects(dir, projects, (repoPath) => projectCommonDirSync(repoPath, options));
   const decision = decide(cwd, matches);
   if (decision.check !== null && decision.account !== null) {
+    assertOperationActive(options);
     prepareAccount(decision.account);
-    const origin = syncCommandRunner(["git", "-C", cwd, "remote", "get-url", "origin"], existingDirectory(cwd));
+    const origin = syncCommandRunner(["git", "-C", cwd, "remote", "get-url", "origin"], existingDirectory(cwd), undefined, options);
     assertHttpsOrigin(decision.check, decision.account, origin);
   }
   return { project: decision.project, account: decision.account, projects: decision.projects };
@@ -421,27 +430,31 @@ function identityCached(login: string): boolean {
 }
 
 /** `gh api user` under the account must answer its login (case-insensitive). Successes cached 60 s. */
-export async function verifyGithubIdentity(login: string): Promise<void> {
+export async function verifyGithubIdentity(login: string, options: OperationDeadlineOptions = {}): Promise<void> {
+  assertOperationActive(options);
   if (identityCached(login)) return;
   assertAccountFiles(login);
   const result = await commandRunner(identityArgs(), process.cwd(), {
     env: githubAccountEnv(login, process.env),
     timeoutMs: IDENTITY_TIMEOUT_MS,
+    ...options,
   });
+  assertOperationActive(options);
   checkIdentity(login, result);
   identityCache.set(normalizeGithubLogin(login), Date.now());
 }
 
-export function verifyGithubIdentitySync(login: string): void {
+export function verifyGithubIdentitySync(login: string, options: OperationDeadlineOptions = {}): void {
   if (identityCached(login)) return;
   assertAccountFiles(login);
-  checkIdentity(login, syncCommandRunner(identityArgs(), process.cwd(), githubAccountEnv(login, process.env)));
+  assertOperationActive(options);
+  checkIdentity(login, syncCommandRunner(identityArgs(), process.cwd(), githubAccountEnv(login, process.env), options));
+  assertOperationActive(options);
   identityCache.set(normalizeGithubLogin(login), Date.now());
 }
 
-export interface GithubCommandOptions {
+export interface GithubCommandOptions extends OperationDeadlineOptions {
   beforeRun?: () => void;
-  deadlineAt?: number;
   timeoutMs?: number;
   /** Check the account's identity first (push, merge, done transitions). */
   verifyIdentity?: boolean;
@@ -460,18 +473,20 @@ function redactResult(result: BoundedCommandResult): BoundedCommandResult {
  * exactly as before; an attached project runs under its account or throws GithubAccountError.
  */
 export async function runGithubCommand(args: string[], cwd: string, options: GithubCommandOptions = {}): Promise<BoundedCommandResult> {
-  const resolution = await resolveGithubAccount(cwd);
-  if (resolution.account !== null && options.verifyIdentity) await verifyGithubIdentity(resolution.account);
+  assertOperationActive(options);
+  const operation: OperationDeadlineOptions = { deadlineAt: options.deadlineAt, signal: options.signal };
+  const resolution = await resolveGithubAccount(cwd, operation);
+  if (resolution.account !== null && options.verifyIdentity) await verifyGithubIdentity(resolution.account, operation);
   options.beforeRun?.();
-  let timeoutMs = options.timeoutMs;
-  if (options.deadlineAt !== undefined) {
-    const remaining = options.deadlineAt - Date.now();
-    if (remaining <= 0) throw new Error("The operation deadline expired before command execution.");
-    timeoutMs = Math.min(timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS, remaining);
-  }
-  const timeout = timeoutMs === undefined ? {} : { timeoutMs };
+  assertOperationActive(options);
   const env = resolution.account === null ? {} : { env: githubAccountEnv(resolution.account, process.env) };
-  return redactResult(await commandRunner(args, cwd, { ...timeout, ...env }));
+  const timeoutMs = options.deadlineAt === undefined ? options.timeoutMs : Math.min(options.timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS, options.deadlineAt - Date.now());
+  return redactResult(await commandRunner(args, cwd, {
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(options.deadlineAt === undefined ? {} : { deadlineAt: options.deadlineAt }),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...env,
+  }));
 }
 
 /** Account of the cwd for an identity check outside a command (merge, done gates). */
@@ -485,10 +500,10 @@ export async function verifyGithubAccountForCwd(cwd: string): Promise<GithubReso
  * Environment overrides for an agent session, shell or script rooted at `cwd`: null for the
  * machine default, the account keys otherwise (identity verified). Throws GithubAccountError.
  */
-export function githubEnvForCwdSync(cwd: string): Record<string, string> | null {
-  const resolution = resolveGithubAccountSync(cwd);
+export function githubEnvForCwdSync(cwd: string, options: OperationDeadlineOptions = {}): Record<string, string> | null {
+  const resolution = resolveGithubAccountSync(cwd, options);
   if (resolution.account === null) return null;
-  verifyGithubIdentitySync(resolution.account);
+  verifyGithubIdentitySync(resolution.account, options);
   return githubAccountEnvOverrides(resolution.account);
 }
 

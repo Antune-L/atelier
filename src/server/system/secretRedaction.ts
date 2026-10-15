@@ -1,3 +1,6 @@
+import { QUALITY_HISTORY_ACTION_REFERENCE_LIMIT, QUALITY_HISTORY_ARTIFACT_LIMIT, QUALITY_HISTORY_SUMMARY_LIMIT } from "../../shared/qualityHistory.ts";
+import type { QualityActionInput } from "../../shared/qualityHistory.ts";
+
 /**
  * The single secret masker of the server: logs, surfaced errors, transcripts and quality artifacts
  * all pass through it. GitHub tokens get dedicated patterns because a pasted account token or a
@@ -34,4 +37,21 @@ export function redactSecrets(text: string, extraSecrets: readonly string[] = []
   }
   for (const { pattern, replacement } of SECRET_PATTERNS) redacted = redacted.replace(pattern, replacement);
   return redacted;
+}
+
+export function minimizeQualityAction<T extends QualityActionInput>(input: T, secrets: readonly string[] = []) {
+  const bounded = (value: string) => value.slice(0, QUALITY_HISTORY_SUMMARY_LIMIT);
+  return {
+    ...input,
+    summary: bounded(redactSecrets(input.summary, secrets)),
+    truncated: input.truncated === true || Object.values(input).some((value) => typeof value === "string" && value.length > QUALITY_HISTORY_SUMMARY_LIMIT) || (input.artifactPaths?.length ?? 0) > QUALITY_HISTORY_ARTIFACT_LIMIT || (input.actionIds?.length ?? 0) > QUALITY_HISTORY_ACTION_REFERENCE_LIMIT,
+    sourceId: input.sourceId ? bounded(input.sourceId) : null,
+    nativeId: input.nativeId ? bounded(input.nativeId) : null,
+    sessionId: input.sessionId ? bounded(input.sessionId) : null,
+    toolName: input.toolName ? bounded(input.toolName) : null,
+    phase: bounded(input.phase ?? "unknown"),
+    criterionId: input.criterionId ? bounded(input.criterionId) : null,
+    artifactPaths: (input.artifactPaths ?? []).slice(0, QUALITY_HISTORY_ARTIFACT_LIMIT).map(bounded),
+    actionIds: (input.actionIds ?? []).slice(0, QUALITY_HISTORY_ACTION_REFERENCE_LIMIT).map(bounded),
+  };
 }

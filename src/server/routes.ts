@@ -1,3 +1,6 @@
+import { lstat, readdir, realpath, rm } from "node:fs/promises";
+import { isAbsolute, join, relative } from "node:path";
+
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
@@ -6,6 +9,8 @@ import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SPLIT_BRANCH_P
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
+import { QUALITY_BROWSER_CLEANUP_MARKER } from "./agents/qualityValidator.ts";
+import { QUALITY_NATIVE_CLEANUP_DIRECTORY } from "./agents/qualitySession.ts";
 import { runRecordedAction } from "./recordedAction.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import { canMergePr, canResolveConflicts } from "../shared/ticketMerge.ts";
@@ -464,6 +469,45 @@ function splitChildDefaults(ticket: Ticket): Pick<
   };
 }
 
+class QualityCleanupObligationError extends Error {}
+
+async function removeQualityArtifacts(deps: RouteDeps, ticketId: string): Promise<void> {
+  const runIds = deps.store.getTicketQuality(ticketId).runs.map((run) => run.id);
+  if (!deps.qualityArtifactDirectory || runIds.length === 0) return;
+  let root: string;
+  try { root = await realpath(deps.qualityArtifactDirectory); } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
+  for (const runId of runIds) {
+    const path = join(root, runId);
+    let resolved: string;
+    try { resolved = await realpath(path); } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+      throw error;
+    }
+    const withinRoot = relative(root, resolved);
+    if (!withinRoot || withinRoot.startsWith("..") || isAbsolute(withinRoot)) throw new Error("Quality artifact directory is outside its controlled root.");
+    for (const marker of [join(resolved, QUALITY_BROWSER_CLEANUP_MARKER), join(resolved, "browser", QUALITY_BROWSER_CLEANUP_MARKER)]) {
+      try { await lstat(marker); } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+        throw error;
+      }
+      throw new QualityCleanupObligationError("Browser session closure is unconfirmed. The ticket and its private artifacts are retained.");
+    }
+    for (const scope of [resolved, join(resolved, "browser"), join(resolved, "relevance")]) {
+      try {
+        if ((await readdir(join(scope, QUALITY_NATIVE_CLEANUP_DIRECTORY))).length === 0) continue;
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+        throw error;
+      }
+      throw new QualityCleanupObligationError("Native session closure is unconfirmed. The ticket and its private artifacts are retained.");
+    }
+    await rm(path, { recursive: true, force: true });
+  }
+}
+
 /**
  * Recursively create a split subtree under `parentTicket` (whose `parentBranch` already exists). Each
  * leaf becomes a regular todo child depending on its parent; each node with children becomes an
@@ -562,6 +606,7 @@ async function performSplit(
     created = await createSplitChildren(deps, project, ticket, ticket, motherBranch, result.children, createdIds);
   } catch (error) {
     for (const id of createdIds) {
+      await removeQualityArtifacts(deps, id);
       store.deleteTicket(id);
       hub.pushTicketRemoved(id);
     }
@@ -1868,6 +1913,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (ticket.slotId !== null) {
         return jsonError(set, HTTP_CONFLICT, "ticket occupe un slot : abandonne-le d'abord");
       }
+      if (ticket.autonomousState?.hostMutation || ticket.autonomousState?.execution?.closure.status === "unknown" || ticket.autonomousState?.execution?.closure.status === "requested") return jsonError(set, HTTP_CONFLICT, "Autonomous writer closure is unconfirmed. The ticket and its proofs are retained.");
       await deps.quality?.cancel(params.id);
       const preview = store.getTicketPreview(params.id);
       if (preview && preview.cleanupStatus !== "complete") {
@@ -1876,6 +1922,10 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (ticket.kind === "feature" && deps.quality?.get(params.id).runs.some((run) => run.cleanupStatus !== "complete")) {
         return jsonError(set, HTTP_CONFLICT, "Quality cleanup is incomplete. The ticket cannot be deleted yet.");
+      }
+      try { await removeQualityArtifacts(deps, params.id); } catch (error) {
+        if (error instanceof QualityCleanupObligationError) return jsonError(set, HTTP_CONFLICT, error.message);
+        throw error;
       }
       store.deleteTicket(params.id);
       hub.pushTicketRemoved(params.id);

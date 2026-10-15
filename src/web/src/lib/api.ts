@@ -53,8 +53,8 @@ import type { createConversationSchema, createTicketsFromPrdSchema } from "@shar
 import { ticketSchema } from "@shared/schemas";
 import type { recoverImplementationPlanArgsSchema } from "@shared/protocol";
 import type { Column, Orchestrator, PrState } from "@shared/constants";
-import { qualityFollowUpResponseSchema } from "@shared/quality";
-import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
+import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestPageSchema } from "@shared/quality";
+import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
@@ -111,6 +111,20 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   return response.json();
+}
+
+export async function requestQualityRun<T>(path: string, body: { provider?: Orchestrator; requestId: string }): Promise<T> {
+  const init = { method: "POST", body: JSON.stringify(body) };
+  try {
+    return await request<T>(path, init);
+  } catch (failure) {
+    if (!(failure instanceof TypeError)) throw failure;
+    return request<T>(path, init);
+  }
+}
+
+export function qualityActionArtifactUrl(ticketId: string, actionId: string, index: number): string {
+  return `${ticketQualityPath(ticketId)}/actions/${encodeURIComponent(actionId)}/artifacts/${index}`;
 }
 
 export const api = {
@@ -214,20 +228,29 @@ export const api = {
   },
   ticketQuality: (id: string, signal?: AbortSignal): Promise<QualityResponse> =>
     request(ticketQualityPath(id), { signal }),
+  qualityRequests: async (id: string, cursor?: NonNullable<QualityRequestPage["nextCursor"]>): Promise<QualityRequestPage> => {
+    const query = cursor === undefined ? "" : `?beforeCreatedAt=${cursor.beforeCreatedAt}&beforeRequestId=${encodeURIComponent(cursor.beforeRequestId)}`;
+    return qualityRequestPageSchema.parse(await request<unknown>(`${ticketQualityPath(id)}/requests${query}`));
+  },
+  qualityActions: async (id: string, owner: { requestId: string } | { runId: string }, afterSequence?: number) => {
+    const scope = "requestId" in owner ? `requests/${encodeURIComponent(owner.requestId)}` : `runs/${encodeURIComponent(owner.runId)}`;
+    const query = afterSequence === undefined ? "" : `?afterSequence=${afterSequence}`;
+    return qualityActionPageSchema.parse(await request<unknown>(`${ticketQualityPath(id)}/${scope}/actions${query}`));
+  },
   setQualityCriteria: (id: string, input: SetQualityCriteriaInput): Promise<QualityResponse> =>
     request(`${ticketQualityPath(id)}/criteria`, { method: "POST", body: JSON.stringify(input) }),
   qualityPreflight: (id: string): Promise<QualityPreflight> =>
     request(`${ticketQualityPath(id)}/preflight`, { method: "POST" }),
-  startQualityChecks: (id: string): Promise<{ run: QualityValidationRun }> =>
-    request(`${ticketQualityPath(id)}/checks`, { method: "POST" }),
-  startQualityValidation: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
-    request(`${ticketQualityPath(id)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
-  verifyTicketQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
-    request(`${ticketQualityPath(id)}/verify`, { method: "POST", body: JSON.stringify({ provider }) }),
-  testTicketFeature: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
-    request(`${ticketQualityPath(id)}/functional`, { method: "POST", body: JSON.stringify({ provider }) }),
-  verifyCombinedQuality: (id: string, provider: Orchestrator): Promise<{ run: QualityValidationRun }> =>
-    request(`${ticketQualityPath(id)}/combined`, { method: "POST", body: JSON.stringify({ provider }) }),
+  startQualityChecks: (id: string, requestId = crypto.randomUUID()): Promise<{ run: QualityValidationRun }> =>
+    requestQualityRun(`${ticketQualityPath(id)}/checks`, { requestId }),
+  startQualityValidation: (id: string, provider: Orchestrator, requestId = crypto.randomUUID()): Promise<{ run: QualityValidationRun }> =>
+    requestQualityRun(`${ticketQualityPath(id)}/validate`, { provider, requestId }),
+  verifyTicketQuality: (id: string, provider: Orchestrator, requestId = crypto.randomUUID()): Promise<{ run: QualityValidationRun }> =>
+    requestQualityRun(`${ticketQualityPath(id)}/verify`, { provider, requestId }),
+  testTicketFeature: (id: string, provider: Orchestrator, requestId = crypto.randomUUID()): Promise<{ run: QualityValidationRun }> =>
+    requestQualityRun(`${ticketQualityPath(id)}/functional`, { provider, requestId }),
+  verifyCombinedQuality: (id: string, provider: Orchestrator, requestId = crypto.randomUUID()): Promise<{ run: QualityValidationRun }> =>
+    requestQualityRun(`${ticketQualityPath(id)}/combined`, { provider, requestId }),
   startQualityIteration: (id: string, input: StartQualityIterationInput): Promise<{ iteration: QualityIteration }> =>
     request(`${ticketQualityPath(id)}/iterations`, { method: "POST", body: JSON.stringify(input) }),
   createQualityFollowUp: async (id: string, input: CreateQualityFollowUpInput): Promise<QualityFollowUpResponse> =>

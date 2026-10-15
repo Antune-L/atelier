@@ -2,15 +2,17 @@ import { useState, type ReactNode } from "react";
 
 import { ORCHESTRATOR_LABELS } from "@shared/constants";
 import { QUALITY_ACTIVE_STATUSES } from "@shared/quality";
+import type { PreviewRecord } from "@shared/preview";
 import type { QualityEvidence, QualityPermissionBlockReason, QualityRunStatus, QualityValidationRun, TicketQuality } from "@shared/quality";
 
+import { QualityActionHistory } from "@/components/ticket-detail/QualityActionHistory";
 import { Dialog } from "@/components/ui/dialog";
 import { qualityEvidenceArtifactUrl } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
 import { formatQualityCriterionText, formatQualityEnvironmentLabel, formatQualityEvidenceOutput, formatQualityEvidenceSummary, formatQualityMessage, qualityFailureLabel, qualityModeLabel, qualityPermissionBlockMessage, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
 import { cn } from "@/lib/utils";
 
-type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated" | "preparation";
+type ResultStatus = QualityRunStatus | "unverified" | "stale" | "unaccepted" | "simulated" | "preparation" | "bound" | "historical";
 
 const RESULT_LABELS: Record<ResultStatus, string> = {
   queued: "En attente",
@@ -25,6 +27,8 @@ const RESULT_LABELS: Record<ResultStatus, string> = {
   unaccepted: "Preuve non acceptée",
   simulated: "Simulé",
   preparation: "À préparer",
+  bound: "Réussi · version liée",
+  historical: "Réussi · historique",
 };
 const CLEANUP_LABELS: Record<QualityValidationRun["cleanupStatus"], string> = { complete: "terminé", pending: "en attente", failed: "échec" };
 const IMAGE_ARTIFACT_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
@@ -57,8 +61,12 @@ export function QualityResult({ status }: { status: ResultStatus }) {
   return <span className={cn("shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-2xs", tone)}>{RESULT_LABELS[status]}</span>;
 }
 
-export function qualityEvidenceResult(status: QualityRunStatus, current: boolean, accepted: boolean, simulated: boolean): ResultStatus {
+export function qualityEvidenceResult(status: QualityRunStatus, current: boolean, accepted: boolean, simulated: boolean, preview = false): ResultStatus {
   if (status !== "passed") return status;
+  if (preview) {
+    if (simulated) return "simulated";
+    return current ? "bound" : "historical";
+  }
   if (!current) return "stale";
   if (simulated) return "simulated";
   if (!accepted) return "unaccepted";
@@ -79,7 +87,7 @@ function qualityRunCriterionResults(quality: TicketQuality, run: QualityValidati
 }
 
 function QualityPermissionDiagnostics({ run }: { run: QualityValidationRun }) {
-  if (run.status === "passed" || QUALITY_ACTIVE_STATUSES.includes(run.status)) return null;
+  if (QUALITY_ACTIVE_STATUSES.includes(run.status)) return null;
   const diagnostic = run.diagnostic;
   if (diagnostic === null) return null;
   const counts = new Map<QualityPermissionBlockReason | null, number>();
@@ -124,7 +132,7 @@ export function QualityRunStatus({ run, current, quality, children }: { run: Qua
   if (run.failurePhase !== null) phasePrefix = "Étape concernée";
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(status, current, accepted, run.simulated)} /></div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{title}{run.provider !== null && ` · ${ORCHESTRATOR_LABELS[run.provider]}`}</span><QualityResult status={qualityEvidenceResult(status, current, accepted, run.simulated, !!run.preview)} /></div>
       <QualityPermissionDiagnostics run={run} />
       {children}
       <p className="text-2xs text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {qualityModeLabel(run.mode)}</p>
@@ -201,10 +209,12 @@ export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClos
   let title = "Preuve du critère";
   if (evidence.kind === "command") title = "Journal du contrôle";
   else if ((run?.mode ?? snapshot?.mode) === "browser") title = "Preuve du parcours";
+  let freshnessNote = current ? "Cette preuve correspond au code, aux critères et à la configuration actuels." : "Cette preuve est obsolète pour le code, les critères ou la configuration actuels.";
+  if (run?.preview) freshnessNote = "Cette preuve conserve la version déployée liée. La validité des critères et de la configuration actuels n’est pas confirmée par ce lien.";
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} size="lg" title={title} description={evidenceProvenance(evidence, run)}>
-      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence, run?.simulated === true)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, accepted, run?.simulated === true)} /></div>
-      <p className={cn("text-xs", current ? "text-muted-foreground" : "text-warning")}>{current ? "Cette preuve correspond au code, aux critères et à la configuration actuels." : "Cette preuve est obsolète pour le code, les critères ou la configuration actuels."}</p>
+      <div className="flex items-center justify-between gap-3"><p className="text-sm">{formatQualityEvidenceSummary(evidence, run?.simulated === true)}</p><QualityResult status={qualityEvidenceResult(evidence.status, current, accepted, run?.simulated === true, !!run?.preview)} /></div>
+      <p className={cn("text-xs", current ? "text-muted-foreground" : "text-warning")}>{freshnessNote}</p>
       {current && !accepted && <p className="text-xs text-warning">Les observations de cette exécution ne sont pas acceptées comme preuves de livraison. Consultez le résultat de l’exécution dans l’historique.</p>}
       <dl className="flex flex-col gap-2 text-xs">
         <div className="flex gap-3"><dt className="w-28 shrink-0 text-muted-foreground">Version du code</dt><dd className="break-all font-mono">{run?.revision ?? "Non renseignée"}</dd></div>
@@ -221,26 +231,34 @@ export function QualityEvidenceDialog({ evidence, quality, currentRunIds, onClos
   );
 }
 
-export function QualityRunHistory({ quality, currentRunIds, onOpenEvidence }: { quality: TicketQuality; currentRunIds: string[]; onOpenEvidence: (evidence: QualityEvidence) => void }) {
+export function qualityRunIsCurrent(run: QualityValidationRun, currentRunIds: string[], preview: PreviewRecord | null): boolean {
+  if (!run.preview) return currentRunIds.includes(run.id);
+  return preview !== null && preview.status === "ready" && preview.desiredState === "running" && preview.id === run.preview.previewId && preview.qualityRunId === run.id && (preview.deployedRevision ?? preview.revision) === run.revision && preview.url === run.preview.url;
+}
+
+export function QualityRunHistory({ quality, currentRunIds, preview = null, onOpenEvidence }: { quality: TicketQuality; currentRunIds: string[]; preview?: PreviewRecord | null; onOpenEvidence: (evidence: QualityEvidence) => void }) {
   return (
     <details className="rounded border border-border">
       <summary className="cursor-pointer px-3 py-2 text-xs">Historique des validations ({quality.runs.length})</summary>
       <div className="divide-y divide-border border-t border-border">
         {[...quality.runs].reverse().map((run) => {
           const snapshot = quality.criteriaSnapshots.find((item) => item.id === run.criteriaSnapshotId);
-          const current = currentRunIds.includes(run.id);
+          const baseSnapshot = quality.criteriaSnapshots.find((item) => item.id === snapshot?.baseSnapshotId);
+          const current = qualityRunIsCurrent(run, currentRunIds, preview);
           return (
             <div key={run.id} className="space-y-2 px-3 py-3 text-xs">
-              <QualityRunStatus run={run} current={current || Boolean(run.preview)} quality={quality} />
+              <QualityRunStatus run={run} current={current} quality={quality} />
               {run.preview ? (
-                <p className="break-all text-muted-foreground">Prévisualisation · {run.preview.revision}</p>
+                <div className="space-y-1 text-muted-foreground"><p className="break-all">Prévisualisation {run.preview.previewId} · {current ? "version déployée liée" : "résultat historique"}</p><a className="block break-all text-info underline" href={run.preview.url} target="_blank" rel="noopener noreferrer">{run.preview.url}</a></div>
               ) : (
                 <p className={current ? "text-muted-foreground" : "text-warning"}>{current ? "Version actuelle" : "Résultats obsolètes pour la version actuelle"}</p>
               )}
-              <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{snapshot && ` · critères v${snapshot.version}`}</p>
-              <p className="break-all font-mono text-2xs">{run.revision}</p>
+              <p className="text-muted-foreground">{run.simulated ? "Simulation" : "Exécution réelle"} · {formatDateTime(run.startedAt)}{run.completedAt !== null && ` · fin ${formatDateTime(run.completedAt)}`}{snapshot && ` · critères v${snapshot.version}`}{baseSnapshot && ` · critères source v${baseSnapshot.version}`}</p>
+              {run.preview && <p className="text-muted-foreground">Cette identité de prévisualisation ne confirme pas l’actualité des critères ni de la configuration enregistrée avec cette exécution.</p>}
+              <p className="break-all font-mono text-2xs">Version du code (SHA) : {run.revision}</p>
               {run.environment && <p className="break-all text-muted-foreground">Copie séparée : {run.environment.directory} · port {run.environment.port}</p>}
               {run.environment?.addresses?.map((address) => <p key={address.url} className="break-all text-muted-foreground">{formatQualityEnvironmentLabel(address.label)} : {address.url}</p>)}
+              <QualityActionHistory ticketId={quality.ticketId} owner={{ runId: run.id }} />
               <p className="text-muted-foreground">Nettoyage : {CLEANUP_LABELS[run.cleanupStatus]}</p>
               {quality.evidence.filter((evidence) => evidence.runId === run.id).map((evidence) => <button key={evidence.id} type="button" className="block text-left text-muted-foreground hover:text-foreground" onClick={() => onOpenEvidence(evidence)}>Voir la preuve : {formatQualityEvidenceSummary(evidence, run.simulated)}</button>)}
             </div>

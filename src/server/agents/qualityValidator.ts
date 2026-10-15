@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 
@@ -14,17 +14,21 @@ import type { AgentExecutionGuard, AgentSessionEvent, AgentSessionHandle, AgentS
 import { safeJsonParse } from "../system/boundedCommand.ts";
 import { CODEX_NO_MATCHES_OBSERVATION } from "../system/codexCommandPolicy.ts";
 import { envWithProjectNode } from "../system/nvmNode.ts";
+import { redactSecrets } from "../system/secretRedaction.ts";
 import { previewHostResolverArgs } from "../system/previewNetwork.ts";
 
 import type { ResolvedExecution } from "./executionConfig.ts";
 import { PLAYWRIGHT_MCP_VERSION, playwrightMcpArgs } from "./playwrightMcp.ts";
 import { QualityBlockerError } from "./qualityBlocker.ts";
 import { qualityErrorMessage, runQualitySession } from "./qualitySession.ts";
+import type { QualityJournal } from "./qualityJournal.ts";
 import type { QualityObservation } from "./qualitySession.ts";
 
 const QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS = 10_000;
 const QUALITY_CHECK_EXCERPT_LIMIT = 2_000;
 const PRIVATE_FILE_MODE = 0o600;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+export const QUALITY_BROWSER_CLEANUP_MARKER = "browser-cleanup-obligation.json";
 const QUALITY_BROWSER_TOOLS = [
   "browser_close", "browser_resize", "browser_console_messages", "browser_handle_dialog",
   "browser_emulate_media", "browser_find", "browser_fill_form", "browser_press_key", "browser_type",
@@ -107,6 +111,8 @@ export interface QualityValidatorOptions {
   signal: AbortSignal;
   onEvent?(event: AgentSessionEvent): void;
   timeoutMs?: number;
+  deadlineAt?: number;
+  journal?: QualityJournal;
   artifactDirectory?: string;
   browserServer?: StdioMcpServerDefinition;
   browserAuth?: { username: string; password: string };
@@ -301,6 +307,25 @@ function functionalAcceptances(results: QualityValidatorResponseResult[], criter
   return acceptances;
 }
 
+async function closeQualityBrowser(client: Client, transport: StdioClientTransport, options: QualityValidatorOptions): Promise<void> {
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const closed = await Promise.race([
+      Promise.allSettled([Promise.resolve().then(() => client.close()), Promise.resolve().then(() => transport.close())]),
+      new Promise<never>((_, reject) => {
+        const remaining = options.deadlineAt === undefined ? QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS : Math.max(0, options.deadlineAt - Date.now());
+        cleanupTimer = setTimeout(() => reject(new Error("Browser preflight closure could not be confirmed before the deadline")), remaining);
+      }),
+    ]);
+    if (closed.some((result) => result.status === "rejected")) throw new Error("Browser preflight closure failed");
+  } catch (error) {
+    options.onClosureUnknown?.();
+    throw error;
+  } finally {
+    if (cleanupTimer) clearTimeout(cleanupTimer);
+  }
+}
+
 async function preflightQualityBrowser(options: QualityValidatorOptions, server: StdioMcpServerDefinition): Promise<void> {
   const environment = { ...envWithProjectNode(options.cwd), ...options.environment, ...server.env };
   const client = new Client({ name: "kanban-quality-browser-preflight", version: "1" });
@@ -316,12 +341,13 @@ async function preflightQualityBrowser(options: QualityValidatorOptions, server:
     await Promise.race([
       (async () => {
         await client.connect(transport);
+        if (options.signal.aborted || options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw new Error("Validation deadline expired during browser startup");
         const tools = await client.listTools(undefined, { signal: options.signal });
         const missing = QUALITY_BROWSER_TOOLS.filter((name) => !tools.tools.some((tool) => tool.name === name));
         if (missing.length > 0) throw new Error(`Required browser tools are unavailable: ${missing.join(", ")}`);
       })(),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Browser MCP preflight timed out")), QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS);
+        timer = setTimeout(() => reject(new Error("Browser MCP preflight timed out")), options.deadlineAt === undefined ? QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS : Math.max(0, Math.min(QUALITY_BROWSER_PREFLIGHT_TIMEOUT_MS, options.deadlineAt - Date.now())));
       }),
     ]);
   } catch (error) {
@@ -330,142 +356,223 @@ async function preflightQualityBrowser(options: QualityValidatorOptions, server:
     throw new QualityBlockerError("browser_unavailable", `Playwright MCP ${PLAYWRIGHT_MCP_VERSION} must be installed locally before behavioral validation. Automatic downloads are disabled. ${detail}`);
   } finally {
     if (timer) clearTimeout(timer);
-    await client.close();
-    await transport.close();
+    await closeQualityBrowser(client, transport, options);
   }
 }
 
 export async function runQualityValidator(options: QualityValidatorOptions): Promise<QualityValidatorResult> {
+  options.journal?.assertHealthy();
+  if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw new Error("Validation deadline expired");
   if (options.signal.aborted) throw new Error("Validation cancelled before session startup");
   options.executionGuard?.beforeStart();
   const functional = options.functional === true;
   const mode = functional ? "browser" : options.mode ?? "browser";
   const artifactDirectory = options.artifactDirectory ?? join(tmpdir(), `kanban-quality-${randomUUID()}`);
   await mkdir(artifactDirectory, { recursive: true });
-  let configPath: string | undefined;
-  let browserConfig: Record<string, unknown> | undefined;
-  const sensitiveValues: string[] = [];
-  if (options.browserAuth) {
-    const address = options.addresses[0];
-    if (!address) throw new Error("Authenticated preview validation requires an application address.");
-    const authorization = `Basic ${Buffer.from(`${options.browserAuth.username}:${options.browserAuth.password}`).toString("base64")}`;
-    sensitiveValues.push(authorization, authorization.slice("Basic ".length), options.browserAuth.password);
-    configPath = join(tmpdir(), `kanban-quality-browser-auth-${randomUUID()}.json`);
-    const resolverArgs = previewHostResolverArgs(address.url);
-    browserConfig = { browser: { contextOptions: { httpCredentials: { ...options.browserAuth, origin: new URL(address.url).origin } }, ...(resolverArgs.length > 0 ? { launchOptions: { args: resolverArgs } } : {}) } };
-  }
-  const redact = (value: string): string => {
-    let redacted = value;
-    for (const secret of sensitiveValues) {
-      if (secret) redacted = redacted.replaceAll(secret, "[redacted]");
-    }
-    return redacted;
+  const browserOutputDirectory = mode === "browser" && !options.browserServer ? await mkdtemp(join(tmpdir(), "kanban-quality-browser-")) : undefined;
+  const cleanupMarkerPath = mode === "browser" ? join(artifactDirectory, QUALITY_BROWSER_CLEANUP_MARKER) : undefined;
+  let browserClosureUnknown = false;
+  const markBrowserClosureUnknown = (): void => {
+    browserClosureUnknown = true;
+    options.onClosureUnknown?.();
   };
-  let browserServer: StdioMcpServerDefinition | undefined;
-  let session: Awaited<ReturnType<typeof runQualitySession>>;
   try {
-    if (configPath && browserConfig) await writeFile(configPath, JSON.stringify(browserConfig), { mode: PRIVATE_FILE_MODE });
-    if (mode === "browser") {
-      browserServer = qualityBrowserServer(options, artifactDirectory, configPath);
-      await preflightQualityBrowser(options, browserServer);
+    if (browserOutputDirectory) await chmod(browserOutputDirectory, PRIVATE_DIRECTORY_MODE);
+    if (cleanupMarkerPath) await writeFile(cleanupMarkerPath, JSON.stringify({ version: 1, requestId: options.journal?.requestId ?? null, ticketId: options.ticketId, runId: options.runId, provider: options.execution.provider, privateDirectory: browserOutputDirectory ?? null, closure: "unconfirmed" }), { mode: PRIVATE_FILE_MODE });
+    let configPath: string | undefined;
+    let browserConfig: Record<string, unknown> | undefined;
+    const sensitiveValues: string[] = [];
+    if (options.browserAuth) {
+      const address = options.addresses[0];
+      if (!address) throw new Error("Authenticated preview validation requires an application address.");
+      const authorization = `Basic ${Buffer.from(`${options.browserAuth.username}:${options.browserAuth.password}`).toString("base64")}`;
+      sensitiveValues.push(authorization, authorization.slice("Basic ".length), options.browserAuth.password);
+      configPath = join(tmpdir(), `kanban-quality-browser-auth-${randomUUID()}.json`);
+      const resolverArgs = previewHostResolverArgs(address.url);
+      browserConfig = { browser: { contextOptions: { httpCredentials: { ...options.browserAuth, origin: new URL(address.url).origin } }, ...(resolverArgs.length > 0 ? { launchOptions: { args: resolverArgs } } : {}) } };
     }
-    session = await runQualitySession({
-      ...options,
-      mode,
-      prompt: functional ? functionalPrompt(options) : qualityPrompt({ ...options, mode }),
-      outputSchema: z.toJSONSchema(functional ? qualityFunctionalResponseSchema : qualityResponseSchema, { target: "draft-07" }),
-      allowedTools: browserServer ? QUALITY_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`) : [],
-      disallowedTools: QUALITY_DISABLED_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`),
-      extraMcpServers: browserServer ? { playwright: browserServer } : {},
+    const redact = (value: string): string => {
+      let redacted = value;
+      for (const secret of sensitiveValues) {
+        if (secret) redacted = redacted.replaceAll(secret, "[redacted]");
+      }
+      return options.journal?.redact(redacted) ?? redactSecrets(redacted);
+    };
+    let browserServer: StdioMcpServerDefinition | undefined;
+    let session: Awaited<ReturnType<typeof runQualitySession>>;
+    try {
+      if (configPath && browserConfig) await writeFile(configPath, JSON.stringify(browserConfig), { mode: PRIVATE_FILE_MODE });
+      if (mode === "browser") {
+        browserServer = qualityBrowserServer(options, browserOutputDirectory ?? artifactDirectory, configPath);
+        const preflightActionId = options.journal?.start({ kind: "service", phase: "browser-preflight", summary: "Check isolated browser tool availability" });
+        options.journal?.assertHealthy();
+        try {
+          await preflightQualityBrowser({ ...options, onClosureUnknown: markBrowserClosureUnknown }, browserServer);
+          if (preflightActionId) options.journal?.finish(preflightActionId, { status: "succeeded", summary: "Browser tool availability confirmed" });
+        } catch (error) {
+          if (preflightActionId) options.journal?.finish(preflightActionId, { status: "failed", summary: "Browser tool availability check failed" });
+          throw error;
+        }
+        options.journal?.assertHealthy();
+      }
+      session = await runQualitySession({
+        ...options,
+        artifactDirectory,
+        onClosureUnknown: markBrowserClosureUnknown,
+        mode,
+        prompt: functional ? functionalPrompt(options) : qualityPrompt({ ...options, mode }),
+        outputSchema: z.toJSONSchema(functional ? qualityFunctionalResponseSchema : qualityResponseSchema, { target: "draft-07" }),
+        allowedTools: browserServer ? QUALITY_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`) : [],
+        disallowedTools: QUALITY_DISABLED_BROWSER_TOOLS.map((tool) => `mcp__playwright__${tool}`),
+        extraMcpServers: browserServer ? { playwright: browserServer } : {},
+      });
+    } finally {
+      if (configPath) await rm(configPath, { force: true });
+    }
+    if (options.deadlineAt !== undefined && (options.signal.aborted || Date.now() >= options.deadlineAt)) throw new Error("Validation deadline expired or manual validation was cancelled before artifact acceptance");
+    const { completed, sessionId, timedOut, cancelled, cleanupFailed, durationMs } = session;
+    const mask = (value: string): string => redact(session.redact(value));
+    const observations = session.observations.flatMap((observation) => {
+      const tool = mode === "repository"
+        ? observation.tool
+        : browserToolName(observation.tool);
+      if (tool === null || mode === "repository" && !QUALITY_REPOSITORY_TOOLS.has(tool)) return [];
+      return [{ ...observation, tool }];
     });
-  } finally {
-    if (configPath) await rm(configPath, { force: true });
-  }
-  const { completed, sessionId, timedOut, cancelled, cleanupFailed, durationMs } = session;
-  const observations = session.observations.flatMap((observation) => {
-    const tool = mode === "repository"
-      ? observation.tool
-      : browserToolName(observation.tool);
-    if (tool === null || mode === "repository" && !QUALITY_REPOSITORY_TOOLS.has(tool)) return [];
-    return [{ ...observation, tool, output: redact(observation.output) }];
-  });
-  const artifactPath = join(artifactDirectory, mode === "repository" ? "repository-observations.json" : "browser-observations.json");
-  const structuredOutput = completed.type === "turn_end" ? completed.structuredOutput : undefined;
-  const response = functional ? qualityFunctionalResponseSchema.safeParse(structuredOutput) : qualityResponseSchema.safeParse(structuredOutput);
-  const results: QualityValidatorResponseResult[] | null = response.success ? response.data.results.map((result) => ({ ...result, summary: redact(result.summary), output: redact(result.output), observedText: redact(result.observedText) })) : null;
-  const serverCheckObservations = functional ? [] : options.checks.filter((check) => check.kind === "command" && check.authority === "server" && check.status !== "inconclusive");
-  await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations: observations.map((observation) => ({ ...observation, input: undefined })), serverCheckObservations, diagnostics: session.diagnostics, response: results === null ? null : { results } }, (_key, value: unknown) => typeof value === "string" ? redact(value) : value, 2));
-  const successful = observations.filter((observation) => observation.ok);
-  const navigated = successful.some((observation) => observation.tool === "browser_navigate");
-  const indexedObservations = observations.map((observation, index) => ({ ...observation, index }));
-  const origins = [...new Set(options.addresses.map((address) => new URL(address.url).origin))];
-  const blockers: QualityFunctionalBlocker[] = [];
-  const navigatedIndex = navigationIndex(indexedObservations, origins);
-  const screenshots = await qualityScreenshots(indexedObservations, navigatedIndex, artifactDirectory);
-  const acceptances = functional && results ? functionalAcceptances(results, options.criteria, indexedObservations, navigatedIndex, screenshots) : new Map<string, QualityFunctionalAcceptance>();
-  const evidence = options.criteria.map((criterion) => {
-    const matchingResults = results ? results.filter((result) => result.criterionId === criterion.id) : [];
-    const result = matchingResults.length === 1 ? matchingResults[0] : undefined;
-    let status: QualityEvidence["status"] = "inconclusive";
-    let summary = "The validator did not return a unique observed result for this criterion";
-    let output = "";
-    let evidenceArtifactPath = artifactPath;
-    let scenario: QualityEvidence["scenario"];
-    if (functional) {
-      const acceptance = result ? acceptances.get(criterion.id) ?? null : null;
-      scenario = { interaction: criterion.interaction ?? "display", expected: criterion.expected ?? criterion.text, actions: acceptance?.actions ?? [], observed: result?.observedText ?? "" };
-      if (result && acceptance) {
+    const artifactPath = join(artifactDirectory, mode === "repository" ? "repository-observations.json" : "browser-observations.json");
+    const structuredOutput = completed.type === "turn_end" ? completed.structuredOutput : undefined;
+    const response = functional ? qualityFunctionalResponseSchema.safeParse(structuredOutput) : qualityResponseSchema.safeParse(structuredOutput);
+    const results: QualityValidatorResponseResult[] | null = response.success ? response.data.results : null;
+    const serverCheckObservations = functional ? [] : options.checks.filter((check) => check.kind === "command" && check.authority === "server" && check.status !== "inconclusive");
+
+    for (const denial of session.diagnostics.permissionDenials) {
+      denial.reason = mask(denial.reason);
+    }
+    const successful = observations.filter((observation) => observation.ok);
+    const navigated = successful.some((observation) => observation.tool === "browser_navigate");
+    const indexedObservations = observations.map((observation, index) => ({ ...observation, index }));
+    const origins = [...new Set(options.addresses.map((address) => new URL(address.url).origin))];
+    const blockers: QualityFunctionalBlocker[] = [];
+    const navigatedIndex = navigationIndex(indexedObservations, origins);
+    const screenshots = await qualityScreenshots(indexedObservations, navigatedIndex, browserOutputDirectory ?? artifactDirectory);
+    if (browserOutputDirectory) {
+      for (const screenshot of screenshots) {
+        if (options.deadlineAt !== undefined && (options.signal.aborted || Date.now() >= options.deadlineAt)) throw new Error("Validation stopped before screenshot retention");
+        const retainedPath = join(artifactDirectory, screenshot.name);
+        await copyFile(screenshot.path, retainedPath);
+        screenshot.path = retainedPath;
+      }
+    }
+    const artifactResults = results?.map((result) => ({
+      criterionId: options.criteria.some((criterion) => criterion.id === result.criterionId) ? result.criterionId : "[unrecognized criterion]",
+      status: result.status,
+      summary: mask(result.summary),
+      output: mask(result.output),
+      observedText: mask(result.observedText),
+      tools: result.tools.map((tool) => QUALITY_REPOSITORY_TOOLS.has(tool) || browserToolName(tool) !== null ? tool : mask(tool)),
+      checkEvidenceIds: result.checkEvidenceIds.filter((id) => serverCheckObservations.some((check) => check.id === id)),
+      screenshot: citedScreenshot(result.screenshot, screenshots)?.name ?? null,
+      ...(result.actions ? { actions: result.actions.flatMap((tool) => browserToolName(tool) ?? []) } : {}),
+      ...(result.blocker !== undefined ? { blocker: result.blocker } : {}),
+    }));
+    const artifactObservations = observations.map(({ toolCallId, actionId, tool, ok, truncated, output, redactedOutput }) => ({ toolCallId, actionId, tool, ok, truncated, output: mask(redactedOutput ?? output) }));
+    const artifactChecks = serverCheckObservations.map((check) => ({
+      ...check,
+      summary: mask(check.summary),
+      output: mask(check.output),
+      command: check.command === null ? null : mask(check.command),
+      ...(check.scenario ? { scenario: { ...check.scenario, expected: mask(check.scenario.expected), observed: mask(check.scenario.observed), actions: check.scenario.actions.map((action) => ({ ...action, tool: browserToolName(action.tool) ?? mask(action.tool) })) } } : {}),
+    }));
+    for (const diagnostic of session.diagnostics.tools) {
+      if (diagnostic.path) diagnostic.path = mask(diagnostic.path);
+      if (diagnostic.glob) diagnostic.glob = mask(diagnostic.glob);
+    }
+    await writeFile(artifactPath, JSON.stringify({ mode, functional, runId: options.runId, revision: options.revisionSha, provider: options.execution.provider, sessionId, observations: artifactObservations, serverCheckObservations: artifactChecks, diagnostics: session.diagnostics, response: artifactResults ? { results: artifactResults } : null }, null, 2));
+    const acceptances = functional && results ? functionalAcceptances(results, options.criteria, indexedObservations, navigatedIndex, screenshots) : new Map<string, QualityFunctionalAcceptance>();
+    const evidence = options.criteria.map((criterion) => {
+      const matchingResults = results ? results.filter((result) => result.criterionId === criterion.id) : [];
+      const result = matchingResults.length === 1 ? matchingResults[0] : undefined;
+      let status: QualityEvidence["status"] = "inconclusive";
+      let summary = "The validator did not return a unique observed result for this criterion";
+      let output = "";
+      let evidenceArtifactPath = artifactPath;
+      let scenario: QualityEvidence["scenario"];
+      if (functional) {
+        const acceptance = result ? acceptances.get(criterion.id) ?? null : null;
+        scenario = { interaction: criterion.interaction ?? "display", expected: mask(criterion.expected ?? criterion.text), actions: acceptance?.actions ?? [], observed: mask(result?.observedText ?? "") };
+        if (result && acceptance) {
+          summary = result.summary;
+          output = result.output;
+          if (result.blocker) {
+            blockers.push({ code: result.blocker, scenarioId: criterion.id, summary: qualityErrorMessage(mask(result.summary)) });
+            summary = `Scenario blocked (${result.blocker}): ${result.summary}`;
+          } else if (acceptance.accepted && output.trim()) {
+            status = result.status;
+            if (acceptance.screenshot) evidenceArtifactPath = acceptance.screenshot.path;
+          } else summary = acceptance.reason || "The reported result lacks an explanation of the observed state";
+        }
+      } else if (result) {
         summary = result.summary;
         output = result.output;
-        if (result.blocker) {
-          blockers.push({ code: result.blocker, scenarioId: criterion.id, summary: qualityErrorMessage(result.summary) });
-          summary = `Scenario blocked (${result.blocker}): ${result.summary}`;
-        } else if (acceptance.accepted && output.trim()) {
+        const tools = result.tools.map((tool) => mode === "repository" ? tool : browserToolName(tool));
+        const excerpt = result.observedText;
+        const singleLine = excerpt.trim().length > 0 && !excerpt.includes("\n") && !excerpt.includes("\r");
+        const nativeObserved = singleLine && successful.some((observation) =>
+          (mode === "repository" ? QUALITY_REPOSITORY_TOOLS.has(observation.tool) : QUALITY_OBSERVATION_TOOLS.has(observation.tool)) && tools.includes(observation.tool) && observation.output.includes(result.observedText),
+        );
+        const checkIds = result.checkEvidenceIds;
+        const checksAttributed = checkIds.length > 0 && checkIds.every((id) => serverCheckObservations.some((check) => check.id === id));
+        const checkObserved = mode === "repository" && singleLine && checksAttributed && serverCheckObservations.some((check) => checkIds.includes(check.id) && check.output.includes(excerpt));
+        const toolsCompleted = tools.every((tool) => tool !== null && successful.some((observation) => observation.tool === tool));
+        const checkReferencesValid = checkIds.length === 0 || mode === "repository" && checksAttributed;
+        const visual = mode === "browser" && criterion.interaction === "visual";
+        const screenshot = visual && checkIds.length === 0 && toolsCompleted ? citedScreenshot(result.screenshot, screenshots) : null;
+        const attributed = screenshot !== null || checkReferencesValid && toolsCompleted && (nativeObserved && tools.length > 0 || checkObserved && tools.length === 0);
+        if ((mode === "repository" || navigated) && attributed && output.trim()) {
           status = result.status;
-          if (acceptance.screenshot) evidenceArtifactPath = acceptance.screenshot.path;
-        } else summary = acceptance.reason || "The reported result lacks an explanation of the observed state";
+          if (screenshot) evidenceArtifactPath = screenshot.path;
+        } else summary = visual ? QUALITY_VISUAL_REJECTION : "The reported result lacks matching completed read-only observations";
       }
-    } else if (result) {
-      summary = result.summary;
-      output = result.output;
-      const tools = result.tools.map((tool) => mode === "repository" ? tool : browserToolName(tool));
-      const excerpt = result.observedText;
-      const singleLine = excerpt.trim().length > 0 && !excerpt.includes("\n") && !excerpt.includes("\r");
-      const nativeObserved = singleLine && successful.some((observation) =>
-        (mode === "repository" ? QUALITY_REPOSITORY_TOOLS.has(observation.tool) : QUALITY_OBSERVATION_TOOLS.has(observation.tool)) && tools.includes(observation.tool) && observation.output.includes(result.observedText),
-      );
-      const checkIds = result.checkEvidenceIds;
-      const checksAttributed = checkIds.length > 0 && checkIds.every((id) => serverCheckObservations.some((check) => check.id === id));
-      const checkObserved = mode === "repository" && singleLine && checksAttributed && serverCheckObservations.some((check) => checkIds.includes(check.id) && check.output.includes(excerpt));
-      const toolsCompleted = tools.every((tool) => tool !== null && successful.some((observation) => observation.tool === tool));
-      const checkReferencesValid = checkIds.length === 0 || mode === "repository" && checksAttributed;
-      const visual = mode === "browser" && criterion.interaction === "visual";
-      const screenshot = visual && checkIds.length === 0 && toolsCompleted ? citedScreenshot(result.screenshot, screenshots) : null;
-      const attributed = screenshot !== null || checkReferencesValid && toolsCompleted && (nativeObserved && tools.length > 0 || checkObserved && tools.length === 0);
-      if ((mode === "repository" || navigated) && attributed && output.trim()) {
-        status = result.status;
-        if (screenshot) evidenceArtifactPath = screenshot.path;
-      } else summary = visual ? QUALITY_VISUAL_REJECTION : "The reported result lacks matching completed read-only observations";
-    }
-    if (completed.type === "error" || completed.type === "turn_end" && !completed.ok || cleanupFailed || cancelled) {
-      status = "inconclusive";
-      if (completed.type === "error") summary = redact(qualityErrorMessage(completed.message));
-      else if (cleanupFailed) summary = "The validator session could not be closed within its deadline";
-      else summary = "The validator session did not complete successfully";
-    }
-    return qualityEvidenceSchema.parse({
-      id: randomUUID(), runId: options.runId, criterionId: criterion.id,
-      kind: "behavior", authority: "agent", author: "agent", status, summary, output,
-      command: null, exitCode: null, timedOut, durationMs, artifactPath: evidenceArtifactPath,
-      provider: options.execution.provider, sessionId, model: options.execution.model, createdAt: Date.now(),
-      ...(scenario ? { scenario } : {}),
+      if (completed.type === "error" || completed.type === "turn_end" && !completed.ok || cleanupFailed || cancelled) {
+        status = "inconclusive";
+        if (completed.type === "error") summary = redact(qualityErrorMessage(completed.message));
+        else if (cleanupFailed) summary = "The validator session could not be closed within its deadline";
+        else summary = "The validator session did not complete successfully";
+      }
+      return qualityEvidenceSchema.parse({
+        id: randomUUID(), runId: options.runId, criterionId: criterion.id,
+        kind: "behavior", authority: "agent", author: "agent", status, summary: mask(summary), output: mask(output),
+        command: null, exitCode: null, timedOut, durationMs, artifactPath: evidenceArtifactPath,
+        provider: options.execution.provider, sessionId, model: options.execution.model, createdAt: Date.now(),
+        ...(scenario ? { scenario } : {}),
+      });
     });
-  });
-  let diagnostic: QualityRunDiagnostic | null = null;
-  if (evidence.some((entry) => entry.status === "failed" && options.criteria.some((criterion) => criterion.id === entry.criterionId && criterion.required))) diagnostic = { category: "code_nonconformance", summary: functional ? "Required browser scenarios were contradicted by attributed observations." : "Required acceptance criteria were contradicted by attributed observations.", permissionDenials: session.diagnostics.permissionDenials, blockers };
-  else if (blockers.length > 0) diagnostic = { category: "environment_blocker", summary: "Some browser scenarios could not be exercised in the validation environment.", permissionDenials: session.diagnostics.permissionDenials, blockers };
-  else if (timedOut) diagnostic = { category: "timeout", summary: "Independent validation exceeded its deadline.", permissionDenials: session.diagnostics.permissionDenials, blockers };
-  else if (session.diagnostics.permissionDenialCount > 0) diagnostic = { category: "permission_denial", summary: "The provider reported specific tool permission refusals; source-code nonconformance is unconfirmed.", permissionDenials: session.diagnostics.permissionDenials, blockers };
-  else if (evidence.some((entry) => entry.status === "inconclusive")) diagnostic = { category: "validation_incomplete", summary: "Independent validation did not produce complete attributed observations.", permissionDenials: [], blockers };
-  return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider, diagnostic };
+    for (const entry of evidence) {
+      const result = results?.find((candidate) => candidate.criterionId === entry.criterionId);
+      const acceptance = entry.criterionId ? acceptances.get(entry.criterionId) : undefined;
+      const screenshot = screenshots.find((candidate) => candidate.path === entry.artifactPath);
+      const exact = indexedObservations.filter((observation) => observation.ok && (
+        acceptance?.interactionIndex === observation.index
+        || screenshot?.index === observation.index
+        || result !== undefined && result.observedText.trim().length > 0 && result.tools.some((tool) => (browserToolName(tool) ?? tool) === observation.tool) && observation.output.includes(result.observedText)
+      ));
+      let status: "succeeded" | "failed" | "unknown" = "unknown";
+      if (entry.status === "passed") status = "succeeded";
+      else if (entry.status === "failed") status = "failed";
+      options.journal?.observe({ kind: "observation", phase: functional ? "functional" : "validating", status, provider: options.execution.provider, sessionId, criterionId: entry.criterionId, actionIds: exact.flatMap((observation) => observation.actionId ? [observation.actionId] : []), artifactPaths: entry.artifactPath ? [entry.artifactPath] : [], summary: "Criterion assessment linked to exact observed actions and retained artifact" });
+    }
+    let diagnostic: QualityRunDiagnostic | null = null;
+    if (evidence.some((entry) => entry.status === "failed" && options.criteria.some((criterion) => criterion.id === entry.criterionId && criterion.required))) diagnostic = { category: "code_nonconformance", summary: functional ? "Required browser scenarios were contradicted by attributed observations." : "Required acceptance criteria were contradicted by attributed observations.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (blockers.length > 0) diagnostic = { category: "environment_blocker", summary: "Some browser scenarios could not be exercised in the validation environment.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (timedOut) diagnostic = { category: "timeout", summary: "Independent validation exceeded its deadline.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (session.diagnostics.permissionDenialCount > 0) diagnostic = { category: "permission_denial", summary: "The provider reported specific tool permission refusals; source-code nonconformance is unconfirmed.", permissionDenials: session.diagnostics.permissionDenials, blockers };
+    else if (evidence.some((entry) => entry.status === "inconclusive")) diagnostic = { category: "validation_incomplete", summary: "Independent validation did not produce complete attributed observations.", permissionDenials: [], blockers };
+    options.journal?.assertHealthy();
+    return { evidence, sessionId, model: options.execution.model, provider: options.execution.provider, diagnostic };
+  } finally {
+    if (!browserClosureUnknown) {
+      if (browserOutputDirectory) await rm(browserOutputDirectory, { recursive: true, force: true });
+      if (cleanupMarkerPath) await rm(cleanupMarkerPath, { force: true });
+    }
+  }
 }

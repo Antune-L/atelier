@@ -11,6 +11,7 @@ import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../s
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { assertOperationActive } from "./boundedCommand.ts";
 import { createFakeCoolifyTransport } from "./coolifyClient.ts";
 import { FakeGithubAccountRegistry } from "./github/accounts.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
@@ -42,6 +43,7 @@ import type {
   SpawnShellOptions,
   SystemAdapter,
   WorktreeSetupOptions,
+  OperationDeadlineOptions,
   ValidationCommandOptions,
   ValidationCommandResult,
   ValidationDependencyResult,
@@ -192,39 +194,47 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async captureValidationRevision(opts: ValidationRevisionOptions): Promise<ValidationRevision> {
+    assertOperationActive(opts);
     this.log("captureValidationRevision", { ...opts });
     return { commitSha: "simulated-revision", fingerprint: "simulated-revision", clean: true };
   }
 
   async prepareValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<{ cwd: string; dataDirectory: string; port: number; databaseNamespace: string }> {
+    assertOperationActive(opts);
     this.log("prepareValidationWorkspace", { ...opts });
     return { cwd: join("/simulated-validation", opts.runId), dataDirectory: join("/simulated-validation", `${opts.runId}-data`), port: 52819, databaseNamespace: `simulated_${opts.runId}` };
   }
 
   async cleanupValidationWorkspace(opts: ValidationWorkspaceOptions): Promise<void> {
+    assertOperationActive(opts);
     this.log("cleanupValidationWorkspace", { ...opts });
   }
 
   async runValidationCommand(opts: ValidationCommandOptions): Promise<ValidationCommandResult> {
+    assertOperationActive(opts);
     this.log("runValidationCommand", { cwd: opts.cwd, command: opts.command });
     return { exitCode: 0, timedOut: false, cancelled: opts.signal?.aborted === true, stdout: "Simulated command; no real check was executed.", stderr: "", durationMs: 0 };
   }
 
   async installValidationDeps(opts: Omit<ValidationCommandOptions, "command">): Promise<ValidationDependencyResult | null> {
+    assertOperationActive(opts);
     this.log("installValidationDeps", { cwd: opts.cwd });
     const command = "bun install --frozen-lockfile";
     return { command, result: await this.runValidationCommand({ ...opts, command }) };
   }
 
   startValidationService(opts: ValidationCommandOptions): ValidationServiceHandle {
+    assertOperationActive(opts);
     this.log("startValidationService", { cwd: opts.cwd, command: opts.command });
     const result = this.runValidationCommand(opts);
     return { result, output: () => "Simulated service; no real application was started.", stop: async () => { await result; } };
   }
 
-  async fetch(repoPath: string, baseBranch: string): Promise<void> {
+  async fetch(repoPath: string, baseBranch: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    assertOperationActive(options);
     this.log("fetch", { repoPath, baseBranch });
     await delay(FAKE_SETTLE_MS);
+    assertOperationActive(options);
   }
 
   async prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void> {

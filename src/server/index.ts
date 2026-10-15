@@ -289,7 +289,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       const results = await Promise.allSettled([
         delegationManager.quiesceAutonomous(ticketId),
         sessionHub.closeAutonomous(ticketId),
-        qualityManager.cancel(ticketId),
+        qualityManager.cancel(ticketId, { pendingManual: false }),
       ]);
       return results.every((result) => result.status === "fulfilled" && result.value !== false)
         && !delegationManager.hasAutonomousWriters(ticketId) && !qualityManager.hasAutonomousWriters(ticketId)
@@ -303,6 +303,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     const current = store.getTicket(ticket.id);
     if (current) await delegationManager.resumeImplementationPlan(current, slotId);
   });
+  qualityManager.setManualClosureVerifier((ticketId) => slotManager.closeAutonomousWork(ticketId));
   slotManager.setQualityGate((ticketId, mode) => qualityManager.gate(ticketId, mode));
   slotManager.setQualityIterationVerifier((ticketId, worktreePath, iterationId) => qualityManager.verifyQualityIteration(ticketId, worktreePath, iterationId));
   qualityManager.setQualityIterationCorrectionStarter((ticketId, iterationId) => slotManager.startQualityCorrection(ticketId, iterationId));

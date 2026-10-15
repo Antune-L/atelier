@@ -65,7 +65,7 @@ function qualityReadScopeHook(options: AgentSessionOptions, reportedDenials: Set
     const reason = "Quality inspection is restricted to repository files under the validation workspace.";
     if (!reportedDenials.has(input.tool_use_id)) {
       reportedDenials.add(input.tool_use_id);
-      reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason });
+      reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason, nativeId: input.tool_use_id });
     }
     return { hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -398,6 +398,7 @@ async function pumpStream(sessionPromise: Promise<ClaudeQuery>, options: AgentSe
         const details = denialReasons.get(denial.tool_use_id);
         const command = bashCommandSchema.safeParse(denial.tool_input);
         reportPermissionDenial(options, {
+          nativeId: denial.tool_use_id,
           toolName: denial.tool_name,
           command: command.success ? command.data.command : null,
           reason: details?.reason ?? PERMISSION_DENIAL_REASON,

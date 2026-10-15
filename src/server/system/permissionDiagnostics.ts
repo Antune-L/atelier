@@ -15,6 +15,7 @@ export const permissionDenialSchema = z.object({
   reason: z.string(),
   blockReason: qualityPermissionBlockReasonSchema.nullable().default(null),
   sourceId: z.string().optional(),
+  nativeId: z.string().optional(),
 });
 export type PermissionDenial = z.infer<typeof permissionDenialSchema>;
 

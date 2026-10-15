@@ -362,6 +362,25 @@ CREATE TABLE IF NOT EXISTS quality_validation_runs (
   started_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS quality_requests (
+  request_id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  run_id TEXT UNIQUE REFERENCES quality_validation_runs(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS quality_requests_ticket_idx ON quality_requests(ticket_id, created_at);
+CREATE TABLE IF NOT EXISTS quality_actions (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL REFERENCES quality_requests(request_id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES quality_validation_runs(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  UNIQUE(request_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS quality_actions_run_idx ON quality_actions(run_id, sequence);
+
 CREATE TABLE IF NOT EXISTS quality_evidence (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL REFERENCES quality_validation_runs(id) ON DELETE CASCADE,

@@ -3,6 +3,7 @@ import { ChevronRight, TriangleAlert } from "lucide-react";
 import { QUALITY_ACTIVE_STATUSES } from "@shared/quality";
 import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityScenarioInteraction, QualityValidationRun, TicketQuality } from "@shared/quality";
 
+import { QualityActionHistory } from "@/components/ticket-detail/QualityActionHistory";
 import { PREPARATION_COMMAND_SUMMARIES, QualityResult, QualityRunStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
 import { formatDuration } from "@/lib/display";
 import { formatQualityCriterionText, formatQualityEvidenceSummary, formatQualityMessage, qualityFunctionalBlockerLabel } from "@/lib/qualityMessages";
@@ -21,7 +22,6 @@ interface FunctionalTestPanelProps {
 function ScenarioRow({ scenario, creator, evidence, run, current, onOpenEvidence }: { scenario: QualityCriterion; creator: QualityCriteriaSnapshot["createdBy"]; evidence: QualityEvidence | undefined; run: QualityValidationRun; current: boolean; onOpenEvidence: (evidence: QualityEvidence) => void }) {
   const interaction = evidence?.scenario?.interaction ?? scenario.interaction;
   const expected = evidence?.scenario?.expected ?? scenario.expected;
-  const actions = evidence?.scenario?.actions ?? [];
   const observed = evidence?.scenario?.observed;
   const content = (
     <>
@@ -29,10 +29,9 @@ function ScenarioRow({ scenario, creator, evidence, run, current, onOpenEvidence
         <p className="text-xs">{formatQualityCriterionText(scenario, creator)}</p>
         <p className="text-2xs text-muted-foreground">{interaction !== undefined && `${INTERACTION_LABELS[interaction]} · `}Scénario {scenario.id}{!scenario.required && " · facultatif"}</p>
         {expected !== undefined && <p className="text-2xs text-muted-foreground">Résultat attendu : {expected}</p>}
-        {actions.length > 0 && <p className="break-words font-mono text-2xs text-muted-foreground">Actions enregistrées : {actions.map((action) => `${action.tool}${action.ok ? "" : " (échec)"}`).join(", ")}</p>}
         {observed !== undefined && observed !== "" && <p className="text-2xs">Observé : {observed}</p>}
       </div>
-      {evidence === undefined ? <QualityResult status="unverified" /> : <QualityResult status={qualityEvidenceResult(evidence.status, current, run.evidenceAccepted, run.simulated)} />}
+      {evidence === undefined ? <QualityResult status="unverified" /> : <QualityResult status={qualityEvidenceResult(evidence.status, current, run.evidenceAccepted, run.simulated, !!run.preview)} />}
     </>
   );
   if (evidence === undefined) return <div className="flex flex-wrap items-start gap-3 px-3 py-3">{content}</div>;
@@ -49,12 +48,13 @@ export function FunctionalTestPanel({ run, quality, current, onOpenEvidence }: F
   return (
     <div className="space-y-3 rounded border border-border px-3 py-3">
       <QualityRunStatus run={run} current={current} quality={quality} />
+      {run.preview && <p className="text-xs text-muted-foreground">Preuve sur la version déployée liée : {run.revision}. Les critères et la configuration actuels restent à confirmer.</p>}
       {run.simulated && <p className="text-xs text-warning">Simulation, non concluant : aucun parcours réel n’a été exécuté dans le navigateur.</p>}
-      {!current && !active && <p className="text-xs text-warning">Ce test appartient à une version antérieure du code, des scénarios ou de la configuration.</p>}
+      {!run.preview && !current && !active && <p className="text-xs text-warning">Ce test appartient à une version antérieure du code, des scénarios ou de la configuration.</p>}
 
       <div className="space-y-2">
         <p className="text-xs font-medium">Prérequis</p>
-        {prerequisites.length > 0 && <div className="divide-y divide-border rounded border border-border">{prerequisites.map((evidence) => <button key={evidence.id} type="button" className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left hover:bg-muted/30" onClick={() => onOpenEvidence(evidence)}><span className="min-w-0 flex-1 text-xs">{formatQualityEvidenceSummary(evidence)}</span><span className="text-2xs text-muted-foreground">{formatDuration(evidence.durationMs)}</span><QualityResult status={qualityEvidenceResult(evidence.status, current, true, run.simulated)} /><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>)}</div>}
+        {prerequisites.length > 0 && <div className="divide-y divide-border rounded border border-border">{prerequisites.map((evidence) => <button key={evidence.id} type="button" className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left hover:bg-muted/30" onClick={() => onOpenEvidence(evidence)}><span className="min-w-0 flex-1 text-xs">{formatQualityEvidenceSummary(evidence)}</span><span className="text-2xs text-muted-foreground">{formatDuration(evidence.durationMs)}</span><QualityResult status={qualityEvidenceResult(evidence.status, current, true, run.simulated, !!run.preview)} /><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button>)}</div>}
         {prerequisites.length === 0 && <p className="text-xs text-muted-foreground">Aucune préparation enregistrée pour ce test.</p>}
         <p className="text-2xs text-muted-foreground">{PREREQUISITES_NOTE}</p>
       </div>
@@ -71,7 +71,7 @@ export function FunctionalTestPanel({ run, quality, current, onOpenEvidence }: F
         <div className="space-y-2">
           <p className="text-xs font-medium">Scénarios</p>
           <div className="divide-y divide-border rounded border border-border">
-            {snapshot.criteria.map((scenario) => <ScenarioRow key={scenario.id} scenario={scenario} creator={snapshot.createdBy} evidence={runEvidence.filter((evidence) => evidence.kind === "behavior" && evidence.criterionId === scenario.id).at(-1)} run={run} current={current} onOpenEvidence={onOpenEvidence} />)}
+            {snapshot.criteria.map((scenario) => <div key={scenario.id}><ScenarioRow scenario={scenario} creator={snapshot.createdBy} evidence={runEvidence.filter((evidence) => evidence.kind === "behavior" && evidence.criterionId === scenario.id).at(-1)} run={run} current={current} onOpenEvidence={onOpenEvidence} /><div className="px-3 pb-3"><QualityActionHistory ticketId={run.ticketId} owner={{ runId: run.id }} criterionId={scenario.id} /></div></div>)}
           </div>
         </div>
       )}

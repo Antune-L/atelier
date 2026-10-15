@@ -71,3 +71,11 @@ Use the production-built SPA served from the isolated backend origin when a cust
 ## Codex read-only analysis commands
 
 Codex triage and automatic feasibility must expose native exec_command reads to both the parent and the scout/verifier. Read/Glob/Grep names in subagent instructions do not create Codex tools, and native exec_command reaches the PreToolUse hook as Bash. Keep read-only analysis commands single, path-scoped, and limited to explicit absolute repository operands; the hook may lack the effective command working directory. Require rg --no-config and deny external preprocessors, compressed-search helpers, dereferencing escapes, writes, and child recursion. Preserve Claude and Atelier scout restrictions. Only promise local-image inspection when an image-reading tool is actually exposed; otherwise report the limitation.
+
+## Tester action history and native cleanup
+
+Reserve a manual quality request before revision capture or other preparation. It has its own finite allowance and must not consume or reset an autonomous execution's credits, frozen scenarios, or delivery proof. A request rejected before run creation is not a failed product test.
+
+Redact sensitive text before storage, but preserve trusted action identifiers and artifact references structurally. Replacing a short value throughout serialized JSON can corrupt identifiers and break exact evidence links. Compare bounded raw observations only in memory before redacting the persisted evidence.
+
+Provider event dispatchers can absorb callback exceptions, so an audit write failure needs an explicit owner-level abort signal. Progress writes must not prevent compensating closure. Record each native session's cleanup obligation before startup and retain it when closure is unknown; restart recovery and deletion must honor the obligation, including planner and repository sessions without a browser.

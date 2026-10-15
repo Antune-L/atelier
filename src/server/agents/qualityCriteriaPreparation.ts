@@ -52,6 +52,7 @@ export async function prepareQualityCriteria(options: PrepareQualityCriteriaOpti
   };
   const session = await runQualitySession({
     ...options,
+    phase: "criteria-preparation",
     runId: `criteria-${crypto.randomUUID()}`,
     mode: "repository",
     outputSchema: z.toJSONSchema(qualityCriteriaPlanSchema, { target: "draft-07" }),
@@ -76,6 +77,10 @@ Return only the supplied structured output with mode and criteria.`,
   }
   const plan = qualityCriteriaPlanSchema.safeParse(session.completed.structuredOutput);
   if (!plan.success) throw new Error("Criteria preparation did not return valid mode and criteria");
+  for (const criterion of plan.data.criteria) {
+    criterion.text = session.redact(criterion.text);
+    if (criterion.expected) criterion.expected = session.redact(criterion.expected);
+  }
   return plan.data;
 }
 
@@ -110,6 +115,7 @@ export async function prepareFunctionalScenarios(options: PrepareFunctionalScena
   };
   const session = await runQualitySession({
     ...options,
+    phase: "scenario-preparation",
     runId: `scenarios-${crypto.randomUUID()}`,
     mode: "repository",
     outputSchema: z.toJSONSchema(functionalScenarioPlanSchema, { target: "draft-07" }),
@@ -139,5 +145,10 @@ Return only the supplied structured output with scenarios and uncovered.`,
   }
   const plan = functionalScenarioPlanSchema.safeParse(session.completed.structuredOutput);
   if (!plan.success) throw new Error("Scenario preparation did not return valid scenarios");
+  for (const scenario of plan.data.scenarios) {
+    scenario.text = session.redact(scenario.text);
+    scenario.expected = session.redact(scenario.expected);
+  }
+  for (const uncovered of plan.data.uncovered) uncovered.reason = session.redact(uncovered.reason);
   return plan.data;
 }

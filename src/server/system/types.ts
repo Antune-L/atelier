@@ -98,7 +98,12 @@ export interface MergePrExpectation {
   assertCurrent?: () => void;
 }
 
-export interface ValidationRevisionOptions {
+export interface OperationDeadlineOptions {
+  deadlineAt?: number;
+  signal?: AbortSignal;
+}
+
+export interface ValidationRevisionOptions extends OperationDeadlineOptions {
   repoPath: string;
   sourcePath?: string;
   branch?: string;
@@ -116,19 +121,18 @@ export interface CodeSnapshot {
   fileHashes: Record<string, string>;
 }
 
-export interface ValidationWorkspaceOptions {
+export interface ValidationWorkspaceOptions extends OperationDeadlineOptions {
   ticketId: string;
   runId: string;
   repoPath: string;
   commitSha: string;
 }
 
-export interface ValidationCommandOptions {
+export interface ValidationCommandOptions extends OperationDeadlineOptions {
   cwd: string;
   command: string;
   timeoutMs: number;
   environment: Record<string, string>;
-  signal?: AbortSignal;
 }
 
 export interface ValidationCommandResult {
@@ -300,7 +304,7 @@ export interface SystemAdapter {
 
   // ---- git worktree lifecycle ----
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
-  fetch(repoPath: string, baseBranch: string): Promise<void>;
+  fetch(repoPath: string, baseBranch: string, options?: OperationDeadlineOptions): Promise<void>;
   /** Fetch origin/<baseBranch> and check it out detached at `path`, so read-only analyses see the up-to-date base. */
   prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void>;
   removeAnalysisWorkspace(repoPath: string, path: string): Promise<void>;

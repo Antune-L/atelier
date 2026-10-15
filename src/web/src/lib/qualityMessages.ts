@@ -1,9 +1,16 @@
 import { latestAcceptanceSnapshot } from "@shared/quality";
-import type { QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityFunctionalBlockerCode, QualityPermissionBlockReason, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
+import type { QualityAction, QualityRequestOrigin, QualityRequestStatus, QualityCriteriaSnapshot, QualityCriterion, QualityEvidence, QualityFunctionalBlockerCode, QualityPermissionBlockReason, QualityRunPhase, QualityValidationMode, QualityValidationRun, TicketQuality } from "@shared/quality";
 
 import { errorMessage } from "@/lib/errors";
 
 const QUALITY_MESSAGES: Readonly<Record<string, string>> = {
+  "This request has already been received. Use a new explicit request to try again.": "Cette demande a déjà été reçue. Relancez explicitement une nouvelle vérification pour réessayer.",
+  "Quality cleanup or an active writer prevents a new manual validation.": "Une vérification attend la fin du nettoyage ou d’un travail en cours avant de pouvoir démarrer.",
+  "Current autonomous writer closure could not be confirmed.": "L’arrêt du travail autonome n’a pas pu être confirmé. La vérification n’a pas démarré.",
+  "Delivered acceptance criteria or validation configuration changed; frozen retesting is unavailable.": "Les critères ou les paramètres de validation ont changé depuis la livraison. La nouvelle vérification ne peut pas réutiliser cette livraison.",
+  "Create a new manual preview before retesting a completed autonomous delivery.": "Créez une nouvelle prévisualisation manuelle avant de vérifier à nouveau cette livraison autonome.",
+  "Manual validation total deadline expired or the request was cancelled.": "La durée totale autorisée pour cette vérification est écoulée, ou la demande a été annulée.",
+  "A completed delivered ticket with current confirmed writer closure is required for manual retesting.": "Le ticket doit être livré et terminé, avec l’arrêt du travail confirmé, avant une nouvelle vérification manuelle.",
   "Validation DATABASE_URL must contain a run-specific database namespace, path, directory, or port placeholder.": "La variable DATABASE_URL de validation doit contenir un marqueur propre à l’exécution pour la base de données, le chemin, le dossier ou le port.",
   "No versioned acceptance criteria are defined.": "Aucune version des critères d’acceptation n’est définie.",
   "Acceptance criteria will be prepared automatically during verification.": "Les critères d’acceptation seront préparés automatiquement pendant la vérification.",
@@ -273,3 +280,8 @@ export function qualityPhaseLabel(phase: QualityRunPhase): string {
 export function qualityFailureLabel(phase: QualityRunPhase): string {
   return QUALITY_FAILURE_LABELS[phase];
 }
+
+export const QUALITY_ACTION_LABELS: Record<QualityAction["status"], string> = { started: "Démarré", succeeded: "Réussi", failed: "Échec", denied: "Refusé", interrupted: "Interrompu", unknown: "Résultat inconnu" };
+export const QUALITY_REQUEST_LABELS: Record<QualityRequestStatus, string> = { reserved: "En attente", running: "En cours", completed: "Terminé", refused: "Refusé avant démarrage", interrupted: "Interrompu" };
+export const QUALITY_ORIGIN_LABELS: Record<QualityRequestOrigin, string> = { manual: "Demande manuelle", autonomous: "Parcours autonome", system: "Contrôle du système" };
+export const QUALITY_ACTION_KIND_LABELS: Record<QualityAction["kind"], string> = { tool: "Outil", command: "Commande", service: "Service", git: "Version du code", cleanup: "Nettoyage", denial: "Refus", observation: "Observation", history: "Capture de l’historique" };

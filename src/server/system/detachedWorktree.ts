@@ -6,8 +6,9 @@
 import { mkdir, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
+import { assertOperationActive, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import type { BoundedCommandResult } from "./boundedCommand.ts";
+import type { OperationDeadlineOptions } from "./types.ts";
 
 export type DetachedWorktreeStep = "add" | "remove" | "prune";
 
@@ -18,17 +19,20 @@ export class DetachedWorktreeError extends Error {
   }
 }
 
-export async function addDetachedWorktree(repoPath: string, path: string, revision: string): Promise<void> {
+export async function addDetachedWorktree(repoPath: string, path: string, revision: string, options: OperationDeadlineOptions = {}): Promise<void> {
+  assertOperationActive(options);
   await mkdir(dirname(path), { recursive: true });
-  const result = await runBoundedCommand(["git", "-C", repoPath, "worktree", "add", "--detach", path, revision], repoPath);
+  const result = await runBoundedCommand(["git", "-C", repoPath, "worktree", "add", "--detach", path, revision], repoPath, options);
   if (result.exitCode !== 0 || result.timedOut) throw new DetachedWorktreeError("add", result);
 }
 
-export async function removeDetachedWorktree(repoPath: string, path: string): Promise<void> {
+export async function removeDetachedWorktree(repoPath: string, path: string, options: OperationDeadlineOptions = {}): Promise<void> {
+  assertOperationActive(options);
   // A non-zero exit is expected when the directory was never registered (partial add); only a timeout is fatal.
-  const removed = await runBoundedCommand(["git", "-C", repoPath, "worktree", "remove", "--force", path], repoPath);
+  const removed = await runBoundedCommand(["git", "-C", repoPath, "worktree", "remove", "--force", path], repoPath, options);
   if (removed.timedOut) throw new DetachedWorktreeError("remove", removed);
+  assertOperationActive(options);
   await rm(path, { recursive: true, force: true });
-  const pruned = await runBoundedCommand(["git", "-C", repoPath, "worktree", "prune"], repoPath);
+  const pruned = await runBoundedCommand(["git", "-C", repoPath, "worktree", "prune"], repoPath, options);
   if (pruned.exitCode !== 0 || pruned.timedOut) throw new DetachedWorktreeError("prune", pruned);
 }

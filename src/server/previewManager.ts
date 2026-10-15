@@ -513,7 +513,11 @@ export class PreviewManager {
     return this.trackRequest(this.validatePreview(id, provider));
   }
 
-  private async validatePreview(id: string, provider: Orchestrator) {
+  async validateManual(id: string, provider: Orchestrator, requestId: string) {
+    return this.trackRequest(this.validatePreview(id, provider, requestId));
+  }
+
+  private async validatePreview(id: string, provider: Orchestrator, requestId?: string) {
     if (this.shuttingDown) throw new Error("Preview service is shutting down.");
     const preview = this.get(id);
     if (preview.status !== "ready" || preview.desiredState !== "running" || !preview.url || preview.deployedRevision !== preview.revision) throw new Error("Wait for the exact preview revision to be ready before validation.");
@@ -523,7 +527,7 @@ export class PreviewManager {
     if (preview.autonomous) this.requireAutonomousDeployment(ticketId, preview.revision);
     const auth = this.deps.config.getPreviewAuth();
     if (!auth) throw new Error("Preview authentication is unavailable.");
-    const run = await this.deps.quality.testPreview(ticketId, provider, {
+    const target = {
       previewId: id, revision: preview.revision, url: preview.url, healthPath: preview.recipe?.healthPath, auth, autonomous: preview.autonomous, testData: preview.recipe?.testData,
       assertCurrent: async () => {
         if (preview.autonomous) this.requireAutonomousDeployment(ticketId, preview.revision);
@@ -531,7 +535,8 @@ export class PreviewManager {
         const latest = this.deps.store.getTicketPreview(ticketId);
         if (latest?.id !== id || current.status !== "ready" || current.desiredState !== "running" || current.revision !== preview.revision || current.deployedRevision !== preview.revision || current.url !== preview.url) throw new Error("The preview changed or stopped during validation.");
       },
-    });
+    };
+    const run = requestId ? await this.deps.quality.manualStart(ticketId, "functional", provider, requestId, target) : await this.deps.quality.testPreview(ticketId, provider, target);
     this.update(id, { qualityRunId: run.id });
     return run;
   }

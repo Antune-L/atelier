@@ -1,24 +1,27 @@
 import { ChevronRight, FlaskConical, GitCommitHorizontal, MousePointerClick, Play, RefreshCw, ShieldCheck, Square, TriangleAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ORCHESTRATORS, ORCHESTRATOR_LABELS } from "@shared/constants";
 import type { Orchestrator } from "@shared/constants";
 import { QUALITY_ACTIVE_STATUSES, QUALITY_ITERATION_ACTIVE_STATUSES } from "@shared/quality";
 import type { CreateQualityFollowUpInput, QualityEvidence, QualityPreflight, QualityResponse, StartQualityIterationInput } from "@shared/quality";
+import type { PreviewRecord } from "@shared/preview";
 import type { Ticket } from "@shared/schemas";
 
 import { AutonomousRecoveryPanel } from "@/components/ticket-detail/AutonomousRecoveryPanel";
 import { FunctionalTestPanel } from "@/components/ticket-detail/FunctionalTestPanel";
+import { QualityRequestHistory } from "@/components/ticket-detail/QualityActionHistory";
 import { QualityCriteriaPanel } from "@/components/ticket-detail/QualityCriteriaPanel";
 import { QualityIterations } from "@/components/ticket-detail/QualityIterations";
 import { QualityRemediation } from "@/components/ticket-detail/QualityRemediation";
-import { PREPARATION_COMMAND_SUMMARIES, QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunExplanation, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult } from "@/components/ticket-detail/QualityResults";
+import { PREPARATION_COMMAND_SUMMARIES, QualityEvidenceDialog, QualityResult, QualityRunHistory, QualityRunExplanation, QualityRunStatus, QualitySection, qualityChecksStatus, qualityEvidenceResult, qualityRunIsCurrent } from "@/components/ticket-detail/QualityResults";
 import { ValidationSkeleton } from "@/components/ticket-detail/ValidationSkeleton";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/display";
 import { formatQualityEvidenceSummary, formatQualityGateMessage, formatQualityMessage, qualityErrorMessage, qualityPhaseLabel, qualityRunTitle } from "@/lib/qualityMessages";
+import { previewApi } from "@/lib/previewApi";
 import { cn } from "@/lib/utils";
 
 const QUALITY_RUNNING_POLL_MS = 3_000;
@@ -27,7 +30,9 @@ const REVISION_DISPLAY_LENGTH = 12;
 
 export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOpenTerminal?: () => void }) {
   const [response, setResponse] = useState<QualityResponse | null>(null);
+  const [preview, setPreview] = useState<PreviewRecord | null>(null);
   const [preflight, setPreflight] = useState<QualityPreflight | null>(null);
+  const actionPending = useRef(false);
   const [pending, setPending] = useState(false);
   const [startingIteration, setStartingIteration] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +41,8 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
   const [selectedEvidence, setSelectedEvidence] = useState<QualityEvidence | null>(null);
 
   const refresh = useCallback(async (signal?: AbortSignal): Promise<QualityResponse> => {
-    const value = await api.ticketQuality(ticket.id, signal);
+    const [value, previewResponse] = await Promise.all([api.ticketQuality(ticket.id, signal), previewApi.ticketPreview(ticket.id).catch(() => null)]);
+    setPreview(previewResponse?.preview ?? null);
     setResponse(value);
     setLoadError(null);
     return value;
@@ -66,6 +72,8 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
   }, [refresh]);
 
   const act = async (action?: () => Promise<unknown>): Promise<void> => {
+    if (actionPending.current) return;
+    actionPending.current = true;
     setPending(true);
     setError(null);
     try {
@@ -74,6 +82,7 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
     } catch (failure) {
       setError(qualityErrorMessage(failure));
     } finally {
+      actionPending.current = false;
       setPending(false);
     }
   };
@@ -98,8 +107,10 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
   const independentRuns = [...quality.runs].reverse().filter((run) => (run.kind === "behavior" || run.kind === "full") && run.provider !== null);
   const independentRun = independentRuns[0];
   const independentCurrent = independentRun !== undefined && gate.currentRunIds.includes(independentRun.id);
-  const functionalRun = [...quality.runs].reverse().find((run) => run.kind === "functional" && !run.preview);
-  const functionalCurrent = functionalRun !== undefined && gate.currentRunIds.includes(functionalRun.id);
+  const functionalRun = [...quality.runs].reverse().find((run) => run.kind === "functional");
+  const functionalCurrent = functionalRun !== undefined && qualityRunIsCurrent(functionalRun, gate.currentRunIds, preview);
+  let functionalVersionLabel = functionalCurrent ? "version actuelle" : "version non confirmée ou périmée";
+  if (functionalRun?.preview) functionalVersionLabel = functionalCurrent ? "version déployée liée" : "résultat historique";
   const busy = pending || activeRun !== undefined || iterationActive;
   const startIteration = async (request: Omit<StartQualityIterationInput, "provider">): Promise<void> => {
     if (busy) return;
@@ -114,7 +125,7 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
     if (busy) return;
     void act(async () => setResponse(await api.createQualityFollowUp(ticket.id, input)));
   };
-  const latestRevision = quality.runs.filter((run) => !run.preview).at(-1)?.revision ?? preflight?.revision;
+  const latestRevision = quality.runs.at(-1)?.revision ?? preflight?.revision;
   const reservations = [...new Set([...gate.reservations, ...gate.reasons].map((message) => formatQualityGateMessage(message, quality)))];
   const simulated = quality.runs.some((run) => run.simulated);
   let deliveryLabel = "Validation à préparer";
@@ -146,10 +157,10 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
         <div className="flex flex-wrap items-center gap-2"><label htmlFor="quality-validator" className="text-xs text-muted-foreground">Fournisseur indépendant</label><Select id="quality-validator" aria-label="Agent de validation indépendant" value={iterationActive && latestIteration !== null ? latestIteration.provider : provider} disabled={busy} className="w-auto" onChange={(event) => { if (event.target.value === "claude" || event.target.value === "codex") setProvider(event.target.value); }}>{ORCHESTRATORS.map((value) => <option key={value} value={value}>{ORCHESTRATOR_LABELS[value]}</option>)}</Select></div>
         <div className="divide-y divide-border rounded-lg border border-border">
           {[
-            { label: "Contrôles techniques", run: checksRun, current: checksCurrent, accepted: checksAccepted, status: checksRun === undefined ? undefined : qualityChecksStatus(checksRun, checks), action: () => api.startQualityChecks(ticket.id), actionLabel: "Lancer les contrôles techniques", Icon: Play },
-            { label: "Critères d’acceptation", run: independentRun, current: independentCurrent, accepted: independentRun?.evidenceAccepted === true, status: independentRun?.status, action: () => api.verifyTicketQuality(ticket.id, provider), actionLabel: "Valider les critères", Icon: FlaskConical },
-            { label: "Parcours dans le navigateur", run: functionalRun, current: functionalCurrent, accepted: functionalRun?.evidenceAccepted === true, status: functionalRun?.status, action: () => api.testTicketFeature(ticket.id, provider), actionLabel: "Tester dans le navigateur", Icon: MousePointerClick },
-          ].map((operation) => <div key={operation.label} className="flex flex-wrap items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-medium">{operation.label}</p><p className="mt-1 text-xs text-muted-foreground">{operation.run === undefined ? "Aucune exécution enregistrée" : `${formatDateTime(operation.run.startedAt)} · ${operation.run.provider === null ? "Serveur" : ORCHESTRATOR_LABELS[operation.run.provider]} · ${operation.current ? "version actuelle" : "version non confirmée ou périmée"}${operation.run.simulated ? " · simulation" : ""}`}</p></div><QualityResult status={operation.status === undefined ? "unverified" : qualityEvidenceResult(operation.status, operation.current, operation.accepted, operation.run?.simulated === true)} /><Button size="sm" variant="outline" disabled={busy} onClick={() => void act(operation.action)}><operation.Icon className="size-3.5" />{operation.actionLabel}</Button></div>)}
+            { label: "Contrôles techniques", versionLabel: checksCurrent ? "version actuelle" : "version non confirmée ou périmée", run: checksRun, current: checksCurrent, accepted: checksAccepted, status: checksRun === undefined ? undefined : qualityChecksStatus(checksRun, checks), action: () => api.startQualityChecks(ticket.id), actionLabel: "Lancer les contrôles techniques", Icon: Play },
+            { label: "Critères d’acceptation", versionLabel: independentCurrent ? "version actuelle" : "version non confirmée ou périmée", run: independentRun, current: independentCurrent, accepted: independentRun?.evidenceAccepted === true, status: independentRun?.status, action: () => api.verifyTicketQuality(ticket.id, provider), actionLabel: "Valider les critères", Icon: FlaskConical },
+            { label: "Parcours dans le navigateur", versionLabel: functionalVersionLabel, run: functionalRun, current: functionalCurrent, accepted: functionalRun?.evidenceAccepted === true, status: functionalRun?.status, action: () => api.testTicketFeature(ticket.id, provider), actionLabel: "Tester dans le navigateur", Icon: MousePointerClick },
+          ].map((operation) => <div key={operation.label} className="flex flex-wrap items-center gap-3 px-4 py-3"><div className="min-w-0 flex-1"><p className="text-sm font-medium">{operation.label}</p><p className="mt-1 text-xs text-muted-foreground">{operation.run === undefined ? "Aucune exécution enregistrée" : `${formatDateTime(operation.run.startedAt)} · ${operation.run.provider === null ? "Serveur" : ORCHESTRATOR_LABELS[operation.run.provider]} · ${operation.versionLabel}${operation.run.simulated ? " · simulation" : ""}`}</p></div><QualityResult status={operation.status === undefined ? "unverified" : qualityEvidenceResult(operation.status, operation.current, operation.accepted, operation.run?.simulated === true, !!operation.run?.preview)} /><Button size="sm" variant="outline" disabled={busy} onClick={() => void act(operation.action)}><operation.Icon className="size-3.5" />{operation.actionLabel}</Button></div>)}
         </div>
         <p className="text-xs text-muted-foreground">Chaque opération garde son propre résultat. Les parcours navigateur ne remplacent pas les contrôles techniques.</p>
       </section>
@@ -189,14 +200,15 @@ export function ValidationTab({ ticket, onOpenTerminal }: { ticket: Ticket; onOp
 
       <QualityCriteriaPanel quality={quality} gate={gate} busy={busy} onSave={async (criteria) => { setResponse(await api.setQualityCriteria(ticket.id, { criteria })); }} onEvidence={async (input) => { setResponse(await api.addQualityEvidence(ticket.id, input)); }} onOpenEvidence={setSelectedEvidence} />
 
-      <QualityRunHistory quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
+      <QualityRequestHistory key={ticket.id} ticketId={ticket.id} />
+      <QualityRunHistory preview={preview} quality={quality} currentRunIds={gate.currentRunIds} onOpenEvidence={setSelectedEvidence} />
 
       <QualitySection number={4} title="Bilan avant livraison">
         <div className="space-y-3 rounded border border-border p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium">{deliveryLabel}</p><span className={cn("text-2xs", deliveryComplete ? "text-success" : "text-warning")}>Preuves {deliveryComplete ? "complètes" : "à compléter"}</span></div>{reservations.length > 0 && <ul className="space-y-1.5 text-xs text-muted-foreground">{reservations.map((reservation) => <li key={reservation} className="flex gap-2"><TriangleAlert className="mt-0.5 h-3 w-3 shrink-0 text-warning" /><span>{reservation}</span></li>)}</ul>}<p className="text-xs text-muted-foreground">{deliveryNote}</p></div>
       </QualitySection>
 
       <p className="border-t border-border pt-3 text-2xs text-muted-foreground">Les preuves sont liées à la version du code, aux critères et à la configuration. Toute modification impose une nouvelle vérification.</p>
-      <QualityEvidenceDialog evidence={selectedEvidence} quality={quality} currentRunIds={gate.currentRunIds} onClose={() => setSelectedEvidence(null)} />
+      <QualityEvidenceDialog evidence={selectedEvidence} quality={quality} currentRunIds={quality.runs.filter((run) => qualityRunIsCurrent(run, gate.currentRunIds, preview)).map((run) => run.id)} onClose={() => setSelectedEvidence(null)} />
     </div>
   );
 }

@@ -9,8 +9,11 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { OperationDeadlineOptions } from "./types.ts";
+
 export const BOUNDED_COMMAND_TIMEOUT_MS = 30_000;
 const MS_PER_SECOND = 1000;
+const FORCE_KILL_SIGNAL = 9;
 
 export interface BoundedCommandResult {
   exitCode: number;
@@ -21,14 +24,23 @@ export interface BoundedCommandResult {
   timeoutMs?: number;
 }
 
-export interface BoundedCommandOptions {
+export interface BoundedCommandOptions extends OperationDeadlineOptions {
   /** FULL child environment; omitted inherits the server's. */
   env?: Record<string, string>;
   timeoutMs?: number;
 }
 
+export function assertOperationActive(options: OperationDeadlineOptions): void {
+  options.signal?.throwIfAborted();
+  if (options.deadlineAt !== undefined && (!Number.isFinite(options.deadlineAt) || Date.now() >= options.deadlineAt)) {
+    throw new Error("The operation deadline expired before command execution.");
+  }
+}
+
 export async function runBoundedCommand(args: string[], cwd: string, options: BoundedCommandOptions = {}): Promise<BoundedCommandResult> {
-  const timeoutMs = options.timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS;
+  assertOperationActive(options);
+  const commandTimeoutMs = options.timeoutMs ?? BOUNDED_COMMAND_TIMEOUT_MS;
+  const timeoutMs = options.deadlineAt === undefined ? commandTimeoutMs : Math.min(commandTimeoutMs, options.deadlineAt - Date.now());
   const proc = Bun.spawn(args, {
     cwd,
     stdin: "ignore",
@@ -37,9 +49,12 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
     ...(options.env ? { env: options.env } : {}),
   });
   let timedOut = false;
+  const onAbort = (): void => { proc.kill(FORCE_KILL_SIGNAL); };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) onAbort();
   const timer = setTimeout(() => {
     timedOut = true;
-    proc.kill(9);
+    proc.kill(FORCE_KILL_SIGNAL);
   }, timeoutMs);
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -47,9 +62,12 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
     ]);
-    return { exitCode, stdout, stderr, timedOut, ...(options.timeoutMs !== undefined ? { timeoutMs } : {}) };
+    options.signal?.throwIfAborted();
+    if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) timedOut = true;
+    return { exitCode, stdout, stderr, timedOut, ...(options.timeoutMs !== undefined || options.deadlineAt !== undefined ? { timeoutMs } : {}) };
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onAbort);
   }
 }
 

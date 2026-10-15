@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
+import { QUALITY_HISTORY_VERSION, QUALITY_HISTORY_EVENT_LIMIT, QUALITY_HISTORY_BYTE_LIMIT, QUALITY_HISTORY_SUMMARY_LIMIT, QUALITY_HISTORY_PAGE_LIMIT, QUALITY_HISTORY_DEFAULT_PAGE_SIZE, qualityActionSchema, qualityRequestSchema } from "../../shared/qualityHistory.ts";
+import type { QualityAction, QualityActionInput, QualityActionPage, QualityRequest, QualityRequestPage } from "../../shared/qualityHistory.ts";
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, serializeAutonomousState, AutonomousExecutionError, autonomousResumeSchema, AUTONOMOUS_MAX_ENVIRONMENT_RETRIES, AUTONOMOUS_MAX_SAME_FAILURE_REPAIRS, AUTONOMOUS_MINUTE_MS, autonomousStateSchema, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 import type { AutonomousDelivery, AutonomousState, AutonomousStartKind, AutonomousResumeInput } from "../../shared/autonomous.ts";
 
@@ -52,7 +54,8 @@ import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 
-import { mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
+import { mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -2055,6 +2058,139 @@ export class Store {
       const snapshot = qualityCriteriaSnapshotSchema.parse({ ...input, id: nanoid(), ticketId, version, createdAt: Date.now() });
       this.db.query("INSERT INTO quality_criteria_snapshots (id, ticket_id, version, payload_json, created_at) VALUES (?, ?, ?, ?, ?)").run(snapshot.id, ticketId, version, JSON.stringify(snapshot), snapshot.createdAt);
       return snapshot;
+    });
+  }
+
+  reserveQualityRequest(input: Pick<QualityRequest, "requestId" | "ticketId" | "parameterHash" | "origin"> & Partial<Pick<QualityRequest, "deadlineAt" | "provider" | "kind" | "revision" | "previewId">>): { request: QualityRequest; reused: boolean } {
+    return this.transaction(() => {
+      const previous = this.getQualityRequest(input.requestId);
+      if (previous) {
+        if (previous.ticketId !== input.ticketId || previous.parameterHash !== input.parameterHash || previous.origin !== input.origin) throw new Error("Quality request id was already used with different parameters");
+        return { request: previous, reused: true };
+      }
+      const request = qualityRequestSchema.parse({ ...input, status: "reserved", runId: null, deadlineAt: input.deadlineAt ?? null, createdAt: Date.now(), completedAt: null, reason: null, historyVersion: QUALITY_HISTORY_VERSION, historyCompleteness: "complete", truncated: false });
+      this.db.query("INSERT INTO quality_requests (request_id, ticket_id, run_id, status, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(request.requestId, request.ticketId, null, request.status, JSON.stringify(request), request.createdAt);
+      return { request, reused: false };
+    });
+  }
+
+  getQualityRequest(requestId: string): QualityRequest | null {
+    const row = this.db.query("SELECT * FROM quality_requests WHERE request_id = ?").get(requestId);
+    return row ? mapQualityRequestRow(row) : null;
+  }
+
+  getQualityRequestForRun(runId: string): QualityRequest | null {
+    const row = this.db.query("SELECT * FROM quality_requests WHERE run_id = ?").get(runId);
+    return row ? mapQualityRequestRow(row) : null;
+  }
+
+  listQualityRequests(ticketId: string): QualityRequest[] {
+    return this.db.query("SELECT * FROM quality_requests WHERE ticket_id = ? ORDER BY created_at DESC, request_id DESC").all(ticketId).map(mapQualityRequestRow);
+  }
+
+  listQualityRequestsPage(ticketId: string, input: { beforeCreatedAt?: number; beforeRequestId?: string; limit?: number } = {}): QualityRequestPage {
+    const limit = z.number().int().positive().max(QUALITY_HISTORY_PAGE_LIMIT).parse(input.limit ?? QUALITY_HISTORY_DEFAULT_PAGE_SIZE);
+    let requests: QualityRequest[];
+    if (input.beforeCreatedAt !== undefined && input.beforeRequestId !== undefined) {
+      const beforeCreatedAt = z.number().int().nonnegative().parse(input.beforeCreatedAt);
+      const beforeRequestId = z.string().min(1).parse(input.beforeRequestId);
+      requests = this.db.query("SELECT * FROM quality_requests WHERE ticket_id = ? AND (created_at < ? OR (created_at = ? AND request_id < ?)) ORDER BY created_at DESC, request_id DESC LIMIT ?").all(ticketId, beforeCreatedAt, beforeCreatedAt, beforeRequestId, limit + 1).map(mapQualityRequestRow);
+    } else {
+      if (input.beforeCreatedAt !== undefined || input.beforeRequestId !== undefined) throw new Error("Quality request pagination requires both cursor fields");
+      requests = this.db.query("SELECT * FROM quality_requests WHERE ticket_id = ? ORDER BY created_at DESC, request_id DESC LIMIT ?").all(ticketId, limit + 1).map(mapQualityRequestRow);
+    }
+    const page = requests.slice(0, limit);
+    const last = page.at(-1);
+    const nextCursor = requests.length > limit && last ? { beforeCreatedAt: last.createdAt, beforeRequestId: last.requestId } : null;
+    return { requests: page, nextCursor };
+  }
+
+  getQualityAction(ticketId: string, actionId: string): QualityAction | null {
+    const row = this.db.query("SELECT quality_actions.* FROM quality_actions JOIN quality_requests ON quality_requests.request_id = quality_actions.request_id WHERE quality_actions.id = ? AND quality_requests.ticket_id = ?").get(actionId, ticketId);
+    return row ? mapQualityActionRow(row) : null;
+  }
+
+  private persistQualityRequest(request: QualityRequest): QualityRequest {
+    const validated = qualityRequestSchema.parse(request);
+    this.db.query("UPDATE quality_requests SET run_id = ?, status = ?, payload_json = ? WHERE request_id = ?").run(validated.runId, validated.status, JSON.stringify(validated), validated.requestId);
+    return validated;
+  }
+
+  bindQualityRequestRun(requestId: string, runId: string): QualityRequest {
+    return this.transaction(() => {
+      const request = this.getQualityRequest(requestId);
+      const run = this.getQualityRun(runId);
+      if (!request || !run || request.ticketId !== run.ticketId) throw new Error("Quality run does not belong to the request ticket");
+      if (request.runId === runId) return request;
+      if (request.runId !== null || request.status !== "reserved") throw new Error("Quality request can only bind one run before settlement");
+      const bound = this.persistQualityRequest({ ...request, runId, status: "running" });
+      for (const action of this.db.query("SELECT * FROM quality_actions WHERE request_id = ?").all(requestId).map(mapQualityActionRow)) {
+        this.db.query("UPDATE quality_actions SET run_id = ?, payload_json = ? WHERE id = ?").run(runId, JSON.stringify({ ...action, runId }), action.id);
+      }
+      return bound;
+    });
+  }
+
+  settleQualityRequest(requestId: string, status: "completed" | "refused" | "interrupted", reason?: string): QualityRequest {
+    return this.transaction(() => {
+      const request = this.getQualityRequest(requestId);
+      if (!request) throw new Error("Quality request not found");
+      if (request.status !== "reserved" && request.status !== "running") return request;
+      if (status === "completed" && !request.runId) throw new Error("A completed quality request requires a real run");
+      return this.persistQualityRequest({ ...request, status, completedAt: Date.now(), reason: reason === undefined ? null : redactSecrets(reason).slice(0, QUALITY_HISTORY_SUMMARY_LIMIT) });
+    });
+  }
+
+  markQualityHistoryPartial(requestId: string, truncated = false): void {
+    const request = this.getQualityRequest(requestId);
+    if (request) this.persistQualityRequest({ ...request, historyCompleteness: "partial", truncated: request.truncated || truncated });
+  }
+
+  appendQualityAction(requestId: string, input: QualityActionInput): QualityAction | null {
+    return this.transaction(() => {
+      const request = this.getQualityRequest(requestId);
+      if (!request) throw new Error("Quality request not found");
+      if (request.status !== "reserved" && request.status !== "running") throw new Error("Quality request is already settled");
+      if (request.truncated) return null;
+      const count = this.scalar("SELECT COUNT(*) AS n FROM quality_actions WHERE request_id = ?", requestId);
+      const bytes = this.scalar("SELECT COALESCE(SUM(length(CAST(payload_json AS BLOB))), 0) AS n FROM quality_actions WHERE request_id = ?", requestId);
+      let action = qualityActionSchema.parse({ ...minimizeQualityAction(input), id: nanoid(), actionId: input.actionId ?? nanoid(), requestId, runId: request.runId, sequence: count + 1, createdAt: Date.now() });
+      if (action.truncated) this.markQualityHistoryPartial(requestId);
+      if (count >= QUALITY_HISTORY_EVENT_LIMIT - 1 || bytes + Buffer.byteLength(JSON.stringify(action)) >= QUALITY_HISTORY_BYTE_LIMIT - QUALITY_HISTORY_SUMMARY_LIMIT) {
+        action = qualityActionSchema.parse({ id: nanoid(), actionId: nanoid(), requestId, runId: request.runId, sequence: count + 1, createdAt: Date.now(), kind: "history", phase: "history", status: "unknown", summary: "History truncated: the request journal reached its storage limit.", artifactPaths: [] });
+        this.markQualityHistoryPartial(requestId, true);
+      }
+      this.db.query("INSERT INTO quality_actions (id, request_id, run_id, sequence, payload_json) VALUES (?, ?, ?, ?, ?)").run(action.id, requestId, request.runId, action.sequence, JSON.stringify(action));
+      return action;
+    });
+  }
+
+  listQualityActions(ticketId: string, input: { requestId?: string; runId?: string; afterSequence?: number; limit?: number }): QualityActionPage {
+    let request: QualityRequest | null = null;
+    if (input.requestId) request = this.getQualityRequest(input.requestId);
+    else if (input.runId) request = this.getQualityRequestForRun(input.runId);
+    if (!request || request.ticketId !== ticketId || input.runId && request.runId !== input.runId) return { actions: [], nextSequence: null };
+    const limit = z.number().int().positive().max(QUALITY_HISTORY_PAGE_LIMIT).parse(input.limit ?? QUALITY_HISTORY_DEFAULT_PAGE_SIZE);
+    const afterSequence = z.number().int().nonnegative().parse(input.afterSequence ?? 0);
+    const actions = this.db.query("SELECT * FROM quality_actions WHERE request_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?").all(request.requestId, afterSequence, limit + 1).map(mapQualityActionRow);
+    const page = actions.slice(0, limit);
+    return { actions: page, nextSequence: actions.length > limit ? page.at(-1)?.sequence ?? null : null };
+  }
+
+  interruptQualityRequests(): void {
+    this.transaction(() => {
+      const requests = this.db.query("SELECT * FROM quality_requests WHERE status IN ('reserved', 'running')").all().map(mapQualityRequestRow);
+      for (const request of requests) {
+        const actions = this.db.query("SELECT * FROM quality_actions WHERE request_id = ? ORDER BY sequence ASC").all(request.requestId).map(mapQualityActionRow);
+        const open = new Map<string, QualityAction>();
+        for (const action of actions) {
+          if (action.status === "started") open.set(action.actionId, action);
+          else open.delete(action.actionId);
+        }
+        for (const action of open.values()) this.appendQualityAction(request.requestId, { ...action, status: "interrupted", summary: "Action result was not observed before backend restart." });
+        this.markQualityHistoryPartial(request.requestId);
+        this.settleQualityRequest(request.requestId, "interrupted", "Backend restarted before request completion; no action was replayed.");
+      }
     });
   }
 

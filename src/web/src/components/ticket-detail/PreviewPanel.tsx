@@ -29,6 +29,7 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const validationPending = useRef(false);
   const { busy, error, run } = useBusyAction();
 
   useEffect(() => {
@@ -118,12 +119,14 @@ export function PreviewPanel({ ticket }: { ticket: Ticket }) {
   }
 
   async function validate(validationProvider: "claude" | "codex") {
-    if (preview === null) return;
+    if (preview === null || validationPending.current) return;
+    validationPending.current = true;
     setValidationMessage(null);
     await run(async () => {
       await previewApi.validatePreview(preview.id, validationProvider);
       setValidationMessage(`Vérification locale ${validationProvider === "claude" ? "Claude" : "Codex"} lancée. Consultez Contrôles pour les résultats.`);
     }, "Impossible de lancer la vérification locale.");
+    validationPending.current = false;
   }
 
   return (

@@ -1,5 +1,5 @@
 import { ChevronsDownUp, ChevronsUpDown, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ORCHESTRATORS, ORCHESTRATOR_LABELS } from "@shared/constants";
 import type { Orchestrator } from "@shared/constants";
@@ -71,6 +71,7 @@ export function VerificationProgress({ pending, active }: { pending: boolean; ac
 export function VerificationTab({ ticket }: { ticket: Ticket }) {
   const [response, setResponse] = useState<QualityResponse | null>(null);
   const [provider, setProvider] = useState<Orchestrator>(ticket.orchestrator === "claude" ? "codex" : "claude");
+  const actionPending = useRef(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refresh = useCallback(async (signal?: AbortSignal): Promise<void> => { setResponse(await api.ticketQuality(ticket.id, signal)); }, [ticket.id]);
@@ -85,9 +86,11 @@ export function VerificationTab({ ticket }: { ticket: Ticket }) {
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
   }, [refresh]);
   const act = async (action: () => Promise<unknown>): Promise<void> => {
+    if (actionPending.current) return;
+    actionPending.current = true;
     setPending(true);
     setError(null);
-    try { await action(); await refresh(); } catch (failure) { setError(qualityErrorMessage(failure)); } finally { setPending(false); }
+    try { await action(); await refresh(); } catch (failure) { setError(qualityErrorMessage(failure)); } finally { actionPending.current = false; setPending(false); }
   };
   const active = response?.quality.runs.some((run) => QUALITY_ACTIVE_STATUSES.includes(run.status)) || response?.quality.iterations.some((iteration) => QUALITY_ITERATION_ACTIVE_STATUSES.includes(iteration.status));
   const busy = pending || !!active;

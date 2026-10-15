@@ -44,6 +44,8 @@ import {
   triageVerdictSchema,
   vcsProviderSchema,
 } from "../../shared/schemas.ts";
+import { qualityActionSchema, qualityRequestSchema } from "../../shared/qualityHistory.ts";
+import type { QualityAction, QualityRequest } from "../../shared/qualityHistory.ts";
 import { projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityValidationRun } from "../../shared/quality.ts";
 import type { ProjectConfig } from "../config.ts";
@@ -824,4 +826,14 @@ export function mapPreviewRow(raw: unknown): PreviewRecord {
 export function mapPreviewProjectSettingsRow(raw: unknown): PreviewProjectSettings {
   const row = previewPayloadRowSchema.parse(raw);
   return previewProjectSettingsSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityRequestRow(raw: unknown): QualityRequest {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityRequestSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapQualityActionRow(raw: unknown): QualityAction {
+  const row = qualityPayloadRowSchema.parse(raw);
+  return qualityActionSchema.parse(JSON.parse(row.payload_json));
 }

@@ -2,6 +2,8 @@ import { realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative } from "node:path";
 
 import { Elysia } from "elysia";
+import { nanoid } from "nanoid";
+import { z } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
 import { createQualityFollowUpSchema, manualQualityEvidenceSchema, setQualityCriteriaSchema, startQualityIterationSchema, validateQualitySchema } from "../shared/quality.ts";
@@ -10,6 +12,11 @@ import type { QualityManager } from "./agents/qualityManager.ts";
 import type { Store } from "./db/store.ts";
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
+
+const manualStartSchema = validateQualitySchema.extend({ requestId: z.string().trim().min(1).max(200).optional() });
+const historyQuerySchema = z.object({ afterSequence: z.coerce.number().int().nonnegative().optional(), limit: z.coerce.number().int().positive().max(200).optional() });
+
+const requestQuerySchema = z.object({ beforeCreatedAt: z.coerce.number().int().nonnegative().optional(), beforeRequestId: z.string().min(1).optional(), limit: z.coerce.number().int().positive().max(200).optional() }).refine((value) => (value.beforeCreatedAt === undefined) === (value.beforeRequestId === undefined));
 
 const HTTP_ACCEPTED = 202;
 const HTTP_BAD_REQUEST = 400;
@@ -32,6 +39,42 @@ interface QualityRouteDeps {
   quality?: QualityManager;
   qualityArtifactDirectory?: string;
   ticketOperations?: TicketOperations;
+}
+
+async function artifactResponse(directory: string, runId: string, artifactPath: string, set: { status?: number | string }): Promise<Response | { error: string }> {
+  try {
+    const qualityRoot = await realpath(directory);
+    const artifactRoot = await realpath(join(directory, runId));
+    const runWithinRoot = relative(qualityRoot, artifactRoot);
+    if (runWithinRoot.startsWith("..") || isAbsolute(runWithinRoot) || !runWithinRoot) {
+      set.status = HTTP_NOT_FOUND;
+      return { error: "Evidence artifact is unavailable." };
+    }
+    const filePath = await realpath(artifactPath);
+    const pathWithinRun = relative(artifactRoot, filePath);
+    if (pathWithinRun.startsWith("..") || isAbsolute(pathWithinRun) || !pathWithinRun) {
+      set.status = HTTP_NOT_FOUND;
+      return { error: "Evidence artifact is unavailable." };
+    }
+    const file = Bun.file(filePath);
+    if (file.size > MAX_ARTIFACT_BYTES) {
+      set.status = HTTP_BAD_REQUEST;
+      return { error: "Evidence artifact exceeds the download limit." };
+    }
+    const contentType = ARTIFACT_CONTENT_TYPES[extname(filePath).toLowerCase()];
+    const disposition = contentType ? "inline" : "attachment";
+    return new Response(file, {
+      headers: {
+        "content-type": contentType ?? "application/octet-stream",
+        "content-disposition": `${disposition}; filename="${basename(filePath).replace(/[^a-zA-Z0-9._-]/g, "_")}"`,
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      },
+    });
+  } catch {
+    set.status = HTTP_NOT_FOUND;
+    return { error: "Evidence artifact is unavailable." };
+  }
 }
 
 export function createQualityRoutes({ store, quality, qualityArtifactDirectory, ticketOperations }: QualityRouteDeps) {
@@ -62,45 +105,37 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
       return { error: getErrorMessage(error) };
     })
     .get("", ({ params }) => response(params.id))
+    .get("/requests", ({ params, query, set }) => {
+      const parsed = requestQuerySchema.safeParse(query);
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid request pagination." }; }
+      return store.listQualityRequestsPage(params.id, parsed.data);
+    })
+    .get("/requests/:requestId/actions", ({ params, query, set }) => {
+      const request = store.getQualityRequest(params.requestId);
+      const parsed = historyQuerySchema.safeParse(query);
+      if (!request || request.ticketId !== params.id) { set.status = HTTP_NOT_FOUND; return { error: "Quality request not found." }; }
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid history pagination." }; }
+      return store.listQualityActions(params.id, { requestId: params.requestId, ...parsed.data });
+    })
+    .get("/runs/:runId/actions", ({ params, query, set }) => {
+      const parsed = historyQuerySchema.safeParse(query);
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid history pagination." }; }
+      return store.listQualityActions(params.id, { runId: params.runId, ...parsed.data });
+    })
     .get("/evidence/:evidenceId/artifact", async ({ params, set }) => {
       const evidence = quality?.get(params.id).evidence.find((item) => item.id === params.evidenceId);
       if (!evidence?.artifactPath || !qualityArtifactDirectory) {
         set.status = HTTP_NOT_FOUND;
         return { error: "Evidence artifact is unavailable." };
       }
-      try {
-        const qualityRoot = await realpath(qualityArtifactDirectory);
-        const artifactRoot = await realpath(join(qualityArtifactDirectory, evidence.runId));
-        const runWithinRoot = relative(qualityRoot, artifactRoot);
-        if (runWithinRoot.startsWith("..") || isAbsolute(runWithinRoot) || !runWithinRoot) {
-          set.status = HTTP_NOT_FOUND;
-          return { error: "Evidence artifact is unavailable." };
-        }
-        const filePath = await realpath(evidence.artifactPath);
-        const pathWithinRun = relative(artifactRoot, filePath);
-        if (pathWithinRun.startsWith("..") || isAbsolute(pathWithinRun) || !pathWithinRun) {
-          set.status = HTTP_NOT_FOUND;
-          return { error: "Evidence artifact is unavailable." };
-        }
-        const file = Bun.file(filePath);
-        if (file.size > MAX_ARTIFACT_BYTES) {
-          set.status = HTTP_BAD_REQUEST;
-          return { error: "Evidence artifact exceeds the download limit." };
-        }
-        const contentType = ARTIFACT_CONTENT_TYPES[extname(filePath).toLowerCase()];
-        const disposition = contentType ? "inline" : "attachment";
-        return new Response(file, {
-          headers: {
-            "content-type": contentType ?? "application/octet-stream",
-            "content-disposition": `${disposition}; filename="${basename(filePath).replace(/[^a-zA-Z0-9._-]/g, "_")}"`,
-            "x-content-type-options": "nosniff",
-            "cache-control": "no-store",
-          },
-        });
-      } catch {
-        set.status = HTTP_NOT_FOUND;
-        return { error: "Evidence artifact is unavailable." };
-      }
+      return artifactResponse(qualityArtifactDirectory, evidence.runId, evidence.artifactPath, set);
+    })
+    .get("/actions/:actionId/artifacts/:index", async ({ params, set }) => {
+      const action = store.getQualityAction(params.id, params.actionId);
+      const index = z.coerce.number().int().nonnegative().safeParse(params.index);
+      const path = index.success ? action?.artifactPaths[index.data] : undefined;
+      if (!action?.runId || !path || !qualityArtifactDirectory) { set.status = HTTP_NOT_FOUND; return { error: "Action artifact is unavailable." }; }
+      return artifactResponse(qualityArtifactDirectory, action.runId, path, set);
     })
     .post("/criteria", async ({ params, body, set }) => {
       const parsed = setQualityCriteriaSchema.safeParse(body);
@@ -149,48 +184,50 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
       }
       return { ...await response(params.id), followUp };
     })
-    .post("/checks", async ({ params, set }) => {
-      const run = await quality?.runChecks(params.id);
+    .post("/checks", async ({ params, body, set }) => {
+      const parsed = z.object({ requestId: z.string().trim().min(1).max(200).optional() }).safeParse(body ?? {});
+      if (!parsed.success) { set.status = HTTP_BAD_REQUEST; return { error: "Invalid quality request." }; }
+      const run = await quality?.manualStart(params.id, "checks", null, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     })
     .post("/validate", async ({ params, body, set }) => {
-      const parsed = validateQualitySchema.safeParse(body);
+      const parsed = manualStartSchema.safeParse(body);
       if (!parsed.success) {
         set.status = HTTP_BAD_REQUEST;
         return { error: parsed.error.message };
       }
-      const run = await quality?.validate(params.id, parsed.data.provider);
+      const run = await quality?.manualStart(params.id, "behavior", parsed.data.provider, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     })
     .post("/verify", async ({ params, body, set }) => {
-      const parsed = validateQualitySchema.safeParse(body);
+      const parsed = manualStartSchema.safeParse(body);
       if (!parsed.success) {
         set.status = HTTP_BAD_REQUEST;
         return { error: parsed.error.message };
       }
-      const run = await quality?.verify(params.id, parsed.data.provider);
+      const run = await quality?.manualStart(params.id, "full", parsed.data.provider, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     })
     .post("/combined", async ({ params, body, set }) => {
-      const parsed = validateQualitySchema.safeParse(body);
+      const parsed = manualStartSchema.safeParse(body);
       if (!parsed.success) {
         set.status = HTTP_BAD_REQUEST;
         return { error: parsed.error.message };
       }
-      const run = await quality?.verifyCombined(params.id, parsed.data.provider);
+      const run = await quality?.manualStart(params.id, "combined", parsed.data.provider, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     })
     .post("/functional", async ({ params, body, set }) => {
-      const parsed = validateQualitySchema.safeParse(body);
+      const parsed = manualStartSchema.safeParse(body);
       if (!parsed.success) {
         set.status = HTTP_BAD_REQUEST;
         return { error: parsed.error.message };
       }
-      const run = await quality?.testFeature(params.id, parsed.data.provider);
+      const run = await quality?.manualStart(params.id, "functional", parsed.data.provider, parsed.data.requestId ?? nanoid());
       set.status = HTTP_ACCEPTED;
       return { run };
     })

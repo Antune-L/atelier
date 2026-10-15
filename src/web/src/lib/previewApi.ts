@@ -2,7 +2,7 @@ import { coolifyPrivateKeysResponseSchema } from "@shared/preview";
 import type { CoolifyInventory, PreviewGithubSourceResolution, PreviewProjectSettings, PreviewQualification, PreviewReadiness, PreviewRecord, PreviewSettings, UpdatePreviewProjectSettingsInput, UpdatePreviewSettingsInput } from "@shared/preview";
 import type { Ticket } from "@shared/schemas";
 
-import { request } from "@/lib/api";
+import { request, requestQualityRun } from "@/lib/api";
 
 export const previewApi = {
   settings: () => request<{ settings: PreviewSettings }>("/api/settings/previews"),
@@ -23,5 +23,5 @@ export const previewApi = {
   createPreview: (ticketId: string) => request<{ preview: PreviewRecord }>(`/api/tickets/${encodeURIComponent(ticketId)}/preview`, { method: "POST" }),
   stopPreview: (previewId: string) => request<{ preview: PreviewRecord }>(`/api/previews/${encodeURIComponent(previewId)}`, { method: "DELETE" }),
   retryCleanup: (previewId: string) => request<{ preview: PreviewRecord }>(`/api/previews/${encodeURIComponent(previewId)}/cleanup`, { method: "POST" }),
-  validatePreview: (previewId: string, provider: "claude" | "codex") => request<{ run: { id: string } }>(`/api/previews/${encodeURIComponent(previewId)}/validate`, { method: "POST", body: JSON.stringify({ provider }) }),
+  validatePreview: (previewId: string, provider: "claude" | "codex", requestId = crypto.randomUUID()) => requestQualityRun<{ run: { id: string } }>(`/api/previews/${encodeURIComponent(previewId)}/validate`, { provider, requestId }),
 };

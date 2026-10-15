@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button";
 import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Sheet } from "@/components/ui/sheet";
-import { Switch } from "@/components/ui/switch";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
@@ -82,10 +81,9 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   // null = untouched → fall back to the selected project's configured default.
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
   const autoMerge = !prOnly && (autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false);
-  const [addScreenshotsChoice, setAddScreenshotsChoice] = useState<boolean | null>(null);
   // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
   const addScreenshots =
-    !autoMerge && (addScreenshotsChoice ?? selectedProject?.defaultAddScreenshots ?? false);
+    !autoMerge && (selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [argusMultiLoop, setArgusMultiLoop] = useState(false);
   const [stealth, setStealth] = useState(false);
@@ -136,7 +134,6 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     setPrdEnabled(false);
     setPrDraft(true);
     setAutoMergeChoice(null);
-    setAddScreenshotsChoice(null);
     setVerifyFeature(false);
     setArgusMultiLoop(false);
     setStealth(false);
@@ -424,10 +421,6 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                 >
                   <AutonomousOptions id="new-autonomous" values={autonomousOptions} prOnly={prOnly} onChange={updateAutonomousOptions} />
                 </TicketOptionsToggleGroup>
-                <label className="flex items-center justify-between gap-3 text-sm">
-                  <span>Ajouter des captures dans la PR{autoMerge && <span className="block text-xs text-muted-foreground">Indisponible avec la fusion automatique.</span>}</span>
-                  <Switch checked={addScreenshots} disabled={autoMerge} onCheckedChange={setAddScreenshotsChoice} aria-label="Ajouter des captures dans la PR" />
-                </label>
               </div>
             </details>
             {error && <p role="alert" className="text-sm text-danger">{error}</p>}

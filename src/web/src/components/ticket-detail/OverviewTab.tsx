@@ -1,4 +1,5 @@
-import { ArrowRight, ExternalLink } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronUp, ExternalLink, FileText } from "lucide-react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { COLUMN_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
@@ -28,6 +29,37 @@ interface OverviewTabProps {
 const SUMMARY_COLUMNS: Ticket["column"][] = ["done", "merged"];
 const MISSING_VALUE = "-";
 const BRIEF_EXCERPT_LENGTH = 360;
+
+interface TicketBriefProps {
+  description: string;
+  onEdit: () => void;
+}
+
+function TicketBrief({ description, onEdit }: TicketBriefProps) {
+  const [expanded, setExpanded] = useState(false);
+  const headingId = useId();
+  const contentId = useId();
+  const hasDescription = description.trim().length > 0;
+  const canExpand = hasDescription && description.length > BRIEF_EXCERPT_LENGTH;
+
+  return (
+    <section aria-labelledby={headingId} className="ticket-brief min-w-0 space-y-4 rounded-lg border p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id={headingId} className="flex items-center gap-2 text-base font-semibold"><FileText className="size-4" aria-hidden />Brief</h2>
+        <span className="ticket-brief-muted text-xs">Demande initiale</span>
+      </div>
+      {hasDescription ? (
+        <div id={contentId} className={canExpand && !expanded ? "ticket-brief-preview" : undefined} onFocusCapture={() => setExpanded(true)}>
+          <Markdown content={description} />
+        </div>
+      ) : <p className="ticket-brief-muted text-sm">Aucun brief renseigné.</p>}
+      <div className="ticket-brief-footer flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+        {canExpand && <Button variant="outline" size="sm" className="ticket-brief-action" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(!expanded)}>{expanded ? "Replier le brief" : "Lire le brief complet"}{expanded ? <ChevronUp className="size-3.5" aria-hidden /> : <ChevronDown className="size-3.5" aria-hidden />}</Button>}
+        <Button variant="ghost" size="sm" className="ticket-brief-action ml-auto" onClick={onEdit}>Modifier le brief<ArrowRight className="size-3.5" aria-hidden /></Button>
+      </div>
+    </section>
+  );
+}
 
 function formatErrorDetails(details: ErrorDetails): string {
   const lines = [
@@ -67,6 +99,8 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
 
   return (
     <div className="space-y-5 pb-4">
+      <TicketBrief key={ticket.id} description={ticket.description} onEdit={() => onNavigate("description")} />
+
       <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
         <p className="text-xs text-muted-foreground">Prochaine action</p>
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -78,11 +112,6 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
       {ticket.error && <p role="alert" className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{ticket.error}</p>}
       {ticket.implementationPlan && (ticket.implementationPlan.recovery || canRecoverImplementation(ticket)) && <ImplementationRecovery key={`${ticket.id}:${ticket.implementationPlan.id}:${ticket.implementationPlan.recovery?.generation ?? "delegated"}:${ticket.slotId}`} ticket={ticket} plan={ticket.implementationPlan} />}
       {ticket.errorDetails && <details className="rounded-md border border-border text-sm text-muted-foreground"><summary className="cursor-pointer px-3 py-2">Diagnostic de l’interruption</summary><pre className="max-h-64 overflow-auto whitespace-pre border-t border-border p-3 font-mono text-xs">{formatErrorDetails(ticket.errorDetails)}</pre></details>}
-
-      <section className="space-y-3 rounded-lg border border-border p-4">
-        <SectionHeader aside={<Button variant="ghost" size="sm" onClick={() => onNavigate("description")}>Lire ou modifier le brief<ArrowRight className="size-3.5" aria-hidden /></Button>}>Brief</SectionHeader>
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{ticket.description ? `${ticket.description.slice(0, BRIEF_EXCERPT_LENGTH)}${ticket.description.length > BRIEF_EXCERPT_LENGTH ? "…" : ""}` : "Aucun brief renseigné."}</p>
-      </section>
 
       <section className="space-y-3 rounded-lg border border-border p-4">
         <SectionHeader>Exécution et coût</SectionHeader>

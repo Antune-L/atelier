@@ -171,6 +171,44 @@
 
 /* Markdown rendering (PRD / comments). Prose-like spacing on a light surface. */
 @layer components {
+  .ticket-brief {
+    --brief-background: #e9f0e8;
+    --brief-foreground: #23362e;
+    --brief-muted-foreground: #466353;
+    --brief-border: #c4d3c7;
+    --brief-accent: #669983;
+    --brief-preview-height: 14rem;
+    background-color: var(--brief-background);
+    color: var(--brief-foreground);
+    border-color: var(--brief-border);
+    box-shadow: inset 3px 0 0 var(--brief-accent);
+  }
+  .ticket-brief-muted { color: var(--brief-muted-foreground); }
+  .ticket-brief-preview {
+    max-height: var(--brief-preview-height);
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, #000 calc(var(--brief-preview-height) - 2rem), transparent var(--brief-preview-height));
+  }
+  .ticket-brief-footer { border-color: var(--brief-border); }
+  .ticket-brief .ticket-brief-action {
+    background-color: transparent;
+    color: var(--brief-foreground);
+    border-color: var(--brief-accent);
+  }
+  .ticket-brief .ticket-brief-action:hover { background-color: rgb(35 54 46 / 6%); }
+  .ticket-brief .markdown { color: var(--brief-foreground); line-height: 1.75; overflow-wrap: anywhere; }
+  .ticket-brief .markdown a { color: var(--brief-foreground); }
+  .ticket-brief .markdown blockquote { color: var(--brief-muted-foreground); }
+  .ticket-brief .markdown code,
+  .ticket-brief .markdown pre { background-color: rgb(35 54 46 / 6%); color: var(--brief-foreground); }
+  .ticket-brief .markdown pre code { background-color: transparent; }
+  .ticket-brief .markdown blockquote,
+  .ticket-brief .markdown pre,
+  .ticket-brief .markdown img,
+  .ticket-brief .markdown th,
+  .ticket-brief .markdown td,
+  .ticket-brief .markdown hr { border-color: var(--brief-border); }
+
   .markdown {
     @apply text-sm leading-relaxed text-foreground;
   }

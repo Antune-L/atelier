@@ -209,19 +209,22 @@ export function ProjectPanel({
     }
   };
 
-  const applyInspection = (result: RepoInspection): void => {
+  const applyInspection = (result: RepoInspection, account: string | null): void => {
+    const provider = result.vcsProvider?.value ?? DEFAULT_VCS_PROVIDER;
     setInspection(result);
     setRepoPath(result.repoPath);
     clearConnection();
-    if (result.label) setLabel(result.label.value);
-    if (result.group) setGroup(result.group.value);
-    if (result.baseBranch) setBaseBranch(result.baseBranch.value);
-    if (result.vcsProvider) setVcsProvider(result.vcsProvider.value);
-    if (result.runScript) setRunScript(result.runScript.value);
+    setLabel(result.label?.value ?? "");
+    setGroup(result.group?.value ?? "");
+    setBaseBranch(result.baseBranch?.value ?? "");
+    setVcsProvider(provider);
+    setRunScript(result.runScript?.value ?? "");
+    setGithubAccount(provider === "github" ? account : null);
+    setValidation({ ...validationDraft(undefined), startCommand: result.validationStartCommand?.value ?? "" });
   };
 
-  const enterForm = (result: RepoInspection): void => {
-    applyInspection(result);
+  const enterForm = (result: RepoInspection, account: string | null): void => {
+    applyInspection(result, account);
     setStep("form");
     const detected = result.vcsProvider;
     if (result.isGitRepo && detected !== null) {
@@ -234,8 +237,7 @@ export function ProjectPanel({
   /** « Depuis GitHub »: the server-side clone joins the same form as an inspected local folder. */
   const applyClone = (result: CloneProjectResponse, account: string | null): void => {
     setClonedUrl(result.cloneUrl);
-    setGithubAccount(account);
-    enterForm(result.inspection);
+    enterForm(result.inspection, account);
   };
 
   const inspect = async (path: string): Promise<void> => {
@@ -246,8 +248,7 @@ export function ProjectPanel({
     try {
       const result = await api.inspectProject({ repoPath: trimmed });
       setClonedUrl(null);
-      setGithubAccount(null);
-      enterForm(result);
+      enterForm(result, result.githubAccount?.value ?? null);
     } catch (e) {
       onError(errorMessage(e));
     } finally {
@@ -557,7 +558,7 @@ export function ProjectPanel({
           </div>
         </Field>
         {vcsProvider === "github" && (
-          <Field label="Compte GitHub">
+          <Field label="Compte GitHub" hint={clonedUrl === null ? suggestionHint(inspection?.githubAccount, githubAccount) : undefined}>
             <div className="flex w-full flex-col items-start gap-1">
               <Select
                 value={githubAccount ?? MACHINE_ACCOUNT_VALUE}
@@ -603,7 +604,12 @@ export function ProjectPanel({
         >
           {advancedFields}
         </AdvancedSection>
-        <ValidationConfigFields value={validation} onChange={setValidation} />
+        <ValidationConfigFields
+          value={validation}
+          onChange={setValidation}
+          startCommandHint={suggestionHint(inspection?.validationStartCommand, validation.startCommand)}
+          composeFile={creating ? inspection?.composeFile ?? null : null}
+        />
         {project !== null && <ProjectPreviewSettings key={project.key} project={project} />}
       </div>
 

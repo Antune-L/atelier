@@ -8,6 +8,7 @@
  */
 
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
+import type { RepoInspectionContext } from "./repoInspection.ts";
 import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
@@ -444,9 +445,9 @@ export interface SystemAdapter {
 
   /**
    * Read-only, deterministic inspection of a folder picked in the project form (package.json, git
-   * refs, origin URL, lockfile) to prefill it. Throws "dossier introuvable" when it is not a directory.
+   * refs, origin URL, lockfile, compose file) to prefill it. Throws "dossier introuvable" when it is not a directory.
    */
-  inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
+  inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">>;
 
   // ---- GitHub accounts and clones (« Depuis GitHub » project mode) ----
   /** Registered GitHub accounts (one GH_CONFIG_DIR each); the fake keeps them in memory. */

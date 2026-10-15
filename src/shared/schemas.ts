@@ -659,6 +659,9 @@ export const repoInspectionSchema = z.object({
   baseBranch: repoSuggestionSchema.nullable(),
   vcsProvider: vcsProviderSuggestionSchema.nullable(),
   runScript: repoSuggestionSchema.nullable(),
+  validationStartCommand: repoSuggestionSchema.nullable(),
+  githubAccount: repoSuggestionSchema.nullable(),
+  composeFile: z.string().nullable(),
 });
 export type RepoInspection = z.infer<typeof repoInspectionSchema>;
 

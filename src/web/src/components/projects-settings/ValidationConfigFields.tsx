@@ -55,9 +55,11 @@ export function validationDraftConfig(draft: ValidationDraft): ProjectValidation
 interface ValidationConfigFieldsProps {
   value: ValidationDraft;
   onChange: (value: ValidationDraft) => void;
+  startCommandHint?: string;
+  composeFile?: string | null;
 }
 
-export function ValidationConfigFields({ value, onChange }: ValidationConfigFieldsProps) {
+export function ValidationConfigFields({ value, onChange, startCommandHint, composeFile }: ValidationConfigFieldsProps) {
   const invalid = value.enabled && validationDraftConfig(value) === null;
   let configurationStatus = "Désactivée";
   if (value.enabled) configurationStatus = invalid ? "À corriger" : "Activée";
@@ -82,6 +84,16 @@ export function ValidationConfigFields({ value, onChange }: ValidationConfigFiel
         ) : (
           <p className="mt-1 text-muted-foreground">La validation indépendante ne sera pas demandée pour ce projet.</p>
         )}
+        {!value.enabled && startCommandHint && (
+          <p className="mt-1 text-muted-foreground">
+            Commande de démarrage proposée ({startCommandHint}) : <code className="font-mono">{value.startCommand}</code>
+          </p>
+        )}
+        {composeFile && (
+          <p className="mt-1 text-muted-foreground">
+            {composeFile} détecté : si la validation a besoin de ces services, configurez la préparation et le nettoyage.
+          </p>
+        )}
       </div>
       {value.enabled && (
         <>
@@ -92,7 +104,7 @@ export function ValidationConfigFields({ value, onChange }: ValidationConfigFiel
               <Field label="Préparer l’environnement">
                 <Input aria-label="Commande de préparation de validation" value={value.setupCommand} onChange={(event) => onChange({ ...value, setupCommand: event.target.value })} />
               </Field>
-              <Field label="Démarrer l’application de test">
+              <Field label="Démarrer l’application de test" hint={startCommandHint}>
                 <Input aria-label="Commande de démarrage de validation" value={value.startCommand} onChange={(event) => onChange({ ...value, startCommand: event.target.value })} />
               </Field>
               <Field label="Nettoyer après la validation">

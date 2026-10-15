@@ -5,6 +5,7 @@
 
 import { sshHostFromRemoteUrl } from "../repoInspection.ts";
 
+export const GITHUB_HOST = "github.com";
 const GIT_REMOTE_SCP_RE = /^(?:[^@/]+@)?([^@/:]+):(?!\/\/)(.+)$/;
 
 export interface GithubRepoRef {

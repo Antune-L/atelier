@@ -72,6 +72,7 @@ import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
+import type { RepoInspectionContext } from "./system/repoInspection.ts";
 import { githubAccountLabel, GithubAccountError, normalizeGithubLogin } from "./system/github/accountEnv.ts";
 import { CloneConflictError, CloneSourceError, CloneTimeoutError } from "./system/github/clone.ts";
 import { redactSecrets } from "./system/secretRedaction.ts";
@@ -108,7 +109,7 @@ interface PaneReader {
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
   listBranches(repoPath: string): Promise<string[]>;
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
-  inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">>;
+  inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">>;
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
   mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
@@ -308,7 +309,8 @@ async function inspectProjectFolder(store: Store, system: PaneReader, repoPath: 
     if (row.group) knownGroups.add(row.group);
     if (existingProjectKey === null && normalizeRepoPath(row.repoPath) === requestedPath) existingProjectKey = key;
   }
-  const inspection = await system.inspectRepo(repoPath, [...knownGroups]);
+  const githubLogins = await system.githubAccounts().logins().catch(() => []);
+  const inspection = await system.inspectRepo(repoPath, { knownGroups: [...knownGroups], githubLogins });
   return { ...inspection, existingProjectKey } satisfies RepoInspection;
 }
 

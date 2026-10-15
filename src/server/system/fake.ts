@@ -16,7 +16,8 @@ import { createFakeCoolifyTransport } from "./coolifyClient.ts";
 import { FakeGithubAccountRegistry } from "./github/accounts.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import { plannedClonePath } from "./github/clone.ts";
-import { FALLBACK_BASE_BRANCH, formatProjectLabel } from "./repoInspection.ts";
+import { FALLBACK_BASE_BRANCH, formatProjectLabel, suggestGithubAccount } from "./repoInspection.ts";
+import type { RepoInspectionContext } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
   AutonomousWorkspace,
@@ -58,6 +59,8 @@ import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
 const FAKE_GITHUB_REPOS = ["Antune-L/atelier", "acme-org/api", "acme-org/web"];
+const FAKE_GITHUB_OWNER = "Antune-L";
+const FAKE_VALIDATION_START_COMMAND = "bun run dev --port $PORT --host 127.0.0.1 --strictPort";
 const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
 const FAKE_CONTEXT_WINDOW = 200_000;
 const FAKE_CONTEXT_BASE_TOKENS = 12_000;
@@ -578,8 +581,8 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).testConnection(repoPath, Date.now());
   }
 
-  async inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">> {
-    this.log("inspectRepo", { repoPath, knownGroups });
+  async inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">> {
+    this.log("inspectRepo", { repoPath, ...context });
     const label = formatProjectLabel(basename(repoPath));
     return {
       repoPath,
@@ -589,6 +592,9 @@ export class FakeSystemAdapter implements SystemAdapter {
       baseBranch: { value: FALLBACK_BASE_BRANCH, source: "remoteHead" },
       vcsProvider: { value: "github", source: "remoteUrl" },
       runScript: null,
+      validationStartCommand: { value: FAKE_VALIDATION_START_COMMAND, source: "viteScript" },
+      githubAccount: suggestGithubAccount(FAKE_GITHUB_OWNER, context.githubLogins),
+      composeFile: null,
     };
   }
 

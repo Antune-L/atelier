@@ -8,7 +8,8 @@ import type { ProjectConfig } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { KeyedMutex } from "../mutex.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
-import { LOCKFILE_NAMES, parsePackageManifest } from "../system/repoInspection.ts";
+import { presentPackageManagerFiles, resolvePackageManager, scriptRunner } from "../system/packageManager.ts";
+import { parsePackageManifest } from "../system/repoInspection.ts";
 import type { SystemAdapter, ValidationServiceHandle } from "../system/types.ts";
 
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
@@ -27,7 +28,6 @@ export function verificationProblem(summary: string, details: string) {
   return { summary, details: qualityErrorMessage(details), evidenceId: null, provider: null, sessionId: null, artifactPath: null };
 }
 
-const runners: Record<string, string> = { "bun.lock": "bun run", "bun.lockb": "bun run", "pnpm-lock.yaml": "pnpm", "yarn.lock": "yarn", "package-lock.json": "npm run" };
 function assertDatabaseIsolation(project: ProjectConfig): void {
   const databaseUrl = project.validation?.environment?.DATABASE_URL;
   if (databaseUrl && !["${VALIDATION_DATABASE_NAMESPACE}", "${VALIDATION_DATABASE_PATH}", "${VALIDATION_RUN_DIRECTORY}", "${VALIDATION_PORT}"].some((placeholder) => databaseUrl.includes(placeholder))) throw new Error("Validation DATABASE_URL must contain a run-specific database namespace, path, directory, or port placeholder.");
@@ -37,10 +37,7 @@ export async function combinedCheckCommands(project: ProjectConfig, directory: s
   if (simulated) return configured.flatMap(([name, command]) => command ? [{ name, command }] : []);
   const file = Bun.file(join(directory, "package.json"));
   const manifest = await file.exists() ? parsePackageManifest(await file.text()) : null;
-  let runner = "npm run";
-  for (const lock of LOCKFILE_NAMES) {
-    if (await Bun.file(join(directory, lock)).exists()) { runner = runners[lock] ?? runner; break; }
-  }
+  const runner = scriptRunner(resolvePackageManager(manifest?.packageManager, await presentPackageManagerFiles(directory)));
   const names = new Set(["typecheck", "lint", "test", ...Object.keys(manifest?.scripts ?? {}).filter((name) => /^(?:test|tests|e2e|unit|integration|playwright|cypress)(?:$|[:_-])/i.test(name) && !/(?:watch|ui|debug|update|install|report|codegen|serve)(?:$|[:_-])/i.test(name))]);
   return [...names].flatMap((name) => {
     const override = configured.find(([key]) => key === name)?.[1];

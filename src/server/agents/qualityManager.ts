@@ -17,7 +17,8 @@ import { createLogger } from "../logger.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { AgentExecutionGuard, AgentSessionOptions } from "../system/agentSession.ts";
 import { isSuccessStatus, previewStatus } from "../system/previewNetwork.ts";
-import { parsePackageManifest, LOCKFILE_NAMES } from "../system/repoInspection.ts";
+import { presentPackageManagerFiles, resolvePackageManager, scriptRunner } from "../system/packageManager.ts";
+import { parsePackageManifest } from "../system/repoInspection.ts";
 import type { SystemAdapter, ValidationCommandResult, ValidationRevision, ValidationServiceHandle, ValidationWorkspaceOptions } from "../system/types.ts";
 import { validationDatabasePath } from "../system/validationWorkspace.ts";
 
@@ -38,8 +39,6 @@ const HEALTH_REQUEST_TIMEOUT_MS = 2_000;
 const OUTPUT_LIMIT = 32_768;
 const PREVIOUS_OBSERVATION_LIMIT = 2_000;
 const REVISION_CACHE_MS = 3_000;
-const DEFAULT_CHECK_RUNNER = "npm run";
-const CHECK_RUNNERS: Record<string, string> = { "bun.lock": "bun run", "bun.lockb": "bun run", "pnpm-lock.yaml": "pnpm", "yarn.lock": "yarn", "package-lock.json": "npm run" };
 const DATABASE_ISOLATION_PLACEHOLDERS = ["${VALIDATION_DATABASE_NAMESPACE}", "${VALIDATION_DATABASE_PATH}", "${VALIDATION_RUN_DIRECTORY}", "${VALIDATION_PORT}"];
 const SIMULATED_CRITERION_ID = "SIMULATED";
 const SIMULATED_CRITERION_TEXT = "Simulation uniquement : l’acceptation indépendante n’a pas été vérifiée.";
@@ -1324,10 +1323,7 @@ export class QualityManager {
     }
     const manifestFile = Bun.file(join(directory, "package.json"));
     const manifest = await manifestFile.exists() ? parsePackageManifest(await manifestFile.text()) : null;
-    let runner = DEFAULT_CHECK_RUNNER;
-    for (const name of LOCKFILE_NAMES) {
-      if (await Bun.file(join(directory, name)).exists()) { runner = CHECK_RUNNERS[name] ?? DEFAULT_CHECK_RUNNER; break; }
-    }
+    const runner = scriptRunner(resolvePackageManager(manifest?.packageManager, await presentPackageManagerFiles(directory)));
     const commands: CheckCommand[] = [];
     for (const name of CHECK_NAMES) {
       const configured = project.scripts?.[name];

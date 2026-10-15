@@ -22,6 +22,8 @@ export const INSPECTION_SOURCE_LABELS: Record<RepoInspectionSource, string> = {
   remoteUrl: "déduit du remote origin",
   lockfile: "déduit du lockfile et des scripts",
   fallback: "valeur par défaut",
+  viteScript: "proposée pour Vite, à vérifier",
+  remoteOwner: "propriétaire du remote origin",
 };
 
 interface Suggestion<T> {

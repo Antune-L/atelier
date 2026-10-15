@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import type { VcsProvider } from "../../shared/constants.ts";
 import type { RepoInspection } from "../../shared/schemas.ts";
+import { scriptArgumentSeparator, scriptRunner } from "./packageManager.ts";
+import type { ResolvedPackageManager } from "./packageManager.ts";
 
 export type RepoInspectionResult = Omit<RepoInspection, "existingProjectKey">;
 type RepoSuggestion = NonNullable<RepoInspection["label"]>;
@@ -19,26 +21,23 @@ const SCP_LIKE_REMOTE_PATTERN = /^(?:[^@/\s]+@)?([A-Za-z0-9][^:/\s]*):(?!\/\/)/;
 const SSH_URL_REMOTE_PATTERN = /^ssh:\/\/(?:[^@/\s]+@)?([A-Za-z0-9][^:/\s]*)/;
 const SSH_CONFIG_HOSTNAME_PATTERN = /^hostname\s+(\S+)$/m;
 const RUN_SCRIPT_CANDIDATES = ["dev", "start", "serve"] as const;
-const DEFAULT_SCRIPT_RUNNER = "npm run";
+export const COMPOSE_FILE_NAMES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"] as const;
+const VITE_BINARY = "vite";
+const VITE_DEV_SUBCOMMANDS = ["dev", "serve"];
+const SHELL_OPERATOR_PATTERN = /[&|;<>`$()\n]/;
+const SCRIPT_TOKEN_SEPARATOR = /\s+/;
+const OPTION_PREFIX = "-";
+// NOTE: validation health-checks 127.0.0.1:$PORT; `--strictPort` makes Vite fail instead of silently taking another port.
+const VITE_VALIDATION_FLAGS = "--port $PORT --host 127.0.0.1 --strictPort";
 
 const PROVIDER_HOST_MARKERS: { provider: VcsProvider; markers: string[] }[] = [
   { provider: "github", markers: ["github.com"] },
   { provider: "azureDevops", markers: ["dev.azure.com", "visualstudio.com"] },
 ];
 
-/** Lockfiles in detection priority order, each mapped to the command prefix that runs a package script. */
-const LOCKFILE_RUNNERS = [
-  { file: "bun.lock", runner: "bun run" },
-  { file: "bun.lockb", runner: "bun run" },
-  { file: "pnpm-lock.yaml", runner: "pnpm" },
-  { file: "yarn.lock", runner: "yarn" },
-  { file: "package-lock.json", runner: "npm run" },
-] as const;
-
-export const LOCKFILE_NAMES: readonly string[] = LOCKFILE_RUNNERS.map((entry) => entry.file);
-
 const packageManifestSchema = z.object({
   name: z.string().optional().catch(undefined),
+  packageManager: z.string().optional().catch(undefined),
   scripts: z.record(z.string(), z.unknown()).optional().catch(undefined),
 });
 export type PackageManifest = z.infer<typeof packageManifestSchema>;
@@ -47,14 +46,19 @@ export interface RepoFacts {
   repoPath: string;
   isGitRepo: boolean;
   manifest: PackageManifest | null;
-  lockfile: string | null;
+  packageManager: ResolvedPackageManager | null;
   remoteHead: string | null;
   currentBranch: string | null;
   remoteUrl: string | null;
   /** Real hostname behind an SSH host alias of the origin URL (`ssh -G`), when one was resolved. */
   remoteSshHostname: string | null;
   knownGroups: string[];
+  githubOwner: string | null;
+  githubLogins: string[];
+  composeFile: string | null;
 }
+
+export type RepoInspectionContext = Pick<RepoFacts, "knownGroups" | "githubLogins">;
 
 export function parsePackageManifest(text: string): PackageManifest | null {
   try {
@@ -121,19 +125,55 @@ export function suggestVcsProvider(remoteUrl: string | null, remoteSshHostname: 
   return provider ? { value: provider, source: "remoteUrl" } : null;
 }
 
-export function suggestRunScript(manifest: PackageManifest | null, lockfile: string | null): RepoSuggestion | null {
+function pickRunScript(manifest: PackageManifest | null): string | null {
   const scripts = manifest?.scripts;
   if (!scripts) return null;
-  const script = RUN_SCRIPT_CANDIDATES.find((name) => Object.hasOwn(scripts, name));
+  return RUN_SCRIPT_CANDIDATES.find((name) => Object.hasOwn(scripts, name)) ?? null;
+}
+
+export function suggestRunScript(manifest: PackageManifest | null, packageManager: ResolvedPackageManager | null): RepoSuggestion | null {
+  const script = pickRunScript(manifest);
   if (!script) return null;
-  const runner = LOCKFILE_RUNNERS.find((entry) => entry.file === lockfile)?.runner ?? DEFAULT_SCRIPT_RUNNER;
-  return { value: `${runner} ${script}`, source: "lockfile" };
+  return { value: `${scriptRunner(packageManager)} ${script}`, source: packageManager?.lockfile ? "lockfile" : "packageManifest" };
+}
+
+export function isViteDevScript(body: string): boolean {
+  if (SHELL_OPERATOR_PATTERN.test(body)) return false;
+  const [binary, subcommand] = body.trim().split(SCRIPT_TOKEN_SEPARATOR);
+  if (binary !== VITE_BINARY) return false;
+  return subcommand === undefined || subcommand.startsWith(OPTION_PREFIX) || VITE_DEV_SUBCOMMANDS.includes(subcommand);
+}
+
+export function suggestValidationStartCommand(manifest: PackageManifest | null, packageManager: ResolvedPackageManager | null): RepoSuggestion | null {
+  const script = pickRunScript(manifest);
+  const body = script ? manifest?.scripts?.[script] : undefined;
+  if (!script || typeof body !== "string" || !isViteDevScript(body)) return null;
+  const command = `${scriptRunner(packageManager)} ${script}${scriptArgumentSeparator(packageManager)} ${VITE_VALIDATION_FLAGS}`;
+  return { value: command, source: "viteScript" };
+}
+
+export function suggestGithubAccount(githubOwner: string | null, githubLogins: string[]): RepoSuggestion | null {
+  if (!githubOwner) return null;
+  const owner = githubOwner.toLowerCase();
+  const login = githubLogins.find((candidate) => candidate.trim().toLowerCase() === owner);
+  return login ? { value: login, source: "remoteOwner" } : null;
 }
 
 export function buildRepoInspection(facts: RepoFacts): RepoInspectionResult {
   const label = suggestLabel(facts.repoPath, facts.manifest);
   if (!facts.isGitRepo) {
-    return { repoPath: facts.repoPath, isGitRepo: false, label, group: null, baseBranch: null, vcsProvider: null, runScript: null };
+    return {
+      repoPath: facts.repoPath,
+      isGitRepo: false,
+      label,
+      group: null,
+      baseBranch: null,
+      vcsProvider: null,
+      runScript: null,
+      validationStartCommand: null,
+      githubAccount: null,
+      composeFile: null,
+    };
   }
   return {
     repoPath: facts.repoPath,
@@ -142,6 +182,9 @@ export function buildRepoInspection(facts: RepoFacts): RepoInspectionResult {
     group: suggestGroup(facts.repoPath, facts.knownGroups),
     baseBranch: suggestBaseBranch(facts.remoteHead, facts.currentBranch),
     vcsProvider: suggestVcsProvider(facts.remoteUrl, facts.remoteSshHostname),
-    runScript: suggestRunScript(facts.manifest, facts.lockfile),
+    runScript: suggestRunScript(facts.manifest, facts.packageManager),
+    validationStartCommand: suggestValidationStartCommand(facts.manifest, facts.packageManager),
+    githubAccount: suggestGithubAccount(facts.githubOwner, facts.githubLogins),
+    composeFile: facts.composeFile,
   };
 }

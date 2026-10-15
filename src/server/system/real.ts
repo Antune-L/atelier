@@ -44,9 +44,11 @@ import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
 import { captureValidationRevision, cleanupValidationWorkspace, prepareValidationWorkspace, runValidationCommand, startValidationService } from "./validationWorkspace.ts";
+import { installCommand, presentPackageManagerFiles, resolvePackageManager } from "./packageManager.ts";
+import { GITHUB_HOST, isSshRemote, parseGithubRemote } from "./github/remote.ts";
 import {
   buildRepoInspection,
-  LOCKFILE_NAMES,
+  COMPOSE_FILE_NAMES,
   PACKAGE_MANIFEST_FILE,
   parsePackageManifest,
   REPO_NOT_FOUND_MESSAGE,
@@ -54,7 +56,7 @@ import {
   sshHostFromRemoteUrl,
   vcsProviderFromRemoteUrl,
 } from "./repoInspection.ts";
-import type { PackageManifest, RepoFacts } from "./repoInspection.ts";
+import type { PackageManifest, RepoFacts, RepoInspectionContext } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
   AutonomousWorkspace,
@@ -202,6 +204,12 @@ async function resolveSshHostname(remoteUrl: string): Promise<string | null> {
 
 type GitRemoteFacts = Pick<RepoFacts, "remoteHead" | "currentBranch" | "remoteUrl" | "remoteSshHostname">;
 const NO_GIT_REMOTE_FACTS: GitRemoteFacts = { remoteHead: null, currentBranch: null, remoteUrl: null, remoteSshHostname: null };
+
+function httpsGithubOwner(remoteUrl: string): string | null {
+  if (isSshRemote(remoteUrl)) return null;
+  const remote = parseGithubRemote(remoteUrl);
+  return remote?.host === GITHUB_HOST ? remote.owner : null;
+}
 
 async function readPackageManifest(repoPath: string): Promise<PackageManifest | null> {
   const file = Bun.file(join(repoPath, PACKAGE_MANIFEST_FILE));
@@ -1254,13 +1262,19 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcs(provider).testConnection(repoPath, Date.now());
   }
 
-  async inspectRepo(repoPath: string, knownGroups: string[]): Promise<Omit<RepoInspection, "existingProjectKey">> {
+  async inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">> {
     const info = await stat(repoPath).catch(() => null);
     if (!info?.isDirectory()) throw new Error(REPO_NOT_FOUND_MESSAGE);
-    const [isGitRepo, manifest] = await Promise.all([this.isGitWorkTree(repoPath), readPackageManifest(repoPath)]);
-    const lockfile = LOCKFILE_NAMES.find((name) => existsSync(join(repoPath, name))) ?? null;
+    const [isGitRepo, manifest, packageManagerFiles] = await Promise.all([
+      this.isGitWorkTree(repoPath),
+      readPackageManifest(repoPath),
+      presentPackageManagerFiles(repoPath),
+    ]);
+    const packageManager = resolvePackageManager(manifest?.packageManager, packageManagerFiles);
+    const composeFile = COMPOSE_FILE_NAMES.find((name) => existsSync(join(repoPath, name))) ?? null;
     const remotes = isGitRepo ? await this.readGitRemoteFacts(repoPath) : NO_GIT_REMOTE_FACTS;
-    return buildRepoInspection({ repoPath, isGitRepo, manifest, lockfile, knownGroups, ...remotes });
+    const githubOwner = remotes.remoteUrl ? httpsGithubOwner(remotes.remoteUrl) : null;
+    return buildRepoInspection({ repoPath, isGitRepo, manifest, packageManager, composeFile, githubOwner, ...context, ...remotes });
   }
 
   private async readGitRemoteFacts(repoPath: string): Promise<GitRemoteFacts> {
@@ -1480,15 +1494,6 @@ class RealPaneStream implements PaneStream {
   }
 }
 
-/** Lockfile → install command. Installing with the wrong manager would diverge from the lockfile. */
-const INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; command: string; validationCommand: string }> = [
-  { lockfile: "pnpm-lock.yaml", command: "pnpm install", validationCommand: "pnpm install --frozen-lockfile" },
-  { lockfile: "yarn.lock", command: "yarn install", validationCommand: "yarn install --frozen-lockfile" },
-  { lockfile: "package-lock.json", command: "npm install", validationCommand: "npm ci" },
-  { lockfile: "bun.lock", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
-  { lockfile: "bun.lockb", command: "bun install", validationCommand: "bun install --frozen-lockfile" },
-];
-
 /**
  * Resolve the first conventional worktree script to a `bash <absolutePath>` command (so it runs without
  * a +x bit), ALWAYS pointing at the copy that lives inside the slot. Null when no candidate exists.
@@ -1518,10 +1523,8 @@ async function resolveWorktreeScriptCommand(
 }
 
 async function detectInstallCommand(slotPath: string, validation = false): Promise<string> {
-  for (const { lockfile, command, validationCommand } of INSTALL_COMMANDS) {
-    if (await Bun.file(join(slotPath, lockfile)).exists()) return validation ? validationCommand : command;
-  }
-  return validation ? "bun install --no-save" : "bun install";
+  const [manifest, files] = await Promise.all([readPackageManifest(slotPath), presentPackageManagerFiles(slotPath)]);
+  return installCommand(resolvePackageManager(manifest?.packageManager, files), validation);
 }
 
 /**

@@ -5,9 +5,8 @@
 
 import { GITHUB_LOGIN_PATTERN, MACHINE_ACCOUNT_SEGMENT } from "../../../shared/github.ts";
 
-import { parseGithubRemote } from "./remote.ts";
+import { GITHUB_HOST, parseGithubRemote } from "./remote.ts";
 
-const GITHUB_HOST = "github.com";
 const REPOSITORY_NAME_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
 const OWNER_REPO_SHORTHAND_PATTERN = /^([^/]+)\/([^/]+)$/;
 const GITHUB_HTTPS_PREFIX = /^https:\/\/github\.com\//i;

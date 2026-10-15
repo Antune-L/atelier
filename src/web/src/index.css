@@ -111,6 +111,62 @@
   body {
     @apply bg-background font-sans text-sm text-foreground;
   }
+
+  :root {
+    --scrollbar-size: 14px;
+    --scrollbar-inset: 2px;
+    --scrollbar-radius: 5px;
+    scrollbar-color: hsl(var(--brand)) hsl(var(--accent));
+  }
+
+  .xterm-viewport {
+    scrollbar-color: auto;
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    :root {
+      scrollbar-color: auto;
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar {
+      width: var(--scrollbar-size);
+      height: var(--scrollbar-size);
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar-track {
+      border-radius: var(--scrollbar-radius);
+      background: hsl(var(--accent));
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar-thumb {
+      border: var(--scrollbar-inset) solid transparent;
+      border-radius: var(--scrollbar-radius);
+      background: hsl(var(--brand));
+      background-clip: padding-box;
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar-corner {
+      background: hsl(var(--accent));
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar-button {
+      display: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :root {
+      scrollbar-color: auto;
+    }
+
+    *:not(.xterm-viewport)::-webkit-scrollbar,
+    *:not(.xterm-viewport)::-webkit-scrollbar-track,
+    *:not(.xterm-viewport)::-webkit-scrollbar-thumb,
+    *:not(.xterm-viewport)::-webkit-scrollbar-corner,
+    *:not(.xterm-viewport)::-webkit-scrollbar-button {
+      all: revert;
+    }
+  }
 }
 
 /* Markdown rendering (PRD / comments). Prose-like spacing on a light surface. */

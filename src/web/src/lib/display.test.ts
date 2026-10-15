@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
 import type { CodexRuntimeStatus } from "@shared/codexCapabilities";
+import { IMPLEMENTER_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
 
-import { effectiveWorkDurationMs, isCodexFastAvailable, ticketImplementationDuration } from "./display";
+import { agentPairLabel, effectiveWorkDurationMs, isCodexFastAvailable, ticketImplementationDuration } from "./display";
 
 const runtime: CodexRuntimeStatus = {
   status: "ready",
@@ -69,5 +70,17 @@ describe("ticketImplementationDuration", () => {
   test("returns null when only finishedAt is set", () => {
     const ticket = { implementationStartedAt: 10_000, implementingStartedAt: 5_000, implementationFinishedAt: null, finishedAt: 70_000 };
     expect(ticketImplementationDuration(ticket)).toBeNull();
+  });
+});
+
+describe("agentPairLabel", () => {
+  test("shows the provider once when orchestrator and implementer match", () => {
+    expect(agentPairLabel("claude", "claude")).toBe(ORCHESTRATOR_LABELS.claude);
+    expect(agentPairLabel("codex", "codex")).toBe(ORCHESTRATOR_LABELS.codex);
+  });
+
+  test("joins distinct providers with a separator", () => {
+    expect(agentPairLabel("claude", "codex")).toBe(`${ORCHESTRATOR_LABELS.claude} · ${IMPLEMENTER_LABELS.codex}`);
+    expect(agentPairLabel("claude", "composer")).toBe(`${ORCHESTRATOR_LABELS.claude} · ${IMPLEMENTER_LABELS.composer}`);
   });
 });

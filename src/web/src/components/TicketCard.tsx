@@ -6,11 +6,11 @@ import type { CSSProperties } from "react";
 
 import { isAutonomousParentIncomplete } from "@shared/autonomous";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { IMPLEMENTER_LABELS, ORCHESTRATOR_LABELS } from "@shared/constants";
 import { summarizeSessionCosts } from "@shared/pricing";
 
 import { StageProgressBar } from "@/components/StageProgressBar";
 import {
+  agentPairLabel,
   formatDuration,
   formatRelativeDuration,
   formatUsd,
@@ -185,7 +185,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
       </div>
 
       <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-        <span>{ORCHESTRATOR_LABELS[ticket.orchestrator]} · {IMPLEMENTER_LABELS[ticket.implementer]}</span>
+        <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
         <span>{ticketDeliveryLabel(ticket)}</span>
         <span>{ticketCostLabel(ticket)}</span>
       </div>

@@ -359,6 +359,13 @@ export function ticketImplementationDuration(
 
 export { prNumberFromUrl };
 
+/** Card label for a ticket's agent pair: the provider name once when orchestrator and implementer match. */
+export function agentPairLabel(orchestrator: Orchestrator, implementer: Implementer): string {
+  const orchestratorLabel = ORCHESTRATOR_LABELS[orchestrator];
+  const implementerLabel = IMPLEMENTER_LABELS[implementer];
+  return orchestratorLabel === implementerLabel ? orchestratorLabel : `${orchestratorLabel} · ${implementerLabel}`;
+}
+
 /** PR number to display on a card: stored `prNumber`, else parsed from `prUrl`. */
 export function ticketPrNumber(ticket: Pick<Ticket, "prNumber" | "prUrl">): number | null {
   return ticket.prNumber ?? prNumberFromUrl(ticket.prUrl);

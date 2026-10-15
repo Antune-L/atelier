@@ -45,6 +45,7 @@ import { runOneShotSession } from "./oneShotSession.ts";
 import { prepareProjectShell } from "./projectShell.ts";
 import { captureValidationRevision, cleanupValidationWorkspace, prepareValidationWorkspace, runValidationCommand, startValidationService } from "./validationWorkspace.ts";
 import { installCommand, presentPackageManagerFiles, resolvePackageManager } from "./packageManager.ts";
+import { readWorkspacePackages } from "./workspacePackages.ts";
 import { GITHUB_HOST, isSshRemote, parseGithubRemote } from "./github/remote.ts";
 import {
   buildRepoInspection,
@@ -1274,7 +1275,8 @@ export class RealSystemAdapter implements SystemAdapter {
     const composeFile = COMPOSE_FILE_NAMES.find((name) => existsSync(join(repoPath, name))) ?? null;
     const remotes = isGitRepo ? await this.readGitRemoteFacts(repoPath) : NO_GIT_REMOTE_FACTS;
     const githubOwner = remotes.remoteUrl ? httpsGithubOwner(remotes.remoteUrl) : null;
-    return buildRepoInspection({ repoPath, isGitRepo, manifest, packageManager, composeFile, githubOwner, ...context, ...remotes });
+    const workspacePackages = await readWorkspacePackages(repoPath, manifest);
+    return buildRepoInspection({ repoPath, isGitRepo, manifest, packageManager, composeFile, githubOwner, workspacePackages, ...context, ...remotes });
   }
 
   private async readGitRemoteFacts(repoPath: string): Promise<GitRemoteFacts> {

@@ -1120,8 +1120,7 @@ export const DEFAULT_RESEARCH_OPTIONS: ResearchOptions = {
   howTo: true,
   externalDocs: true,
   duplicates: true,
-  // Expensive multi-agent run: opt-in only.
-  adversarialReview: false,
+  adversarialReview: true,
 };
 
 export function enabledResearchOptionKeys(options: ResearchOptions): ResearchOptionKey[] {

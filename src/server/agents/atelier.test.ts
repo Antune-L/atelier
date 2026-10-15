@@ -41,8 +41,9 @@ function conversation(orchestrator: Orchestrator, researchEnabled: boolean, rese
 const prompt = (c: Conversation): string => buildAtelierPrompt({ conversation: c, project: PROJECT });
 
 describe("buildAtelierPrompt — adversarial review", () => {
-  test("the section is absent by default and when research is off", () => {
-    expect(prompt(conversation("claude", true, DEFAULT_RESEARCH_OPTIONS))).not.toContain(ADVERSARIAL_SECTION);
+  test("the section is present by default and absent when unchecked or when research is off", () => {
+    expect(prompt(conversation("claude", true, DEFAULT_RESEARCH_OPTIONS))).toContain(ADVERSARIAL_SECTION);
+    expect(prompt(conversation("claude", true, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: false }))).not.toContain(ADVERSARIAL_SECTION);
     expect(prompt(conversation("claude", false, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true }))).not.toContain(ADVERSARIAL_SECTION);
   });
 
@@ -72,7 +73,7 @@ describe("buildAtelierPrompt — adversarial review", () => {
     const positions = labels.map((label) => text.indexOf(label));
     for (const position of positions) expect(position).toBeGreaterThan(-1);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    const off = prompt(conversation("claude", true, DEFAULT_RESEARCH_OPTIONS));
+    const off = prompt(conversation("claude", true, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: false }));
     for (const label of labels) expect(off).not.toContain(label);
   });
 });

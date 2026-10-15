@@ -14,8 +14,8 @@ describe("researchOptionsSchema", () => {
     });
   });
 
-  test("the adversarial review is opt-in and round-trips through keys", () => {
-    expect(DEFAULT_RESEARCH_OPTIONS.adversarialReview).toBe(false);
+  test("the adversarial review is on by default and round-trips through keys", () => {
+    expect(DEFAULT_RESEARCH_OPTIONS.adversarialReview).toBe(true);
     expect(researchOptionsFromKeys(["adversarialReview"]).adversarialReview).toBe(true);
   });
 });

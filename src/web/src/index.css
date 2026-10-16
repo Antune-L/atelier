@@ -208,17 +208,22 @@
 /* Markdown rendering (PRD / comments). Prose-like spacing on a light surface. */
 @layer components {
   .ticket-brief {
-    --brief-background: #e9f0e8;
-    --brief-foreground: #23362e;
-    --brief-muted-foreground: #466353;
-    --brief-border: #c4d3c7;
-    --brief-accent: #669983;
+    --brief-tint: 4%;
+    --brief-background: color-mix(in srgb, hsl(var(--card)), hsl(var(--brand)) var(--brief-tint));
+    --brief-foreground: hsl(var(--card-foreground));
+    --brief-muted-foreground: color-mix(in srgb, hsl(var(--muted-foreground)), var(--brief-foreground) 20%);
+    --brief-border: color-mix(in srgb, hsl(var(--border)), hsl(var(--brand)) 16%);
+    --brief-accent: color-mix(in srgb, hsl(var(--brand)), hsl(var(--card)) 25%);
+    --brief-heading-foreground: color-mix(in srgb, hsl(var(--brand)), var(--brief-foreground) 48%);
+    --brief-overlay-background: color-mix(in srgb, var(--brief-foreground) 6%, transparent);
     --brief-preview-height: 14rem;
     background-color: var(--brief-background);
     color: var(--brief-foreground);
     border-color: var(--brief-border);
     box-shadow: inset 3px 0 0 var(--brief-accent);
   }
+  .dark .ticket-brief { --brief-tint: 7%; }
+  .ticket-brief > :first-child h2 { color: var(--brief-heading-foreground); }
   .ticket-brief-muted { color: var(--brief-muted-foreground); }
   .ticket-brief-preview {
     max-height: var(--brief-preview-height);
@@ -228,15 +233,15 @@
   .ticket-brief-footer { border-color: var(--brief-border); }
   .ticket-brief .ticket-brief-action {
     background-color: transparent;
-    color: var(--brief-foreground);
-    border-color: var(--brief-accent);
+    color: var(--brief-muted-foreground);
+    border-color: var(--brief-border);
   }
-  .ticket-brief .ticket-brief-action:hover { background-color: rgb(35 54 46 / 6%); }
+  .ticket-brief .ticket-brief-action:hover { background-color: var(--brief-overlay-background); }
   .ticket-brief .markdown { color: var(--brief-foreground); line-height: 1.75; overflow-wrap: anywhere; }
   .ticket-brief .markdown a { color: var(--brief-foreground); }
   .ticket-brief .markdown blockquote { color: var(--brief-muted-foreground); }
   .ticket-brief .markdown code,
-  .ticket-brief .markdown pre { background-color: rgb(35 54 46 / 6%); color: var(--brief-foreground); }
+  .ticket-brief .markdown pre { background-color: var(--brief-overlay-background); color: var(--brief-foreground); }
   .ticket-brief .markdown pre code { background-color: transparent; }
   .ticket-brief .markdown blockquote,
   .ticket-brief .markdown pre,

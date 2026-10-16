@@ -36,7 +36,6 @@ interface BoardColumnProps {
   /** How many tickets the bulk action would actually start (capped by free slots); disables the button at 0. */
   moveAllCount?: number;
   eligibleTodoCount?: number;
-  freeSlotCount?: number;
   /** True while a bulk launch is in flight — disables the button to prevent re-entry. */
   moveAllBusy?: boolean;
   /** When set on the TODO column, runs the batch feasibility analysis on eligible tickets. */
@@ -248,7 +247,6 @@ export function BoardColumn({
   onMoveAllToImplementing,
   moveAllCount = 0,
   eligibleTodoCount = 0,
-  freeSlotCount = 0,
   moveAllBusy = false,
   onAnalyzeAll,
   analyzeAllCount = 0,
@@ -423,7 +421,6 @@ export function BoardColumn({
               {sortDir === "desc" ? "Plus récents" : "Plus anciens"}
             </button>
           )}
-          {column === "todo" && <span>{eligibleTodoCount} éligible(s) · {freeSlotCount} slot(s) libre(s)</span>}
         </div>
       </div>
       <div

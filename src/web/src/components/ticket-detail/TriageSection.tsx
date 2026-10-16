@@ -1,5 +1,5 @@
-import { Check, ChevronDown, ClipboardPaste, Copy, RotateCw, Sparkles } from "lucide-react";
-import { useId, useState } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, RotateCw, Sparkles } from "lucide-react";
+import { useId, useRef, useState } from "react";
 
 import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, type AgentEffort, type AgentModel, type FeasibilityEngine } from "@shared/constants";
 import type { FeasibilityAnswerBatchInput, FeasibilityAnswerInput, Ticket } from "@shared/schemas";
@@ -96,6 +96,17 @@ export function TriageSection({
   };
 
   const questions = result?.questions ?? [];
+  const questionPanelId = useId();
+  const questionScope = `${ticket.id}:${ticket.feasibilityReportVersion}`;
+  const [questionSelection, setQuestionSelection] = useState({ scope: questionScope, index: 0 });
+  const questionButtons = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedQuestionIndex = questionSelection.scope === questionScope && questions[questionSelection.index]
+    ? questionSelection.index
+    : 0;
+  const selectQuestion = (index: number): void => {
+    setQuestionSelection({ scope: questionScope, index });
+    questionButtons.current[index]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
   const currentRuns = questions.map((_question, index) => ticket.feasibilityAnswers.find((candidate) =>
     candidate.reportVersion === ticket.feasibilityReportVersion && candidate.questionIndex === index));
   const [answers, setAnswerAt] = useLocalDraftList(
@@ -103,6 +114,8 @@ export function TriageSection({
     currentRuns.map((run) => run?.answer ?? ""),
   );
   const [submitting, setSubmitting] = useState(false);
+  const [submittedQuestionKeys, setSubmittedQuestionKeys] = useState<string[]>([]);
+  const [questionSubmissionErrors, setQuestionSubmissionErrors] = useState<Record<string, boolean>>({});
   const [batchError, setBatchError] = useState<string | null>(null);
   const batchAnswers = answers.flatMap((answer, questionIndex) => {
     const status = currentRuns[questionIndex]?.status;
@@ -117,8 +130,9 @@ export function TriageSection({
   const submissionPending = submitting || awaitingPush;
   const batchDisabled = batchAnswers.length === 0 || submissionPending || feasibilityAnswersBlocked(ticket);
 
-  const trackSubmission = async <T,>(send: () => Promise<T>, idsOf: (response: T) => string[]): Promise<T> => {
+  const trackSubmission = async <T,>(send: () => Promise<T>, idsOf: (response: T) => string[], questionIndexes: number[]): Promise<T> => {
     setSubmitting(true);
+    setSubmittedQuestionKeys(questionIndexes.map((index) => `${questionScope}:${index}`));
     setAcceptedIds(null);
     try {
       const response = await send();
@@ -129,8 +143,16 @@ export function TriageSection({
     }
   };
 
-  const handleAnswerQuestion = (input: FeasibilityAnswerInput): Promise<{ started: boolean; id: string }> =>
-    trackSubmission(() => onAnswerFeasibility(input), (response) => [response.id]);
+  const handleAnswerQuestion = async (input: FeasibilityAnswerInput): Promise<{ started: boolean; id: string }> => {
+    const key = `${questionScope}:${input.questionIndex}`;
+    setQuestionSubmissionErrors((current) => ({ ...current, [key]: false }));
+    try {
+      return await trackSubmission(() => onAnswerFeasibility(input), (response) => [response.id], [input.questionIndex]);
+    } catch (error) {
+      setQuestionSubmissionErrors((current) => ({ ...current, [key]: true }));
+      throw error;
+    }
+  };
 
   const handleAnswerBatch = async (): Promise<void> => {
     if (batchDisabled) return;
@@ -139,6 +161,7 @@ export function TriageSection({
       await trackSubmission(
         () => onAnswerFeasibilityBatch({ revision: ticket.feasibilityRevision, reportVersion: ticket.feasibilityReportVersion, answers: batchAnswers }),
         (response) => response.ids,
+        batchAnswers.map((answer) => answer.questionIndex),
       );
     } catch (error) {
       setBatchError(error instanceof Error ? error.message : String(error));
@@ -151,6 +174,32 @@ export function TriageSection({
       : null;
   const suggestionApplied =
     suggestion !== null && ticket.model === suggestion.model && ticket.effort === suggestion.effort;
+  const analysis = result && (
+    <div className="space-y-2">
+      <Markdown content={result.summary} />
+      {result.reasons.length > 0 && (
+        <div>
+          <SectionHeader>Raisons</SectionHeader>
+          <ul className="list-disc pl-5">
+            {result.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      )}
+      {result.files.length > 0 && (
+        <ul className="font-mono text-2xs text-muted-foreground">
+          {result.files.map((file) => <li key={file}>{file}</li>)}
+        </ul>
+      )}
+      {result.solutions && result.solutions.length > 0 && (
+        <div>
+          <SectionHeader>Solutions envisageables</SectionHeader>
+          <ul className="list-disc pl-5">
+            {result.solutions.map((solution) => <li key={solution}>{solution}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <section className="space-y-2">
@@ -168,30 +217,84 @@ export function TriageSection({
 
       {ticket.triageStatus === "done" && result && (
         <div className="space-y-2 text-sm">
-          <Markdown content={result.summary} />
-          {result.reasons.length > 0 && (
-            <div>
-              <SectionHeader>Raisons</SectionHeader>
-              <ul className="list-disc pl-5">
-                {result.reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {questions.length > 0 ? (
+            <details className="group rounded-md border border-border/60 px-3 py-2">
+              <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-180" />
+                Voir l’analyse et les points d’attention
+              </summary>
+              <div className="mt-3">{analysis}</div>
+            </details>
+          ) : analysis}
           {result.questions.length > 0 && (
-            <div>
-              <SectionHeader>Questions</SectionHeader>
-              <ul className="space-y-3">
-                {result.questions.map((question, index) => (
-                  <li key={`${ticket.id}:${ticket.feasibilityReportVersion}:${index}`}>
-                    <FeasibilityQuestion ticket={ticket} question={question} index={index}
-                      answer={answers[index] ?? ""} submissionPending={submissionPending} onAnswerChange={(value) => setAnswerAt(index, value)} onSubmit={handleAnswerQuestion} />
-                  </li>
-                ))}
-              </ul>
+            <div className="space-y-2">
+              <SectionHeader aside={
+                <span className="text-2xs font-normal text-muted-foreground" aria-live="polite">
+                  {currentRuns.filter((run) => run?.status === "done").length} / {questions.length} intégrées
+                </span>
+              }>Questions à préciser</SectionHeader>
+              <div className="feasibility-workspace">
+                <div className="feasibility-workspace-layout overflow-hidden rounded-md border border-border">
+                  <nav className="feasibility-question-nav bg-muted/30 p-1.5" aria-label="Questions de faisabilité">
+                    {questions.map((question, index) => {
+                      const run = currentRuns[index];
+                      const key = `${questionScope}:${index}`;
+                      const pending = run?.status === "running" || (submissionPending && submittedQuestionKeys.includes(key));
+                      let failed = false;
+                      let preview = answers[index]?.trim() || "À répondre";
+                      let indicator = <span>{index + 1}</span>;
+                      if (run?.status === "done") {
+                        preview = "Réponse intégrée";
+                        indicator = <Check className="h-3 w-3" />;
+                      } else if (pending) {
+                        preview = "Intégration en cours…";
+                        indicator = <RotateCw className="h-3 w-3 animate-spin" />;
+                      } else if (run?.status === "failed" || questionSubmissionErrors[key]) {
+                        failed = true;
+                        preview = "Échec, à réessayer";
+                      }
+                      return (
+                        <button key={`${questionScope}:${index}`} type="button"
+                          ref={(element) => { questionButtons.current[index] = element; }}
+                          aria-current={selectedQuestionIndex === index ? "true" : undefined}
+                          aria-controls={`${questionPanelId}-${index}`} title={question.question}
+                          onClick={() => selectQuestion(index)}
+                          className={cn("feasibility-question-link flex gap-2 rounded-md border border-transparent p-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            selectedQuestionIndex === index && "border-border bg-accent/70")}
+                        >
+                          <span className={cn("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-border text-2xs text-muted-foreground",
+                            run?.status === "done" && "border-brand/50 bg-brand/10 text-brand",
+                            failed && "border-danger/50 text-danger")}>{indicator}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="line-clamp-2 text-xs font-medium leading-relaxed">{question.question}</span>
+                            <span className={cn("mt-0.5 block truncate text-2xs text-muted-foreground", failed && "text-danger")}>{preview}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </nav>
+                  <div className="flex min-w-0 flex-1 flex-col gap-4 p-3">
+                    {questions.map((question, index) => (
+                      <div key={`${questionScope}:${index}`} id={`${questionPanelId}-${index}`} hidden={selectedQuestionIndex !== index} className="space-y-2">
+                        <p className="text-2xs text-muted-foreground">Question {index + 1} sur {questions.length}</p>
+                        <FeasibilityQuestion ticket={ticket} question={question} index={index}
+                          answer={answers[index] ?? ""} submissionPending={submissionPending} onAnswerChange={(value) => setAnswerAt(index, value)} onSubmit={handleAnswerQuestion} />
+                      </div>
+                    ))}
+                    {questions.length > 1 && (
+                      <div className="mt-auto flex justify-between gap-2 border-t border-border pt-3">
+                        <Button type="button" size="sm" variant="ghost" disabled={selectedQuestionIndex === 0} onClick={() => selectQuestion(selectedQuestionIndex - 1)}>
+                          <ChevronLeft className="h-3.5 w-3.5" /> Précédente
+                        </Button>
+                        <Button type="button" size="sm" variant="outline" disabled={selectedQuestionIndex === questions.length - 1} onClick={() => selectQuestion(selectedQuestionIndex + 1)}>
+                          Suivante <ChevronRight className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
               {result.questions.length > 1 && (
-                // Sticky so the batch action stays reachable while scrolling through the questions.
                 <div className="sticky bottom-0 z-10 mt-3 space-y-1 border-t border-border bg-card py-2">
                   <Button size="sm" variant="secondary" disabled={batchDisabled} onClick={() => void handleAnswerBatch()}>
                     Intégrer toutes les réponses ({batchAnswers.length})
@@ -199,23 +302,6 @@ export function TriageSection({
                   {batchError && <p role="alert" className="text-sm text-danger">{batchError}</p>}
                 </div>
               )}
-            </div>
-          )}
-          {result.files.length > 0 && (
-            <ul className="font-mono text-2xs text-muted-foreground">
-              {result.files.map((file) => (
-                <li key={file}>{file}</li>
-              ))}
-            </ul>
-          )}
-          {result.solutions && result.solutions.length > 0 && (
-            <div>
-              <SectionHeader>Solutions envisageables</SectionHeader>
-              <ul className="list-disc pl-5">
-                {result.solutions.map((solution) => (
-                  <li key={solution}>{solution}</li>
-                ))}
-              </ul>
             </div>
           )}
         </div>

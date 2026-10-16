@@ -313,6 +313,49 @@
   .prd-annotation-pin {
     @apply ml-0.5 rounded-full bg-warning px-1 align-super text-[10px] font-semibold text-warning-foreground no-underline;
   }
+
+  .feasibility-workspace {
+    container: feasibility / inline-size;
+  }
+
+  .feasibility-workspace-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .feasibility-question-nav {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.25rem;
+    overflow-x: auto;
+    border-bottom: 1px solid hsl(var(--border));
+    scrollbar-width: thin;
+  }
+
+  .feasibility-question-link {
+    width: 11rem;
+    flex-shrink: 0;
+    align-items: flex-start;
+  }
+
+  @container feasibility (min-width: 32rem) {
+    .feasibility-workspace-layout {
+      flex-direction: row;
+    }
+
+    .feasibility-question-nav {
+      flex: 0 0 34%;
+      flex-direction: column;
+      max-height: 24rem;
+      overflow-y: auto;
+      border-right: 1px solid hsl(var(--border));
+      border-bottom: 0;
+    }
+
+    .feasibility-question-link {
+      width: 100%;
+    }
+  }
 }
 
 /* PRD in-app search (⌘F): CSS Custom Highlight API matches. Names must match PrdAnnotator. */

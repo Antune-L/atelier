@@ -291,7 +291,6 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}
       moveAllCount={moveAllCount}
       eligibleTodoCount={eligibleTodo.length}
-      freeSlotCount={freeSlotCount}
       moveAllBusy={movingAll}
       onAnalyzeAll={column === "todo" ? handleAnalyzeAll : undefined}
       analyzeAllCount={analyzeAllCount}

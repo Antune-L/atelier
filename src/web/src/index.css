@@ -19,6 +19,7 @@
     --background: 48 18.5% 94.7%;
     --foreground: 220 10% 11.8%;
     --card: 0 0% 100%;
+    --card-raised: color-mix(in srgb, hsl(var(--card)) 94%, black 6%);
     --card-foreground: 220 10% 11.8%;
     --popover: 0 0% 100%;
     --popover-foreground: 220 10% 11.8%;
@@ -64,6 +65,7 @@
     --background: 202.5 9.3% 16.9%;
     --foreground: 108 8.5% 88.4%;
     --card: 200 8.6% 20.6%;
+    --card-raised: color-mix(in srgb, hsl(var(--card)) 94%, white 6%);
     --card-foreground: 108 8.5% 88.4%;
     --popover: 200 8.6% 20.6%;
     --popover-foreground: 108 8.5% 88.4%;
@@ -101,6 +103,40 @@
     --chart-3: 39.3 41.5% 71.2%;
     --chart-4: 260 20.3% 73.9%;
     --chart-5: 6.4 38.9% 71.8%;
+  }
+}
+
+@layer components {
+  .ticket-card-surface {
+    --ticket-card-background: var(--card-raised);
+    background-color: var(--ticket-card-background);
+    border-color: transparent;
+    transition: background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  }
+
+  .ticket-card-surface[data-card-state="attention"] {
+    --ticket-card-background: color-mix(in srgb, hsl(var(--warning)) 10%, var(--card-raised));
+  }
+
+  .ticket-card-surface:hover {
+    background-color: color-mix(in srgb, hsl(var(--info)) 9%, var(--ticket-card-background));
+    border-color: color-mix(in srgb, hsl(var(--info)) 40%, hsl(var(--border)));
+    box-shadow: 0 4px 12px rgb(0 0 0 / 9%);
+    transform: translateY(-2px);
+  }
+
+  .ticket-card-surface[data-dragging="true"]:hover {
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ticket-card-surface {
+      transition: none;
+    }
+
+    .ticket-card-surface:hover {
+      transform: none;
+    }
   }
 }
 

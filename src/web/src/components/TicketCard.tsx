@@ -43,7 +43,7 @@ const STATE_STRIPE_COLORS: Record<CardState, string> = {
   running: "bg-info",
   attention: "bg-warning",
   failed: "bg-danger",
-  done: "bg-success",
+  done: "bg-info/50",
   idle: "bg-border",
 };
 
@@ -125,74 +125,77 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
       {...attributes}
       {...listeners}
       onClick={() => onOpen(ticket)}
-      className={cn(
-        "relative cursor-grab rounded-md py-2 pl-3 pr-2.5 transition-colors hover:bg-accent/60 active:cursor-grabbing",
-        state === "attention" ? "bg-warning/10" : "bg-card",
-      )}
+      className="cursor-grab rounded-md active:cursor-grabbing"
     >
-      <span aria-hidden className={cn("absolute inset-y-0 left-0 w-0.5 rounded-l-md", STATE_STRIPE_COLORS[state])} />
+      <div className="ticket-card-surface relative rounded-md border p-3" data-card-state={state} data-dragging={isDragging}>
+        <span aria-hidden className={cn("absolute inset-y-0 left-0 w-0.5 rounded-l-md", STATE_STRIPE_COLORS[state])} />
 
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="min-w-0 break-words text-sm font-medium leading-snug">{ticket.title}</h3>
-        {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="min-w-0 break-words text-sm font-semibold leading-snug">{ticket.title}</h3>
+          {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
+          <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
+          <span>{KIND_LABELS[ticket.kind]}</span>
+          {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
+          <span>{elapsedLabel}</span>
+          {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}
+          {ticket.watchdogFlagged && <span className="text-warning">inactif</span>}
+          {ticket.testing && <span>test</span>}
+          {ticket.dependsOn && (
+            <span className="max-w-full truncate" title={dependencyLabel}>
+              {parentBlocked ? "Attend" : "Basé sur"} {truncateParentTitle(parentTitle)}
+            </span>
+          )}
+          {ticket.triageStatus === "running" && (
+            <span className="inline-flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
+            </span>
+          )}
+          {ticket.prUrl && (
+            <a
+              href={ticket.prUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 text-foreground hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {prNumber !== null ? `PR #${prNumber}` : "PR"}
+            </a>
+          )}
+          {ticket.column === "done" && ticket.kind === "feature" && !partial && onCheckMerge && (
+            <button
+              type="button"
+              disabled={checkingMerge}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCheckingMerge(true);
+                void onCheckMerge(ticket).finally(() => setCheckingMerge(false));
+              }}
+              className="inline-flex items-center gap-1 font-mono text-2xs hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
+            >
+              {checkingMerge ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
+              Vérifier le merge
+            </button>
+          )}
+        </div>
+
+        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-2xs text-muted-foreground">
+          <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
+          <span>{ticketDeliveryLabel(ticket)}</span>
+          <span>{ticketCostLabel(ticket)}</span>
+        </div>
+        {decisionLabel && <p className="mt-2 text-xs font-medium text-warning">{decisionLabel}</p>}
+        {ticket.error && <p className="mt-1 line-clamp-2 break-words text-xs text-danger" title={ticket.error}>{ticket.error}</p>}
+
+        {ticket.stage && (
+          <div className="mt-2.5 border-t border-border/40 pt-0.5">
+            <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />
+          </div>
+        )}
       </div>
-
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
-        <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
-        <span>{KIND_LABELS[ticket.kind]}</span>
-        {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
-        <span>{elapsedLabel}</span>
-        {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}
-        {ticket.watchdogFlagged && <span className="text-warning">inactif</span>}
-        {ticket.testing && <span>test</span>}
-        {ticket.dependsOn && (
-          <span className="max-w-full truncate" title={dependencyLabel}>
-            {parentBlocked ? "Attend" : "Basé sur"} {truncateParentTitle(parentTitle)}
-          </span>
-        )}
-        {ticket.triageStatus === "running" && (
-          <span className="inline-flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
-          </span>
-        )}
-        {ticket.prUrl && (
-          <a
-            href={ticket.prUrl}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="inline-flex items-center gap-1 text-foreground hover:underline"
-          >
-            <ExternalLink className="h-3 w-3" />
-            {prNumber !== null ? `PR #${prNumber}` : "PR"}
-          </a>
-        )}
-        {ticket.column === "done" && ticket.kind === "feature" && !partial && onCheckMerge && (
-          <button
-            type="button"
-            disabled={checkingMerge}
-            onClick={(e) => {
-              e.stopPropagation();
-              setCheckingMerge(true);
-              void onCheckMerge(ticket).finally(() => setCheckingMerge(false));
-            }}
-            className="inline-flex items-center gap-1 font-mono text-2xs hover:text-foreground hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:no-underline"
-          >
-            {checkingMerge ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
-            Vérifier le merge
-          </button>
-        )}
-      </div>
-
-      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-        <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
-        <span>{ticketDeliveryLabel(ticket)}</span>
-        <span>{ticketCostLabel(ticket)}</span>
-      </div>
-      {decisionLabel && <p className="mt-2 text-xs font-medium text-warning">{decisionLabel}</p>}
-      {ticket.error && <p className="mt-1 line-clamp-2 break-words text-xs text-danger" title={ticket.error}>{ticket.error}</p>}
-
-      {ticket.stage && <StageProgressBar stage={ticket.stage} animated={isStageAnimated(ticket.stage)} />}
     </div>
   );
 }

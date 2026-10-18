@@ -1,10 +1,11 @@
 import { MessageSquarePlus } from "lucide-react";
-import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 
 import type { Conversation, ProjectInfo, ResearchOptions } from "@shared/schemas";
 import { DEFAULT_RESEARCH_OPTIONS } from "@shared/schemas";
 
 import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
+import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
@@ -12,10 +13,9 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
-import { errorMessage } from "@/lib/errors";
 import { defaultAgentSettings, type AtelierAgentSettings, type AtelierSeed } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
-import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
+import { appendMarkdownLine } from "@/lib/paste";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 import { boardStore } from "@/lib/store";
 
@@ -54,13 +54,9 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
     setMessage((prev) => appendMarkdownLine(prev, markdown));
   };
 
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    void handleMediaPaste(event, appendToMessage).catch((e: unknown) =>
-      setError(errorMessage(e, "Échec de l'upload")),
-    );
-  };
+  const { uploading, uploadFiles, onPaste } = useAtelierAttachments(appendToMessage, setError);
 
-  const submitDisabled = busy || !message.trim() || !projects.some((p) => p.key === project);
+  const submitDisabled = busy || uploading || !message.trim() || !projects.some((p) => p.key === project);
 
   const submit = async (): Promise<void> => {
     if (submitDisabled) return;
@@ -93,7 +89,8 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
       <div className="space-y-2 rounded-lg border border-border bg-card p-4">
         <Label htmlFor="atelier-first-message" className={FIELD_LABEL_CLASSES}>Votre idée</Label>
         <Textarea id="atelier-first-message" value={message} onChange={(e) => setMessage(e.target.value)} onPaste={onPaste} onKeyDown={onKeyDown} className="min-h-[200px]" placeholder="Décrivez la feature ou le correctif, le résultat attendu et les contraintes…" />
-        <p className="text-xs text-muted-foreground">Collez une image pour l’attacher. ⌘ ou Ctrl + Entrée démarre la discussion.</p>
+        <AtelierAttachments uploading={uploading} disabled={busy} uploadFiles={uploadFiles} />
+        <p className="text-xs text-muted-foreground">Ajoutez vos liens dans le message et joignez vos images ou documents. ⌘ ou Ctrl + Entrée démarre la discussion.</p>
       </div>
       <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
         <ProjectSelect id="atelier-project" projects={projects} value={project} onChange={setProjectChoice} />

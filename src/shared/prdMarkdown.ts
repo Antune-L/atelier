@@ -25,6 +25,10 @@ const LABELS = {
   dependsOn: "Dépend de",
   acceptance: "Critères d'acceptation",
   boundaries: "Limites",
+  roadmap: "Feuille de route",
+  milestone: "Jalon",
+  selectedMilestone: "Jalon ciblé",
+  scope: "Périmètre",
   noneFeminine: "Aucune",
   noneMasculine: "Aucun",
 } as const;
@@ -81,13 +85,36 @@ function renderDependencies(task: PrdTask): string {
 }
 
 function renderTaskBody(task: PrdTask): Block {
-  return [
+  const blocks = [
     `**${LABELS.expectedOutcome} :** ${task.expectedOutcome}`,
     `**${LABELS.startCondition} :** ${task.startCondition}`,
     renderDependencies(task),
     labelledList(LABELS.acceptance, task.acceptance),
     labelledList(LABELS.boundaries, task.boundaries),
   ];
+  if (task.milestoneId !== undefined) blocks.unshift(`**${LABELS.milestone} :** ${task.milestoneId}`);
+  return blocks;
+}
+
+function renderMilestoneContext(doc: PrdDocument, milestoneId: string, level: number): Block {
+  const milestone = doc.roadmap?.milestones.find((candidate) => candidate.id === milestoneId);
+  if (!milestone) return [];
+  return [
+    heading(level, `${LABELS.milestone} ${milestone.id}${SEPARATOR}${milestone.title}`),
+    milestone.summary,
+    labelledList(LABELS.scope, milestone.scope),
+    labelledList(LABELS.acceptance, milestone.acceptance),
+  ];
+}
+
+function renderRoadmap(doc: PrdDocument): Block {
+  if (!doc.roadmap) return [];
+  const blocks = [heading(H2, LABELS.roadmap)];
+  if (doc.roadmap.selectedMilestoneId !== undefined) {
+    blocks.push(`**${LABELS.selectedMilestone} :** ${doc.roadmap.selectedMilestoneId}`);
+  }
+  for (const milestone of doc.roadmap.milestones) blocks.push(...renderMilestoneContext(doc, milestone.id, H3));
+  return blocks;
 }
 
 function renderTask(task: PrdTask, level: number): Block {
@@ -152,6 +179,7 @@ export function renderPrdMarkdown(doc: PrdDocument): string {
     ...section(H2, LABELS.decisions, listOrNone(doc.openQuestions, LABELS.noneFeminine)),
     ...need,
     ...section(H2, LABELS.outOfScope, listOrNone(doc.outOfScope, LABELS.noneMasculine)),
+    ...renderRoadmap(doc),
     ...section(H2, LABELS.axes, bulletList(doc.axes.map((axis) => `**${axisTitle(axis)}**${SEPARATOR}${axis.summary}`))),
   ];
   for (const axis of doc.axes) blocks.push(...renderAxisDetail(doc, axis));
@@ -173,7 +201,13 @@ export function orderSelectedPrdTasks(doc: PrdDocument, selected: ReadonlySet<st
   return ordered;
 }
 
-export function renderPrdSingleBrief(doc: PrdDocument): string {
+export function renderPrdSingleBrief(doc: PrdDocument, milestoneId?: string): string {
+  if (milestoneId !== undefined) {
+    const blocks = renderMilestoneContext(doc, milestoneId, H2);
+    blocks.push(`Seul le jalon ${milestoneId} est à implémenter. Le reste du PRD sert de contexte.`);
+    for (const task of doc.tasks.filter((candidate) => candidate.milestoneId === milestoneId)) blocks.push(...renderTask(task, H3));
+    return joinBlocks(blocks);
+  }
   const goals = doc.goals.length > 0 ? `\n\n${heading(H2, LABELS.goals)}\n${bulletList(doc.goals)}` : "";
   return `${doc.summary}${goals}`;
 }
@@ -189,6 +223,7 @@ export function renderPrdTaskBrief(doc: PrdDocument, taskId: string): string | n
     `Tâche extraite du PRD ${prdReference(doc)}${axisLabel}. Le PRD complet est disponible dans l'onglet PRD de la carte.`,
     ...renderTaskBody(task),
   ];
+  if (task.milestoneId !== undefined) blocks.push(...renderMilestoneContext(doc, task.milestoneId, H2));
   if (requirements.length > 0) {
     blocks.push(heading(H2, LABELS.axisRequirements));
     for (const requirement of requirements) blocks.push(...renderRequirement(requirement, H3));
@@ -196,16 +231,19 @@ export function renderPrdTaskBrief(doc: PrdDocument, taskId: string): string | n
   return joinBlocks(blocks);
 }
 
-export function renderPrdAxisBrief(doc: PrdDocument, axisId: string): string | null {
+export function renderPrdAxisBrief(doc: PrdDocument, axisId: string, milestoneId?: string): string | null {
   const axis = doc.axes.find((candidate) => candidate.id === axisId);
   if (!axis) return null;
   const requirements = doc.requirements.filter((requirement) => requirement.axis === axis.id);
-  const tasks = doc.tasks.filter((task) => task.axis === axis.id);
+  const tasks = doc.tasks.filter((task) => task.axis === axis.id && (milestoneId === undefined || task.milestoneId === milestoneId));
   const blocks: Block = [
     heading(H1, axisTitle(axis)),
     `Axe extrait du PRD ${prdReference(doc)}. Le PRD complet est disponible dans l'onglet PRD de la carte.`,
     axis.summary,
   ];
+  if (milestoneId !== undefined) {
+    blocks.push(...renderMilestoneContext(doc, milestoneId, H2), `Seul le jalon ${milestoneId} est à implémenter. Les exigences de l'axe servent de contexte aux tâches sélectionnées.`);
+  }
   if (requirements.length > 0) {
     blocks.push(heading(H2, LABELS.requirements));
     for (const requirement of requirements) blocks.push(...renderRequirement(requirement, H3));

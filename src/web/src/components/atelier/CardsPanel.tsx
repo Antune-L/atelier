@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useBoard } from "@/hooks/useBoard";
 import { useBusyAction } from "@/hooks/useBusyAction";
@@ -42,29 +43,34 @@ interface CardCandidate extends CardEdit {
 const MAX_GHOST_TICKETS = 5;
 const DEFAULT_IMPLEMENTER = "claude";
 
-function candidatesFor(split: PrdSplitMode, doc: PrdDocument): CardCandidate[] {
+function candidatesFor(split: PrdSplitMode, doc: PrdDocument, milestoneId?: string): CardCandidate[] {
+  const milestone = doc.roadmap?.milestones.find((candidate) => candidate.id === milestoneId);
+  const tasks = doc.tasks.filter((task) => milestoneId === undefined || task.milestoneId === milestoneId);
+  if (tasks.length === 0) return [];
   if (split === "single") {
-    return [{ id: PRD_SINGLE_SELECTION, title: doc.title, detail: doc.summary, description: renderPrdSingleBrief(doc), chips: [] }];
+    return [{ id: PRD_SINGLE_SELECTION, title: milestone?.title ?? doc.title, detail: milestone?.summary ?? doc.summary, description: renderPrdSingleBrief(doc, milestoneId), chips: [] }];
   }
   if (split === "axes") {
-    return doc.axes.map((axis) => {
-      const taskCount = doc.tasks.filter((task) => task.axis === axis.id).length;
-      return { id: axis.id, title: `${axis.id} — ${axis.title}`, detail: axis.summary, description: renderPrdAxisBrief(doc, axis.id) ?? axis.summary, chips: [`${taskCount} tâche(s)`] };
+    return doc.axes.filter((axis) => milestoneId === undefined || tasks.some((task) => task.axis === axis.id)).map((axis) => {
+      const taskCount = tasks.filter((task) => task.axis === axis.id).length;
+      return { id: axis.id, title: `${axis.id} — ${axis.title}`, detail: axis.summary, description: renderPrdAxisBrief(doc, axis.id, milestoneId) ?? axis.summary, chips: [`${taskCount} tâche(s)`] };
     });
   }
-  return doc.tasks.map((task) => ({
+  return tasks.map((task) => ({
     id: task.id,
     title: `${task.id} — ${task.title}`,
     detail: task.expectedOutcome,
     description: renderPrdTaskBrief(doc, task.id) ?? task.expectedOutcome,
-    chips: [task.axis, ...task.dependsOn.map((dependency) => `après ${dependency}`)],
+    chips: [task.axis, ...(task.milestoneId ? [task.milestoneId] : []), ...task.dependsOn.map((dependency) => `branche parente ${dependency}`)],
   }));
 }
 
-function splitDescription(split: PrdSplitMode, doc: PrdDocument): string {
-  if (split === "single") return "Le PRD entier est confié à un seul agent qui exécute les tâches dans l’ordre.";
-  if (split === "axes") return `${doc.axes.length} carte(s), une par axe, chacune regroupant ses tâches.`;
-  return `${doc.tasks.length} carte(s), chaînées par leurs dépendances. Chaque carte embarque le PRD complet et sa tâche cible.`;
+function splitDescription(split: PrdSplitMode, doc: PrdDocument, milestoneId?: string): string {
+  const tasks = doc.tasks.filter((task) => milestoneId === undefined || task.milestoneId === milestoneId);
+  const axisCount = new Set(tasks.map((task) => task.axis)).size;
+  if (split === "single") return "Le périmètre sélectionné est confié à un seul agent.";
+  if (split === "axes") return `${axisCount} carte(s), une par axe, chacune regroupant les tâches du périmètre sélectionné.`;
+  return `${tasks.length} carte(s). Les dépendances définissent les branches parentes, pas l’ordre des jalons.`;
 }
 
 function pluralCards(count: number): string {
@@ -77,6 +83,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
   const id = useId();
   const project = projects.find((p) => p.key === conversation.project);
   const [split, setSplit] = useState<PrdSplitMode>("tasks");
+  const [milestoneId, setMilestoneId] = useState<string | undefined>(prd.document.roadmap?.selectedMilestoneId);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [excludedFor, setExcludedFor] = useState(prd.id);
   const [edits, setEdits] = useState<Record<string, CardEdit>>({});
@@ -92,11 +99,13 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
     setExcluded([]);
     setEdits({});
     setCreated([]);
+    setMilestoneId(prd.document.roadmap?.selectedMilestoneId);
   }
 
   const prdDocument = prd.document;
-  const originalCandidates = candidatesFor(split, prdDocument);
-  const editedCandidates = originalCandidates.map((candidate) => ({ ...candidate, ...edits[`${split}:${candidate.id}`] }));
+  const editScope = split === "tasks" ? split : `${split}:${milestoneId ?? ""}`;
+  const originalCandidates = candidatesFor(split, prdDocument, milestoneId);
+  const editedCandidates = originalCandidates.map((candidate) => ({ ...candidate, ...edits[`${editScope}:${candidate.id}`] }));
   const selectedCandidates = editedCandidates.filter((candidate) => !excluded.includes(candidate.id));
   const selectedIds = new Set(selectedCandidates.map((candidate) => candidate.id));
   const selection = split === "tasks"
@@ -125,7 +134,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
         selection: selection.map((candidate) => candidate.id),
         overrides: selection.flatMap((candidate) => {
           const original = originalCandidates.find((item) => item.id === candidate.id);
-          if (!original || (candidate.title === original.title && candidate.description === original.description)) return [];
+          if (!original || (milestoneId === undefined && candidate.title === original.title && candidate.description === original.description)) return [];
           return [{ candidateId: candidate.id, title: candidate.title.trim(), description: candidate.description }];
         }),
         options: {
@@ -156,7 +165,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
             <ul className="space-y-3">
               {candidates.map((candidate) => {
                 const selected = selectedIds.has(candidate.id);
-                const editKey = `${split}:${candidate.id}`;
+                const editKey = `${editScope}:${candidate.id}`;
                 return (
                   <li key={candidate.id} className={cn("space-y-3 rounded-lg border p-3", selected ? "border-border" : "border-dashed border-border opacity-60")}>
                     <div className="flex items-start gap-3">
@@ -181,6 +190,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
                 );
               })}
             </ul>
+            {candidates.length === 0 && <p className="text-sm text-muted-foreground">Aucune tâche détaillée pour ce jalon. Précisez ses tâches dans la conversation avant de créer des cartes.</p>}
             {brokenDependencies && <p className="text-xs text-warning">Une tâche sélectionnée dépend d’une tâche exclue : sa carte ne sera pas chaînée.</p>}
             {invalidEdits && <p role="alert" className="text-xs text-danger">Chaque carte sélectionnée doit avoir un titre et un contenu.</p>}
           </section>
@@ -199,9 +209,19 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
             <p className="mt-1 text-sm">{project?.label ?? conversation.project} · TODO</p>
             <p className="mt-2 text-xs text-muted-foreground">Les cartes ne démarrent pas automatiquement. Chaque carte conserve son PRD et sa conversation d’origine.</p>
           </div>
+          {prdDocument.roadmap && (
+            <section className="space-y-2 rounded-lg border border-border p-3">
+              <Label htmlFor={`${id}-milestone`}>Périmètre des cartes</Label>
+              <Select id={`${id}-milestone`} value={milestoneId ?? ""} disabled={busy || created.length > 0} onChange={(event) => setMilestoneId(event.target.value || undefined)} className="w-full">
+                <option value="">Toute la feuille de route</option>
+                {prdDocument.roadmap.milestones.map((milestone) => <option key={milestone.id} value={milestone.id}>{milestone.id} · {milestone.title}</option>)}
+              </Select>
+              <p className="text-xs text-muted-foreground">Le choix du jalon conserve vos modifications et votre sélection. Il ne crée aucune dépendance entre les jalons.</p>
+            </section>
+          )}
           <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-medium">Découpage · {PRD_SPLIT_MODE_LABELS[split]}</summary>
-            <div role="radiogroup" aria-label="Découpage" className="mt-3 flex flex-col gap-2">{PRD_SPLIT_MODES.map((mode) => <button key={mode} type="button" role="radio" aria-checked={split === mode} disabled={busy || created.length > 0} onClick={() => setSplit(mode)} className={cn("flex flex-col gap-1 rounded-md border p-3 text-left transition-colors", split === mode ? "border-foreground/40 bg-accent" : "border-border hover:bg-accent/50")}><span className="text-sm font-medium">{PRD_SPLIT_MODE_LABELS[mode]}</span><span className="text-xs text-muted-foreground">{splitDescription(mode, prdDocument)}</span></button>)}</div>
+            <div role="radiogroup" aria-label="Découpage" className="mt-3 flex flex-col gap-2">{PRD_SPLIT_MODES.map((mode) => <button key={mode} type="button" role="radio" aria-checked={split === mode} disabled={busy || created.length > 0} onClick={() => setSplit(mode)} className={cn("flex flex-col gap-1 rounded-md border p-3 text-left transition-colors", split === mode ? "border-foreground/40 bg-accent" : "border-border hover:bg-accent/50")}><span className="text-sm font-medium">{PRD_SPLIT_MODE_LABELS[mode]}</span><span className="text-xs text-muted-foreground">{splitDescription(mode, prdDocument, milestoneId)}</span></button>)}</div>
           </details>
           <details className="rounded-lg border border-border p-3">
             <summary className="cursor-pointer text-sm font-medium">Agent et livraison des cartes</summary>

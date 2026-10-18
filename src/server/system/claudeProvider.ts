@@ -30,6 +30,7 @@ import type { QualityPermissionBlockReason } from "../../shared/quality.ts";
 import { createLogger } from "../logger.ts";
 
 import type {
+  AgentImageInput,
   AgentProvider,
   AgentSessionEvent,
   AgentSessionHandle,
@@ -181,13 +182,23 @@ export function createSdkAgentSession(
     resume?.();
   }
 
-  function enqueue(content: string, messageId?: string): string {
+  function enqueue(content: string, messageId?: string, images?: readonly AgentImageInput[]): string {
     const id = messageId ?? nanoid(16);
     if (closed) {
       opts.onEvent({ type: "message_status", messageId: id, status: "rejected", turnId: null });
       return id;
     }
-    inbox.push({ id, prompt: { type: "user", parent_tool_use_id: null, message: { role: "user", content } } });
+    const prompt: SDKUserMessage = { type: "user", parent_tool_use_id: null, message: { role: "user", content } };
+    if (images?.length) {
+      prompt.message.content = [{ type: "text", text: content }];
+      for (const image of images) {
+        prompt.message.content.push({
+          type: "image",
+          source: { type: "base64", media_type: image.mediaType, data: image.data },
+        });
+      }
+    }
+    inbox.push({ id, prompt });
     opts.onEvent({ type: "message_status", messageId: id, status: "received", turnId: null });
     wake();
     return id;

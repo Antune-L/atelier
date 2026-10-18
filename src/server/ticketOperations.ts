@@ -309,6 +309,12 @@ export class TicketOperations {
     return { tickets, total: filtered.length, nextOffset };
   }
 
+  getProjectTicket(ticketId: string, project: string): CompactTicket {
+    const ticket = this.deps.store.getTicket(ticketId);
+    if (!ticket || ticket.project !== project) throw new TicketOperationError("NOT_FOUND", "ticket not found in this project");
+    return compactTicket(ticket);
+  }
+
   createTodoTicket(input: CreateTodoTicketInput): CreateTodoTicketResult {
     const normalized = normalizeCreateInput(input);
     if (!isProjectKey(normalized.project)) {

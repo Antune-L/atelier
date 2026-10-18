@@ -281,7 +281,8 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
 }
 
 const ATELIER_SESSION_PREFIX = "atelier-";
-const ATELIER_WEB_TOOLS = ["WebSearch", "WebFetch"];
+const ATELIER_SOURCE_TOOLS = ["WebFetch"];
+const ATELIER_RESEARCH_TOOLS = ["WebSearch"];
 
 export function atelierSessionKey(conversationId: string): string {
   return `${ATELIER_SESSION_PREFIX}${conversationId}`;
@@ -377,7 +378,7 @@ export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionSt
       ...(adversarial ? { agents: atelierAdversarialAgents(driver) } : {}),
     };
   }
-  const tools = researchOptions.externalDocs ? [...READONLY_TOOLS, ...ATELIER_WEB_TOOLS] : [...READONLY_TOOLS];
+  const tools = [...READONLY_TOOLS, ...ATELIER_SOURCE_TOOLS, ...(researchOptions.externalDocs ? ATELIER_RESEARCH_TOOLS : [])];
   if (!adversarial) {
     return {
       ...base,

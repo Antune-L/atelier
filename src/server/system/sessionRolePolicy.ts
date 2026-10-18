@@ -1,6 +1,6 @@
 import type { SettingSource } from "@anthropic-ai/claude-agent-sdk";
 
-import { WORKER_TOOLS } from "../../shared/protocol.ts";
+import { ATELIER_BOARD_TOOL_NAMES, WORKER_TOOLS } from "../../shared/protocol.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
 
 import type { AgentSessionRole } from "./agentSession.ts";
@@ -9,11 +9,11 @@ export const QUALITY_VALIDATOR_INSTRUCTIONS = "You are an independent quality ag
 
 /** Pipeline tools exposed to a session. Backend validation remains the second authorization layer. */
 export function workerToolsForRole(role: AgentSessionRole | undefined): WorkerToolName[] {
-  if (role === undefined || role === "orchestrator") return WORKER_TOOLS.map((entry) => entry.name);
+  if (role === undefined || role === "orchestrator") return WORKER_TOOLS.filter((entry) => !ATELIER_BOARD_TOOL_NAMES.some((name) => name === entry.name)).map((entry) => entry.name);
   if (role === "triage") return ["ask_user", "submit_triage", "fail"];
   if (role === "feasibility") return ["submit_feasibility", "fail"];
   if (role === "split") return ["submit_split", "fail"];
-  if (role === "atelier") return ["submit_prd_document", "fail"];
+  if (role === "atelier") return ["submit_prd_document", "fail", ...ATELIER_BOARD_TOOL_NAMES];
   return [];
 }
 

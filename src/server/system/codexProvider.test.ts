@@ -5,7 +5,7 @@ import { z } from "zod";
 import { CODEX_MAX_CONCURRENT_SUBAGENT_THREADS } from "../../shared/constants.ts";
 import { TranscriptBuffer } from "../agents/transcriptBuffer.ts";
 import { WorkerMcpManager } from "../workerMcp.ts";
-import type { AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
+import type { AgentImageInput, AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
 import {
   CodexAppServerRpcError,
   JSONRPC_INVALID_REQUEST,
@@ -245,6 +245,42 @@ test("Codex session starts, steers, interrupts and drains before closing", async
       },
     },
   });
+});
+
+test("Codex delivers native uploaded images in initial and steered turns without writable roots", async () => {
+  const fixture = appServerFixture();
+  const events: AgentSessionEvent[] = [];
+  const image: AgentImageInput = { path: "/uploads/fixture.png", mediaType: "image/png", data: "cG5n" };
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect,
+    resolveBinary: () => "/fixture/codex",
+    projectEnvironment: () => ({ PATH: "/project/node/bin" }),
+  });
+  const session = provider.createSession(options(events));
+
+  session.send("Describe the attachment", "initial-image", [image]);
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  session.send("Inspect it again", "steered-image", [image]);
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/steer"));
+
+  expect(fixture.requests.find((request) => request.method === "turn/start")?.params).toMatchObject({
+    input: [
+      { type: "text", text: "Describe the attachment", text_elements: [] },
+      { type: "localImage", path: image.path },
+    ],
+  });
+  expect(fixture.requests.find((request) => request.method === "turn/steer")?.params).toMatchObject({
+    input: [
+      { type: "text", text: "Inspect it again", text_elements: [] },
+      { type: "localImage", path: image.path },
+    ],
+  });
+  expect(fixture.requests.find((request) => request.method === "thread/start")?.params).toMatchObject({ sandbox: "read-only" });
+  fixture.notify({
+    method: "turn/completed",
+    params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } },
+  });
+  await session.close();
 });
 
 test("an interrupted Codex session accepts a new turn after the active turn ends", async () => {
@@ -1118,13 +1154,20 @@ test("a steering refusal replays the message through turn/start without a fatal 
     projectEnvironment: () => ({}),
   });
   const session = provider.createSession(options(events));
+  const image: AgentImageInput = { path: "/uploads/retry.png", mediaType: "image/png", data: "cG5n" };
   session.send("first");
   await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
-  const messageId = session.send("steer");
+  const messageId = session.send("steer", undefined, [image]);
   await waitFor(() => fixture.requests.filter((request) => request.method === "turn/start").length === 2);
 
   expect(events).toContainEqual({ type: "message_status", messageId, status: "accepted", turnId: "turn-1" });
   expect(events.some((event) => event.type === "error")).toBe(false);
+  expect(fixture.requests.filter((request) => request.method === "turn/start")[1]?.params).toMatchObject({
+    input: [
+      { type: "text", text: "steer", text_elements: [] },
+      { type: "localImage", path: image.path },
+    ],
+  });
 
   const closed = session.close();
   fixture.notify({

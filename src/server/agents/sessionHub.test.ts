@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { WorkerToolName } from "../../shared/protocol.ts";
-import type { AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
+import type { AgentImageInput, AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 
 import type {
@@ -18,6 +18,7 @@ interface RecordedSession {
   opts: AgentSessionOptions;
   sent: string[];
   messageIds: string[];
+  images: Array<readonly AgentImageInput[] | undefined>;
   resolveClose(): void;
   disposed: boolean;
   failSend: boolean;
@@ -31,15 +32,16 @@ class RecordingSystem extends FakeSystemAdapter {
     const closePromise = new Promise<void>((resolve) => {
       resolveClose = resolve;
     });
-    const record: RecordedSession = { opts, sent: [], messageIds: [], resolveClose, disposed: false, failSend: false };
+    const record: RecordedSession = { opts, sent: [], messageIds: [], images: [], resolveClose, disposed: false, failSend: false };
     this.sessions.push(record);
     return {
       ticketId: opts.ticketId,
-      send: (content, messageId) => {
+      send: (content, messageId, images) => {
         if (record.failSend) throw new Error("transport fermé");
         const resolvedMessageId = messageId ?? "fixture-message";
         record.sent.push(content);
         record.messageIds.push(resolvedMessageId);
+        record.images.push(images);
         return resolvedMessageId;
       },
       interrupt: async () => undefined,
@@ -73,6 +75,29 @@ function sessionConfig(): SessionStartConfig {
 }
 
 describe("SessionHub generations", () => {
+  test("passes native images alongside channel text without persisting image bytes", () => {
+    const system = new RecordingSystem();
+    const hub = new SessionHub(system);
+    const queued: SessionMessageContext[] = [];
+    const image: AgentImageInput = { path: "/uploads/fixture.png", mediaType: "image/png", data: "cG5n" };
+    hub.setHandlers({
+      onToolCall: async () => ({ ok: true, result: "ok" }),
+      onStop: () => undefined,
+      onActivity: () => undefined,
+      onMessageQueued: (context) => queued.push(context),
+    });
+    hub.start(sessionConfig());
+    const session = system.sessions[0];
+    if (!session) throw new Error("session missing");
+
+    expect(hub.sendEvent("ticket-1", { type: "chat", content: "Describe the attachment" }, [image])).toBe(true);
+    expect(session.images).toEqual([[image]]);
+    expect(queued[0]?.content).toContain("Describe the attachment");
+    expect(queued[0]).not.toHaveProperty("images");
+    hub.disconnect("ticket-1");
+    session.resolveClose();
+  });
+
   test("tracks received and accepted separately without claiming semantic application", () => {
     const system = new RecordingSystem();
     const hub = new SessionHub(system);

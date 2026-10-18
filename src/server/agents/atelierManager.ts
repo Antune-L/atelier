@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { getErrorMessage } from "../../shared/errors.ts";
 import { compileFeedback } from "../../shared/prdFeedback.ts";
+import type { WorkerToolName } from "../../shared/protocol.ts";
 import type { Conversation, ConversationMessage, PrdDocument } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
@@ -11,7 +12,11 @@ import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
 import type { AgentSessionEvent } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
+import type { TicketOperations } from "../ticketOperations.ts";
 
+import { prepareAtelierAttachments } from "./atelierAttachments.ts";
+import type { PreparedAtelierAttachments } from "./atelierAttachments.ts";
+import { AtelierTicketTools } from "./atelierTicketTools.ts";
 import { buildAtelierConsolidateTurn, buildAtelierPrompt, buildAtelierRegenerationTurn } from "./atelier.ts";
 import { assertExecutionAvailable, resolveExecution } from "./executionConfig.ts";
 import type { ExecutionDefaults } from "./executionConfig.ts";
@@ -80,6 +85,8 @@ export interface AtelierManagerDeps {
   system: Pick<SystemAdapter, "checkCodexRuntime">;
   getProject?: (key: string) => ProjectConfig | null;
   defaults?: () => ExecutionDefaults;
+  ticketOperations?: TicketOperations;
+  uploadsRoot?: string;
   idleTimeoutMs?: number;
   flushIntervalMs?: number;
 }
@@ -121,6 +128,8 @@ function defaultExecutionDefaults(): ExecutionDefaults {
 }
 
 export class AtelierManager {
+  private readonly uploadsRoot: string | undefined;
+  private readonly ticketTools: AtelierTicketTools | null;
   private readonly runtimes = new Map<string, ConversationRuntime>();
   private readonly starting = new Map<string, Promise<boolean>>();
   private readonly store: Store;
@@ -133,6 +142,8 @@ export class AtelierManager {
   private readonly flushIntervalMs: number;
 
   constructor(deps: AtelierManagerDeps) {
+    this.uploadsRoot = deps.uploadsRoot;
+    this.ticketTools = deps.ticketOperations ? new AtelierTicketTools({ store: deps.store, hub: deps.hub, operations: deps.ticketOperations }) : null;
     this.store = deps.store;
     this.hub = deps.hub;
     this.sessionHub = deps.sessionHub;
@@ -248,6 +259,12 @@ export class AtelierManager {
     return `PRD révision ${record.revision} enregistré. L'utilisateur va le relire et l'annoter dans l'Atelier ; résume-lui brièvement son contenu. Une éventuelle demande de régénération t'arrivera avec ses retours.`;
   }
 
+  async handleBoardTool(conversationId: string, name: WorkerToolName, args: unknown, callId: string): Promise<{ ok: boolean; result: string }> {
+    if (!this.ticketTools) return { ok: false, result: "Atelier board operations are unavailable." };
+    this.flush(conversationId);
+    return this.ticketTools.handle(conversationId, name, args, callId);
+  }
+
   handleFail(conversationId: string, reason: string): string {
     this.markError(conversationId, reason);
     return "Échec enregistré : l'utilisateur en est informé.";
@@ -269,7 +286,9 @@ export class AtelierManager {
     try {
       const sentAsFirstTurn = await this.ensureSession(conversationId, content, messageId);
       if (sentAsFirstTurn) return;
-      if (!this.sessionHub.sendEvent(atelierSessionKey(conversationId), { type: "chat", content })) {
+      const history = this.historyBefore(conversationId, messageId).filter((message) => message.role === "user").map((message) => message.content).join(PART_SEPARATOR);
+      const prepared = await this.prepareAttachments(content, history);
+      if (!this.sessionHub.sendEvent(atelierSessionKey(conversationId), { type: "chat", content: prepared.content }, prepared.images)) {
         throw new Error(SESSION_UNAVAILABLE_MESSAGE);
       }
     } catch (error) {
@@ -309,6 +328,9 @@ export class AtelierManager {
     await assertExecutionAvailable(this.system, execution);
     const resumeSessionId = execution.provider === "codex" ? conversation.sessionId : null;
     const key = atelierSessionKey(conversationId);
+    const history = this.historyBefore(conversationId, messageId);
+    const payload = `${buildAtelierPrompt({ conversation, project, history })}${PART_SEPARATOR}${content}`;
+    const prepared = await this.prepareAttachments(payload);
     const runtime = this.runtime(conversationId);
     runtime.resumed = resumeSessionId !== null;
     // The SDK emits nothing at startup: a fresh CLI process starts with no background task.
@@ -331,11 +353,14 @@ export class AtelierManager {
       },
     );
     log.info("session atelier démarrée", { conversationId, provider: execution.provider, resumed: resumeSessionId !== null });
-    if (resumeSessionId) return this.sessionHub.sendEvent(key, { type: "chat", content });
-    const history = this.historyBefore(conversationId, messageId);
-    const payload = `${buildAtelierPrompt({ conversation, project, history })}${PART_SEPARATOR}${content}`;
-    if (!this.sessionHub.sendEvent(key, { type: "ticket", payload })) throw new Error(SESSION_UNAVAILABLE_MESSAGE);
+    if (resumeSessionId) return this.sessionHub.sendEvent(key, { type: "chat", content: prepared.content }, prepared.images);
+    if (!this.sessionHub.sendEvent(key, { type: "ticket", payload: prepared.content }, prepared.images)) throw new Error(SESSION_UNAVAILABLE_MESSAGE);
     return true;
+  }
+
+  private async prepareAttachments(content: string, previousContent = ""): Promise<PreparedAtelierAttachments> {
+    if (!this.uploadsRoot) return { content, images: [] };
+    return prepareAtelierAttachments(content, this.uploadsRoot, previousContent);
   }
 
   private historyBefore(conversationId: string, messageId: string): ConversationMessage[] {

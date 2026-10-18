@@ -1,11 +1,12 @@
 import { FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { RESEARCH_OPTION_LABELS } from "@shared/constants";
 import { enabledResearchOptionKeys } from "@shared/schemas";
 import type { Conversation, ConversationMessage, UpdateConversationInput } from "@shared/schemas";
 
 import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
+import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { UNTITLED_CONVERSATION_LABEL, agentLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
-import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
+import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
 
 interface ConversationPanelProps {
@@ -65,6 +66,10 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
   const [following, setFollowing] = useState(true);
   const threadRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
+  const appendToDraft = (markdown: string): void => {
+    setDraft((prev) => appendMarkdownLine(prev, markdown));
+  };
+  const { uploading, uploadFiles, onPaste } = useAtelierAttachments(appendToDraft, setError);
 
   const running = conversation.sessionStatus === "running";
   const hasAssistantReply = messages.some((m) => m.role === "assistant");
@@ -94,7 +99,7 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
 
   const send = async (): Promise<void> => {
     const content = draft.trim();
-    if (!content || busy || running) return;
+    if (!content || busy || running || uploading) return;
     if (await post(content)) clearDraft();
   };
 
@@ -128,14 +133,6 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void send();
-  };
-
-  const appendToDraft = (markdown: string): void => {
-    setDraft((prev) => appendMarkdownLine(prev, markdown));
-  };
-
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
-    void handleMediaPaste(event, appendToDraft).catch((e: unknown) => setError(errorMessage(e, "Échec de l'upload")));
   };
 
   return (
@@ -191,7 +188,7 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
         <Button
           size="sm"
           onClick={consolidate}
-          disabled={!hasAssistantReply || running || busy}
+          disabled={!hasAssistantReply || running || busy || uploading}
           title={hasAssistantReply ? undefined : "Disponible après la première réponse de l'agent"}
         >
           <FileText className="h-3.5 w-3.5" />
@@ -255,15 +252,16 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
             placeholder="Réponds à l'agent… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
             aria-label="Message à l'agent"
           />
-          <div className="flex items-center gap-2">
-            {error && <p className="min-w-0 flex-1 truncate text-xs text-danger">{error}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <AtelierAttachments uploading={uploading} disabled={busy} uploadFiles={uploadFiles} />
+            {error && <p role="alert" className="min-w-0 flex-1 text-xs text-danger">{error}</p>}
             {running && (
               <Button size="sm" variant="outline" className="ml-auto" onClick={interrupt} disabled={busy}>
                 <Square className="h-3.5 w-3.5" />
                 Interrompre
               </Button>
             )}
-            <Button size="sm" className="ml-auto" onClick={() => void send()} disabled={!draft.trim() || busy || running}>
+            <Button size="sm" className="ml-auto" onClick={() => void send()} disabled={!draft.trim() || busy || running || uploading}>
               <Send className="h-3.5 w-3.5" />
               Envoyer
             </Button>

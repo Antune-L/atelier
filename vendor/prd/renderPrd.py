@@ -26,13 +26,16 @@ TOP_LEVEL_FIELDS = {
     "outOfScope",
     "openQuestions",
     "tasks",
+    "roadmap",
 }
-REQUIRED_TOP_LEVEL_FIELDS = TOP_LEVEL_FIELDS - {"$schema"}
+REQUIRED_TOP_LEVEL_FIELDS = TOP_LEVEL_FIELDS - {"$schema", "roadmap"}
 PRE_DRAFT_FIELDS = {"reuse", "sharedSurfaces", "sourcePriority"}
 AXIS_FIELDS = {"id", "title", "summary"}
 SOURCE_FIELDS = {"title", "ref"}
 REQUIREMENT_FIELDS = {"id", "axis", "kind", "title", "description", "priority", "status", "acceptance"}
 TASK_FIELDS = {"id", "axis", "title", "expectedOutcome", "startCondition", "dependsOn", "acceptance", "boundaries"}
+ROADMAP_FIELDS = {"milestones", "selectedMilestoneId"}
+MILESTONE_FIELDS = {"id", "title", "summary", "scope", "acceptance"}
 TEXT_ARRAY_FIELDS = {
     "goals",
     "users",
@@ -112,7 +115,8 @@ def validate_document(document):
     validate_sources(document["sources"], errors)
     axis_ids = validate_axes(document["axes"], errors)
     requirement_ids, covered_axes = validate_requirements(document["requirements"], errors, axis_ids)
-    validate_tasks(document["tasks"], errors, axis_ids)
+    milestone_ids = validate_roadmap(document.get("roadmap"), errors) if "roadmap" in document else set()
+    validate_tasks(document["tasks"], errors, axis_ids, milestone_ids)
     if len(requirement_ids) != len(set(requirement_ids)):
         errors.append("$.requirements: requirement IDs must be unique")
     for axis_id in axis_ids:
@@ -214,7 +218,39 @@ def validate_requirements(requirements, errors, axis_ids):
     return identifiers, covered_axes
 
 
-def validate_tasks(tasks, errors, axis_ids):
+def validate_roadmap(roadmap, errors):
+    identifiers = []
+    if not require_object(roadmap, "$.roadmap", errors):
+        return set()
+    require_fields(roadmap, {"milestones"}, ROADMAP_FIELDS, "$.roadmap", errors)
+    milestones = roadmap.get("milestones")
+    if not isinstance(milestones, list) or not milestones:
+        errors.append("$.roadmap.milestones: expected at least one milestone")
+        return set()
+    for index, milestone in enumerate(milestones):
+        path = f"$.roadmap.milestones[{index}]"
+        if not require_object(milestone, path, errors):
+            continue
+        require_fields(milestone, MILESTONE_FIELDS, MILESTONE_FIELDS, path, errors)
+        if MILESTONE_FIELDS - milestone.keys():
+            continue
+        if require_text(milestone["id"], f"{path}.id", errors, IDENTIFIER_PATTERN):
+            identifiers.append(milestone["id"])
+        require_text(milestone["title"], f"{path}.title", errors)
+        require_text(milestone["summary"], f"{path}.summary", errors)
+        require_text_array(milestone["scope"], f"{path}.scope", errors, non_empty=True)
+        require_text_array(milestone["acceptance"], f"{path}.acceptance", errors, non_empty=True)
+    known = set(identifiers)
+    if len(known) != len(identifiers):
+        errors.append("$.roadmap.milestones: milestone IDs must be unique")
+    if "selectedMilestoneId" in roadmap:
+        selected = roadmap["selectedMilestoneId"]
+        if require_text(selected, "$.roadmap.selectedMilestoneId", errors, IDENTIFIER_PATTERN) and selected not in known:
+            errors.append(f"$.roadmap.selectedMilestoneId: unknown milestone '{selected}'")
+    return known
+
+
+def validate_tasks(tasks, errors, axis_ids, milestone_ids):
     if not isinstance(tasks, list) or not tasks:
         errors.append("$.tasks: expected at least one task")
         return
@@ -224,13 +260,17 @@ def validate_tasks(tasks, errors, axis_ids):
         path = f"$.tasks[{index}]"
         if not require_object(task, path, errors):
             continue
-        require_fields(task, TASK_FIELDS, TASK_FIELDS, path, errors)
+        require_fields(task, TASK_FIELDS, TASK_FIELDS | {"milestoneId"}, path, errors)
         if TASK_FIELDS - task.keys():
             continue
         valid_identifier = require_text(task["id"], f"{path}.id", errors, TASK_IDENTIFIER_PATTERN)
         if valid_identifier:
             identifiers.append(task["id"])
         validate_axis_reference(task["axis"], f"{path}.axis", errors, axis_ids)
+        if "milestoneId" in task:
+            milestone_id = task["milestoneId"]
+            if require_text(milestone_id, f"{path}.milestoneId", errors, IDENTIFIER_PATTERN) and milestone_id not in milestone_ids:
+                errors.append(f"{path}.milestoneId: unknown milestone '{milestone_id}'")
         require_text(task["title"], f"{path}.title", errors)
         require_text(task["expectedOutcome"], f"{path}.expectedOutcome", errors)
         require_text(task["startCondition"], f"{path}.startCondition", errors)
@@ -334,6 +374,7 @@ CHANGES_ID = "changes"
 BRIEF_ID = "brief"
 DECISIONS_ID = "decisions"
 AXES_ID = "axes"
+ROADMAP_ID = "roadmap"
 OUT_OF_SCOPE_ID = "out-of-scope"
 SECONDARY_ID = "secondary"
 IMPACT_ID = "impact"
@@ -390,6 +431,10 @@ LABELS = {
         "need": "Besoin",
         "goals": "Objectifs",
         "axes": "Axes",
+        "roadmap": "Feuille de route",
+        "milestone": "Jalon",
+        "selectedMilestone": "Jalon ciblé",
+        "scope": "Périmètre",
         "sources": "Sources",
         "outOfScope": "Hors périmètre",
         "requirements": "Exigences",
@@ -452,6 +497,10 @@ LABELS = {
         "need": "Need",
         "goals": "Goals",
         "axes": "Axes",
+        "roadmap": "Roadmap",
+        "milestone": "Milestone",
+        "selectedMilestone": "Selected milestone",
+        "scope": "Scope",
         "sources": "Sources",
         "outOfScope": "Out of scope",
         "requirements": "Requirements",
@@ -1256,7 +1305,10 @@ def ordered_requirements(requirements):
 
 
 def slide_order(document):
-    keys = [DECISIONS_ID, BRIEF_ID, AXES_ID]
+    keys = [DECISIONS_ID, BRIEF_ID]
+    if "roadmap" in document:
+        keys.append(ROADMAP_ID)
+    keys.append(AXES_ID)
     for axis in document["axes"]:
         keys.append(slide_key(AXIS_KEY_PREFIX, axis["id"]))
         axis_requirements = ordered_requirements(axis_items(document["requirements"], axis["id"]))
@@ -1527,6 +1579,8 @@ def dependency_chip_html(task, task_axes, labels):
 
 def task_html(task, labels, task_axes, status):
     badges = f"{dependency_chip_html(task, task_axes, labels)}{change_badge(status, labels)}"
+    if "milestoneId" in task:
+        badges += f'<span class="badge">{escape(labels["milestone"])} {escape(task["milestoneId"])}</span>'
     if badges:
         badges = f'<span class="badges">{badges}</span>'
     classes = slide_classes("item slide", len(task["acceptance"]))
@@ -1691,6 +1745,29 @@ def changes_banner_html(changes, labels):
     )
 
 
+def roadmap_html(document, labels):
+    roadmap = document.get("roadmap")
+    if roadmap is None:
+        return ""
+    entries = []
+    for milestone in roadmap["milestones"]:
+        entries.append(
+            f'<section><h3>{escape(milestone["id"])}{escape(COUNT_SEPARATOR)}{escape(milestone["title"])}</h3>'
+            f'<p>{escape(milestone["summary"])}</p>'
+            f'<h4>{escape(labels["scope"])}</h4>{list_html(milestone["scope"], labels["empty"])}'
+            f'<h4>{escape(labels["acceptance"])}</h4>{list_html(milestone["acceptance"], labels["empty"])}</section>'
+        )
+    selected = roadmap.get("selectedMilestoneId")
+    selected_html = ""
+    if selected is not None:
+        selected_html = f'<p><strong>{escape(labels["selectedMilestone"])}</strong>{escape(COUNT_SEPARATOR)}{escape(selected)}</p>'
+    return block_html(
+        ROADMAP_ID, labels["roadmap"], selected_html + "".join(entries),
+        slide_classes("block slide", len(roadmap["milestones"])),
+        extra_attributes=slide_attributes(KIND_AXIS, labels["roadmap"], ROADMAP_ID),
+    )
+
+
 def build_blocks(document, labels, changes):
     axis_sections = "".join(axis_section_html(document, axis, labels, changes) for axis in document["axes"])
     return "".join(
@@ -1700,6 +1777,7 @@ def build_blocks(document, labels, changes):
             decisions_html(document, labels, changes),
             brief_html(document, labels),
             list_block(document, labels, OUT_OF_SCOPE_BLOCK),
+            roadmap_html(document, labels),
             axes_html(document, labels, changes),
             axis_sections,
             secondary_html(document, labels),
@@ -1722,6 +1800,7 @@ def navigation_html(document, labels):
         navigation_entry_html(DECISIONS_ID, labels["decisions"]),
         navigation_entry_html(BRIEF_ID, labels["need"]),
         navigation_entry_html(OUT_OF_SCOPE_ID, labels["outOfScope"]),
+        *([navigation_entry_html(ROADMAP_ID, labels["roadmap"])] if "roadmap" in document else []),
         navigation_entry_html(AXES_ID, labels["axes"], f'<ul class="nav-sub">{axis_entries}</ul>'),
         navigation_entry_html(SECONDARY_ID, labels["secondary"]),
         navigation_entry_html(IMPACT_ID, labels["impact"]),

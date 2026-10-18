@@ -20,6 +20,7 @@ import type { TranscriptUpdate } from "../../shared/transcript.ts";
 import { TranscriptBuffer } from "./transcriptBuffer.ts";
 import { createLogger } from "../logger.ts";
 import type {
+  AgentImageInput,
   AgentPermissionMode,
   AgentExecutionGuard,
   AgentSessionEvent,
@@ -451,7 +452,7 @@ export class SessionHub {
   }
 
   /** Inject a backend channel event as a user turn. False when no live session exists for the ticket. */
-  sendEvent(ticketId: string, event: ChannelEvent): boolean {
+  sendEvent(ticketId: string, event: ChannelEvent, images?: readonly AgentImageInput[]): boolean {
     const live = this.sessions.get(ticketId);
     if (!live?.handle) return false;
     if (event.type === "ticket" && live.replayedTicket) {
@@ -464,7 +465,7 @@ export class SessionHub {
     try {
       this.handlers?.onMessageQueued?.(context);
       live.messageMetadata.set(messageId, { channel: event.type, generationId: live.generationId });
-      const sentMessageId = live.handle.send(content, messageId);
+      const sentMessageId = live.handle.send(content, messageId, images);
       if (sentMessageId !== messageId) throw new Error("Le provider n'a pas conservé l'identifiant du message.");
       return true;
     } catch (error) {

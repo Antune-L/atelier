@@ -4,12 +4,27 @@ import { join } from "node:path";
 
 import { prdDocumentSchema } from "./prdDocument.ts";
 import type { PrdDocument } from "./prdDocument.ts";
-import { renderPrdAxisBrief, renderPrdMarkdown, renderPrdTaskBrief } from "./prdMarkdown.ts";
+import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief } from "./prdMarkdown.ts";
 
 const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "vendor", "prd", "prd-template.json");
 
 function loadTemplate(): PrdDocument {
   return prdDocumentSchema.parse(JSON.parse(readFileSync(TEMPLATE_PATH, "utf8")));
+}
+
+function loadRoadmap(): PrdDocument {
+  const document = loadTemplate();
+  return prdDocumentSchema.parse({
+    ...document,
+    roadmap: {
+      milestones: [
+        { id: "capture", title: "Capture searches", summary: "Persist the current search.", scope: ["Save searches"], acceptance: ["A saved search survives reload."] },
+        { id: "restore", title: "Restore searches", summary: "Restore a persisted search.", scope: ["Restore searches"], acceptance: ["A saved search restores its filters."] },
+      ],
+      selectedMilestoneId: "restore",
+    },
+    tasks: document.tasks.map((task) => ({ ...task, milestoneId: task.id === "T1" ? "capture" : "restore", dependsOn: [] })),
+  });
 }
 
 describe("prdDocumentSchema", () => {
@@ -46,6 +61,25 @@ describe("prdDocumentSchema", () => {
     expect(prdDocumentSchema.safeParse(duplicated).success).toBe(false);
     expect(prdDocumentSchema.safeParse({ ...doc, title: "   " }).success).toBe(false);
   });
+
+  test("accepts optional roadmap milestones without adding branch dependencies", () => {
+    const document = loadRoadmap();
+    expect(document.roadmap?.selectedMilestoneId).toBe("restore");
+    expect(document.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
+    expect(orderSelectedPrdTasks(document, new Set(["T2"])).map((task) => task.id)).toEqual(["T2"]);
+    expect(loadTemplate().roadmap).toBeUndefined();
+    expect(loadTemplate().tasks.every((task) => task.milestoneId === undefined)).toBe(true);
+  });
+
+  test("rejects duplicate, absent and unknown roadmap references", () => {
+    const document = loadRoadmap();
+    const milestones = document.roadmap?.milestones ?? [];
+    expect(prdDocumentSchema.safeParse({ ...document, roadmap: { milestones: [...milestones, ...milestones] } }).success).toBe(false);
+    expect(prdDocumentSchema.safeParse({ ...document, roadmap: { milestones, selectedMilestoneId: "unknown" } }).success).toBe(false);
+    expect(prdDocumentSchema.safeParse({ ...document, roadmap: { milestones: [] } }).success).toBe(false);
+    expect(prdDocumentSchema.safeParse({ ...document, roadmap: undefined }).success).toBe(false);
+    expect(prdDocumentSchema.safeParse({ ...document, tasks: document.tasks.map((task) => ({ ...task, milestoneId: "unknown" })) }).success).toBe(false);
+  });
 });
 
 describe("renderPrdMarkdown", () => {
@@ -69,6 +103,16 @@ describe("renderPrdMarkdown", () => {
     expect(markdown).toContain("## Décisions attendues\n\nAucune");
     expect(markdown).not.toContain("### Utilisateurs");
   });
+
+  test("renders the full roadmap, selected milestone, scope and acceptance", () => {
+    const markdown = renderPrdMarkdown(loadRoadmap());
+    expect(markdown).toContain("## Feuille de route");
+    expect(markdown).toContain("**Jalon ciblé :** restore");
+    expect(markdown).toContain("### Jalon capture — Capture searches");
+    expect(markdown).toContain("### Jalon restore — Restore searches");
+    expect(markdown).toContain("A saved search restores its filters.");
+    expect(markdown).toContain("**Jalon :** capture");
+  });
 });
 
 describe("PRD briefs", () => {
@@ -88,5 +132,20 @@ describe("PRD briefs", () => {
     expect(brief).toContain("### T1 — Persist saved searches");
     expect(brief).not.toContain("T2 —");
     expect(renderPrdAxisBrief(loadTemplate(), "A9")).toBeNull();
+  });
+
+  test("limits milestone briefs to the selected tasks while retaining their acceptance", () => {
+    const document = loadRoadmap();
+    const single = renderPrdSingleBrief(document, "restore");
+    expect(single).toContain("Jalon restore — Restore searches");
+    expect(single).toContain("T2 — Restore a saved search");
+    expect(single).not.toContain("T1 — Persist saved searches");
+    expect(single).toContain("A saved search restores its filters.");
+    const axis = renderPrdAxisBrief(document, "A2", "restore");
+    expect(axis).toContain("Seul le jalon restore est à implémenter.");
+    expect(axis).toContain("T2 — Restore a saved search");
+    expect(renderPrdAxisBrief(document, "A2", "capture")).not.toContain("T2 — Restore a saved search");
+    expect(renderPrdTaskBrief(document, "T2")).toContain("Jalon restore — Restore searches");
+    expect(renderPrdTaskBrief(document, "T2")).not.toContain("Jalon capture");
   });
 });

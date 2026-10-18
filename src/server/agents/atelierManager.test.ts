@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ATELIER_SLOT_ID } from "../../shared/constants.ts";
+import { ATELIER_SLOT_ID, ORCHESTRATORS } from "../../shared/constants.ts";
 import { DEFAULT_RESEARCH_OPTIONS, prdDocumentSchema } from "../../shared/schemas.ts";
 import type { PrdDocument } from "../../shared/schemas.ts";
 import { initProjectRegistry } from "../config.ts";
@@ -10,7 +11,7 @@ import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
 import type { NewConversation } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
-import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
+import type { AgentImageInput, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
@@ -23,6 +24,7 @@ const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "..", "vendor", "prd", "
 class CapturingSystem extends FakeSystemAdapter {
   readonly sessions: AgentSessionOptions[] = [];
   readonly sent: string[][] = [];
+  readonly images: AgentImageInput[][][] = [];
   compacts = 0;
   compactError: string | null = null;
 
@@ -30,10 +32,13 @@ class CapturingSystem extends FakeSystemAdapter {
     this.sessions.push(opts);
     const sent: string[] = [];
     this.sent.push(sent);
+    const sentImages: AgentImageInput[][] = [];
+    this.images.push(sentImages);
     return {
       ticketId: opts.ticketId,
-      send: (content, messageId = crypto.randomUUID()) => {
+      send: (content, messageId = crypto.randomUUID(), images = []) => {
         sent.push(content);
+        sentImages.push([...images]);
         return messageId;
       },
       compact: async () => {
@@ -82,7 +87,7 @@ afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-function setup(idleTimeoutMs?: number) {
+function setup(idleTimeoutMs?: number, uploadsRoot?: string) {
   const db = createDatabase(":memory:");
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
@@ -90,7 +95,7 @@ function setup(idleTimeoutMs?: number) {
   const system = new CapturingSystem();
   const hub = new ClientHub(store);
   const sessionHub = new SessionHub(system);
-  const manager = new AtelierManager({ store, hub, sessionHub, system, flushIntervalMs: 0, ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}) });
+  const manager = new AtelierManager({ store, hub, sessionHub, system, uploadsRoot, flushIntervalMs: 0, ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}) });
   closers.push(async () => {
     manager.stop();
     sessionHub.disconnectAll();
@@ -105,6 +110,38 @@ function loadTemplate(): PrdDocument {
 }
 
 describe("AtelierManager", () => {
+  for (const orchestrator of ORCHESTRATORS) {
+    test(`${orchestrator} rehydrates sources and native images for later turns, consolidation and session restart`, async () => {
+      const uploadsRoot = mkdtempSync(join(realpathSync(tmpdir()), "atelier-manager-uploads-"));
+      const imagePath = join(uploadsRoot, "screen.png");
+      const documentPath = join(uploadsRoot, "brief.md");
+      writeFileSync(imagePath, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64"));
+      writeFileSync(documentPath, "Le jalon 2 conserve l'historique des recherches.");
+      const { store, system, sessionHub, manager } = setup(undefined, uploadsRoot);
+      closers.push(async () => rmSync(uploadsRoot, { recursive: true, force: true }));
+      const conversation = store.createConversation({ ...CLAUDE_CONVERSATION, orchestrator });
+      await manager.postMessage(conversation.id, "Analyse ce besoin ![Écran](/uploads/screen.png) [Cahier des charges](/uploads/brief.md)").delivered;
+      expect(system.images[0]?.[0]?.[0]?.path).toBe(imagePath);
+      expect(system.sent[0]?.[0]).toContain("Le jalon 2 conserve l'historique des recherches.");
+      system.emit({ type: "init", sessionId: `${orchestrator}-source-thread` });
+      system.emit(TURN_END);
+      await manager.postMessage(conversation.id, "Explique le second jalon.").delivered;
+      expect(system.images[0]?.[1]?.[0]?.path).toBe(imagePath);
+      expect(system.sent[0]?.[1]).toContain("Le jalon 2 conserve l'historique des recherches.");
+      expect(system.sent[0]?.[1]).not.toContain("Analyse ce besoin");
+      system.emit(TURN_END);
+      await manager.consolidate(conversation.id).delivered;
+      expect(system.images[0]?.[2]?.[0]?.path).toBe(imagePath);
+      expect(system.sent[0]?.[2]).toContain("Consolider en PRD");
+      system.emit(TURN_END);
+      sessionHub.disconnect(atelierSessionKey(conversation.id), "completed");
+      await manager.postMessage(conversation.id, "Reprenons les sources.").delivered;
+      expect(system.images[1]?.[0]?.[0]?.path).toBe(imagePath);
+      expect(system.sent[1]?.[0]).toContain("## Historique de la conversation");
+      expect(system.sent[1]?.[0]).toContain("Le jalon 2 conserve l'historique des recherches.");
+    });
+  }
+
   test("persists the user message, starts a read-only session and captures the Claude reply", async () => {
     const { store, system, manager } = setup();
     const conversation = store.createConversation(CLAUDE_CONVERSATION);
@@ -191,7 +228,9 @@ describe("AtelierManager", () => {
 
     await manager.postMessage(conversation.id, "Retour").delivered;
     expect(system.sessions[1]?.resumeSessionId).toBe("thread-1");
-    expect(system.sent[1]).toEqual(["Retour"]);
+    expect(system.sent[1]?.[0]).toContain("## Historique de la conversation");
+    expect(system.sent[1]?.[0]).toContain("Premier message");
+    expect(system.sent[1]?.[0]?.endsWith("Retour")).toBe(true);
   });
 
   test("stores each submitted PRD as the next revision", () => {

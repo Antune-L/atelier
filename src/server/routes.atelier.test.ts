@@ -24,6 +24,7 @@ import { Store } from "./db/store.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
 import { Notifier } from "./notifier.ts";
+import { createTicketOperations } from "./ticketOperations.ts";
 import { PYTHON_BINARY } from "./prd/renderPrdHtml.ts";
 import { createApiRoutes } from "./routes.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "./system/agentSession.ts";
@@ -82,7 +83,8 @@ function setupWith<System extends FakeSystemAdapter>(system: System) {
   const split = new SplitManager(store, system, sessionHub);
   const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
   const delegation = new DelegationManager(store, system, sessionHub, hub);
-  const atelier = new AtelierManager({ store, hub, sessionHub, system, flushIntervalMs: 0 });
+  const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility });
+  const atelier = new AtelierManager({ store, hub, sessionHub, system, ticketOperations, flushIntervalMs: 0 });
   const coordinator = new AgentCoordinator(store, hub, sessionHub, notifier, lifecycle, slots, triage, feasibility, split, delegation, atelier);
   const app = createApiRoutes({
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
@@ -155,6 +157,39 @@ async function waitForIdle(store: Store, conversationId: string): Promise<void> 
 }
 
 describe("Atelier routes", () => {
+  for (const orchestrator of ["claude", "codex"] satisfies Orchestrator[]) {
+    test(`${orchestrator} routes scoped board tools through the real coordinator`, async () => {
+      const { system, request, store, feasibility, slots } = setup();
+      const analysis = spyOn(feasibility, "start").mockResolvedValue(undefined);
+      const implementation = spyOn(slots, "startTicket").mockResolvedValue(undefined);
+      const seed = "Crée une carte Recherche puis lance-la.";
+      try {
+        const response = await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY, orchestrator, seed });
+        const conversation = conversationSchema.parse(await response.json());
+        await flushMicrotasks();
+        const session = system.sessions[0];
+        if (!session) throw new Error("Atelier session did not start");
+        expect((await session.onToolCall("atelier_list_tickets", {})).ok).toBe(true);
+        const created = await session.onToolCall("atelier_create_todo", { requestId: "search", title: "Recherche", authorizationQuote: seed });
+        expect(created.ok).toBe(true);
+        const ticket = store.listTickets(false)[0];
+        if (!ticket) throw new Error("Atelier card was not created");
+        expect(ticket.project).toBe(conversation.project);
+        expect(ticket.column).toBe("todo");
+        expect(implementation).not.toHaveBeenCalled();
+        expect((await session.onToolCall("atelier_get_ticket", { ticketId: ticket.id })).result).toContain(ticket.id);
+        expect((await session.onToolCall("atelier_start_ticket", { ticketId: ticket.id, authorizationQuote: seed })).result).toContain('"status":"queued"');
+        expect(implementation).toHaveBeenCalledTimes(1);
+        expect((await session.onToolCall("done", { pr_url: "https://example.com/pr/1" })).ok).toBe(false);
+        const actionResults = store.listConversationMessages(conversation.id).filter((message) => message.role === "activity");
+        expect(actionResults).toHaveLength(2);
+      } finally {
+        analysis.mockRestore();
+        implementation.mockRestore();
+      }
+    });
+  }
+
   for (const orchestrator of ["claude", "codex"] satisfies Orchestrator[]) {
     test(`a ${orchestrator} conversation seeds its session and accepts a PRD through the worker tool`, async () => {
       const { system, request } = setup();

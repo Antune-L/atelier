@@ -320,6 +320,7 @@ describe("buildAtelierSessionConfig — adversarial review", () => {
         expect(config.permissionDeny).toBeUndefined();
       }
     }
+    expect(atelierConfig("claude", false, false).allowedTools).toContain("WebFetch");
     expect(atelierConfig("claude", true, false).disallowedTools).toEqual(["Edit", "Write", "Bash", "Task", "Agent"]);
   });
 });

@@ -35,6 +35,19 @@ const prdSourceSchema = z.strictObject({ title: textSchema, ref: textSchema });
 
 const prdAxisSchema = z.strictObject({ id: axisIdSchema, title: textSchema, summary: textSchema });
 
+const prdMilestoneSchema = z.strictObject({
+  id: identifierSchema,
+  title: textSchema,
+  summary: textSchema,
+  scope: nonEmptyTextArraySchema,
+  acceptance: nonEmptyTextArraySchema,
+});
+
+const prdRoadmapSchema = z.strictObject({
+  milestones: z.array(prdMilestoneSchema).min(1),
+  selectedMilestoneId: identifierSchema.optional(),
+});
+
 const prdRequirementSchema = z.strictObject({
   id: identifierSchema,
   axis: axisIdSchema,
@@ -48,6 +61,7 @@ const prdRequirementSchema = z.strictObject({
 
 const prdTaskSchema = z.strictObject({
   id: taskIdSchema,
+  milestoneId: identifierSchema.optional(),
   axis: axisIdSchema,
   title: textSchema,
   expectedOutcome: textSchema,
@@ -97,6 +111,7 @@ export const prdDocumentSchema = z
     revision: textSchema,
     title: textSchema,
     summary: textSchema,
+    roadmap: prdRoadmapSchema.optional(),
     locale: z.enum(PRD_LOCALES),
     preDraft: prdPreDraftSchema,
     goals: textArraySchema,
@@ -112,6 +127,15 @@ export const prdDocumentSchema = z
     tasks: z.array(prdTaskSchema).min(1),
   })
   .superRefine((document, context) => {
+    const milestoneIds = document.roadmap?.milestones.map((milestone) => milestone.id) ?? [];
+    const knownMilestones = new Set(milestoneIds);
+    if (hasDuplicates(milestoneIds)) {
+      context.addIssue({ code: "custom", message: "identifiants de jalons en double", path: ["roadmap", "milestones"] });
+    }
+    const selectedMilestoneId = document.roadmap?.selectedMilestoneId;
+    if (selectedMilestoneId !== undefined && !knownMilestones.has(selectedMilestoneId)) {
+      context.addIssue({ code: "custom", message: `jalon inconnu « ${selectedMilestoneId} »`, path: ["roadmap", "selectedMilestoneId"] });
+    }
     const axisIds = document.axes.map((axis) => axis.id);
     const knownAxes = new Set(axisIds);
     if (hasDuplicates(axisIds)) context.addIssue({ code: "custom", message: "identifiants d'axes en double", path: ["axes"] });
@@ -133,6 +157,9 @@ export const prdDocumentSchema = z
     const knownTasks = new Set(taskIds);
     if (hasDuplicates(taskIds)) context.addIssue({ code: "custom", message: "identifiants de tâches en double", path: ["tasks"] });
     document.tasks.forEach((task, index) => {
+      if (task.milestoneId !== undefined && !knownMilestones.has(task.milestoneId)) {
+        context.addIssue({ code: "custom", message: `jalon inconnu « ${task.milestoneId} »`, path: ["tasks", index, "milestoneId"] });
+      }
       if (!knownAxes.has(task.axis)) context.addIssue({ code: "custom", message: `axe inconnu « ${task.axis} »`, path: ["tasks", index, "axis"] });
       for (const dependency of task.dependsOn) {
         if (dependency === task.id) {

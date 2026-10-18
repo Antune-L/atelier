@@ -266,7 +266,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const splitManager = new SplitManager(store, system, sessionHub);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
   const feasibilityAnswerManager = new FeasibilityAnswerManager(store, system, clientHub);
-  const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system });
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const qualityManager = new QualityManager({
@@ -282,6 +281,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
   }, repoMutex);
+  const ticketOperations = createTicketOperations({
+    store,
+    hub: clientHub,
+    lifecycle,
+    slots: slotManager,
+    feasibility: feasibilityManager,
+  });
+  const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system, ticketOperations, uploadsRoot: join(dataRoot, UPLOADS_DIR) });
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
   sessionHub.setAutonomousGuardFactory((config) => createAutonomousSessionGuard(store, config.ticketId, "orchestrator"));
   slotManager.setAutonomousRecovery({
@@ -327,13 +334,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
-  const ticketOperations = createTicketOperations({
-    store,
-    hub: clientHub,
-    lifecycle,
-    slots: slotManager,
-    feasibility: feasibilityManager,
-  });
   const previewManager = new PreviewManager({
     store,
     config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),

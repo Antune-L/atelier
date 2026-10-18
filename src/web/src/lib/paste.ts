@@ -22,6 +22,7 @@ function isMedia(type: string): boolean {
 export async function handleMediaPaste(
   event: ClipboardEvent<HTMLTextAreaElement>,
   appendText: (markdown: string) => void,
+  uploadFile: typeof api.uploadFile = api.uploadFile,
 ): Promise<boolean> {
   const items = Array.from(event.clipboardData.items);
   const fileItem = items.find((item) => item.kind === "file" && isMedia(item.type));
@@ -29,9 +30,16 @@ export async function handleMediaPaste(
   const file = fileItem.getAsFile();
   if (!file) return false;
   event.preventDefault();
-  const result = await api.uploadFile(file);
+  const result = await uploadFile(file);
   const isImage = file.type.startsWith(IMAGE_PREFIX);
   const line = isImage ? `![pasted-image](${result.path})` : `[pasted-file](${result.path})`;
   appendText(line);
   return true;
+}
+
+export async function uploadAttachment(file: File): Promise<string> {
+  const result = await api.uploadFile(file);
+  const label = file.name.replace(/[\\[\]\\\r\n]/g, "_") || "pièce jointe";
+  const prefix = file.type.startsWith(IMAGE_PREFIX) ? "!" : "";
+  return `${prefix}[${label}](${result.url})`;
 }

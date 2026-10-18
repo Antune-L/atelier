@@ -28,6 +28,34 @@ describe("renderPrdHtml", () => {
     expect(html).toContain("Saved searches v2");
   });
 
+  test.skipIf(!hasPython)("exports optional roadmap scope and task associations with escaped content", async () => {
+    const previous = loadTemplate();
+    const document = prdDocumentSchema.parse({
+      ...previous,
+      roadmap: {
+        milestones: [{ id: "capture", title: "Capture <searches>", summary: "Persist searches.", scope: ["Save filters"], acceptance: ["A search survives reload."] }],
+        selectedMilestoneId: "capture",
+      },
+      tasks: previous.tasks.map((task) => ({ ...task, milestoneId: "capture" })),
+    });
+    const html = await renderPrdHtml({ document, previous });
+    expect(html).toContain('id="roadmap"');
+    expect(html).toContain('href="#roadmap"');
+    expect(html).toContain("Capture &lt;searches&gt;");
+    expect(html).toContain("Selected milestone");
+    expect(html).toContain("Save filters");
+    expect(html).toContain("A search survives reload.");
+    expect(html).toContain("Milestone capture");
+  });
+
+  test.skipIf(!hasPython)("rejects invalid roadmap references at the standalone export boundary", async () => {
+    const document = loadTemplate();
+    const milestone = { id: "capture", title: "Capture", summary: "Save searches.", scope: ["Save filters"], acceptance: ["A search survives reload."] };
+    await expect(renderPrdHtml({ document: { ...document, roadmap: { milestones: [milestone], selectedMilestoneId: "unknown" } } })).rejects.toThrow("unknown milestone 'unknown'");
+    await expect(renderPrdHtml({ document: { ...document, roadmap: { milestones: [milestone, milestone] } } })).rejects.toThrow("milestone IDs must be unique");
+    await expect(renderPrdHtml({ document: { ...document, tasks: document.tasks.map((task) => ({ ...task, milestoneId: "unknown" })) } })).rejects.toThrow("unknown milestone 'unknown'");
+  });
+
   test("fails with a French error when the renderer is missing", async () => {
     await expect(renderPrdHtml({ document: loadTemplate(), resourcesRoot: "/nonexistent-root" })).rejects.toBeInstanceOf(PrdRenderError);
   });

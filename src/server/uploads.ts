@@ -14,6 +14,15 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "video/mp4": ".mp4",
   "video/quicktime": ".mov",
   "video/webm": ".webm",
+  "application/pdf": ".pdf",
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "text/csv": ".csv",
+  "application/json": ".json",
+  "application/msword": ".doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/rtf": ".rtf",
+  "application/vnd.oasis.opendocument.text": ".odt",
 };
 
 const SAFE_EXT = /^\.[a-z0-9]{1,5}$/;

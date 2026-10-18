@@ -4,7 +4,7 @@ import { autonomousPlanInputSchema, autonomousResumeSchema } from "../../shared/
 import type { AutonomousPlanInput, AutonomousResumeInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
-import { AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
+import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
 import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -359,7 +359,7 @@ export class AgentCoordinator {
       if (ctx.name === "submit_split") return this.handleSubmitSplit(ctx);
       return { ok: false, result: "Session de découpage en lecture seule : seul submit_split est autorisé." };
     }
-    // NOTE(ali): Atelier sessions run on a synthetic `atelier-<id>` key (no ticket); only submit_prd_document and fail are allowed.
+    // NOTE(ali): Atelier sessions use a synthetic key and project-scoped board tools.
     if (ctx.slotId === ATELIER_SLOT_ID) {
       log.info("tool call (atelier)", { sessionKey: ctx.ticketId, tool: ctx.name });
       return this.handleAtelierTool(ctx);
@@ -431,6 +431,10 @@ export class AgentCoordinator {
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_feasibility: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
     submit_split: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
+    atelier_list_tickets: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
+    atelier_get_ticket: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
+    atelier_create_todo: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
+    atelier_start_ticket: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
   };
 
@@ -559,10 +563,13 @@ export class AgentCoordinator {
     return { ok: true, result: "Découpage enregistré." };
   }
 
-  private handleAtelierTool(ctx: SessionToolCall): ToolResult {
+  private async handleAtelierTool(ctx: SessionToolCall): Promise<ToolResult> {
     const conversationId = parseAtelierSessionKey(ctx.ticketId);
     if (conversationId === null || !this.store.getConversation(conversationId)) {
       return { ok: false, result: "Conversation de l'Atelier introuvable." };
+    }
+    if (ATELIER_BOARD_TOOL_NAMES.some((name) => name === ctx.name)) {
+      return this.atelier.handleBoardTool(conversationId, ctx.name, ctx.args, ctx.callId);
     }
     if (ctx.name === "submit_prd_document") {
       const parsed = submitPrdDocumentArgsSchema.safeParse(ctx.args);
@@ -574,7 +581,7 @@ export class AgentCoordinator {
       if (!parsed.success) return { ok: false, result: parsed.error.message };
       return { ok: true, result: this.atelier.handleFail(conversationId, parsed.data.reason) };
     }
-    return { ok: false, result: "Session de l'Atelier en lecture seule : seuls submit_prd_document et fail sont autorisés." };
+    return { ok: false, result: "Cet outil est indisponible dans l'Atelier. Le dépôt reste en lecture seule." };
   }
 
   private async handleSubmitTriage(ctx: SessionToolCall): Promise<ToolResult> {

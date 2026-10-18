@@ -7,7 +7,7 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
-import type { AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
+import type { AgentImageInput, AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
 import { createSdkAgentSession, dispatchClaudeMessage, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
 
 const RESULT = {
@@ -49,16 +49,19 @@ const COMPACT_BOUNDARY = {
 interface ScriptedQuery {
   dependencies: ClaudeSessionDependencies;
   prompts: string[];
+  messages: SDKUserMessage[];
   contextReads(): number;
 }
 
 function scriptedQuery(): ScriptedQuery {
   const prompts: string[] = [];
+  const messages: SDKUserMessage[] = [];
   let reads = 0;
   let used = 50_000;
   const query = ({ prompt }: { prompt: AsyncIterable<SDKUserMessage> }): ClaudeQuery => {
     async function* stream(): AsyncGenerator<SDKMessage> {
       for await (const message of prompt) {
+        messages.push(message);
         const content = typeof message.message.content === "string" ? message.message.content : "";
         prompts.push(content);
         if (content === "/compact") {
@@ -79,7 +82,7 @@ function scriptedQuery(): ScriptedQuery {
       },
     };
   };
-  return { dependencies: { query, ensureBinary: async () => "/fixture/claude" }, prompts, contextReads: () => reads };
+  return { dependencies: { query, ensureBinary: async () => "/fixture/claude" }, prompts, messages, contextReads: () => reads };
 }
 
 function options(events: AgentSessionEvent[], reportContextUsage: boolean): AgentSessionOptions {
@@ -108,6 +111,25 @@ async function waitFor(check: () => boolean): Promise<void> {
 }
 
 const turnEnds = (events: AgentSessionEvent[]): number => events.filter((event) => event.type === "turn_end").length;
+
+test("Claude delivers uploaded images as native vision blocks and keeps plain turns unchanged", async () => {
+  const fixture = scriptedQuery();
+  const events: AgentSessionEvent[] = [];
+  const image: AgentImageInput = { path: "/uploads/fixture.png", mediaType: "image/png", data: "cG5n" };
+  const session = createSdkAgentSession(options(events, false), fixture.dependencies);
+
+  session.send("Describe the attachment", "image-turn", [image]);
+  session.send("Follow-up", "text-turn");
+  await waitFor(() => turnEnds(events) === 2);
+
+  expect(fixture.messages[0]?.message.content).toEqual([
+    { type: "text", text: "Describe the attachment" },
+    { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } },
+  ]);
+  expect(fixture.messages[1]?.message.content).toBe("Follow-up");
+  expect(events).toContainEqual({ type: "message_status", messageId: "image-turn", status: "accepted", turnId: null });
+  await session.close();
+});
 
 test("Claude reports the context usage after each turn and compacts through /compact", async () => {
   const fixture = scriptedQuery();

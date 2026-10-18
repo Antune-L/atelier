@@ -15,6 +15,7 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type {
+  AgentImageInput,
   AgentMcpServerDefinition,
   AgentProvider,
   AgentSessionEvent,
@@ -185,6 +186,7 @@ interface SkillInput {
 interface QueuedMessage {
   id: string;
   content: string;
+  images?: readonly AgentImageInput[];
   reconcileBeforeSend: boolean;
 }
 
@@ -991,8 +993,10 @@ function createCodexAgentSession(
     }
   }
 
-  function turnInput(content: string): unknown[] {
+  function turnInput(message: QueuedMessage): unknown[] {
+    const { content, images } = message;
     const input: unknown[] = [{ type: "text", text: content, text_elements: [] }];
+    if (images) input.push(...images.map(({ path }) => ({ type: "localImage", path })));
     if (firstTurn) {
       input.push(...skillInputs);
       firstTurn = false;
@@ -1151,7 +1155,7 @@ function createCodexAgentSession(
             threadId,
             expectedTurnId: currentTurnId,
             clientUserMessageId: message.id,
-            input: turnInput(message.content),
+            input: turnInput(message),
           },
           turnSteerResponseSchema,
         );
@@ -1162,7 +1166,7 @@ function createCodexAgentSession(
           {
             threadId,
             clientUserMessageId: message.id,
-            input: turnInput(message.content),
+            input: turnInput(message),
             model: options.model,
             effort: options.effort,
             serviceTier: options.serviceTier ?? "default",
@@ -1380,10 +1384,11 @@ function createCodexAgentSession(
 
   return {
     ticketId: options.ticketId,
-    send: (content, messageId) => {
+    send: (content, messageId, images) => {
       const message = {
         id: messageId ?? nanoid(16),
         content,
+        ...(images?.length ? { images: images.map((image) => ({ ...image })) } : {}),
         reconcileBeforeSend: messageId !== undefined && options.resumeSessionId !== undefined,
       };
       if (closing || cleaned) {

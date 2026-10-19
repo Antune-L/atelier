@@ -473,6 +473,7 @@ export interface SystemAdapter {
   mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   /** Read the PR's merge state, neutralised by the provider's client. `merged` is true only for "merged". */
   checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
+  readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
 
   // ---- project test commands ----

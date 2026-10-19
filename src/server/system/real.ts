@@ -946,7 +946,7 @@ export class RealSystemAdapter implements SystemAdapter {
     // The base branch must exist on origin before the PR creation can target it.
     const baseExists = await networkGit(["-C", slotPath, "ls-remote", "--heads", "origin", baseBranch], slotPath);
     if (baseExists.exitCode !== 0 || baseExists.timedOut || baseExists.stdout.trim().length === 0) {
-      if (opts.requireExistingBase) return { ok: false, url: "", reason: "Autonomous delivery requires an existing remote target branch." };
+      if (opts.requireExistingBase) return { ok: false, url: "", reason: "Delivery requires an existing remote target branch." };
       const push = await networkGit(["-C", slotPath, "push", "origin", `HEAD:refs/heads/${baseBranch}`], slotPath, { verifyIdentity: true, deadlineAt: opts.deadlineAt, beforeRun: opts.assertCurrent });
       if (push.exitCode !== 0 || push.timedOut) {
         return { ok: false, url: "", reason: `création de la branche de base ${baseBranch} échouée : ${boundedCommandDetail(push)}` };
@@ -1338,6 +1338,10 @@ export class RealSystemAdapter implements SystemAdapter {
     // read lag to absorb as in the auto-merge path.
     const state = await this.vcs(provider).readPrState(repoPath, prUrl);
     return { merged: state === "merged", state };
+  }
+
+  async readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
+    return this.vcs(provider).readPrBase(repoPath, prUrl);
   }
 
   async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {

@@ -20,7 +20,7 @@ import type { SystemAdapter } from "../system/index.ts";
 
 import { prepareAnalysisWorkspace, releaseAnalysisWorkspace } from "./analysisWorkspace.ts";
 import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
-import { resolveBaseBranch } from "./baseBranch.ts";
+import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildFeasibilityBatchContract } from "./contract.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
@@ -124,6 +124,7 @@ export class FeasibilityBatchManager {
   private readonly scheduledTickets = new Set<string>();
   private launching = 0;
   private stopped = false;
+  private analysisSettledHandler: (ticketId: string) => void = () => undefined;
 
   constructor(
     private readonly store: Store,
@@ -134,6 +135,10 @@ export class FeasibilityBatchManager {
     /** The repo mutex shared with slot creation, so analysis worktree git ops never race it. */
     private readonly repoMutex: KeyedMutex = new KeyedMutex(),
   ) {}
+
+  setAnalysisSettledHandler(handler: (ticketId: string) => void): void {
+    this.analysisSettledHandler = handler;
+  }
 
   /** Mark every ticket `running`, then spawn the batch session and deliver its contract once connected. */
   async start(ticketIds: string[], projectKey: string): Promise<void> {
@@ -166,7 +171,9 @@ export class FeasibilityBatchManager {
       return;
     }
 
-    const { groups, invalidTicketIds } = groupFeasibilityTickets(tickets, (ticket, project) => resolveBaseBranch(ticket, project, this.store));
+    const { groups, invalidTicketIds } = groupFeasibilityTickets(tickets, (ticket, project) =>
+      resolveAnalysisBaseBranch(ticket, project, this.store),
+    );
     for (const ticketId of invalidTicketIds) this.failTicket(ticketId, "projet inconnu");
     for (const group of groups) {
       for (let offset = 0; offset < group.ticketIds.length; offset += MAX_TICKETS_PER_BATCH) {
@@ -343,10 +350,12 @@ export class FeasibilityBatchManager {
     });
     this.hub.pushTicket(updated);
     this.store.logEvent(ticketId, "feasibility_done", { verdict: result.verdict });
+    this.analysisSettledHandler(ticketId);
   }
 
   private failTicket(ticketId: string, reason: string): void {
-    if (!this.store.getTicket(ticketId)) return;
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return;
     const updated = this.store.updateTicket(ticketId, {
       triageStatus: "failed",
       triageVerdict: null,
@@ -354,6 +363,7 @@ export class FeasibilityBatchManager {
     });
     this.hub.pushTicket(updated);
     this.store.logEvent(ticketId, "feasibility_failed", { reason });
+    if (ticket.triageStatus === "running") this.analysisSettledHandler(ticketId);
   }
 
   private isCurrentBatchTicket(ticketId: string, expectedUpdatedAt: number | undefined): boolean {

@@ -503,7 +503,7 @@ export class FakeSystemAdapter implements SystemAdapter {
     provider: VcsProvider,
   ): Promise<{ ok: boolean; url: string; reason: string }> {
     opts.assertCurrent?.();
-    this.log("createPr", { slotPath, baseBranch, draft: opts.draft });
+    this.log("createPr", { slotPath, baseBranch, draft: opts.draft, requireExistingBase: opts.requireExistingBase });
     return this.vcs(provider).createPr(slotPath, baseBranch, opts);
   }
 
@@ -643,6 +643,10 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("checkPrMerged", { repoPath, prUrl });
     const state = await this.vcs(provider).readPrState(repoPath, prUrl);
     return { merged: state === "merged", state };
+  }
+
+  async readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
+    return this.vcs(provider).readPrBase(repoPath, prUrl);
   }
 
   async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {

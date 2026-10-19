@@ -177,6 +177,7 @@ function githubRepoKey(ref: GithubRepoRef): string {
   return `${ref.host}/${ref.owner}/${ref.repository}`;
 }
 
+const ghPrBaseSchema = z.object({ baseRefName: z.string().min(1) });
 /** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
 const ghPrStateSchema = z.object({ state: z.string() });
 const ghPrMergeableSchema = z.object({ mergeable: z.string() });
@@ -739,6 +740,13 @@ export class GithubVcsClient implements VcsClient {
     } catch {
       return false;
     }
+  }
+
+  async readPrBase(cwd: string, prUrl: string): Promise<string | null> {
+    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "baseRefName"], cwd);
+    if (res.exitCode !== 0 || res.timedOut) return null;
+    const parsed = ghPrBaseSchema.safeParse(safeJsonParse(res.stdout));
+    return parsed.success ? parsed.data.baseRefName : null;
   }
 
   async readPrState(cwd: string, prUrl: string): Promise<PrState> {

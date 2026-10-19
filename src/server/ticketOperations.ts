@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { isAutonomousParentIncomplete } from "../shared/autonomous.ts";
+import { isDependencyReady } from "../shared/dependencies.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
 import type { Column } from "../shared/constants.ts";
 import {
@@ -202,14 +202,6 @@ function compactTicket(ticket: Ticket): CompactTicket {
   };
 }
 
-function isBlocked(ticket: Ticket, store: Store): boolean {
-  if (ticket.dependsOn === null) return false;
-  const parent = store.getTicket(ticket.dependsOn);
-  if (!parent || parent.branch === null || isAutonomousParentIncomplete(parent)) return true;
-  const splitMother = parent.branch.startsWith("split/") && parent.prUrl === null;
-  return parent.prUrl === null && !splitMother;
-}
-
 function isActive(ticket: Ticket): boolean {
   if (ticket.column === "implementing" || ticket.column === "prd" || ticket.column === "to_review") return true;
   if (ticket.stage === "awaiting_answers") return true;
@@ -259,7 +251,7 @@ export function ticketDependencyError(
     if (cursor.id === ticketId) return "circular dependency not allowed";
     if (seen.has(cursor.id)) break;
     seen.add(cursor.id);
-    cursor = cursor.dependsOn ? store.getTicket(cursor.dependsOn) : null;
+    cursor = store.getDependencyParent(cursor);
   }
   return null;
 }
@@ -526,7 +518,8 @@ export class TicketOperations {
     if (ticket.triageStatus === "running") {
       throw new TicketOperationError("CONFLICT", "analysis in progress: wait for the verdict before starting the implementation");
     }
-    if (isBlocked(ticket, this.deps.store)) {
+    const parent = this.deps.store.getDependencyParent(ticket);
+    if (!isDependencyReady(ticket, parent)) {
       throw new TicketOperationError("CONFLICT", "waiting for the PR of the ticket it depends on");
     }
     const queued = this.deps.lifecycle.enqueue(ticketId);

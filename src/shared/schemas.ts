@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { dependencyLaunchSchema } from "./dependencyLaunch.ts";
+
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "./autonomous.ts";
 import { transcriptUpdateSchema } from "./transcript.ts";
 
@@ -303,6 +305,7 @@ export const TRIAGE_VERDICT_LABELS: Record<TriageVerdict, string> = {
 };
 
 export const ticketSchema = z.object({
+  dependencyLaunch: dependencyLaunchSchema.nullable().optional(),
   implementationPlan: implementationPlanSchema.nullable().optional(),
   id: z.string(),
   title: z.string(),

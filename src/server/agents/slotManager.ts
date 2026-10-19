@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { isAutonomousParentIncomplete } from "../../shared/autonomous.ts";
+import { isDependencyReady } from "../../shared/dependencies.ts";
 import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
 import {
   ACTIVE_STAGES,
@@ -36,7 +36,7 @@ import type { AgentExecutionGuard } from "../system/agentSession.ts";
 import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 
-import { resolveBaseBranch } from "./baseBranch.ts";
+import { requireForkBaseBranch, resolveExecutionBaseBranch, resolvePrTargetBaseBranch } from "./baseBranch.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
@@ -169,6 +169,7 @@ export class SlotManager {
   private readonly autonomousDeliveryStops = new Set<string>();
   private readonly repoMutex: KeyedMutex;
   private readonly queue: string[] = [];
+  private readonly deferredDependents = new Set<string>();
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
@@ -574,7 +575,8 @@ export class SlotManager {
   async startTicket(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
-    if (ticket.dependsOn !== null && isAutonomousParentIncomplete(this.store.getTicket(ticket.dependsOn) ?? {})) throw new Error("The autonomous parent still has an incomplete delivery. Its dependent ticket cannot start.");
+    if (ticket.column === "abandoned" || ticket.column === "merged") return;
+    this.assertStartReady(ticket);
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
       if (autonomousError) throw new Error(autonomousError);
@@ -596,9 +598,10 @@ export class SlotManager {
     }
     const current = this.store.getTicket(ticketId);
     if (iteration && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) return;
-    if (!current || current.slotId !== ticket.slotId || this.isLaunching(ticketId) || this.sessionHub.isConnected(ticketId)) {
+    if (!current || current.column === "abandoned" || current.column === "merged" || current.slotId !== ticket.slotId || this.isLaunching(ticketId) || this.sessionHub.isConnected(ticketId)) {
       return;
     }
+    this.assertStartReady(current);
     const free = reusableSlotId === null ? this.store.findFreeSlot() : this.store.getSlot(reusableSlotId);
     if (!free) {
       if (!this.queue.includes(ticketId)) {
@@ -693,7 +696,34 @@ export class SlotManager {
 
   private pumpQueue(): void {
     const next = this.queue.shift();
-    if (next) void this.startTicket(next);
+    if (!next) return;
+    const ticket = this.store.getTicket(next);
+    if (!ticket || ticket.column === "abandoned" || ticket.column === "merged") {
+      this.pumpQueue();
+      return;
+    }
+    void this.startTicket(next).catch((error: unknown) => {
+      log.error("démarrage du ticket en file échoué", { ticketId: next, error: getErrorMessage(error) });
+      this.pumpQueue();
+    });
+  }
+
+  private assertStartReady(ticket: Ticket): void {
+    if (ticket.triageStatus === "running") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+    const parent = this.store.getDependencyParent(ticket);
+    if (!isDependencyReady(ticket, parent)) throw new Error("En attente de la livraison du ticket parent.");
+    if (isProjectKey(ticket.project)) requireForkBaseBranch(ticket, getProject(ticket.project), this.store);
+  }
+
+  resumeDeferredDependent(ticketId: string): void {
+    if (!this.deferredDependents.has(ticketId)) return;
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket?.triageStatus === "running") return;
+    this.deferredDependents.delete(ticketId);
+    if (ticket?.column !== "todo" || ticket.dependsOn === null) return;
+    void this.startDependents(ticket.dependsOn).catch((error: unknown) => {
+      log.error("reprise du ticket dépendant échouée", { ticketId, error: getErrorMessage(error) });
+    });
   }
 
   /**
@@ -701,11 +731,20 @@ export class SlotManager {
    * Recursive by nature (each child's own done releases its children).
    */
   private async startDependents(parentId: string): Promise<void> {
-    if (isAutonomousParentIncomplete(this.store.getTicket(parentId) ?? {})) return;
     for (const child of this.store.listDependents(parentId)) {
-      if (child.column !== "todo") continue;
-      this.lifecycle.enqueue(child.id);
-      await this.startTicket(child.id);
+      try {
+        if (child.column !== "todo" || !isDependencyReady(child, this.store.getDependencyParent(child))) continue;
+        if (child.triageStatus === "running") {
+          this.deferredDependents.add(child.id);
+          continue;
+        }
+        this.assertStartReady(child);
+        this.deferredDependents.delete(child.id);
+        this.lifecycle.enqueue(child.id);
+        await this.startTicket(child.id);
+      } catch (error) {
+        log.error("démarrage du ticket dépendant échoué", { ticketId: child.id, parentId, error: getErrorMessage(error) });
+      }
     }
   }
 
@@ -1044,7 +1083,7 @@ export class SlotManager {
       return;
     }
     const project = getProject(ticket.project);
-    const baseBranch = resolveBaseBranch(ticket, project, this.store);
+    const baseBranch = resolveExecutionBaseBranch(ticket, project, this.store);
     const path = slotPath(slotId);
     const iteration = this.store.getActiveQualityIteration(ticketId);
     const qualityCorrection = iteration?.mode === "correction";
@@ -1163,6 +1202,9 @@ export class SlotManager {
         }
       });
       assertWork();
+      if (ticket.dependsOn !== null && !ticket.dependencyLaunch && !reuseWorktree && !resolving && !qualityCorrection) {
+        this.store.recordDependencyLaunch(ticketId, { version: 1, parentTicketId: ticket.dependsOn, baseBranch, branch, project: ticket.project });
+      }
 
       if (qualityCorrection) {
         await this.assertQualityIterationPr(ticket, iteration, iteration.sourceRevision);
@@ -1194,7 +1236,9 @@ export class SlotManager {
 
       this.setPhase(ticketId, SETUP_PHASES.spawning);
       if (qualityCorrection && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la préparation.");
-      this.startAgentSession(this.store.getTicket(ticketId) ?? ticket, slotId, path, { ...(executionGuard ? { executionGuard } : {}) });
+      const launchingTicket = this.store.getTicket(ticketId) ?? ticket;
+      if (launchingTicket.dependencyLaunch) resolvePrTargetBaseBranch(launchingTicket, project, this.store);
+      this.startAgentSession(launchingTicket, slotId, path, { ...(executionGuard ? { executionGuard } : {}) });
       this.touch(this.store.updateTicket(ticketId, { stage: "implementing", lastProgressAt: Date.now() }));
       this.store.logEvent(ticketId, "session_spawned", { slotId });
       log.info("session spawnée", { ticketId, slotId });
@@ -1255,14 +1299,18 @@ export class SlotManager {
 
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
-    if (ticket.resolvingConflicts) return buildConflictResolutionContract(ticket, { commitLanguage });
+    if (ticket.resolvingConflicts) {
+      const project = getProject(ticket.project);
+      const baseBranch = resolveExecutionBaseBranch(ticket, project, this.store);
+      return buildConflictResolutionContract(ticket, { commitLanguage, baseBranch });
+    }
     if (ticket.kind === "review") return buildReviewContract(ticket, { commitLanguage });
     if (ticket.kind === "clean") return buildCleanContract(ticket, { commitLanguage });
     if (ticket.kind === "ask") return buildAskContract(ticket);
     // A child ticket stacks on its parent's branch: the PR target must match the worktree fork point
     // resolved in launchInSlot, so resolve it once here and pass it through.
     const baseBranch = isProjectKey(ticket.project)
-      ? resolveBaseBranch(ticket, getProject(ticket.project), this.store)
+      ? resolvePrTargetBaseBranch(ticket, getProject(ticket.project), this.store)
       : ticket.baseBranch ?? "";
     const iteration = this.store.getActiveQualityIteration(ticket.id);
     if (iteration?.mode === "correction") {
@@ -1292,6 +1340,25 @@ export class SlotManager {
     });
   }
 
+  async verifyDependencyDelivery(ticket: Ticket, path: string, prUrl?: string): Promise<DoneGateResult> {
+    if (ticket.dependsOn === null && !ticket.dependencyLaunch) return { ok: true, reason: "" };
+    try {
+      if (!isProjectKey(ticket.project)) return { ok: false, reason: "Projet introuvable pour vérifier la base de livraison." };
+      const project = getProject(ticket.project);
+      const baseBranch = resolvePrTargetBaseBranch(ticket, project, this.store);
+      if (prUrl) {
+        const actualBase = await this.system.readPrBase(path, prUrl, project.vcsProvider);
+        if (actualBase === null) return { ok: false, reason: "Impossible de vérifier la branche cible de la PR enfant." };
+        if (actualBase !== baseBranch) return { ok: false, reason: `La PR enfant cible ${actualBase} au lieu de sa base de lancement ${baseBranch}. Livraison bloquée.` };
+      }
+      const current = this.store.getTicket(ticket.id);
+      if (!current || resolvePrTargetBaseBranch(current, project, this.store) !== baseBranch) return { ok: false, reason: "La base de livraison a changé pendant la vérification." };
+      return { ok: true, reason: "" };
+    } catch (error) {
+      return { ok: false, reason: getErrorMessage(error) };
+    }
+  }
+
   /**
    * Select the done gate by ticket kind. Review gates on optional posted/pushed proof; a clean gates
    * on a clean tree and a fully-pushed PR head branch — `requirePushedBranch` asserts both no
@@ -1299,7 +1366,9 @@ export class SlotManager {
    * pertinent to apply" case (0 commits ahead) while preventing applied-but-unpushed fixes from being
    * lost when the slot is released; everything else gates on the standard feature done.
    */
-  private doneGate(ticket: Ticket, path: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+  private async doneGate(ticket: Ticket, path: string, branch: string, prUrl: string): Promise<DoneGateResult> {
+    const dependencyGate = await this.verifyDependencyDelivery(ticket, path, prUrl);
+    if (!dependencyGate.ok) return dependencyGate;
     if (ticket.autonomous) return this.verifyAutonomousPr(ticket, path, prUrl);
     const provider = projectVcsProvider(ticket.project);
     if (ticket.kind === "review") {
@@ -1345,7 +1414,7 @@ export class SlotManager {
         repoPath: project.repoPath,
         slotPath: path,
         branch: ticket.branch,
-        baseBranch: resolveBaseBranch(ticket, project, this.store),
+        baseBranch: resolvePrTargetBaseBranch(ticket, project, this.store),
         prUrl,
         commitSha,
         allowMerged: ticket.autonomousDelivery === "merge",
@@ -1366,7 +1435,7 @@ export class SlotManager {
     try {
       const revision = await this.autonomousRevision(ticket, path);
       const project = getProject(ticket.project);
-      const baseBranch = resolveBaseBranch(ticket, project, this.store);
+      const baseBranch = resolvePrTargetBaseBranch(ticket, project, this.store);
       let prUrl = ticket.prUrl;
       if (!prUrl) {
         const ready = await this.system.verifyStealthReady(path, ticket.branch);
@@ -1485,6 +1554,12 @@ export class SlotManager {
     }
     const recoveryAfterQuality = await this.implementationRecoveryGuard?.(ticketId, slotId, prUrl);
     if (recoveryAfterQuality && !recoveryAfterQuality.ok) return { ok: false, reason: recoveryAfterQuality.result, slotReleased: false };
+    const dependencyGate = await this.verifyDependencyDelivery(currentTicket, path);
+    if (!dependencyGate.ok) {
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: dependencyGate.reason });
+      await this.lifecycle.stall(ticketId, { title: "Gate done échouée", body: `${ticket.title}: ${dependencyGate.reason}` }, { error: dependencyGate.reason, errorDetails: this.lifecycle.errorDetailsFor(ticketId, dependencyGate.reason, "done_gate") });
+      return { ok: false, reason: dependencyGate.reason, slotReleased: false };
+    }
     log.info("gate done validée", { ticketId, slotId, prUrl });
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
@@ -1502,7 +1577,7 @@ export class SlotManager {
         let merge: DoneGateResult = { ok: merged.merged, reason: "" };
         if (!merged.merged) {
           const operationId = crypto.randomUUID();
-          merge = await this.system.mergePr(path, ticket.branch, prUrl, project.vcsProvider, { commitSha: currentTicket.autonomousState.revision, baseBranch: resolveBaseBranch(currentTicket, project, this.store), deadlineAt: currentTicket.autonomousState.execution?.deadlineAt ?? currentTicket.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(currentTicket, slotId, currentTicket.autonomousState?.revision ?? "", "merge", operationId) });
+          merge = await this.system.mergePr(path, ticket.branch, prUrl, project.vcsProvider, { commitSha: currentTicket.autonomousState.revision, baseBranch: resolvePrTargetBaseBranch(currentTicket, project, this.store), deadlineAt: currentTicket.autonomousState.execution?.deadlineAt ?? currentTicket.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(currentTicket, slotId, currentTicket.autonomousState?.revision ?? "", "merge", operationId) });
         }
         if (!merge.ok) {
           const stopped = this.store.getTicket(ticketId)?.autonomousState;
@@ -1593,7 +1668,9 @@ export class SlotManager {
     );
     await this.notifier.notify("Ticket terminé", this.doneNotifyBody(ticket, mergeError), ticket.id, true);
     // The PR is open and the branch pushed (gate passed): release any child stacked on this ticket.
-    if (!mergeError) void this.startDependents(ticketId);
+    if (!mergeError) void this.startDependents(ticketId).catch((error: unknown) => {
+      log.error("libération des tickets dépendants échouée", { ticketId, error: getErrorMessage(error) });
+    });
     this.pumpQueue();
     return {
       ok: true,
@@ -1675,7 +1752,8 @@ export class SlotManager {
     const path = slotPath(slotId);
 
     log.info("vérification de la gate ready_for_review", { ticketId, slotId, branch: ticket.branch });
-    const gate = await this.system.verifyStealthReady(path, ticket.branch);
+    const dependencyGate = await this.verifyDependencyDelivery(ticket, path);
+    const gate = dependencyGate.ok ? await this.system.verifyStealthReady(path, ticket.branch) : dependencyGate;
     if (!gate.ok) {
       // Mirror finishTicket's gate-failure handling exactly (uses the same done_gate event/counter).
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
@@ -1732,9 +1810,10 @@ export class SlotManager {
     if (quality?.enabled && !quality.complete) {
       return { ok: false, reason: `Validation qualité incomplète : ${quality.reservations.join(" ; ")}` };
     }
-    const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
+    const dependencyGate = await this.verifyDependencyDelivery(ticket, path);
+    const baseBranch = dependencyGate.ok ? resolvePrTargetBaseBranch(ticket, getProject(ticket.project), this.store) : "";
     log.info("vérification de la gate push direct", { ticketId, slotId, baseBranch });
-    const gate = await this.system.verifyDirectPushed(path, baseBranch);
+    const gate = dependencyGate.ok ? await this.system.verifyDirectPushed(path, baseBranch) : dependencyGate;
     if (!gate.ok) {
       // Mirror markReadyForReview's gate-failure handling exactly (same DONE_GATE_FAILED_EVENT counter).
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: gate.reason });
@@ -1768,7 +1847,9 @@ export class SlotManager {
     this.store.logEvent(ticketId, "direct_pushed", { baseBranch });
     log.info("push direct terminé, slot libéré", { ticketId, slotId, baseBranch });
     await this.notifier.notify("Ticket terminé", `${ticket.title} → poussé sur ${baseBranch}`, ticket.id, true);
-    void this.startDependents(ticketId);
+    void this.startDependents(ticketId).catch((error: unknown) => {
+      log.error("libération des tickets dépendants échouée", { ticketId, error: getErrorMessage(error) });
+    });
     this.pumpQueue();
     return { ok: true, reason: "" };
   }
@@ -1798,12 +1879,19 @@ export class SlotManager {
       return { ok: false, reason: "création de PR déjà en cours", prUrl: null };
     }
     this.touch(this.store.updateTicket(ticketId, { stage: "opening_pr", error: null }));
-    const baseBranch = resolveBaseBranch(ticket, getProject(ticket.project), this.store);
+    const dependencyGate = await this.verifyDependencyDelivery(ticket, slotPath(ticket.slotId));
+    if (!dependencyGate.ok) {
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: dependencyGate.reason });
+      this.touch(this.store.updateTicket(ticketId, { stage: "done", error: dependencyGate.reason }));
+      return { ...dependencyGate, prUrl: null };
+    }
+    const baseBranch = resolvePrTargetBaseBranch(ticket, getProject(ticket.project), this.store);
     const provider = getProject(ticket.project).vcsProvider;
     const quality = await this.recordDeliveryQuality(ticketId);
     const draft = ticket.prDraft || Boolean(quality?.enabled && !quality.complete);
-    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft }, provider);
+    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft, headBranch: ticket.branch, requireExistingBase: ticket.dependsOn !== null }, provider);
     if (!result.ok) {
+      this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: result.reason });
       // Roll the stage back to the resting "done" so the card stays in "À review" and a retry is allowed.
       this.touch(this.store.updateTicket(ticketId, { stage: "done", error: result.reason }));
       log.warn("création de PR stealth échouée", { ticketId, reason: result.reason });
@@ -1828,7 +1916,9 @@ export class SlotManager {
     this.store.logEvent(ticketId, "stealth_pr_created", { prUrl: result.url });
     log.info("PR stealth créée, slot libéré", { ticketId, prUrl: result.url });
     await this.notifier.notify("PR créée", `${ticket.title} → PR ouverte`, ticket.id, true);
-    void this.startDependents(ticketId);
+    void this.startDependents(ticketId).catch((error: unknown) => {
+      log.error("libération des tickets dépendants échouée", { ticketId, error: getErrorMessage(error) });
+    });
     this.pumpQueue();
     return { ok: true, reason: "", prUrl: result.url };
   }
@@ -1925,6 +2015,9 @@ export class SlotManager {
   }
 
   async abandonTicket(ticketId: string): Promise<void> {
+    const queuedIndex = this.queue.indexOf(ticketId);
+    if (queuedIndex !== -1) this.queue.splice(queuedIndex, 1);
+    this.deferredDependents.delete(ticketId);
     const bounded = this.store.getTicket(ticketId)?.autonomousState?.execution;
     if (bounded) {
       this.store.cancelAutonomousExecution(ticketId);
@@ -2120,7 +2213,8 @@ export class SlotManager {
   /** Re-spawn an interrupted ticket in its slot (retry endpoint). */
   async retry(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
-    if (!ticket) return;
+    if (!ticket || ticket.column === "abandoned" || ticket.column === "merged") return;
+    this.assertStartReady(ticket);
     if (this.store.getActiveQualityIteration(ticketId) || this.store.getLatestQualityIteration(ticketId)?.mode === "correction") throw new Error("Utilise Corriger et revérifier ou Reprendre la vérification pour cette carte.");
     try {
       if (await this.resumeAttachedFeatureWorktree(ticket)) return;
@@ -2281,7 +2375,9 @@ export class SlotManager {
 
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
     const storedTicket = this.store.getTicket(ticketId);
-    if (!storedTicket || !isProjectKey(storedTicket.project)) return;
+    if (!storedTicket || !isProjectKey(storedTicket.project) || storedTicket.column === "abandoned" || storedTicket.column === "merged") return;
+    this.assertStartReady(storedTicket);
+    if (storedTicket.dependencyLaunch) resolvePrTargetBaseBranch(storedTicket, getProject(storedTicket.project), this.store);
     const executionGuard = createAutonomousSessionGuard(this.store, ticketId, "retry");
     if (executionGuard) {
       this.store.assertAutonomousWork(ticketId);

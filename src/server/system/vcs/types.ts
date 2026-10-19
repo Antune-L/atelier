@@ -81,6 +81,7 @@ export interface VcsClient {
   verifyReviewPublication(cwd: string, prUrl: string, check: ReviewPublicationCheck): Promise<DoneGateResult>;
   /** Mark the PR ready (no-op if already) and merge it; the caller deletes the remote branch. */
   mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult>;
+  readPrBase(cwd: string, prUrl: string): Promise<string | null>;
   readPrState(cwd: string, prUrl: string): Promise<PrState>;
   readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability>;
 }

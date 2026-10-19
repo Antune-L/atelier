@@ -36,7 +36,7 @@ import {
 import { allowedReviewPasses, passDimensionFindings, publishedReviewFindings, requiredReviewKinds, withUnreviewedChangesSection } from "./reviewPass.ts";
 import type { UnreviewedChanges } from "./reviewPass.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
-import { resolveBaseBranch } from "./baseBranch.ts";
+import { resolvePrTargetBaseBranch } from "./baseBranch.ts";
 import { codexImplementerKnobs, delegatedImplementerPermissions } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
@@ -709,7 +709,7 @@ export class DelegationManager {
     if (fingerprint.fingerprint !== recovery.candidate.fingerprint) return { ok: false, result: "Recovered candidate changed. Assess coverage and review the candidate again." };
     const reviewed = await this.reviewGate(ticketId, slotId, "approved_or_limit", recovery.generation);
     if (!reviewed.ok) return { ok: false, result: reviewed.reason };
-    const gate = await this.system.verifyRecoveryCandidate({ repoPath: project.repoPath, slotPath: slotPath(slotId), branch: ticket.branch, baseBranch: resolveBaseBranch(ticket, project, this.store), prUrl, commitSha: recovery.candidate.commitSha }, projectVcsProvider(ticket.project));
+    const gate = await this.system.verifyRecoveryCandidate({ repoPath: project.repoPath, slotPath: slotPath(slotId), branch: ticket.branch, baseBranch: resolvePrTargetBaseBranch(ticket, project, this.store), prUrl, commitSha: recovery.candidate.commitSha }, projectVcsProvider(ticket.project));
     if (!gate.ok) return { ok: false, result: gate.reason };
     const archives = await this.system.preserveImplementationRecovery({ repoPath: project.repoPath, slotPath: slotPath(slotId) });
     const current = this.store.getImplementationPlan(ticketId);

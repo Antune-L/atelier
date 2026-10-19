@@ -4,8 +4,9 @@ import { isAbsolute, join, relative } from "node:path";
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
-import { autonomousResumeSchema, isAutonomousParentIncomplete } from "../shared/autonomous.ts";
+import { autonomousResumeSchema } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
+import { isDependencyReady, isSplitMother } from "../shared/dependencies.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
@@ -14,6 +15,7 @@ import { QUALITY_NATIVE_CLEANUP_DIRECTORY } from "./agents/qualitySession.ts";
 import { runRecordedAction } from "./recordedAction.ts";
 import { getErrorMessage } from "../shared/errors.ts";
 import { canMergePr, canResolveConflicts } from "../shared/ticketMerge.ts";
+import { resolvePrTargetBaseBranch } from "./agents/baseBranch.ts";
 import type { MergePrResult } from "../shared/ticketMerge.ts";
 import {
   analyzeTicketsSchema,
@@ -372,23 +374,6 @@ function markMergedBlocker(ticket: Ticket, store: Store): string | null {
 const MANUAL_MERGED_EVENT = "manual_merged";
 const mergesInFlight = new Set<string>();
 
-/** A split mother lands in "done" with its integration branch (split/…) set but no PR. */
-function isSplitMother(ticket: Ticket): boolean {
-  return ticket.branch !== null && ticket.branch.startsWith(SPLIT_BRANCH_PREFIX) && ticket.prUrl === null;
-}
-
-/** A ticket can't start while its dependency hasn't opened its PR yet (no branch/prUrl). */
-function isBlocked(ticket: Ticket, store: Store): boolean {
-  if (!ticket.dependsOn) return false;
-  const parent = store.getTicket(ticket.dependsOn);
-  if (!parent || parent.branch === null || isAutonomousParentIncomplete(parent)) return true;
-  // A split mother lands in "done" with its integration branch (split/…) set but no PR; its children
-  // must still be allowed to start. Every other parent is blocked until it opens its PR (this keeps the
-  // stacked-PR blocking behavior, incl. directPush parents whose feat/… branch has no PR either).
-  if (parent.prUrl === null && !isSplitMother(parent)) return true;
-  return false;
-}
-
 /** Mother branch name for a split: `split/<motherId>-<slug>`. */
 function splitMotherBranch(ticket: Ticket): string {
   return `${SPLIT_BRANCH_PREFIX}${ticket.id}-${slugify(ticket.title)}`;
@@ -576,6 +561,7 @@ async function performSplit(
   project: { repoPath: string; baseBranch: string },
 ): Promise<{ created: Ticket[]; mother: Ticket }> {
   const { store, hub, system, split, slots } = deps;
+  if (ticket.dependsOn !== null) throw new Error("A ticket with a dependency cannot be split.");
 
   // Decompose first. For a PRD card this disconnects the planning session (the split session is keyed
   // by the same ticketId); a failure here means we have not created any child or branch yet, so a TODO
@@ -635,7 +621,8 @@ async function performSplit(
 function parkOrStart(deps: RouteDeps, ticket: Ticket, start: boolean): Ticket {
   const { store, hub, lifecycle, slots } = deps;
   // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
-  if (!start || isBlocked(ticket, store)) {
+  const parent = store.getDependencyParent(ticket);
+  if (!start || ticket.triageStatus === "running" || !isDependencyReady(ticket, parent)) {
     hub.pushTicket(ticket);
     if (!start) startFeasibilityInBackground(deps.feasibility, [ticket.id], ticket.project);
     return ticket;
@@ -1577,7 +1564,8 @@ export function createApiRoutes(deps: RouteDeps) {
         if (ticket.triageStatus === "running") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
-        if (isBlocked(ticket, store)) {
+        const parent = store.getDependencyParent(ticket);
+        if (!isDependencyReady(ticket, parent)) {
           return jsonError(set, HTTP_CONFLICT, "en attente de la PR du ticket dont il dépend");
         }
         lifecycle.moveColumn(params.id, "implementing");
@@ -1679,9 +1667,12 @@ export function createApiRoutes(deps: RouteDeps) {
       if (mergesInFlight.has(params.id)) return jsonError(set, HTTP_CONFLICT, "un merge est déjà en cours pour cette carte");
       const project = getProject(ticket.project);
       const { prUrl, branch } = ticket;
-      const conflictReason = `La PR a des conflits avec ${ticket.baseBranch ?? project.baseBranch}`;
       mergesInFlight.add(params.id);
       try {
+        const dependencyDelivery = await slots.verifyDependencyDelivery(ticket, project.repoPath, prUrl);
+        if (!dependencyDelivery.ok) return jsonError(set, HTTP_CONFLICT, dependencyDelivery.reason);
+        const targetBaseBranch = resolvePrTargetBaseBranch(ticket, project, store);
+        const conflictReason = `La PR a des conflits avec ${targetBaseBranch}`;
         const mergeability = await deps.system.readPrMergeability(project.repoPath, prUrl, project.vcsProvider);
         if (mergeability === "conflicting") {
           return { merged: false, conflicts: true, reason: conflictReason } satisfies MergePrResult;
@@ -1704,6 +1695,9 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
+      if (ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
+      const parent = store.getDependencyParent(ticket);
+      if (!isDependencyReady(ticket, parent)) return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })
@@ -1845,6 +1839,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.kind !== "feature") return jsonError(set, HTTP_CONFLICT, "découpage réservé aux tickets feature");
+      if (ticket.dependsOn !== null) return jsonError(set, HTTP_CONFLICT, "A ticket with a dependency cannot be split.");
       if (ticket.autonomous) return jsonError(set, HTTP_CONFLICT, "The autonomous pilot supports a single feature card. Split delivery is not qualified.");
       // Gate (re-validated server-side): column todo, OR column prd with a non-null PRD markdown.
       const eligible =

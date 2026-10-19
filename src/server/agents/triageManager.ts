@@ -13,7 +13,7 @@ import type { SystemAdapter } from "../system/index.ts";
 
 import { ANALYSIS_WORKSPACES_ROOT, prepareAnalysisWorkspace, releaseAnalysisWorkspace } from "./analysisWorkspace.ts";
 import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
-import { resolveBaseBranch } from "./baseBranch.ts";
+import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
@@ -50,6 +50,7 @@ export class TriageManager {
   /** Tickets whose spawn is mid-flight: guards the relaunch path (no 409) against unserialized double-spawn. */
   private readonly launching = new Set<string>();
   private stopped = false;
+  private analysisSettledHandler: (ticketId: string) => void = () => undefined;
 
   constructor(
     private readonly store: Store,
@@ -60,6 +61,10 @@ export class TriageManager {
     /** The repo mutex shared with slot creation, so analysis worktree git ops never race it. */
     private readonly repoMutex: KeyedMutex = new KeyedMutex(),
   ) {}
+
+  setAnalysisSettledHandler(handler: (ticketId: string) => void): void {
+    this.analysisSettledHandler = handler;
+  }
 
   /**
    * Start the read-only triage SDK session and inject its prompt as the first turn. With `deep`, runs
@@ -93,7 +98,7 @@ export class TriageManager {
       this.cleanup(ticketId);
 
       const triageLanguage = this.store.getAppSettings().triageLanguage;
-      const baseBranch = resolveBaseBranch(ticket, project, this.store);
+      const baseBranch = resolveAnalysisBaseBranch(ticket, project, this.store);
       // The ticket's feasibility engine wins when pinned; otherwise a codex-orchestrated ticket triages
       // on Codex too (its knobs), so Claude never enters its pipeline.
       const execution = resolveFeasibilityExecution(ticket, "triage");
@@ -169,6 +174,7 @@ export class TriageManager {
       this.hub.pushTicket(updated);
       this.store.logEvent(ticket.id, "triage_failed", { reason: "server restart" });
       log.warn("triage orphelin récupéré au boot", { ticketId: ticket.id });
+      this.analysisSettledHandler(ticket.id);
     }
   }
 
@@ -191,11 +197,13 @@ export class TriageManager {
     });
     this.hub.pushTicket(updated);
     this.store.logEvent(ticketId, "triage_done", { verdict: result.verdict });
+    this.analysisSettledHandler(ticketId);
   }
 
   private async failTriage(ticketId: string, reason: string): Promise<void> {
     this.cleanup(ticketId, "failed");
-    if (!this.store.getTicket(ticketId)) return;
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return;
     const updated = this.store.updateTicket(ticketId, {
       triageStatus: "failed",
       triageVerdict: null,
@@ -204,6 +212,7 @@ export class TriageManager {
     this.hub.pushTicket(updated);
     this.store.logEvent(ticketId, "triage_failed", { reason });
     log.warn("triage échoué", { ticketId, reason });
+    if (ticket.triageStatus === "running") this.analysisSettledHandler(ticketId);
   }
 
   /** Stop the SDK session and clear the timeout. Idempotent. */

@@ -383,6 +383,14 @@ export function buildTicketContract(
   if (iteration) prdDirective = "- Le PRD initial est figé ; aucune nouvelle soumission ni validation du PRD.";
   if (ticket.autonomous) prdDirective = "- Le plan autonome initial est figé par submit_autonomous_plan ; aucune nouvelle soumission ni validation du PRD ne remplace ce plan.";
 
+  let missingBaseInstruction = "";
+  if (!noPr && !iteration && !ticket.autonomous && ticket.dependsOn === null) {
+    missingBaseInstruction = `   Si la branche cible \`${baseBranch}\` n'existe pas encore sur origin, crée-la d'abord : \`git ls-remote --heads origin ${baseBranch} | grep -q . || git push origin HEAD:refs/heads/${baseBranch}\``;
+  }
+  if (ticket.dependsOn !== null) {
+    missingBaseInstruction = `   Vérifie que la branche cible \`${baseBranch}\` existe sur origin avant toute livraison. Si elle est absente, arrête-toi et appelle fail() : ne recrée jamais une branche parente manquante.`;
+  }
+
   const lines: string[] = [
     `# Ticket ${ticket.id} — ${ticket.title}`,
     "",
@@ -437,10 +445,8 @@ export function buildTicketContract(
     ].join("\n"),
     wantsVerify ? buildVerifyStep(ticket) : "",
     buildMockupReviewStep(ticket, verifyWithMockups),
+    missingBaseInstruction,
     finalizationStep,
-    noPr || iteration || ticket.autonomous
-      ? ""
-      : `   Si la branche cible \`${baseBranch}\` n'existe pas encore sur origin, crée-la d'abord : \`git ls-remote --heads origin ${baseBranch} | grep -q . || git push origin HEAD:refs/heads/${baseBranch}\``,
     noPr || iteration || ticket.autonomous ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
     noPr || iteration || ticket.autonomous ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
     wantsScreenshots
@@ -469,12 +475,12 @@ export function buildTicketContract(
  * already checked out on the EXISTING PR branch (its commits), and the goal is to make the PR merge
  * cleanly again, then re-trigger the auto-merge via done(). No new PR is created.
  */
-export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage }): string {
+export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLanguage: CommitLanguage; baseBranch?: string }): string {
   if (!isProjectKey(ticket.project)) {
     throw new Error(`Projet inconnu: ${ticket.project}`);
   }
   const project = getProject(ticket.project);
-  const baseBranch = ticket.baseBranch ?? project.baseBranch;
+  const baseBranch = opts.baseBranch ?? ticket.baseBranch ?? project.baseBranch;
 
   const context: string[] = ticket.autoMerge || ticket.error
     ? [

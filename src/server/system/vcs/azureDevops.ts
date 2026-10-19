@@ -184,6 +184,7 @@ const azurePolicyListSchema = z.object({
  * second lookup for the `project` route parameter.
  */
 const azurePrShowSchema = z.object({
+  targetRefName: z.string().min(1).optional(),
   pullRequestId: z.number().int(),
   status: z.string(),
   mergeStatus: z.string().nullable().default(null),
@@ -715,6 +716,12 @@ export class AzureDevopsVcsClient implements VcsClient {
       return { ok: false, reason: unmergedReason(AZURE_LABEL, state, res.stdout.trim() || res.stderr.trim()) };
     }
     return { ok: true, reason: "" };
+  }
+
+  async readPrBase(cwd: string, prUrl: string): Promise<string | null> {
+    const pr = await this.showPr(cwd, prUrl);
+    if (!pr.ok || !pr.data.targetRefName) return null;
+    return stripHeadsPrefix(pr.data.targetRefName);
   }
 
   async readPrState(cwd: string, prUrl: string): Promise<PrState> {

@@ -4,7 +4,7 @@ import { ExternalLink, GitMerge, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
-import { isAutonomousParentIncomplete } from "@shared/autonomous";
+import { isDependencyReady } from "@shared/dependencies";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { summarizeSessionCosts } from "@shared/pricing";
 
@@ -95,7 +95,7 @@ function truncateParentTitle(title: string): string {
 
 export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
-  const parentBlocked = ticket.dependsOn ? !parent || parent.prUrl === null || parent.branch === null || isAutonomousParentIncomplete(parent) : false;
+  const parentBlocked = ticket.dependsOn !== null && !isDependencyReady(ticket, parent ?? null);
   const [checkingMerge, setCheckingMerge] = useState(false);
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);

@@ -9,6 +9,7 @@ import { useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, type Column } from "@shared/constants";
+import { isDependencyReady } from "@shared/dependencies";
 
 import { BoardColumn } from "@/components/BoardColumn";
 import { ticketDecisionLabel } from "@/components/TicketCard";
@@ -26,6 +27,7 @@ import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery }
 import { useBoard } from "@/hooks/useBoard";
 import { boardStore } from "@/lib/store";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
+import { getDependencyParent } from "@/lib/ticketLookup";
 
 interface BoardProps {
   projects: ProjectInfo[];
@@ -101,7 +103,10 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const ticketsByColumn = (column: Column): Ticket[] => visible.filter((t) => t.column === column);
 
   // A running triage holds the ticket's worker socket, so the server rejects a move to implementing.
-  const eligibleTodo = ticketsByColumn("todo").filter((t) => t.triageStatus !== "running");
+  const eligibleTodo = ticketsByColumn("todo").filter((ticket) => {
+    const parent = getDependencyParent(ticket, ticketsById);
+    return ticket.triageStatus !== "running" && isDependencyReady(ticket, parent);
+  });
   const freeSlotCount = slots.filter((s) => s.status === "free").length;
   // Never queue: cap the bulk launch at the number of immediately available slots.
   const moveAllCount = Math.min(eligibleTodo.length, freeSlotCount);
@@ -212,8 +217,8 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const targetsProjectBase = (ticket: Ticket): boolean => {
     const project = projects.find((p) => p.key === ticket.project);
     if (project === undefined) return false;
-    const parent = ticket.dependsOn === null ? undefined : ticketsById.get(ticket.dependsOn);
-    const target = parent?.branch ?? ticket.baseBranch ?? project.baseBranch;
+    const parent = getDependencyParent(ticket, ticketsById);
+    const target = ticket.dependencyLaunch?.baseBranch ?? parent?.branch ?? ticket.baseBranch ?? project.baseBranch;
     return target === project.baseBranch;
   };
   const mergeableTickets = ticketsByColumn("done").filter((t) => canMergePr(t) && targetsProjectBase(t));
@@ -266,6 +271,17 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     if (isLocked(ticket) && target !== "abandoned") {
       setError("Ticket en traitement : seul Abandonnés est autorisé.");
       return;
+    }
+    if (target === "implementing") {
+      const parent = getDependencyParent(ticket, ticketsById);
+      if (ticket.triageStatus === "running") {
+        setError("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+        return;
+      }
+      if (!isDependencyReady(ticket, parent)) {
+        setError("En attente de la livraison du ticket dont il dépend.");
+        return;
+      }
     }
     if (target === "abandoned") {
       setPendingAbandon(ticket.id);

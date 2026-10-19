@@ -281,6 +281,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const slotManager = new SlotManager(store, system, clientHub, sessionHub, notifier, lifecycle, {
     projectRoot: resourcesRoot,
   }, repoMutex);
+  triageManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
+  feasibilityManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
   const ticketOperations = createTicketOperations({
     store,
     hub: clientHub,

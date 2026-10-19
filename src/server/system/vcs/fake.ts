@@ -148,6 +148,10 @@ export class FakeVcsClient implements VcsClient {
     return { ok: true, reason: "" };
   }
 
+  async readPrBase(_cwd: string, prUrl: string): Promise<string | null> {
+    return this.createdPrs.get(prUrl)?.baseBranch ?? FAKE_OPEN_PRS.find((pr) => pr.url === prUrl)?.baseBranch ?? null;
+  }
+
   async readPrState(_cwd: string, _prUrl: string): Promise<PrState> {
     return "merged";
   }

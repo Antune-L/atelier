@@ -19,6 +19,7 @@ import { COLUMN_LABELS, COLUMN_SORT_FIELD, SPLIT_BRANCH_PREFIX, type Column } fr
 import { ColumnActionsMenu } from "@/components/ColumnActionsMenu";
 import { TicketCard, resolveProjectColor, resolveProjectLabel } from "@/components/TicketCard";
 import { cn } from "@/lib/utils";
+import { getDependencyParent } from "@/lib/ticketLookup";
 
 interface BoardColumnProps {
   column: Column;
@@ -179,8 +180,8 @@ function isSplitMother(ticket: Ticket): boolean {
 function familyKeyOf(ticket: Ticket, ticketsById: Map<string, Ticket>): string | null {
   if (isSplitMother(ticket)) return ticket.id;
   if (ticket.dependsOn === null) return null;
-  const parent = ticketsById.get(ticket.dependsOn);
-  if (parent !== undefined && isSplitMother(parent)) return parent.id;
+  const parent = getDependencyParent(ticket, ticketsById);
+  if (parent !== null && isSplitMother(parent)) return parent.id;
   return null;
 }
 
@@ -438,7 +439,7 @@ export function BoardColumn({
                 ticket={ticket}
                 projectLabel={resolveProjectLabel(projects, ticket.project)}
                 projectColor={resolveProjectColor(projects, ticket.project)}
-                parent={ticket.dependsOn ? ticketsById.get(ticket.dependsOn) ?? null : null}
+                parent={getDependencyParent(ticket, ticketsById)}
                 onOpen={onOpenTicket}
                 onCheckMerge={onCheckMerge}
               />

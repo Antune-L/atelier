@@ -46,7 +46,7 @@ export class DependencyReconciliation {
     this.refresh(ticketId);
   }
 
-  async readAndApply(ticket: Ticket): Promise<PrSnapshot | null> {
+  async readAndApply(ticket: Ticket, swallowReadError = true): Promise<PrSnapshot | null> {
     if (ticket.column !== "done" || !ticket.prUrl || !isProjectKey(ticket.project)) return null;
     const project = getProject(ticket.project);
     // TODO(ali): Reconcile Azure parent merges once its live delivery semantics are qualified.
@@ -54,7 +54,8 @@ export class DependencyReconciliation {
     let snapshot: PrSnapshot;
     try {
       snapshot = await this.system.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
-    } catch {
+    } catch (error) {
+      if (!swallowReadError) throw error;
       return null;
     }
     const current = this.store.getTicket(ticket.id);
@@ -74,7 +75,7 @@ export class DependencyReconciliation {
     if (snapshot.state === "merged") await this.markMerged(current);
     else if (changed) this.hub.pushTicket(this.store.getTicket(ticket.id) ?? current);
     this.refreshDependents(ticket.id);
-    if (changed && previous?.state !== snapshot.state && (snapshot.state === "merged" || snapshot.state === "closed")) {
+    if (this.store.listDependents(ticket.id).length > 0 && changed && previous?.state !== snapshot.state && (snapshot.state === "merged" || snapshot.state === "closed")) {
       const body = snapshot.state === "merged"
         ? `${ticket.title} : PR fusionnée dans ${snapshot.baseBranch ?? "une base inconnue"}. Les bases des tickets dépendants ont été vérifiées.`
         : `${ticket.title} : PR fermée sans fusion. Les tickets dépendants restent bloqués.`;

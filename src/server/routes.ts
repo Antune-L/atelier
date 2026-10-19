@@ -1560,7 +1560,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (target === "implementing") {
         // A running triage holds a worker socket keyed by this ticketId; launching now would
         // collide the two sessions on that key. Wait for the verdict first.
-        if (ticket.triageStatus === "running") {
+        if (ticket.column === "todo" && ticket.triageStatus === "running") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
         const parent = store.getDependencyParent(ticket);
@@ -1701,7 +1701,7 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
-      if (ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
+      if (ticket.column === "todo" && ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
       const parent = store.getDependencyParent(ticket);
       if (!isDependencyReady(ticket, parent)) return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
       await slots.retry(params.id);

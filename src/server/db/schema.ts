@@ -459,6 +459,7 @@ CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project, u
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation ON conversation_messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_prd_documents_conversation ON prd_documents(conversation_id, revision);
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_events_ticket_type_id ON events(ticket_id, type, id);
 CREATE INDEX IF NOT EXISTS idx_ticket_creation_requests_ticket ON ticket_creation_requests(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 CREATE INDEX IF NOT EXISTS idx_execution_runs_owner ON execution_runs(owner_type, owner_id, started_at);

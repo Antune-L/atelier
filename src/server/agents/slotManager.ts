@@ -468,6 +468,8 @@ export class SlotManager {
       if (!previous || previous.mode !== "correction" || previous.sourceRunId !== iteration.sourceRunId || previous.headBranch !== iteration.headBranch || slot?.ticketId !== ticketId || this.sessionHub.isConnected(ticketId)) throw new Error("Le slot de correction conservé ne peut être repris que par une relance explicite de la même passe.");
     }
     const executionTicket = this.qualityCorrectionTicket(ticket);
+    await this.reconcileDependencies(ticketId);
+    this.assertStartReady(this.store.getTicket(ticketId) ?? ticket);
     this.touch(this.store.updateTicket(ticketId, { orchestrator: executionTicket.orchestrator, implementer: executionTicket.implementer, autoMerge: false, resolvingConflicts: false, error: null, finishedAt: null }));
     this.lifecycle.enqueue(ticketId);
     if (ticket.slotId !== null) {
@@ -580,10 +582,20 @@ export class SlotManager {
 
   /** Entry point when a ticket is dragged into "À implémenter". */
   async startTicket(ticketId: string): Promise<void> {
+    try {
+      await this.startReadyTicket(ticketId);
+    } catch (error) {
+      if (this.store.getTicket(ticketId)?.column === "implementing") this.markUnallocatedLaunchFailed(ticketId, error);
+      throw error;
+    }
+  }
+
+  private async startReadyTicket(ticketId: string): Promise<void> {
     await this.reconcileDependencies(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     if (ticket.column === "abandoned" || ticket.column === "merged") return;
+    if (ticket.column === "todo" && ticket.triageStatus === "running") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
     this.assertStartReady(ticket);
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
@@ -712,13 +724,20 @@ export class SlotManager {
     }
     void this.startTicket(next).catch((error: unknown) => {
       log.error("démarrage du ticket en file échoué", { ticketId: next, error: getErrorMessage(error) });
+      this.markUnallocatedLaunchFailed(next, error);
       this.pumpQueue();
     });
   }
 
+  private markUnallocatedLaunchFailed(ticketId: string, error: unknown): void {
+    const current = this.store.getTicket(ticketId);
+    if (!current || current.column === "abandoned" || current.column === "merged" || current.slotId !== null || this.isLaunching(ticketId) || this.sessionHub.isConnected(ticketId)) return;
+    if (current.column === "failed" && current.error === getErrorMessage(error)) return;
+    this.lifecycle.markLaunchFailed(ticketId, null, getErrorMessage(error), error);
+  }
+
   private assertStartReady(ticket: Ticket): void {
     if (this.updatingDependencyBases.has(ticket.id)) throw new Error("Mise à jour de la base en cours. Attends la fin avant de relancer le ticket.");
-    if (ticket.triageStatus === "running") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
     const parent = this.store.getDependencyParent(ticket);
     if (!isDependencyReady(ticket, parent)) throw new Error("En attente de la livraison du ticket parent.");
     if (isProjectKey(ticket.project)) requireForkBaseBranch(ticket, getProject(ticket.project), this.store);
@@ -767,6 +786,8 @@ export class SlotManager {
   async resolveMergeConflicts(ticketId: string): Promise<boolean> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.branch === null || ticket.prUrl === null) return false;
+    await this.reconcileDependencies(ticketId);
+    this.assertStartReady(this.store.getTicket(ticketId) ?? ticket);
     const free = this.store.findFreeSlot();
     if (!free) {
       this.touch(
@@ -1086,10 +1107,16 @@ export class SlotManager {
   }
 
   private async launchInSlot(slotId: number, ticketId: string, reuseWorktree = false): Promise<void> {
-    await this.reconcileDependencies(ticketId);
+    try {
+      await this.reconcileDependencies(ticketId);
+      const current = this.store.getTicket(ticketId);
+      if (current) this.assertStartReady(current);
+    } catch (error) {
+      this.markUnallocatedLaunchFailed(ticketId, error);
+      throw error;
+    }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
-    this.assertStartReady(ticket);
     if (!isProjectKey(ticket.project)) {
       this.markFailed(ticketId, slotId, `Projet inconnu: ${ticket.project}`);
       return;
@@ -1365,7 +1392,7 @@ export class SlotManager {
     if (!ticket || ticket.column !== "done" || !ticket.prUrl || !isProjectKey(ticket.project)) return { merged: false, state: "unknown" };
     const project = getProject(ticket.project);
     if (project.vcsProvider === "github") {
-      const snapshot = await this.dependencyReconciliation.readAndApply(ticket);
+      const snapshot = await this.dependencyReconciliation.readAndApply(ticket, false);
       const current = this.store.getTicket(ticketId);
       return { merged: snapshot?.state === "merged" && current?.column === "merged", state: snapshot?.state ?? "unknown", ...(current ? { ticket: current } : {}) };
     }
@@ -1379,6 +1406,7 @@ export class SlotManager {
   }
 
   async recordMergedDelivery(ticketId: string, path: string, prUrl: string): Promise<void> {
+    if (this.store.listDependents(ticketId).length === 0) return;
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.prUrl !== prUrl || !isProjectKey(ticket.project)) return;
     const project = getProject(ticket.project);
@@ -2225,7 +2253,7 @@ export class SlotManager {
     if (current.column !== ticket.column) throw new Error("Le parent a changé pendant la vérification de sa PR.");
     const merged = this.lifecycle.markMerged(ticketId);
     this.dependencyReconciliation.refreshDependents(ticketId);
-    this.pumpQueue();
+    if (ticket.slotId !== null) this.pumpQueue();
     return this.store.getTicket(ticketId) ?? merged;
   }
 
@@ -2458,6 +2486,8 @@ export class SlotManager {
     if (iteration && (iteration.mode !== "correction" || iteration.status !== "correcting")) return false;
     const previous = this.store.getLatestQualityIteration(ticketId);
     if (!iteration && previous?.mode !== "correction") return this.relaunch(ticketId);
+    await this.reconcileDependencies(ticketId);
+    this.assertStartReady(this.store.getTicket(ticketId) ?? ticket);
     if (!iteration && previous?.mode === "correction" && previous.status !== "completed") {
       const sourceRunId = previous.resultRunId ?? previous.sourceRunId;
       const source = this.store.getQualityRun(sourceRunId);

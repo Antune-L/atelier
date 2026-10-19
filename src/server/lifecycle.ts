@@ -168,13 +168,8 @@ export class TicketLifecycle {
     return ticket;
   }
 
-  /**
-   * Setup/launch failure (no agent, no comment): column failed, stage failed, error, clear
-   * resolvingConflicts, stamp finishedAt; force the given slot to "failed", push the ticket+slots,
-   * log "failed", notify (fire-and-forget). Distinct from `fail`: no comment, log name "failed",
-   * un-awaited notify, slot always written.
-   */
-  markLaunchFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): Ticket {
+  // NOTE(ali): Queue launch failures have no slot to mark as failed.
+  markLaunchFailed(ticketId: string, slotId: number | null, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): Ticket {
     const errorDetails = this.errorDetailsFor(ticketId, error, source, { slotId });
     const ticket = this.store.updateTicket(ticketId, {
       column: "failed",
@@ -184,7 +179,7 @@ export class TicketLifecycle {
       resolvingConflicts: false,
       finishedAt: Date.now(),
     });
-    this.store.updateSlot(slotId, { status: "failed" });
+    if (slotId !== null) this.store.updateSlot(slotId, { status: "failed" });
     this.hub.pushTicket(ticket);
     this.hub.pushSlots(this.store.listSlots());
     this.store.logEvent(ticketId, "failed", { reason, details: errorDetails });

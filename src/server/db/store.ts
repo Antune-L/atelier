@@ -56,6 +56,7 @@ import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, Quali
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
 import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
+import { createLogger } from "../logger.ts";
 
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
 import { mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
@@ -81,6 +82,7 @@ export class TicketCreationRequestConflictError extends Error {
   }
 }
 
+const log = createLogger("store");
 const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
 const reviewVerdictSchema = z.enum(["approve", "revise"]);
 const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
@@ -2445,8 +2447,7 @@ export class Store {
   // ---- Events (audit log) ----
 
   getDependencyLaunch(ticketId: string): DependencyLaunch | null {
-    const payload = this.latestEventPayload(ticketId, DEPENDENCY_LAUNCH_EVENT);
-    return payload === null ? null : dependencyLaunchSchema.parse(payload);
+    return this.latestEventPayload(ticketId, DEPENDENCY_LAUNCH_EVENT, dependencyLaunchSchema);
   }
 
   recordDependencyLaunch(ticketId: string, launch: DependencyLaunch): void {
@@ -2463,9 +2464,8 @@ export class Store {
   }
 
   getDependencyPrObservation(ticketId: string): DependencyPrObservation | null {
-    const payload = this.latestEventPayload(ticketId, DEPENDENCY_PR_OBSERVATION_EVENT);
-    if (payload === null) return null;
-    const observation = dependencyPrObservationSchema.parse(payload);
+    const observation = this.latestEventPayload(ticketId, DEPENDENCY_PR_OBSERVATION_EVENT, dependencyPrObservationSchema);
+    if (observation === null) return null;
     const raw = this.db.query("SELECT pr_url, project, branch FROM tickets WHERE id = ?").get(ticketId);
     if (!raw) return null;
     const identity = z.object({ pr_url: z.string().nullable(), project: z.string(), branch: z.string().nullable() }).parse(raw);
@@ -2481,8 +2481,7 @@ export class Store {
   }
 
   getDependencyStatus(ticketId: string): DependencyStatus | null {
-    const payload = this.latestEventPayload(ticketId, DEPENDENCY_STATUS_EVENT);
-    return payload === null ? null : dependencyStatusSchema.parse(payload);
+    return this.latestEventPayload(ticketId, DEPENDENCY_STATUS_EVENT, dependencyStatusSchema);
   }
 
   recordDependencyStatus(ticketId: string, status: DependencyStatus): boolean {
@@ -2499,14 +2498,24 @@ export class Store {
   }
 
   getDirectPushedBase(ticketId: string): string | null {
-    const payload = this.latestEventPayload(ticketId, DIRECT_PUSHED_EVENT);
-    return payload === null ? null : directPushedSchema.parse(payload).baseBranch;
+    return this.latestEventPayload(ticketId, DIRECT_PUSHED_EVENT, directPushedSchema)?.baseBranch ?? null;
   }
 
-  private latestEventPayload(ticketId: string, type: string): unknown {
+  private latestEventPayload<T>(ticketId: string, type: string, schema: z.ZodType<T>): T | null {
     const raw = this.db.query("SELECT payload FROM events WHERE ticket_id = ? AND type = ? ORDER BY id DESC LIMIT 1").get(ticketId, type);
     if (!raw) return null;
-    return JSON.parse(z.object({ payload: z.string() }).parse(raw).payload);
+    const row = z.object({ payload: z.string() }).safeParse(raw);
+    if (row.success) {
+      try {
+        const parsed = schema.safeParse(JSON.parse(row.data.payload));
+        if (parsed.success) return parsed.data;
+      } catch {
+        log.warn("invalid event JSON ignored", { ticketId, type });
+        return null;
+      }
+    }
+    log.warn("invalid event payload ignored", { ticketId, type });
+    return null;
   }
 
   logEvent(ticketId: string | null, type: string, payload: unknown): void {

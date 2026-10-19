@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { DEPENDENCY_LAUNCH_EVENT, DIRECT_PUSHED_EVENT, dependencyLaunchSchema, directPushedSchema } from "../../shared/dependencyLaunch.ts";
-import type { DependencyLaunch } from "../../shared/dependencyLaunch.ts";
+import { DEPENDENCY_LAUNCH_EVENT, DEPENDENCY_PR_OBSERVATION_EVENT, DEPENDENCY_STATUS_EVENT, DIRECT_PUSHED_EVENT, dependencyLaunchSchema, dependencyPrObservationSchema, dependencyStatusSchema, directPushedSchema } from "../../shared/dependencyLaunch.ts";
+import type { DependencyLaunch, DependencyPrObservation, DependencyStatus } from "../../shared/dependencyLaunch.ts";
 
 import { QUALITY_HISTORY_VERSION, QUALITY_HISTORY_EVENT_LIMIT, QUALITY_HISTORY_BYTE_LIMIT, QUALITY_HISTORY_SUMMARY_LIMIT, QUALITY_HISTORY_PAGE_LIMIT, QUALITY_HISTORY_DEFAULT_PAGE_SIZE, qualityActionSchema, qualityRequestSchema } from "../../shared/qualityHistory.ts";
 import type { QualityAction, QualityActionInput, QualityActionPage, QualityRequest, QualityRequestPage } from "../../shared/qualityHistory.ts";
@@ -1340,7 +1340,7 @@ export class Store {
   getTicket(id: string): Ticket | null {
     const raw = this.db.query("SELECT * FROM tickets WHERE id = ?").get(id);
     if (!raw) return null;
-    return { ...mapTicketRow(raw, this.pendingQuestions(id)), implementationPlan: this.getImplementationPlan(id), dependencyLaunch: this.getDependencyLaunch(id) };
+    return { ...mapTicketRow(raw, this.pendingQuestions(id)), implementationPlan: this.getImplementationPlan(id), ...this.getDependencyFields(id) };
   }
 
   getDependencyParent(ticket: Ticket): Ticket | null {
@@ -1360,7 +1360,7 @@ export class Store {
     const rows = this.db.query(sql).all();
     return rows.map((raw) => {
       const ticket = mapTicketRow(raw, 0);
-      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id), implementationPlan: this.getImplementationPlan(ticket.id), dependencyLaunch: this.getDependencyLaunch(ticket.id) };
+      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id), implementationPlan: this.getImplementationPlan(ticket.id), ...this.getDependencyFields(ticket.id) };
     });
   }
 
@@ -1369,7 +1369,7 @@ export class Store {
     const rows = this.db.query("SELECT * FROM tickets WHERE depends_on = ? AND archived = 0").all(parentId);
     return rows.map((raw) => {
       const ticket = mapTicketRow(raw, 0);
-      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id), dependencyLaunch: this.getDependencyLaunch(ticket.id) };
+      return { ...ticket, pendingQuestions: this.pendingQuestions(ticket.id), ...this.getDependencyFields(ticket.id) };
     });
   }
 
@@ -2451,6 +2451,51 @@ export class Store {
 
   recordDependencyLaunch(ticketId: string, launch: DependencyLaunch): void {
     this.logEvent(ticketId, DEPENDENCY_LAUNCH_EVENT, dependencyLaunchSchema.parse(launch));
+    this.recordDependencyStatus(ticketId, { stale: false, reason: null, newBaseBranch: null, manualCommand: null });
+  }
+
+  private getDependencyFields(ticketId: string) {
+    return {
+      dependencyLaunch: this.getDependencyLaunch(ticketId),
+      dependencyPrObservation: this.getDependencyPrObservation(ticketId),
+      dependencyStatus: this.getDependencyStatus(ticketId),
+    };
+  }
+
+  getDependencyPrObservation(ticketId: string): DependencyPrObservation | null {
+    const payload = this.latestEventPayload(ticketId, DEPENDENCY_PR_OBSERVATION_EVENT);
+    if (payload === null) return null;
+    const observation = dependencyPrObservationSchema.parse(payload);
+    const raw = this.db.query("SELECT pr_url, project, branch FROM tickets WHERE id = ?").get(ticketId);
+    if (!raw) return null;
+    const identity = z.object({ pr_url: z.string().nullable(), project: z.string(), branch: z.string().nullable() }).parse(raw);
+    if (identity.pr_url !== observation.prUrl || identity.project !== observation.project || identity.branch !== observation.branch) return null;
+    return observation;
+  }
+
+  recordDependencyPrObservation(ticketId: string, observation: DependencyPrObservation): boolean {
+    const parsed = dependencyPrObservationSchema.parse(observation);
+    if (JSON.stringify(this.getDependencyPrObservation(ticketId)) === JSON.stringify(parsed)) return false;
+    this.logEvent(ticketId, DEPENDENCY_PR_OBSERVATION_EVENT, parsed);
+    return true;
+  }
+
+  getDependencyStatus(ticketId: string): DependencyStatus | null {
+    const payload = this.latestEventPayload(ticketId, DEPENDENCY_STATUS_EVENT);
+    return payload === null ? null : dependencyStatusSchema.parse(payload);
+  }
+
+  recordDependencyStatus(ticketId: string, status: DependencyStatus): boolean {
+    const parsed = dependencyStatusSchema.parse(status);
+    if (JSON.stringify(this.getDependencyStatus(ticketId)) === JSON.stringify(parsed)) return false;
+    this.logEvent(ticketId, DEPENDENCY_STATUS_EVENT, parsed);
+    return true;
+  }
+
+  getDeliveredBase(ticketId: string): string | null {
+    const observation = this.getDependencyPrObservation(ticketId);
+    if (observation?.state === "merged" && observation.baseBranch !== null) return observation.baseBranch;
+    return this.getDirectPushedBase(ticketId);
   }
 
   getDirectPushedBase(ticketId: string): string | null {

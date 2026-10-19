@@ -83,7 +83,7 @@ Support Azure DevOps (Azure Repos) alongside GitHub, selectable per project (Git
 - Lot 3: implemented, uncommitted. An Azure project can now run a feature ticket end to end
   (list → create → done gate → merge) and a read-only review pass; publication and the clean flow stay lot 4.
   - `azureDevops.ts` implements `listOpenPrs`, `verifyPrExists`, `readPrHead`, `confirmPrHead`,
-    `prHeadFetchRef`, `createPr`, `fetchPrSummary`, `mergePr` and `readPrState` as `az` argv spawns
+    `prHeadFetchRef`, `createPr`, `fetchPrSummary`, `mergePr` and `readPr` as `az` argv spawns
     through `runBoundedCommand`, always `--org <url> --detect false -o json`. The repo triple comes
     from the parsed `origin` remote for repo-scoped calls and from the PR web URL for PR-scoped ones
     (`az repos pr show/update` take `--id` + `--org` only — verified in `--help`).

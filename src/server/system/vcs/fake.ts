@@ -3,13 +3,13 @@
  * whatever the project's provider is. Zero external side effects.
  */
 
-import type { PrMergeability, PrState } from "../../../shared/constants.ts";
+import type { PrMergeability } from "../../../shared/constants.ts";
 import type { OpenPr, VcsConnectionResult } from "../../../shared/schemas.ts";
 import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
 import type { DoneGateResult, PublishReviewResult, ReviewHeadResult, RecoveryCandidateOptions, PrMutationOptions, CreatePrOptions } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
-import type { CreatePrResult, ReviewRequestSnapshot, VcsClient } from "./types.ts";
+import type { CreatePrResult, PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 /** Base offset for the deterministic dry-run stealth PR number (createPr). */
 const FAKE_STEALTH_PR_BASE = 900;
@@ -148,12 +148,14 @@ export class FakeVcsClient implements VcsClient {
     return { ok: true, reason: "" };
   }
 
-  async readPrBase(_cwd: string, prUrl: string): Promise<string | null> {
-    return this.createdPrs.get(prUrl)?.baseBranch ?? FAKE_OPEN_PRS.find((pr) => pr.url === prUrl)?.baseBranch ?? null;
-  }
-
-  async readPrState(_cwd: string, _prUrl: string): Promise<PrState> {
-    return "merged";
+  async readPr(_cwd: string, prUrl: string): Promise<PrSnapshot> {
+    return {
+      state: "merged",
+      baseBranch: this.createdPrs.get(prUrl)?.baseBranch ?? FAKE_OPEN_PRS.find((pr) => pr.url === prUrl)?.baseBranch ?? null,
+      mergedAt: null,
+      mergeCommitSha: null,
+      headSha: null,
+    };
   }
 
   async readPrMergeability(_cwd: string, _prUrl: string): Promise<PrMergeability> {

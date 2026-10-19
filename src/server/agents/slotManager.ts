@@ -1,6 +1,8 @@
 import { join } from "node:path";
 
 import { isDependencyReady } from "../../shared/dependencies.ts";
+import { canUpdateDependencyBase } from "../../shared/ticketMerge.ts";
+import type { UpdateDependencyBaseResult } from "../../shared/ticketMerge.ts";
 import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
 import {
   ACTIVE_STAGES,
@@ -15,6 +17,7 @@ import {
   REVIEWER_BRANCH_SUFFIX,
   TERMINAL_STAGES,
   type Column,
+  type PrState,
 } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { hasUnresolvedImplementation } from "../../shared/implementationPlan.ts";
@@ -37,6 +40,7 @@ import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts"
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
 
 import { requireForkBaseBranch, resolveExecutionBaseBranch, resolvePrTargetBaseBranch } from "./baseBranch.ts";
+import { DependencyReconciliation, matchesTicketDelivery } from "./dependencyReconciliation.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
@@ -170,6 +174,8 @@ export class SlotManager {
   private readonly repoMutex: KeyedMutex;
   private readonly queue: string[] = [];
   private readonly deferredDependents = new Set<string>();
+  private readonly updatingDependencyBases = new Set<string>();
+  private readonly dependencyReconciliation: DependencyReconciliation;
   /** Live setup phase per ticket, shown in the terminal view until the agent outputs. */
   private readonly setupPhase = new Map<string, string>();
   private readonly phaseStartedAt = new Map<string, number>();
@@ -223,6 +229,7 @@ export class SlotManager {
     repoMutex = new KeyedMutex(),
   ) {
     this.repoMutex = repoMutex;
+    this.dependencyReconciliation = new DependencyReconciliation(store, system, hub, notifier, (ticket) => this.markMerged(ticket.id, ticket));
   }
 
   setDelegationDrain(drain: (ticketId: string) => Promise<void>): void {
@@ -481,8 +488,8 @@ export class SlotManager {
   private async assertQualityIterationPr(ticket: Ticket, iteration: QualityIteration, expectedRevision?: string): Promise<void> {
     if (!isProjectKey(ticket.project) || !iteration.prUrl || !iteration.headBranch || ticket.prUrl !== iteration.prUrl) throw new Error("La PR de correction a changé ou n'est plus disponible.");
     const project = getProject(ticket.project);
-    const state = await this.system.checkPrMerged(project.repoPath, iteration.prUrl, project.vcsProvider);
-    if (state.merged || state.state !== "open") throw new Error("La correction requiert une PR ouverte et non fusionnée.");
+    const state = await this.system.readPr(project.repoPath, iteration.prUrl, project.vcsProvider);
+    if (state.state !== "open") throw new Error("La correction requiert une PR ouverte et non fusionnée.");
     const open = (await this.system.listOpenPrs(project.repoPath, project.vcsProvider)).find((pr) => pr.url === iteration.prUrl);
     if (!open || open.headBranch !== iteration.headBranch) throw new Error("La branche de la PR a changé depuis la vérification source.");
     const competing = this.store.listTickets(true).find((candidate) => candidate.id !== ticket.id && candidate.project === ticket.project && candidate.prUrl === iteration.prUrl && (candidate.slotId !== null || candidate.column === "implementing"));
@@ -573,6 +580,7 @@ export class SlotManager {
 
   /** Entry point when a ticket is dragged into "À implémenter". */
   async startTicket(ticketId: string): Promise<void> {
+    await this.reconcileDependencies(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     if (ticket.column === "abandoned" || ticket.column === "merged") return;
@@ -709,6 +717,7 @@ export class SlotManager {
   }
 
   private assertStartReady(ticket: Ticket): void {
+    if (this.updatingDependencyBases.has(ticket.id)) throw new Error("Mise à jour de la base en cours. Attends la fin avant de relancer le ticket.");
     if (ticket.triageStatus === "running") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
     const parent = this.store.getDependencyParent(ticket);
     if (!isDependencyReady(ticket, parent)) throw new Error("En attente de la livraison du ticket parent.");
@@ -738,7 +747,8 @@ export class SlotManager {
           this.deferredDependents.add(child.id);
           continue;
         }
-        this.assertStartReady(child);
+        await this.reconcileDependencies(child.id);
+        this.assertStartReady(this.store.getTicket(child.id) ?? child);
         this.deferredDependents.delete(child.id);
         this.lifecycle.enqueue(child.id);
         await this.startTicket(child.id);
@@ -1076,8 +1086,10 @@ export class SlotManager {
   }
 
   private async launchInSlot(slotId: number, ticketId: string, reuseWorktree = false): Promise<void> {
+    await this.reconcileDependencies(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
+    this.assertStartReady(ticket);
     if (!isProjectKey(ticket.project)) {
       this.markFailed(ticketId, slotId, `Projet inconnu: ${ticket.project}`);
       return;
@@ -1162,6 +1174,7 @@ export class SlotManager {
       await assertCodexImplementerAvailable(this.system, executionTicket, execution);
       assertWork();
       this.setPhase(ticketId, SETUP_PHASES.worktree);
+      let forkSha: string | null = null;
       await this.repoMutex.run(project.repoPath, async () => {
         assertWork();
         if (reuseWorktree) {
@@ -1172,6 +1185,9 @@ export class SlotManager {
           await this.system.worktreeRemove(previous?.repoPath ?? project.repoPath, path);
           assertWork();
           await this.system.fetch(project.repoPath, baseBranch);
+          if (ticket.dependsOn !== null && !ticket.dependencyLaunch && !resolving && !qualityCorrection) {
+            forkSha = await this.system.readGitRef(project.repoPath, `origin/${baseBranch}`);
+          }
         }
         if (!reuseWorktree && (resolving || reviewFix || cleanFix || qualityCorrection)) {
           // The PR branch lives only on origin after the slot was released; fetch it, then check it
@@ -1202,8 +1218,8 @@ export class SlotManager {
         }
       });
       assertWork();
-      if (ticket.dependsOn !== null && !ticket.dependencyLaunch && !reuseWorktree && !resolving && !qualityCorrection) {
-        this.store.recordDependencyLaunch(ticketId, { version: 1, parentTicketId: ticket.dependsOn, baseBranch, branch, project: ticket.project });
+      if (ticket.dependsOn !== null && !ticket.dependencyLaunch && forkSha !== null) {
+        this.store.recordDependencyLaunch(ticketId, { version: 2, parentTicketId: ticket.dependsOn, baseBranch, branch, project: ticket.project, forkSha });
       }
 
       if (qualityCorrection) {
@@ -1340,22 +1356,153 @@ export class SlotManager {
     });
   }
 
+  async reconcileDependencies(ticketId: string): Promise<void> {
+    await this.dependencyReconciliation.reconcile(ticketId);
+  }
+
+  async checkMergedPr(ticketId: string): Promise<{ merged: boolean; state: PrState; ticket?: Ticket }> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.column !== "done" || !ticket.prUrl || !isProjectKey(ticket.project)) return { merged: false, state: "unknown" };
+    const project = getProject(ticket.project);
+    if (project.vcsProvider === "github") {
+      const snapshot = await this.dependencyReconciliation.readAndApply(ticket);
+      const current = this.store.getTicket(ticketId);
+      return { merged: snapshot?.state === "merged" && current?.column === "merged", state: snapshot?.state ?? "unknown", ...(current ? { ticket: current } : {}) };
+    }
+    const snapshot = await this.system.readPr(project.repoPath, ticket.prUrl, project.vcsProvider);
+    if (snapshot.state !== "merged") return { merged: false, state: snapshot.state };
+    const current = this.store.getTicket(ticketId);
+    if (!matchesTicketDelivery(current, ticket) || current.column !== "done") return { merged: false, state: "unknown" };
+    this.store.recordDependencyPrObservation(ticketId, { version: 1, prUrl: ticket.prUrl, project: ticket.project, branch: ticket.branch, ...snapshot, state: "merged" });
+    const merged = await this.markMerged(ticketId, ticket);
+    return { merged: true, state: snapshot.state, ticket: merged };
+  }
+
+  async recordMergedDelivery(ticketId: string, path: string, prUrl: string): Promise<void> {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket || ticket.prUrl !== prUrl || !isProjectKey(ticket.project)) return;
+    const project = getProject(ticket.project);
+    try {
+      const snapshot = await this.system.readPr(path, prUrl, project.vcsProvider);
+      const current = this.store.getTicket(ticketId);
+      if (snapshot.state !== "merged" || !matchesTicketDelivery(current, ticket) || current.column !== ticket.column || !isProjectKey(current.project) || getProject(current.project).repoPath !== project.repoPath || getProject(current.project).vcsProvider !== project.vcsProvider) return;
+      this.store.recordDependencyPrObservation(ticketId, { version: 1, prUrl, project: ticket.project, branch: ticket.branch, ...snapshot, state: "merged" });
+      this.touch(this.store.getTicket(ticketId) ?? current);
+      this.dependencyReconciliation.refreshDependents(ticketId);
+    } catch (error) {
+      log.warn("lecture de la cible fusionnée indisponible", { ticketId, reason: getErrorMessage(error) });
+    }
+  }
+
+  private dependencyPrBaseFailure(ticket: Ticket, baseBranch: string, actualBase: string | null): DoneGateResult {
+    let manualCommand: string | null = null;
+    if (ticket.prUrl && projectVcsProvider(ticket.project) === "github") {
+      const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+      manualCommand = `gh pr edit ${quote(ticket.prUrl)} --base ${quote(baseBranch)}`;
+    }
+    let reason = "Impossible de vérifier la branche cible de la PR enfant. La fusion reste bloquée.";
+    if (actualBase !== null) {
+      let instruction = "Utilise « Mettre à jour la base » puis recible la PR manuellement si nécessaire.";
+      if (ticket.dependencyLaunch?.baseBranch === baseBranch) {
+        instruction = "Recible la PR manuellement, puis clique de nouveau sur « Mettre à jour la base » pour vérifier sa branche cible.";
+        if (manualCommand) {
+          instruction = "Exécute la commande ci-dessous, puis clique de nouveau sur « Mettre à jour la base » pour vérifier sa branche cible.";
+        }
+      }
+      reason = `La PR enfant cible ${actualBase} au lieu de ${baseBranch}. ${instruction}`;
+    }
+    this.store.recordDependencyStatus(ticket.id, { stale: true, reason, newBaseBranch: baseBranch, manualCommand: actualBase === null ? null : manualCommand });
+    this.touch(this.store.getTicket(ticket.id) ?? ticket);
+    return { ok: false, reason: manualCommand && actualBase !== null ? `${reason} ${manualCommand}` : reason };
+  }
+
   async verifyDependencyDelivery(ticket: Ticket, path: string, prUrl?: string): Promise<DoneGateResult> {
+    if (this.updatingDependencyBases.has(ticket.id)) return { ok: false, reason: "Mise à jour de la base en cours. Attends sa fin avant de fusionner." };
     if (ticket.dependsOn === null && !ticket.dependencyLaunch) return { ok: true, reason: "" };
     try {
+      await this.reconcileDependencies(ticket.id);
+      const current = this.store.getTicket(ticket.id);
+      if (!matchesTicketDelivery(current, ticket) || current.slotId !== ticket.slotId) return { ok: false, reason: "Le ticket a changé pendant la vérification de sa dépendance." };
+      ticket = current;
       if (!isProjectKey(ticket.project)) return { ok: false, reason: "Projet introuvable pour vérifier la base de livraison." };
       const project = getProject(ticket.project);
       const baseBranch = resolvePrTargetBaseBranch(ticket, project, this.store);
       if (prUrl) {
-        const actualBase = await this.system.readPrBase(path, prUrl, project.vcsProvider);
-        if (actualBase === null) return { ok: false, reason: "Impossible de vérifier la branche cible de la PR enfant." };
-        if (actualBase !== baseBranch) return { ok: false, reason: `La PR enfant cible ${actualBase} au lieu de sa base de lancement ${baseBranch}. Livraison bloquée.` };
+        const snapshot = await this.system.readPr(path, prUrl, project.vcsProvider);
+        const latest = this.store.getTicket(ticket.id);
+        if (!matchesTicketDelivery(latest, ticket) || latest.slotId !== ticket.slotId) return { ok: false, reason: "Le ticket a changé pendant la lecture de sa PR." };
+        if (snapshot.baseBranch !== baseBranch) return this.dependencyPrBaseFailure({ ...latest, prUrl }, baseBranch, snapshot.baseBranch);
+        this.store.recordDependencyStatus(ticket.id, { stale: false, reason: null, newBaseBranch: baseBranch, manualCommand: null });
+        this.touch(this.store.getTicket(ticket.id) ?? latest);
       }
-      const current = this.store.getTicket(ticket.id);
-      if (!current || resolvePrTargetBaseBranch(current, project, this.store) !== baseBranch) return { ok: false, reason: "La base de livraison a changé pendant la vérification." };
+      const latest = this.store.getTicket(ticket.id);
+      if (!latest || resolvePrTargetBaseBranch(latest, project, this.store) !== baseBranch) return { ok: false, reason: "La base de livraison a changé pendant la vérification." };
       return { ok: true, reason: "" };
     } catch (error) {
       return { ok: false, reason: getErrorMessage(error) };
+    }
+  }
+
+  async updateDependencyBase(ticketId: string): Promise<UpdateDependencyBaseResult> {
+    if (this.updatingDependencyBases.has(ticketId)) return { ok: false, reason: "Mise à jour de la base déjà en cours." };
+    this.updatingDependencyBases.add(ticketId);
+    try {
+      await this.reconcileDependencies(ticketId);
+      const ticket = this.store.getTicket(ticketId);
+      if (!ticket || !canUpdateDependencyBase(ticket) || !isProjectKey(ticket.project) || ticket.branch === null || ticket.dependsOn === null) return { ok: false, reason: "La mise à jour de base requiert un ticket dépendant sans session ni slot actif." };
+      const launch = ticket.dependencyLaunch;
+      if (!launch || launch.version !== 2) return { ok: false, reason: "Aucun commit de départ n'a été enregistré pour ce ticket. Rebase et reciblage manuels requis ; aucune réécriture automatique n'est possible." };
+      if (launch.parentTicketId !== ticket.dependsOn || launch.branch !== ticket.branch || launch.project !== ticket.project) return { ok: false, reason: "L'identité du ticket a changé depuis son lancement. Reprise manuelle requise." };
+      const project = getProject(ticket.project);
+      const baseBranch = requireForkBaseBranch(ticket, project, this.store);
+      const assertCurrent = (): void => {
+        const current = this.store.getTicket(ticketId);
+        if (!matchesTicketDelivery(current, ticket) || !canUpdateDependencyBase(current) || JSON.stringify(current.dependencyLaunch) !== JSON.stringify(launch) || this.sessionHub.isConnected(ticketId) || this.isLaunching(ticketId) || this.store.listSlots().some((slot) => slot.ticketId === ticketId) || this.queue.includes(ticketId)) throw new Error("Le ticket ou sa session a changé pendant la mise à jour de la base. Opération arrêtée.");
+        if (!isProjectKey(current.project) || getProject(current.project).repoPath !== project.repoPath || getProject(current.project).vcsProvider !== project.vcsProvider || requireForkBaseBranch(current, getProject(current.project), this.store) !== baseBranch) throw new Error("La base ou le projet a changé pendant la mise à jour. Opération arrêtée.");
+      };
+      await this.repoMutex.run(project.repoPath, async () => {
+        assertCurrent();
+        this.store.recordDependencyStatus(ticketId, { stale: true, reason: "Mise à jour de la base en cours ; la cible de la PR doit encore être vérifiée.", newBaseBranch: baseBranch, manualCommand: null });
+        this.touch(this.store.getTicket(ticketId) ?? ticket);
+        const result = await this.system.updateDependencyBase({ repoPath: project.repoPath, branch: launch.branch, baseBranch, forkSha: launch.forkSha, assertCurrent });
+        if (!result.ok || !result.forkSha) throw new Error(result.reason || "La mise à jour n'a pas retourné son commit de base.");
+        const afterPush = this.store.getTicket(ticketId);
+        if (!matchesTicketDelivery(afterPush, ticket)) throw new Error("La branche a été repoussée mais l’identité du ticket a changé. Vérification manuelle requise.");
+        const nextForkSha = result.forkSha;
+        this.store.transaction(() => {
+          this.store.recordDependencyLaunch(ticketId, { version: 2, parentTicketId: launch.parentTicketId, baseBranch, branch: launch.branch, project: launch.project, forkSha: nextForkSha });
+          this.store.recordDependencyStatus(ticketId, { stale: true, reason: "Branche rebasée ; la cible de la PR doit encore être vérifiée.", newBaseBranch: baseBranch, manualCommand: null });
+        });
+      });
+      const current = this.store.getTicket(ticketId);
+      if (!matchesTicketDelivery(current, ticket)) return { ok: false, reason: "Le ticket a changé après la mise à jour. Vérification manuelle requise." };
+      if (current.prUrl) {
+        const snapshot = await this.system.readPr(project.repoPath, current.prUrl, project.vcsProvider);
+        const latest = this.store.getTicket(ticketId);
+        if (!matchesTicketDelivery(latest, current)) return { ok: false, reason: "Le ticket a changé pendant la vérification finale de sa PR." };
+        if (snapshot.baseBranch !== baseBranch) {
+          const failure = this.dependencyPrBaseFailure(latest, baseBranch, snapshot.baseBranch);
+          const status = this.store.getDependencyStatus(ticketId);
+          return { ok: false, reason: failure.reason, ...(status?.manualCommand ? { manualCommand: status.manualCommand } : {}), ticket: this.store.getTicket(ticketId) ?? latest };
+        }
+      }
+      const finalTicket = this.store.getTicket(ticketId);
+      if (!finalTicket || !isProjectKey(finalTicket.project) || requireForkBaseBranch(finalTicket, getProject(finalTicket.project), this.store) !== baseBranch) throw new Error("La base a changé pendant la vérification finale. Relance « Mettre à jour la base ».");
+      this.store.recordDependencyStatus(ticketId, { stale: false, reason: null, newBaseBranch: baseBranch, manualCommand: null });
+      const updated = this.store.getTicket(ticketId) ?? current;
+      this.touch(updated);
+      return { ok: true, reason: "Base mise à jour. La PR reste ouverte et peut être fusionnée séparément.", ticket: updated };
+    } catch (error) {
+      const reason = getErrorMessage(error);
+      const current = this.store.getTicket(ticketId);
+      const status = this.store.getDependencyStatus(ticketId);
+      if (current && status?.stale) {
+        this.store.recordDependencyStatus(ticketId, { ...status, reason });
+        this.touch(this.store.getTicket(ticketId) ?? current);
+      }
+      return { ok: false, reason };
+    } finally {
+      this.updatingDependencyBases.delete(ticketId);
     }
   }
 
@@ -1429,6 +1576,7 @@ export class SlotManager {
   }
 
   private async prepareAutonomousPrReserved(ticketId: string, slotId: number, input: { title: string; body: string }): Promise<{ ok: boolean; url: string; reason: string }> {
+    await this.reconcileDependencies(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket?.autonomous || !ticket.branch || !ticket.autonomousState || ticket.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId || !isProjectKey(ticket.project)) return { ok: false, url: "", reason: "Autonomous delivery does not own this worktree." };
     const path = slotPath(slotId);
@@ -1573,9 +1721,11 @@ export class SlotManager {
       if (currentTicket.autonomousDelivery === "merge" && !isCloudHost()) {
         if (!isProjectKey(currentTicket.project) || !currentTicket.autonomousState?.revision) return { ok: false, reason: "Autonomous merge revision is unavailable.", slotReleased: false };
         const project = getProject(currentTicket.project);
-        const merged = await this.system.checkPrMerged(path, prUrl, project.vcsProvider);
-        let merge: DoneGateResult = { ok: merged.merged, reason: "" };
-        if (!merged.merged) {
+        const merged = await this.system.readPr(path, prUrl, project.vcsProvider);
+        let merge: DoneGateResult = { ok: merged.state === "merged", reason: "" };
+        if (merged.state !== "merged") {
+          const finalGate = await this.verifyDependencyDelivery(currentTicket, path, prUrl);
+          if (!finalGate.ok) return { ok: false, reason: finalGate.reason, slotReleased: false };
           const operationId = crypto.randomUUID();
           merge = await this.system.mergePr(path, ticket.branch, prUrl, project.vcsProvider, { commitSha: currentTicket.autonomousState.revision, baseBranch: resolvePrTargetBaseBranch(currentTicket, project, this.store), deadlineAt: currentTicket.autonomousState.execution?.deadlineAt ?? currentTicket.autonomousState.deadlineAt, assertCurrent: () => this.assertAutonomousMutation(currentTicket, slotId, currentTicket.autonomousState?.revision ?? "", "merge", operationId) });
         }
@@ -1587,8 +1737,8 @@ export class SlotManager {
           return { ok: false, reason: merge.reason, slotReleased: false, pending: merge.pending };
         }
         const confirmed = await this.verifyAutonomousPr(currentTicket, path, prUrl);
-        const state = await this.system.checkPrMerged(path, prUrl, project.vcsProvider);
-        if (!confirmed.ok || !state.merged) return { ok: false, reason: confirmed.reason || "Autonomous merge could not be confirmed.", slotReleased: false };
+        const state = await this.system.readPr(path, prUrl, project.vcsProvider);
+        if (!confirmed.ok || state.state !== "merged") return { ok: false, reason: confirmed.reason || "Autonomous merge could not be confirmed.", slotReleased: false };
         const reconciled = this.store.getTicket(ticketId)?.autonomousState;
         if (!reconciled) return { ok: false, reason: "Autonomous merge state disappeared during reconciliation.", slotReleased: false };
         this.touch(this.store.updateTicket(ticketId, { autonomousState: { ...reconciled, hostMutation: null, deliveryConfirmation: { prUrl, revision: currentTicket.autonomousState.revision, outcome: "merge", confirmedAt: reconciled.deliveryConfirmation?.confirmedAt ?? Date.now() } } }));
@@ -1598,6 +1748,8 @@ export class SlotManager {
     } else if (options.skipMerge && currentTicket.resolvingConflicts) {
       this.store.logEvent(ticketId, "merge_skipped_after_review_limit", { prUrl });
     } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
+      const finalGate = await this.verifyDependencyDelivery(currentTicket, path, prUrl);
+      if (!finalGate.ok) return { ok: false, reason: finalGate.reason, slotReleased: false };
       log.info("auto-merge de la PR", { ticketId, prUrl });
       const merge = await this.system.mergePr(path, ticket.branch, prUrl, projectVcsProvider(ticket.project));
       if (merge.ok) {
@@ -1642,6 +1794,7 @@ export class SlotManager {
       }
     }
 
+    if (column === "merged") await this.recordMergedDelivery(ticketId, path, prUrl);
     const deliveryAfterCleanup = this.store.getTicket(ticketId);
     if (currentTicket.autonomous && (deliveryAfterCleanup?.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId || deliveryAfterCleanup.column === "abandoned" || deliveryAfterCleanup.autonomousState?.phase !== "delivering")) return { ok: false, reason: "Autonomous delivery was stopped or its worktree ownership changed during cleanup.", slotReleased: false };
     const completedAutonomousState = this.store.getTicket(ticketId)?.autonomousState;
@@ -1659,6 +1812,7 @@ export class SlotManager {
         ...(currentTicket.autonomous && completedAutonomousState ? { autonomousState: { ...completedAutonomousState, phase: "completed", error: null } } : {}),
       }),
     );
+    if (column === "merged") this.dependencyReconciliation.refreshDependents(ticketId);
     if (!mergeError) this.store.logEvent(ticketId, "done", { prUrl });
     const cleanupError = await this.cleanupTerminalSlot(
       slotId,
@@ -2056,14 +2210,23 @@ export class SlotManager {
     this.pumpQueue();
   }
 
-  async markMerged(ticketId: string): Promise<Ticket> {
+  async markMerged(ticketId: string, expected?: Ticket): Promise<Ticket> {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) throw new Error(`markMerged: ticket ${ticketId} introuvable`);
-    if (ticket.slotId === null) return this.lifecycle.markMerged(ticketId);
-    await this.releaseSlotIfOwned(ticket, ticket.slotId);
+    const identity = expected ?? ticket;
+    if (!matchesTicketDelivery(ticket, identity)) throw new Error("Le parent a changé pendant la vérification de sa PR.");
+    if (ticket.column === "merged") return ticket;
+    if (expected && ticket.column !== "done") throw new Error("Le parent a changé pendant la vérification de sa PR.");
+    if (!expected && ticket.prUrl && isProjectKey(ticket.project)) await this.recordMergedDelivery(ticketId, getProject(ticket.project).repoPath, ticket.prUrl);
+    if (ticket.slotId !== null) await this.releaseSlotIfOwned(ticket, ticket.slotId);
+    const current = this.store.getTicket(ticketId);
+    if (!matchesTicketDelivery(current, identity)) throw new Error("Le parent a changé pendant la vérification de sa PR.");
+    if (current.column === "merged") return current;
+    if (current.column !== ticket.column) throw new Error("Le parent a changé pendant la vérification de sa PR.");
     const merged = this.lifecycle.markMerged(ticketId);
+    this.dependencyReconciliation.refreshDependents(ticketId);
     this.pumpQueue();
-    return merged;
+    return this.store.getTicket(ticketId) ?? merged;
   }
 
   private markFailed(ticketId: string, slotId: number, reason: string, error: unknown = reason, source: ErrorDetailsSource = "launch"): void {
@@ -2212,6 +2375,7 @@ export class SlotManager {
 
   /** Re-spawn an interrupted ticket in its slot (retry endpoint). */
   async retry(ticketId: string): Promise<void> {
+    await this.reconcileDependencies(ticketId);
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || ticket.column === "abandoned" || ticket.column === "merged") return;
     this.assertStartReady(ticket);
@@ -2374,6 +2538,7 @@ export class SlotManager {
   }
 
   private async relaunchInPlace(slotId: number, ticketId: string): Promise<void> {
+    await this.reconcileDependencies(ticketId);
     const storedTicket = this.store.getTicket(ticketId);
     if (!storedTicket || !isProjectKey(storedTicket.project) || storedTicket.column === "abandoned" || storedTicket.column === "merged") return;
     this.assertStartReady(storedTicket);

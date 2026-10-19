@@ -8,7 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
-import type { PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
+import type { PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
@@ -83,6 +83,8 @@ import type {
   RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
+  UpdateDependencyBaseOptions,
+  UpdateDependencyBaseResult,
   WorktreeSetupOptions,
   OperationDeadlineOptions,
   ValidationCommandOptions,
@@ -96,7 +98,7 @@ import type {
 import { AzureDevopsVcsClient } from "./vcs/azureDevops.ts";
 import { GithubVcsClient } from "./vcs/github.ts";
 import { PR_BODY_FILE } from "./vcs/types.ts";
-import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
+import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const log = createLogger("system");
 
@@ -405,6 +407,57 @@ export class RealSystemAdapter implements SystemAdapter {
     const res = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath, options);
     if (res.exitCode !== 0 || res.timedOut) {
       throw new Error(`git fetch origin ${baseBranch} a échoué (code ${res.exitCode}) : ${boundedCommandDetail(res)}`);
+    }
+  }
+
+  async readGitRef(repoPath: string, ref: string, options: OperationDeadlineOptions = {}): Promise<string> {
+    const result = await runBoundedCommand(["git", "-C", repoPath, "rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], repoPath, options);
+    if (result.exitCode !== 0 || result.timedOut) {
+      throw new Error(`Lecture de la référence Git ${ref} impossible : ${boundedCommandDetail(result)}`);
+    }
+    return result.stdout.trim();
+  }
+
+  async updateDependencyBase(options: UpdateDependencyBaseOptions): Promise<UpdateDependencyBaseResult> {
+    const { repoPath, branch, baseBranch, forkSha, assertCurrent } = options;
+    const childRef = `refs/remotes/origin/${branch}`;
+    const baseRef = `refs/remotes/origin/${baseBranch}`;
+    const fetchRefspecs = [...new Set([
+      `+refs/heads/${branch}:${childRef}`,
+      `+refs/heads/${baseBranch}:${baseRef}`,
+    ])];
+    const path = join(tmpdir(), `kanban-dependency-base-${randomUUID()}`);
+    const fetched = await networkGit(["-C", repoPath, "fetch", "origin", ...fetchRefspecs], repoPath, options);
+    if (fetched.exitCode !== 0 || fetched.timedOut) {
+      return { ok: false, reason: `Récupération des branches impossible : ${boundedCommandDetail(fetched)}` };
+    }
+    assertCurrent();
+    const currentChildSha = await this.readGitRef(repoPath, childRef, options);
+    const nextForkSha = await this.readGitRef(repoPath, baseRef, options);
+    const recordedForkSha = await this.readGitRef(repoPath, forkSha, options);
+    const ancestor = await runBoundedCommand(["git", "-C", repoPath, "merge-base", "--is-ancestor", recordedForkSha, currentChildSha], repoPath, options);
+    if (ancestor.exitCode !== 0 || ancestor.timedOut) {
+      return { ok: false, reason: "Le commit de départ enregistré n'est plus un ancêtre de la branche distante. Un rebase manuel est requis avant toute réécriture." };
+    }
+    try {
+      await addDetachedWorktree(repoPath, path, currentChildSha, options);
+      assertCurrent();
+      const rebased = await runBoundedCommand(["git", "-C", path, "rebase", "--no-update-refs", "--onto", nextForkSha, recordedForkSha], path, options);
+      if (rebased.exitCode !== 0 || rebased.timedOut) {
+        const aborted = await runBoundedCommand(["git", "-C", path, "rebase", "--abort"], path);
+        const abortDetail = aborted.exitCode !== 0 || aborted.timedOut ? ` Annulation impossible : ${boundedCommandDetail(aborted)}.` : "";
+        return { ok: false, reason: `La mise à jour de la base nécessite un rebase manuel : ${boundedCommandDetail(rebased)}.${abortDetail}` };
+      }
+      assertCurrent();
+      const pushed = await networkGit([
+        "-C", path, "push", `--force-with-lease=refs/heads/${branch}:${currentChildSha}`, "origin", `HEAD:refs/heads/${branch}`,
+      ], path, { ...options, verifyIdentity: true, beforeRun: assertCurrent });
+      if (pushed.exitCode !== 0 || pushed.timedOut) {
+        return { ok: false, reason: `Publication de la branche mise à jour impossible : ${boundedCommandDetail(pushed)}` };
+      }
+      return { ok: true, reason: "Base mise à jour. La PR reste ouverte.", forkSha: nextForkSha };
+    } finally {
+      await removeDetachedWorktree(repoPath, path);
     }
   }
 
@@ -1333,15 +1386,8 @@ export class RealSystemAdapter implements SystemAdapter {
     return { ok: true, reason: "" };
   }
 
-  async checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }> {
-    // Single read (no polling): a manual user-triggered check has no synchronous-merge
-    // read lag to absorb as in the auto-merge path.
-    const state = await this.vcs(provider).readPrState(repoPath, prUrl);
-    return { merged: state === "merged", state };
-  }
-
-  async readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
-    return this.vcs(provider).readPrBase(repoPath, prUrl);
+  async readPr(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrSnapshot> {
+    return this.vcs(provider).readPr(repoPath, prUrl);
   }
 
   async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {

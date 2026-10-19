@@ -55,7 +55,7 @@ import type { recoverImplementationPlanArgsSchema } from "@shared/protocol";
 import type { Column, Orchestrator, PrState } from "@shared/constants";
 import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestPageSchema } from "@shared/quality";
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
-import type { MergePrResult } from "@shared/ticketMerge";
+import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
 
@@ -295,6 +295,8 @@ export const api = {
   mergePr: (id: string): Promise<MergePrResult> =>
     request(`/api/tickets/${id}/merge`, { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),
+  updateDependencyBase: (id: string): Promise<UpdateDependencyBaseResult> =>
+    request(`/api/tickets/${id}/update-base`, { method: "POST" }),
   resolveConflicts: (id: string): Promise<Ticket> =>
     request(`/api/tickets/${id}/resolve-conflicts`, { method: "POST" }),
   relaunch: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/relaunch`, { method: "POST" }),

@@ -38,7 +38,8 @@ import type {
 } from "../types.ts";
 import { CONNECTION_TEST_PR_LIMIT, connectionFailure, connectionResult } from "./connection.ts";
 import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
-import type { CreatePrResult, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
+import { UNKNOWN_PR_SNAPSHOT } from "./types.ts";
+import type { CreatePrResult, PrSnapshot, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 const GH_BINARY = "gh";
 const OPEN_PR_FIELDS = `
@@ -177,9 +178,14 @@ function githubRepoKey(ref: GithubRepoRef): string {
   return `${ref.host}/${ref.owner}/${ref.repository}`;
 }
 
-const ghPrBaseSchema = z.object({ baseRefName: z.string().min(1) });
-/** `gh pr view --json state` shape, used to confirm an auto-merge actually landed. */
-const ghPrStateSchema = z.object({ state: z.string() });
+const GH_PR_SNAPSHOT_FIELDS = "state,baseRefName,mergedAt,mergeCommit,headRefOid";
+const ghPrSnapshotSchema = z.object({
+  state: z.string(),
+  baseRefName: z.string().min(1).nullable(),
+  mergedAt: z.string().nullable(),
+  mergeCommit: z.object({ oid: z.string().min(1) }).nullable(),
+  headRefOid: z.string().min(1).nullable(),
+});
 const ghPrMergeableSchema = z.object({ mergeable: z.string() });
 
 const PR_MERGEABILITY_BY_GITHUB_MERGEABLE: Record<string, PrMergeability> = {
@@ -677,7 +683,7 @@ export class GithubVcsClient implements VcsClient {
       });
       const response = ghSynchronousMergeSchema.safeParse(safeJsonParse(result.stdout));
       if (result.exitCode !== 0 || result.timedOut || !response.success || !response.data.merged || !response.data.sha) return { ok: false, reason: `Direct expected-head merge was not confirmed. Native policies requiring a merge queue are not supported by this pilot; no queue or auto-merge request is made. ${boundedCommandDetail(result) || "Keep the pull request and worktree for reconciliation."}` };
-      const state = await confirmPrMerged(() => this.readPrState(cwd, prUrl));
+      const state = await confirmPrMerged(async () => (await this.readPr(cwd, prUrl)).state);
       if (state !== "merged") return { ok: false, pending: state === "open", reason: unmergedReason(VCS_PROVIDER_LABELS.github, state, boundedCommandDetail(result)) };
       const head = await this.readPrHead(cwd, prUrl);
       if (!head.ok || head.commitSha !== expected.commitSha) return { ok: false, reason: "Merged pull request source does not match the preview-tested commit." };
@@ -693,7 +699,7 @@ export class GithubVcsClient implements VcsClient {
     // checks still pending it silently enables auto-merge instead, and GitHub may queue
     // or later reject the merge (e.g. a conflict). Trusting the exit code alone produced
     // false "PR mergée" badges, so confirm the real state before reporting success.
-    const state = await confirmPrMerged(() => this.readPrState(cwd, prUrl));
+    const state = await confirmPrMerged(async () => (await this.readPr(cwd, prUrl)).state);
     if (state !== "merged") {
       const hint = res.stdout.trim() || res.stderr.trim();
       return { ok: false, reason: unmergedReason(VCS_PROVIDER_LABELS.github, state, hint) };
@@ -742,23 +748,18 @@ export class GithubVcsClient implements VcsClient {
     }
   }
 
-  async readPrBase(cwd: string, prUrl: string): Promise<string | null> {
-    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "baseRefName"], cwd);
-    if (res.exitCode !== 0 || res.timedOut) return null;
-    const parsed = ghPrBaseSchema.safeParse(safeJsonParse(res.stdout));
-    return parsed.success ? parsed.data.baseRefName : null;
-  }
-
-  async readPrState(cwd: string, prUrl: string): Promise<PrState> {
-    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", "state"], cwd);
-    if (res.exitCode !== 0) return "unknown";
-    try {
-      const parsed = ghPrStateSchema.safeParse(JSON.parse(res.stdout));
-      if (!parsed.success) return "unknown";
-      return PR_STATE_BY_GITHUB_STATE[parsed.data.state] ?? "unknown";
-    } catch {
-      return "unknown";
-    }
+  async readPr(cwd: string, prUrl: string): Promise<PrSnapshot> {
+    const res = await runGh([GH_BINARY, "pr", "view", prUrl, "--json", GH_PR_SNAPSHOT_FIELDS], cwd);
+    if (res.exitCode !== 0 || res.timedOut) return UNKNOWN_PR_SNAPSHOT;
+    const parsed = ghPrSnapshotSchema.safeParse(safeJsonParse(res.stdout));
+    if (!parsed.success) return UNKNOWN_PR_SNAPSHOT;
+    return {
+      state: PR_STATE_BY_GITHUB_STATE[parsed.data.state] ?? "unknown",
+      baseBranch: parsed.data.baseRefName,
+      mergedAt: parsed.data.mergedAt,
+      mergeCommitSha: parsed.data.mergeCommit?.oid ?? null,
+      headSha: parsed.data.headRefOid,
+    };
   }
 
   async readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability> {

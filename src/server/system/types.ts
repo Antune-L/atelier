@@ -9,12 +9,12 @@
 
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { RepoInspectionContext } from "./repoInspection.ts";
-import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
+import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
-import type { ReviewRequestSnapshot } from "./vcs/types.ts";
+import type { PrSnapshot, ReviewRequestSnapshot } from "./vcs/types.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
@@ -102,6 +102,20 @@ export interface MergePrExpectation {
 export interface OperationDeadlineOptions {
   deadlineAt?: number;
   signal?: AbortSignal;
+}
+
+export interface UpdateDependencyBaseOptions extends OperationDeadlineOptions {
+  repoPath: string;
+  branch: string;
+  baseBranch: string;
+  forkSha: string;
+  assertCurrent: () => void;
+}
+
+export interface UpdateDependencyBaseResult {
+  ok: boolean;
+  reason: string;
+  forkSha?: string;
 }
 
 export interface ValidationRevisionOptions extends OperationDeadlineOptions {
@@ -306,6 +320,8 @@ export interface SystemAdapter {
   // ---- git worktree lifecycle ----
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string, options?: OperationDeadlineOptions): Promise<void>;
+  readGitRef(repoPath: string, ref: string, options?: OperationDeadlineOptions): Promise<string>;
+  updateDependencyBase(options: UpdateDependencyBaseOptions): Promise<UpdateDependencyBaseResult>;
   /** Fetch origin/<baseBranch> and check it out detached at `path`, so read-only analyses see the up-to-date base. */
   prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void>;
   removeAnalysisWorkspace(repoPath: string, path: string): Promise<void>;
@@ -471,9 +487,7 @@ export interface SystemAdapter {
    * path still allowed on a cloud host, so only the manual `POST /tickets/:id/merge` route may call it.
    */
   mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
-  /** Read the PR's merge state, neutralised by the provider's client. `merged` is true only for "merged". */
-  checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
-  readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
+  readPr(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrSnapshot>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
 
   // ---- project test commands ----

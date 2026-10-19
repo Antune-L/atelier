@@ -7,7 +7,7 @@ import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
-import type { Orchestrator, PrMergeability, PrState, VcsProvider } from "../../shared/constants.ts";
+import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -43,6 +43,8 @@ import type {
   RunAutomationOptions,
   SpawnShellOptions,
   SystemAdapter,
+  UpdateDependencyBaseOptions,
+  UpdateDependencyBaseResult,
   WorktreeSetupOptions,
   OperationDeadlineOptions,
   ValidationCommandOptions,
@@ -54,7 +56,7 @@ import type {
   ValidationWorkspaceOptions,
 } from "./types.ts";
 import { FakeVcsClient } from "./vcs/fake.ts";
-import type { ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
+import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
@@ -101,6 +103,8 @@ const SKILLS_DIR_NAME = "skills";
 function fakeMissingKey(name: string, provider: Orchestrator): string {
   return `${name}${FAKE_MISSING_PROVIDER_SEPARATOR}${provider}`;
 }
+
+const FAKE_GIT_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 export class FakeSystemAdapter implements SystemAdapter {
   readonly coolifyRequest = createFakeCoolifyTransport();
@@ -238,6 +242,23 @@ export class FakeSystemAdapter implements SystemAdapter {
     this.log("fetch", { repoPath, baseBranch });
     await delay(FAKE_SETTLE_MS);
     assertOperationActive(options);
+  }
+
+  async readGitRef(repoPath: string, ref: string, options: OperationDeadlineOptions = {}): Promise<string> {
+    assertOperationActive(options);
+    this.log("readGitRef", { repoPath, ref });
+    return FAKE_GIT_COMMIT_SHA;
+  }
+
+  async updateDependencyBase(options: UpdateDependencyBaseOptions): Promise<UpdateDependencyBaseResult> {
+    assertOperationActive(options);
+    options.assertCurrent();
+    const { repoPath, branch, baseBranch, forkSha } = options;
+    this.log("updateDependencyBase", { repoPath, branch, baseBranch, forkSha });
+    await delay(FAKE_SETTLE_MS);
+    assertOperationActive(options);
+    options.assertCurrent();
+    return { ok: true, reason: "Base mise à jour. La PR reste ouverte.", forkSha: await this.readGitRef(repoPath, `origin/${baseBranch}`, options) };
   }
 
   async prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void> {
@@ -639,14 +660,9 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).mergePr(slotPath, prUrl);
   }
 
-  async checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }> {
-    this.log("checkPrMerged", { repoPath, prUrl });
-    const state = await this.vcs(provider).readPrState(repoPath, prUrl);
-    return { merged: state === "merged", state };
-  }
-
-  async readPrBase(repoPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
-    return this.vcs(provider).readPrBase(repoPath, prUrl);
+  async readPr(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrSnapshot> {
+    this.log("readPr", { repoPath, prUrl });
+    return this.vcs(provider).readPr(repoPath, prUrl);
   }
 
   async readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability> {

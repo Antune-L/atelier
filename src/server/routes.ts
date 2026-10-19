@@ -112,7 +112,6 @@ interface PaneReader {
   listBranches(repoPath: string): Promise<string[]>;
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
   inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">>;
-  checkPrMerged(repoPath: string, prUrl: string, provider: VcsProvider): Promise<{ merged: boolean; state: PrState }>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
   mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   // Desktop self-update guards + build runner (dev desktop only).
@@ -1645,22 +1644,23 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (!ticket.prUrl) return jsonError(set, HTTP_CONFLICT, "aucune PR associée à cette carte");
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
-      const project = getProject(ticket.project);
-      let result: { merged: boolean; state: PrState };
       try {
-        result = await deps.system.checkPrMerged(project.repoPath, ticket.prUrl, project.vcsProvider);
+        return await slots.checkMergedPr(params.id);
       } catch (error) {
         return jsonError(set, HTTP_BAD_GATEWAY, getErrorMessage(error, "échec de la lecture de la PR"));
       }
-      if (!result.merged) return { merged: false, state: result.state };
-      // Mirror /merged: stamp finishedAt so the board orders newest-first.
-      const merged = await slots.markMerged(params.id);
-      return { merged: true, state: result.state, ticket: merged };
     })
     .post("/tickets/:id/merge", async ({ params, set }) => {
+      await slots.reconcileDependencies(params.id);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      if (!canMergePr(ticket) || ticket.prUrl === null || ticket.branch === null) {
+      if (ticket.dependencyStatus?.stale || ticket.dependencyStatus?.reason) {
+        if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
+        const gate = await slots.verifyDependencyDelivery(ticket, getProject(ticket.project).repoPath, ticket.prUrl ?? undefined);
+        if (!gate.ok) return jsonError(set, HTTP_CONFLICT, gate.reason);
+      }
+      const mergeTicket = store.getTicket(params.id) ?? ticket;
+      if (!canMergePr(mergeTicket) || ticket.prUrl === null || ticket.branch === null) {
         return jsonError(set, HTTP_CONFLICT, "merge réservé aux features terminées avec une PR ouverte");
       }
       if (!isProjectKey(ticket.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
@@ -1677,10 +1677,12 @@ export function createApiRoutes(deps: RouteDeps) {
         if (mergeability === "conflicting") {
           return { merged: false, conflicts: true, reason: conflictReason } satisfies MergePrResult;
         }
+        const refreshedGate = await slots.verifyDependencyDelivery(ticket, project.repoPath, prUrl);
+        if (!refreshedGate.ok) return jsonError(set, HTTP_CONFLICT, refreshedGate.reason);
         const merge = await deps.system.mergePrOnUserRequest(project.repoPath, branch, prUrl, project.vcsProvider);
         if (merge.ok) {
           store.logEvent(params.id, MANUAL_MERGED_EVENT, { prUrl });
-          const merged = lifecycle.markMerged(params.id);
+          const merged = await slots.markMerged(params.id);
           return { merged: true, conflicts: false, ticket: merged } satisfies MergePrResult;
         }
         const after = await deps.system.readPrMergeability(project.repoPath, prUrl, project.vcsProvider);
@@ -1690,6 +1692,10 @@ export function createApiRoutes(deps: RouteDeps) {
       } finally {
         mergesInFlight.delete(params.id);
       }
+    })
+    .post("/tickets/:id/update-base", async ({ params, set }) => {
+      if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      return slots.updateDependencyBase(params.id);
     })
     .post("/tickets/:id/retry", async ({ params, set }) => {
       const ticket = store.getTicket(params.id);

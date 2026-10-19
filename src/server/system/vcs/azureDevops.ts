@@ -54,7 +54,8 @@ import {
 } from "./azureRest.ts";
 import { CONNECTION_TEST_PR_LIMIT, connectionFailure, connectionResult } from "./connection.ts";
 import { confirmPrMerged, unmergedReason } from "./prMerge.ts";
-import type { CreatePrResult, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
+import { UNKNOWN_PR_SNAPSHOT } from "./types.ts";
+import type { CreatePrResult, PrSnapshot, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 const AZURE_PYTHON_LOCATION_RE = /^Python location '([^'\r\n]+)'$/m;
 const AZURE_PENDING_REVIEW_VOTE = 0;
@@ -711,23 +712,23 @@ export class AzureDevopsVcsClient implements VcsClient {
       return { ok: false, reason: `az repos pr update a échoué : ${boundedCommandDetail(res)}` };
     }
     // Completion is asynchronous when policies are still running: confirm the real state, as on GitHub.
-    const state = await confirmPrMerged(() => this.readPrState(cwd, prUrl));
+    const state = await confirmPrMerged(async () => (await this.readPr(cwd, prUrl)).state);
     if (state !== "merged") {
       return { ok: false, reason: unmergedReason(AZURE_LABEL, state, res.stdout.trim() || res.stderr.trim()) };
     }
     return { ok: true, reason: "" };
   }
 
-  async readPrBase(cwd: string, prUrl: string): Promise<string | null> {
+  async readPr(cwd: string, prUrl: string): Promise<PrSnapshot> {
     const pr = await this.showPr(cwd, prUrl);
-    if (!pr.ok || !pr.data.targetRefName) return null;
-    return stripHeadsPrefix(pr.data.targetRefName);
-  }
-
-  async readPrState(cwd: string, prUrl: string): Promise<PrState> {
-    const pr = await this.showPr(cwd, prUrl);
-    if (!pr.ok) return "unknown";
-    return PR_STATE_BY_AZURE_STATUS[pr.data.status] ?? "unknown";
+    if (!pr.ok) return UNKNOWN_PR_SNAPSHOT;
+    return {
+      state: PR_STATE_BY_AZURE_STATUS[pr.data.status] ?? "unknown",
+      baseBranch: pr.data.targetRefName ? stripHeadsPrefix(pr.data.targetRefName) : null,
+      mergedAt: null,
+      mergeCommitSha: null,
+      headSha: pr.data.lastMergeSourceCommit?.commitId ?? null,
+    };
   }
 
   async readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability> {

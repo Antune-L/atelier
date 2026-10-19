@@ -9,6 +9,7 @@ export function isSplitMother(ticket: Ticket): boolean {
 export function isDependencyReady(ticket: Ticket, parent: Ticket | null): boolean {
   if (ticket.dependsOn === null) return true;
   if (!parent || isAutonomousParentIncomplete(parent)) return false;
+  if (parent.dependencyPrObservation?.state === "closed") return false;
   if (isSplitMother(parent)) return true;
   if (parent.column === "merged") return true;
   if (parent.directPush && parent.column === "done") return true;

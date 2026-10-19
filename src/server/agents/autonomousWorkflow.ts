@@ -244,7 +244,7 @@ export class AutonomousWorkflow {
       const project = getProject(ticket.project);
       const head = await this.deps.system.readPullRequestHead(project.repoPath, confirmation.prUrl, project.vcsProvider);
       if (!head.ok || head.commitSha !== revision) throw new Error("The confirmed delivery source revision changed.");
-      if (confirmation.outcome === "merge" && !(await this.deps.system.checkPrMerged(project.repoPath, confirmation.prUrl, project.vcsProvider)).merged) throw new Error("The confirmed merge is no longer verified.");
+      if (confirmation.outcome === "merge" && (await this.deps.system.readPr(project.repoPath, confirmation.prUrl, project.vcsProvider)).state !== "merged") throw new Error("The confirmed merge is no longer verified.");
       const slot = ticket.slotId === null ? null : this.deps.store.getSlot(ticket.slotId);
       if (!slot || slot.ticketId !== ticket.id) throw new Error("The confirmed delivery no longer owns its retained implementation worktree.");
       const local = await this.deps.system.captureValidationRevision({ repoPath: project.repoPath, sourcePath: join(SLOTS_ROOT, `slot-${slot.id}`) });

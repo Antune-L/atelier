@@ -46,6 +46,22 @@ export interface ReviewRequestSnapshot {
   prs: ReviewRequestPr[];
 }
 
+export interface PrSnapshot {
+  state: PrState;
+  baseBranch: string | null;
+  mergedAt: string | null;
+  mergeCommitSha: string | null;
+  headSha: string | null;
+}
+
+export const UNKNOWN_PR_SNAPSHOT: PrSnapshot = {
+  state: "unknown",
+  baseBranch: null,
+  mergedAt: null,
+  mergeCommitSha: null,
+  headSha: null,
+};
+
 export interface VcsClient {
   listReviewRequests(repoPath: string): Promise<ReviewRequestSnapshot>;
   /** Cheap read-only reachability check (list one PR). Never throws. */
@@ -81,7 +97,6 @@ export interface VcsClient {
   verifyReviewPublication(cwd: string, prUrl: string, check: ReviewPublicationCheck): Promise<DoneGateResult>;
   /** Mark the PR ready (no-op if already) and merge it; the caller deletes the remote branch. */
   mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult>;
-  readPrBase(cwd: string, prUrl: string): Promise<string | null>;
-  readPrState(cwd: string, prUrl: string): Promise<PrState>;
+  readPr(cwd: string, prUrl: string): Promise<PrSnapshot>;
   readPrMergeability(cwd: string, prUrl: string): Promise<PrMergeability>;
 }

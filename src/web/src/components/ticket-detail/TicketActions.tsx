@@ -14,7 +14,7 @@ import { useState } from "react";
 
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
-import { canMergePr, canResolveConflicts } from "@shared/ticketMerge";
+import { canMergePr, canResolveConflicts, canUpdateDependencyBase } from "@shared/ticketMerge";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -80,7 +80,9 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
     hasConflicts,
     onConflicts: () => setConflictTicketId(ticket.id),
   });
-  if (actions.length === 0) return null;
+  const dependencyReason = ticket.dependencyStatus?.reason;
+  const dependencyManualCommand = ticket.dependencyStatus?.manualCommand;
+  if (actions.length === 0 && !dependencyReason && !dependencyManualCommand) return null;
 
   // A destructive action is never the primary button: it stays behind the menu.
   const primary = actions.find((action) => action.destructive !== true) ?? null;
@@ -133,6 +135,10 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
 
   return (
     <div className="space-y-2">
+      {dependencyReason && <p className="text-sm text-warning">{dependencyReason}</p>}
+      {dependencyManualCommand && (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs"><code>{dependencyManualCommand}</code></pre>
+      )}
       {hasConflicts && (
         <p className="text-sm text-warning">
           Conflits détectés avec la branche de base : la PR ne peut pas être mergée.
@@ -263,6 +269,29 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
           await api.moveTicket(ticket.id, "implementing");
         } catch (error) {
           ctx.onError(errorMessage(error, "Déplacement refusé"));
+        }
+      },
+    });
+  }
+
+  if (canUpdateDependencyBase(ticket)) {
+    actions.push({
+      id: "update-base",
+      label: "Mettre à jour la base",
+      Icon: RotateCw,
+      title: "Rebaser la branche sur la base actuelle sans merger la PR",
+      confirm: {
+        title: "Mettre à jour la base",
+        description: "La branche sera rebasée sur sa nouvelle base puis repoussée avec protection contre les modifications concurrentes. La PR restera ouverte.",
+        confirmLabel: "Mettre à jour",
+      },
+      run: async () => {
+        try {
+          const result = await api.updateDependencyBase(ticket.id);
+          if (!result.ok) ctx.onError(result.reason);
+          ctx.onRefresh();
+        } catch (error) {
+          ctx.onError(errorMessage(error, "Mise à jour de la base refusée"));
         }
       },
     });

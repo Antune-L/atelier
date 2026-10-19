@@ -1,4 +1,4 @@
-import { MessageSquarePlus, Trash2 } from "lucide-react";
+import { MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
@@ -31,6 +31,7 @@ import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const ALL_PROJECTS = "all";
+const LIST_COLLAPSED_KEY = "atelier:list-collapsed";
 
 interface AtelierViewProps {
   projects: ProjectInfo[];
@@ -65,6 +66,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const [prdChoice, setPrdChoice] = useState<string | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem(LIST_COLLAPSED_KEY) === "1");
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
   const composeSeq = useRef(0);
@@ -209,10 +211,43 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
 
   const showStepper = compose === null && conversation !== null && selectedId !== null;
 
+  const toggleListCollapsed = (): void => {
+    const next = !listCollapsed;
+    localStorage.setItem(LIST_COLLAPSED_KEY, next ? "1" : "0");
+    setListCollapsed(next);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 md:flex-row">
-      <aside className="flex w-full shrink-0 flex-col gap-3 overflow-hidden md:w-72">
-        <div className="flex items-center justify-between gap-2"><h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{visible.length}</span></h2><Button size="sm" variant="ghost" className="md:hidden" onClick={() => setListOpen(!listOpen)}>{listOpen ? "Masquer" : "Afficher"}</Button></div>
+      {listCollapsed && (
+        <button
+          type="button"
+          onClick={toggleListCollapsed}
+          className="hidden w-10 shrink-0 flex-col items-center gap-2 py-1 text-muted-foreground hover:text-foreground md:flex"
+          title="Déplier « Discussions »"
+          aria-label="Déplier « Discussions »"
+        >
+          <PanelLeftOpen className="h-3.5 w-3.5" />
+          <span className="font-mono text-2xs">{visible.length}</span>
+          <span className="text-2xs uppercase tracking-wider [writing-mode:vertical-rl]">Discussions</span>
+        </button>
+      )}
+      <aside className={cn("flex w-full shrink-0 flex-col gap-3 overflow-hidden md:w-72", listCollapsed && "md:hidden")}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={toggleListCollapsed}
+              className="hidden text-muted-foreground transition-colors hover:text-foreground md:block"
+              title="Replier « Discussions »"
+              aria-label="Replier « Discussions »"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+            <h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{visible.length}</span></h2>
+          </div>
+          <Button size="sm" variant="ghost" className="md:hidden" onClick={() => setListOpen(!listOpen)}>{listOpen ? "Masquer" : "Afficher"}</Button>
+        </div>
         <Button size="sm" onClick={() => openCompose(null)}>
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle discussion

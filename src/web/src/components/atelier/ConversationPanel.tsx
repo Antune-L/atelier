@@ -307,7 +307,7 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
 
 function ActivityBlock({ rows, live }: { rows: ConversationMessage[]; live: boolean }) {
   return (
-    <details open={live} className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+    <details className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground">
         {live && <LiveDot />}
         <span className={FIELD_LABEL_CLASSES}>Journal de session</span>

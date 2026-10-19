@@ -201,6 +201,73 @@ export function orderSelectedPrdTasks(doc: PrdDocument, selected: ReadonlySet<st
   return ordered;
 }
 
+interface PrdTaskParent {
+  parentTaskId: string | null;
+  dependsOnTaskId: string | null;
+}
+
+interface IndependentPrdPrerequisites {
+  taskId: string;
+  prerequisiteIds: string[];
+}
+
+type PrdTaskParentError =
+  | { kind: "unknown_task" | "duplicate_task" | "cycle"; taskIds: string[]; message: string }
+  | { kind: "independent_prerequisites"; tasks: IndependentPrdPrerequisites[]; message: string };
+
+type PrdTaskParentsResult =
+  | { ok: true; parents: ReadonlyMap<string, PrdTaskParent> }
+  | { ok: false; error: PrdTaskParentError };
+
+const MAX_PRD_PARENT_BRANCHES = 1;
+
+export function resolveSelectedPrdTaskParents(doc: PrdDocument, selected: ReadonlySet<string>): PrdTaskParentsResult {
+  const taskIds = new Set<string>();
+  for (const task of doc.tasks) {
+    if (taskIds.has(task.id)) return { ok: false, error: { kind: "duplicate_task", taskIds: [task.id], message: `Identifiant de tâche dupliqué : ${task.id}.` } };
+    taskIds.add(task.id);
+  }
+  const unknownIds = [...new Set([...selected, ...doc.tasks.flatMap((task) => task.dependsOn)])].filter((id) => !taskIds.has(id));
+  if (unknownIds.length > 0) return { ok: false, error: { kind: "unknown_task", taskIds: unknownIds, message: `Tâches inconnues dans les dépendances ou la sélection : ${unknownIds.join(LIST_SEPARATOR)}.` } };
+
+  const ancestors = new Map<string, Set<string>>();
+  const pending = [...doc.tasks];
+  while (pending.length > 0) {
+    const index = pending.findIndex((task) => task.dependsOn.every((dependency) => ancestors.has(dependency)));
+    if (index === -1) {
+      const cycleTaskIds = pending.map((task) => task.id);
+      return { ok: false, error: { kind: "cycle", taskIds: cycleTaskIds, message: `Cycle dans les dépendances du PRD : ${cycleTaskIds.join(LIST_SEPARATOR)}.` } };
+    }
+    const [task] = pending.splice(index, 1);
+    if (!task) break;
+    const inherited = new Set<string>();
+    for (const dependency of task.dependsOn) {
+      inherited.add(dependency);
+      for (const ancestor of ancestors.get(dependency) ?? []) inherited.add(ancestor);
+    }
+    ancestors.set(task.id, inherited);
+  }
+
+  const parents = new Map<string, PrdTaskParent>();
+  const independentTasks: IndependentPrdPrerequisites[] = [];
+  for (const task of doc.tasks) {
+    if (!selected.has(task.id)) continue;
+    const dependencies = [...new Set(task.dependsOn)];
+    const prerequisiteIds = dependencies.filter((dependency) => !dependencies.some((other) => ancestors.get(other)?.has(dependency)));
+    if (prerequisiteIds.length > MAX_PRD_PARENT_BRANCHES) {
+      independentTasks.push({ taskId: task.id, prerequisiteIds });
+      continue;
+    }
+    const parentTaskId = prerequisiteIds[0] ?? null;
+    parents.set(task.id, { parentTaskId, dependsOnTaskId: parentTaskId !== null && selected.has(parentTaskId) ? parentTaskId : null });
+  }
+  if (independentTasks.length > 0) {
+    const conflicts = independentTasks.map((task) => `${task.taskId} dépend de ${task.prerequisiteIds.join(" et ")}, qui sont indépendantes`).join(". ");
+    return { ok: false, error: { kind: "independent_prerequisites", tasks: independentTasks, message: `${conflicts} : une carte ne peut partir que d’une seule branche. Crée une carte unique pour tout le document.` } };
+  }
+  return { ok: true, parents };
+}
+
 export function renderPrdSingleBrief(doc: PrdDocument, milestoneId?: string): string {
   if (milestoneId !== undefined) {
     const blocks = renderMilestoneContext(doc, milestoneId, H2);

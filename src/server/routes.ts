@@ -51,7 +51,7 @@ import {
   validatePrdSchema,
 } from "../shared/schemas.ts";
 import type { Conversation, CreateReviewInput, CreateTicketsFromPrdInput, ManagedProject, OpenPr, PrdDocument, PrdDocumentRecord, RepoInspection, SkillStatus, SplitChildInput, Ticket, UpdateConversationInput, UpdateMode, VcsConnectionResult } from "../shared/schemas.ts";
-import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief } from "../shared/prdMarkdown.ts";
+import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief, resolveSelectedPrdTaskParents } from "../shared/prdMarkdown.ts";
 import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
@@ -705,14 +705,14 @@ function prdCardDrafts(doc: PrdDocument, input: CreateTicketsFromPrdInput): PrdC
       dependsOnTask: null,
     }));
   }
-  const unknown = input.selection.find((id) => !doc.tasks.some((task) => task.id === id));
-  if (unknown !== undefined) return `tâche inconnue : ${unknown}`;
+  const resolution = resolveSelectedPrdTaskParents(doc, selected);
+  if (!resolution.ok) return resolution.error.message;
   return orderSelectedPrdTasks(doc, selected).map((task) => ({
     candidateId: task.id,
     title: `${task.id} — ${task.title}`,
     description: renderPrdTaskBrief(doc, task.id) ?? task.expectedOutcome,
     sourcePrdTask: task.id,
-    dependsOnTask: task.dependsOn.find((dependency) => selected.has(dependency)) ?? null,
+    dependsOnTask: resolution.parents.get(task.id)?.dependsOnTaskId ?? null,
   }));
 }
 

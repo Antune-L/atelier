@@ -2,7 +2,7 @@ import { ArrowLeft, Check, ExternalLink, Plus } from "lucide-react";
 import { useId, useState } from "react";
 
 import { PRD_SINGLE_SELECTION, PRD_SPLIT_MODES, PRD_SPLIT_MODE_LABELS, type PrdSplitMode } from "@shared/constants";
-import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdSingleBrief, renderPrdTaskBrief } from "@shared/prdMarkdown";
+import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdSingleBrief, renderPrdTaskBrief, resolveSelectedPrdTaskParents } from "@shared/prdMarkdown";
 import type { Conversation, PrdDocument, PrdDocumentRecord, ProjectInfo, Ticket } from "@shared/schemas";
 
 import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
@@ -61,7 +61,7 @@ function candidatesFor(split: PrdSplitMode, doc: PrdDocument, milestoneId?: stri
     title: `${task.id} — ${task.title}`,
     detail: task.expectedOutcome,
     description: renderPrdTaskBrief(doc, task.id) ?? task.expectedOutcome,
-    chips: [task.axis, ...(task.milestoneId ? [task.milestoneId] : []), ...task.dependsOn.map((dependency) => `branche parente ${dependency}`)],
+    chips: [task.axis, ...(task.milestoneId ? [task.milestoneId] : [])],
   }));
 }
 
@@ -117,7 +117,14 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
   const candidates = split === "tasks"
     ? [...selection, ...editedCandidates.filter((candidate) => excluded.includes(candidate.id))]
     : editedCandidates;
-  const brokenDependencies = split === "tasks" && prdDocument.tasks.some((task) => selectedIds.has(task.id) && task.dependsOn.some((dependency) => !selectedIds.has(dependency)));
+  const resolution = split === "tasks" ? resolveSelectedPrdTaskParents(prdDocument, selectedIds) : null;
+  const dependencyError = resolution && !resolution.ok ? resolution.error : null;
+  const resolvedParents = resolution?.ok ? resolution.parents : null;
+  const missingParents = [...resolvedParents ?? []].filter(([, parent]) => parent.parentTaskId !== null && parent.dependsOnTaskId === null);
+  const hasChainedCards = [...resolvedParents?.values() ?? []].some((parent) => parent.dependsOnTaskId !== null);
+  const startDescription = hasChainedCards
+    ? "Les premières cartes sont démarrées manuellement. Une carte dépendante démarre automatiquement quand sa carte parente ouvre sa PR."
+    : "Les cartes ne démarrent pas automatiquement.";
   const invalidEdits = selection.some((candidate) => !candidate.title.trim() || !candidate.description.trim());
   const existingTodo = tickets.filter((ticket) => ticket.project === conversation.project && ticket.column === "todo");
   const pendingCards = created.length === 0 ? selection : [];
@@ -127,7 +134,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
   };
 
   const create = async (): Promise<void> => {
-    if (selection.length === 0 || invalidEdits || busy || created.length > 0) return;
+    if (selection.length === 0 || dependencyError || invalidEdits || busy || created.length > 0) return;
     await run(async () => {
       const result = await api.atelierCreateTickets(prd.id, {
         split,
@@ -166,6 +173,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
               {candidates.map((candidate) => {
                 const selected = selectedIds.has(candidate.id);
                 const editKey = `${editScope}:${candidate.id}`;
+                const parent = resolvedParents?.get(candidate.id);
                 return (
                   <li key={candidate.id} className={cn("space-y-3 rounded-lg border p-3", selected ? "border-border" : "border-dashed border-border opacity-60")}>
                     <div className="flex items-start gap-3">
@@ -176,7 +184,11 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
                         <Label htmlFor={`${id}-${split}-${candidate.id}-title`} className="text-xs text-muted-foreground">Titre de la carte {candidate.id !== PRD_SINGLE_SELECTION && <span className="font-mono">· {candidate.id}</span>}</Label>
                         <Input id={`${id}-${split}-${candidate.id}-title`} value={candidate.title} disabled={busy || created.length > 0} onChange={(event) => setEdits((current) => ({ ...current, [editKey]: { title: event.target.value, description: candidate.description } }))} />
                         {candidate.detail && <p className="text-xs text-muted-foreground">{candidate.detail}</p>}
-                        <div className="flex flex-wrap gap-1.5">{candidate.chips.map((chip) => <span key={chip} className="rounded-full border border-border px-1.5 font-mono text-2xs text-muted-foreground">{chip}</span>)}</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {candidate.chips.map((chip) => <span key={chip} className="rounded-full border border-border px-1.5 font-mono text-2xs text-muted-foreground">{chip}</span>)}
+                          {parent?.parentTaskId && <Badge variant="outline">branche parente {parent.parentTaskId}</Badge>}
+                          {parent?.parentTaskId && parent.dependsOnTaskId === null && <Badge variant="warning">prérequis exclu · sans chaînage</Badge>}
+                        </div>
                       </div>
                     </div>
                     <details className="rounded-md border border-border/60 px-3 py-2">
@@ -191,7 +203,13 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
               })}
             </ul>
             {candidates.length === 0 && <p className="text-sm text-muted-foreground">Aucune tâche détaillée pour ce jalon. Précisez ses tâches dans la conversation avant de créer des cartes.</p>}
-            {brokenDependencies && <p className="text-xs text-warning">Une tâche sélectionnée dépend d’une tâche exclue : sa carte ne sera pas chaînée.</p>}
+            {missingParents.map(([taskId, parent]) => <p key={taskId} className="text-xs text-warning">{taskId} : le prérequis {parent.parentTaskId} est exclu. La carte partira de la branche de base du projet sans le code de {parent.parentTaskId}.</p>)}
+            {dependencyError && (
+              <div role="alert" className="space-y-2 rounded-md border border-danger/30 p-3">
+                <p className="text-xs text-danger">{dependencyError.message}</p>
+                <Button size="sm" variant="outline" disabled={busy || created.length > 0} onClick={() => { setSplit("single"); setMilestoneId(undefined); setExcluded([]); }}>Une carte pour tout le document</Button>
+              </div>
+            )}
             {invalidEdits && <p role="alert" className="text-xs text-danger">Chaque carte sélectionnée doit avoir un titre et un contenu.</p>}
           </section>
           {error && <p role="alert" className="text-sm text-danger">{error}</p>}
@@ -207,7 +225,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
           <div className="rounded-lg border border-border bg-muted/20 p-3">
             <h3 className="text-sm font-medium">Destination</h3>
             <p className="mt-1 text-sm">{project?.label ?? conversation.project} · TODO</p>
-            <p className="mt-2 text-xs text-muted-foreground">Les cartes ne démarrent pas automatiquement. Chaque carte conserve son PRD et sa conversation d’origine.</p>
+            <p className="mt-2 text-xs text-muted-foreground">{startDescription} Chaque carte conserve son PRD et sa conversation d’origine.</p>
           </div>
           {prdDocument.roadmap && (
             <section className="space-y-2 rounded-lg border border-border p-3">
@@ -239,8 +257,8 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
       </div>
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-3">
         <div><p className="text-sm font-medium">{pluralCards(selection.length)} dans TODO · {project?.label ?? conversation.project}</p><p className="text-xs text-muted-foreground">La confirmation crée les cartes sans lancer leur implémentation.</p></div>
-        <ConfirmPopover title={`Créer ${pluralCards(selection.length)} dans TODO ?`} description={`Destination : ${project?.label ?? conversation.project}. Les titres et contenus affichés seront utilisés. Les cartes ne démarrent pas automatiquement.`} confirmLabel={`Créer ${pluralCards(selection.length)}`} onConfirm={create}>
-          <Button size="sm" disabled={busy || selection.length === 0 || invalidEdits || created.length > 0}><Plus className="h-3.5 w-3.5" />Créer {pluralCards(selection.length)} dans TODO</Button>
+        <ConfirmPopover title={`Créer ${pluralCards(selection.length)} dans TODO ?`} description={`Destination : ${project?.label ?? conversation.project}. Les titres et contenus affichés seront utilisés. ${startDescription}`} confirmLabel={`Créer ${pluralCards(selection.length)}`} onConfirm={create}>
+          <Button size="sm" disabled={busy || selection.length === 0 || dependencyError !== null || invalidEdits || created.length > 0}><Plus className="h-3.5 w-3.5" />Créer {pluralCards(selection.length)} dans TODO</Button>
         </ConfirmPopover>
       </footer>
     </div>

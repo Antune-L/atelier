@@ -20,8 +20,9 @@ Decisions taken with the user (2026-09-25):
   row in the ticket detail linking back to the PRD/conversation.
 - "Solidité" gauge from the mockup is dropped for now: the "Consolider en PRD" button is available
   as soon as the agent has replied once; the agent may suggest consolidation in its text.
-- Cards default to one ticket per PRD task chained through `dependsOn`; alternatives: one single
-  ticket, one ticket per axis.
+- Cards default to one ticket per PRD task chained through a single retained prerequisite after
+  transitive reduction of the full PRD graph. Independent prerequisites block the whole task batch;
+  the UI offers one card for the whole document. Other split modes: one single ticket, one per axis.
 
 ## Architecture decisions
 
@@ -111,9 +112,12 @@ Three new tables in `SCHEMA_SQL` (+ indexes), rows zod-validated in `rows.ts`, a
   `vendor/prd/renderPrd.py` with `--previous` = previous revision when any; python3 required,
   502 with a French message otherwise).
 - `POST /prd/:id/tickets { split, selection, options, start }` → creates TODO tickets
-  (`prdEnabled: false`, `prdMarkdown` set, `sourcePrdId`/`sourcePrdTask`, `dependsOn` = ticket of
-  the first `dependsOn` task in `tasks` mode), pushes each ticket, sets conversation status
-  `cards_created`, returns `{ tickets }`.
+  (`prdEnabled: false`, `prdMarkdown` set, `sourcePrdId`/`sourcePrdTask`). In `tasks` mode, the shared
+  resolver reduces direct prerequisites using the full PRD graph and chains to the retained parent
+  only when selected. Independent prerequisites, unknown task IDs or cycles return HTTP 400 before
+  any ticket write. A retained but excluded parent leaves the card on the project base without
+  that parent's code; the UI names the missing prerequisite. The route pushes each ticket, sets
+  conversation status `cards_created`, and returns `{ tickets }`.
 
 ### Contract injection
 
@@ -320,7 +324,13 @@ REST contract implemented as specified. Deviations and precisions:
 
 - `POST /prd/:id/tickets` `tasks` mode creates the selected tasks dependencies-first (stable
   topological order, document order otherwise), so a task listed before its dependency still gets
-  its `dependsOn`. `tickets` in the response are in creation order.
+  its resolved `dependsOn`. Redundant direct prerequisites are removed transitively even through
+  excluded tasks; two or more independent prerequisites on any selected task reject the entire
+  batch before writes. The UI disables creation and offers a single card covering the whole
+  document, clearing the milestone filter. `tickets` in the response are in creation order.
+- The card preview sends `start: false`, so its creation starts no implementation. In task batches
+  with chaining, the first cards are started manually; dependent cards start automatically when
+  their parent opens its PR. Single and axis cards have no automatic dependency start.
 - `axes` mode titles cards `A2 — <axis title>` with `sourcePrdTask: null`; `single` mode ignores the
   `selection` content (send `["single"]`) and uses `summary` + a `## Objectifs` list as description.
 - `POST /conversations` with a `seed` returns the conversation re-read after the seed was posted
@@ -365,7 +375,8 @@ REST contract implemented as specified. Deviations and precisions:
 
 ## Open questions / hypotheses
 
-- Multi-parent task dependencies collapse to the first `dependsOn` (single `dependsOn` on tickets).
+- Tickets still have one `dependsOn`: independent PRD prerequisites require a single document card
+  or a revised PRD. They are never silently linearized or reduced to the first selected parent.
 - HTML export depends on `python3` (present on the dev machine at `/opt/homebrew/bin/python3`).
 
 ### Lot D simplifier pass (2026-09-25)

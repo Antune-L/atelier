@@ -17,6 +17,7 @@ import type { TicketOperations } from "../ticketOperations.ts";
 import { prepareAtelierAttachments } from "./atelierAttachments.ts";
 import type { PreparedAtelierAttachments } from "./atelierAttachments.ts";
 import { AtelierTicketTools } from "./atelierTicketTools.ts";
+import type { BoardRouteHandler } from "./atelierTicketTools.ts";
 import { buildAtelierConsolidateTurn, buildAtelierPrompt, buildAtelierRegenerationTurn } from "./atelier.ts";
 import { assertExecutionAvailable, resolveExecution } from "./executionConfig.ts";
 import type { ExecutionDefaults } from "./executionConfig.ts";
@@ -257,6 +258,10 @@ export class AtelierManager {
     this.patchConversation(conversationId, { status: "prd_draft" });
     log.info("PRD enregistré", { conversationId, revision: record.revision });
     return `PRD révision ${record.revision} enregistré. L'utilisateur va le relire et l'annoter dans l'Atelier ; résume-lui brièvement son contenu. Une éventuelle demande de régénération t'arrivera avec ses retours.`;
+  }
+
+  setBoardRoutes(routes: BoardRouteHandler): void {
+    this.ticketTools?.setRoutes(routes);
   }
 
   async handleBoardTool(conversationId: string, name: WorkerToolName, args: unknown, callId: string): Promise<{ ok: boolean; result: string }> {

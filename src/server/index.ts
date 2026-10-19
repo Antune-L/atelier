@@ -433,6 +433,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     pickFolder: opts.onPickFolder,
   });
 
+  atelierManager.setBoardRoutes((request) => api.handle(request));
+
   const app = new Elysia()
     .use(api)
     .get("/health", () => ({ ok: true, dryRun: system.dryRun }))

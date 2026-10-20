@@ -1122,6 +1122,15 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.vcs(provider).readPrBody(slotPath, prUrl);
   }
 
+  async readWorktreePrBody(slotPath: string): Promise<string | null> {
+    const file = Bun.file(join(slotPath, PR_BODY_FILE));
+    try {
+      return await file.exists() ? await file.text() : null;
+    } catch {
+      return null;
+    }
+  }
+
   async convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {
     return this.vcs(provider).convertPrToDraft(slotPath, prUrl, opts);
   }

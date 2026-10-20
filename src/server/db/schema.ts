@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS tickets (
   source_prd_id TEXT,
   source_prd_task TEXT,
   agent_summary TEXT,
+  review_level TEXT,
+  review_reason TEXT,
+  review_flags_json TEXT,
+  stealth_pr_title TEXT,
+  stealth_pr_body TEXT,
   column_name TEXT NOT NULL DEFAULT 'todo',
   stage TEXT,
   model TEXT,
@@ -534,6 +539,11 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "error_details", ddl: "ALTER TABLE tickets ADD COLUMN error_details TEXT" },
   { column: "source_prd_id", ddl: "ALTER TABLE tickets ADD COLUMN source_prd_id TEXT" },
   { column: "source_prd_task", ddl: "ALTER TABLE tickets ADD COLUMN source_prd_task TEXT" },
+  { column: "review_level", ddl: "ALTER TABLE tickets ADD COLUMN review_level TEXT" },
+  { column: "review_reason", ddl: "ALTER TABLE tickets ADD COLUMN review_reason TEXT" },
+  { column: "review_flags_json", ddl: "ALTER TABLE tickets ADD COLUMN review_flags_json TEXT" },
+  { column: "stealth_pr_title", ddl: "ALTER TABLE tickets ADD COLUMN stealth_pr_title TEXT" },
+  { column: "stealth_pr_body", ddl: "ALTER TABLE tickets ADD COLUMN stealth_pr_body TEXT" },
 ];
 
 /**

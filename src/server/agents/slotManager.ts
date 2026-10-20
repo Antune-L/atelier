@@ -38,11 +38,13 @@ import type { SystemAdapter } from "../system/index.ts";
 import type { AgentExecutionGuard } from "../system/agentSession.ts";
 import type { DoneGateResult, ReviewPublicationState } from "../system/types.ts";
 import { REVIEW_PUBLICATION_STATE_BY_EVENT } from "../system/types.ts";
+import { hasStructuredPrDescription } from "../system/vcs/prDescription.ts";
 
 import { requireForkBaseBranch, resolveExecutionBaseBranch, resolvePrTargetBaseBranch } from "./baseBranch.ts";
 import { DependencyReconciliation, matchesTicketDelivery } from "./dependencyReconciliation.ts";
 import { createAutonomousSessionGuard } from "./autonomousSessionGuard.ts";
 import { AutonomousPartialDelivery } from "./autonomousPartialDelivery.ts";
+import { isFirstFeatureDelivery } from "./prDescription.ts";
 import { buildRecoveryContext, recoveryStage } from "./recoveryContext.ts";
 import { reviewPublicationEvent } from "./reviewFindings.ts";
 import { publishedReviewFindings } from "./reviewPass.ts";
@@ -90,6 +92,9 @@ const UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON = "Unresolved implementation obl
 
 /** tmux session-name prefix for a standalone (ticket-less) runnable worktree session. */
 const WORKTREE_SESSION_PREFIX = "worktree";
+const PR_DESCRIPTION_APPLY_FAILED_EVENT = "pr_description_apply_failed";
+const MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT = "merge_skipped_after_review_limit";
+const MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT = "merge_skipped_review_level_high";
 
 /** Branch-name prefix of a standalone worktree session's fresh branch. */
 const WORKTREE_BRANCH_PREFIX = "worktree";
@@ -123,6 +128,7 @@ const SETUP_PHASES = {
 
 export interface FinishTicketOptions {
   skipMerge?: boolean;
+  skipPrDescription?: boolean;
 }
 
 export interface SlotManagerConfig {
@@ -1644,6 +1650,30 @@ export class SlotManager {
     }
   }
 
+  async isDeliveryDescriptionStructured(ticket: Ticket, slotId: number, prUrl: string): Promise<boolean | null> {
+    const path = slotPath(slotId);
+    const provider = projectVcsProvider(ticket.project);
+    if (provider === "azureDevops") {
+      const fileBody = await this.system.readWorktreePrBody(path);
+      return fileBody !== null && hasStructuredPrDescription(fileBody);
+    }
+    const body = await this.system.readPrBody(path, prUrl, provider);
+    return body === null ? null : hasStructuredPrDescription(body);
+  }
+
+  private async applyAzurePrDescription(ticket: Ticket, path: string, prUrl: string): Promise<void> {
+    const provider = projectVcsProvider(ticket.project);
+    if (provider !== "azureDevops" || !isFirstFeatureDelivery(ticket, this.store.getActiveQualityIteration(ticket.id) !== null)) return;
+    try {
+      const fileBody = (await this.system.readWorktreePrBody(path))?.trimEnd() ?? "";
+      if (fileBody.trim().length === 0) return;
+      const applied = await this.system.updatePrBody(path, prUrl, () => fileBody, provider);
+      if (!applied.ok) this.store.logEvent(ticket.id, PR_DESCRIPTION_APPLY_FAILED_EVENT, { prUrl, reason: applied.reason });
+    } catch (error) {
+      this.store.logEvent(ticket.id, PR_DESCRIPTION_APPLY_FAILED_EVENT, { prUrl, reason: getErrorMessage(error) });
+    }
+  }
+
   /** Verify and release a slot on done(pr_url). */
   async finishTicket(
     ticketId: string,
@@ -1738,6 +1768,7 @@ export class SlotManager {
       return { ok: false, reason: dependencyGate.reason, slotReleased: false };
     }
     log.info("gate done validée", { ticketId, slotId, prUrl });
+    if (!options.skipPrDescription) await this.applyAzurePrDescription(currentTicket, path, prUrl);
 
     // Opt-in auto-merge: merge before releasing the slot (worktree still present for gh cwd).
     // Review and clean tickets land in their own "PR reviewed" column instead of the generic "done".
@@ -1775,7 +1806,7 @@ export class SlotManager {
         this.store.logEvent(ticketId, "auto_merged", { prUrl, commitSha: currentTicket.autonomousState.revision });
       }
     } else if (options.skipMerge && currentTicket.resolvingConflicts) {
-      this.store.logEvent(ticketId, "merge_skipped_after_review_limit", { prUrl });
+      this.store.logEvent(ticketId, currentTicket.reviewLevel === "high" ? MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT : MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT, { prUrl });
     } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
       const finalGate = await this.verifyDependencyDelivery(currentTicket, path, prUrl);
       if (!finalGate.ok) return { ok: false, reason: finalGate.reason, slotReleased: false };
@@ -2072,7 +2103,8 @@ export class SlotManager {
     const provider = getProject(ticket.project).vcsProvider;
     const quality = await this.recordDeliveryQuality(ticketId);
     const draft = ticket.prDraft || Boolean(quality?.enabled && !quality.complete);
-    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft, headBranch: ticket.branch, requireExistingBase: ticket.dependsOn !== null }, provider);
+    const content = ticket.stealthPrTitle && ticket.stealthPrBody ? { title: ticket.stealthPrTitle, body: ticket.stealthPrBody } : {};
+    const result = await this.system.createPr(slotPath(ticket.slotId), baseBranch, { draft, headBranch: ticket.branch, requireExistingBase: ticket.dependsOn !== null, ...content }, provider);
     if (!result.ok) {
       this.store.logEvent(ticketId, DONE_GATE_FAILED_EVENT, { reason: result.reason });
       // Roll the stage back to the resting "done" so the card stays in "À review" and a retry is allowed.

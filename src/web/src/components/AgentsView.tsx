@@ -4,6 +4,7 @@ import { useState } from "react";
 import { TERMINAL_STAGES } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { TerminalView } from "@/components/TerminalView";
 import { TicketBadges } from "@/components/TicketBadges";
@@ -81,7 +82,10 @@ function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProp
     <article className="flex w-full min-w-0 flex-col rounded-lg border bg-card p-4 shadow-sm md:w-[calc(50%-0.5rem)] xl:w-[calc(33.333%-0.667rem)]">
       <div className="flex items-start justify-between gap-3">
         <button type="button" onClick={() => onOpen(ticket)} className="min-w-0 rounded-sm text-left text-sm font-medium leading-snug hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><span className="line-clamp-2">{ticket.title}</span></button>
-        {ticket.slotId !== null && <Badge variant="info" className="shrink-0 gap-1 text-2xs"><Cpu className="h-3 w-3" />slot {ticket.slotId}</Badge>}
+        <div className="flex shrink-0 items-center gap-2">
+          {ticket.reviewLevel && <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} />}
+          {ticket.slotId !== null && <Badge variant="info" className="gap-1 text-2xs"><Cpu className="h-3 w-3" />slot {ticket.slotId}</Badge>}
+        </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>

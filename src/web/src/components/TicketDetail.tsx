@@ -5,6 +5,7 @@ import { ACTIVE_STAGES, COLUMN_ORDER, type Column } from "@shared/constants";
 import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { ActivityTab } from "@/components/ticket-detail/ActivityTab";
 import { DescriptionTab } from "@/components/ticket-detail/DescriptionTab";
 import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
@@ -247,6 +248,15 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
       {current.slotId !== null && <span className="shrink-0">Emplacement {current.slotId}</span>}
       {kindToken !== undefined && <span className="shrink-0">{kindToken}</span>}
       {locked && <span className="shrink-0">Agent en cours</span>}
+      {current.reviewLevel && (
+        <ReviewLevelDot
+          level={current.reviewLevel}
+          reason={current.reviewReason}
+          flags={current.reviewFlags}
+          withLabel
+          className="shrink-0 text-foreground"
+        />
+      )}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         <button
           type="button"

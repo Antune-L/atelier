@@ -487,6 +487,17 @@ export const ACTIVE_STAGES: Stage[] = [
   "opening_pr",
 ];
 
+export const REVIEW_LEVELS = ["low", "medium", "high"] as const;
+export type ReviewLevel = (typeof REVIEW_LEVELS)[number];
+
+export const REVIEW_LEVEL_LABELS: Record<CommitLanguage, Record<ReviewLevel, string>> = {
+  fr: { low: "Pas de relecture nécessaire", medium: "À connaître", high: "Changement important" },
+  en: { low: "No review needed", medium: "Worth knowing", high: "Important change" },
+};
+
+export const REVIEW_FLAGS = ["description_unstructured"] as const;
+export type ReviewFlag = (typeof REVIEW_FLAGS)[number];
+
 /** Triage feasibility verdicts an agent can return. */
 export const TRIAGE_VERDICTS = [
   "implementable",

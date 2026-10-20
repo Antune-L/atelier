@@ -4,7 +4,8 @@ import { autonomousPlanInputSchema, autonomousResumeSchema } from "../../shared/
 import type { AutonomousPlanInput, AutonomousResumeInput } from "../../shared/autonomous.ts";
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
-import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema } from "../../shared/protocol.ts";
+import type { ReviewFlag, ReviewLevel } from "../../shared/constants.ts";
+import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
 import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
 import {
   askUserArgsSchema,
@@ -32,9 +33,11 @@ import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
 import type { Notifier } from "../notifier.ts";
 import type { AgentTurnUsage } from "../system/agentSession.ts";
+import { hasStructuredPrDescription, maxReviewLevel } from "../system/vcs/prDescription.ts";
 
 import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
+import { isFirstFeatureDelivery } from "./prDescription.ts";
 import { acceptsReviewLimit, unreviewedChangesReport } from "./reviewPass.ts";
 import type { UnreviewedChanges } from "./reviewPass.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
@@ -85,7 +88,48 @@ const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
 const AUTONOMOUS_RESUME_REQUESTED_EVENT = "autonomous_resume_requested";
 const AUTONOMOUS_RESUME_PROMPT = "Reprise demandée par l’utilisateur. Si le worktree est propre et poussé et que la dernière review indépendante couvre le code courant, appelle validate_autonomous puis termine ton tour. Sinon, termine d’abord la correction, la review, le commit et le push. N’ouvre ni ne fusionne de PR.";
+const PR_DESCRIPTION_REFUSED_EVENT = "pr_description_refused";
+const DELIVERY_DONE_EVENT = "done";
+const READY_FOR_REVIEW_EVENT = "ready_for_review";
+const SESSION_SPAWNED_EVENT = "session_spawned";
+const REFUSAL_ANCHOR_EVENTS = [PR_DESCRIPTION_REFUSED_EVENT, DELIVERY_DONE_EVENT, READY_FOR_REVIEW_EVENT, SESSION_SPAWNED_EVENT];
+const AUTO_MERGE_DISABLED_REVIEW_LEVEL_HIGH_EVENT = "auto_merge_disabled_review_level_high";
+const DESCRIPTION_UNSTRUCTURED_FLAG: ReviewFlag = "description_unstructured";
+const REVIEW_LIMIT_FLOOR_LEVEL: ReviewLevel = "medium";
+const REVIEW_LIMIT_FLOOR_REASON = "PR acceptée à la limite du budget de review.";
+const REVIEW_LEVEL_MISSING_MESSAGE = `le niveau de relecture humaine \`review_level\` (low, medium ou high) et sa raison \`review_reason\` (une phrase, ${REVIEW_REASON_MAX_LENGTH} caractères max) sont absents`;
+const UNSTRUCTURED_DESCRIPTION_MESSAGE = "la description de la PR ne contient pas les sections obligatoires du modèle (contexte et ce qui a été fait)";
+const STEALTH_PR_CONTENT_MISSING_MESSAGE = "le titre `title` et la description `body` de la future PR sont absents";
+const DONE_DESCRIPTION_REMEDIATION = "Corrige la description de la PR (réécris le fichier de description puis mets la PR à jour comme indiqué dans le contrat) et rappelle done(pr_url, review_level, review_reason).";
+const STEALTH_DESCRIPTION_REMEDIATION = "Rappelle ready_for_review avec title, body (description structurée selon le modèle du contrat), review_level et review_reason.";
+const AUTONOMOUS_UNSTRUCTURED_BODY_MESSAGE = "The pull request body must contain the context and what changed sections of the required template. Rewrite the body and call deliver_autonomous again.";
 const DIRECT_PUSH_AT_REVIEW_LIMIT_MESSAGE = "Gate échouée: le budget de passes de review est épuisé sans approbation du code courant ; le push direct sur la branche cible est refusé. Appelle fail(reason, findings) en conservant le travail pour une reprise manuelle.";
+
+interface ReviewAssessment {
+  level: ReviewLevel;
+  reason: string;
+}
+
+interface DeliveryReviewInput {
+  review_level?: ReviewLevel;
+  review_reason?: string;
+}
+
+function deliveryAssessment(input: DeliveryReviewInput): ReviewAssessment | null {
+  if (input.review_level === undefined || input.review_reason === undefined) return null;
+  return { level: input.review_level, reason: input.review_reason };
+}
+
+function deliveryProblems(assessment: ReviewAssessment | null, structured: boolean | null): string[] {
+  const problems: string[] = [];
+  if (assessment === null) problems.push(REVIEW_LEVEL_MISSING_MESSAGE);
+  if (structured === false) problems.push(UNSTRUCTURED_DESCRIPTION_MESSAGE);
+  return problems;
+}
+
+interface CompleteReviewedTicketOptions {
+  recovery?: boolean;
+}
 
 interface ReviewLimitAcceptance {
   passId: string;
@@ -449,7 +493,7 @@ export class AgentCoordinator {
   }
 
   private async handleValidateAutonomous(ctx: SessionToolCall): Promise<ToolResult> {
-    const parsed = readyForReviewArgsSchema.safeParse(ctx.args);
+    const parsed = validateAutonomousArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous validation is unavailable for this ticket." };
@@ -465,6 +509,7 @@ export class AgentCoordinator {
     if (!parsed.success) return { ok: false, result: parsed.error.message };
     const ticket = this.store.getTicket(ctx.ticketId);
     if (!ticket?.autonomous || !this.autonomousWorkflow) return { ok: false, result: "Autonomous delivery is unavailable for this ticket." };
+    if (!hasStructuredPrDescription(parsed.data.body)) return { ok: false, result: AUTONOMOUS_UNSTRUCTURED_BODY_MESSAGE };
     if (this.completingTickets.has(ctx.ticketId)) return { ok: false, result: "Ticket delivery is already in progress." };
     this.completingTickets.add(ctx.ticketId);
     let backgroundStarted = false;
@@ -474,6 +519,7 @@ export class AgentCoordinator {
       if (!review.ok) return { ok: false, result: review.reason };
       const prepared = await this.slots.prepareAutonomousPr(ctx.ticketId, ctx.slotId, parsed.data);
       if (!prepared.ok) return { ok: false, result: prepared.reason };
+      this.persistReviewAssessment(ctx.ticketId, { level: parsed.data.review_level, reason: parsed.data.review_reason }, { replace: true, flags: [] });
       const outcome = await this.completeReviewedTicketNow(ctx, prepared.url);
       if (!outcome.pending) return outcome;
       const delivery = this.continueAutonomousDelivery(ctx, prepared.url).catch((error: unknown) => {
@@ -663,23 +709,67 @@ export class AgentCoordinator {
   }
 
   private async handleDone(ctx: SessionToolCall): Promise<ToolResult> {
-    if (this.store.getTicket(ctx.ticketId)?.autonomous) return { ok: false, result: "Use deliver_autonomous: the backend owns autonomous pull request creation and delivery." };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.autonomous) return { ok: false, result: "Use deliver_autonomous: the backend owns autonomous pull request creation and delivery." };
     const parsed = doneArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
+    if (ticket?.kind === "feature") {
+      const assessment = deliveryAssessment(parsed.data);
+      if (isFirstFeatureDelivery(ticket, this.store.getActiveQualityIteration(ctx.ticketId) !== null)) {
+        const structured = await this.slots.isDeliveryDescriptionStructured(ticket, ctx.slotId, parsed.data.pr_url);
+        const refusal = this.refuseDeliveryOnce(ctx.ticketId, deliveryProblems(assessment, structured), DONE_DESCRIPTION_REMEDIATION);
+        if (refusal !== null) return refusal;
+        this.persistReviewAssessment(ctx.ticketId, assessment, { replace: true, flags: structured === false ? [DESCRIPTION_UNSTRUCTURED_FLAG] : [] });
+      } else if (assessment !== null) {
+        this.persistReviewAssessment(ctx.ticketId, assessment, { replace: false });
+      }
+    }
     return this.completeReviewedTicket(ctx, parsed.data.pr_url);
   }
 
-  private async completeReviewedTicket(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string): Promise<ToolResult> {
+  private refuseDeliveryOnce(ticketId: string, problems: string[], remediation: string): ToolResult | null {
+    if (problems.length === 0) return null;
+    if (this.store.lastEventType(ticketId, REFUSAL_ANCHOR_EVENTS) === PR_DESCRIPTION_REFUSED_EVENT) return null;
+    this.store.logEvent(ticketId, PR_DESCRIPTION_REFUSED_EVENT, { problems });
+    return { ok: false, result: `Livraison refusée une fois : ${problems.join(" ; ")}. ${remediation}` };
+  }
+
+  private persistReviewAssessment(ticketId: string, assessment: ReviewAssessment | null, opts: { replace: true; flags: ReviewFlag[] } | { replace: false }): void {
+    const ticket = this.store.getTicket(ticketId);
+    if (!ticket) return;
+    const patch: TicketPatch = {};
+    if (opts.replace) {
+      patch.reviewLevel = assessment?.level ?? null;
+      patch.reviewReason = assessment?.reason ?? null;
+      patch.reviewFlags = opts.flags;
+    } else if (assessment !== null) {
+      const level = maxReviewLevel(ticket.reviewLevel ?? null, assessment.level);
+      patch.reviewLevel = level;
+      patch.reviewReason = level === assessment.level ? assessment.reason : ticket.reviewReason ?? null;
+    }
+    this.hub.pushTicket(this.store.updateTicket(ticketId, patch));
+  }
+
+  private applyReviewLimitFloor(ticketId: string): void {
+    const ticket = this.store.getTicket(ticketId);
+    if (ticket?.kind !== "feature") return;
+    const previous = ticket.reviewLevel ?? null;
+    const level = maxReviewLevel(previous, REVIEW_LIMIT_FLOOR_LEVEL);
+    if (level === previous) return;
+    this.hub.pushTicket(this.store.updateTicket(ticketId, { reviewLevel: level, reviewReason: previous === null ? REVIEW_LIMIT_FLOOR_REASON : `${REVIEW_LIMIT_FLOOR_REASON} ${ticket.reviewReason ?? ""}`.trim() }));
+  }
+
+  private async completeReviewedTicket(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string, opts: CompleteReviewedTicketOptions = {}): Promise<ToolResult> {
     if (this.completingTickets.has(ctx.ticketId)) return { ok: false, result: "Ticket delivery is already in progress. Wait for its result before retrying." };
     this.completingTickets.add(ctx.ticketId);
     try {
-      return await this.completeReviewedTicketNow(ctx, prUrl);
+      return await this.completeReviewedTicketNow(ctx, prUrl, opts);
     } finally {
       this.completingTickets.delete(ctx.ticketId);
     }
   }
 
-  private async completeReviewedTicketNow(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string): Promise<ToolResult> {
+  private async completeReviewedTicketNow(ctx: Pick<SessionToolCall, "ticketId" | "slotId" | "callId" | "generationId">, prUrl: string, opts: CompleteReviewedTicketOptions = {}): Promise<ToolResult> {
     if (this.delegation.hasActiveImplementations(ctx.ticketId)) {
       return {
         ok: false,
@@ -704,9 +794,16 @@ export class AgentCoordinator {
     const reviewReport = readOnlyReview || reviewGate.acceptedWithFindings
       ? this.delegation.reviewBoardReport(ctx.ticketId)
       : null;
+    if (acceptedAtReviewLimit) this.applyReviewLimitFloor(ctx.ticketId);
     if (acceptedAtReviewLimit && ticket?.autoMerge === true) {
       this.store.updateTicket(ctx.ticketId, { autoMerge: false });
       this.store.logEvent(ctx.ticketId, "auto_merge_disabled_after_review_limit", { passId: reviewGate.passId });
+    }
+    const assessed = this.store.getTicket(ctx.ticketId);
+    const highReviewLevel = assessed?.reviewLevel === "high";
+    if (highReviewLevel && assessed.autoMerge) {
+      this.store.updateTicket(ctx.ticketId, { autoMerge: false });
+      this.store.logEvent(ctx.ticketId, AUTO_MERGE_DISABLED_REVIEW_LEVEL_HIGH_EVENT, { passId: reviewGate.passId });
     }
     log.info("finalisation done démarrée", {
       ticketId: ctx.ticketId,
@@ -716,7 +813,7 @@ export class AgentCoordinator {
       passId: reviewGate.passId,
     });
     this.lifecycle.beginOpeningPr(ctx.ticketId);
-    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, prUrl, { skipMerge: acceptedAtReviewLimit });
+    const outcome = await this.slots.finishTicket(ctx.ticketId, ctx.slotId, prUrl, { skipMerge: acceptedAtReviewLimit || highReviewLevel, skipPrDescription: opts.recovery === true });
     log.info("finalisation done terminée", {
       ticketId: ctx.ticketId,
       slotId: ctx.slotId,
@@ -775,6 +872,17 @@ export class AgentCoordinator {
     if (!ticket || ticket.kind !== "feature" || (!ticket.stealth && !ticket.directPush)) {
       return { ok: false, result: "ready_for_review réservé aux tickets stealth ou push direct." };
     }
+    const stealthDelivery = ticket.stealth && !ticket.directPush && !ticket.resolvingConflicts && this.store.getActiveQualityIteration(ctx.ticketId) === null;
+    const assessment = deliveryAssessment(parsed.data);
+    const stealthBodyStructured = parsed.data.body !== undefined && hasStructuredPrDescription(parsed.data.body);
+    if (stealthDelivery) {
+      const contentMissing = parsed.data.title === undefined || parsed.data.body === undefined;
+      const problems = contentMissing
+        ? [...deliveryProblems(assessment, null), STEALTH_PR_CONTENT_MISSING_MESSAGE]
+        : deliveryProblems(assessment, stealthBodyStructured);
+      const refusal = this.refuseDeliveryOnce(ctx.ticketId, problems, STEALTH_DESCRIPTION_REMEDIATION);
+      if (refusal !== null) return refusal;
+    }
     const review = await this.readyForReviewGate(ctx);
     if (!review.ok) return { ok: false, result: review.result };
     if (review.atLimit !== null && ticket.directPush) {
@@ -789,6 +897,13 @@ export class AgentCoordinator {
       return { ok: false, result: `Gate échouée: ${outcome.reason}: corrige et rappelle ready_for_review().` };
     }
     if (review.atLimit !== null) this.reportStealthReviewLimit(ctx.ticketId, review.atLimit);
+    if (stealthDelivery) {
+      this.persistReviewAssessment(ctx.ticketId, assessment, { replace: true, flags: stealthBodyStructured ? [] : [DESCRIPTION_UNSTRUCTURED_FLAG] });
+      this.hub.pushTicket(this.store.updateTicket(ctx.ticketId, { stealthPrTitle: parsed.data.title ?? null, stealthPrBody: parsed.data.body ?? null }));
+      if (review.atLimit !== null) this.applyReviewLimitFloor(ctx.ticketId);
+    } else if (assessment !== null) {
+      this.persistReviewAssessment(ctx.ticketId, assessment, { replace: false });
+    }
     return {
       ok: true,
       result: ticket.directPush
@@ -883,7 +998,7 @@ export class AgentCoordinator {
       if (!recovery) return { ok: false, result: "Recovery generation changed. Reload the ticket before finalizing." };
       const prUrl = parsed.data.prUrl ?? recovery.prUrl;
       if (!prUrl) return { ok: false, result: "Recovery finalization requires the candidate pull request URL." };
-      return this.completeReviewedTicket({ ticketId, slotId: ticket.slotId, callId: nanoid(), generationId: recovery.generation }, prUrl);
+      return this.completeReviewedTicket({ ticketId, slotId: ticket.slotId, callId: nanoid(), generationId: recovery.generation }, prUrl, { recovery: true });
     }
     const outcome = await this.delegation.recoverImplementationPlan(ticketId, ticket.slotId, parsed.data, "user");
     if (!outcome.ok || (parsed.data.action !== "takeover" && parsed.data.action !== "assess")) return outcome;
@@ -913,7 +1028,7 @@ export class AgentCoordinator {
       if (this.store.getTicket(ctx.ticketId)?.testing || recovery.slotId !== ctx.slotId) return { ok: false, result: "Recovery finalization cannot use a user test session or a different slot." };
       const prUrl = parsed.data.prUrl ?? recovery.prUrl;
       if (!prUrl) return { ok: false, result: "Recovery finalization requires the candidate pull request URL." };
-      return this.completeReviewedTicket(ctx, prUrl);
+      return this.completeReviewedTicket(ctx, prUrl, { recovery: true });
     }
     return this.delegation.recoverImplementationPlan(ctx.ticketId, ctx.slotId, parsed.data, "agent");
   }

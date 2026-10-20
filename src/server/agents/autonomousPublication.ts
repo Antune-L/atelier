@@ -1,11 +1,24 @@
 import type { AutonomousState } from "../../shared/autonomous.ts";
+import type { CommitLanguage } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import type { Store } from "../db/store.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
+import { PR_DESCRIPTION_TEMPLATES, renderReviewLevelLine } from "../system/vcs/prDescription.ts";
 
 import { requiredReviewKinds } from "./reviewPass.ts";
 
 const SECTION_TITLE = "## Autonomous partial delivery";
+const PARTIAL_INTRO = "This draft preserves partial work. Acceptance is incomplete; merging is not authorized.";
+export const PARTIAL_REVIEW_LEVEL = "high";
+export const PARTIAL_REVIEW_REASONS: Record<CommitLanguage, string> = {
+  fr: "Livraison partielle : l'acceptation est incomplète et la fusion n'est pas autorisée.",
+  en: "Partial delivery: acceptance is incomplete and merging is not authorized.",
+};
+
+export interface PartialPublicationLayout {
+  language: CommitLanguage;
+  includeSummary: boolean;
+}
 const OUTPUT_EXCERPT_LIMIT = 4000;
 const TECHNICAL_CHECKS = ["typecheck", "lint", "test"] satisfies Array<"typecheck" | "lint" | "test">;
 
@@ -21,16 +34,26 @@ export function partialPublicationMarkers(ticketId: string) {
   return { start: `<!-- kanban-partial:${ticketId}:start -->`, end: `<!-- kanban-partial:${ticketId}:end -->` };
 }
 
-export function partialPublicationSection(store: Store, ticket: Ticket, state: AutonomousState, revision: string, reason: string): string {
+export function partialPublicationSection(store: Store, ticket: Ticket, state: AutonomousState, revision: string, reason: string, layout: PartialPublicationLayout): string {
   const execution = state.execution;
   if (!execution) throw new Error("Bounded autonomous execution is required for partial publication.");
   const quality = store.getTicketQuality(ticket.id);
-  const lines = [SECTION_TITLE, "", "This draft preserves partial work. Acceptance is incomplete; merging is not authorized.", "",
+  const template = PR_DESCRIPTION_TEMPLATES[layout.language];
+  const contextLines = [PARTIAL_INTRO, "",
     `Candidate commit: ${revision}`, `Reason: ${reason}`, "",
     `Starts: ${execution.starts.length}/${execution.maxStarts}. Corrections: ${state.corrections}/${execution.maxCorrections}. Environment retries: ${state.environmentRetries}/${execution.maxEnvironmentRetries}.`,
     `Work deadline: ${new Date(execution.deadlineAt).toISOString()}. Publication attempts: ${execution.publicationAttempts}/${execution.maxPublicationAttempts}.`,
-    `Finalization deadline: ${new Date(execution.finalizationDeadlineAt ?? execution.deadlineAt).toISOString()}.`,
-    "", "### Verification reservations", ""];
+    `Finalization deadline: ${new Date(execution.finalizationDeadlineAt ?? execution.deadlineAt).toISOString()}.`];
+  const retainedLines = ["The ticket worktree and implementation lots are retained for explicit recovery."];
+  const plan = store.getImplementationPlan(ticket.id);
+  const lots = plan?.lots ?? store.listImplementationLotStates(ticket.id);
+  for (const lot of lots) retainedLines.push(`- ${lot.label}: ${lot.status}.${lot.status === "completed" ? "" : " This lot is not confirmed integrated and covered."}`);
+  for (const archive of plan?.recovery?.archives ?? []) retainedLines.push(`- Preserved lot ${archive.label}: ${archive.archivePath}; journal: ${archive.journalPath ?? "none recorded"}.`);
+  if (lots.length === 0) retainedLines.push("- No implementation lot is recorded.");
+  const lines = layout.includeSummary
+    ? [renderReviewLevelLine(layout.language, PARTIAL_REVIEW_LEVEL, PARTIAL_REVIEW_REASONS[layout.language]), "", template.context, "", ...contextLines, "", template.changes, "", ...retainedLines, "", template.vigilance]
+    : [SECTION_TITLE, "", ...contextLines, "", template.vigilance];
+  lines.push("", "### Verification reservations", "");
   if (!state.plan) lines.push("- No autonomous acceptance plan was frozen; acceptance remains unexecuted.");
   for (const criterion of state.plan?.criteria ?? []) {
     const currentRuns = quality.runs.filter((run) => run.revision === revision && !run.simulated);
@@ -95,12 +118,7 @@ export function partialPublicationSection(store: Store, ticket: Ticket, state: A
     for (const finding of result?.findings ?? []) lines.push(`  - ${finding.severity}: ${finding.summary} Verification: ${finding.verificationStatus}. ${finding.evidence}${finding.path ? ` Location: ${finding.path}${finding.line === null ? "" : `:${finding.line}`}.` : ""}`);
   }
   if (!review || review.reviewedCommitSha !== revision) lines.push("- Current candidate changes have not been independently reviewed at this exact commit. Existing unreviewed-change sections in the PR body are preserved.");
-  lines.push("", "### Retained implementation work", "", "The ticket worktree and implementation lots are retained for explicit recovery.");
-  const plan = store.getImplementationPlan(ticket.id);
-  const lots = plan?.lots ?? store.listImplementationLotStates(ticket.id);
-  for (const lot of lots) lines.push(`- ${lot.label}: ${lot.status}.${lot.status === "completed" ? "" : " This lot is not confirmed integrated and covered."}`);
-  for (const archive of plan?.recovery?.archives ?? []) lines.push(`- Preserved lot ${archive.label}: ${archive.archivePath}; journal: ${archive.journalPath ?? "none recorded"}.`);
-  if (lots.length === 0) lines.push("- No implementation lot is recorded.");
+  if (!layout.includeSummary) lines.push("", "### Retained implementation work", "", ...retainedLines);
   const markers = partialPublicationMarkers(ticket.id);
   return `${markers.start}\n${redactSecrets(lines.join("\n"))}\n${markers.end}`;
 }

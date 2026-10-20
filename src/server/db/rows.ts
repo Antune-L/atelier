@@ -6,7 +6,7 @@ import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES,
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
 
-import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
+import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
 import type { AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   prNotificationSchema,
@@ -95,6 +95,11 @@ const ticketRowSchema = z.object({
   source_prd_id: z.string().nullable(),
   source_prd_task: z.string().nullable(),
   agent_summary: z.string().nullable(),
+  review_level: z.string().nullable().default(null),
+  review_reason: z.string().nullable().default(null),
+  review_flags_json: z.string().nullable().default(null),
+  stealth_pr_title: z.string().nullable().default(null),
+  stealth_pr_body: z.string().nullable().default(null),
   column_name: z.string(),
   stage: z.string().nullable(),
   model: z.string().nullable(),
@@ -323,6 +328,18 @@ function parseSessionUsage(raw: string | null): Ticket["sessionUsage"] {
   return parsed.success ? parsed.data : {};
 }
 
+const reviewLevelColumnSchema = z.enum(REVIEW_LEVELS).nullable().catch(null);
+const reviewFlagsColumnSchema = z.array(z.enum(REVIEW_FLAGS)).catch([]);
+
+function parseReviewFlags(raw: string | null): Ticket["reviewFlags"] {
+  if (raw === null) return [];
+  try {
+    return reviewFlagsColumnSchema.parse(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
 function parseErrorDetails(raw: string | null): ErrorDetails | null {
   if (raw === null) return null;
   let json: unknown;
@@ -376,6 +393,11 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     sourcePrdId: row.source_prd_id,
     sourcePrdTask: row.source_prd_task,
     agentSummary: row.agent_summary,
+    reviewLevel: reviewLevelColumnSchema.parse(row.review_level),
+    reviewReason: row.review_reason,
+    reviewFlags: parseReviewFlags(row.review_flags_json),
+    stealthPrTitle: row.stealth_pr_title,
+    stealthPrBody: row.stealth_pr_body,
     column: ticketColumnSchema.parse(row.column_name),
     stage: ticketStageSchema.parse(row.stage),
     model: row.model === null ? null : agentModelSchema.parse(row.model),

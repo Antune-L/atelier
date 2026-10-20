@@ -322,6 +322,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   );
 
   const terminalCounts = new Map(TERMINAL_COLUMNS.map((column) => [column, ticketsByColumn(column).length]));
+  const terminalHighReviewCounts = new Map(
+    TERMINAL_COLUMNS.map((column) => [column, ticketsByColumn(column).filter((ticket) => ticket.reviewLevel === "high").length]),
+  );
   const displayedTerminalColumns = TERMINAL_COLUMNS.filter((column) => openTerminalColumns.has(column));
 
   return (
@@ -345,6 +348,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
         <TerminalColumnsPanel
           columns={TERMINAL_COLUMNS}
           countByColumn={terminalCounts}
+          highReviewCountByColumn={terminalHighReviewCounts}
           expanded={openTerminalColumns}
           onToggle={toggleTerminalColumn}
         />

@@ -127,8 +127,10 @@ const AZURE_COMMANDS: VcsCommandTable = {
   label: VCS_PROVIDER_LABELS.azureDevops,
   createPr: ({ draft, baseBranch }) =>
     `az repos pr create ${AZURE_COMMON_FLAGS} --source-branch <branche-courante> --target-branch ${baseBranch}`
-    + ` --title "<titre>" --description "<description>" --draft ${String(draft)}`,
-  createPrHint: `${AZURE_REPO_REF_HINT} Il n'existe pas d'équivalent de \`--fill\` : rédige toi-même le titre (sujet du dernier commit) et la description (liste des commits de \`git log origin/<base>..HEAD\`).`,
+    + ` --title "<titre>" --description "<une ligne de résumé>" --draft ${String(draft)}`,
+  createPrHint: `${AZURE_REPO_REF_HINT} Rédige d'abord la description complète de la PR avec l'outil d'écriture de fichiers dans \`${PR_BODY_FILE}\` à la racine du worktree (fichier ignoré par git).`
+    + ` Passe seulement une ligne de résumé à \`--description\`, sans backticks ni \`$\` : le backend applique le contenu de \`${PR_BODY_FILE}\` à la PR après la livraison.`
+    + ` Pour corriger la description ensuite, réécris simplement ce fichier.`,
   bannedCreatePr: "az repos pr create",
   // Azure has no PR-diff command and no diff endpoint: the review worktree is already on the PR head,
   // so a plain-git diff against the target branch is the provider-neutral equivalent.

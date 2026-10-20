@@ -38,7 +38,7 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, Stage, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
@@ -419,6 +419,11 @@ export interface TicketPatch {
   sourcePrdId?: string | null;
   sourcePrdTask?: string | null;
   agentSummary?: string | null;
+  reviewLevel?: ReviewLevel | null;
+  reviewReason?: string | null;
+  reviewFlags?: ReviewFlag[];
+  stealthPrTitle?: string | null;
+  stealthPrBody?: string | null;
   column?: Column;
   stage?: Stage | null;
   model?: AgentModel | null;
@@ -1612,6 +1617,11 @@ export class Store {
     if (patch.sourcePrdId !== undefined) set("source_prd_id", patch.sourcePrdId);
     if (patch.sourcePrdTask !== undefined) set("source_prd_task", patch.sourcePrdTask);
     if (patch.agentSummary !== undefined) set("agent_summary", patch.agentSummary);
+    if (patch.reviewLevel !== undefined) set("review_level", patch.reviewLevel);
+    if (patch.reviewReason !== undefined) set("review_reason", patch.reviewReason);
+    if (patch.reviewFlags !== undefined) set("review_flags_json", JSON.stringify(patch.reviewFlags));
+    if (patch.stealthPrTitle !== undefined) set("stealth_pr_title", patch.stealthPrTitle);
+    if (patch.stealthPrBody !== undefined) set("stealth_pr_body", patch.stealthPrBody);
     if (patch.column !== undefined) {
       set(COLUMN_TO_DB, patch.column);
       // Stamp the entry into "À implémenter" (re-stamped on each re-entry) so the card's

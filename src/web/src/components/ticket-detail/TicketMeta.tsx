@@ -5,6 +5,7 @@ import { COLUMN_LABELS, ORCHESTRATOR_LABELS, type Column } from "@shared/constan
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { columnSchema } from "@shared/schemas";
 
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { ConfirmPopover } from "@/components/ui/confirm";
@@ -144,6 +145,11 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
           hasConversations={conversations.some((c) => c.project === ticket.project)}
           onOpen={onOpenPrdOrigin}
         />
+      )}
+      {ticket.reviewLevel && (
+        <MetaRow label="Relecture">
+          <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} withLabel />
+        </MetaRow>
       )}
       {ticket.prUrl !== null && (
         <MetaRow label="PR">

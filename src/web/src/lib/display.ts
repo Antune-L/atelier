@@ -18,6 +18,7 @@ import {
   IMPLEMENTER_LABELS,
   ORCHESTRATORS,
   ORCHESTRATOR_LABELS,
+  REVIEW_LEVEL_LABELS,
   STAGE_LABELS,
   type AgentEffort,
   type AgentModel,
@@ -26,6 +27,8 @@ import {
   type FeasibilityEngine,
   type Implementer,
   type Orchestrator,
+  type ReviewFlag,
+  type ReviewLevel,
   type Stage,
 } from "@shared/constants";
 import { prNumberFromUrl } from "@shared/prUrl";
@@ -188,6 +191,29 @@ export function triageVerdictVariant(verdict: TriageVerdict): BadgeVariant {
 
 export function triageVerdictDot(verdict: TriageVerdict): { glyph: string; className: string; title: string } {
   return TRIAGE_VERDICT_DOTS[verdict];
+}
+
+export const REVIEW_LEVEL_DISPLAY: Record<ReviewLevel, { label: string }> = {
+  low: { label: REVIEW_LEVEL_LABELS.fr.low },
+  medium: { label: REVIEW_LEVEL_LABELS.fr.medium },
+  high: { label: REVIEW_LEVEL_LABELS.fr.high },
+};
+
+export const REVIEW_LEVEL_DOT_CLASSES: Record<ReviewLevel, string> = {
+  low: "border-[1.5px] border-success",
+  medium: "bg-warning",
+  high: "bg-danger ring-[3px] ring-danger/30",
+};
+
+export const REVIEW_FLAG_LABELS: Record<ReviewFlag, string> = {
+  description_unstructured: "Description de PR non structurée",
+};
+
+export function reviewLevelTooltip(level: ReviewLevel, reason?: string | null, flags?: readonly ReviewFlag[]): string {
+  const lines = [REVIEW_LEVEL_DISPLAY[level].label];
+  if (reason) lines.push(reason);
+  for (const flag of flags ?? []) lines.push(REVIEW_FLAG_LABELS[flag]);
+  return lines.join("\n");
 }
 
 const STAGE_VARIANTS: Record<Stage, BadgeVariant> = {

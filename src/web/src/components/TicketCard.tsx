@@ -8,6 +8,7 @@ import { isDependencyReady } from "@shared/dependencies";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { summarizeSessionCosts } from "@shared/pricing";
 
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import {
   agentPairLabel,
@@ -132,7 +133,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
 
         <div className="flex items-start justify-between gap-2">
           <h3 className="min-w-0 break-words text-sm font-semibold leading-snug">{ticket.title}</h3>
-          {ticket.triageStatus === "done" && ticket.triageVerdict && <TriageDot verdict={ticket.triageVerdict} />}
+          <TitleStatusDot ticket={ticket} />
         </div>
 
         <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
@@ -198,6 +199,15 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
       </div>
     </div>
   );
+}
+
+function TitleStatusDot({ ticket }: { ticket: Ticket }) {
+  if (ticket.reviewLevel) {
+    return <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} className="mt-1" />;
+  }
+  if (ticket.prUrl) return null;
+  if (ticket.triageStatus === "done" && ticket.triageVerdict) return <TriageDot verdict={ticket.triageVerdict} />;
+  return null;
 }
 
 function TriageDot({ verdict }: { verdict: NonNullable<Ticket["triageVerdict"]> }) {

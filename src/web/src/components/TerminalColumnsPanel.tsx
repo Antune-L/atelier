@@ -2,11 +2,14 @@ import { useDroppable } from "@dnd-kit/core";
 
 import { COLUMN_LABELS, type Column } from "@shared/constants";
 
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
+import { REVIEW_LEVEL_DISPLAY } from "@/lib/display";
 import { cn } from "@/lib/utils";
 
 interface TerminalColumnsPanelProps {
   columns: Column[];
   countByColumn: Map<Column, number>;
+  highReviewCountByColumn: Map<Column, number>;
   expanded: Set<Column>;
   onToggle: (column: Column) => void;
 }
@@ -29,6 +32,7 @@ export function writeTerminalColumnOpen(column: Column, open: boolean): void {
 interface TerminalRowProps {
   column: Column;
   count: number;
+  highReviewCount: number;
   expanded: boolean;
   onToggle: (column: Column) => void;
 }
@@ -38,7 +42,7 @@ interface TerminalRowButtonProps extends TerminalRowProps {
   dropRef?: (node: HTMLElement | null) => void;
 }
 
-function TerminalRowButton({ column, count, expanded, isOver, dropRef, onToggle }: TerminalRowButtonProps) {
+function TerminalRowButton({ column, count, highReviewCount, expanded, isOver, dropRef, onToggle }: TerminalRowButtonProps) {
   const label = COLUMN_LABELS[column];
   const isAlerting = column === "failed" && count > 0;
 
@@ -56,7 +60,16 @@ function TerminalRowButton({ column, count, expanded, isOver, dropRef, onToggle 
       )}
     >
       <span className={cn("truncate text-muted-foreground", expanded && "text-foreground")}>{label}</span>
-      <span className={cn("font-mono tabular-nums text-foreground", isAlerting && "text-danger")}>{count}</span>
+      <span className="flex items-center gap-1 font-mono tabular-nums">
+        <span className={cn("text-foreground", isAlerting && "text-danger")}>{count}</span>
+        {highReviewCount > 0 && (
+          <span className="flex items-center gap-1 text-2xs text-muted-foreground" title={`${REVIEW_LEVEL_DISPLAY.high.label} : ${highReviewCount}`}>
+            ·
+            <ReviewLevelDot level="high" />
+            {highReviewCount}
+          </span>
+        )}
+      </span>
     </button>
   );
 }
@@ -70,7 +83,7 @@ function DroppableTerminalRow(props: TerminalRowProps) {
   return <TerminalRowButton {...props} isOver={isOver} dropRef={setNodeRef} />;
 }
 
-export function TerminalColumnsPanel({ columns, countByColumn, expanded, onToggle }: TerminalColumnsPanelProps) {
+export function TerminalColumnsPanel({ columns, countByColumn, highReviewCountByColumn, expanded, onToggle }: TerminalColumnsPanelProps) {
   return (
     <div className="flex h-full w-40 shrink-0 flex-col border-l border-border">
       <div className="px-2.5 pb-2 pt-1">
@@ -79,7 +92,12 @@ export function TerminalColumnsPanel({ columns, countByColumn, expanded, onToggl
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {columns.map((column) => {
-          const row = { column, count: countByColumn.get(column) ?? 0, onToggle };
+          const row = {
+            column,
+            count: countByColumn.get(column) ?? 0,
+            highReviewCount: highReviewCountByColumn.get(column) ?? 0,
+            onToggle,
+          };
           // NOTE: an expanded column already owns the droppable id through its lane; registering it
           // here too would give dnd-kit two nodes for the same id.
           if (expanded.has(column)) {

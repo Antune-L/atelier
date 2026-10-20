@@ -5,7 +5,7 @@ import { dependencyLaunchSchema, dependencyPrObservationSchema, dependencyStatus
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "./autonomous.ts";
 import { transcriptUpdateSchema } from "./transcript.ts";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, REVIEW_FLAGS, REVIEW_LEVELS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import type { ResearchOptionKey } from "./constants.ts";
 import { githubLoginSchema } from "./github.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
@@ -369,6 +369,11 @@ export const ticketSchema = z.object({
   sourcePrdTask: z.string().nullable(),
   /** Markdown summary of what the agent did (captured from the PR description on done); null until finished. */
   agentSummary: z.string().nullable(),
+  reviewLevel: z.enum(REVIEW_LEVELS).nullable().optional(),
+  reviewReason: z.string().nullable().optional(),
+  reviewFlags: z.array(z.enum(REVIEW_FLAGS)).optional(),
+  stealthPrTitle: z.string().nullable().optional(),
+  stealthPrBody: z.string().nullable().optional(),
   column: columnSchema,
   stage: stageSchema.nullable(),
   /** Orchestrator agent overrides (null = fall back to the server config defaults). */

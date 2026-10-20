@@ -55,7 +55,7 @@ import type {
   ValidationServiceHandle,
   ValidationWorkspaceOptions,
 } from "./types.ts";
-import { FakeVcsClient } from "./vcs/fake.ts";
+import { FAKE_PR_BODY, FakeVcsClient } from "./vcs/fake.ts";
 import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
 
 const dryRunLog = createLogger("dry-run");
@@ -563,6 +563,11 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async readPrBody(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null> {
     return this.vcs(provider).readPrBody(slotPath, prUrl);
+  }
+
+  async readWorktreePrBody(slotPath: string): Promise<string | null> {
+    this.log("readWorktreePrBody", { slotPath });
+    return FAKE_PR_BODY;
   }
 
   async convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult> {

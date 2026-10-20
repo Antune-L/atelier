@@ -7,7 +7,9 @@ import type { ProjectConfig } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { PrMutationOptions, SystemAdapter } from "../system/types.ts";
 
-import { partialPublicationSection, withPartialPublication } from "./autonomousPublication.ts";
+import { hasStructuredPrDescription } from "../system/vcs/prDescription.ts";
+
+import { PARTIAL_REVIEW_LEVEL, PARTIAL_REVIEW_REASONS, partialPublicationSection, withPartialPublication } from "./autonomousPublication.ts";
 
 const RECONCILIATION_TIMEOUT_MS = 60_000;
 const USER_CANCELLED = "user_cancelled";
@@ -103,7 +105,7 @@ export class AutonomousPartialDelivery {
         const createOptions = this.operation(context, "create_pr", candidateRevision);
         const created = await this.bounded(context, () => this.deps.system.createPr(context.cwd, context.baseBranch, {
           ...createOptions, draft: true, title: `${PARTIAL_PR_TITLE_PREFIX}${this.ticket(ticketId).title}`,
-          body: this.section(ticketId, candidateRevision, reason), headBranch: context.branch, requireExistingBase: true,
+          body: this.section(ticketId, candidateRevision, reason, null), headBranch: context.branch, requireExistingBase: true,
         }, context.project.vcsProvider));
         if (!created.ok || !created.url) throw new Error(created.reason || "Pull request creation could not be confirmed.");
         this.deps.store.updateTicket(ticketId, { prUrl: created.url });
@@ -125,7 +127,7 @@ export class AutonomousPartialDelivery {
       await this.verifyCandidate(context, candidatePrUrl, candidateRevision);
       const body = await this.bounded(context, () => this.deps.system.readPrBody(context.cwd, candidatePrUrl, context.project.vcsProvider));
       if (body === null) throw new Error("The existing pull request body could not be read.");
-      const expectedBody = withPartialPublication(body, ticketId, this.section(ticketId, candidateRevision, reason));
+      const expectedBody = withPartialPublication(body, ticketId, this.section(ticketId, candidateRevision, reason, body));
       const bodyOptions = this.operation(context, "update_pr_body", candidateRevision, digest(expectedBody));
       const updated = await this.bounded(context, () => this.deps.system.updatePrBody(context.cwd, candidatePrUrl, (current) => {
         if (current !== body) throw new Error("The pull request body changed before publication; human text was preserved.");
@@ -232,6 +234,7 @@ export class AutonomousPartialDelivery {
     const stopped = execution.userStopRequestedAt !== null;
     const ticket = this.ticket(context.ticketId);
     this.deps.store.updateTicket(context.ticketId, { column: stopped ? ticket.column : "to_review", stage: stopped ? ticket.stage : null, autoMerge: false, prUrl, error: stopped ? ticket.error : null,
+      reviewLevel: PARTIAL_REVIEW_LEVEL, reviewReason: PARTIAL_REVIEW_REASONS[this.deps.store.getAppSettings().commitLanguage], reviewFlags: [],
       autonomousState: { ...state, phase: stopped ? state.phase : "published_partial", error: stopped ? state.error : null, hostMutation: null, revision,
         execution: { ...execution, publication: { status: "confirmed", candidatePrUrl: prUrl, prUrl, revision, bodyConfirmed: true, simulated: this.deps.system.dryRun, error: null } } },
     });
@@ -303,8 +306,10 @@ export class AutonomousPartialDelivery {
     });
   }
 
-  private section(ticketId: string, revision: string, reason: string): string {
-    return partialPublicationSection(this.deps.store, this.ticket(ticketId), this.state(ticketId), revision, reason);
+  private section(ticketId: string, revision: string, reason: string, existingBody: string | null): string {
+    const includeSummary = existingBody === null || !hasStructuredPrDescription(withPartialPublication(existingBody, ticketId, ""));
+    const { commitLanguage } = this.deps.store.getAppSettings();
+    return partialPublicationSection(this.deps.store, this.ticket(ticketId), this.state(ticketId), revision, reason, { language: commitLanguage, includeSummary });
   }
 
   private ticket(ticketId: string): Ticket {

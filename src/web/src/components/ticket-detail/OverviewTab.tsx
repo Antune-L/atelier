@@ -2,9 +2,10 @@ import { ArrowRight, ChevronDown, ChevronUp, ExternalLink, FileText } from "luci
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { ORCHESTRATOR_LABELS } from "@shared/constants";
+import { ORCHESTRATOR_LABELS, type ReviewLevel } from "@shared/constants";
 import type { ErrorDetails, ProjectInfo, Ticket } from "@shared/schemas";
 
+import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { TicketCost } from "@/components/TicketCost";
 import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
@@ -15,7 +16,7 @@ import type { TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { useCapabilities } from "@/hooks/useCapabilities";
-import { formatDateTime } from "@/lib/display";
+import { REVIEW_FLAG_LABELS, formatDateTime } from "@/lib/display";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 
 interface OverviewTabProps {
@@ -104,6 +105,7 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
       {ticket.kind === "feature" && <section className="space-y-3 rounded-lg border border-border p-4">
         <SectionHeader>Résultat et livraison</SectionHeader>
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>Proposition de modification</span>{ticket.prUrl !== null ? <a href={ticket.prUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{ticket.prNumber === null ? "Ouvrir la PR" : `Ouvrir la PR #${ticket.prNumber}`}<ExternalLink className="size-3.5" aria-hidden /></a> : <span className="text-muted-foreground">Aucune PR associée</span>}</div>
+        {ticket.reviewLevel && <ReviewLevelRow ticket={ticket} level={ticket.reviewLevel} />}
         <div className="flex flex-wrap justify-between gap-2 text-sm"><span>Livraison demandée</span><span>{requestedDelivery}</span></div>
         <div className="flex flex-wrap justify-between gap-2 text-sm"><span>Mode effectif de cet hôte</span><span>{effectiveDelivery}</span></div>
         {ticket.column === "merged" ? <p className="text-xs text-muted-foreground">Le ticket est marqué comme fusionné. Ce statut reste distinct des preuves de validation.</p> : <p className="text-xs text-muted-foreground">La présence d’une PR ne confirme pas la validation ni la possibilité de fusion. Les réserves sont dans Contrôles.</p>}
@@ -114,6 +116,19 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
       {showSummary && ticket.agentSummary !== null && <details className="rounded-lg border border-border"><summary className="cursor-pointer px-4 py-3 text-sm font-medium">Résumé de l’agent</summary><div className="border-t border-border p-4"><Markdown content={ticket.agentSummary} /></div></details>}
 
       {isTodo ? <section className="space-y-4 rounded-lg border border-border p-4"><SectionHeader>Préparer le lancement</SectionHeader><LaunchForm ticket={ticket} projects={projects} canEditTarget={!locked} />{triage}</section> : <details className="rounded-lg border border-border"><summary className="cursor-pointer px-4 py-3 text-sm font-medium">Réglages utilisés</summary><div className="border-t border-border p-4"><TicketConfigSummary ticket={ticket} /></div></details>}
+    </div>
+  );
+}
+
+function ReviewLevelRow({ ticket, level }: { ticket: Ticket; level: ReviewLevel }) {
+  return (
+    <div className="flex flex-wrap justify-between gap-2 text-sm">
+      <span>Relecture humaine</span>
+      <div className="min-w-0 text-right">
+        <ReviewLevelDot level={level} reason={ticket.reviewReason} flags={ticket.reviewFlags} withLabel />
+        {ticket.reviewReason && <p className="mt-0.5 text-xs text-muted-foreground">{ticket.reviewReason}</p>}
+        {ticket.reviewFlags?.map((flag) => <p key={flag} className="mt-0.5 text-xs text-warning">{REVIEW_FLAG_LABELS[flag]}</p>)}
+      </div>
     </div>
   );
 }

@@ -447,6 +447,7 @@ export interface SystemAdapter {
   prepareAutonomousCandidate(slotPath: string, opts: PrMutationOptions): Promise<ReviewHeadResult>;
   pushAutonomousCandidate(slotPath: string, branch: string, opts: PrMutationOptions): Promise<DoneGateResult>;
   readPrBody(slotPath: string, prUrl: string, provider: VcsProvider): Promise<string | null>;
+  readWorktreePrBody(slotPath: string): Promise<string | null>;
   convertPrToDraft(slotPath: string, prUrl: string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult>;
   updatePrBody(slotPath: string, prUrl: string, transform: (body: string) => string, provider: VcsProvider, opts?: PrMutationOptions): Promise<DoneGateResult>;
 

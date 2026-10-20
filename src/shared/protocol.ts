@@ -18,7 +18,7 @@
 import { z } from "zod";
 
 import { autonomousPlanInputSchema } from "./autonomous.ts";
-import { COLUMNS, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, TRIAGE_VERDICTS } from "./constants.ts";
+import { COLUMNS, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, REVIEW_LEVELS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 import { implementationPlanLotDefinitionSchema, implementationPlanParallelSchema } from "./implementationPlan.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
@@ -136,14 +136,32 @@ export const ATELIER_BOARD_TOOL_NAMES = ["atelier_list_tickets", "atelier_get_ti
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
 
-export const doneArgsSchema = z.object({ pr_url: z.url() });
+export const REVIEW_REASON_MAX_LENGTH = 200;
+const reviewLevelArgSchema = z.enum(REVIEW_LEVELS);
+const reviewReasonArgSchema = z.string().trim().min(1).max(REVIEW_REASON_MAX_LENGTH);
+const prTitleArgSchema = z.string().trim().min(1);
+const prBodyArgSchema = z.string().trim().min(1);
 
-export const readyForReviewArgsSchema = z.object({});
+export const doneArgsSchema = z.object({
+  pr_url: z.url(),
+  review_level: reviewLevelArgSchema.optional(),
+  review_reason: reviewReasonArgSchema.optional(),
+});
+
+export const readyForReviewArgsSchema = z.object({
+  review_level: reviewLevelArgSchema.optional(),
+  review_reason: reviewReasonArgSchema.optional(),
+  title: prTitleArgSchema.optional(),
+  body: prBodyArgSchema.optional(),
+});
+export const validateAutonomousArgsSchema = z.object({});
 export const AUTONOMOUS_UNIT_TEST_LOT = "unit-tests";
 
 export const deliverAutonomousArgsSchema = z.object({
-  title: z.string().trim().min(1),
-  body: z.string().trim().min(1),
+  title: prTitleArgSchema,
+  body: prBodyArgSchema,
+  review_level: reviewLevelArgSchema,
+  review_reason: reviewReasonArgSchema,
 });
 
 export const qualityArgsSchema = z.object({
@@ -314,11 +332,11 @@ export const WORKER_TOOLS = [
   {
     name: "validate_autonomous",
     description: "Start the autonomous checks and Coolify branch preview before creating a pull request. Independent review must approve the current code first. Keep the worktree, end the turn and wait for the backend continuation. Missing or stale evidence prevents delivery.",
-    argsSchema: readyForReviewArgsSchema,
+    argsSchema: validateAutonomousArgsSchema,
   },
   {
     name: "deliver_autonomous",
-    description: "Deliver the exact independently reviewed and preview-tested commit. Supply the pull request title and body. The backend creates or reconciles the pull request and applies the card's durable PR-only or merge choice. Agents must never create or merge the pull request themselves.",
+    description: "Deliver the exact independently reviewed and preview-tested commit. Supply the pull request title, the structured body (context and what changed sections, review points only when a human must check something) and the human review level with its reason. The backend creates or reconciles the pull request and applies the card's durable PR-only or merge choice. Agents must never create or merge the pull request themselves.",
     argsSchema: deliverAutonomousArgsSchema,
   },
   {
@@ -350,13 +368,13 @@ export const WORKER_TOOLS = [
   },
   {
     name: "done",
-    description: "Signale la fin du ticket avec l'URL de la PR draft (GitHub ou Azure DevOps selon le projet). Le backend vérifie avant de clôturer.",
+    description: "Signale la fin du ticket avec l'URL de la PR draft (GitHub ou Azure DevOps selon le projet), le niveau de relecture humaine (review_level : low, medium ou high) et sa raison (review_reason). Niveau et raison sont obligatoires à la première livraison d'un ticket feature, facultatifs pour une correction ou une résolution de conflits. Le backend vérifie avant de clôturer.",
     argsSchema: doneArgsSchema,
   },
   {
     name: "ready_for_review",
     description:
-      "Signale qu'un ticket sans PR (stealth ou push direct) a sa branche commitée et poussée. Le backend vérifie l'arbre propre + branche poussée, puis selon le mode conserve le worktree pour test (stealth) ou ferme le worktree et clôture la carte en « Fini » (push direct).",
+      "Signale qu'un ticket sans PR (stealth ou push direct) a sa branche commitée et poussée. Le backend vérifie l'arbre propre + branche poussée, puis selon le mode conserve le worktree pour test (stealth) ou ferme le worktree et clôture la carte en « Fini » (push direct). En stealth, fournis aussi le titre (title) et la description structurée (body) de la future PR, le niveau de relecture humaine (review_level) et sa raison (review_reason).",
     argsSchema: readyForReviewArgsSchema,
   },
   {

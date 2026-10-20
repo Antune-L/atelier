@@ -58,6 +58,13 @@ import { UNKNOWN_PR_SNAPSHOT } from "./types.ts";
 import type { CreatePrResult, PrSnapshot, ReviewPublicationCheck, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 const AZURE_PYTHON_LOCATION_RE = /^Python location '([^'\r\n]+)'$/m;
+const AZURE_PR_DESCRIPTION_MAX_LENGTH = 4000;
+const AZURE_PR_DESCRIPTION_TRUNCATION_MARKER = "\n\n[…]";
+
+function fitAzurePrDescription(description: string): string {
+  if (description.length <= AZURE_PR_DESCRIPTION_MAX_LENGTH) return description;
+  return `${description.slice(0, AZURE_PR_DESCRIPTION_MAX_LENGTH - AZURE_PR_DESCRIPTION_TRUNCATION_MARKER.length).trimEnd()}${AZURE_PR_DESCRIPTION_TRUNCATION_MARKER}`;
+}
 const AZURE_PENDING_REVIEW_VOTE = 0;
 const AZURE_CURRENT_IDENTITY_SCRIPT = `
 import json, sys
@@ -536,7 +543,7 @@ export class AzureDevopsVcsClient implements VcsClient {
       return { ok: false, url: "", reason: `aucun commit entre origin/${baseBranch} et HEAD : rien à proposer en PR` };
     }
     const title = opts.title ?? subjects[subjects.length - 1] ?? sourceBranch;
-    const description = opts.body === undefined ? subjects.map((subject) => `- ${subject}`) : [opts.body];
+    const description = fitAzurePrDescription(opts.body ?? subjects.map((subject) => `- ${subject}`).join("\n"));
     if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, url: "", reason: "Autonomous delivery deadline expired before pull request creation." };
     opts.assertCurrent?.();
     const res = await runBoundedCommand(
@@ -545,7 +552,7 @@ export class AzureDevopsVcsClient implements VcsClient {
         "--source-branch", sourceBranch,
         "--target-branch", baseBranch,
         "--title", title,
-        "--description", ...description,
+        "--description", description,
         "--draft", String(opts.draft),
       ],
       cwd,
@@ -599,7 +606,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (target === null) return { ok: false, reason: "Invalid Azure DevOps pull request URL." };
     const body = await this.readPrBody(cwd, prUrl);
     if (body === null) return { ok: false, reason: "Pull request description and identity could not be read." };
-    const expectedBody = transform(body);
+    const expectedBody = fitAzurePrDescription(transform(body));
     if (opts.deadlineAt !== undefined && Date.now() >= opts.deadlineAt) return { ok: false, reason: "Autonomous delivery deadline expired before description update." };
     opts.assertCurrent?.();
     const res = await runBoundedCommand(this.prUpdateArgs(target, ["--description", expectedBody]), cwd, { timeoutMs: opts.deadlineAt === undefined ? BOUNDED_COMMAND_TIMEOUT_MS : Math.min(BOUNDED_COMMAND_TIMEOUT_MS, opts.deadlineAt - Date.now()) });

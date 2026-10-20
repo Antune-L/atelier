@@ -9,6 +9,7 @@ import { DEFAULT_PREVIEW_RECIPE_PATH } from "../../shared/preview.ts";
 import { AUTONOMOUS_UNIT_TEST_LOT } from "../../shared/protocol.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
+import { buildPrDescriptionInstructions } from "./prDescription.ts";
 import { acceptsReviewLimit } from "./reviewPass.ts";
 import { subagentDisciplineLines, subagentSpawnHint } from "./triage.ts";
 import { vcsCommands } from "./vcsCommands.ts";
@@ -31,6 +32,11 @@ function resolveReviewLanguage(ticket: Ticket, fallback: CommitLanguage): Commit
 function reviewStyleHeaderLines(language: CommitLanguage, humanTone: boolean): string[] {
   return [`Langue de la revue : ${COMMIT_LANGUAGE_LABELS[language]}`, humanTone ? "Ton : humain (concis)" : ""];
 }
+
+const DONE_SIGNAL = "done(pr_url, review_level, review_reason)";
+const STEALTH_SIGNAL = "ready_for_review(title, body, review_level, review_reason)";
+const DELIVER_AUTONOMOUS_SIGNAL = "deliver_autonomous({title, body, review_level, review_reason})";
+const OPTIONAL_REVIEW_LEVEL_HINT = "`review_level` et `review_reason` sont facultatifs ici : passe-les seulement si cette passe rend la PR plus sensible à relire (le niveau conservé est le plus élevé).";
 
 const HUMAN_TONE_DIRECTIVE =
   "- Ton des commentaires : humain et concis. Écris comme un collègue qui relit la PR : phrases courtes, pas de jargon de reviewer automatique, pas de préambule, une remarque = une idée.";
@@ -330,15 +336,15 @@ export function buildTicketContract(
     : "une nouvelle vérification indépendante complète";
   let toolDirective: string;
   if (ticket.autonomous) {
-    toolDirective = '- `validate_autonomous()` seulement après review indépendante approuvée du code courant, commit propre et push de la branche. Termine ton tour et attends la continuation. Après les preuves satisfaisantes, `deliver_autonomous({title,body})` confie au backend la création de PR et la livraison choisie. N’appelle jamais done ni une commande de création ou fusion de PR.';
+    toolDirective = `- \`validate_autonomous()\` seulement après review indépendante approuvée du code courant, commit propre et push de la branche. Termine ton tour et attends la continuation. Après les preuves satisfaisantes, \`${DELIVER_AUTONOMOUS_SIGNAL}\` confie au backend la création de PR et la livraison choisie. N’appelle jamais done ni une commande de création ou fusion de PR.`;
   } else if (iteration) {
-    toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite ${iterationVerification}.`;
+    toolDirective = `- \`done(pr_url="${iteration.prUrl}")\` UNIQUEMENT après avoir commité proprement et poussé les corrections sur la branche existante \`${iteration.headBranch}\`. Le backend lance ensuite ${iterationVerification}. ${OPTIONAL_REVIEW_LEVEL_HINT}`;
   } else if (directPush) {
     toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé tes commits DIRECTEMENT sur la branche cible \`${baseBranch}\` (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
   } else if (stealth) {
-    toolDirective = `- \`ready_for_review()\` UNIQUEMENT après avoir commité proprement et poussé la branche (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}).`;
+    toolDirective = `- \`${STEALTH_SIGNAL}\` UNIQUEMENT après avoir commité proprement et poussé la branche (AUCUNE PR, AUCUN ${vcs.bannedCreatePr}). Le titre et la description servent à la PR que l'utilisateur créera plus tard.`;
   } else {
-    toolDirective = `- \`done(pr_url)\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`;
+    toolDirective = `- \`${DONE_SIGNAL}\` UNIQUEMENT après avoir : commité proprement, poussé la branche, et ouvert une PR${prIsDraft ? " draft" : ""} via \`${prCreateCmd}\`.`;
   }
 
   let finalizationStep: string;
@@ -359,16 +365,22 @@ export function buildTicketContract(
 
   let signalStep: string;
   if (ticket.autonomous) {
-    signalStep = `7. Quand le backend annonce les preuves prêtes, appelle deliver_autonomous({title,body}). Livraison choisie : ${ticket.autonomousDelivery === "merge" ? "fusion autonome uniquement après les politiques natives satisfaites et confirmation de la fusion du commit vérifié" : "créer la PR puis s’arrêter, sans activer ni demander ni planifier aucune fusion"}. Si la livraison reste en attente, conserve le worktree et relis quality.get ; ne crée jamais une deuxième PR ni ne contourne une politique.`;
+    signalStep = `7. Quand le backend annonce les preuves prêtes, appelle ${DELIVER_AUTONOMOUS_SIGNAL}. Livraison choisie : ${ticket.autonomousDelivery === "merge" ? "fusion autonome uniquement après les politiques natives satisfaites et confirmation de la fusion du commit vérifié" : "créer la PR puis s’arrêter, sans activer ni demander ni planifier aucune fusion"}. Si la livraison reste en attente, conserve le worktree et relis quality.get ; ne crée jamais une deuxième PR ni ne contourne une politique.`;
   } else if (iteration) {
     signalStep = `7. done(pr_url="${iteration.prUrl}"). Termine ton tour : le backend conserve le worktree jusqu'à la fin ${functionalIteration ? "du nouveau test fonctionnel de tous les scénarios" : "de la nouvelle vérification de tous les critères"}. Une vérification échouée ou non concluante termine cette passe ; aucun cycle automatique supplémentaire.`;
   } else if (directPush) {
     signalStep = `7. \`ready_for_review()\` — tes commits sont sur \`${baseBranch}\` ; le worktree sera fermé et la carte passera en « Fini » (aucune PR).`;
   } else if (stealth) {
-    signalStep = "7. `ready_for_review()` — le worktree restera disponible pour que l'utilisateur teste ; la PR sera créée plus tard par l'utilisateur.";
+    signalStep = `7. \`${STEALTH_SIGNAL}\` — le worktree restera disponible pour que l'utilisateur teste ; la PR sera créée plus tard par l'utilisateur avec ce titre et cette description.`;
   } else {
-    signalStep = "7. done(pr_url).";
+    signalStep = `7. ${DONE_SIGNAL}.`;
   }
+
+  let prDescriptionSignal: string | null = DONE_SIGNAL;
+  if (ticket.autonomous) prDescriptionSignal = DELIVER_AUTONOMOUS_SIGNAL;
+  else if (iteration || directPush) prDescriptionSignal = null;
+  else if (stealth) prDescriptionSignal = STEALTH_SIGNAL;
+  const prDescriptionLines = prDescriptionSignal === null ? [] : buildPrDescriptionInstructions(opts.commitLanguage, prDescriptionSignal);
 
   let qualityDirective = '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.';
   if (ticket.autonomous) {
@@ -449,12 +461,13 @@ export function buildTicketContract(
     finalizationStep,
     noPr || iteration || ticket.autonomous ? "" : `   Ensuite : \`${prCreateCmd}\` vers ${baseBranch}.`,
     noPr || iteration || ticket.autonomous ? "" : vcs.createPrHint && `   ${vcs.createPrHint}`,
+    ...prDescriptionLines,
     wantsScreenshots
       ? "   + captures d'écran : si ce ticket touche le frontend, capture la fonctionnalité via Playwright (lance l'app, navigue jusqu'à l'écran concerné, prends les screenshots) et inclus ces images dans la description de la PR (téléverse-les puis intègre-les en markdown `![légende](url)`). Si le diff ne touche pas le frontend, ignore cette consigne."
       : "",
     signalStep,
     !ticket.autonomous && !iteration && !noPr && ticket.autoMerge
-      ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}.`
+      ? `Note : la PR ne doit PAS être en draft — une fois \`done()\` validé, le système la mergera automatiquement dans ${baseBranch}, sauf si tu passes \`review_level=high\`, qui désactive le merge automatique.`
       : "",
     "",
     "## Interdits",
@@ -505,7 +518,7 @@ export function buildConflictResolutionContract(ticket: Ticket, opts: { commitLa
     buildSpecializedFraming(ticket.orchestrator === "codex", "à la résolution de conflits"),
     "- `update_stage(stage)` à chaque transition d'étape.",
     "- `ask_user(question)` si une décision te dépasse (conflit sémantique ambigu : ne devine pas une intention critique).",
-    "- `done(pr_url)` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR).",
+    `- \`done(pr_url)\` UNIQUEMENT après avoir poussé une branche qui se merge proprement (passe la MÊME URL de PR, ne crée PAS de nouvelle PR). ${OPTIONAL_REVIEW_LEVEL_HINT}`,
     "- `fail(reason, findings)` si les conflits ne sont pas résolvables sans arbitrage.",
     commitLanguageDirective(opts.commitLanguage),
     "",

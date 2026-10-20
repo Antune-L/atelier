@@ -9,13 +9,20 @@ import { isPrNeedsAttention } from "../../../shared/pr.ts";
 
 import type { DoneGateResult, PublishReviewResult, ReviewHeadResult, RecoveryCandidateOptions, PrMutationOptions, CreatePrOptions } from "../types.ts";
 import { githubPrHeadRef } from "./github.ts";
+import { renderPrDescription } from "./prDescription.ts";
 import type { CreatePrResult, PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./types.ts";
 
 /** Base offset for the deterministic dry-run stealth PR number (createPr). */
 const FAKE_STEALTH_PR_BASE = 900;
 const FAKE_REVIEW_HEAD = "dry-run-review-head";
 const FAKE_REVIEW_ID = 1;
-const FAKE_PR_BODY = "## Résumé (dry-run)\n\nImplémentation simulée de la fonctionnalité décrite par le ticket.";
+export const FAKE_PR_BODY = renderPrDescription({
+  language: "fr",
+  level: "low",
+  reason: "Simulation dry-run, aucun changement réel.",
+  context: "Ticket exécuté en mode simulation (dry-run).",
+  changes: "Implémentation simulée de la fonctionnalité décrite par le ticket.",
+});
 
 /** Sample open PRs surfaced by the review picker in dry-run (one clearly "needs attention"). */
 const FAKE_OPEN_PRS: OpenPr[] = [

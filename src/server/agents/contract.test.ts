@@ -150,7 +150,7 @@ describe("buildTicketContract — stealth / directPush finalization (no PR)", ()
     test(`stealth (${orchestrator}) signals ready_for_review and opens no PR`, () => {
       const ticket = makeTicket({ id: `st-${orchestrator}`, orchestrator, implementer, stealth: true });
       const contract = buildTicketContract(ticket, TICKET_OPTS);
-      expect(contract).toContain("ready_for_review()");
+      expect(contract).toContain("ready_for_review(title, body, review_level, review_reason)");
       expect(contract).toContain("AUCUNE PR");
       expect(contract).not.toContain("done(pr_url)");
     });

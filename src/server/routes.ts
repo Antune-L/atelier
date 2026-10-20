@@ -262,7 +262,6 @@ function toManagedProject(key: string, p: ProjectConfig): ManagedProject {
     sortOrder: p.sortOrder ?? 0,
     githubAccount: p.githubAccount ?? null,
     ...(p.group !== undefined ? { group: p.group } : {}),
-    ...(p.runScript !== undefined ? { runScript: p.runScript } : {}),
     ...(p.validation !== undefined ? { validation: p.validation } : {}),
     ...(p.color !== undefined ? { color: p.color } : {}),
   };
@@ -1007,7 +1006,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/projects", async ({ body, set }) => {
       const parsed = createProjectSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, runScript, validation, color, group } = parsed.data;
+      const { label, repoPath, baseBranch, commitTimeoutMs, vcsProvider, validation, color, group } = parsed.data;
       if (group !== undefined && color !== undefined) return jsonError(set, HTTP_BAD_REQUEST, "la couleur appartient au groupe");
       const requestedAccount = parsed.data.githubAccount ?? null;
       if (requestedAccount !== null && vcsProvider !== "github") return jsonError(set, HTTP_BAD_REQUEST, AZURE_ACCOUNT_REFUSED_MESSAGE);
@@ -1022,7 +1021,6 @@ export function createApiRoutes(deps: RouteDeps) {
         vcsProvider,
         defaultAutoMerge: false,
         defaultAddScreenshots: false,
-        ...(runScript !== undefined ? { runScript } : {}),
         ...(validation !== undefined ? { validation } : {}),
         ...(color !== undefined ? { color } : {}),
         ...(group !== undefined ? { group } : {}),

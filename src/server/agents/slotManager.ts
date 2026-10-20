@@ -820,7 +820,7 @@ export class SlotManager {
    * Spawn an interactive test session for a finished feature: reserve a free slot, recreate a
    * runnable worktree on the card's EXISTING feature branch (fetched from origin after the slot was
    * released), run the project setup + install deps, then spawn a PLAIN interactive shell that
-   * auto-runs the project's launch command (`runScript`) and hands control to the user via the
+   * auto-runs the launch command detected in the worktree and hands control to the user via the
    * terminal. No Claude, no contract, no pipeline, no gate, no PR, no queue. The card stays in "Fini"
    * (column/stage untouched) — the `testing` flag is the only marker. Eligibility is re-checked here
    * (the route also validates) so a double click can't double-spawn.
@@ -894,9 +894,9 @@ export class SlotManager {
       await this.system.installDeps(path, project.commitTimeoutMs);
 
       // Plain interactive shell (no Claude, no contract, no worker) that auto-runs the project's
-      // launch command, then stays open for the user. A project without `runScript` drops into a bare
-      // shell with no auto-launch.
-      const runCmd = project.runScript ?? null;
+      // launch command detected in the worktree, then stays open for the user. A worktree without a
+      // detectable command drops into a bare shell with no auto-launch.
+      const runCmd = await this.system.detectRunCommand(path);
       this.setPhase(ticketId, SETUP_PHASES.launching);
       await this.system.spawnShellSession({ sessionName, cwd: path, initialCommand: runCmd ?? undefined });
       this.store.logEvent(ticketId, "test_session_launched", { slotId: free.id, sessionName, runCmd });
@@ -933,7 +933,7 @@ export class SlotManager {
   /**
    * Launch a standalone, ticket-less runnable worktree session: reserve a free slot, fork a fresh
    * branch off the selected base (fetched from origin), run the project setup + install deps, then
-   * spawn a PLAIN interactive shell that auto-runs the project's launch command (`runScript`) and
+   * spawn a PLAIN interactive shell that auto-runs the launch command detected in the worktree and
    * hands control to the user. Same machinery as startTestSession but tied to no card. The eligibility
    * (valid project / free slot) is re-checked here so a race can't double-spawn; the slow setup runs
    * after the slot is reserved, and self-cleans on failure. The route fire-and-forgets this.
@@ -1009,7 +1009,7 @@ export class SlotManager {
       });
       await this.system.installDeps(path, project.commitTimeoutMs);
 
-      const runCmd = project.runScript ?? null;
+      const runCmd = await this.system.detectRunCommand(path);
       await this.system.spawnShellSession({ sessionName, cwd: path, initialCommand: runCmd ?? undefined });
       log.info("shell worktree lancé", { slotId: free.id, sessionName, runCmd });
     } catch (error) {
@@ -1033,7 +1033,7 @@ export class SlotManager {
    * Relaunch a standalone worktree session: kill its running shell/process and respawn it (re-running the
    * project launch command) in the SAME worktree, keeping the DB row, branch and slot. The previous run's
    * external infra (e.g. docker compose, port-bound dev server) is torn down first via the project teardown
-   * script — otherwise re-running `runScript` would collide with the still-running instance.
+   * script — otherwise re-running the launch command would collide with the still-running instance.
    */
   async relaunchWorktreeSession(slotId: number): Promise<void> {
     const session = this.store.getWorktreeSession(slotId);
@@ -1047,10 +1047,11 @@ export class SlotManager {
     // so the teardown script doesn't run against the still-live process.
     await this.system.killSession(session.sessionName);
     await this.runWorktreeTeardown(project, slotId, session.branch, session.baseBranch);
-    const runCmd = project.runScript ?? null;
+    const cwd = slotPath(slotId);
+    const runCmd = await this.system.detectRunCommand(cwd);
     await this.system.spawnShellSession({
       sessionName: session.sessionName,
-      cwd: slotPath(slotId),
+      cwd,
       initialCommand: runCmd ?? undefined,
     });
     log.info("session worktree relancée", { slotId, sessionName: session.sessionName, runCmd });

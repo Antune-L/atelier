@@ -321,6 +321,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     await delay(FAKE_SETTLE_MS);
   }
 
+  async detectRunCommand(slotPath: string): Promise<string | null> {
+    this.log("detectRunCommand", { slotPath });
+    return null;
+  }
+
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model, provider: opts.provider });
     // Synthetic: no real claude is spawned. Emit `init` then a couple of display-only events on the
@@ -615,7 +620,6 @@ export class FakeSystemAdapter implements SystemAdapter {
       currentBranch: FALLBACK_BASE_BRANCH,
       branchCandidates: rankBranchCandidates(FALLBACK_BASE_BRANCH, FALLBACK_BASE_BRANCH, FAKE_REMOTE_BRANCHES),
       vcsProvider: { value: "github", source: "remoteUrl" },
-      runScript: null,
       validationStartCommand: { value: FAKE_VALIDATION_START_COMMAND, source: "viteScript" },
       githubAccount: suggestGithubAccount(FAKE_GITHUB_OWNER, context.githubLogins),
       composeFile: null,

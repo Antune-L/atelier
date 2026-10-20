@@ -312,7 +312,6 @@ export interface NewProject {
   group?: string;
   instructions?: string;
   worktreeScript?: string;
-  runScript?: string;
   validation?: ProjectValidation;
   worktreeTeardownScript?: string;
   scripts?: { typecheck?: string; lint?: string; test?: string };
@@ -332,7 +331,6 @@ export interface ProjectPatch {
   group?: string | null;
   instructions?: string | null;
   worktreeScript?: string | null;
-  runScript?: string | null;
   validation?: ProjectValidation | null;
   worktreeTeardownScript?: string | null;
   scripts?: { typecheck?: string; lint?: string; test?: string } | null;
@@ -2307,8 +2305,8 @@ export class Store {
     const nextOrder = this.scalar("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM projects");
     this.db
       .query(
-        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, run_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider, validation_json, github_account)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (key, label, repo_path, base_branch, commit_timeout_ms, default_auto_merge, default_add_screenshots, color, group_name, instructions, worktree_script, worktree_teardown_script, scripts_typecheck, scripts_lint, scripts_test, worktree_ports, sort_order, created_at, updated_at, vcs_provider, validation_json, github_account)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         key,
@@ -2322,7 +2320,6 @@ export class Store {
         data.group?.trim() || null,
         data.instructions ?? null,
         data.worktreeScript ?? null,
-        data.runScript ?? null,
         data.worktreeTeardownScript ?? null,
         data.scripts?.typecheck ?? null,
         data.scripts?.lint ?? null,
@@ -2358,7 +2355,6 @@ export class Store {
     if (patch.group !== undefined) builder.set("group_name", patch.group?.trim() || null);
     if (patch.instructions !== undefined) builder.set("instructions", patch.instructions);
     if (patch.worktreeScript !== undefined) builder.set("worktree_script", patch.worktreeScript);
-    if (patch.runScript !== undefined) builder.set("run_script", patch.runScript);
     if (patch.validation !== undefined) builder.set("validation_json", patch.validation === null ? null : JSON.stringify(projectValidationSchema.parse(patch.validation)));
     if (patch.worktreeTeardownScript !== undefined) builder.set("worktree_teardown_script", patch.worktreeTeardownScript);
     if (patch.scripts !== undefined) {

@@ -55,6 +55,7 @@ import {
   REPO_NOT_FOUND_MESSAGE,
   hostnameFromSshConfig,
   sshHostFromRemoteUrl,
+  suggestRunScript,
   vcsProviderFromRemoteUrl,
 } from "./repoInspection.ts";
 import type { PackageManifest, RepoFacts, RepoInspectionContext } from "./repoInspection.ts";
@@ -670,6 +671,10 @@ export class RealSystemAdapter implements SystemAdapter {
     } catch {
       return false;
     }
+  }
+
+  async detectRunCommand(slotPath: string): Promise<string | null> {
+    return detectRunCommand(slotPath);
   }
 
   async installDeps(slotPath: string, timeoutMs: number): Promise<void> {
@@ -1590,6 +1595,11 @@ async function resolveWorktreeScriptCommand(
 async function detectInstallCommand(slotPath: string, validation = false): Promise<string> {
   const [manifest, files] = await Promise.all([readPackageManifest(slotPath), presentPackageManagerFiles(slotPath)]);
   return installCommand(resolvePackageManager(manifest?.packageManager, files), validation);
+}
+
+async function detectRunCommand(slotPath: string): Promise<string | null> {
+  const [manifest, files] = await Promise.all([readPackageManifest(slotPath), presentPackageManagerFiles(slotPath)]);
+  return suggestRunScript(manifest, resolvePackageManager(manifest?.packageManager, files))?.value ?? null;
 }
 
 /**

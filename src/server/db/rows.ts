@@ -198,7 +198,6 @@ const projectRowSchema = z.object({
   group_name: z.string().nullable(),
   instructions: z.string().nullable(),
   worktree_script: z.string().nullable(),
-  run_script: z.string().nullable(),
   validation_json: z.string().nullable().default(null),
   worktree_teardown_script: z.string().nullable(),
   scripts_typecheck: z.string().nullable(),
@@ -501,7 +500,6 @@ export function mapProjectRow(raw: unknown): ProjectConfig {
   const scripts = buildScripts(row);
   if (scripts !== undefined) project.scripts = scripts;
   if (row.worktree_script !== null) project.worktreeScript = row.worktree_script;
-  if (row.run_script !== null) project.runScript = row.run_script;
   if (row.validation_json !== null) project.validation = projectValidationSchema.parse(JSON.parse(row.validation_json));
   if (row.worktree_teardown_script !== null) project.worktreeTeardownScript = row.worktree_teardown_script;
   if (row.instructions !== null) project.instructions = row.instructions;

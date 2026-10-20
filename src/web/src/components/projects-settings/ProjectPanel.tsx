@@ -41,7 +41,6 @@ import { timeoutUnitMs, timeoutUnitOf, type TimeoutUnit } from "@/lib/projectDis
 const DEFAULT_COMMIT_TIMEOUT_MS = 600000;
 const TIMEOUT_UNITS: TimeoutUnit[] = ["min", "s"];
 const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
-const NO_RUN_SCRIPT_LABEL = "aucune commande";
 const SUMMARY_SEPARATOR = " · ";
 const MACHINE_ACCOUNT_VALUE = "";
 const BASE_BRANCH_INPUT_ID = "project-base-branch";
@@ -99,7 +98,6 @@ export function ProjectPanel({
   const [group, setGroup] = useState(project?.group ?? "");
   const [repoPath, setRepoPath] = useState(project?.repoPath ?? "");
   const [baseBranch, setBaseBranch] = useState(project?.baseBranch ?? "");
-  const [runScript, setRunScript] = useState(project?.runScript ?? "");
   const [vcsProvider, setVcsProvider] = useState<VcsProvider>(project?.vcsProvider ?? DEFAULT_VCS_PROVIDER);
   const [connection, setConnection] = useState<VcsConnectionResult | null>(null);
   const [testing, setTesting] = useState(false);
@@ -114,7 +112,6 @@ export function ProjectPanel({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [identityOpen, setIdentityOpen] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
-  const [executionOpen, setExecutionOpen] = useState(false);
   const [validation, setValidation] = useState(() => validationDraft(project?.validation));
   const [validationInspection, setValidationInspection] = useState<RepoInspection | null>(null);
   const validationInspectionGeneration = useRef(0);
@@ -143,7 +140,6 @@ export function ProjectPanel({
     repoPath !== project.repoPath ||
     commitTimeoutMs !== String(project.commitTimeoutMs) ||
     baseBranch !== project.baseBranch ||
-    runScript !== (project.runScript ?? "") ||
     vcsProvider !== project.vcsProvider ||
     githubAccount !== project.githubAccount ||
     validationDirty;
@@ -210,7 +206,6 @@ export function ProjectPanel({
     setGroup(result.group?.value ?? "");
     setBaseBranch(result.baseBranch?.value ?? "");
     setVcsProvider(provider);
-    setRunScript(result.runScript?.value ?? "");
     setGithubAccount(provider === "github" ? account : null);
   };
 
@@ -316,7 +311,6 @@ export function ProjectPanel({
     if (baseBranch !== current.baseBranch) patch.baseBranch = baseBranch.trim();
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
     if (vcsProvider !== current.vcsProvider) patch.vcsProvider = vcsProvider;
-    if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
     if (validationDirty) patch.validation = validationConfig;
     if (githubAccount !== current.githubAccount) patch.githubAccount = githubAccount;
     return patch;
@@ -330,7 +324,6 @@ export function ProjectPanel({
       commitTimeoutMs: Number(commitTimeoutMs),
       vcsProvider,
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
-      ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
       ...(vcsProvider === "github" && githubAccount !== null ? { githubAccount } : {}),
     };
     if (!grouped) input.color = pickProjectColor(projects.map((managedProject) => managedProject.color));
@@ -344,7 +337,6 @@ export function ProjectPanel({
     setGroup(saved.group ?? "");
     setRepoPath(saved.repoPath);
     setBaseBranch(saved.baseBranch);
-    setRunScript(saved.runScript ?? "");
     setVcsProvider(saved.vcsProvider);
     setGithubAccount(saved.githubAccount);
     setValidation(validationDraft(saved.validation));
@@ -611,21 +603,6 @@ export function ProjectPanel({
             </div>
           </Field>
         )}
-        </AdvancedSection>
-        <AdvancedSection
-          title="Démarrage du projet"
-          open={executionOpen}
-          onToggle={() => setExecutionOpen((open) => !open)}
-          summary={
-            <div className="space-y-1">
-              <p className="font-mono">{runScript.trim() || NO_RUN_SCRIPT_LABEL}</p>
-              <p>{suggestionHint(inspection?.runScript, runScript) ?? "Commande configurée"} · démarrage non vérifié ici</p>
-            </div>
-          }
-        >
-          <Field label="Commande de démarrage" hint={suggestionHint(inspection?.runScript, runScript)}>
-            <Input value={runScript} onChange={(e) => setRunScript(e.target.value)} placeholder="bun run dev" />
-          </Field>
         </AdvancedSection>
         {project !== null && (
           <>

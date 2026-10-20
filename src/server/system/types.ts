@@ -363,6 +363,8 @@ export interface SystemAdapter {
    */
   runWorktreeTeardownScript(opts: WorktreeSetupOptions): Promise<void>;
   installDeps(slotPath: string, timeoutMs: number): Promise<void>;
+  /** Launch command derived from the worktree's package.json (dev, start or serve script); null when none. */
+  detectRunCommand(slotPath: string): Promise<string | null>;
 
   // ---- SDK agent session (streaming-input `claude` run; the eventual replacement for spawnSession) ----
   /**

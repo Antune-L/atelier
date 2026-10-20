@@ -205,8 +205,20 @@ async function resolveSshHostname(remoteUrl: string): Promise<string | null> {
   return output ? hostnameFromSshConfig(output) : null;
 }
 
-type GitRemoteFacts = Pick<RepoFacts, "remoteHead" | "currentBranch" | "remoteUrl" | "remoteSshHostname">;
-const NO_GIT_REMOTE_FACTS: GitRemoteFacts = { remoteHead: null, currentBranch: null, remoteUrl: null, remoteSshHostname: null };
+type GitRemoteFacts = Pick<RepoFacts, "remoteHead" | "currentBranch" | "remoteBranches" | "remoteUrl" | "remoteSshHostname">;
+const NO_GIT_REMOTE_FACTS: GitRemoteFacts = { remoteHead: null, currentBranch: null, remoteBranches: [], remoteUrl: null, remoteSshHostname: null };
+const ORIGIN_BRANCH_PREFIX = "origin/";
+const ORIGIN_HEAD_REF = "origin/HEAD";
+const SHORT_REF_NAME_FORMAT = "--format=%(refname:short)";
+
+function originBranchNames(output: string | null): string[] {
+  if (output === null) return [];
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((ref) => ref.startsWith(ORIGIN_BRANCH_PREFIX) && ref !== ORIGIN_HEAD_REF)
+    .map((ref) => ref.slice(ORIGIN_BRANCH_PREFIX.length));
+}
 
 function httpsGithubOwner(remoteUrl: string): string | null {
   if (isSshRemote(remoteUrl)) return null;
@@ -1333,13 +1345,14 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   private async readGitRemoteFacts(repoPath: string): Promise<GitRemoteFacts> {
-    const [remoteHead, currentBranch, remoteUrl] = await Promise.all([
+    const [remoteHead, currentBranch, remoteUrl, remoteRefs] = await Promise.all([
       commandOutputOrNull($`git -C ${repoPath} symbolic-ref --quiet --short refs/remotes/origin/HEAD`),
       commandOutputOrNull($`git -C ${repoPath} symbolic-ref --quiet --short HEAD`),
       commandOutputOrNull($`git -C ${repoPath} remote get-url origin`),
+      commandOutputOrNull($`git -C ${repoPath} for-each-ref --sort=-committerdate ${SHORT_REF_NAME_FORMAT} refs/remotes/origin`),
     ]);
     const remoteSshHostname = remoteUrl && !vcsProviderFromRemoteUrl(remoteUrl) ? await resolveSshHostname(remoteUrl) : null;
-    return { remoteHead, currentBranch, remoteUrl, remoteSshHostname };
+    return { remoteHead, currentBranch, remoteBranches: originBranchNames(remoteRefs), remoteUrl, remoteSshHostname };
   }
 
   private async isGitWorkTree(repoPath: string): Promise<boolean> {

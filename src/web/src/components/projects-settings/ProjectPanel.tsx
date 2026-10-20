@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 
 import type { VcsProvider } from "@shared/constants";
-import { DEFAULT_PROJECT_COLOR, DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS } from "@shared/constants";
+import { DEFAULT_VCS_PROVIDER, VCS_PROVIDERS, VCS_PROVIDER_LABELS, pickProjectColor } from "@shared/constants";
 import type {
   CreateProjectInput,
   ManagedProject,
@@ -25,10 +25,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
 import { ConfirmPopover } from "@/components/ui/confirm";
-import { Input } from "@/components/ui/input";
+import { BranchCombobox, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SettingsFooter } from "@/components/ui/settings";
-import { ValidationConfigFields, validationDraft, validationDraftConfig } from "@/components/projects-settings/ValidationConfigFields";
+import { ValidationConfigFields, validationDraft, validationDraftConfig, type ValidationDraft } from "@/components/projects-settings/ValidationConfigFields";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useGithubAccounts } from "@/hooks/useGithubAccounts";
 import { useSavedFlag } from "@/hooks/useSavedFlash";
@@ -44,6 +44,7 @@ const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 const NO_RUN_SCRIPT_LABEL = "aucune commande";
 const SUMMARY_SEPARATOR = " · ";
 const MACHINE_ACCOUNT_VALUE = "";
+const BASE_BRANCH_INPUT_ID = "project-base-branch";
 
 type CreateStep = "folder" | "form";
 
@@ -105,7 +106,6 @@ export function ProjectPanel({
   const connectionGeneration = useRef(0);
   const [unit, setUnit] = useState<TimeoutUnit>(initialUnit);
   const [timeoutValue, setTimeoutValue] = useState(String(initialTimeoutMs / timeoutUnitMs(initialUnit)));
-  const [color, setColor] = useState(project?.color ?? DEFAULT_PROJECT_COLOR);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [step, setStep] = useState<CreateStep>(project === null ? "folder" : "form");
@@ -116,6 +116,9 @@ export function ProjectPanel({
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [executionOpen, setExecutionOpen] = useState(false);
   const [validation, setValidation] = useState(() => validationDraft(project?.validation));
+  const [validationInspection, setValidationInspection] = useState<RepoInspection | null>(null);
+  const validationInspectionGeneration = useRef(0);
+  const [savedBranches, setSavedBranches] = useState<string[] | null>(null);
   const [sourceMode, setSourceMode] = useState<FolderSourceMode>("local");
   const [githubAccount, setGithubAccount] = useState<string | null>(project?.githubAccount ?? null);
   const [clonedUrl, setClonedUrl] = useState<string | null>(null);
@@ -129,8 +132,6 @@ export function ProjectPanel({
   const valid = isValidDraft(label, repoPath, baseBranch, timeoutValue) && (!validation.enabled || validationConfig !== null);
   const normalizedGroup = group.trim();
   const grouped = normalizedGroup !== "";
-  const inheritedColor = projects.find((managedProject) => managedProject.group?.trim() === normalizedGroup)?.color
-    ?? DEFAULT_PROJECT_COLOR;
   const groupSuggestions = Array.from(
     new Set(projects.flatMap((managedProject) => (managedProject.group ? [managedProject.group] : []))),
   ).sort((left, right) => left.localeCompare(right));
@@ -145,8 +146,7 @@ export function ProjectPanel({
     runScript !== (project.runScript ?? "") ||
     vcsProvider !== project.vcsProvider ||
     githubAccount !== project.githubAccount ||
-    validationDirty ||
-    (!grouped && color !== (project.color ?? DEFAULT_PROJECT_COLOR));
+    validationDirty;
 
   const creating = project === null;
   // Keep the current account selectable even if it is no longer registered (its status shows in Réglages).
@@ -157,21 +157,13 @@ export function ProjectPanel({
   const hint = connectionHint(testing, connection, vcsProvider);
   const inspectionBlocks =
     creating && inspection !== null && (!inspection.isGitRepo || inspection.existingProjectKey !== null);
-  const colorSummary = grouped ? inheritedColor : color;
-  const identityOrigin = [suggestionHint(inspection?.label, label), suggestionHint(inspection?.group, group)]
-    .filter(Boolean).join(SUMMARY_SEPARATOR);
+  const providerUndetected = creating && inspection !== null && inspection.isGitRepo && inspection.vcsProvider === null;
+  const branchOptions = inspection?.branchCandidates ?? savedBranches ?? [];
+  const identityOrigin = suggestionHint(inspection?.group, group);
+  const labelOrigin = suggestionHint(inspection?.label, label);
   const deliveryOrigin = [suggestionHint(inspection?.baseBranch, baseBranch), suggestionHint(inspection?.vcsProvider, vcsProvider)]
     .filter(Boolean).join(SUMMARY_SEPARATOR);
-  const advancedSummary = (
-    <>
-      {[`${timeoutValue} ${unit}`, "couleur"].join(SUMMARY_SEPARATOR)}
-      <span
-        className="h-3 w-3 shrink-0 rounded-sm border border-input"
-        style={{ backgroundColor: colorSummary }}
-        aria-hidden="true"
-      />
-    </>
-  );
+  const advancedSummary = `Délai de préparation ${timeoutValue} ${unit}`;
 
   const clearConnection = (): void => {
     connectionGeneration.current += 1;
@@ -220,11 +212,19 @@ export function ProjectPanel({
     setVcsProvider(provider);
     setRunScript(result.runScript?.value ?? "");
     setGithubAccount(provider === "github" ? account : null);
-    setValidation({ ...validationDraft(undefined), startCommand: result.validationStartCommand?.value ?? "" });
+  };
+
+  const deliveryNeedsReview = (result: RepoInspection): boolean => {
+    if (!result.isGitRepo) return false;
+    const base = result.baseBranch;
+    return result.vcsProvider === null
+      || base?.source !== "remoteHead"
+      || (result.currentBranch !== null && result.currentBranch !== base.value);
   };
 
   const enterForm = (result: RepoInspection, account: string | null): void => {
     applyInspection(result, account);
+    setDeliveryOpen(deliveryNeedsReview(result));
     setStep("form");
     const detected = result.vcsProvider;
     if (result.isGitRepo && detected !== null) {
@@ -271,6 +271,43 @@ export function ProjectPanel({
     }
   };
 
+  const prefillValidationStartCommand = async (current: ManagedProject): Promise<void> => {
+    const generation = ++validationInspectionGeneration.current;
+    try {
+      const result = await api.inspectProject({ repoPath: current.repoPath });
+      if (generation !== validationInspectionGeneration.current) return;
+      setValidationInspection(result);
+      const suggested = result.validationStartCommand?.value;
+      if (suggested === undefined) return;
+      setValidation((draft) => (draft.enabled && draft.startCommand.trim() === "" ? { ...draft, startCommand: suggested } : draft));
+    } catch {
+      return;
+    }
+  };
+
+  const changeValidation = (next: ValidationDraft): void => {
+    const neverConfigured = project !== null && project.validation === undefined;
+    if (neverConfigured && !next.enabled) {
+      validationInspectionGeneration.current += 1;
+      setValidation(validationDraft(undefined));
+      return;
+    }
+    setValidation(next);
+    if (neverConfigured && !validation.enabled && next.enabled && next.startCommand.trim() === "") {
+      void prefillValidationStartCommand(project);
+    }
+  };
+
+  const loadSavedBranches = async (): Promise<void> => {
+    if (project === null || savedBranches !== null) return;
+    setSavedBranches([]);
+    try {
+      setSavedBranches(await api.projectBranches(project.key));
+    } catch {
+      return;
+    }
+  };
+
   const buildPatch = (current: ManagedProject): UpdateProjectInput => {
     const patch: UpdateProjectInput = {};
     if (label !== current.label) patch.label = label.trim();
@@ -280,7 +317,6 @@ export function ProjectPanel({
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
     if (vcsProvider !== current.vcsProvider) patch.vcsProvider = vcsProvider;
     if (runScript !== (current.runScript ?? "")) patch.runScript = runScript.trim() || null;
-    if (!grouped && color !== (current.color ?? DEFAULT_PROJECT_COLOR)) patch.color = color;
     if (validationDirty) patch.validation = validationConfig;
     if (githubAccount !== current.githubAccount) patch.githubAccount = githubAccount;
     return patch;
@@ -295,10 +331,9 @@ export function ProjectPanel({
       vcsProvider,
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
       ...(runScript.trim() !== "" ? { runScript: runScript.trim() } : {}),
-      ...(validationConfig !== null ? { validation: validationConfig } : {}),
       ...(vcsProvider === "github" && githubAccount !== null ? { githubAccount } : {}),
     };
-    if (!grouped) input.color = color;
+    if (!grouped) input.color = pickProjectColor(projects.map((managedProject) => managedProject.color));
     const created = await api.createProject(input);
     await onCreated(created);
   };
@@ -312,7 +347,6 @@ export function ProjectPanel({
     setRunScript(saved.runScript ?? "");
     setVcsProvider(saved.vcsProvider);
     setGithubAccount(saved.githubAccount);
-    setColor(saved.color ?? DEFAULT_PROJECT_COLOR);
     setValidation(validationDraft(saved.validation));
     clearConnection();
     await onSaved();
@@ -396,7 +430,7 @@ export function ProjectPanel({
 
   const advancedFields = (
     <>
-      <Field label="Délai max d'un commit">
+      <Field label="Délai de préparation (setup + installation)">
         <div className="flex w-full items-center gap-2">
           <Input
             type="number"
@@ -419,26 +453,6 @@ export function ProjectPanel({
           </Select>
         </div>
       </Field>
-      <Field label="Couleur">
-        {grouped ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span
-              className="h-6 w-6 shrink-0 rounded border border-input"
-              style={{ backgroundColor: inheritedColor }}
-              aria-hidden="true"
-            />
-            Héritée du groupe « {normalizedGroup} »
-          </div>
-        ) : (
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            className="h-9 w-12 cursor-pointer rounded-md border border-input bg-background"
-            aria-label="Couleur du projet"
-          />
-        )}
-      </Field>
     </>
   );
 
@@ -446,7 +460,14 @@ export function ProjectPanel({
     <div className="space-y-4">
       <div className="rounded-xl border bg-muted/20 p-5">
         {creating && <p className="mb-2 text-xs font-medium text-muted-foreground">Étape 2 sur 2 · Confirmer le projet</p>}
-        <h4 className="text-lg font-semibold">{label || "Nouveau projet"}</h4>
+        <Input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Nom du projet"
+          aria-label="Nom du projet"
+          className="-mx-2 h-auto border-transparent bg-transparent px-2 py-1 text-lg font-semibold shadow-none hover:border-input focus-visible:border-input"
+        />
+        {labelOrigin && <p className="mt-1 text-xs text-muted-foreground">Nom {labelOrigin}</p>}
         <p className="mt-1 break-all text-xs text-muted-foreground">{repoPath}</p>
         <p className="mt-3 text-sm">{VCS_PROVIDER_LABELS[vcsProvider]} · branche {baseBranch || "à renseigner"}</p>
         {creating && <p className="mt-2 text-xs text-muted-foreground">Les valeurs ci-dessous sont proposées depuis le dépôt. Vérifiez-les, puis confirmez l’ajout. Aucune commande de démarrage n’a été exécutée.</p>}
@@ -458,20 +479,17 @@ export function ProjectPanel({
 
       <div className="flex flex-col gap-3">
         <AdvancedSection
-          title="Identité et dossier"
-          open={identityOpen || label.trim() === ""}
+          title="Groupe et dossier"
+          open={identityOpen}
           onToggle={() => setIdentityOpen((open) => !open)}
           summary={
             <div className="space-y-1">
-              <p>{label || "Nom à renseigner"}{normalizedGroup && ` · ${normalizedGroup}`}</p>
+              <p>{normalizedGroup || "Sans groupe"}</p>
               {identityOrigin && <p>{identityOrigin}</p>}
               <p className="break-all">{repoPath}</p>
             </div>
           }
         >
-        <Field label="Nom" hint={suggestionHint(inspection?.label, label)}>
-          <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Nom du projet" />
-        </Field>
         <Field label="Groupe / client" hint={suggestionHint(inspection?.group, group)}>
           <Input
             value={group}
@@ -520,10 +538,23 @@ export function ProjectPanel({
           }
         >
         <Field label="Branche de base" hint={suggestionHint(inspection?.baseBranch, baseBranch)}>
-          <Input value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} placeholder="main" />
+          <div className="w-full" onFocus={() => void loadSavedBranches()}>
+            <BranchCombobox
+              id={BASE_BRANCH_INPUT_ID}
+              value={baseBranch}
+              onChange={setBaseBranch}
+              options={branchOptions}
+              placeholder="main"
+            />
+          </div>
         </Field>
         <Field label="Fournisseur" hint={suggestionHint(inspection?.vcsProvider, vcsProvider)}>
           <div className="flex w-full flex-col items-start gap-1.5">
+            {providerUndetected && (
+              <p role="alert" className="text-xs text-warning">
+                Aucun fournisseur reconnu dans le remote origin : GitHub est proposé par défaut, choisissez le bon fournisseur.
+              </p>
+            )}
             <Select
               value={vcsProvider}
               onChange={(e) => changeVcsProvider(toVcsProvider(e.target.value))}
@@ -596,21 +627,25 @@ export function ProjectPanel({
             <Input value={runScript} onChange={(e) => setRunScript(e.target.value)} placeholder="bun run dev" />
           </Field>
         </AdvancedSection>
-        <AdvancedSection
-          title="Réglages avancés"
-          open={advancedOpen}
-          summary={advancedSummary}
-          onToggle={() => setAdvancedOpen((open) => !open)}
-        >
-          {advancedFields}
-        </AdvancedSection>
-        <ValidationConfigFields
-          value={validation}
-          onChange={setValidation}
-          startCommandHint={suggestionHint(inspection?.validationStartCommand, validation.startCommand)}
-          composeFile={creating ? inspection?.composeFile ?? null : null}
-        />
-        {project !== null && <ProjectPreviewSettings key={project.key} project={project} />}
+        {project !== null && (
+          <>
+            <AdvancedSection
+              title="Réglages avancés"
+              open={advancedOpen}
+              summary={advancedSummary}
+              onToggle={() => setAdvancedOpen((open) => !open)}
+            >
+              {advancedFields}
+            </AdvancedSection>
+            <ValidationConfigFields
+              value={validation}
+              onChange={changeValidation}
+              startCommandHint={suggestionHint(validationInspection?.validationStartCommand, validation.startCommand)}
+              composeFile={validationInspection?.composeFile ?? null}
+            />
+            <ProjectPreviewSettings key={project.key} project={project} />
+          </>
+        )}
       </div>
 
       <SettingsFooter dirty={dirty && !creating} justSaved={savedVisible}>

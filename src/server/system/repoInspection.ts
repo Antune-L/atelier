@@ -14,6 +14,8 @@ export const PACKAGE_MANIFEST_FILE = "package.json";
 export const REPO_NOT_FOUND_MESSAGE = "dossier introuvable";
 export const FALLBACK_BASE_BRANCH = "main";
 const REMOTE_HEAD_PREFIX = "origin/";
+const INTEGRATION_BRANCH_PREFIXES = ["main", "master", "dev", "staging", "preprod"];
+const BRANCH_CANDIDATE_LIMIT = 50;
 const NPM_SCOPE_PATTERN = /^@[^/]+\//;
 const LABEL_WORD_SEPARATOR = /[-_./]+/;
 const LABEL_WORD_JOINER = " ";
@@ -59,6 +61,7 @@ export interface RepoFacts {
   packageManager: ResolvedPackageManager | null;
   remoteHead: string | null;
   currentBranch: string | null;
+  remoteBranches: string[];
   remoteUrl: string | null;
   /** Real hostname behind an SSH host alias of the origin URL (`ssh -G`), when one was resolved. */
   remoteSshHostname: string | null;
@@ -96,10 +99,33 @@ function isGenericManifestName(name: string): boolean {
 }
 
 export function suggestLabel(repoPath: string, manifest: PackageManifest | null): RepoSuggestion | null {
-  const manifestLabel = manifest?.name && !isGenericManifestName(manifest.name) ? formatProjectLabel(manifest.name) : null;
-  if (manifestLabel) return { value: manifestLabel, source: "packageManifest" };
   const folderLabel = formatProjectLabel(basename(repoPath));
-  return folderLabel ? { value: folderLabel, source: "folderName" } : null;
+  if (folderLabel) return { value: folderLabel, source: "folderName" };
+  const manifestLabel = manifest?.name && !isGenericManifestName(manifest.name) ? formatProjectLabel(manifest.name) : null;
+  return manifestLabel ? { value: manifestLabel, source: "packageManifest" } : null;
+}
+
+function startsWithWord(label: string, prefix: string): boolean {
+  const normalizedLabel = label.trim().toLowerCase();
+  const normalizedPrefix = prefix.trim().toLowerCase();
+  return normalizedLabel === normalizedPrefix || normalizedLabel.startsWith(`${normalizedPrefix}${LABEL_WORD_JOINER}`);
+}
+
+export function prefixLabelWithGroup(label: RepoSuggestion | null, group: RepoSuggestion | null): RepoSuggestion | null {
+  if (!label || !group || startsWithWord(label.value, group.value)) return label;
+  return { value: `${group.value}${LABEL_WORD_JOINER}${label.value}`, source: "groupPrefix" };
+}
+
+export function suggestSiblingGroup(siblingGroups: (string | null)[]): RepoSuggestion | null {
+  const [first] = siblingGroups;
+  if (!first || siblingGroups.some((group) => group !== first)) return null;
+  return { value: first, source: "siblingProjects" };
+}
+
+export function withSiblingGroup<T extends Pick<RepoInspection, "isGitRepo" | "label" | "group">>(inspection: T, siblingGroups: (string | null)[]): T {
+  if (!inspection.isGitRepo) return inspection;
+  const group = inspection.group ?? suggestSiblingGroup(siblingGroups);
+  return { ...inspection, group, label: prefixLabelWithGroup(inspection.label, group) };
 }
 
 export function suggestGroup(repoPath: string, knownGroups: string[]): RepoSuggestion | null {
@@ -116,6 +142,22 @@ export function suggestBaseBranch(remoteHead: string | null, currentBranch: stri
   }
   if (currentBranch) return { value: currentBranch, source: "currentBranch" };
   return { value: FALLBACK_BASE_BRANCH, source: "fallback" };
+}
+
+function isIntegrationBranch(branch: string): boolean {
+  const name = branch.toLowerCase();
+  return INTEGRATION_BRANCH_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+export function rankBranchCandidates(baseBranch: string | null, currentBranch: string | null, remoteBranches: string[]): string[] {
+  const current = currentBranch !== null && remoteBranches.includes(currentBranch) ? [currentBranch] : [];
+  const ordered = [
+    ...(baseBranch !== null ? [baseBranch] : []),
+    ...current,
+    ...remoteBranches.filter(isIntegrationBranch),
+    ...remoteBranches,
+  ];
+  return [...new Set(ordered)].slice(0, BRANCH_CANDIDATE_LIMIT);
 }
 
 export function vcsProviderFromRemoteUrl(remoteUrl: string): VcsProvider | null {
@@ -205,6 +247,8 @@ export function buildRepoInspection(facts: RepoFacts): RepoInspectionResult {
       label,
       group: null,
       baseBranch: null,
+      currentBranch: null,
+      branchCandidates: [],
       vcsProvider: null,
       runScript: null,
       validationStartCommand: null,
@@ -212,12 +256,16 @@ export function buildRepoInspection(facts: RepoFacts): RepoInspectionResult {
       composeFile: null,
     };
   }
+  const baseBranch = suggestBaseBranch(facts.remoteHead, facts.currentBranch);
+  const group = suggestGroup(facts.repoPath, facts.knownGroups);
   return {
     repoPath: facts.repoPath,
     isGitRepo: true,
-    label,
-    group: suggestGroup(facts.repoPath, facts.knownGroups),
-    baseBranch: suggestBaseBranch(facts.remoteHead, facts.currentBranch),
+    label: prefixLabelWithGroup(label, group),
+    group,
+    baseBranch,
+    currentBranch: facts.currentBranch,
+    branchCandidates: rankBranchCandidates(baseBranch.value, facts.currentBranch, facts.remoteBranches),
     vcsProvider: suggestVcsProvider(facts.remoteUrl, facts.remoteSshHostname),
     runScript: suggestRunScript(facts.manifest, facts.packageManager),
     validationStartCommand: suggestValidationStartCommand(facts.manifest, facts.packageManager, facts.workspacePackages),

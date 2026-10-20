@@ -29,6 +29,7 @@ import {
   DEFAULT_IMPLEMENTATION_LOT,
   DEFAULT_TRIAGE_LANGUAGE,
   DEFAULT_PROJECT_COLOR,
+  pickProjectColor,
   IMPLEMENT_EFFORT_META_KEY,
   IMPLEMENT_MODEL_META_KEY,
   QUALITY_OWNER_META_KEY,
@@ -2285,6 +2286,12 @@ export class Store {
     return { ...project, color: parsed?.color ?? DEFAULT_PROJECT_COLOR };
   }
 
+  private nextProjectColor(): string {
+    const rows = this.db.query("SELECT color FROM project_groups UNION ALL SELECT color FROM projects WHERE group_name IS NULL").all();
+    const colors = z.array(z.object({ color: z.string().nullable() })).parse(rows);
+    return pickProjectColor(colors.map((row) => row.color));
+  }
+
   setProjectGroupColor(group: string, color: string): boolean {
     return this.transaction(() => {
       const count = this.scalar("SELECT COUNT(*) AS n FROM projects WHERE group_name = ?", group);
@@ -2330,7 +2337,7 @@ export class Store {
       );
     if (data.group?.trim()) {
       this.db.query("INSERT OR IGNORE INTO project_groups (name, color) VALUES (?, ?)")
-        .run(data.group.trim(), data.color ?? DEFAULT_PROJECT_COLOR);
+        .run(data.group.trim(), data.color ?? this.nextProjectColor());
     }
     const project = this.getProjectRow(key);
     if (!project) throw new Error(`createProject: projet ${key} introuvable après insertion`);
@@ -2369,7 +2376,7 @@ export class Store {
     builder.runWhere(this.db, "projects", "key", key);
     if (patch.group?.trim()) {
       this.db.query("INSERT OR IGNORE INTO project_groups (name, color) VALUES (?, ?)")
-        .run(patch.group.trim(), DEFAULT_PROJECT_COLOR);
+        .run(patch.group.trim(), this.nextProjectColor());
     }
     const project = this.getProjectRow(key);
     if (!project) throw new Error(`updateProject: projet ${key} introuvable`);

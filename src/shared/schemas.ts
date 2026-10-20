@@ -662,6 +662,8 @@ export const repoInspectionSchema = z.object({
   label: repoSuggestionSchema.nullable(),
   group: repoSuggestionSchema.nullable(),
   baseBranch: repoSuggestionSchema.nullable(),
+  currentBranch: z.string().nullable(),
+  branchCandidates: z.array(z.string()),
   vcsProvider: vcsProviderSuggestionSchema.nullable(),
   runScript: repoSuggestionSchema.nullable(),
   validationStartCommand: repoSuggestionSchema.nullable(),

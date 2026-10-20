@@ -1,5 +1,5 @@
 import { Loader2, Lock } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { GithubRepoSummary } from "@shared/github";
 import { GITHUB_CLONE_TIMEOUT_MS } from "@shared/github";
@@ -20,6 +20,14 @@ const CLONE_TIMEOUT_SECONDS = GITHUB_CLONE_TIMEOUT_MS / 1000;
 const SCP_LINK_PATTERN = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i;
 const HTTPS_LINK_PATTERN = /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i;
 const SHORTHAND_PATTERN = /^([^/\s:]+)\/([^/\s:]+?)(?:\.git)?$/;
+const AZURE_HOST_MARKERS = ["dev.azure.com", "visualstudio.com"];
+const UNRECOGNIZED_LINK_MESSAGE = "Lien non reconnu : seuls les dépôts github.com sont clonés ici (sinon, utilisez « Dossier local »).";
+const AZURE_LINK_MESSAGE = "Dépôt Azure DevOps : clonez-le sur cette machine, puis choisissez son dossier dans « Dossier local ».";
+
+function isAzureLink(source: string): boolean {
+  const lowered = source.toLowerCase();
+  return AZURE_HOST_MARKERS.some((marker) => lowered.includes(marker));
+}
 
 export function previewCloneUrl(source: string): string | null {
   const trimmed = source.trim();
@@ -50,6 +58,7 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
   const [link, setLink] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [cloning, setCloning] = useState(false);
+  const cloneButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -146,6 +155,7 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
                   onClick={() => {
                     setLink("");
                     setSelected(repo.fullName);
+                    requestAnimationFrame(() => cloneButtonRef.current?.focus());
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-muted disabled:opacity-60",
@@ -169,14 +179,13 @@ export function GithubCloneStep({ disabled, onCloned, onError }: GithubCloneStep
               <p className="text-xs text-muted-foreground">Dépôt à cloner</p>
               <p className="mt-1 break-all font-medium">{source}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {plannedUrl === null
-                  ? "Lien non reconnu : seuls les dépôts github.com sont clonés ici (sinon, utilisez « Dossier local »)."
-                  : <>Clone HTTPS : <code className="break-all">{plannedUrl}</code></>}
+                {plannedUrl !== null && <>Clone HTTPS : <code className="break-all">{plannedUrl}</code></>}
+                {plannedUrl === null && (isAzureLink(source) ? AZURE_LINK_MESSAGE : UNRECOGNIZED_LINK_MESSAGE)}
               </p>
             </>
           )}
         </div>
-        <Button onClick={() => { if (source !== null) void clone(source); }} disabled={locked || source === null} className="self-start">
+        <Button ref={cloneButtonRef} onClick={() => { if (source !== null) void clone(source); }} disabled={locked || source === null} className="self-start">
           {cloning && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
           Cloner ce dépôt
         </Button>

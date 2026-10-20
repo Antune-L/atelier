@@ -53,7 +53,7 @@ export function BranchCombobox({ id, value, onChange, options, placeholder = "Br
 
   const filteredOptions = useMemo(() => {
     const q = value.trim().toLowerCase();
-    if (!q) return options;
+    if (!q || options.some((b) => b.toLowerCase() === q)) return options;
     return options.filter((b) => b.toLowerCase().includes(q));
   }, [options, value]);
 

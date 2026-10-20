@@ -170,6 +170,13 @@ export function ProjectsSettings() {
     );
   };
 
+  const updateProjectColor = async (project: ManagedProject, color: string): Promise<void> => {
+    await mutateOptimistically(
+      (current) => current.map((item) => (item.key === project.key ? { ...item, color } : item)),
+      () => api.updateProject(project.key, { color }),
+    );
+  };
+
   const toggleVisibility = async (project: ManagedProject): Promise<void> => {
     await mutateOptimistically(
       (current) => current.map((item) => (item.key === project.key ? { ...item, hidden: !project.hidden } : item)),
@@ -228,6 +235,7 @@ export function ProjectsSettings() {
           }}
           onToggleVisibility={(project) => void toggleVisibility(project)}
           onGroupColorChange={(group, color) => void updateGroupColor(group, color)}
+          onProjectColorChange={(project, color) => void updateProjectColor(project, color)}
           onGroupMove={(activeKey, overKey) => void persistOrder(moveGroup(allGroups, activeKey, overKey))}
           onProjectMove={(group, activeKey, overKey) =>
             void persistOrder(moveVisibleProject(projects, group, activeKey, overKey))

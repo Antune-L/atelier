@@ -24,6 +24,8 @@ export const INSPECTION_SOURCE_LABELS: Record<RepoInspectionSource, string> = {
   fallback: "valeur par défaut",
   viteScript: "proposée pour Vite, à vérifier",
   remoteOwner: "propriétaire du remote origin",
+  siblingProjects: "projets du même dossier",
+  groupPrefix: "composé du groupe et du nom du dossier",
 };
 
 interface Suggestion<T> {

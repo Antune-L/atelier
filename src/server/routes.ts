@@ -1,5 +1,5 @@
 import { lstat, readdir, realpath, rm } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
@@ -74,6 +74,7 @@ import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
+import { withSiblingGroup } from "./system/repoInspection.ts";
 import type { RepoInspectionContext } from "./system/repoInspection.ts";
 import { githubAccountLabel, GithubAccountError, normalizeGithubLogin } from "./system/github/accountEnv.ts";
 import { CloneConflictError, CloneSourceError, CloneTimeoutError } from "./system/github/clone.ts";
@@ -302,17 +303,21 @@ async function registeredGithubAccount(system: PaneReader, account: string | nul
 /** Same inspection as POST /projects/inspect: suggested fields plus an already-registered project. */
 async function inspectProjectFolder(store: Store, system: PaneReader, repoPath: string): Promise<RepoInspection> {
   const requestedPath = normalizeRepoPath(repoPath);
+  const parentPath = dirname(requestedPath);
   const knownGroups = new Set<string>();
+  const siblingGroups: (string | null)[] = [];
   let existingProjectKey: string | null = null;
   for (const key of store.listProjectKeys()) {
     const row = store.getProjectRow(key);
     if (!row) continue;
     if (row.group) knownGroups.add(row.group);
-    if (existingProjectKey === null && normalizeRepoPath(row.repoPath) === requestedPath) existingProjectKey = key;
+    const rowPath = normalizeRepoPath(row.repoPath);
+    if (existingProjectKey === null && rowPath === requestedPath) existingProjectKey = key;
+    if (rowPath !== requestedPath && dirname(rowPath) === parentPath) siblingGroups.push(row.group ?? null);
   }
   const githubLogins = await system.githubAccounts().logins().catch(() => []);
   const inspection = await system.inspectRepo(repoPath, { knownGroups: [...knownGroups], githubLogins });
-  return { ...inspection, existingProjectKey } satisfies RepoInspection;
+  return { ...withSiblingGroup(inspection, siblingGroups), existingProjectKey } satisfies RepoInspection;
 }
 
 /** HTTP status of a clone/listing failure; the message is always redacted. */

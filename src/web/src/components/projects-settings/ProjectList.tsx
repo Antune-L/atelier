@@ -49,6 +49,7 @@ interface ProjectListProps {
   onSelect: (key: string) => void;
   onToggleVisibility: (project: ManagedProject) => void;
   onGroupColorChange: (group: ListGroup, color: string) => void;
+  onProjectColorChange: (project: ManagedProject, color: string) => void;
   onGroupMove: (activeKey: string, overKey: string) => void;
   onProjectMove: (group: ListGroup, activeKey: string, overKey: string) => void;
 }
@@ -105,6 +106,7 @@ export function ProjectList({
   onSelect,
   onToggleVisibility,
   onGroupColorChange,
+  onProjectColorChange,
   onGroupMove,
   onProjectMove,
 }: ProjectListProps) {
@@ -194,8 +196,10 @@ export function ProjectList({
                             showTimeout={project.commitTimeoutMs !== referenceTimeoutMs}
                             disabled={busy}
                             dragDisabled={dragDisabled}
+                            colorEditable={group.key === UNGROUPED_KEY}
                             onSelect={() => onSelect(project.key)}
                             onToggleVisibility={() => onToggleVisibility(project)}
+                            onColorChange={(color) => onProjectColorChange(project, color)}
                           />
                         ))}
                       </div>
@@ -266,8 +270,10 @@ interface ProjectListRowProps {
   showTimeout: boolean;
   disabled: boolean;
   dragDisabled: boolean;
+  colorEditable: boolean;
   onSelect: () => void;
   onToggleVisibility: () => void;
+  onColorChange: (color: string) => void;
 }
 
 function SortableProjectListRow({
@@ -276,8 +282,10 @@ function SortableProjectListRow({
   showTimeout,
   disabled,
   dragDisabled,
+  colorEditable,
   onSelect,
   onToggleVisibility,
+  onColorChange,
 }: ProjectListRowProps) {
   const sortable = useSortable({ id: projectSortId(project.key), disabled: disabled || dragDisabled });
   const { attributes, listeners, setNodeRef, setActivatorNodeRef } = sortable;
@@ -299,6 +307,17 @@ function SortableProjectListRow({
         >
           <GripVertical className="h-4 w-4" />
         </button>
+        {colorEditable && (
+          <input
+            type="color"
+            value={project.color ?? DEFAULT_PROJECT_COLOR}
+            onChange={(event) => onColorChange(event.target.value)}
+            disabled={disabled}
+            className="h-5 w-5 shrink-0 cursor-pointer rounded border border-input bg-background p-0 disabled:cursor-default"
+            aria-label={`Couleur de ${project.label}`}
+            title={`Couleur de ${project.label}`}
+          />
+        )}
         <button
           type="button"
           onClick={onSelect}
@@ -306,10 +325,12 @@ function SortableProjectListRow({
           disabled={disabled}
           className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left disabled:opacity-60"
         >
-          <span
-            className="h-3 w-3 shrink-0 rounded-sm"
-            style={{ backgroundColor: project.color ?? DEFAULT_PROJECT_COLOR }}
-          />
+          {!colorEditable && (
+            <span
+              className="h-3 w-3 shrink-0 rounded-sm"
+              style={{ backgroundColor: project.color ?? DEFAULT_PROJECT_COLOR }}
+            />
+          )}
           <span className="min-w-0 flex-1 space-y-0.5">
             <span className="block truncate text-sm font-semibold">{project.label}</span>
             <span className="block truncate font-mono text-xs text-muted-foreground" title={project.repoPath}>
@@ -317,7 +338,7 @@ function SortableProjectListRow({
             </span>
             <span className="flex flex-wrap items-center gap-1 pt-0.5">
               <Pill>{project.baseBranch}</Pill>
-              {showTimeout && <Pill>commit {formatCommitTimeout(project.commitTimeoutMs)}</Pill>}
+              {showTimeout && <Pill>préparation {formatCommitTimeout(project.commitTimeoutMs)}</Pill>}
             </span>
           </span>
           <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />

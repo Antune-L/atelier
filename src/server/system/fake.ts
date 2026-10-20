@@ -16,7 +16,7 @@ import { createFakeCoolifyTransport } from "./coolifyClient.ts";
 import { FakeGithubAccountRegistry } from "./github/accounts.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import { plannedClonePath } from "./github/clone.ts";
-import { FALLBACK_BASE_BRANCH, formatProjectLabel, suggestGithubAccount } from "./repoInspection.ts";
+import { FALLBACK_BASE_BRANCH, formatProjectLabel, rankBranchCandidates, suggestGithubAccount } from "./repoInspection.ts";
 import type { RepoInspectionContext } from "./repoInspection.ts";
 import type {
   CodeSnapshot,
@@ -62,6 +62,7 @@ const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
 const FAKE_GITHUB_REPOS = ["Antune-L/atelier", "acme-org/api", "acme-org/web"];
 const FAKE_GITHUB_OWNER = "Antune-L";
+const FAKE_REMOTE_BRANCHES = ["main", "develop", "staging"];
 const FAKE_VALIDATION_START_COMMAND = "bun run dev --port $PORT --host 127.0.0.1 --strictPort";
 const FAKE_SESSION_TEXT = "Session simulée (dry-run) : aucun agent réel n'est lancé dans le bac à sable.";
 const FAKE_CONTEXT_WINDOW = 200_000;
@@ -611,6 +612,8 @@ export class FakeSystemAdapter implements SystemAdapter {
       label: label ? { value: label, source: "folderName" } : null,
       group: null,
       baseBranch: { value: FALLBACK_BASE_BRANCH, source: "remoteHead" },
+      currentBranch: FALLBACK_BASE_BRANCH,
+      branchCandidates: rankBranchCandidates(FALLBACK_BASE_BRANCH, FALLBACK_BASE_BRANCH, FAKE_REMOTE_BRANCHES),
       vcsProvider: { value: "github", source: "remoteUrl" },
       runScript: null,
       validationStartCommand: { value: FAKE_VALIDATION_START_COMMAND, source: "viteScript" },
@@ -621,7 +624,7 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async listBranches(repoPath: string): Promise<string[]> {
     this.log("listBranches", { repoPath });
-    return ["main", "develop", "staging"];
+    return [...FAKE_REMOTE_BRANCHES];
   }
 
   private readonly fakeGithubAccounts = new FakeGithubAccountRegistry();

@@ -1,4 +1,11 @@
 export const DEFAULT_PROJECT_COLOR = "#6366f1";
+export const PROJECT_COLOR_PALETTE = [DEFAULT_PROJECT_COLOR, "#0284c7", "#059669", "#e11d48", "#d97706", "#7c3aed", "#0d9488", "#db2777", "#ea580c", "#65a30d", "#0891b2", "#c026d3"];
+
+export function pickProjectColor(usedColors: (string | null | undefined)[]): string {
+  const used = new Set(usedColors.flatMap((color) => (color ? [color.toLowerCase()] : [])));
+  const free = PROJECT_COLOR_PALETTE.find((color) => !used.has(color.toLowerCase()));
+  return free ?? PROJECT_COLOR_PALETTE[used.size % PROJECT_COLOR_PALETTE.length] ?? DEFAULT_PROJECT_COLOR;
+}
 
 export const COLUMNS = [
   "todo",
@@ -134,7 +141,7 @@ export const VCS_PROVIDER_LABELS: Record<VcsProvider, string> = {
 export const DEFAULT_VCS_PROVIDER: VcsProvider = "github";
 
 /** Where a repo-inspection suggestion came from, so the project form can explain each prefilled field. */
-export const REPO_INSPECTION_SOURCES = ["packageManifest", "folderName", "parentFolder", "remoteHead", "currentBranch", "remoteUrl", "lockfile", "fallback", "viteScript", "remoteOwner"] as const;
+export const REPO_INSPECTION_SOURCES = ["packageManifest", "folderName", "parentFolder", "remoteHead", "currentBranch", "remoteUrl", "lockfile", "fallback", "viteScript", "remoteOwner", "siblingProjects", "groupPrefix"] as const;
 export type RepoInspectionSource = (typeof REPO_INSPECTION_SOURCES)[number];
 
 /** Provider-neutral lifecycle state of a pull request, mapped at the VCS client boundary. */

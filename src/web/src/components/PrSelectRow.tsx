@@ -9,10 +9,11 @@ import { cn } from "@/lib/utils";
 interface PrSelectRowProps {
   pr: OpenPr;
   selected: boolean;
+  activeLabel: string | null;
   onToggle: () => void;
 }
 
-export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
+export function PrSelectRow({ pr, selected, activeLabel, onToggle }: PrSelectRowProps) {
   const needsAttention = isPrNeedsAttention(pr);
   return (
     <div
@@ -46,6 +47,7 @@ export function PrSelectRow({ pr, selected, onToggle }: PrSelectRowProps) {
             <span>· {pr.author}</span>
             {pr.additions !== null && <span className="text-success">+{pr.additions}</span>}
             {pr.deletions !== null && <span className="text-destructive">-{pr.deletions}</span>}
+            {activeLabel !== null && <Badge variant="info">{activeLabel}</Badge>}
             {needsAttention && <Badge variant="warning">À relire</Badge>}
             {pr.reviewStatus === "reviewed" && <Badge variant="secondary">Déjà revue</Badge>}
             {pr.isDraft && <Badge variant="secondary">Draft</Badge>}

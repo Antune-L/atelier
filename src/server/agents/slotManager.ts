@@ -22,7 +22,7 @@ import {
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import { hasUnresolvedImplementation } from "../../shared/implementationPlan.ts";
 import type { QualityGate, QualityIteration, QualityRunStatus } from "../../shared/quality.ts";
-import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
+import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, type ErrorDetailsSource, type Slot, type Ticket, type WorktreeSession } from "../../shared/schemas.ts";
 import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from "../config.ts";
 import type { ProjectConfig } from "../config.ts";
 
@@ -179,6 +179,7 @@ export class SlotManager {
   private readonly autonomousDeliveryStops = new Set<string>();
   private readonly repoMutex: KeyedMutex;
   private readonly queue: string[] = [];
+  private readonly claimedSlots = new Set<number>();
   private readonly deferredDependents = new Set<string>();
   private readonly updatingDependencyBases = new Set<string>();
   private readonly dependencyReconciliation: DependencyReconciliation;
@@ -628,7 +629,7 @@ export class SlotManager {
       return;
     }
     this.assertStartReady(current);
-    const free = reusableSlotId === null ? this.store.findFreeSlot() : this.store.getSlot(reusableSlotId);
+    const free = reusableSlotId === null ? this.findFreeSlot() : this.store.getSlot(reusableSlotId);
     if (!free) {
       if (!this.queue.includes(ticketId)) {
         this.queue.push(ticketId);
@@ -637,7 +638,7 @@ export class SlotManager {
       }
       return;
     }
-    if (free.status !== "free" || free.ticketId !== null || this.store.getWorktreeSession(free.id) !== null) {
+    if (free.status !== "free" || free.ticketId !== null || this.claimedSlots.has(free.id) || this.store.getWorktreeSession(free.id) !== null) {
       this.markWorktreeReuseFailed(ticket, `le slot Atelier ${free.id} vient d'être réservé par une autre session`);
       return;
     }
@@ -704,6 +705,7 @@ export class SlotManager {
       !reusableSlot ||
       reusableSlot.status !== "free" ||
       reusableSlot.ticketId !== null ||
+      this.claimedSlots.has(reusableSlotId) ||
       this.store.getWorktreeSession(reusableSlotId) !== null
     ) {
       throw new Error(`le slot Atelier ${reusableSlotId} vient d'être réservé par une autre session`);
@@ -794,7 +796,7 @@ export class SlotManager {
     if (!ticket || ticket.branch === null || ticket.prUrl === null) return false;
     await this.reconcileDependencies(ticketId);
     this.assertStartReady(this.store.getTicket(ticketId) ?? ticket);
-    const free = this.store.findFreeSlot();
+    const free = this.findFreeSlot();
     if (!free) {
       this.touch(
         this.store.updateTicket(ticketId, {
@@ -845,7 +847,7 @@ export class SlotManager {
     ) {
       return;
     }
-    const free = this.store.findFreeSlot();
+    const free = this.findFreeSlot();
     if (!free) {
       this.touch(
         this.store.updateTicket(ticketId, {
@@ -949,7 +951,7 @@ export class SlotManager {
       log.error("session worktree refusée : projet inconnu", { project: input.project });
       return;
     }
-    const free = this.store.findFreeSlot();
+    const free = this.findFreeSlot();
     if (!free) {
       log.warn("session worktree refusée : aucun slot libre", { project: input.project });
       this.hub.pushNotification("Worktree", "Aucun slot libre — réessaie une fois un slot libéré.");
@@ -1113,7 +1115,13 @@ export class SlotManager {
     }
   }
 
+  private findFreeSlot(): Slot | null {
+    return this.store.listSlots().find((slot) => slot.status === "free" && !this.claimedSlots.has(slot.id)) ?? null;
+  }
+
   private async launchInSlot(slotId: number, ticketId: string, reuseWorktree = false): Promise<void> {
+    // NOTE(ali): the slot is only marked busy after this await, so concurrent starts must see it as claimed.
+    this.claimedSlots.add(slotId);
     try {
       await this.reconcileDependencies(ticketId);
       const current = this.store.getTicket(ticketId);
@@ -1121,6 +1129,8 @@ export class SlotManager {
     } catch (error) {
       this.markUnallocatedLaunchFailed(ticketId, error);
       throw error;
+    } finally {
+      this.claimedSlots.delete(slotId);
     }
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;

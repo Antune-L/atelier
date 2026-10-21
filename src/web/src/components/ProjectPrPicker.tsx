@@ -1,26 +1,43 @@
 import { RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 
-import type { ProjectInfo } from "@shared/schemas";
+import { TERMINAL_COLUMNS } from "@shared/constants";
+import type { ProjectInfo, Ticket } from "@shared/schemas";
 
 import { PrSelectRow } from "@/components/PrSelectRow";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { Button } from "@/components/ui/button";
+import { useBoard } from "@/hooks/useBoard";
 import type { ProjectPanelState } from "@/hooks/useProjectPanel";
 import type { ReviewCountSnapshot } from "@/hooks/useReviewCounts";
+import { ticketPrNumber } from "@/lib/display";
 import { cn } from "@/lib/utils";
+
+type PrTicketKind = Extract<Ticket["kind"], "review" | "clean">;
+
+const ACTIVE_TICKET_LABELS: Record<PrTicketKind, string> = {
+  review: "Review en cours",
+  clean: "Nettoyage en cours",
+};
 
 interface ProjectPrPickerProps {
   projects: ProjectInfo[];
   panel: ProjectPanelState;
   idPrefix: string;
+  ticketKind: PrTicketKind;
   reviewCounts?: ReviewCountSnapshot;
   onRefreshCounts?: () => void;
 }
 
 /** Project selector + open-PR multi-select list, shared by the review and clean PR panels. */
-export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRefreshCounts }: ProjectPrPickerProps) {
+export function ProjectPrPicker({ projects, panel, idPrefix, ticketKind, reviewCounts, onRefreshCounts }: ProjectPrPickerProps) {
   const { project, setProjectChoice, prs, loading, selected, toggle, refresh } = panel;
+  const { tickets } = useBoard();
+  const activePrNumbers = new Set(
+    tickets
+      .filter((ticket) => ticket.kind === ticketKind && ticket.project === project && !TERMINAL_COLUMNS.includes(ticket.column))
+      .map(ticketPrNumber),
+  );
   const selectId = `${idPrefix}-project`;
 
   let list: ReactNode;
@@ -30,7 +47,13 @@ export function ProjectPrPicker({ projects, panel, idPrefix, reviewCounts, onRef
     list = (
       <div className="space-y-1.5">
         {prs.map((pr) => (
-          <PrSelectRow key={pr.number} pr={pr} selected={selected.has(pr.number)} onToggle={() => toggle(pr.number)} />
+          <PrSelectRow
+            key={pr.number}
+            pr={pr}
+            selected={selected.has(pr.number)}
+            activeLabel={activePrNumbers.has(pr.number) ? ACTIVE_TICKET_LABELS[ticketKind] : null}
+            onToggle={() => toggle(pr.number)}
+          />
         ))}
       </div>
     );

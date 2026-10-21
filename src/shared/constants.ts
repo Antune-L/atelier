@@ -47,6 +47,8 @@ export const COLUMN_ORDER: Column[] = [
   "abandoned",
 ];
 
+export const TERMINAL_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
+
 /** Field a sortable column ranks its tickets by; absent columns aren't sortable. */
 export const COLUMN_SORT_FIELD: Partial<
   Record<Column, "createdAt" | "finishedAt">

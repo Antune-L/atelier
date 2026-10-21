@@ -128,6 +128,7 @@ export function ReviewPrPanel({ projects, onClose, notification }: ReviewPrPanel
         projects={projects}
         panel={panel}
         idPrefix="review"
+        ticketKind="review"
         reviewCounts={reviewCounts}
         onRefreshCounts={() => { void refreshReviewCounts(); }}
       />}

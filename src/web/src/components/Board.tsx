@@ -8,7 +8,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, type Column } from "@shared/constants";
+import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, TERMINAL_COLUMNS, type Column } from "@shared/constants";
 import { isDependencyReady } from "@shared/dependencies";
 
 import { BoardColumn } from "@/components/BoardColumn";
@@ -41,7 +41,6 @@ const DRAG_ACTIVATION_DISTANCE = 6;
 const PINNED_DECISIONS_LIMIT = 4;
 
 /** Lanes whose tickets are done with: folded into the right-edge panel until the user opens one. */
-const TERMINAL_COLUMNS: Column[] = ["done", "merged", "reviewed", "answered", "failed", "abandoned"];
 
 const ACTIVE_COLUMNS: Column[] = COLUMN_ORDER.filter((column) => !TERMINAL_COLUMNS.includes(column));
 

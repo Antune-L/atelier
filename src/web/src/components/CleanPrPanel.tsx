@@ -46,7 +46,7 @@ export function CleanPrPanel({ projects, onClose }: CleanPrPanelProps) {
 
   return (
     <div className="space-y-4">
-      <ProjectPrPicker projects={projects} panel={panel} idPrefix="clean" />
+      <ProjectPrPicker projects={projects} panel={panel} idPrefix="clean" ticketKind="clean" />
 
       <div className="space-y-1">
         <Label htmlFor="clean-context" className={FIELD_LABEL_CLASSES}>Contexte de la PR (optionnel)</Label>

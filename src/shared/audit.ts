@@ -106,6 +106,7 @@ export const AUDIT_DAY_MS = 24 * 60 * 60_000;
 const nonEmptyTextSchema = z.string().trim().min(1);
 const timestampSchema = z.number().int().nonnegative();
 const shaSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
+const gitBranchSchema = z.string().trim().regex(/^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)[A-Za-z0-9._/-]+$/, "Nom de branche invalide.");
 const dailyTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
 export const auditProviderSchema = z.enum(ORCHESTRATORS);
@@ -113,7 +114,7 @@ export type AuditProvider = z.infer<typeof auditProviderSchema>;
 
 export const auditProjectSettingsSchema = z.object({
   enabled: z.boolean().default(false),
-  branch: nonEmptyTextSchema.nullable().default(null),
+  branch: gitBranchSchema.nullable().default(null),
   dailyTime: dailyTimeSchema.default(AUDIT_DEFAULT_DAILY_TIME),
   timeZone: nonEmptyTextSchema.default(AUDIT_DEFAULT_TIME_ZONE),
   provider: auditProviderSchema.nullable().default(null),

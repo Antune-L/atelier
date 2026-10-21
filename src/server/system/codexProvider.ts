@@ -55,10 +55,22 @@ import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
-import { QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForRole } from "./sessionRolePolicy.ts";
+import type { AgentSessionRole } from "./agentSession.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 /** Concurrency the feasibility scout runs its per-ticket threads at (independent of implementer lots). */
+
+const ISOLATED_ROLE_INSTRUCTIONS: Partial<Record<AgentSessionRole, string>> = {
+  "quality-validator": QUALITY_VALIDATOR_INSTRUCTIONS,
+  auditor: AUDITOR_INSTRUCTIONS,
+};
+
+function isolatedThreadOptions(role: AgentSessionRole | undefined): { ephemeral?: true; developerInstructions?: string } {
+  const instructions = role === undefined ? undefined : ISOLATED_ROLE_INSTRUCTIONS[role];
+  return instructions === undefined ? {} : { ephemeral: true, developerInstructions: instructions };
+}
+
 const FEASIBILITY_MAX_CONCURRENT_THREADS = 4;
 const GRACEFUL_CLOSE_TIMEOUT_MS = 60_000;
 const FORCE_CLOSE_GRACE_MS = 2_000;
@@ -536,7 +548,7 @@ try {
   const scoutTypes = Object.entries(options.agents ?? {})
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
-  const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility");
+  const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility" || options.role === "auditor");
   writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator", options.cwd), {
     encoding: "utf8",
     mode: 0o600,
@@ -651,7 +663,7 @@ function threadConfig(
 ): ConfigObject {
   const config: ConfigObject = {
     allow_login_shell: false,
-    web_search: options.role === "quality-validator" ? "disabled" : "live",
+    web_search: options.role === "quality-validator" || options.role === "auditor" ? "disabled" : "live",
     sandbox_workspace_write: {
       network_access: options.readOnly !== true,
       ...(gitWritableRoots.length > 0 ? { writable_roots: gitWritableRoots } : {}),
@@ -859,7 +871,7 @@ function createCodexAgentSession(
     if (item.type === "commandExecution") {
       if (!completed) emit({ type: "tool_use", name: "command_execution", input: { command: item.command }, toolCallId: item.id });
       if (completed) {
-        const noMatches = options.role === "quality-validator" && item.exitCode === 1
+        const noMatches = (options.role === "quality-validator" || options.role === "auditor") && item.exitCode === 1
           && isCodexReadOnlyRgNoMatchCommand(item.command, options.cwd);
         const finished = item.status === "completed" || noMatches && item.status === "failed";
         const output = [`Command: ${item.command}`, `Exit code: ${item.exitCode ?? "unknown"}`, noMatches ? CODEX_NO_MATCHES_OBSERVATION : "", item.aggregatedOutput ?? ""].filter(Boolean).join("\n");
@@ -1323,10 +1335,7 @@ function createCodexAgentSession(
               sandbox: options.readOnly ? "read-only" : "workspace-write",
               config,
               threadSource: "appServer",
-              ...(options.role === "quality-validator" ? {
-                ephemeral: true,
-                developerInstructions: QUALITY_VALIDATOR_INSTRUCTIONS,
-              } : {}),
+              ...isolatedThreadOptions(options.role),
             },
             threadResponseSchema,
           );

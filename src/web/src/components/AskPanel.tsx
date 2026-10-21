@@ -17,17 +17,20 @@ import { resolveProjectChoice } from "@/lib/projectSelection";
 interface AskPanelProps {
   projects: ProjectInfo[];
   onClose: () => void;
+  /** Prefill from another surface (e.g. an audit finding). */
+  initialProject?: string;
+  initialQuestion?: string;
 }
 
 /**
  * "Ask" mode: pose a read-only question about a project. The agent (chosen model + reasoning
  * effort) explores the worktree and answers as a comment — no branch, no PR. Launches immediately.
  */
-export function AskPanel({ projects, onClose }: AskPanelProps) {
+export function AskPanel({ projects, onClose, initialProject, initialQuestion = "" }: AskPanelProps) {
   const capabilities = useCapabilities();
-  const [projectChoice, setProjectChoice] = useState<string | null>(null);
+  const [projectChoice, setProjectChoice] = useState<string | null>(initialProject ?? null);
   const project = resolveProjectChoice(projects, projectChoice);
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialQuestion);
   // null = follow the server default; resolve it so the matching tab is highlighted.
   const [model, setModel] = useState<AgentModel | null>(null);
   const [effort, setEffort] = useState<AgentEffort | null>(null);

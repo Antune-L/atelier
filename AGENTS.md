@@ -85,6 +85,8 @@ src/server/
     coordinator.ts  routes the worker tools + turn-end auto-nudge → stalled escalation + usage
     contract.ts     builds the pipeline contract injected as the first user turn
     triage.ts / watchdog.ts
+    auditManager.ts daily per-project commit audit (wall-clock scheduler, idle gate, cards from findings)
+    audit/          audit engine: read-only `auditor` sessions per chunk × lens, citation check, adversarial verifiers
 src/web/         React + Vite + Tailwind + dnd-kit board
 templates/       run_composer.sh (the Cursor headless driver)
 ```

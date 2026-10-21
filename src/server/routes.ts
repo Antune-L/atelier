@@ -90,6 +90,8 @@ import { PrdRenderError, renderPrdHtml } from "./prd/renderPrdHtml.ts";
 import { saveUpload } from "./uploads.ts";
 import { createQualityRoutes } from "./qualityRoutes.ts";
 import { createPreviewRoutes } from "./previewRoutes.ts";
+import { createAuditRoutes } from "./auditRoutes.ts";
+import type { AuditManager } from "./agents/auditManager.ts";
 import type { PreviewManager } from "./previewManager.ts";
 import {
   autonomousOptionsError,
@@ -134,6 +136,7 @@ interface PaneReader {
 
 interface RouteDeps {
   previews?: PreviewManager;
+  audits?: AuditManager;
   quality?: QualityManager;
   qualityArtifactDirectory?: string;
   store: Store;
@@ -973,6 +976,7 @@ export function createApiRoutes(deps: RouteDeps) {
 
   return new Elysia({ prefix: "/api" })
     .use(deps.previews ? createPreviewRoutes({ previews: deps.previews }) : new Elysia())
+    .use(deps.audits ? createAuditRoutes({ audits: deps.audits }) : new Elysia())
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.

@@ -44,6 +44,8 @@ import { hasUnresolvedImplementation, implementationPlanSchema } from "../../sha
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
+import { AUDIT_ACTIVE_RUN_STATUSES, AUDIT_DAY_MS, AUDIT_OBSERVATION_DAYS, auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema, auditRunSchema, updateAuditProjectSettingsSchema } from "../../shared/audit.ts";
+import type { AuditFinding, AuditProjectSettings, AuditProjectState, AuditRun, UpdateAuditProjectSettingsInput } from "../../shared/audit.ts";
 import { createPreviewSchema, previewProjectSettingsSchema, previewRecordSchema, updatePreviewProjectSettingsSchema, updatePreviewSchema } from "../../shared/preview.ts";
 import type { CreatePreviewInput, PreviewProjectSettings, PreviewRecord, UpdatePreviewInput, UpdatePreviewProjectSettingsInput } from "../../shared/preview.ts";
 import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewKind } from "../../shared/protocol.ts";
@@ -60,7 +62,7 @@ import type { ProjectConfig, ProjectKey } from "../config.ts";
 import { createLogger } from "../logger.ts";
 
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
-import { mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -1747,6 +1749,9 @@ export class Store {
       this.resetImplementationQueue(ticketId);
       this.db.query("DELETE FROM comments WHERE ticket_id = ?").run(ticketId);
       this.db.query("DELETE FROM events WHERE ticket_id = ?").run(ticketId);
+      for (const { finding } of this.db.query("SELECT * FROM audit_findings WHERE ticket_id = ?").all(ticketId).map(mapAuditFindingRow)) {
+        this.saveAuditFinding({ ...finding, ticketId: null, updatedAt: Date.now() });
+      }
       this.db.query("DELETE FROM tickets WHERE id = ?").run(ticketId);
       for (const notification of this.db.query("SELECT payload FROM pr_notifications").all().map(mapPrNotificationRow)) {
         if (notification.ticketId === ticketId) this.savePrNotification({ ...notification, ticketId: null });
@@ -2388,6 +2393,7 @@ export class Store {
     if (!project) throw new Error(`updateProject: projet ${key} introuvable`);
     if (previous?.repoPath !== project.repoPath || previous.vcsProvider !== project.vcsProvider || previous.githubAccount !== project.githubAccount) {
       this.db.query("DELETE FROM pr_notification_sync WHERE project = ?").run(key);
+      this.resetAuditCursor(key);
     }
     return project;
   }
@@ -2697,6 +2703,191 @@ export class Store {
       this.db.query("INSERT OR REPLACE INTO preview_project_settings (project, payload_json) VALUES (?, ?)").run(project, JSON.stringify(settings));
       return settings;
     });
+  }
+
+  // ---- Daily audit ----
+
+  getAuditProjectSettings(project: string): AuditProjectSettings {
+    const row = this.db.query("SELECT * FROM audit_project_settings WHERE project = ?").get(project);
+    return row ? mapAuditProjectSettingsRow(row) : auditProjectSettingsSchema.parse({});
+  }
+
+  updateAuditProjectSettings(project: string, input: UpdateAuditProjectSettingsInput, now = Date.now()): AuditProjectSettings {
+    return this.transaction(() => {
+      if (!this.getProjectRow(project)) throw new Error("projet de l'audit introuvable");
+      const previous = this.getAuditProjectSettings(project);
+      const settings = auditProjectSettingsSchema.parse({ ...previous, ...updateAuditProjectSettingsSchema.parse(input) });
+      this.db.query("INSERT OR REPLACE INTO audit_project_settings (project, payload_json) VALUES (?, ?)").run(project, JSON.stringify(settings));
+      if (previous.branch !== settings.branch) this.resetAuditCursor(project);
+      if (!previous.enabled && settings.enabled && this.getAuditProjectState(project).enabledAt === null) {
+        this.updateAuditProjectState(project, { enabledAt: now, observationUntil: now + AUDIT_OBSERVATION_DAYS * AUDIT_DAY_MS });
+      }
+      return settings;
+    });
+  }
+
+  getAuditProjectState(project: string): AuditProjectState {
+    const row = this.db.query("SELECT * FROM audit_project_state WHERE project = ?").get(project);
+    if (row) return mapAuditProjectStateRow(row);
+    return auditProjectStateSchema.parse({ project, lastSha: null, lastBranch: null, lastScheduledDate: null, enabledAt: null, observationUntil: null });
+  }
+
+  updateAuditProjectState(project: string, patch: Partial<Omit<AuditProjectState, "project">>): AuditProjectState {
+    const state = auditProjectStateSchema.parse({ ...this.getAuditProjectState(project), ...patch, project });
+    this.db
+      .query("INSERT OR REPLACE INTO audit_project_state (project, last_sha, last_branch, last_scheduled_date, enabled_at, observation_until) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(project, state.lastSha, state.lastBranch, state.lastScheduledDate, state.enabledAt, state.observationUntil);
+    return state;
+  }
+
+  resetAuditCursor(project: string): void {
+    this.db.query("UPDATE audit_project_state SET last_sha = NULL, last_branch = NULL WHERE project = ?").run(project);
+  }
+
+  saveAuditRun(run: AuditRun): AuditRun {
+    const parsed = auditRunSchema.parse(run);
+    this.db
+      .query("INSERT OR REPLACE INTO audit_runs (id, project, status, started_at, payload_json) VALUES (?, ?, ?, ?, ?)")
+      .run(parsed.id, parsed.project, parsed.status, parsed.startedAt, JSON.stringify(parsed));
+    return parsed;
+  }
+
+  updateAuditRun(id: string, patch: Partial<Omit<AuditRun, "id" | "project">>): AuditRun {
+    return this.transaction(() => {
+      const current = this.getAuditRun(id);
+      if (!current) throw new Error(`audit ${id} introuvable`);
+      return this.saveAuditRun({ ...current, ...patch });
+    });
+  }
+
+  getAuditRun(id: string): AuditRun | null {
+    const row = this.db.query("SELECT * FROM audit_runs WHERE id = ?").get(id);
+    return row ? mapAuditRunRow(row) : null;
+  }
+
+  listAuditRuns(options: { project?: string; limit: number }): AuditRun[] {
+    if (options.project === undefined) {
+      return this.db.query("SELECT * FROM audit_runs ORDER BY started_at DESC, rowid DESC LIMIT ?").all(options.limit).map(mapAuditRunRow);
+    }
+    return this.db
+      .query("SELECT * FROM audit_runs WHERE project = ? ORDER BY started_at DESC, rowid DESC LIMIT ?")
+      .all(options.project, options.limit)
+      .map(mapAuditRunRow);
+  }
+
+  listActiveAuditRuns(): AuditRun[] {
+    const placeholders = AUDIT_ACTIVE_RUN_STATUSES.map(() => "?").join(", ");
+    return this.db
+      .query(`SELECT * FROM audit_runs WHERE status IN (${placeholders}) ORDER BY started_at ASC, rowid ASC`)
+      .all(...AUDIT_ACTIVE_RUN_STATUSES)
+      .map(mapAuditRunRow);
+  }
+
+  interruptActiveAuditRuns(reason: string, now = Date.now()): number {
+    return this.transaction(() => {
+      const runs = this.listActiveAuditRuns();
+      for (const run of runs) this.saveAuditRun({ ...run, status: "interrupted", progress: null, error: reason, finishedAt: now });
+      return runs.length;
+    });
+  }
+
+  pruneAuditRuns(project: string, keep: number): void {
+    this.transaction(() => {
+      const placeholders = AUDIT_ACTIVE_RUN_STATUSES.map(() => "?").join(", ");
+      this.db
+        .query(`DELETE FROM audit_runs WHERE project = ? AND status NOT IN (${placeholders}) AND id NOT IN (
+          SELECT id FROM audit_runs WHERE project = ? ORDER BY started_at DESC, rowid DESC LIMIT ?
+        )`)
+        .run(project, ...AUDIT_ACTIVE_RUN_STATUSES, project, keep);
+      this.db
+        .query(`DELETE FROM audit_findings WHERE project = ? AND has_decision = 0 AND ticket_id IS NULL
+          AND last_run_id NOT IN (SELECT id FROM audit_runs WHERE project = ?)`)
+        .run(project, project);
+    });
+  }
+
+  saveAuditFinding(finding: AuditFinding, cardGeneration?: number): AuditFinding {
+    const parsed = auditFindingSchema.parse(finding);
+    const generation = cardGeneration ?? this.getAuditFindingCardGeneration(parsed.id);
+    this.db
+      .query(`INSERT OR REPLACE INTO audit_findings
+        (id, project, fingerprint, first_run_id, last_run_id, ticket_id, has_decision, card_generation, payload_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(
+        parsed.id,
+        parsed.project,
+        parsed.fingerprint,
+        parsed.firstRunId,
+        parsed.lastRunId,
+        parsed.ticketId,
+        parsed.decision === null ? 0 : 1,
+        generation,
+        JSON.stringify(parsed),
+        parsed.createdAt,
+        parsed.updatedAt,
+      );
+    return parsed;
+  }
+
+  getAuditFinding(id: string): AuditFinding | null {
+    const row = this.db.query("SELECT * FROM audit_findings WHERE id = ?").get(id);
+    return row ? mapAuditFindingRow(row).finding : null;
+  }
+
+  getAuditFindingCardGeneration(id: string): number {
+    const row = this.db.query("SELECT * FROM audit_findings WHERE id = ?").get(id);
+    return row ? mapAuditFindingRow(row).cardGeneration : 0;
+  }
+
+  getAuditFindingByFingerprint(project: string, fingerprint: string): AuditFinding | null {
+    const row = this.db.query("SELECT * FROM audit_findings WHERE project = ? AND fingerprint = ?").get(project, fingerprint);
+    return row ? mapAuditFindingRow(row).finding : null;
+  }
+
+  listAuditFindings(project: string): AuditFinding[] {
+    return this.db
+      .query("SELECT * FROM audit_findings WHERE project = ? ORDER BY created_at ASC, rowid ASC")
+      .all(project)
+      .map((row) => mapAuditFindingRow(row).finding);
+  }
+
+  listAuditFindingsForRun(runId: string): AuditFinding[] {
+    return this.db
+      .query("SELECT * FROM audit_findings WHERE first_run_id = ? OR last_run_id = ? ORDER BY created_at ASC, rowid ASC")
+      .all(runId, runId)
+      .map((row) => mapAuditFindingRow(row).finding);
+  }
+
+  listAuditFindingsWithTicket(): AuditFinding[] {
+    return this.db
+      .query("SELECT * FROM audit_findings WHERE ticket_id IS NOT NULL ORDER BY created_at ASC, rowid ASC")
+      .all()
+      .map((row) => mapAuditFindingRow(row).finding);
+  }
+
+  clearAuditRecheckFlags(): number {
+    return this.transaction(() => {
+      const findings = this.db.query("SELECT * FROM audit_findings").all().map((row) => mapAuditFindingRow(row).finding).filter((finding) => finding.recheckRunning);
+      for (const finding of findings) this.saveAuditFinding({ ...finding, recheckRunning: false });
+      return findings.length;
+    });
+  }
+
+  countAuditSessionsSince(since: number, excludedOwnerIds: readonly string[] = []): number {
+    const excluded = excludedOwnerIds.length === 0 ? "" : ` AND owner_id NOT IN (${excludedOwnerIds.map(() => "?").join(", ")})`;
+    return this.scalar(`SELECT COUNT(*) AS n FROM execution_runs WHERE owner_type = 'audit' AND started_at >= ?${excluded}`, since, ...excludedOwnerIds);
+  }
+
+  countPendingAuditTriage(project: string): number {
+    return this.scalar(
+      `SELECT COUNT(*) AS n FROM audit_findings WHERE project = ? AND has_decision = 0 AND ticket_id IS NULL
+        AND json_extract(payload_json, '$.reviewState') IN ('confirmed', 'contested')`,
+      project,
+    );
+  }
+
+  countRunningCardExecutions(): number {
+    return this.scalar("SELECT COUNT(*) AS n FROM execution_runs WHERE status = 'running' AND owner_type IN ('ticket', 'action', 'batch')");
   }
 
   // ---- App settings (global, stored in the `meta` table) ----

@@ -1,10 +1,12 @@
 import { ChevronDown, Cloud, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import type { AuditTicketOrigin } from "@shared/audit";
 import type { Ticket } from "@shared/schemas";
 
 import { AgentsView } from "@/components/AgentsView";
 import { AtelierView } from "@/components/atelier/AtelierView";
+import { AuditsView } from "@/components/audits/AuditsView";
 import { AutomationView } from "@/components/AutomationView";
 import { Board } from "@/components/Board";
 import { NotificationCenter } from "@/components/NotificationCenter";
@@ -37,7 +39,8 @@ import { useProjects, useProjectsLoaded } from "@/hooks/useProjects";
 import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
 import { api } from "@/lib/api";
 import type { AtelierSeed, AtelierTarget } from "@/lib/atelier";
-import { boardStore } from "@/lib/store";
+import { auditsNeedAttention } from "@/lib/auditDisplay";
+import { boardStore, type AuditTarget } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
 
@@ -65,9 +68,10 @@ export function App() {
   const selectableProjects = projects.filter((project) => !project.hidden);
   const projectsLoaded = useProjectsLoaded();
   const showOnboarding = projectsLoaded && projects.length === 0;
-  const { slots, openTicketId, conversations } = useBoard();
-  // Global icon badge: ignores the project filter.
+  const { slots, openTicketId, conversations, audits, auditTarget: requestedAuditTarget } = useBoard();
+  // Global icon badges: ignore the project filter.
   const atelierUnread = conversations.some((c) => c.unread);
+  const auditsAlert = auditsNeedAttention(audits);
   const [view, setView] = useState<SidebarView>("home");
   const [homeView, setHomeView] = useState<HomeView>("kanban");
   const [filter, setFilter] = useState("all");
@@ -80,7 +84,18 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [atelierTarget, setAtelierTarget] = useState<AtelierTarget | null>(null);
+  const [auditTarget, setAuditTarget] = useState<AuditTarget | null>(null);
+  const [appliedAuditRequest, setAppliedAuditRequest] = useState<AuditTarget | null>(requestedAuditTarget);
   const { canUpdate } = useCapabilities();
+
+  if (requestedAuditTarget !== appliedAuditRequest) {
+    setAppliedAuditRequest(requestedAuditTarget);
+    if (requestedAuditTarget !== null) {
+      setAuditTarget(requestedAuditTarget);
+      setView("audits");
+      setSettingsOpen(false);
+    }
+  }
 
   const { tickets } = useBoard();
   const [fetchedTicket, setFetchedTicket] = useState<Ticket | null>(null);
@@ -126,6 +141,7 @@ export function App() {
 
   const selectView = (next: SidebarView): void => {
     setAtelierTarget(null);
+    setAuditTarget(null);
     setView(next);
   };
 
@@ -142,6 +158,10 @@ export function App() {
   const openPrdOrigin = (prdId: string, project: string): void => {
     boardStore.closeTicket();
     openAtelier({ kind: "prd", prdId, project });
+  };
+
+  const openAuditOrigin = (origin: AuditTicketOrigin): void => {
+    boardStore.openAudits({ project: origin.project, runId: origin.runId, findingId: origin.findingId });
   };
 
   const projectFilterSelect = (
@@ -187,6 +207,7 @@ export function App() {
   const renderView = (): ReactNode => {
     if (view === "stats") return <StatsView projects={projects} />;
     if (view === "automation") return <AutomationView />;
+    if (view === "audits") return <AuditsView projects={projects} target={auditTarget} />;
     if (view === "atelier") {
       return <AtelierView projects={selectableProjects} projectFilter={effectiveFilter} target={atelierTarget} />;
     }
@@ -198,7 +219,7 @@ export function App() {
       <Sidebar
         view={view}
         onSelect={selectView}
-        badges={{ atelier: atelierUnread }}
+        badges={{ atelier: atelierUnread, audits: auditsAlert }}
         onOpenSettings={() => setSettingsOpen(true)}
         onUpdate={handleUpdate}
         updating={updating}
@@ -320,6 +341,7 @@ export function App() {
         projects={projects}
         onClose={() => boardStore.closeTicket()}
         onOpenPrdOrigin={openPrdOrigin}
+        onOpenAuditOrigin={openAuditOrigin}
       />
       <Toaster />
 

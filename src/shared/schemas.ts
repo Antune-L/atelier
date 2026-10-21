@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { auditOverviewSchema, EMPTY_AUDIT_OVERVIEW } from "./audit.ts";
 
 import { dependencyLaunchSchema, dependencyPrObservationSchema, dependencyStatusSchema } from "./dependencyLaunch.ts";
 
@@ -65,7 +66,7 @@ export type SessionUsage = z.infer<typeof sessionUsageSchema>;
 
 // ---- Effective execution history ----
 
-export const executionOwnerTypeSchema = z.enum(["ticket", "action", "batch", "conversation"]);
+export const executionOwnerTypeSchema = z.enum(["ticket", "action", "batch", "conversation", "audit"]);
 export const executionStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
 
 export const executionModelUsageSchema = z.object({
@@ -1299,7 +1300,9 @@ export const wsClientEventSchema = z.discriminatedUnion("type", [
     conversations: z.array(conversationSchema),
     prNotifications: z.array(prNotificationSchema).default([]),
     prNotificationSync: z.array(prNotificationSyncStatusSchema).default([]),
+    audits: auditOverviewSchema.default(EMPTY_AUDIT_OVERVIEW),
   }),
+  z.object({ type: z.literal("audits"), audits: auditOverviewSchema }),
   z.object({ type: z.literal("pr_notifications"), notifications: z.array(prNotificationSchema), sync: z.array(prNotificationSyncStatusSchema) }),
   z.object({ type: z.literal("ticket"), ticket: ticketSchema }),
   z.object({ type: z.literal("automations"), automations: z.array(automationSchema) }),

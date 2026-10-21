@@ -4,13 +4,14 @@ import {
   MessageSquare,
   RefreshCw,
   Settings,
+  ShieldCheck,
   Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-export type SidebarView = "home" | "atelier" | "stats" | "automation";
+export type SidebarView = "home" | "atelier" | "stats" | "audits" | "automation";
 
 interface SidebarProps {
   view: SidebarView;
@@ -33,8 +34,14 @@ const NAV_ENTRIES: NavEntry[] = [
   { value: "home", label: "Tableau", Icon: LayoutGrid },
   { value: "atelier", label: "Atelier", Icon: MessageSquare },
   { value: "stats", label: "Statistiques", Icon: BarChart3 },
+  { value: "audits", label: "Audits", Icon: ShieldCheck },
   { value: "automation", label: "Automatisations", Icon: Zap },
 ];
+
+const BADGE_TITLES: Partial<Record<SidebarView, string>> = {
+  atelier: "nouvelles réponses",
+  audits: "constats à trier",
+};
 
 const ITEM_BASE =
   "flex h-9 w-9 items-center justify-center gap-2 rounded-md transition-colors xl:w-full xl:justify-start xl:px-3";
@@ -43,7 +50,7 @@ const ITEM_INACTIVE =
 const ITEM_ACTIVE =
   "bg-accent text-foreground shadow-[inset_2px_0_0_hsl(var(--info))]";
 
-/** Permanent icon rail: Home / Atelier / Stats / Automation, Settings pinned at the bottom. */
+/** Permanent icon rail: Home / Atelier / Stats / Audits / Automation, Settings pinned at the bottom. */
 export function Sidebar({
   view,
   onSelect,
@@ -60,7 +67,8 @@ export function Sidebar({
       </span>
       {NAV_ENTRIES.map(({ value, label, Icon }) => {
         const badged = badges[value] === true;
-        const title = badged ? `${label} — nouvelles réponses` : label;
+        const badgeTitle = BADGE_TITLES[value];
+        const title = badged && badgeTitle !== undefined ? `${label} — ${badgeTitle}` : label;
         return (
           <button
             key={value}

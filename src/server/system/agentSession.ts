@@ -40,7 +40,8 @@ export type AgentSessionRole =
   | "reviewer"
   | "quality-validator"
   | "one-shot"
-  | "atelier";
+  | "atelier"
+  | "auditor";
 
 export interface AgentStreamBlock {
   itemId: string;

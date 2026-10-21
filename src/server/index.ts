@@ -22,6 +22,7 @@ import { AutonomousWorkflow } from "./agents/autonomousWorkflow.ts";
 import { createAutonomousSessionGuard } from "./agents/autonomousSessionGuard.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
+import { AuditManager } from "./agents/auditManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
@@ -336,6 +337,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   );
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
+  const auditManager = new AuditManager({ store, system, hub: clientHub, notifier, repoMutex, ticketOperations, slots: slotManager });
   const previewManager = new PreviewManager({
     store,
     config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),
@@ -425,6 +427,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     reformulate: reformulateManager,
     feasibilityAnswers: feasibilityAnswerManager,
     automations: automationManager,
+    audits: auditManager,
     projectRoot: dataRoot,
     resourcesRoot,
     composerAvailable,
@@ -540,6 +543,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   }
 
   store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
+  auditManager.start();
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
@@ -552,6 +556,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       publicMcpManager?.setToken(token);
     },
     async teardownSessions() {
+      auditManager.stop();
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
       await slotManager.drainAutonomousPublications();
@@ -572,6 +577,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       watchdog.stop();
       atelierManager.stop();
       automationManager.stop();
+      auditManager.stop();
       await server.stop(true);
       if (uiServer !== null) await uiServer.stop(true);
       if (socketPath !== null) rmSync(socketPath, { force: true });

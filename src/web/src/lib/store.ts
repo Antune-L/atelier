@@ -12,6 +12,8 @@ import type {
   WsClientEvent,
 } from "@shared/schemas";
 import { wsClientEventSchema } from "@shared/schemas";
+import { EMPTY_AUDIT_OVERVIEW } from "@shared/audit";
+import type { AuditOverview } from "@shared/audit";
 
 import {
   ensureNotificationPermission,
@@ -32,6 +34,13 @@ export interface Toast {
   ticketId?: string;
 }
 
+/** A request from another surface (ticket detail, project settings) to open the Audits view. */
+export interface AuditTarget {
+  project: string | null;
+  runId: string | null;
+  findingId: string | null;
+}
+
 export interface BoardState {
   tickets: Ticket[];
   slots: Slot[];
@@ -40,6 +49,8 @@ export interface BoardState {
   conversations: Conversation[];
   prNotifications: PrNotification[];
   prNotificationSync: PrNotificationSyncStatus[];
+  audits: AuditOverview;
+  auditTarget: AuditTarget | null;
   soundEnabled: boolean;
   notificationCenterOpen: boolean;
   connected: boolean;
@@ -61,6 +72,8 @@ class BoardStore {
     conversations: [],
     prNotifications: [],
     prNotificationSync: [],
+    audits: EMPTY_AUDIT_OVERVIEW,
+    auditTarget: null,
     soundEnabled: getStoredSoundEnabled(),
     notificationCenterOpen: false,
     connected: false,
@@ -138,7 +151,11 @@ class BoardStore {
           conversations: event.conversations,
           prNotifications: event.prNotifications,
           prNotificationSync: event.prNotificationSync,
+          audits: event.audits,
         });
+        break;
+      case "audits":
+        this.set({ audits: event.audits });
         break;
       case "pr_notifications":
         this.set({ prNotifications: event.notifications, prNotificationSync: event.sync });
@@ -232,6 +249,11 @@ class BoardStore {
   /** The currently open ticket detail; lives here since notifications can request opening a ticket. */
   openTicket(ticketId: string): void {
     this.set({ openTicketId: ticketId });
+  }
+
+  /** Opens the Audits view, optionally on a project, a run and a highlighted finding. */
+  openAudits(target: AuditTarget): void {
+    this.set({ auditTarget: target, openTicketId: null });
   }
 
   setSoundEnabled(enabled: boolean): void {

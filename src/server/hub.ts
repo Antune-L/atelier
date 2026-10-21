@@ -1,8 +1,13 @@
 import type { ServerWebSocket } from "bun";
 
+import { EMPTY_AUDIT_OVERVIEW } from "../shared/audit.ts";
+import type { AuditOverview } from "../shared/audit.ts";
 import type { Automation, NotificationSoundKind, Comment, Conversation, ConversationMessage, PrdDocumentRecord, Slot, Ticket, WorktreeSession, WsClientEvent } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
+import { createLogger } from "./logger.ts";
+
+const log = createLogger("hub");
 
 interface ClientSocketData {
   kind: "client";
@@ -10,12 +15,18 @@ interface ClientSocketData {
 
 export type ClientSocket = ServerWebSocket<ClientSocketData>;
 
+const AUDIT_PUSH_THROTTLE_MS = 2_000;
+
 /**
  * Broadcasts state mutations to all connected UI clients. The UI never polls;
  * every mutation flows through here.
  */
 export class ClientHub {
   private readonly clients = new Set<ClientSocket>();
+  private auditOverviewSource: () => AuditOverview = () => EMPTY_AUDIT_OVERVIEW;
+  private lastAuditPushAt = 0;
+  private auditPushPending = false;
+  private auditPushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly store: Store) {}
 
@@ -38,8 +49,18 @@ export class ClientHub {
       conversations: this.store.listConversations(),
       prNotifications: this.store.listPrNotifications(),
       prNotificationSync: this.store.listPrNotificationSync(),
+      audits: this.safeAuditOverview(),
     };
     ws.send(JSON.stringify(event));
+  }
+
+  private safeAuditOverview(): AuditOverview {
+    try {
+      return this.auditOverviewSource();
+    } catch (error) {
+      log.warn("aperçu des audits indisponible pour le snapshot", { error: error instanceof Error ? error.message : String(error) });
+      return EMPTY_AUDIT_OVERVIEW;
+    }
   }
 
   private broadcast(event: WsClientEvent): void {
@@ -92,6 +113,31 @@ export class ClientHub {
 
   pushPrNotifications(): void {
     this.broadcast({ type: "pr_notifications", notifications: this.store.listPrNotifications(), sync: this.store.listPrNotificationSync() });
+  }
+
+  setAuditOverviewSource(source: () => AuditOverview): void {
+    this.auditOverviewSource = source;
+  }
+
+  pushAudits(): void {
+    this.auditPushPending = true;
+    if (this.auditPushTimer !== null) return;
+    const wait = this.lastAuditPushAt + AUDIT_PUSH_THROTTLE_MS - Date.now();
+    if (wait <= 0) {
+      this.flushAudits();
+      return;
+    }
+    this.auditPushTimer = setTimeout(() => {
+      this.auditPushTimer = null;
+      this.flushAudits();
+    }, wait);
+  }
+
+  private flushAudits(): void {
+    if (!this.auditPushPending) return;
+    this.auditPushPending = false;
+    this.lastAuditPushAt = Date.now();
+    this.broadcast({ type: "audits", audits: this.safeAuditOverview() });
   }
 
   pushNotification(title: string, body: string, ticketId?: string, sound?: boolean, soundKind?: NotificationSoundKind): void {

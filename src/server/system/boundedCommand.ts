@@ -22,12 +22,34 @@ export interface BoundedCommandResult {
   timedOut: boolean;
   /** Budget the command ran under; absent means the default {@link BOUNDED_COMMAND_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /** True when stdout reached `maxStdoutChars` and the command was stopped. */
+  truncated?: boolean;
 }
 
 export interface BoundedCommandOptions extends OperationDeadlineOptions {
   /** FULL child environment; omitted inherits the server's. */
   env?: Record<string, string>;
   timeoutMs?: number;
+  /** Stop the command once stdout exceeds this many characters and return what was read. */
+  maxStdoutChars?: number;
+}
+
+async function readStdout(stream: ReadableStream<Uint8Array>, maxChars: number | undefined, onLimit: () => void): Promise<{ text: string; truncated: boolean }> {
+  if (maxChars === undefined) return { text: await new Response(stream).text(), truncated: false };
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    if (text.length > maxChars) {
+      onLimit();
+      await reader.cancel().catch(() => undefined);
+      return { text: text.slice(0, maxChars), truncated: true };
+    }
+  }
+  return { text: text + decoder.decode(), truncated: false };
 }
 
 export function assertOperationActive(options: OperationDeadlineOptions): void {
@@ -59,12 +81,19 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
       proc.exited,
-      new Response(proc.stdout).text(),
+      readStdout(proc.stdout, options.maxStdoutChars, () => proc.kill(FORCE_KILL_SIGNAL)),
       new Response(proc.stderr).text(),
     ]);
     options.signal?.throwIfAborted();
     if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) timedOut = true;
-    return { exitCode, stdout, stderr, timedOut, ...(options.timeoutMs !== undefined || options.deadlineAt !== undefined ? { timeoutMs } : {}) };
+    return {
+      exitCode,
+      stdout: stdout.text,
+      stderr,
+      timedOut,
+      ...(options.timeoutMs !== undefined || options.deadlineAt !== undefined ? { timeoutMs } : {}),
+      ...(stdout.truncated ? { truncated: true } : {}),
+    };
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", onAbort);

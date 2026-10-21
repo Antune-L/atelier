@@ -156,6 +156,12 @@ export interface TicketPage {
 
 export type CreateTodoTicketInput = z.input<typeof createTodoTicketInputSchema>;
 
+export type CreateTodoTicketFollowUp = "analyze" | "none" | "start";
+
+export interface CreateTodoTicketOptions {
+  afterCreate?: CreateTodoTicketFollowUp;
+}
+
 export interface CreateTodoTicketResult {
   created: boolean;
   ticket: CompactTicket;
@@ -307,7 +313,7 @@ export class TicketOperations {
     return compactTicket(ticket);
   }
 
-  createTodoTicket(input: CreateTodoTicketInput): CreateTodoTicketResult {
+  createTodoTicket(input: CreateTodoTicketInput, options: CreateTodoTicketOptions = {}): CreateTodoTicketResult {
     const normalized = normalizeCreateInput(input);
     if (!isProjectKey(normalized.project)) {
       throw new TicketOperationError("INVALID_INPUT", "unknown project");
@@ -372,17 +378,22 @@ export class TicketOperations {
     };
     try {
       const result = this.deps.store.createTicketIdempotent(normalized.requestId, payload, ticketInput);
-      if (result.created) {
-        this.deps.hub.pushTicket(result.ticket);
-        startFeasibilityInBackground(this.deps.feasibility, [result.ticket.id], result.ticket.project);
-      }
-      return { created: result.created, ticket: compactTicket(result.ticket) };
+      if (!result.created) return { created: false, ticket: compactTicket(result.ticket) };
+      const ticket = this.afterCreate(result.ticket, options.afterCreate ?? "analyze");
+      return { created: true, ticket: compactTicket(ticket) };
     } catch (error) {
       if (error instanceof TicketCreationRequestConflictError) {
         throw new TicketOperationError("CONFLICT", requestKeyConflictMessage(normalized.requestId));
       }
       throw error;
     }
+  }
+
+  private afterCreate(ticket: Ticket, followUp: CreateTodoTicketFollowUp): Ticket {
+    if (followUp === "start" && isDependencyReady(ticket, this.deps.store.getDependencyParent(ticket))) return this.enqueueAndStart(ticket.id);
+    this.deps.hub.pushTicket(ticket);
+    if (followUp === "analyze") startFeasibilityInBackground(this.deps.feasibility, [ticket.id], ticket.project);
+    return ticket;
   }
 
   analyzeTickets(ids: string[]): AnalyzeTicketsResult {
@@ -522,6 +533,10 @@ export class TicketOperations {
     if (!isDependencyReady(ticket, parent)) {
       throw new TicketOperationError("CONFLICT", "waiting for the PR of the ticket it depends on");
     }
+    return { status: "queued", ticket: compactTicket(this.enqueueAndStart(ticketId)) };
+  }
+
+  private enqueueAndStart(ticketId: string): Ticket {
     const queued = this.deps.lifecycle.enqueue(ticketId);
     void this.deps.slots.startTicket(ticketId).catch((error: unknown) => {
       log.error("ticket start failed", {
@@ -529,7 +544,7 @@ export class TicketOperations {
         error: error instanceof Error ? error.message : String(error),
       });
     });
-    return { status: "queued", ticket: compactTicket(queued) };
+    return queued;
   }
 }
 

@@ -25,6 +25,7 @@ import { canMergePr } from "@shared/ticketMerge";
 import { api } from "@/lib/api";
 import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { useBoard } from "@/hooks/useBoard";
+import { auditTicketIds } from "@/lib/auditDisplay";
 import { boardStore } from "@/lib/store";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
 import { getDependencyParent } from "@/lib/ticketLookup";
@@ -55,7 +56,7 @@ function isColumn(value: string): value is Column {
 }
 
 export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAddTicket }: BoardProps) {
-  const { tickets, slots } = useBoard();
+  const { tickets, slots, audits } = useBoard();
   const [pendingAbandon, setPendingAbandon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [movingAll, setMovingAll] = useState(false);
@@ -88,6 +89,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
 
   // Full-board lookup so a card can resolve its dependency parent (possibly in another column).
   const ticketsById = useMemo(() => new Map(tickets.map((t) => [t.id, t])), [tickets]);
+  const auditTickets = auditTicketIds(audits);
   const byProject = projectFilter === "all" ? tickets : tickets.filter((t) => t.project === projectFilter);
   const needle = normalizeSearch(searchQuery);
   const searched = byProject.filter((ticket) => matchesQuery(needle, ticket.title, ticket.description, ticket.id, ticket.branch ?? ""));
@@ -301,6 +303,7 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       tickets={ticketsByColumn(column)}
       projects={projects}
       ticketsById={ticketsById}
+      auditTicketIds={auditTickets}
       onOpenTicket={onOpenTicket}
       onAddTicket={onAddTicket}
       onMoveAllToImplementing={column === "todo" ? handleMoveAllToImplementing : undefined}

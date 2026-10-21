@@ -24,6 +24,7 @@ import {
 } from "@/components/projects-settings/ProjectPanelParts";
 import { Button } from "@/components/ui/button";
 import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
+import { ProjectAuditSettings } from "@/components/projects-settings/ProjectAuditSettings";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { BranchCombobox, Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -621,6 +622,7 @@ export function ProjectPanel({
               composeFile={validationInspection?.composeFile ?? null}
             />
             <ProjectPreviewSettings key={project.key} project={project} />
+            <ProjectAuditSettings key={project.key} project={project} />
           </>
         )}
       </div>

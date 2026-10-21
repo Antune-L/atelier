@@ -3,6 +3,8 @@ import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
 
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 
+import { auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema, auditRunSchema } from "../../shared/audit.ts";
+import type { AuditFinding, AuditProjectSettings, AuditProjectState, AuditRun } from "../../shared/audit.ts";
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
 
@@ -856,4 +858,42 @@ export function mapQualityRequestRow(raw: unknown): QualityRequest {
 export function mapQualityActionRow(raw: unknown): QualityAction {
   const row = qualityPayloadRowSchema.parse(raw);
   return qualityActionSchema.parse(JSON.parse(row.payload_json));
+}
+
+const auditPayloadRowSchema = z.object({ payload_json: z.string() });
+const auditFindingRowSchema = auditPayloadRowSchema.extend({ card_generation: z.number().int().nonnegative() });
+const auditProjectStateRowSchema = z.object({
+  project: z.string(),
+  last_sha: z.string().nullable(),
+  last_branch: z.string().nullable(),
+  last_scheduled_date: z.string().nullable(),
+  enabled_at: z.number().int().nullable(),
+  observation_until: z.number().int().nullable(),
+});
+
+export function mapAuditProjectSettingsRow(raw: unknown): AuditProjectSettings {
+  const row = auditPayloadRowSchema.parse(raw);
+  return auditProjectSettingsSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapAuditProjectStateRow(raw: unknown): AuditProjectState {
+  const row = auditProjectStateRowSchema.parse(raw);
+  return auditProjectStateSchema.parse({
+    project: row.project,
+    lastSha: row.last_sha,
+    lastBranch: row.last_branch,
+    lastScheduledDate: row.last_scheduled_date,
+    enabledAt: row.enabled_at,
+    observationUntil: row.observation_until,
+  });
+}
+
+export function mapAuditRunRow(raw: unknown): AuditRun {
+  const row = auditPayloadRowSchema.parse(raw);
+  return auditRunSchema.parse(JSON.parse(row.payload_json));
+}
+
+export function mapAuditFindingRow(raw: unknown): { finding: AuditFinding; cardGeneration: number } {
+  const row = auditFindingRowSchema.parse(raw);
+  return { finding: auditFindingSchema.parse(JSON.parse(row.payload_json)), cardGeneration: row.card_generation };
 }

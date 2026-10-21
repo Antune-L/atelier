@@ -219,7 +219,7 @@ function mapGithubPr(pr: z.infer<typeof ghPrSchema>): OpenPr {
   };
 }
 
-async function readGithubRepoRef(repoPath: string): Promise<GithubRepoRef> {
+export async function readGithubRepoRef(repoPath: string): Promise<GithubRepoRef> {
   const remote = await runBoundedCommand(["git", "-C", repoPath, "remote", "get-url", "origin"], repoPath);
   if (remote.exitCode !== 0 || remote.timedOut) {
     throw new Error(`lecture du remote GitHub impossible : ${boundedCommandDetail(remote)}`);

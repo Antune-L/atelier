@@ -11,6 +11,7 @@ import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/con
 import { createLogger } from "../logger.ts";
 
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive } from "./boundedCommand.ts";
 import { createFakeCoolifyTransport } from "./coolifyClient.ts";
 import { FakeGithubAccountRegistry } from "./github/accounts.ts";
@@ -106,6 +107,9 @@ function fakeMissingKey(name: string, provider: Orchestrator): string {
 }
 
 const FAKE_GIT_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const FAKE_AUDIT_BASE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+const FAKE_AUDIT_FILE = "src/example.ts";
+const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n--- a/${FAKE_AUDIT_FILE}\n+++ b/${FAKE_AUDIT_FILE}\n@@ -1 +1 @@\n-export const example = 1;\n+export const example = 2;\n`;
 
 export class FakeSystemAdapter implements SystemAdapter {
   readonly coolifyRequest = createFakeCoolifyTransport();
@@ -272,6 +276,27 @@ export class FakeSystemAdapter implements SystemAdapter {
 
   async clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void> {
     this.log("clearAnalysisWorkspaces", { root, repoPaths });
+  }
+
+  async collectAuditRange(input: AuditRangeInput): Promise<AuditRange> {
+    this.log("collectAuditRange", { cwd: input.cwd, baseSha: input.baseSha });
+    const baseSha = input.baseSha ?? FAKE_AUDIT_BASE_SHA;
+    return {
+      status: "ok",
+      baseSha,
+      tipSha: FAKE_GIT_COMMIT_SHA,
+      githubRepositoryUrl: null,
+      chunks: [{
+        index: 0,
+        baseSha,
+        headSha: FAKE_GIT_COMMIT_SHA,
+        commits: [{ sha: FAKE_GIT_COMMIT_SHA, subject: "Simulated change (#1)", body: "", prNumber: 1 }],
+        diff: FAKE_AUDIT_DIFF,
+        files: [FAKE_AUDIT_FILE],
+        skipped: [],
+      }],
+      deferredCommitCount: 0,
+    };
   }
 
   async worktreeExists(slotPath: string): Promise<boolean> {

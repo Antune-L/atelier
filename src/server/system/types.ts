@@ -14,6 +14,7 @@ import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import type { PrSnapshot, ReviewRequestSnapshot } from "./vcs/types.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
@@ -325,6 +326,7 @@ export interface SystemAdapter {
   /** Fetch origin/<baseBranch> and check it out detached at `path`, so read-only analyses see the up-to-date base. */
   prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void>;
   removeAnalysisWorkspace(repoPath: string, path: string): Promise<void>;
+  collectAuditRange(input: AuditRangeInput): Promise<AuditRange>;
   /** Boot recovery: delete every leftover analysis worktree under `root` and prune their registrations. */
   clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void>;
   findWorktreeByBranch(repoPath: string, branch: string): Promise<string | null>;

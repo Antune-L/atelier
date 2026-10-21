@@ -1,0 +1,2 @@
+<!-- NOTE(ali): written for the daily audit; the audit method is now owned by the app. -->
+Read the repository with exec_command only: one direct command among pwd, ls, cat, head, tail, wc and rg, with explicit absolute paths inside the worktree `{{WORKTREE}}` for every operand. Pipes, command chaining, shell expansion, redirection, globs, access outside the worktree and any modification are refused. Always add --no-config to rg; list files with `rg --no-config --files {{WORKTREE}}/<directory>`. You have no web access and must not spawn sub-agents.

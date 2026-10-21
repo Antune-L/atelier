@@ -35,6 +35,7 @@ import type {
   AgentSessionEvent,
   AgentSessionHandle,
   AgentSessionOptions,
+  AgentSessionRole,
   AgentSubagentDefinition,
   AgentTurnUsage,
 } from "./agentSession.ts";
@@ -46,7 +47,7 @@ import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
-import { QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 const log = createLogger("claude-provider");
@@ -58,12 +59,23 @@ const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
 
-function qualityReadScopeHook(options: AgentSessionOptions, reportedDenials: Set<string>): HookCallback {
+const SCOPED_READ_TOOLS = ["Read", "Glob", "Grep"];
+const SCOPED_READ_ROLE_POLICIES: Partial<Record<AgentSessionRole, { readScopeDenial: string; instructions: string }>> = {
+  "quality-validator": {
+    readScopeDenial: "Quality inspection is restricted to repository files under the validation workspace.",
+    instructions: QUALITY_VALIDATOR_INSTRUCTIONS,
+  },
+  auditor: {
+    readScopeDenial: "Audit reads are restricted to repository files under the audited worktree.",
+    instructions: AUDITOR_INSTRUCTIONS,
+  },
+};
+
+function scopedReadHook(options: AgentSessionOptions, reportedDenials: Set<string>, reason: string): HookCallback {
   return async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     let blockReason: QualityPermissionBlockReason | null = null;
-    if (qualityReadToolAllowed(options.cwd, input.tool_name, input.tool_input, (reason) => { blockReason ??= reason; })) return {};
-    const reason = "Quality inspection is restricted to repository files under the validation workspace.";
+    if (qualityReadToolAllowed(options.cwd, input.tool_name, input.tool_input, (denied) => { blockReason ??= denied; })) return {};
     if (!reportedDenials.has(input.tool_use_id)) {
       reportedDenials.add(input.tool_use_id);
       reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason, nativeId: input.tool_use_id });
@@ -287,6 +299,7 @@ export function createSdkAgentSession(
   };
   if (opts.blockReviewPublishing) preToolUseHooks.push(denyReviewPublishingHook);
   if (opts.blockTypecheck) preToolUseHooks.push(denyTypecheckHook(opts.cwd));
+  const scopedReadPolicy = opts.role === undefined ? undefined : SCOPED_READ_ROLE_POLICIES[opts.role];
   const queryOptions: Options = {
     abortController,
     cwd: opts.cwd,
@@ -308,7 +321,7 @@ export function createSdkAgentSession(
     hooks: { PreToolUse: [
       ...(opts.executionGuard ? [{ matcher: ".*", hooks: [autonomousHook] }] : []),
       { matcher: "Bash", hooks: preToolUseHooks },
-      ...(opts.role === "quality-validator" ? [{ matcher: "Read|Glob|Grep", hooks: [qualityReadScopeHook(opts, reportedDenials)] }] : []),
+      ...(scopedReadPolicy ? [{ matcher: SCOPED_READ_TOOLS.join("|"), hooks: [scopedReadHook(opts, reportedDenials, scopedReadPolicy.readScopeDenial)] }] : []),
     ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     // `gh auth` is denied to every Claude session (settings rule + the PreToolUse hook above).
@@ -317,10 +330,10 @@ export function createSdkAgentSession(
     ...(opts.skills ? { skills: opts.skills } : {}),
     ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
     ...(opts.outputSchema ? { outputFormat: { type: "json_schema", schema: opts.outputSchema } } : {}),
-    ...(opts.role === "quality-validator" ? {
-      tools: ["Read", "Glob", "Grep"],
+    ...(scopedReadPolicy ? {
+      tools: SCOPED_READ_TOOLS,
       strictMcpConfig: true,
-      systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: QUALITY_VALIDATOR_INSTRUCTIONS },
+      systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: scopedReadPolicy.instructions },
     } : {}),
     ...(opts.permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
   };

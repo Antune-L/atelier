@@ -2,6 +2,7 @@ import { CLEANER_BRANCH_SUFFIX, COMMIT_LANGUAGE_LABELS, DEFAULT_PLAN_PARALLEL_IM
 import type { CommitLanguage, Orchestrator, ReviewDepth } from "../../shared/constants.ts";
 import type { QualityEvidence, QualityIteration } from "../../shared/quality.ts";
 import type { Ticket } from "../../shared/schemas.ts";
+import { findAuditMarker } from "../../shared/audit.ts";
 import { formatTriageQuestion, triageResultSchema } from "../../shared/schemas.ts";
 import { extractFigmaUrls } from "../../shared/figma.ts";
 import { hasMockups } from "../../shared/mockups.ts";
@@ -381,6 +382,8 @@ export function buildTicketContract(
   else if (iteration || directPush) prDescriptionSignal = null;
   else if (stealth) prDescriptionSignal = STEALTH_SIGNAL;
   const prDescriptionLines = prDescriptionSignal === null ? [] : buildPrDescriptionInstructions(opts.commitLanguage, prDescriptionSignal);
+  const auditMarker = findAuditMarker(ticket.description);
+  if (auditMarker !== null && prDescriptionLines.length > 0) prDescriptionLines.push(`   Recopie tel quel, sur la dernière ligne de la description de PR, le marqueur \`${auditMarker}\` du ticket.`);
 
   let qualityDirective = '- Le tool `quality({action:"get"})` permet de consulter les preuves et réserves du ticket. Si une validation qualité a été activée par l’utilisateur, conserve ses critères et suis les contrôles configurés.';
   if (ticket.autonomous) {

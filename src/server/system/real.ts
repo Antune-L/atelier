@@ -19,6 +19,8 @@ import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
+import { collectGitAuditRange } from "./auditRange.ts";
+import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
@@ -489,6 +491,10 @@ export class RealSystemAdapter implements SystemAdapter {
   async clearAnalysisWorkspaces(root: string, repoPaths: string[]): Promise<void> {
     await rm(root, { recursive: true, force: true });
     for (const repoPath of repoPaths) await $`git -C ${repoPath} worktree prune`.nothrow().quiet();
+  }
+
+  async collectAuditRange(input: AuditRangeInput): Promise<AuditRange> {
+    return collectGitAuditRange(input);
   }
 
   async worktreeExists(slotPath: string): Promise<boolean> {

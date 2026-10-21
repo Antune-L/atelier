@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import { autonomousWorkspacesSchema } from "@shared/autonomous";
 import type { AutonomousResumeInput, AutonomousWorkspaces } from "@shared/autonomous";
@@ -58,6 +58,8 @@ import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFol
 import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
+import { auditFindingSchema, auditOverviewSchema, auditProjectViewSchema, auditRunDetailSchema, auditRunSchema } from "@shared/audit";
+import type { AuditCreateCardInput, AuditDecisionInput, AuditFinding, AuditOverview, AuditProjectView, AuditRun, AuditRunDetail, AuditSetStartInput, UpdateAuditProjectSettingsInput } from "@shared/audit";
 
 /** POST /api/projects/clone: the clone (or reused folder) plus the usual folder inspection. */
 export interface CloneProjectResponse extends CloneResult {
@@ -69,6 +71,7 @@ const HTTP_CONFLICT = 409;
 const HTTP_NOT_FOUND = 404;
 const PROJECT_IN_USE_MESSAGE = "Ce projet a des tickets associés";
 const ATELIER_BASE = "/api/atelier";
+const AUDITS_BASE = "/api/audits";
 
 export type CreateConversationBody = z.input<typeof createConversationSchema>;
 export type CreateTicketsFromPrdBody = z.input<typeof createTicketsFromPrdSchema>;
@@ -96,8 +99,24 @@ function atelierPrdPath(id: string): string {
   return `${ATELIER_BASE}/prd/${encodeURIComponent(id)}`;
 }
 
+function projectAuditPath(key: string): string {
+  return `/api/projects/${encodeURIComponent(key)}/audit`;
+}
+
+function auditFindingPath(id: string): string {
+  return `${AUDITS_BASE}/findings/${encodeURIComponent(id)}`;
+}
+
+const auditCardResponseSchema = z.object({ finding: auditFindingSchema, ticketId: z.string().min(1) });
+
 export function atelierPrdExportUrl(id: string, format: "json" | "html"): string {
   return `${atelierPrdPath(id)}/export.${format}`;
+}
+
+async function responseError(response: Response): Promise<Error> {
+  const body = await response.json().catch(() => ({ error: response.statusText }));
+  const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
+  return new Error(message);
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -106,9 +125,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json", ...init?.headers },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-    throw new Error(message);
+    throw await responseError(response);
   }
   return response.json();
 }
@@ -150,9 +167,7 @@ export const api = {
     });
     if (response.status === HTTP_CONFLICT) throw new Error(PROJECT_IN_USE_MESSAGE);
     if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: response.statusText }));
-      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-      throw new Error(message);
+      throw await responseError(response);
     }
   },
   pickFolder: async (): Promise<string | null> => {
@@ -162,9 +177,7 @@ export const api = {
     });
     if (response.status === HTTP_NOT_FOUND) return null;
     if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: response.statusText }));
-      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-      throw new Error(message);
+      throw await responseError(response);
     }
     const body: unknown = await response.json().catch(() => null);
     if (body && typeof body === "object" && "path" in body && typeof body.path === "string") return body.path;
@@ -180,9 +193,7 @@ export const api = {
       headers: { "content-type": "application/json" },
     });
     if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: response.statusText }));
-      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-      throw new Error(message);
+      throw await responseError(response);
     }
   },
   githubRepos: (account: string | null): Promise<GithubRepoSummary[]> =>
@@ -359,14 +370,33 @@ export const api = {
     request(`${atelierPrdPath(id)}/regenerate`, { method: "POST" }),
   atelierCreateTickets: (id: string, input: CreateTicketsFromPrdBody): Promise<{ tickets: Ticket[] }> =>
     request(`${atelierPrdPath(id)}/tickets`, { method: "POST", body: JSON.stringify(input) }),
+  audits: async (): Promise<AuditOverview> => auditOverviewSchema.parse(await request<unknown>(AUDITS_BASE)),
+  auditRun: async (id: string, signal?: AbortSignal): Promise<AuditRunDetail> =>
+    auditRunDetailSchema.parse(await request<unknown>(`${AUDITS_BASE}/runs/${encodeURIComponent(id)}`, { signal })),
+  stopAuditRun: async (id: string): Promise<AuditRun> =>
+    auditRunSchema.parse(await request<unknown>(`${AUDITS_BASE}/runs/${encodeURIComponent(id)}/stop`, { method: "POST" })),
+  updateProjectAudit: async (key: string, patch: UpdateAuditProjectSettingsInput): Promise<AuditProjectView> =>
+    auditProjectViewSchema.parse(await request<unknown>(projectAuditPath(key), { method: "PATCH", body: JSON.stringify(patch) })),
+  runProjectAudit: async (key: string): Promise<AuditRun> =>
+    auditRunSchema.parse(await request<unknown>(`${projectAuditPath(key)}/run`, { method: "POST", body: JSON.stringify({}) })),
+  setProjectAuditStart: async (key: string, input: AuditSetStartInput): Promise<AuditProjectView> =>
+    auditProjectViewSchema.parse(await request<unknown>(`${projectAuditPath(key)}/start`, { method: "POST", body: JSON.stringify(input) })),
+  createAuditCard: async (findingId: string, input: AuditCreateCardInput): Promise<{ finding: AuditFinding; ticketId: string }> =>
+    auditCardResponseSchema.parse(await request<unknown>(`${auditFindingPath(findingId)}/card`, { method: "POST", body: JSON.stringify(input) })),
+  decideAuditFinding: async (findingId: string, input: AuditDecisionInput): Promise<AuditFinding> =>
+    auditFindingSchema.parse(await request<unknown>(`${auditFindingPath(findingId)}/decision`, { method: "POST", body: JSON.stringify(input) })),
+  clearAuditDecision: async (findingId: string): Promise<AuditFinding> =>
+    auditFindingSchema.parse(await request<unknown>(`${auditFindingPath(findingId)}/decision`, { method: "DELETE" })),
+  recheckAuditFinding: async (findingId: string): Promise<AuditFinding> =>
+    auditFindingSchema.parse(await request<unknown>(`${auditFindingPath(findingId)}/recheck`, { method: "POST" })),
+  arbitrateAuditFinding: async (findingId: string): Promise<AuditFinding> =>
+    auditFindingSchema.parse(await request<unknown>(`${auditFindingPath(findingId)}/arbitrate`, { method: "POST" })),
   uploadFile: async (file: File): Promise<UploadResult> => {
     const form = new FormData();
     form.append("file", file);
     const response = await fetch("/api/uploads", { method: "POST", body: form });
     if (!response.ok) {
-      const body = await response.json().catch(() => ({ error: response.statusText }));
-      const message = body && typeof body === "object" && "error" in body ? String(body.error) : response.statusText;
-      throw new Error(message);
+      throw await responseError(response);
     }
     return response.json();
   },

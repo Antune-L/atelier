@@ -1,6 +1,7 @@
-import { ExternalLink, MessageSquare } from "lucide-react";
+import { ExternalLink, MessageSquare, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
+import type { AuditTicketOrigin } from "@shared/audit";
 import { COLUMN_LABELS, ORCHESTRATOR_LABELS, type Column } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { columnSchema } from "@shared/schemas";
@@ -11,6 +12,7 @@ import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Select } from "@/components/ui/select";
 import { useBoard } from "@/hooks/useBoard";
+import { auditOriginFor, formatAuditDate } from "@/lib/auditDisplay";
 import { finishedKindLabel, formatDateTime } from "@/lib/display";
 
 const STATUS_SELECT_ID = "ticket-status";
@@ -51,6 +53,7 @@ interface TicketMetaProps {
   locked: boolean;
   onStatusChange: (target: Column) => void;
   onOpenPrdOrigin?: (prdId: string, project: string) => void;
+  onOpenAuditOrigin?: (origin: AuditTicketOrigin) => void;
 }
 
 function statusTitle(ticket: Ticket, locked: boolean): string | undefined {
@@ -62,8 +65,9 @@ function statusTitle(ticket: Ticket, locked: boolean): string | undefined {
 }
 
 /** Key/value recap of the open ticket, shown in the sheet's right-hand column. */
-export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusChange, onOpenPrdOrigin }: TicketMetaProps) {
-  const { conversations } = useBoard();
+export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusChange, onOpenPrdOrigin, onOpenAuditOrigin }: TicketMetaProps) {
+  const { conversations, audits } = useBoard();
+  const auditOrigin = auditOriginFor(audits, ticket.id);
   const [pending, setPending] = useState<Column | null>(null);
   const pendingConfirm = pending === null ? undefined : STATUS_CONFIRMS[pending];
 
@@ -146,6 +150,9 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
           onOpen={onOpenPrdOrigin}
         />
       )}
+      {auditOrigin !== undefined && (
+        <AuditOriginRow origin={auditOrigin} projectLabel={resolveProjectLabel(projects, auditOrigin.project)} onOpen={onOpenAuditOrigin} />
+      )}
       {ticket.reviewLevel && (
         <MetaRow label="Relecture">
           <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} withLabel />
@@ -184,6 +191,31 @@ function PrdOriginRow({ prdId, task, project, hasConversations, onOpen }: PrdOri
     <MetaRow label="Origine">
       <button type="button" onClick={() => onOpen(prdId, project)} className={LINK_CLASSES}>
         <MessageSquare className="h-3 w-3" />
+        {label}
+      </button>
+    </MetaRow>
+  );
+}
+
+interface AuditOriginRowProps {
+  origin: AuditTicketOrigin;
+  projectLabel: string;
+  onOpen?: (origin: AuditTicketOrigin) => void;
+}
+
+function AuditOriginRow({ origin, projectLabel, onOpen }: AuditOriginRowProps) {
+  const label = `Audit du ${formatAuditDate(origin.runStartedAt)} · ${projectLabel}`;
+  if (onOpen === undefined) {
+    return (
+      <MetaRow label="Origine">
+        <span className="text-muted-foreground">{label}</span>
+      </MetaRow>
+    );
+  }
+  return (
+    <MetaRow label="Origine">
+      <button type="button" onClick={() => onOpen(origin)} className={LINK_CLASSES} title="Ouvrir le constat dans la vue Audits">
+        <ShieldCheck className="h-3 w-3" />
         {label}
       </button>
     </MetaRow>

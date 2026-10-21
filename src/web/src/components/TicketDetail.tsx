@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
 
+import type { AuditTicketOrigin } from "@shared/audit";
 import { ACTIVE_STAGES, COLUMN_ORDER, type Column } from "@shared/constants";
 import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 
@@ -67,6 +68,7 @@ interface TicketDetailProps {
   projects: ProjectInfo[];
   onClose: () => void;
   onOpenPrdOrigin?: (prdId: string, project: string) => void;
+  onOpenAuditOrigin?: (origin: AuditTicketOrigin) => void;
 }
 
 function isLocked(ticket: Ticket): boolean {
@@ -105,7 +107,7 @@ function isTextEntry(target: EventTarget | null): boolean {
   return TEXT_ENTRY_TAGS.includes(target.tagName) || target.isContentEditable;
 }
 
-export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: TicketDetailProps) {
+export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpenAuditOrigin }: TicketDetailProps) {
   const { tickets: boardTickets } = useBoard();
   const [comments, setComments] = useState<Comment[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
@@ -387,6 +389,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin }: Tic
               locked={locked}
               onStatusChange={(target) => void changeStatus(target)}
               onOpenPrdOrigin={onOpenPrdOrigin}
+              onOpenAuditOrigin={onOpenAuditOrigin}
             />
             <TicketActions
               ticket={current}

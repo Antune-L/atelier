@@ -27,6 +27,8 @@ interface BoardColumnProps {
   projects: ProjectInfo[];
   /** Full-board lookup for resolving a card's dependency parent (which may live in another column). */
   ticketsById: Map<string, Ticket>;
+  /** Tickets created from an audit finding, tagged "audit" on their card. */
+  auditTicketIds: Set<string>;
   onOpenTicket: (ticket: Ticket) => void;
   /** False for a terminal lane opened from the "Terminé" panel: it is always expanded and closes from the panel. */
   collapsible?: boolean;
@@ -242,6 +244,7 @@ export function BoardColumn({
   tickets,
   projects,
   ticketsById,
+  auditTicketIds,
   onOpenTicket,
   collapsible = true,
   onAddTicket,
@@ -440,6 +443,7 @@ export function BoardColumn({
                 projectLabel={resolveProjectLabel(projects, ticket.project)}
                 projectColor={resolveProjectColor(projects, ticket.project)}
                 parent={getDependencyParent(ticket, ticketsById)}
+                fromAudit={auditTicketIds.has(ticket.id)}
                 onOpen={onOpenTicket}
                 onCheckMerge={onCheckMerge}
               />

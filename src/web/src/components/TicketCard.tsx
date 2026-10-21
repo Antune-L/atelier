@@ -34,6 +34,8 @@ interface TicketCardProps {
   projectColor?: string;
   /** The dependency parent (resolved by the caller, which holds the full board), or null/undefined. */
   parent?: Ticket | null;
+  /** Created from an audit finding: adds an "audit" token to the meta line. */
+  fromAudit?: boolean;
   onOpen: (ticket: Ticket) => void;
   /** When set on the "Fini" column, renders a small button to re-check the PR merge status. */
   onCheckMerge?: (ticket: Ticket) => Promise<void>;
@@ -94,7 +96,7 @@ function truncateParentTitle(title: string): string {
   return `${title.slice(0, PARENT_TITLE_MAX_CHARS - 1)}…`;
 }
 
-export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen, onCheckMerge }: TicketCardProps) {
+export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAudit = false, onOpen, onCheckMerge }: TicketCardProps) {
   const now = useTickTimer();
   const parentBlocked = ticket.dependsOn !== null && !isDependencyReady(ticket, parent ?? null);
   const [checkingMerge, setCheckingMerge] = useState(false);
@@ -139,6 +141,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, onOpen,
         <div className="mt-1 flex flex-wrap items-center gap-x-2 font-mono text-2xs text-muted-foreground">
           <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
           <span>{KIND_LABELS[ticket.kind]}</span>
+          {fromAudit && <span className="rounded border border-border px-1">audit</span>}
           {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
           <span>{elapsedLabel}</span>
           {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}

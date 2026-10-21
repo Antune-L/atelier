@@ -357,6 +357,48 @@ CREATE TABLE IF NOT EXISTS preview_project_settings (
   payload_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS audit_project_settings (
+  project TEXT PRIMARY KEY REFERENCES projects(key) ON DELETE CASCADE,
+  payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_project_state (
+  project TEXT PRIMARY KEY REFERENCES projects(key) ON DELETE CASCADE,
+  last_sha TEXT,
+  last_branch TEXT,
+  last_scheduled_date TEXT,
+  enabled_at INTEGER,
+  observation_until INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS audit_runs (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL REFERENCES projects(key) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_runs_project_idx ON audit_runs(project, started_at);
+CREATE INDEX IF NOT EXISTS audit_runs_status_idx ON audit_runs(status);
+
+CREATE TABLE IF NOT EXISTS audit_findings (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL REFERENCES projects(key) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,
+  first_run_id TEXT NOT NULL,
+  last_run_id TEXT NOT NULL,
+  ticket_id TEXT REFERENCES tickets(id),
+  has_decision INTEGER NOT NULL DEFAULT 0,
+  card_generation INTEGER NOT NULL DEFAULT 0,
+  payload_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(project, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS audit_findings_first_run_idx ON audit_findings(first_run_id);
+CREATE INDEX IF NOT EXISTS audit_findings_last_run_idx ON audit_findings(last_run_id);
+CREATE INDEX IF NOT EXISTS audit_findings_ticket_idx ON audit_findings(ticket_id);
+
 CREATE TABLE IF NOT EXISTS quality_validation_runs (
   id TEXT PRIMARY KEY,
   ticket_id TEXT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,

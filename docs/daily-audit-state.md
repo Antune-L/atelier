@@ -2,7 +2,7 @@
 
 ## Current state
 
-- Worktree `/Users/antoineliu/kanban-agents-audit`, branch `feat/daily-audit` from `origin/main` `7dcfef5` (2026-10-21). Nothing committed yet.
+- Shipped on `main` as `d8d1a0f` (2026-10-21), built in worktree `/Users/antoineliu/kanban-agents-audit` (branch `feat/daily-audit`).
 - Analysis: `plans/athena/2026-10-21-helios-audit/` in the main checkout (`report.md`, `report-v2.md`, `mockups.html`). The v2 report and the user's follow-up decisions are authoritative.
 - The three lots (engine, backend, UI) are integrated on the shared contract `src/shared/audit.ts`, and the first review's fixes are applied.
 

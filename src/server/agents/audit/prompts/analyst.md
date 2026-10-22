@@ -40,10 +40,12 @@ everything you report, and nothing is published outside the application.
    correction. Findings the team dismissed or rejected are deliberately not listed: report every
    defect you find regardless of past decisions; the application matches recurrences against its
    own history and applies those decisions itself.
-6. Record coverage honestly: `filesRead` is the number of changed files you actually read;
-   list every changed file relevant to your lens that you did not inspect in `skipped` with the
-   reason. Use status `partial` whenever `skipped` is not empty. An empty findings list with
-   partial coverage is not "all clear".
+6. Record coverage honestly, using the exact paths from the changed files list (no globs, no
+   directories): `read` lists every changed file whose changes you fully inspected, in the diff or
+   in the worktree; `skipped` lists, with the reason, only the changed files relevant to your lens
+   that you did not inspect. Never list in `skipped` a file outside your lens or a file whose
+   changes you read in full: other lenses cover it. An empty findings list with skipped files is
+   not "all clear".
 
 ## Shared reviewer rules
 

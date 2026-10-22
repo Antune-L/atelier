@@ -256,23 +256,30 @@ export function emptyAuditResult(status: AuditPipelineResult["status"], baseSha:
 
 function chunkCoverage(chunk: AuditRangeChunk, runs: readonly AnalystRun[]): AuditChunkCoverage {
   const outputs = runs.flatMap((run) => run.result.output === null ? [] : [run.result.output]);
+  const changed = new Set(chunk.files);
+  const read = new Set(outputs.flatMap((output) => output.coverage.read).filter((path) => changed.has(path)));
   const skipped = new Map<string, string>(chunk.skipped.map((entry) => [entry.path, entry.reason]));
   for (const output of outputs) {
+    const ownRead = new Set(output.coverage.read);
     for (const entry of output.coverage.skipped) {
-      if (!skipped.has(entry.path)) skipped.set(entry.path, entry.reason);
+      const globs = entry.path.split(",").map((pattern) => new Bun.Glob(pattern.trim()));
+      for (const path of chunk.files) {
+        if (skipped.has(path) || (read.has(path) && !ownRead.has(path))) continue;
+        if (globs.some((glob) => glob.match(path))) skipped.set(path, entry.reason);
+      }
     }
   }
   let status: AuditChunkCoverage["status"] = "complete";
   if (isEmptyChunk(chunk)) status = chunk.skipped.length > 0 ? "partial" : "complete";
   else if (outputs.length < AUDIT_LENSES.length) status = "failed";
-  else if (chunk.skipped.length > 0 || outputs.some((output) => output.coverage.status === "partial")) status = "partial";
+  else if (skipped.size > 0) status = "partial";
   return {
     index: chunk.index,
     baseSha: chunk.baseSha,
     headSha: chunk.headSha,
     commitCount: chunk.commits.length,
     status,
-    filesRead: outputs.reduce((most, output) => Math.max(most, output.coverage.filesRead), 0),
+    filesRead: read.size,
     skipped: [...skipped].map(([path, reason]) => ({ path, reason })),
   };
 }

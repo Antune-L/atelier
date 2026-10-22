@@ -192,8 +192,7 @@ export type AuditAgentFinding = z.infer<typeof auditAgentFindingSchema>;
 
 export const auditAnalysisOutputSchema = z.object({
   coverage: z.object({
-    status: z.enum(["complete", "partial"]),
-    filesRead: z.number().int().nonnegative(),
+    read: z.array(nonEmptyTextSchema),
     skipped: z.array(z.object({ path: nonEmptyTextSchema, reason: nonEmptyTextSchema })),
   }),
   findings: z.array(auditAgentFindingSchema),

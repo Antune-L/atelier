@@ -33,4 +33,4 @@ contract regression (validation removed). Purely additive changes with no consum
 refactors with no changed exported surface are not findings.
 
 Never write "might break" without a consumer `file:line` and a count. If the search is too wide
-(generic name collision), report coverage `partial` with the reason in `skipped`.
+(generic name collision), list the changed file in `skipped` with the reason, even if you read it.

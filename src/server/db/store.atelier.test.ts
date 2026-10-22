@@ -76,7 +76,7 @@ describe("Store atelier", () => {
     expect(conversation.unread).toBe(false);
     const unread = store.updateConversation(conversation.id, { unread: true });
     expect(unread.unread).toBe(true);
-    const read = store.markConversationRead(conversation.id);
+    const read = store.setConversationUnread(conversation.id, false);
     expect(read.unread).toBe(false);
     expect(read.updatedAt).toBe(unread.updatedAt);
   });

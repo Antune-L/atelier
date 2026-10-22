@@ -3004,9 +3004,9 @@ export class Store {
   }
 
   /** Clears the unread flag without bumping updated_at, so the list order stays stable. */
-  markConversationRead(id: string): Conversation {
-    this.db.query("UPDATE conversations SET unread = 0 WHERE id = ?").run(id);
-    return this.requireConversation(id, "markConversationRead");
+  setConversationUnread(id: string, unread: boolean): Conversation {
+    this.db.query("UPDATE conversations SET unread = ? WHERE id = ?").run(unread ? 1 : 0, id);
+    return this.requireConversation(id, "setConversationUnread");
   }
 
   deleteConversation(id: string): void {

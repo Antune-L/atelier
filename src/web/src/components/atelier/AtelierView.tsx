@@ -1,4 +1,4 @@
-import { MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
+import { Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
@@ -144,6 +144,19 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     if (conversationId === selectedId) setSelectedId(null);
   };
 
+  const markUnread = (item: Conversation): void => {
+    if (item.id === selectedId) setSelectedId(null);
+    boardStore.rememberConversation({ ...item, unread: true });
+    api.atelierMarkConversationUnread(item.id).then(
+      (updated) => boardStore.rememberConversation(updated),
+      () => {
+        const current = boardStore.getSnapshot().conversations.find((c) => c.id === item.id);
+        if (current) boardStore.rememberConversation({ ...current, unread: false });
+        boardStore.notify("Échec", "La conversation n'a pas pu être marquée comme non lue.");
+      },
+    );
+  };
+
   const conversation = detail.conversation;
   const latestPrd = prds[prds.length - 1];
   const prd = prds.find((p) => p.id === prdChoice) ?? latestPrd;
@@ -286,6 +299,17 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
                     </Badge>
                   </span>
                 </button>
+                {!item.unread && (
+                  <button
+                    type="button"
+                    aria-label="Marquer comme non lue"
+                    title="Marquer comme non lue"
+                    onClick={() => markUnread(item)}
+                    className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <ConfirmPopover
                   title="Supprimer la conversation"
                   description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."

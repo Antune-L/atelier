@@ -362,6 +362,8 @@ export const api = {
     request(`${atelierConversationPath(id)}/compact`, { method: "POST" }),
   atelierMarkConversationRead: (id: string): Promise<Conversation> =>
     request(`${atelierConversationPath(id)}/read`, { method: "POST" }),
+  atelierMarkConversationUnread: (id: string): Promise<Conversation> =>
+    request(`${atelierConversationPath(id)}/unread`, { method: "POST" }),
   atelierConsolidate: (id: string, feedback?: string): Promise<{ ok: boolean }> =>
     request(`${atelierConversationPath(id)}/consolidate`, { method: "POST", body: JSON.stringify({ feedback }) }),
   atelierUpdatePrd: (id: string, patch: UpdatePrdDocumentInput): Promise<PrdDocumentRecord> =>

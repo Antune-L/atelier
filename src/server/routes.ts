@@ -730,6 +730,15 @@ function createAtelierRoutes(deps: RouteDeps) {
     hub.pushConversation(store.updateConversation(conversationId, { status }));
   }
 
+  function setConversationUnread(conversationId: string, unread: boolean, set: { status?: number | string }): Conversation | { error: string } {
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+    if (conversation.unread === unread) return conversation;
+    const updated = store.setConversationUnread(conversationId, unread);
+    hub.pushConversation(updated);
+    return updated;
+  }
+
   return new Elysia({ prefix: "/atelier" })
     .get("/conversations", ({ query }) => store.listConversations(query.project || undefined))
     .post("/conversations", ({ body, set }) => {
@@ -798,14 +807,8 @@ function createAtelierRoutes(deps: RouteDeps) {
       if (outcome.reason === "not_found") return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       return jsonError(set, HTTP_CONFLICT, outcome.message);
     })
-    .post("/conversations/:id/read", ({ params, set }) => {
-      const conversation = store.getConversation(params.id);
-      if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
-      if (!conversation.unread) return conversation;
-      const updated = store.markConversationRead(params.id);
-      hub.pushConversation(updated);
-      return updated;
-    })
+    .post("/conversations/:id/read", ({ params, set }) => setConversationUnread(params.id, false, set))
+    .post("/conversations/:id/unread", ({ params, set }) => setConversationUnread(params.id, true, set))
     .post("/conversations/:id/consolidate", ({ params, body, set }) => {
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = consolidatePrdSchema.safeParse(body ?? {});

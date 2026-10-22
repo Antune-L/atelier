@@ -867,6 +867,7 @@ const auditProjectStateRowSchema = z.object({
   last_sha: z.string().nullable(),
   last_branch: z.string().nullable(),
   last_scheduled_date: z.string().nullable(),
+  last_scheduled_at: z.number().int().nullable(),
   enabled_at: z.number().int().nullable(),
   observation_until: z.number().int().nullable(),
 });
@@ -883,6 +884,7 @@ export function mapAuditProjectStateRow(raw: unknown): AuditProjectState {
     lastSha: row.last_sha,
     lastBranch: row.last_branch,
     lastScheduledDate: row.last_scheduled_date,
+    lastScheduledAt: row.last_scheduled_at,
     enabledAt: row.enabled_at,
     observationUntil: row.observation_until,
   });

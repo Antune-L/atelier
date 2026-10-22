@@ -100,6 +100,10 @@ export const AUDIT_MAX_AUTO_LAUNCH = 5;
 export const AUDIT_RUNS_LIMIT = 50;
 export const AUDIT_DEFAULT_DAILY_TIME = "07:00";
 export const AUDIT_DEFAULT_TIME_ZONE = "Europe/Paris";
+export const AUDIT_HOURS_PER_DAY = 24;
+export const AUDIT_MIN_INTERVAL_HOURS = 6;
+export const AUDIT_MAX_INTERVAL_HOURS = 14 * AUDIT_HOURS_PER_DAY;
+export const AUDIT_DEFAULT_INTERVAL_HOURS = AUDIT_HOURS_PER_DAY;
 export const AUDIT_MAX_EVIDENCE_CHARS = 1_200;
 export const AUDIT_DAY_MS = 24 * 60 * 60_000;
 
@@ -108,6 +112,7 @@ const timestampSchema = z.number().int().nonnegative();
 const shaSchema = z.string().regex(/^[0-9a-f]{7,40}$/);
 const gitBranchSchema = z.string().trim().regex(/^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*\.lock$)[A-Za-z0-9._/-]+$/, "Nom de branche invalide.");
 const dailyTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const auditProviderSchema = z.enum(ORCHESTRATORS);
 export type AuditProvider = z.infer<typeof auditProviderSchema>;
@@ -117,6 +122,9 @@ export const auditProjectSettingsSchema = z.object({
   branch: gitBranchSchema.nullable().default(null),
   dailyTime: dailyTimeSchema.default(AUDIT_DEFAULT_DAILY_TIME),
   timeZone: nonEmptyTextSchema.default(AUDIT_DEFAULT_TIME_ZONE),
+  intervalHours: z.number().int().min(AUDIT_MIN_INTERVAL_HOURS).max(AUDIT_MAX_INTERVAL_HOURS).default(AUDIT_DEFAULT_INTERVAL_HOURS),
+  anchorDate: dateKeySchema.nullable().default(null),
+  skipWeekends: z.boolean().default(false),
   provider: auditProviderSchema.nullable().default(null),
   model: nonEmptyTextSchema.nullable().default(null),
   effort: nonEmptyTextSchema.nullable().default(null),
@@ -131,6 +139,9 @@ export const updateAuditProjectSettingsSchema = z.object({
   branch: auditProjectSettingsSchema.shape.branch.removeDefault().optional(),
   dailyTime: auditProjectSettingsSchema.shape.dailyTime.removeDefault().optional(),
   timeZone: auditProjectSettingsSchema.shape.timeZone.removeDefault().optional(),
+  intervalHours: auditProjectSettingsSchema.shape.intervalHours.removeDefault().optional(),
+  anchorDate: auditProjectSettingsSchema.shape.anchorDate.removeDefault().optional(),
+  skipWeekends: auditProjectSettingsSchema.shape.skipWeekends.removeDefault().optional(),
   provider: auditProjectSettingsSchema.shape.provider.removeDefault().optional(),
   model: auditProjectSettingsSchema.shape.model.removeDefault().optional(),
   effort: auditProjectSettingsSchema.shape.effort.removeDefault().optional(),
@@ -144,7 +155,8 @@ export const auditProjectStateSchema = z.object({
   project: nonEmptyTextSchema,
   lastSha: shaSchema.nullable(),
   lastBranch: nonEmptyTextSchema.nullable(),
-  lastScheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  lastScheduledDate: dateKeySchema.nullable(),
+  lastScheduledAt: timestampSchema.nullable(),
   enabledAt: timestampSchema.nullable(),
   observationUntil: timestampSchema.nullable(),
 });

@@ -1,6 +1,7 @@
 import {
   AUDIT_CLASS_LABELS,
   AUDIT_DECISION_LABELS,
+  AUDIT_HOURS_PER_DAY,
   AUDIT_LENS_LABELS,
   AUDIT_RUN_PHASES,
   AUDIT_SEVERITY_LABELS,
@@ -29,7 +30,7 @@ import { formatDuration, formatUsd } from "@/lib/display";
 
 export const ALL_FILTER = "all";
 const SHORT_SHA_LENGTH = 7;
-export const AUDIT_UNSUPPORTED_MESSAGE = "L'audit quotidien est disponible pour les projets GitHub. Azure DevOps est prévu plus tard.";
+export const AUDIT_UNSUPPORTED_MESSAGE = "L'audit planifié est disponible pour les projets GitHub. Azure DevOps est prévu plus tard.";
 export const DEFAULT_AUDIT_SETTINGS: AuditProjectSettings = auditProjectSettingsSchema.parse({});
 export const LAUNCH_CARD_CONFIRM_TITLE = "Lancer un agent maintenant ?";
 export const LAUNCH_CARD_CONFIRM_DESCRIPTION = "Il occupera un slot.";
@@ -263,6 +264,32 @@ export function formatAuditDayTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DAY_TIME_FORMAT);
 }
 
+const HOURS_PER_WEEK = 7 * AUDIT_HOURS_PER_DAY;
+const DATE_KEY_FORMAT: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" };
+
+export const AUDIT_CADENCE_PRESETS: ReadonlyArray<{ hours: number; label: string }> = [
+  { hours: 12, label: "Toutes les 12 h" },
+  { hours: AUDIT_HOURS_PER_DAY, label: "Tous les jours" },
+  { hours: 2 * AUDIT_HOURS_PER_DAY, label: "Tous les 2 jours" },
+  { hours: HOURS_PER_WEEK, label: "Chaque semaine" },
+];
+
+function cadenceIntervalLabel(hours: number): string {
+  if (hours === AUDIT_HOURS_PER_DAY) return "tous les jours";
+  if (hours === HOURS_PER_WEEK) return "chaque semaine";
+  if (hours % AUDIT_HOURS_PER_DAY === 0) return `tous les ${hours / AUDIT_HOURS_PER_DAY} jours`;
+  return `toutes les ${hours} h`;
+}
+
+export function formatAuditCadence(settings: Pick<AuditProjectSettings, "intervalHours" | "dailyTime" | "skipWeekends">): string {
+  const time = settings.intervalHours % AUDIT_HOURS_PER_DAY === 0 ? ` à ${settings.dailyTime}` : "";
+  return `${cadenceIntervalLabel(settings.intervalHours)}${time}${settings.skipWeekends ? " · hors week-end" : ""}`;
+}
+
+export function formatAuditDateKey(dateKey: string): string {
+  return new Date(`${dateKey}T00:00:00Z`).toLocaleDateString("fr-FR", DATE_KEY_FORMAT);
+}
+
 export function formatAuditDateTime(ms: number): string {
   return new Date(ms).toLocaleString("fr-FR", DATE_TIME_FORMAT);
 }
@@ -378,7 +405,7 @@ export function browserTimeZone(): string {
 export function auditAskQuestion(finding: AuditFinding): string {
   const symbol = finding.symbol.trim() === "" ? "" : ` (${finding.symbol})`;
   return [
-    "Ce constat de l'audit quotidien est-il un vrai problème ? Vérifie-le sur le code actuel et explique ta conclusion.",
+    "Ce constat de l'audit planifié est-il un vrai problème ? Vérifie-le sur le code actuel et explique ta conclusion.",
     "",
     `**${finding.title}** · ${AUDIT_SEVERITY_LABELS[finding.severity]} · ${AUDIT_CLASS_LABELS[finding.class]}`,
     `- Emplacement : \`${findingLocation(finding)}\`${symbol}`,

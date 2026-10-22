@@ -5,6 +5,7 @@
 - Shipped on `main` as `d8d1a0f` (2026-10-21), built in worktree `/Users/antoineliu/kanban-agents-audit` (branch `feat/daily-audit`).
 - Analysis: `plans/athena/2026-10-21-helios-audit/` in the main checkout (`report.md`, `report-v2.md`, `mockups.html`). The v2 report and the user's follow-up decisions are authoritative.
 - The three lots (engine, backend, UI) are integrated on the shared contract `src/shared/audit.ts`, and the first review's fixes are applied.
+- 2026-10-22: configurable cadence on branch `feat/audit-cadence` (worktree `/Users/antoineliu/kanban-agents-cadence`), mockup `plans/athena/2026-10-22-audit-cadence/mockup.html` in the main checkout. See "Cadence" below.
 
 ## User decisions (2026-10-21)
 
@@ -20,6 +21,14 @@
 - Pipeline: chunk × 4 lenses analysts → deterministic citation check and dedupe → one fresh batched verifier per chunk, a second verifier for critical candidates → confirmed / contested / rejected / unverified. No automatic arbiter; "Arbitrer (agent)" runs one on demand.
 - One provider per run, read-only `auditor` role, only when no card work runs, daily session limit, restartable runs.
 - Cards: never auto-merge, no automatic feasibility pass, provenance via `audit_findings.ticket_id`, auto-launch only for confirmed critical findings outside the 7-day observation window (set on the first enable only, on every host; re-enabling keeps the original window), never for findings of the security lens (`security` and `privacy`) on a repository that is not known to be private.
+
+### Cadence
+
+- Settings: `intervalHours` (6 to 336, default 24), `anchorDate` (date of a slot, null = fixed default anchor), `dailyTime` (anchor time), `skipWeekends`. Presets in the UI: 12 h, every day, every 2 days, weekly, plus custom hours.
+- Slot math lives in `src/shared/auditSchedule.ts`, shared by the scheduler and the settings UI preview. Multiples of 24 h step calendar days at the local wall time (stable across DST); other intervals are fixed durations from the anchor.
+- Weekend slots (project time zone) are skipped, not postponed; the next audit resumes from the cursor. A cadence that only lands on weekends is rejected.
+- Consumption: `audit_project_state.last_scheduled_at` stores the last consumed slot. Rows written before this change only have `last_scheduled_date`, read as that date at `dailyTime`. Only the latest missed slot is caught up.
+- Enabling the audit or changing the cadence marks the currently due slot as consumed, so the change applies from the next slot instead of starting an immediate run.
 
 ### Cursor semantics
 

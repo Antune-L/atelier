@@ -4,7 +4,6 @@ import {
   AUDIT_ACTIVE_RUN_STATUSES,
   AUDIT_DAILY_SESSION_LIMIT,
   AUDIT_DAY_MS,
-  AUDIT_DEFAULT_TIME_ZONE,
   AUDIT_MAX_PARALLEL_SESSIONS,
   AUDIT_MIN_RUN_SESSIONS,
   AUDIT_NOT_PRIORITY_MASK_DAYS,
@@ -20,7 +19,6 @@ import type {
   AuditFinding,
   AuditOverview,
   AuditProjectSettings,
-  AuditProjectState,
   AuditProjectView,
   AuditProvider,
   AuditRun,
@@ -33,6 +31,8 @@ import type {
   AuditVerdictRecord,
   AuditWaitingReason,
 } from "../../shared/audit.ts";
+import { hasAuditSlots, isValidTimeZone, latestDueAuditSlot, nextAuditRunAt, pendingAuditSlot } from "../../shared/auditSchedule.ts";
+import type { AuditCadenceSettings } from "../../shared/auditSchedule.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { AgentEffort, AgentModel, CodexEffort, CodexModel } from "../../shared/constants.ts";
 import type { CodexRuntimeModel } from "../../shared/codexCapabilities.ts";
@@ -72,17 +72,12 @@ const RUN_ID_LENGTH = 12;
 const FINDING_ID_LENGTH = 12;
 const REVIEW_ID_LENGTH = 8;
 const WORKSPACE_KEY_UNSAFE = /[^a-zA-Z0-9_-]/g;
-const DATE_KEY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DAILY_TIME_PATTERN = /^(\d{2}):(\d{2})$/;
-const DATE_PART_TYPES = ["year", "month", "day", "hour", "minute", "second"] as const;
-const MS_PER_SECOND = 1_000;
-const DATE_PAD = 2;
 const PROJECT_TODO_COLUMN = "todo";
 const REVIEW_RUN_PREFIX = "review-";
 const OPEN_REVIEW_STATES: readonly AuditReviewState[] = ["confirmed", "contested"];
 
 const MESSAGES = {
-  unsupported: "L'audit quotidien est disponible pour les projets GitHub. Azure DevOps est prévu plus tard.",
+  unsupported: "L'audit planifié est disponible pour les projets GitHub. Azure DevOps est prévu plus tard.",
   projectNotFound: "Projet introuvable.",
   runNotFound: "Audit introuvable.",
   findingNotFound: "Constat introuvable.",
@@ -92,6 +87,7 @@ const MESSAGES = {
   interrupted: "Audit interrompu par un redémarrage de l'application.",
   invalidSettings: "Réglages d'audit invalides.",
   invalidTimeZone: "Fuseau horaire inconnu.",
+  noSlots: "Ce rythme ne tombe que le week-end : aucun audit ne serait lancé.",
   invalidStart: "Commit de reprise invalide.",
   unknownStart: "Commit de reprise introuvable dans le dépôt.",
   invalidDecision: "Décision invalide.",
@@ -104,7 +100,6 @@ const MESSAGES = {
   unexpectedFailure: "Échec inattendu de l'audit.",
 } as const;
 
-type DatePart = (typeof DATE_PART_TYPES)[number];
 type AbortReason = "yield" | "stop" | "shutdown";
 
 export type AuditErrorCode = "invalid" | "not_found" | "conflict" | "unsupported";
@@ -151,91 +146,10 @@ interface PersistedRun {
   newCritical: AuditFinding[];
 }
 
-function isDatePart(value: string): value is DatePart {
-  return DATE_PART_TYPES.some((part) => part === value);
-}
+const CADENCE_KEYS = ["dailyTime", "timeZone", "intervalHours", "anchorDate", "skipWeekends"] as const satisfies ReadonlyArray<keyof AuditCadenceSettings>;
 
-function isValidTimeZone(timeZone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function safeTimeZone(timeZone: string): string {
-  return isValidTimeZone(timeZone) ? timeZone : AUDIT_DEFAULT_TIME_ZONE;
-}
-
-function zonedParts(epochMs: number, timeZone: string): Record<DatePart, number> {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts: Record<DatePart, number> = { year: 0, month: 0, day: 0, hour: 0, minute: 0, second: 0 };
-  for (const part of formatter.formatToParts(new Date(epochMs))) {
-    if (isDatePart(part.type)) parts[part.type] = Number(part.value);
-  }
-  return parts;
-}
-
-function zonedOffsetMs(epochMs: number, timeZone: string): number {
-  const parts = zonedParts(epochMs, timeZone);
-  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-  return asUtc - (epochMs - (epochMs % MS_PER_SECOND));
-}
-
-function pad(value: number): string {
-  return String(value).padStart(DATE_PAD, "0");
-}
-
-function formatDateKey(year: number, month: number, day: number): string {
-  return `${year}-${pad(month)}-${pad(day)}`;
-}
-
-function parseNumbers(value: string, pattern: RegExp): number[] {
-  const match = pattern.exec(value);
-  if (!match) throw new Error(`valeur de date invalide : ${value}`);
-  return match.slice(1).map(Number);
-}
-
-function zonedDateKey(epochMs: number, timeZone: string): string {
-  const parts = zonedParts(epochMs, safeTimeZone(timeZone));
-  return formatDateKey(parts.year, parts.month, parts.day);
-}
-
-function addDays(dateKey: string, days: number): string {
-  const [year = 0, month = 1, day = 1] = parseNumbers(dateKey, DATE_KEY_PATTERN);
-  const shifted = new Date(Date.UTC(year, month - 1, day) + days * AUDIT_DAY_MS);
-  return formatDateKey(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate());
-}
-
-function zonedWallTime(dateKey: string, dailyTime: string, timeZone: string): number {
-  const [year = 0, month = 1, day = 1] = parseNumbers(dateKey, DATE_KEY_PATTERN);
-  const [hour = 0, minute = 0] = parseNumbers(dailyTime, DAILY_TIME_PATTERN);
-  const guess = Date.UTC(year, month - 1, day, hour, minute);
-  const first = guess - zonedOffsetMs(guess, timeZone);
-  return guess - zonedOffsetMs(first, timeZone);
-}
-
-export function auditSlot(settings: Pick<AuditProjectSettings, "dailyTime" | "timeZone">, now: number): { date: string; at: number } {
-  const timeZone = safeTimeZone(settings.timeZone);
-  const date = zonedDateKey(now, timeZone);
-  return { date, at: zonedWallTime(date, settings.dailyTime, timeZone) };
-}
-
-export function nextAuditRunAt(settings: AuditProjectSettings, state: AuditProjectState, now: number): number | null {
-  if (!settings.enabled) return null;
-  const today = auditSlot(settings, now);
-  if (state.lastScheduledDate === null || state.lastScheduledDate < today.date) return today.at;
-  return zonedWallTime(addDays(today.date, 1), settings.dailyTime, safeTimeZone(settings.timeZone));
+function cadenceChanged(before: AuditCadenceSettings, after: AuditCadenceSettings): boolean {
+  return CADENCE_KEYS.some((field) => before[field] !== after[field]);
 }
 
 function startOfLocalDay(now: number): number {
@@ -380,13 +294,16 @@ export class AuditManager {
     if (parsed.data.enabled === true && project.vcsProvider !== "github") throw new AuditError("unsupported", MESSAGES.unsupported);
     const now = this.now();
     const before = this.store.getAuditProjectSettings(key);
+    if (!hasAuditSlots({ ...before, ...parsed.data }, now)) throw new AuditError("invalid", MESSAGES.noSlots);
     const settings = this.store.updateAuditProjectSettings(key, parsed.data, now);
-    if (!before.enabled && settings.enabled) {
-      const slot = auditSlot(settings, now);
-      if (now >= slot.at) this.store.updateAuditProjectState(key, { lastScheduledDate: slot.date });
-    }
+    if (settings.enabled && (!before.enabled || cadenceChanged(before, settings))) this.skipDueSlot(key, settings, now);
     this.pushOverview();
     return this.projectView(key, now);
+  }
+
+  private skipDueSlot(key: string, settings: AuditProjectSettings, now: number): void {
+    const due = latestDueAuditSlot(settings, now);
+    if (due !== null && pendingAuditSlot(settings, this.store.getAuditProjectState(key), now) !== null) this.store.updateAuditProjectState(key, { lastScheduledAt: due });
   }
 
   async setStart(key: string, input: unknown): Promise<AuditProjectView> {
@@ -630,9 +547,9 @@ export class AuditManager {
       this.enqueueRun(key, latest.trigger);
       return;
     }
-    const slot = auditSlot(settings, now);
-    if (now < slot.at || (state.lastScheduledDate !== null && state.lastScheduledDate >= slot.date)) return;
-    this.store.updateAuditProjectState(key, { lastScheduledDate: slot.date });
+    const slot = pendingAuditSlot(settings, state, now);
+    if (slot === null) return;
+    this.store.updateAuditProjectState(key, { lastScheduledAt: slot });
     if (latest?.status === "rewritten" && latest.baseSha === state.lastSha) {
       log.info("audit planifié ignoré : historique réécrit, commit de reprise attendu", { project: key });
       return;
@@ -725,7 +642,7 @@ export class AuditManager {
     if (!run || !AUDIT_ACTIVE_RUN_STATUSES.includes(run.status)) return;
     this.store.updateAuditRun(runId, { status: "failed", progress: null, waitingReason: null, error, finishedAt: this.now() });
     const label = isProjectKey(run.project) ? getProject(run.project).label : run.project;
-    void this.notifier.notify("Audit quotidien en échec", `${label} : ${error}`);
+    void this.notifier.notify("Audit planifié en échec", `${label} : ${error}`);
   }
 
   private async execute(runId: string): Promise<void> {
@@ -925,11 +842,11 @@ export class AuditManager {
   private async afterRun(persisted: PersistedRun, project: ProjectConfig, settings: AuditProjectSettings): Promise<void> {
     const { run, actionable, newCritical } = persisted;
     this.pushOverview();
-    if (run.status === "failed") void this.notifier.notify("Audit quotidien en échec", `${project.label} : ${run.error ?? MESSAGES.unexpectedFailure}`);
+    if (run.status === "failed") void this.notifier.notify("Audit planifié en échec", `${project.label} : ${run.error ?? MESSAGES.unexpectedFailure}`);
     const [first] = newCritical;
     if (first !== undefined) {
       const body = newCritical.length === 1 ? `${project.label} — ${first.title}` : `${project.label} — ${newCritical.length} constats critiques confirmés`;
-      void this.notifier.notify("Audit quotidien : constat critique", body);
+      void this.notifier.notify("Audit planifié : constat critique", body);
     }
     if (actionable.length === 0 || settings.cardMode === "manual") return;
     const cards = await applyAutoCards(this.cardDeps, {

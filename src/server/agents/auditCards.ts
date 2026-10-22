@@ -102,7 +102,7 @@ function auditCardDescription(finding: AuditFinding, context: AuditCardContext):
   const fix = suggestedFix === "" ? [UNVERIFIED_FIX] : [quoted(suggestedFix), "", `_${UNVERIFIED_FIX} : à valider avant de l'appliquer._`];
   const symbol = cleanField(finding.symbol);
   return [
-    `**${AUDIT_SEVERITY_LABELS[finding.severity]} · ${AUDIT_CLASS_LABELS[finding.class]}** — constat de l'audit quotidien sur \`${context.branch}\`, fichier \`${cleanField(finding.file)}:${finding.line}\`.`,
+    `**${AUDIT_SEVERITY_LABELS[finding.severity]} · ${AUDIT_CLASS_LABELS[finding.class]}** — constat de l'audit planifié sur \`${context.branch}\`, fichier \`${cleanField(finding.file)}:${finding.line}\`.`,
     "",
     `${DATA_SECTION_START} (bloc ${finding.id})`,
     "",

@@ -25,6 +25,7 @@ import {
   AUDIT_CARD_MODE_SHORT_LABELS,
   AUDIT_RUN_STATUS_LABELS,
   auditAskQuestion,
+  formatAuditCadence,
   formatAuditDayTime,
   latestRunsByProject,
 } from "@/lib/auditDisplay";
@@ -218,7 +219,7 @@ export function AuditsView({ projects, target }: AuditsViewProps) {
         <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-muted-foreground">
           <ShieldCheck className="h-6 w-6" />
           <strong className="text-sm font-medium text-foreground">Aucun audit configuré</strong>
-          <p className="max-w-md">Activez l'audit quotidien sur un projet : chaque jour, les commits fusionnés sont relus et seuls les problèmes bloquants vérifiés sont signalés.</p>
+          <p className="max-w-md">Activez l'audit planifié sur un projet : à intervalle régulier, les commits fusionnés sont relus et seuls les problèmes bloquants vérifiés sont signalés.</p>
           <div className="mt-2">{configureMenu}</div>
           {configurableProjects.length === 0 && <p>Aucun projet GitHub disponible.</p>}
         </div>
@@ -233,7 +234,7 @@ export function AuditsView({ projects, target }: AuditsViewProps) {
                     <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground" style={color ? { backgroundColor: color } : undefined} />
                     <span className="font-medium">{resolveProjectLabel(projects, view.project)}</span>
                     <span className="font-mono text-2xs text-muted-foreground">
-                      activé{view.nextRunAt === null ? "" : ` · prochain ${formatAuditDayTime(view.nextRunAt)}`} · {projectEngineLabel(view)} · {AUDIT_CARD_MODE_SHORT_LABELS[view.settings.cardMode]}
+                      activé · {formatAuditCadence(view.settings)}{view.nextRunAt === null ? "" : ` · prochain ${formatAuditDayTime(view.nextRunAt)}`} · {projectEngineLabel(view)} · {AUDIT_CARD_MODE_SHORT_LABELS[view.settings.cardMode]}
                     </span>
                     {view.pendingTriage > 0 && <span className="text-warning">{view.pendingTriage} à trier</span>}
                     <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-2xs" onClick={() => setConfiguring(view.project)}>Configurer</Button>
@@ -266,7 +267,7 @@ export function AuditsView({ projects, target }: AuditsViewProps) {
       <Dialog
         open={configuringProject !== null}
         onOpenChange={(open) => { if (!open) setConfiguring(null); }}
-        title={configuringProject === null ? "Audit quotidien" : `Audit quotidien · ${configuringProject.label}`}
+        title={configuringProject === null ? "Audit planifié" : `Audit planifié · ${configuringProject.label}`}
       >
         {configuringProject !== null && <ProjectAuditSettings key={configuringProject.key} project={configuringProject} showAuditsLink={false} />}
       </Dialog>

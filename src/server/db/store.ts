@@ -2729,14 +2729,14 @@ export class Store {
   getAuditProjectState(project: string): AuditProjectState {
     const row = this.db.query("SELECT * FROM audit_project_state WHERE project = ?").get(project);
     if (row) return mapAuditProjectStateRow(row);
-    return auditProjectStateSchema.parse({ project, lastSha: null, lastBranch: null, lastScheduledDate: null, enabledAt: null, observationUntil: null });
+    return auditProjectStateSchema.parse({ project, lastSha: null, lastBranch: null, lastScheduledDate: null, lastScheduledAt: null, enabledAt: null, observationUntil: null });
   }
 
   updateAuditProjectState(project: string, patch: Partial<Omit<AuditProjectState, "project">>): AuditProjectState {
     const state = auditProjectStateSchema.parse({ ...this.getAuditProjectState(project), ...patch, project });
     this.db
-      .query("INSERT OR REPLACE INTO audit_project_state (project, last_sha, last_branch, last_scheduled_date, enabled_at, observation_until) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(project, state.lastSha, state.lastBranch, state.lastScheduledDate, state.enabledAt, state.observationUntil);
+      .query("INSERT OR REPLACE INTO audit_project_state (project, last_sha, last_branch, last_scheduled_date, last_scheduled_at, enabled_at, observation_until) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(project, state.lastSha, state.lastBranch, state.lastScheduledDate, state.lastScheduledAt, state.enabledAt, state.observationUntil);
     return state;
   }
 

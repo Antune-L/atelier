@@ -367,6 +367,7 @@ CREATE TABLE IF NOT EXISTS audit_project_state (
   last_sha TEXT,
   last_branch TEXT,
   last_scheduled_date TEXT,
+  last_scheduled_at INTEGER,
   enabled_at INTEGER,
   observation_until INTEGER
 );
@@ -652,6 +653,10 @@ const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "context_window", ddl: "ALTER TABLE conversations ADD COLUMN context_window INTEGER" },
 ];
 
+const AUDIT_STATE_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "last_scheduled_at", ddl: "ALTER TABLE audit_project_state ADD COLUMN last_scheduled_at INTEGER" },
+];
+
 /** SQLite lock wait before a concurrent write fails with SQLITE_BUSY (several sessions write usage at once). */
 const BUSY_TIMEOUT_MS = 5_000;
 
@@ -676,6 +681,7 @@ export function createDatabase(path: string): Database {
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);
   migrate(db, "quality_validation_runs", QUALITY_RUN_MIGRATIONS);
   migrate(db, "conversations", CONVERSATION_MIGRATIONS);
+  migrate(db, "audit_project_state", AUDIT_STATE_MIGRATIONS);
   if (!reviewPassPolicyExisted) {
     db.exec(`UPDATE review_passes SET requires_approval = 0
       WHERE ticket_id IN (

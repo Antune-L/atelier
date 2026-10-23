@@ -1257,17 +1257,14 @@ export class DelegationManager {
     return this.store.getReviewPass(ticketId)?.requiresApproval ?? null;
   }
 
-  /**
-   * Rendering in the review language (English by default): the body posted on the pull request.
-   * Azure DevOps carries the verdict through the vote, so its summary thread skips the verdict line.
-   */
-  reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS, withVerdict = true): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options, withVerdict);
+  /** Rendering in the review language (English by default): the body posted on the pull request. */
+  reviewReport(ticketId: string, options: ReviewerOptions = FEATURE_REVIEWER_OPTIONS): string | null {
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS[options.language], options);
   }
 
   /** French rendering: the board comment shown in the app. */
   reviewBoardReport(ticketId: string): string | null {
-    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, BOARD_FINDING_RENDER_STYLE, true);
+    return this.renderReviewReport(ticketId, REVIEW_REPORT_LABELS_FR, BOARD_FINDING_RENDER_STYLE);
   }
 
   private reviewerOptions(ticket: Ticket): ReviewerOptions {
@@ -1282,7 +1279,6 @@ export class DelegationManager {
     ticketId: string,
     labels: ReviewReportLabels,
     style: FindingRenderStyle,
-    withVerdict: boolean,
   ): string | null {
     const findings = publishedReviewFindings(this.store.getReviewPass(ticketId), style);
     if (findings === null) return null;
@@ -1297,7 +1293,7 @@ export class DelegationManager {
       ? ""
       : `${labels.outsideDiffHeading}\n\n${outsideDiffFindings.map((finding) => renderCollapsedFinding(finding, style.humanTone)).join("\n\n")}`;
     const sections = [
-      withVerdict ? `**${verdict}**` : "",
+      `**${verdict}**`,
       style.humanTone ? "" : labels.keptLine(findings.length, countSummary),
       details,
     ];
@@ -1366,7 +1362,7 @@ export class DelegationManager {
     }
     const options = this.reviewerOptions(ticket);
     const provider = projectVcsProvider(ticket.project);
-    const report = this.reviewReport(ticket.id, options, provider !== "azureDevops");
+    const report = this.reviewReport(ticket.id, options);
     if (report === null) return { ok: false, result: "Publication refusée : résultats de review incomplets." };
     const reviewedCommitSha = currentPass.reviewedCommitSha;
     if (reviewedCommitSha === null) {

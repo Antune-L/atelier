@@ -31,7 +31,6 @@ import type {
   ReviewHeadResult,
   ReviewPublicationComment,
   ReviewPublicationEvent,
-  ReviewPublicationState,
   RecoveryCandidateOptions,
 } from "../types.ts";
 import { parseAzureRepoRef } from "./azureRemote.ts";
@@ -95,8 +94,7 @@ const GIT_SEGMENT = "_git";
  */
 const VOTE_REJECTED_MAX = -1;
 const VOTE_APPROVED_MIN = 1;
-const VOTE_APPROVED = 10;
-const VOTE_WAIT_FOR_AUTHOR = -5;
+const VOTE_APPROVED_WITH_SUGGESTIONS = 5;
 
 /**
  * Azure statuses of `az repos pr show/list`, mapped onto the neutral PR state. `notSet` never appears
@@ -135,15 +133,12 @@ const FIRST_COMPARING_ITERATION = 1;
 const AZURE_PATH_PREFIX = "/";
 
 /**
- * Reviewer vote each publication verdict maps to. `--vote` takes a name, not the numeric scale:
+ * Reviewer vote cast on every publication, whatever the verdict: the verdict is carried by the summary
+ * thread instead. `--vote` takes a name, not the numeric scale:
  * `approve | approve-with-suggestions | reject | reset | wait-for-author` (verified in
- * `az repos pr set-vote --help`). A COMMENT pass states no position, so it casts no vote at all.
+ * `az repos pr set-vote --help`).
  */
-const VOTE_BY_EVENT: Record<ReviewPublicationEvent, string | null> = {
-  APPROVE: "approve",
-  REQUEST_CHANGES: "wait-for-author",
-  COMMENT: null,
-};
+const REVIEW_VOTE = "approve-with-suggestions";
 
 const azureReviewerSchema = z.object({
   id: z.string().optional(),
@@ -702,7 +697,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (posted === null || publishedDate === null || !(Date.parse(publishedDate) >= check.since)) {
       return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
     }
-    return this.verifyVote(cwd, context, check.expectedState, posted.author?.id ?? null);
+    return this.verifyVote(cwd, context, posted.author?.id ?? null);
   }
 
   async mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult> {
@@ -951,7 +946,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     thread: AzureThread,
   ): Promise<PublishReviewResult> {
     const publisherId = completionComment(thread, marker)?.author?.id ?? null;
-    const voted = await this.castVote(cwd, context, event, publisherId);
+    const voted = await this.castVote(cwd, context, publisherId);
     if (!voted.ok) return { ok: false, reason: voted.reason, reviewId: null };
     return { ok: true, reason: "", reviewId: thread.id, actualState: REVIEW_PUBLICATION_STATE_BY_EVENT[event] };
   }
@@ -959,10 +954,8 @@ export class AzureDevopsVcsClient implements VcsClient {
   private async verifyVote(
     cwd: string,
     context: AzurePrContext,
-    state: ReviewPublicationState,
     publisherId: string | null,
   ): Promise<DoneGateResult> {
-    if (state === "COMMENTED") return { ok: true, reason: "" };
     if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la vérification du vote` };
     const reviewer = await runBoundedCommand(this.invokeArgs(
       context, AZ_RESOURCE_PR_REVIEWERS, [`reviewerId=${publisherId}`], { method: HTTP_GET },
@@ -974,9 +967,8 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (!parsedReviewer.success || parsedReviewer.data.id.toLowerCase() !== publisherId.toLowerCase()) {
       return { ok: false, reason: `vote ${AZURE_LABEL} de l'auteur de la review introuvable` };
     }
-    const expectedVote = state === "APPROVED" ? VOTE_APPROVED : VOTE_WAIT_FOR_AUTHOR;
-    if (parsedReviewer.data.vote !== expectedVote) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${expectedVote}, reçu ${parsedReviewer.data.vote}` };
+    if (parsedReviewer.data.vote !== VOTE_APPROVED_WITH_SUGGESTIONS) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${VOTE_APPROVED_WITH_SUGGESTIONS}, reçu ${parsedReviewer.data.vote}` };
     }
     return { ok: true, reason: "" };
   }
@@ -984,17 +976,14 @@ export class AzureDevopsVcsClient implements VcsClient {
   private async castVote(
     cwd: string,
     context: AzurePrContext,
-    event: ReviewPublicationEvent,
     publisherId: string | null,
   ): Promise<DoneGateResult> {
-    const vote = VOTE_BY_EVENT[event];
-    if (vote === null) return { ok: true, reason: "" };
     if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la publication du vote` };
     const res = await runBoundedCommand(
       [
         AZ_BINARY, "repos", "pr", "set-vote",
         "--id", String(context.prNumber),
-        "--vote", vote,
+        "--vote", REVIEW_VOTE,
         "--org", context.orgUrl,
         "--detect", "false",
         "-o", "json",
@@ -1002,19 +991,17 @@ export class AzureDevopsVcsClient implements VcsClient {
       cwd,
     );
     if (res.exitCode !== 0 || res.timedOut) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} « ${vote} » refusé : ${boundedCommandDetail(res)}` };
+      return { ok: false, reason: `vote ${AZURE_LABEL} « ${REVIEW_VOTE} » refusé : ${boundedCommandDetail(res)}` };
     }
     const parsed = azureReviewerVoteSchema.safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return { ok: false, reason: `réponse ${AZURE_LABEL} inattendue après la publication du vote` };
     if (parsed.data.id.toLowerCase() !== publisherId.toLowerCase()) {
       return { ok: false, reason: `le vote ${AZURE_LABEL} provient d'une identité différente de l'auteur de la review` };
     }
-    const state = REVIEW_PUBLICATION_STATE_BY_EVENT[event];
-    const expectedVote = state === "APPROVED" ? VOTE_APPROVED : VOTE_WAIT_FOR_AUTHOR;
-    if (parsed.data.vote !== expectedVote) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${expectedVote}, reçu ${parsed.data.vote}` };
+    if (parsed.data.vote !== VOTE_APPROVED_WITH_SUGGESTIONS) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${VOTE_APPROVED_WITH_SUGGESTIONS}, reçu ${parsed.data.vote}` };
     }
-    return this.verifyVote(cwd, context, state, publisherId);
+    return this.verifyVote(cwd, context, publisherId);
   }
 
   /** `az repos pr show --id N --org URL` — the single read backing every PR-scoped gate. */

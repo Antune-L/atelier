@@ -27,5 +27,6 @@ graphify-out/
 # Persisted server logs
 logs/
 
-.playwright-mcp/reports/
+.playwright-mcp/
+reports/
 research_notes/

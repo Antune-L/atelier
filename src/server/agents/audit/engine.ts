@@ -503,7 +503,7 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
     commitCount: attempted.reduce((sum, chunk) => sum + chunk.commits.length, 0),
     deferredCommitCount,
     coverage,
-    candidates: candidates.map((candidate) => ({
+    candidates: candidates.filter((candidate) => input.includeWarnings || finalSeverity(candidate) === "critical").map((candidate) => ({
       finding: { ...candidate.finding, severity: finalSeverity(candidate) },
       lens: candidate.lens,
       chunkIndex: candidate.chunkIndex,

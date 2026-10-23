@@ -791,8 +791,8 @@ export class AuditManager {
       ...existing,
       ...refreshed,
       ...seen,
-      reviewState: candidate.reviewState,
-      verdicts: candidate.verdicts,
+      reviewState: candidate.reviewState === "unverified" ? existing.reviewState : candidate.reviewState,
+      verdicts: [...existing.verdicts, ...candidate.verdicts],
       decision: null,
     });
     const wasVisibleConfirmed = existing.reviewState === "confirmed" && decision === null;
@@ -890,7 +890,9 @@ export class AuditManager {
         recheckRunning: false,
         verdicts: [...current.verdicts, ...verdicts],
         reviewState: mode === "arbiter" ? reviewStateFromVerdicts(verdicts, 1) : reviewStateFromVerdicts(verdicts, review.sessions),
-        severity: verdicts.reduce((severity, verdict) => lowerSeverity(severity, verdict.severity), current.severity),
+        severity: verdicts
+          .filter((verdict) => verdict.verdict === "confirmed")
+          .reduce((severity, verdict) => lowerSeverity(severity, verdict.severity), current.severity),
         updatedAt: this.now(),
       });
     } catch (error) {

@@ -874,7 +874,12 @@ const auditProjectStateRowSchema = z.object({
 
 export function mapAuditProjectSettingsRow(raw: unknown): AuditProjectSettings {
   const row = auditPayloadRowSchema.parse(raw);
-  return auditProjectSettingsSchema.parse(JSON.parse(row.payload_json));
+  const payload: unknown = JSON.parse(row.payload_json);
+  const parsed = auditProjectSettingsSchema.safeParse(payload);
+  if (parsed.success) return parsed.data;
+  // NOTE(ali): a branch saved before gitBranchSchema was tightened falls back to the base branch so the project stays readable and editable.
+  const record = z.record(z.string(), z.unknown()).safeParse(payload);
+  return auditProjectSettingsSchema.parse({ ...(record.success ? record.data : {}), branch: null });
 }
 
 export function mapAuditProjectStateRow(raw: unknown): AuditProjectState {

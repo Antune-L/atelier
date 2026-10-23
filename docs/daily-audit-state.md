@@ -7,6 +7,8 @@
 - The three lots (engine, backend, UI) are integrated on the shared contract `src/shared/audit.ts`, and the first review's fixes are applied.
 - 2026-10-22: configurable cadence on branch `feat/audit-cadence` (worktree `/Users/antoineliu/kanban-agents-cadence`), mockup `plans/athena/2026-10-22-audit-cadence/mockup.html` in the main checkout. See "Cadence" below.
 
+- 2026-10-23: first two live runs on the VPS (Claude Opus high, project kanban-agents) both showed 0 findings, but the transcripts held 6 warnings dropped by `includeWarnings: false`. Fixes on `main`: `af73b38` (the 5 defects those warnings described), then a counter of warnings hidden by the setting (`counts.filteredWarnings`) and per-file splitting of a commit whose diff exceeds `AUDIT_MAX_CHUNK_CHARS` (`AuditRangeChunk.part`; the cursor only passes the commit once its last part is settled).
+
 ## User decisions (2026-10-21)
 
 - The app owns the audit method; no link to the user's `helios-daily-audit` skill, no "Règles d'analyse" option.

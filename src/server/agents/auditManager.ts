@@ -167,7 +167,7 @@ function normalizeRevision(value: string): string {
 }
 
 function emptyCounts(): AuditRunCounts {
-  return { critical: 0, warning: 0, contested: 0, rejected: 0, unverified: 0, masked: 0, deferred: 0 };
+  return { critical: 0, warning: 0, contested: 0, rejected: 0, unverified: 0, masked: 0, deferred: 0, filteredWarnings: 0 };
 }
 
 function countFinding(counts: AuditRunCounts, finding: AuditFinding): void {
@@ -803,7 +803,7 @@ export class AuditManager {
     return this.store.transaction(() => {
       const now = this.now();
       const run = this.requireRun(runId);
-      const counts = { ...emptyCounts(), deferred: result.deferredCommitCount };
+      const counts = { ...emptyCounts(), deferred: result.deferredCommitCount, filteredWarnings: result.filteredWarningCount };
       const actionable: AuditFinding[] = [];
       const newCritical: AuditFinding[] = [];
       for (const candidate of result.candidates) {

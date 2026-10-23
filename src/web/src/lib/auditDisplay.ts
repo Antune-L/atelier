@@ -335,6 +335,7 @@ export function auditRunCoverageComplete(run: AuditRun): boolean {
 export function auditRunCountsLabel(run: AuditRun): string {
   const parts = [plural(run.counts.critical, "critique"), plural(run.counts.warning, "avertissement")];
   if (run.counts.contested > 0) parts.push(plural(run.counts.contested, "contesté"));
+  if (run.counts.filteredWarnings > 0) parts.push(plural(run.counts.filteredWarnings, "avertissement masqué par le réglage", "avertissements masqués par le réglage"));
   parts.push(auditRunCoverageComplete(run) ? "couverture complète" : "couverture partielle");
   return parts.join(" · ");
 }

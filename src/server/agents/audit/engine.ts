@@ -108,6 +108,7 @@ export interface AuditPipelineResult {
   candidates: AuditPipelineCandidate[];
   analystSessions: number;
   verifierSessions: number;
+  filteredWarningCount: number;
   usageByModel: Record<string, AgentTurnUsage>;
   costUsd: number | null;
   error: string | null;
@@ -248,6 +249,7 @@ export function emptyAuditResult(status: AuditPipelineResult["status"], baseSha:
     candidates: [],
     analystSessions: 0,
     verifierSessions: 0,
+    filteredWarningCount: 0,
     usageByModel: {},
     costUsd: null,
     error,
@@ -288,9 +290,13 @@ function coveredHead(chunks: readonly AuditRangeChunk[], settled: ReadonlySet<Au
   let covered: string | null = null;
   for (const chunk of chunks) {
     if (!settled.has(chunk)) break;
-    covered = chunk.headSha;
+    covered = chunk.part === null || chunk.part.index === chunk.part.total - 1 ? chunk.headSha : chunk.baseSha;
   }
   return covered;
+}
+
+function commitShas(chunks: readonly AuditRangeChunk[]): Set<string> {
+  return new Set(chunks.flatMap((chunk) => chunk.commits.map((commit) => commit.sha)));
 }
 
 function chunkVerified(chunk: AuditRangeChunk, candidates: readonly WorkingCandidate[], returned: ReadonlySet<string>): boolean {
@@ -403,7 +409,8 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
   }
   if (deps.system.dryRun && firstSubstantive !== undefined) {
     const simulated = dryRunPipelineResult(range, firstSubstantive, execution, deps.now());
-    return { ...simulated, candidates: screenKnownFindings(simulated.candidates, input.knownFindings, input.includeWarnings) };
+    const screened = screenKnownFindings(simulated.candidates, input.knownFindings, input.includeWarnings);
+    return { ...simulated, candidates: screened, filteredWarningCount: simulated.candidates.length - screened.length };
   }
 
   const admitted = admitChunks(range.chunks, input.sessionBudget);
@@ -437,7 +444,8 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
   const coverage = attempted.map((chunk) => chunkCoverage(chunk, runs.filter((run) => run.chunk === chunk)));
 
   input.onProgress({ phase: "checking", done: 0, total: runs.length });
-  const candidates = screenKnownFindings(dedupeAuditCandidates(await buildCandidates(cwd, runs)), input.knownFindings, input.includeWarnings);
+  const deduped = dedupeAuditCandidates(await buildCandidates(cwd, runs));
+  const candidates = screenKnownFindings(deduped, input.knownFindings, input.includeWarnings);
 
   const analysedChunks = attempted.filter((chunk) => !isEmptyChunk(chunk));
   const batches = signal.aborted ? [] : planVerifierBatches(candidates, analysedChunks, input.sessionBudget - runs.length);
@@ -470,10 +478,10 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
   const failedIndexes = new Set(coverage.filter((entry) => entry.status === "failed").map((entry) => entry.index));
   const settled = new Set(attempted.filter((chunk) => !failedIndexes.has(chunk.index) && chunkVerified(chunk, candidates, returned)));
   const unverifiedCount = attempted.filter((chunk) => !failedIndexes.has(chunk.index) && !settled.has(chunk)).length;
-  const deferredCommitCount = range.deferredCommitCount + range.chunks
-    .filter((chunk) => !attempted.includes(chunk))
-    .reduce((sum, chunk) => sum + chunk.commits.length, 0);
+  const attemptedCommits = commitShas(attempted);
+  const deferredCommitCount = range.deferredCommitCount + [...commitShas(range.chunks)].filter((sha) => !attemptedCommits.has(sha)).length;
   const firstError = runs.find((run) => run.result.error !== null)?.result.error ?? null;
+  const reported = candidates.filter((candidate) => input.includeWarnings || finalSeverity(candidate) === "critical");
   let status: AuditPipelineResult["status"] = "completed";
   let error: string | null = null;
   if (signal.aborted) {
@@ -500,10 +508,10 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
     baseSha: range.baseSha,
     tipSha: range.tipSha,
     coveredSha: coveredHead(range.chunks, settled),
-    commitCount: attempted.reduce((sum, chunk) => sum + chunk.commits.length, 0),
+    commitCount: attemptedCommits.size,
     deferredCommitCount,
     coverage,
-    candidates: candidates.filter((candidate) => input.includeWarnings || finalSeverity(candidate) === "critical").map((candidate) => ({
+    candidates: reported.map((candidate) => ({
       finding: { ...candidate.finding, severity: finalSeverity(candidate) },
       lens: candidate.lens,
       chunkIndex: candidate.chunkIndex,
@@ -515,6 +523,7 @@ export async function runAuditPipeline(deps: AuditEngineDeps, input: AuditPipeli
     })),
     analystSessions: runs.length,
     verifierSessions: verifications.filter((batch) => batch !== null).length,
+    filteredWarningCount: deduped.length - reported.length,
     usageByModel,
     costUsd: costOf(usageByModel),
     error,

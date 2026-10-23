@@ -9,6 +9,11 @@ export interface AuditRangeCommit {
   prNumber: number | null;
 }
 
+export interface AuditChunkPart {
+  index: number;
+  total: number;
+}
+
 export interface AuditRangeChunk {
   index: number;
   baseSha: string;
@@ -17,6 +22,7 @@ export interface AuditRangeChunk {
   diff: string;
   files: string[];
   skipped: Array<{ path: string; reason: string }>;
+  part: AuditChunkPart | null;
 }
 
 export interface AuditRange {
@@ -77,6 +83,8 @@ const LOG_FIELD_SEPARATOR = "\x1f";
 const LOG_RECORD_SEPARATOR = "\x1e";
 
 const SHORT_SHA_LENGTH = 12;
+const FILE_DIFF_SEPARATOR = "\ndiff --git ";
+const FILE_DIFF_HEADER = /^diff --git a\/(.+) b\/(.+)$/;
 
 interface ChunkPlan {
   baseSha: string;
@@ -84,6 +92,14 @@ interface ChunkPlan {
   diff: string;
   size: number;
   oversized: string[];
+  files: string[] | null;
+  part: AuditChunkPart | null;
+  skipped: Array<{ path: string; reason: string }>;
+}
+
+interface FileDiff {
+  path: string;
+  diff: string;
 }
 
 interface CappedDiff {
@@ -136,6 +152,57 @@ function diffArgs(baseSha: string, headSha: string, nameOnly: boolean): string[]
   return ["diff", "--no-color", ...(nameOnly ? ["--name-only"] : []), baseSha, headSha, "--", ".", ...AUDIT_IGNORED_PATHSPECS];
 }
 
+function unanalysedPartReason(sha: string, maxParts: number): string {
+  return `commit ${sha.slice(0, SHORT_SHA_LENGTH)} trop volumineux : seules ses ${maxParts} premières parties sont analysées`;
+}
+
+function splitDiffByFile(diff: string): FileDiff[] {
+  const body = diff.startsWith("\n") ? diff : `\n${diff}`;
+  return body.split(FILE_DIFF_SEPARATOR).filter((segment) => segment.trim().length > 0).map((segment) => {
+    const text = `diff --git ${segment}`.replace(/\n*$/, "\n");
+    const header = text.slice(0, text.indexOf("\n"));
+    const match = FILE_DIFF_HEADER.exec(header);
+    return { path: match?.[2] ?? header, diff: text };
+  });
+}
+
+function packFileDiffs(files: readonly FileDiff[], maxChars: number): FileDiff[][] {
+  const groups: FileDiff[][] = [];
+  let current: FileDiff[] = [];
+  let size = 0;
+  for (const file of files) {
+    if (current.length > 0 && size + file.diff.length > maxChars) {
+      groups.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(file);
+    size += file.diff.length;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
+
+function splitUnitPlans(unitBase: string, unit: string, diff: string, input: AuditRangeInput, maxParts: number): ChunkPlan[] {
+  const groups = packFileDiffs(splitDiffByFile(diff), input.maxChunkChars);
+  const kept = groups.slice(0, maxParts);
+  const dropped = groups.slice(maxParts).flat().map((file) => ({ path: file.path, reason: unanalysedPartReason(unit, maxParts) }));
+  return kept.map((group, index) => {
+    const partDiff = group.map((file) => file.diff).join("");
+    const last = index === kept.length - 1;
+    return {
+      baseSha: unitBase,
+      units: [unit],
+      diff: partDiff,
+      size: partDiff.length,
+      oversized: [],
+      files: group.map((file) => file.path),
+      part: { index, total: kept.length },
+      skipped: last ? dropped : [],
+    };
+  });
+}
+
 async function changedFileNames(cwd: string, baseSha: string, headSha: string): Promise<string[]> {
   const output = await auditGitOutput(cwd, diffArgs(baseSha, headSha, true));
   return output.split("\n").map((file) => file.trim()).filter((file) => file.length > 0);
@@ -173,14 +240,22 @@ async function planChunks(cwd: string, baseSha: string, units: string[], input: 
     const unitBase = index === 0 ? baseSha : units[index - 1] ?? baseSha;
     const { diff, truncated } = await cappedDiff(cwd, unitBase, unit, input.maxUnitDiffChars);
     const size = truncated ? Math.max(diff.length, input.maxChunkChars + 1) : diff.length;
-    if (current && current.size + size <= input.maxChunkChars) {
+    if (current && current.part === null && current.size + size <= input.maxChunkChars) {
       current.units.push(unit);
       current.size += size;
       continue;
     }
     if (current) plans.push(current);
+    current = null;
     if (plans.length >= input.maxChunks) return { plans, deferredCommitCount: units.length - index };
-    current = { baseSha: unitBase, units: [unit], diff, size, oversized: truncated ? [unit] : [] };
+    if (!truncated && size > input.maxChunkChars) {
+      const parts = splitUnitPlans(unitBase, unit, diff, input, input.maxChunks - plans.length);
+      if (plans.length > 0 && parts.some((part) => part.skipped.length > 0)) return { plans, deferredCommitCount: units.length - index };
+      plans.push(...parts.slice(0, -1));
+      current = parts.at(-1) ?? null;
+      continue;
+    }
+    current = { baseSha: unitBase, units: [unit], diff, size, oversized: truncated ? [unit] : [], files: null, part: null, skipped: [] };
   }
   if (current) plans.push(current);
   return { plans, deferredCommitCount: 0 };
@@ -190,7 +265,7 @@ async function buildChunk(cwd: string, plan: ChunkPlan, index: number, input: Au
   const headSha = plan.units.at(-1) ?? plan.baseSha;
   const read = plan.units.length === 1 ? { diff: plan.diff, truncated: plan.oversized.length > 0 } : await cappedDiff(cwd, plan.baseSha, headSha, input.maxUnitDiffChars);
   const oversized = read.truncated && plan.oversized.length === 0 ? [headSha] : plan.oversized;
-  const [files, commits] = await Promise.all([changedFileNames(cwd, plan.baseSha, headSha), rangeCommits(cwd, plan.baseSha, headSha)]);
+  const [files, commits] = await Promise.all([plan.files ?? changedFileNames(cwd, plan.baseSha, headSha), rangeCommits(cwd, plan.baseSha, headSha)]);
   return {
     index,
     baseSha: plan.baseSha,
@@ -198,7 +273,8 @@ async function buildChunk(cwd: string, plan: ChunkPlan, index: number, input: Au
     commits,
     diff: truncateAuditDiff(read.diff, input.maxChunkChars),
     files,
-    skipped: oversized.map((sha) => ({ path: sha, reason: oversizedDiffReason(sha, input.maxUnitDiffChars) })),
+    skipped: [...oversized.map((sha) => ({ path: sha, reason: oversizedDiffReason(sha, input.maxUnitDiffChars) })), ...plan.skipped],
+    part: plan.part,
   };
 }
 

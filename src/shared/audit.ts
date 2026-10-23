@@ -283,6 +283,7 @@ export const auditRunCountsSchema = z.object({
   unverified: z.number().int().nonnegative(),
   masked: z.number().int().nonnegative(),
   deferred: z.number().int().nonnegative(),
+  filteredWarnings: z.number().int().nonnegative().default(0),
 });
 export type AuditRunCounts = z.infer<typeof auditRunCountsSchema>;
 

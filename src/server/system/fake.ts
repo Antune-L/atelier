@@ -294,6 +294,7 @@ export class FakeSystemAdapter implements SystemAdapter {
         diff: FAKE_AUDIT_DIFF,
         files: [FAKE_AUDIT_FILE],
         skipped: [],
+        part: null,
       }],
       deferredCommitCount: 0,
     };

@@ -95,6 +95,11 @@ function rangeLabel(chunk: AuditRangeChunk): string {
   return `${chunk.baseSha.slice(0, SHORT_SHA_LENGTH)}..${chunk.headSha.slice(0, SHORT_SHA_LENGTH)}`;
 }
 
+function partNote(chunk: AuditRangeChunk): string {
+  if (chunk.part === null) return "";
+  return ` This is part ${chunk.part.index + 1} of ${chunk.part.total} of a commit too large for one review: only the changed files listed below are in this part, other analysts review the rest of the commit.`;
+}
+
 function changedFiles(nonce: string, chunk: AuditRangeChunk): string {
   return chunk.files.length > 0 ? untrusted(nonce, "changed-files", chunk.files.map((file) => `- ${file}`).join("\n")) : NONE;
 }
@@ -133,6 +138,7 @@ export function analystPrompt(context: AuditPromptContext, lens: AuditLens, chun
     READ_ACCESS: readAccess(context.provider, context.worktree),
     WORKTREE: context.worktree,
     RANGE: rangeLabel(chunk),
+    PART_NOTE: partNote(chunk),
     RUBRIC: promptText(RUBRIC),
     FILES: changedFiles(nonce, chunk),
     COMMITS: commitsSection(nonce, [chunk], context.prBodies),

@@ -22,7 +22,7 @@ everything you report, and nothing is published outside the application.
 
 - Target revision worktree (your working directory): `{{WORKTREE}}`. It is checked out at the tip of
   the audited branch; the line numbers you cite are the lines at this revision.
-- Reviewed range: `{{RANGE}}`.
+- Reviewed range: `{{RANGE}}`.{{PART_NOTE}}
 - The rubric, the changed files, the commits with their linked pull request descriptions (intent
   sources), the known findings and the diff are inlined below.
 

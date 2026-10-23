@@ -129,11 +129,11 @@ export function toSdkEffort(effort: string | null): SdkEffort | undefined {
   return SDK_EFFORTS.find((value) => value === effort);
 }
 
-const HIDDEN_COMMIT_ATTRIBUTION = { commit: "" };
+const HIDDEN_ATTRIBUTION = { commit: "", pr: "" };
 
-/** Build the `settings` partial: hide commit attribution always, add allow/deny permissions when set. */
+/** Build the `settings` partial: hide commit and PR attribution always, add allow/deny permissions when set. */
 export function buildSettings(allow?: string[], deny?: string[]): Pick<Options, "settings"> {
-  const settings: NonNullable<Options["settings"]> = { attribution: HIDDEN_COMMIT_ATTRIBUTION };
+  const settings: NonNullable<Options["settings"]> = { attribution: HIDDEN_ATTRIBUTION };
   const permissions: { allow?: string[]; deny?: string[] } = {};
   if (allow && allow.length > 0) permissions.allow = allow;
   if (deny && deny.length > 0) permissions.deny = deny;

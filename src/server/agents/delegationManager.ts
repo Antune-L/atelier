@@ -1391,7 +1391,7 @@ export class DelegationManager {
     const published = await this.system.publishReview(slotPath(slotId), prUrl, {
       expectedCommitSha: reviewedCommitSha,
       marker,
-      body: report,
+      body: provider === "azureDevops" && event === "APPROVE" ? "" : report,
       comments,
       event,
     }, provider);

@@ -31,6 +31,7 @@ import type {
   ReviewHeadResult,
   ReviewPublicationComment,
   ReviewPublicationEvent,
+  ReviewPublicationState,
   RecoveryCandidateOptions,
 } from "../types.ts";
 import { parseAzureRepoRef } from "./azureRemote.ts";
@@ -94,6 +95,7 @@ const GIT_SEGMENT = "_git";
  */
 const VOTE_REJECTED_MAX = -1;
 const VOTE_APPROVED_MIN = 1;
+const VOTE_APPROVED = 10;
 const VOTE_APPROVED_WITH_SUGGESTIONS = 5;
 
 /**
@@ -133,12 +135,16 @@ const FIRST_COMPARING_ITERATION = 1;
 const AZURE_PATH_PREFIX = "/";
 
 /**
- * Reviewer vote cast on every publication, whatever the verdict: the verdict is carried by the summary
- * thread instead. `--vote` takes a name, not the numeric scale:
- * `approve | approve-with-suggestions | reject | reset | wait-for-author` (verified in
+ * Reviewer vote each publication verdict maps to: a pass without findings approves, any other pass
+ * approves with suggestions and leaves the verdict to the summary thread. `--vote` takes a name, not the
+ * numeric scale: `approve | approve-with-suggestions | reject | reset | wait-for-author` (verified in
  * `az repos pr set-vote --help`).
  */
-const REVIEW_VOTE = "approve-with-suggestions";
+const VOTE_BY_STATE: Record<ReviewPublicationState, { name: string; value: number }> = {
+  APPROVED: { name: "approve", value: VOTE_APPROVED },
+  CHANGES_REQUESTED: { name: "approve-with-suggestions", value: VOTE_APPROVED_WITH_SUGGESTIONS },
+  COMMENTED: { name: "approve-with-suggestions", value: VOTE_APPROVED_WITH_SUGGESTIONS },
+};
 
 const azureReviewerSchema = z.object({
   id: z.string().optional(),
@@ -697,7 +703,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (posted === null || publishedDate === null || !(Date.parse(publishedDate) >= check.since)) {
       return { ok: false, reason: "postage demandé mais aucune review postée sur la PR" };
     }
-    return this.verifyVote(cwd, context, posted.author?.id ?? null);
+    return this.verifyVote(cwd, context, check.expectedState, posted.author?.id ?? null);
   }
 
   async mergePr(cwd: string, prUrl: string, expected?: MergePrExpectation): Promise<DoneGateResult> {
@@ -946,7 +952,7 @@ export class AzureDevopsVcsClient implements VcsClient {
     thread: AzureThread,
   ): Promise<PublishReviewResult> {
     const publisherId = completionComment(thread, marker)?.author?.id ?? null;
-    const voted = await this.castVote(cwd, context, publisherId);
+    const voted = await this.castVote(cwd, context, REVIEW_PUBLICATION_STATE_BY_EVENT[event], publisherId);
     if (!voted.ok) return { ok: false, reason: voted.reason, reviewId: null };
     return { ok: true, reason: "", reviewId: thread.id, actualState: REVIEW_PUBLICATION_STATE_BY_EVENT[event] };
   }
@@ -954,6 +960,7 @@ export class AzureDevopsVcsClient implements VcsClient {
   private async verifyVote(
     cwd: string,
     context: AzurePrContext,
+    state: ReviewPublicationState,
     publisherId: string | null,
   ): Promise<DoneGateResult> {
     if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la vérification du vote` };
@@ -967,8 +974,9 @@ export class AzureDevopsVcsClient implements VcsClient {
     if (!parsedReviewer.success || parsedReviewer.data.id.toLowerCase() !== publisherId.toLowerCase()) {
       return { ok: false, reason: `vote ${AZURE_LABEL} de l'auteur de la review introuvable` };
     }
-    if (parsedReviewer.data.vote !== VOTE_APPROVED_WITH_SUGGESTIONS) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${VOTE_APPROVED_WITH_SUGGESTIONS}, reçu ${parsedReviewer.data.vote}` };
+    const expectedVote = VOTE_BY_STATE[state].value;
+    if (parsedReviewer.data.vote !== expectedVote) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${expectedVote}, reçu ${parsedReviewer.data.vote}` };
     }
     return { ok: true, reason: "" };
   }
@@ -976,14 +984,16 @@ export class AzureDevopsVcsClient implements VcsClient {
   private async castVote(
     cwd: string,
     context: AzurePrContext,
+    state: ReviewPublicationState,
     publisherId: string | null,
   ): Promise<DoneGateResult> {
+    const vote = VOTE_BY_STATE[state];
     if (publisherId === null) return { ok: false, reason: `auteur de la review ${AZURE_LABEL} introuvable pour la publication du vote` };
     const res = await runBoundedCommand(
       [
         AZ_BINARY, "repos", "pr", "set-vote",
         "--id", String(context.prNumber),
-        "--vote", REVIEW_VOTE,
+        "--vote", vote.name,
         "--org", context.orgUrl,
         "--detect", "false",
         "-o", "json",
@@ -991,17 +1001,17 @@ export class AzureDevopsVcsClient implements VcsClient {
       cwd,
     );
     if (res.exitCode !== 0 || res.timedOut) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} « ${REVIEW_VOTE} » refusé : ${boundedCommandDetail(res)}` };
+      return { ok: false, reason: `vote ${AZURE_LABEL} « ${vote.name} » refusé : ${boundedCommandDetail(res)}` };
     }
     const parsed = azureReviewerVoteSchema.safeParse(safeJsonParse(res.stdout));
     if (!parsed.success) return { ok: false, reason: `réponse ${AZURE_LABEL} inattendue après la publication du vote` };
     if (parsed.data.id.toLowerCase() !== publisherId.toLowerCase()) {
       return { ok: false, reason: `le vote ${AZURE_LABEL} provient d'une identité différente de l'auteur de la review` };
     }
-    if (parsed.data.vote !== VOTE_APPROVED_WITH_SUGGESTIONS) {
-      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${VOTE_APPROVED_WITH_SUGGESTIONS}, reçu ${parsed.data.vote}` };
+    if (parsed.data.vote !== vote.value) {
+      return { ok: false, reason: `vote ${AZURE_LABEL} attendu ${vote.value}, reçu ${parsed.data.vote}` };
     }
-    return this.verifyVote(cwd, context, publisherId);
+    return this.verifyVote(cwd, context, state, publisherId);
   }
 
   /** `az repos pr show --id N --org URL` — the single read backing every PR-scoped gate. */

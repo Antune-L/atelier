@@ -23,6 +23,7 @@ import { createAutonomousSessionGuard } from "./agents/autonomousSessionGuard.ts
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { AuditManager } from "./agents/auditManager.ts";
+import { LaunchScheduler } from "./agents/launchScheduler.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
@@ -236,6 +237,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     );
   }
 
+  const backendStartedAt = Date.now();
   const db = createDatabase(dbPath);
   const store = new Store(db);
   const staleExecutionGenerations = store.listExecutionRuns()
@@ -338,6 +340,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const watchdog = new Watchdog(store, clientHub, notifier);
   const automationManager = new AutomationManager(store, system, clientHub);
   const auditManager = new AuditManager({ store, system, hub: clientHub, notifier, repoMutex, ticketOperations, slots: slotManager });
+  const launchScheduler = new LaunchScheduler({ store, ticketOperations, slots: slotManager, hub: clientHub, notifier, startedAt: backendStartedAt });
   const previewManager = new PreviewManager({
     store,
     config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),
@@ -400,6 +403,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   reformulateManager.recoverStale();
   feasibilityAnswerManager.recoverStale();
   atelierManager.recoverStale();
+  slotManager.resumeQueuedTickets();
   watchdog.start();
   automationManager.start();
 
@@ -544,6 +548,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
   auditManager.start();
+  launchScheduler.start();
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
@@ -557,6 +562,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     },
     async teardownSessions() {
       auditManager.stop();
+      launchScheduler.stop();
       await coordinator.stopAutonomousDeliveries();
       await autonomousWorkflow.shutdown();
       await slotManager.drainAutonomousPublications();
@@ -578,6 +584,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       atelierManager.stop();
       automationManager.stop();
       auditManager.stop();
+      launchScheduler.stop();
       await server.stop(true);
       if (uiServer !== null) await uiServer.stop(true);
       if (socketPath !== null) rmSync(socketPath, { force: true });

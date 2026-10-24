@@ -19,6 +19,7 @@ import type {
   CreateProjectInput,
   CreateReviewInput,
   CreateTicketInput,
+  ScheduleTicketInput,
   Conversation,
   ConversationMessage,
   ImportNotionInput,
@@ -291,6 +292,8 @@ export const api = {
     request("/api/asks", { method: "POST", body: JSON.stringify(input) }),
   updateTicket: (id: string, input: UpdateTicketInput): Promise<Ticket> =>
     request(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  scheduleTicket: (id: string, scheduledStartAt: number | null): Promise<Ticket> =>
+    request(`/api/tickets/${id}/schedule`, { method: "PUT", body: JSON.stringify({ scheduledStartAt } satisfies ScheduleTicketInput) }),
   moveTicket: (id: string, column: Column, confirmed = false): Promise<Ticket> =>
     request(`/api/tickets/${id}/move`, { method: "POST", body: JSON.stringify({ column, confirmed }) }),
   addComment: (id: string, input: CreateCommentInput): Promise<Comment> =>

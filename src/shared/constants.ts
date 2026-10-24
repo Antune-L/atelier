@@ -545,6 +545,11 @@ export const AUTO_RECLAIM_MAX = 2;
  * orchestrator's next-turn latency never trips it.
  */
 export const RECLAIM_IDLE_MS = 10 * 60 * 1000;
+export const LAUNCH_SCHEDULER_TICK_MS = 30_000;
+export const SCHEDULED_START_MAX_DELAY_MS = 5 * 60 * 1000;
+export const SCHEDULED_START_MIN_LEAD_MS = 60_000;
+export const SCHEDULED_START_FIRED_EVENT = "scheduled_start_fired";
+export const SCHEDULED_START_MISSED_EVENT = "scheduled_start_missed";
 /** Audit event logged when any ticket (feature/review/clean/ask) is first inserted. */
 export const CREATED_EVENT = "created";
 /** Audit event logged on each auto-reclaim; backs the reclaim counter (never logged by manual retries). */

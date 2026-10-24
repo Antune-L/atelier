@@ -10,12 +10,13 @@ import {
   Square,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
 import { canMergePr, canResolveConflicts, canUpdateDependencyBase } from "@shared/ticketMerge";
 
+import { LaunchSplitButton } from "@/components/ticket-detail/LaunchSplitButton";
 import { Button } from "@/components/ui/button";
 import {
   CONFIRM_POPOVER_CLASSES,
@@ -27,6 +28,7 @@ import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/comp
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
+import { formatScheduleDate, formatScheduleTime } from "@/lib/scheduledLaunch";
 import { boardStore } from "@/lib/store";
 
 interface ConfirmSpec {
@@ -57,6 +59,7 @@ interface TicketActionsProps {
 }
 
 const RETRY_STAGES: Ticket["stage"][] = ["failed", "interrupted", "stalled"];
+const IMPLEMENT_ACTION_ID = "implement";
 
 
 /**
@@ -119,19 +122,50 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
   const menuConfirm =
     pending !== null && pending.id !== primary?.id && !pendingDialog ? pending.confirm : undefined;
 
-  const primaryButton =
-    primary === null ? null : (
+  const renderPrimary = (action: TicketAction): ReactNode => {
+    if (action.id === IMPLEMENT_ACTION_ID && ticket.kind === "feature" && action.confirm !== undefined) {
+      return (
+        <LaunchSplitButton
+          ticket={ticket}
+          label={action.label}
+          Icon={action.Icon}
+          title={action.title}
+          confirm={action.confirm}
+          startDisabled={action.disabled === true}
+          busy={busyId !== null}
+          onStart={() => runAction(action)}
+          onError={onError}
+        />
+      );
+    }
+    const button = (
       <Button
         size="sm"
         className="w-full"
-        title={primary.title}
-        disabled={primary.disabled === true || busyId !== null}
-        onClick={() => trigger(primary)}
+        title={action.title}
+        disabled={action.disabled === true || busyId !== null}
+        onClick={() => trigger(action)}
       >
-        {primary.Icon !== undefined && <primary.Icon className="h-3.5 w-3.5" />}
-        {primary.label}
+        {action.Icon !== undefined && <action.Icon className="h-3.5 w-3.5" />}
+        {action.label}
       </Button>
     );
+    if (action.confirm === undefined || pending?.id !== action.id || pendingDialog) return button;
+    return (
+      <ConfirmPopover
+        open
+        onOpenChange={(next) => {
+          if (!next) setPending(null);
+        }}
+        title={action.confirm.title}
+        description={action.confirm.description}
+        confirmLabel={action.confirm.confirmLabel}
+        onConfirm={confirmPending}
+      >
+        {button}
+      </ConfirmPopover>
+    );
+  };
 
   return (
     <div className="space-y-2">
@@ -144,22 +178,7 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
           Conflits détectés avec la branche de base : la PR ne peut pas être mergée.
         </p>
       )}
-      {primary?.confirm !== undefined && pending?.id === primary.id && !pendingDialog ? (
-        <ConfirmPopover
-          open
-          onOpenChange={(next) => {
-            if (!next) setPending(null);
-          }}
-          title={primary.confirm.title}
-          description={primary.confirm.description}
-          confirmLabel={primary.confirm.confirmLabel}
-          onConfirm={confirmPending}
-        >
-          {primaryButton}
-        </ConfirmPopover>
-      ) : (
-        primaryButton
-      )}
+      {primary !== null && renderPrimary(primary)}
 
       {rest.length > 0 && (
         <Popover
@@ -254,14 +273,18 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
   }
 
   if (ticket.column === "todo") {
+    const scheduledAt = ticket.scheduledStartAt;
     actions.push({
-      id: "implement",
-      label: "Lancer l'implémentation",
+      id: IMPLEMENT_ACTION_ID,
+      label: scheduledAt === null ? "Lancer l'implémentation" : "Lancer maintenant",
       Icon: Rocket,
       disabled: ticket.triageStatus === "running",
       confirm: {
-        title: "Lancer l'implémentation",
-        description: "L'agent d'implémentation va être lancé sur cette carte et occupera un slot.",
+        title: scheduledAt === null ? "Lancer l'implémentation" : "Lancer maintenant",
+        description:
+          scheduledAt === null
+            ? "L'agent d'implémentation va être lancé sur cette carte et occupera un slot."
+            : `L'agent d'implémentation va être lancé maintenant et occupera un slot. Le lancement programmé du ${formatScheduleDate(scheduledAt)} à ${formatScheduleTime(scheduledAt)} sera annulé.`,
         confirmLabel: "Lancer",
       },
       run: async () => {

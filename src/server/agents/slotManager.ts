@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import { isDependencyReady } from "../../shared/dependencies.ts";
+import { startBlocker } from "../../shared/startBlocker.ts";
 import { canUpdateDependencyBase } from "../../shared/ticketMerge.ts";
 import type { UpdateDependencyBaseResult } from "../../shared/ticketMerge.ts";
 import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
@@ -93,6 +94,9 @@ const UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON = "Unresolved implementation obl
 /** tmux session-name prefix for a standalone (ticket-less) runnable worktree session. */
 const WORKTREE_SESSION_PREFIX = "worktree";
 const PR_DESCRIPTION_APPLY_FAILED_EVENT = "pr_description_apply_failed";
+const QUEUED_RESUMED_EVENT = "queued_resumed";
+const QUEUED_RESUME_MAX_AGE_DAYS = 7;
+const QUEUED_RESUME_MAX_AGE_MS = QUEUED_RESUME_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 const MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT = "merge_skipped_after_review_limit";
 const MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT = "merge_skipped_review_level_high";
 
@@ -602,7 +606,7 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     if (ticket.column === "abandoned" || ticket.column === "merged") return;
-    if (ticket.column === "todo" && ticket.triageStatus === "running") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+    if (startBlocker(ticket, this.store.getDependencyParent(ticket)) === "triage") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
     this.assertStartReady(ticket);
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
@@ -633,6 +637,8 @@ export class SlotManager {
     if (!free) {
       if (!this.queue.includes(ticketId)) {
         this.queue.push(ticketId);
+        if (current.column === "implementing") this.touch(this.store.updateTicket(ticketId, { stage: "queued" }));
+        else this.lifecycle.enqueue(ticketId);
         this.store.logEvent(ticketId, "queued", { reason: "no free slot" });
         log.info("ticket en file (aucun slot libre)", { ticketId, queueLength: this.queue.length });
       }
@@ -770,12 +776,15 @@ export class SlotManager {
     for (const child of this.store.listDependents(parentId)) {
       try {
         if (child.column !== "todo" || !isDependencyReady(child, this.store.getDependencyParent(child))) continue;
+        if (child.scheduledStartAt !== null && child.scheduledStartAt > Date.now()) continue;
         if (child.triageStatus === "running") {
           this.deferredDependents.add(child.id);
           continue;
         }
         await this.reconcileDependencies(child.id);
-        this.assertStartReady(this.store.getTicket(child.id) ?? child);
+        const reconciled = this.store.getTicket(child.id);
+        if (reconciled?.column !== "todo") continue;
+        this.assertStartReady(reconciled);
         this.deferredDependents.delete(child.id);
         this.lifecycle.enqueue(child.id);
         await this.startTicket(child.id);
@@ -2442,6 +2451,44 @@ export class SlotManager {
       }
     }
     this.hub.pushSlots(this.store.listSlots());
+  }
+
+  resumeQueuedTickets(now: number = Date.now()): { resumed: string[]; skipped: string[] } {
+    const cutoff = now - QUEUED_RESUME_MAX_AGE_MS;
+    const candidates = this.store.listTickets(false)
+      .filter((ticket) =>
+        ticket.column === "implementing"
+        && ticket.stage === "queued"
+        && ticket.slotId === null
+        && !this.isTicketEngaged(ticket.id)
+        && this.store.getActiveQualityIteration(ticket.id) === null)
+      .sort((left, right) => (left.implementingStartedAt ?? 0) - (right.implementingStartedAt ?? 0));
+    const resumed: string[] = [];
+    const skipped: string[] = [];
+    for (const ticket of candidates) {
+      if (ticket.implementingStartedAt === null || ticket.implementingStartedAt < cutoff) {
+        skipped.push(ticket.id);
+        continue;
+      }
+      resumed.push(ticket.id);
+      this.store.logEvent(ticket.id, QUEUED_RESUMED_EVENT, {});
+      void this.startTicket(ticket.id).catch((error: unknown) => {
+        log.error("reprise du ticket en file échouée", { ticketId: ticket.id, error: getErrorMessage(error) });
+      });
+    }
+    if (resumed.length === 0 && skipped.length === 0) return { resumed, skipped };
+    log.info("reprise de la file d'attente au démarrage", { resumed: resumed.length, skipped: skipped.length, skippedIds: skipped });
+    if (resumed.length === 0) return { resumed, skipped };
+    const skippedText = skipped.length === 0 ? "" : `, ${skipped.length} ignorée(s) (en file depuis plus de ${QUEUED_RESUME_MAX_AGE_DAYS} jours)`;
+    void this.notifier.notify("File d'attente reprise", `${resumed.length} carte(s) relancée(s)${skippedText}`);
+    return { resumed, skipped };
+  }
+
+  isTicketEngaged(ticketId: string): boolean {
+    return this.queue.includes(ticketId)
+      || this.isLaunching(ticketId)
+      || this.sessionHub.isConnected(ticketId)
+      || this.store.listSlots().some((slot) => slot.ticketId === ticketId);
   }
 
   /** Re-spawn an interrupted ticket in its slot (retry endpoint). */

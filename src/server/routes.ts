@@ -5,8 +5,9 @@ import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
 import { autonomousResumeSchema } from "../shared/autonomous.ts";
-import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
-import { isDependencyReady, isSplitMother } from "../shared/dependencies.ts";
+import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SCHEDULED_START_MIN_LEAD_MS, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
+import { isSplitMother } from "../shared/dependencies.ts";
+import { startBlocker } from "../shared/startBlocker.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
 import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
@@ -39,6 +40,7 @@ import {
   prNotificationReviewOptionsSchema,
   recoverImplementationPlanArgsSchema,
   reorderProjectsSchema,
+  scheduleTicketSchema,
   startWorktreeSessionBodySchema,
   testConnectionDraftSchema,
   updateAppSettingsSchema,
@@ -197,6 +199,8 @@ const HTTP_NOT_FOUND = 404;
 const HTTP_CONFLICT = 409;
 const HTTP_INTERNAL_ERROR = 500;
 const HTTP_BAD_GATEWAY = 502;
+const SCHEDULED_START_SET_EVENT = "scheduled_start_set";
+const SCHEDULED_START_CANCELLED_EVENT = "scheduled_start_cancelled";
 
 /** Shared bullet list describing the target PR of a review/clean card. */
 function prSummaryLines(pr: OpenPr): string[] {
@@ -624,11 +628,22 @@ async function performSplit(
   return { created, mother };
 }
 
+function scheduledStartTimeError(scheduledStartAt: number, now: number): string | null {
+  if (scheduledStartAt < now + SCHEDULED_START_MIN_LEAD_MS) return "l'heure de lancement doit être au moins une minute dans le futur";
+  return null;
+}
+
+function scheduleConflictError(store: Store, ticket: Ticket): string | null {
+  if (ticket.kind !== "feature") return "seul un ticket feature peut être programmé";
+  if (ticket.column !== "todo" || ticket.archived) return "seul un ticket « À faire » peut être programmé";
+  if (ticket.slotId !== null || store.listSlots().some((slot) => slot.ticketId === ticket.id)) return "ce ticket occupe encore un slot : relance-le ou abandonne-le d'abord";
+  return null;
+}
+
 function parkOrStart(deps: RouteDeps, ticket: Ticket, start: boolean): Ticket {
   const { store, hub, lifecycle, slots } = deps;
   // A blocked child stays in todo even with start=true: the parent's done() will auto-start it.
-  const parent = store.getDependencyParent(ticket);
-  if (!start || ticket.triageStatus === "running" || !isDependencyReady(ticket, parent)) {
+  if (!start || startBlocker(ticket, store.getDependencyParent(ticket)) !== null) {
     hub.pushTicket(ticket);
     if (!start) startFeasibilityInBackground(deps.feasibility, [ticket.id], ticket.project);
     return ticket;
@@ -1301,6 +1316,12 @@ export function createApiRoutes(deps: RouteDeps) {
         const depError = ticketDependencyError(store, null, parsed.data.dependsOn, parsed.data.project);
         if (depError !== null) return jsonError(set, HTTP_BAD_REQUEST, depError);
       }
+      const scheduledStartAt = parsed.data.scheduledStartAt ?? null;
+      if (scheduledStartAt !== null) {
+        if (parsed.data.start) return jsonError(set, HTTP_BAD_REQUEST, "un ticket programmé ne peut pas être lancé immédiatement");
+        const timeError = scheduledStartTimeError(scheduledStartAt, Date.now());
+        if (timeError !== null) return jsonError(set, HTTP_BAD_REQUEST, timeError);
+      }
       // Title is optional: fall back to a slice of the description when left blank.
       const title =
         parsed.data.title.trim() || deriveTitleFromDescription(parsed.data.description);
@@ -1343,6 +1364,7 @@ export function createApiRoutes(deps: RouteDeps) {
         codexImplementerEffort: parsed.data.codexImplementerEffort,
         codexImplementerFast: parsed.data.codexImplementerFast,
         feasibilityEngine: parsed.data.feasibilityEngine,
+        scheduledStartAt,
       });
       return parkOrStart(deps, ticket, parsed.data.start);
     })
@@ -1530,6 +1552,23 @@ export function createApiRoutes(deps: RouteDeps) {
         throw error;
       }
     })
+    .put("/tickets/:id/schedule", ({ params, body, set }) => {
+      const parsed = scheduleTicketSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      const { scheduledStartAt } = parsed.data;
+      if (scheduledStartAt !== null) {
+        const conflict = scheduleConflictError(store, ticket);
+        if (conflict !== null) return jsonError(set, HTTP_CONFLICT, conflict);
+        const timeError = scheduledStartTimeError(scheduledStartAt, Date.now());
+        if (timeError !== null) return jsonError(set, HTTP_BAD_REQUEST, timeError);
+      }
+      const updated = store.updateTicket(params.id, { scheduledStartAt, scheduledStartMissedAt: null });
+      hub.pushTicket(updated);
+      store.logEvent(params.id, scheduledStartAt === null ? SCHEDULED_START_CANCELLED_EVENT : SCHEDULED_START_SET_EVENT, { scheduledStartAt });
+      return updated;
+    })
     .post("/tickets/:id/move", async ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
@@ -1570,11 +1609,11 @@ export function createApiRoutes(deps: RouteDeps) {
       if (target === "implementing") {
         // A running triage holds a worker socket keyed by this ticketId; launching now would
         // collide the two sessions on that key. Wait for the verdict first.
-        if (ticket.column === "todo" && ticket.triageStatus === "running") {
+        const blocker = startBlocker(ticket, store.getDependencyParent(ticket));
+        if (blocker === "triage") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
-        const parent = store.getDependencyParent(ticket);
-        if (!isDependencyReady(ticket, parent)) {
+        if (blocker === "dependency") {
           return jsonError(set, HTTP_CONFLICT, "en attente de la PR du ticket dont il dépend");
         }
         lifecycle.moveColumn(params.id, "implementing");
@@ -1711,9 +1750,9 @@ export function createApiRoutes(deps: RouteDeps) {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
-      if (ticket.column === "todo" && ticket.triageStatus === "running") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
-      const parent = store.getDependencyParent(ticket);
-      if (!isDependencyReady(ticket, parent)) return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
+      const blocker = startBlocker(ticket, store.getDependencyParent(ticket));
+      if (blocker === "triage") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
+      if (blocker === "dependency") return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
       await slots.retry(params.id);
       return store.getTicket(params.id);
     })

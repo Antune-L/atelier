@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   implementing_started_at INTEGER,
   implementation_started_at INTEGER,
   implementation_finished_at INTEGER,
+  scheduled_start_at INTEGER,
+  scheduled_start_missed_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -587,6 +589,8 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "review_flags_json", ddl: "ALTER TABLE tickets ADD COLUMN review_flags_json TEXT" },
   { column: "stealth_pr_title", ddl: "ALTER TABLE tickets ADD COLUMN stealth_pr_title TEXT" },
   { column: "stealth_pr_body", ddl: "ALTER TABLE tickets ADD COLUMN stealth_pr_body TEXT" },
+  { column: "scheduled_start_at", ddl: "ALTER TABLE tickets ADD COLUMN scheduled_start_at INTEGER" },
+  { column: "scheduled_start_missed_at", ddl: "ALTER TABLE tickets ADD COLUMN scheduled_start_missed_at INTEGER" },
 ];
 
 /**

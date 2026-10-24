@@ -10,6 +10,7 @@ import { TicketConfigSummary } from "@/components/TicketConfigSummary";
 import { TicketCost } from "@/components/TicketCost";
 import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
 import { LaunchForm } from "@/components/ticket-detail/LaunchForm";
+import { MissedLaunchNotice } from "@/components/ticket-detail/MissedLaunchNotice";
 import { PreviewPanel } from "@/components/ticket-detail/PreviewPanel";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import type { TicketTab } from "@/components/ticket-detail/TicketTabs";
@@ -89,6 +90,7 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
 
   return (
     <div className="space-y-5 pb-4">
+      {ticket.scheduledStartMissedAt !== null && <MissedLaunchNotice ticketId={ticket.id} missedAt={ticket.scheduledStartMissedAt} />}
       <TicketBrief key={ticket.id} description={ticket.description} onEdit={() => onNavigate("description")} />
 
       {ticket.error && <p role="alert" className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{ticket.error}</p>}

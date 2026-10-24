@@ -18,6 +18,8 @@ const MENU_ITEM_CLASSES =
 
 const Popover = PopoverPrimitive.Root;
 
+const PopoverAnchor = PopoverPrimitive.Anchor;
+
 const PopoverTrigger = forwardRef<
   ElementRef<typeof PopoverPrimitive.Trigger>,
   ComponentPropsWithoutRef<typeof PopoverPrimitive.Trigger>
@@ -58,4 +60,4 @@ const PopoverMenuItem = forwardRef<HTMLButtonElement, PopoverMenuItemProps>(
 );
 PopoverMenuItem.displayName = "PopoverMenuItem";
 
-export { Popover, PopoverTrigger, PopoverContent, PopoverMenuItem };
+export { Popover, PopoverAnchor, PopoverTrigger, PopoverContent, PopoverMenuItem };

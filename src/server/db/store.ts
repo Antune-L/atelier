@@ -197,6 +197,7 @@ export interface NewTicket {
   prdMarkdown?: string | null;
   sourcePrdId?: string | null;
   sourcePrdTask?: string | null;
+  scheduledStartAt?: number | null;
 }
 
 export interface NewConversation {
@@ -464,6 +465,8 @@ export interface TicketPatch {
   sessionUsage?: SessionUsage;
   finishedAt?: number | null;
   implementationFinishedAt?: number | null;
+  scheduledStartAt?: number | null;
+  scheduledStartMissedAt?: number | null;
 }
 
 export interface TicketTimeline {
@@ -1404,8 +1407,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at, autonomous, autonomous_delivery, autonomous_max_corrections, autonomous_timeout_minutes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at, autonomous, autonomous_delivery, autonomous_max_corrections, autonomous_timeout_minutes, scheduled_start_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1448,6 +1451,7 @@ export class Store {
         autonomousDelivery,
         autonomousMaxCorrections,
         autonomousTimeoutMinutes,
+        input.scheduledStartAt ?? null,
       );
     this.updateTicket(id, { autonomousMaxStarts, autonomousFinalizationMinutes, autonomousMaxPublicationAttempts });
     return this.finalizeCreate(id, "createTicket", { title: input.title });
@@ -1680,6 +1684,13 @@ export class Store {
     // finishedAt with the merge time, which must not leak into the implementation duration.
     if (patch.implementationFinishedAt !== undefined) set("implementation_finished_at", patch.implementationFinishedAt);
     else if (patch.finishedAt !== undefined) set("implementation_finished_at", patch.finishedAt);
+    if ((patch.column !== undefined && patch.column !== "todo") || patch.archived === true) {
+      set("scheduled_start_at", null);
+      set("scheduled_start_missed_at", null);
+    } else {
+      if (patch.scheduledStartAt !== undefined) set("scheduled_start_at", patch.scheduledStartAt);
+      if (patch.scheduledStartMissedAt !== undefined) set("scheduled_start_missed_at", patch.scheduledStartMissedAt);
+    }
 
     set("updated_at", Date.now());
     builder.run(this.db, "tickets", id);
@@ -1688,6 +1699,30 @@ export class Store {
     if (!ticket) throw new Error(`updateTicket: ticket ${id} not found`);
     if (patch.autonomousState !== undefined || patch.autonomous !== undefined) this.notifyAutonomousExecution(id);
     return ticket;
+  }
+
+  listDueScheduledTickets(now: number): Ticket[] {
+    const rows = this.db
+      .query(`SELECT id FROM tickets WHERE ${COLUMN_TO_DB} = 'todo' AND archived = 0 AND scheduled_start_at IS NOT NULL AND scheduled_start_at <= ? ORDER BY scheduled_start_at ASC, created_at ASC`)
+      .all(now);
+    return rows.flatMap((raw) => {
+      const ticket = this.getTicket(z.object({ id: z.string() }).parse(raw).id);
+      return ticket ? [ticket] : [];
+    });
+  }
+
+  claimScheduledStart(id: string, expectedAt: number): boolean {
+    const result = this.db
+      .query(`UPDATE tickets SET scheduled_start_at = NULL, updated_at = ? WHERE id = ? AND ${COLUMN_TO_DB} = 'todo' AND archived = 0 AND scheduled_start_at = ?`)
+      .run(Date.now(), id, expectedAt);
+    return result.changes === 1;
+  }
+
+  markScheduledStartMissed(id: string, expectedAt: number): boolean {
+    const result = this.db
+      .query(`UPDATE tickets SET scheduled_start_at = NULL, scheduled_start_missed_at = ?, updated_at = ? WHERE id = ? AND ${COLUMN_TO_DB} = 'todo' AND archived = 0 AND scheduled_start_at = ?`)
+      .run(expectedAt, Date.now(), id, expectedAt);
+    return result.changes === 1;
   }
 
   /** Raw nudge counter (not exposed in Ticket type). */

@@ -130,6 +130,11 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
       {ticket.branch !== null && <MetaRow label="Branche">{ticket.branch}</MetaRow>}
       <MetaRow label="Profil">{ORCHESTRATOR_LABELS[ticket.orchestrator]}</MetaRow>
       <MetaRow label="Créé">{formatDateTime(ticket.createdAt)}</MetaRow>
+      {ticket.scheduledStartAt !== null && (
+        <MetaRow label="Lancement">
+          <span className="text-info">{formatDateTime(ticket.scheduledStartAt)}</span>
+        </MetaRow>
+      )}
       {ticket.finishedAt !== null && (
         <MetaRow label={finishedKindLabel(ticket)}>{formatDateTime(ticket.finishedAt)}</MetaRow>
       )}

@@ -78,6 +78,8 @@ const BASE_TICKET: Ticket = {
   implementingStartedAt: null,
   implementationStartedAt: null,
   implementationFinishedAt: null,
+  scheduledStartAt: null,
+  scheduledStartMissedAt: null,
   sessionUsage: {},
   createdAt: 1,
   updatedAt: 1,

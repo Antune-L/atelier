@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { isDependencyReady } from "../shared/dependencies.ts";
+import { startBlocker } from "../shared/startBlocker.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
 import type { Column } from "../shared/constants.ts";
 import {
@@ -144,6 +144,7 @@ export interface CompactTicket {
   autonomousFinalizationMinutes?: number;
   autonomousMaxPublicationAttempts?: number;
   dependsOn: string | null;
+  scheduledStartAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -203,6 +204,7 @@ function compactTicket(ticket: Ticket): CompactTicket {
     autonomousFinalizationMinutes: ticket.autonomousFinalizationMinutes,
     autonomousMaxPublicationAttempts: ticket.autonomousMaxPublicationAttempts,
     dependsOn: ticket.dependsOn,
+    scheduledStartAt: ticket.scheduledStartAt,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
   };
@@ -390,7 +392,7 @@ export class TicketOperations {
   }
 
   private afterCreate(ticket: Ticket, followUp: CreateTodoTicketFollowUp): Ticket {
-    if (followUp === "start" && isDependencyReady(ticket, this.deps.store.getDependencyParent(ticket))) return this.enqueueAndStart(ticket.id);
+    if (followUp === "start" && startBlocker(ticket, this.deps.store.getDependencyParent(ticket)) === null) return this.enqueueAndStart(ticket.id);
     this.deps.hub.pushTicket(ticket);
     if (followUp === "analyze") startFeasibilityInBackground(this.deps.feasibility, [ticket.id], ticket.project);
     return ticket;
@@ -526,11 +528,11 @@ export class TicketOperations {
     if (ticket.column !== "todo") {
       throw new TicketOperationError("CONFLICT", "only a TODO ticket can be started");
     }
-    if (ticket.triageStatus === "running") {
+    const blocker = startBlocker(ticket, this.deps.store.getDependencyParent(ticket));
+    if (blocker === "triage") {
       throw new TicketOperationError("CONFLICT", "analysis in progress: wait for the verdict before starting the implementation");
     }
-    const parent = this.deps.store.getDependencyParent(ticket);
-    if (!isDependencyReady(ticket, parent)) {
+    if (blocker === "dependency") {
       throw new TicketOperationError("CONFLICT", "waiting for the PR of the ticket it depends on");
     }
     return { status: "queued", ticket: compactTicket(this.enqueueAndStart(ticketId)) };

@@ -143,6 +143,8 @@ const ticketRowSchema = z.object({
   implementing_started_at: z.number().nullable(),
   implementation_started_at: z.number().nullable(),
   implementation_finished_at: z.number().nullable(),
+  scheduled_start_at: z.number().int().nullable(),
+  scheduled_start_missed_at: z.number().int().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -442,6 +444,8 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     implementingStartedAt: row.implementing_started_at,
     implementationStartedAt: row.implementation_started_at,
     implementationFinishedAt: row.implementation_finished_at,
+    scheduledStartAt: row.scheduled_start_at,
+    scheduledStartMissedAt: row.scheduled_start_missed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

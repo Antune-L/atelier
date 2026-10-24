@@ -429,6 +429,8 @@ export const ticketSchema = z.object({
   implementationStartedAt: z.number().int().nullable(),
   /** Epoch ms when the agent run ended (PR opened / terminal transition); unlike finishedAt, never overwritten by the merge. Null until then. */
   implementationFinishedAt: z.number().int().nullable(),
+  scheduledStartAt: z.number().int().nullable(),
+  scheduledStartMissedAt: z.number().int().nullable(),
   /** Token usage per session (sessionId → usage by model); empty until a Stop hook reports it. */
   sessionUsage: sessionUsageSchema,
   createdAt: z.number().int(),
@@ -781,6 +783,7 @@ export const createTicketSchema = ticketBatchOptionsSchema
     sourcePrdTask: z.string().min(1).nullable().optional(),
     /** Launch the ticket straight into implementation instead of parking it in "todo". */
     start: z.boolean().default(false),
+    scheduledStartAt: z.number().int().nullable().optional(),
   })
   .refine(
     (data) => data.title.trim().length > 0 || data.description.trim().length > 0,
@@ -847,6 +850,11 @@ export const updateTicketSchema = z.object({
   feasibilityContext: z.boolean().optional(),
 });
 export type UpdateTicketInput = z.infer<typeof updateTicketSchema>;
+
+export const scheduleTicketSchema = z.object({
+  scheduledStartAt: z.number().int().nullable(),
+});
+export type ScheduleTicketInput = z.infer<typeof scheduleTicketSchema>;
 
 export const moveTicketSchema = z.object({
   column: columnSchema,

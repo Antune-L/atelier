@@ -9,11 +9,13 @@ import { AutonomousOptions, autonomousEligibility, prOnlyAutonomousOptions } fro
 import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { ImplementationSettings } from "@/components/ImplementationSettings";
 import { ProjectSelect } from "@/components/ProjectSelect";
+import { SchedulePane } from "@/components/SchedulePane";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
 import { Button } from "@/components/ui/button";
 import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Sheet } from "@/components/ui/sheet";
+import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
@@ -21,11 +23,22 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
 import { dependencyCandidates } from "@/lib/display";
+import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine, handleMediaPaste } from "@/lib/paste";
 import { resolveProjectChoice } from "@/lib/projectSelection";
 
 const SHEET_TITLE = "Créer un ticket";
+
+interface CreateMode {
+  start: boolean;
+  scheduledStartAt: number | null;
+}
+
+type CreateMenuPane = "list" | "schedule";
+
+const CREATE_ONLY: CreateMode = { start: false, scheduledStartAt: null };
+const CREATE_AND_START: CreateMode = { start: true, scheduledStartAt: null };
 
 interface NewTicketSheetProps {
   open: boolean;
@@ -99,6 +112,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   const agent = useAgentKnobs();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [createMenu, setCreateMenu] = useState<CreateMenuPane | null>(null);
 
   // Load the project's branches for the base-branch picker on open and on each
   // project change (mirrors ReviewPrPanel's no-useEffect load-on-render pattern).
@@ -183,12 +197,8 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     );
   };
 
-  const submit = async (start: boolean): Promise<void> => {
-    setError(null);
-    if (!projects.some((p) => p.key === project)) {
-      setError("Projet invalide");
-      return;
-    }
+  const createTicket = async ({ start, scheduledStartAt }: CreateMode): Promise<void> => {
+    if (!projects.some((p) => p.key === project)) throw new Error("Projet invalide");
     setBusy(true);
     try {
       // Send null when the choice matches (or has no) project default → keep "no override" semantics.
@@ -224,14 +234,20 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
         codexImplementerFast: agent.codexImplementerFast,
         feasibilityEngine: null,
         start,
+        scheduledStartAt,
       });
+      setCreateMenu(null);
       reset();
       onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur");
     } finally {
       setBusy(false);
     }
+  };
+
+  const submit = (mode: CreateMode): void => {
+    setError(null);
+    setCreateMenu(null);
+    void createTicket(mode).catch((e) => setError(errorMessage(e)));
   };
 
   const autonomousAvailability = autonomousEligibility(selectedProject, agent.implementer, !dependsOnValid);
@@ -430,17 +446,29 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
           <Button size="sm" variant="ghost" onClick={onClose}>
             Annuler
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void submit(false)}
-            disabled={submitDisabled}
+          <SplitButton
+            label="Créer le ticket"
+            onClick={() => submit(CREATE_ONLY)}
+            mainDisabled={submitDisabled}
+            menuDisabled={submitDisabled}
+            menuLabel="Autres façons de créer"
+            open={createMenu !== null}
+            onOpenChange={(next) => setCreateMenu(next ? "list" : null)}
           >
-            Créer le ticket
-          </Button>
-          <Button size="sm" onClick={() => void submit(true)} disabled={submitDisabled}>
-            Créer et lancer
-          </Button>
+            {createMenu === "schedule" ? (
+              <SchedulePane
+                confirmLabel="Créer et programmer"
+                onBack={() => setCreateMenu("list")}
+                onSubmit={(scheduledStartAt) => createTicket({ start: false, scheduledStartAt })}
+              />
+            ) : (
+              <>
+                <SplitMenuItem label="Créer le ticket" description="Reste dans « À faire » · action par défaut" onClick={() => submit(CREATE_ONLY)} />
+                <SplitMenuItem label="Créer et lancer" description="L’agent démarre tout de suite" onClick={() => submit(CREATE_AND_START)} />
+                <SplitMenuItem label="Créer et programmer…" description="Choisir la date et l’heure du lancement" onClick={() => setCreateMenu("schedule")} />
+              </>
+            )}
+          </SplitButton>
         </div>
       </div>
     </Sheet>

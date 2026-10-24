@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ExternalLink, GitMerge, Loader2 } from "lucide-react";
+import { Clock, ExternalLink, GitMerge, Loader2 } from "lucide-react";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 
@@ -26,6 +26,7 @@ import {
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { cn } from "@/lib/utils";
 import { needsImplementationRecovery } from "@/lib/implementationRecovery";
+import { formatScheduleShort, missedLaunchMessage, scheduledLaunchState } from "@/lib/scheduledLaunch";
 
 interface TicketCardProps {
   ticket: Ticket;
@@ -103,7 +104,9 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
   const partial = ticket.autonomousState?.phase === "published_partial" || ticket.autonomousState?.phase === "publication_failed";
-  const state = partial ? "attention" : ticketCardState(ticket);
+  const scheduledLaunch = scheduledLaunchState(ticket, parent ?? null, now);
+  const scheduleNeedsAttention = scheduledLaunch !== null && scheduledLaunch.kind !== "planned";
+  const state = partial || scheduleNeedsAttention ? "attention" : ticketCardState(ticket);
   const parentTitle = parent?.title ?? "?";
   const dependencyLabel = `${parentBlocked ? "en attente de" : "basé sur"} ${parentTitle}`;
   const decisionLabel = ticketDecisionLabel(ticket);
@@ -152,6 +155,18 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
               {parentBlocked ? "Attend" : "Basé sur"} {truncateParentTitle(parentTitle)}
             </span>
           )}
+          {scheduledLaunch?.kind === "planned" && (
+            <span className="inline-flex items-center gap-1 text-info">
+              <Clock className="h-3 w-3" aria-hidden />
+              programmé {formatScheduleShort(scheduledLaunch.at, now)}
+            </span>
+          )}
+          {scheduledLaunch?.kind === "due" && (
+            <span className="inline-flex items-center gap-1 text-warning">
+              <Clock className="h-3 w-3" aria-hidden />
+              en attente : {scheduledLaunch.reason}
+            </span>
+          )}
           {ticket.triageStatus === "running" && (
             <span className="inline-flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
@@ -192,6 +207,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
           <span>{ticketCostLabel(ticket)}</span>
         </div>
         {decisionLabel && <p className="mt-2 text-xs font-medium text-warning">{decisionLabel}</p>}
+        {scheduledLaunch?.kind === "missed" && <p className="mt-1 text-xs font-medium text-warning">{missedLaunchMessage(scheduledLaunch.at)}</p>}
         {ticket.error && <p className="mt-1 line-clamp-2 break-words text-xs text-danger" title={ticket.error}>{ticket.error}</p>}
 
         {ticket.stage && (

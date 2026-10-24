@@ -10,6 +10,7 @@ import { useMemo, useRef, useState } from "react";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, TERMINAL_COLUMNS, type Column } from "@shared/constants";
 import { isDependencyReady } from "@shared/dependencies";
+import { startBlocker } from "@shared/startBlocker";
 
 import { BoardColumn } from "@/components/BoardColumn";
 import { ticketDecisionLabel } from "@/components/TicketCard";
@@ -104,10 +105,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
   const ticketsByColumn = (column: Column): Ticket[] => visible.filter((t) => t.column === column);
 
   // A running triage holds the ticket's worker socket, so the server rejects a move to implementing.
-  const eligibleTodo = ticketsByColumn("todo").filter((ticket) => {
-    const parent = getDependencyParent(ticket, ticketsById);
-    return ticket.triageStatus !== "running" && isDependencyReady(ticket, parent);
-  });
+  const eligibleTodo = ticketsByColumn("todo").filter(
+    (ticket) => ticket.scheduledStartAt === null && startBlocker(ticket, getDependencyParent(ticket, ticketsById)) === null,
+  );
   const freeSlotCount = slots.filter((s) => s.status === "free").length;
   // Never queue: cap the bulk launch at the number of immediately available slots.
   const moveAllCount = Math.min(eligibleTodo.length, freeSlotCount);

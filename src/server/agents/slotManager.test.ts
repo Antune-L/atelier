@@ -188,3 +188,84 @@ test("abandon moves the card even when its slot was already handed to another ti
     db.close();
   }
 });
+
+test("resumeQueuedTickets re-queues recent slotless queued cards and skips week-old ones", async () => {
+  const db = createDatabase(":memory:");
+  const store = new Store(db);
+  store.createProject("test-proj", {
+    label: "Test",
+    repoPath: "/tmp/repo",
+    baseBranch: "main",
+    commitTimeoutMs: 60_000,
+    defaultAutoMerge: false,
+    defaultAddScreenshots: false,
+  });
+  initProjectRegistry(store);
+  for (const slot of store.listSlots()) store.updateSlot(slot.id, { status: "busy" });
+  const recent = store.createTicket(makeTicket({ title: "Récente" }));
+  store.updateTicket(recent.id, { column: "implementing", stage: "queued" });
+  const stale = store.createTicket(makeTicket({ title: "Ancienne" }));
+  store.updateTicket(stale.id, { column: "implementing", stage: "queued" });
+  const now = Date.now();
+  const staleAt = now - 8 * 24 * 60 * 60 * 1000;
+  store.setTicketTimeline(stale.id, { createdAt: staleAt, updatedAt: staleAt, implementingStartedAt: staleAt, implementationStartedAt: null, finishedAt: null });
+  const todo = store.createTicket(makeTicket({ title: "À faire" }));
+
+  const system = new RelaunchSystem();
+  const hub = new ClientHub(store);
+  const sessionHub = new SessionHub(system);
+  const notifications: string[] = [];
+  const notifier = new Notifier(hub, (_title, body) => { notifications.push(body); });
+  const lifecycle = new TicketLifecycle(store, hub, notifier);
+  const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
+
+  try {
+    expect(slots.resumeQueuedTickets(now)).toEqual({ resumed: [recent.id], skipped: [stale.id] });
+    for (let attempt = 0; attempt < 50 && !slots.isTicketEngaged(recent.id); attempt += 1) await Bun.sleep(10);
+    expect(slots.isTicketEngaged(recent.id)).toBe(true);
+    expect(slots.isTicketEngaged(stale.id)).toBe(false);
+    expect(store.getTicket(todo.id)?.column).toBe("todo");
+    expect(system.sessions).toHaveLength(0);
+    expect(notifications).toEqual(["1 carte(s) relancée(s), 1 ignorée(s) (en file depuis plus de 7 jours)"]);
+    expect(slots.resumeQueuedTickets(now)).toEqual({ resumed: [], skipped: [stale.id] });
+  } finally {
+    sessionHub.disconnectAll();
+    await sessionHub.drainClosingSessions();
+    db.close();
+  }
+});
+
+test("retrying a slotless failed card with no free slot queues it in implementing", async () => {
+  const db = createDatabase(":memory:");
+  const store = new Store(db);
+  store.createProject("test-proj", {
+    label: "Test",
+    repoPath: "/tmp/repo",
+    baseBranch: "main",
+    commitTimeoutMs: 60_000,
+    defaultAutoMerge: false,
+    defaultAddScreenshots: false,
+  });
+  initProjectRegistry(store);
+  for (const slot of store.listSlots()) store.updateSlot(slot.id, { status: "busy" });
+  const ticket = store.createTicket(makeTicket({}));
+  store.updateTicket(ticket.id, { column: "failed", stage: "failed" });
+
+  const system = new RelaunchSystem();
+  const hub = new ClientHub(store);
+  const sessionHub = new SessionHub(system);
+  const notifier = new Notifier(hub);
+  const lifecycle = new TicketLifecycle(store, hub, notifier);
+  const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
+
+  try {
+    await slots.retry(ticket.id);
+    expect(store.getTicket(ticket.id)).toMatchObject({ column: "implementing", stage: "queued", slotId: null });
+    expect(slots.isTicketEngaged(ticket.id)).toBe(true);
+    expect(system.sessions).toHaveLength(0);
+  } finally {
+    sessionHub.disconnectAll();
+    await sessionHub.drainClosingSessions();
+    db.close();
+  }
+});

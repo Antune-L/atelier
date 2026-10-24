@@ -43,6 +43,7 @@ const compactTicketSchema = z.object({
   autonomousFinalizationMinutes: ticketSchema.shape.autonomousFinalizationMinutes,
   autonomousMaxPublicationAttempts: ticketSchema.shape.autonomousMaxPublicationAttempts,
   dependsOn: z.string().nullable(),
+  scheduledStartAt: z.number().nullable().describe("Read-only epoch milliseconds of the planned one-shot launch of a TODO feature ticket, or null when none is planned. Set from the board; update_ticket cannot change it."),
   createdAt: z.number(),
   updatedAt: z.number(),
 });

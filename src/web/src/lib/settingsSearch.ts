@@ -93,7 +93,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     id: "skills",
     label: "Skills",
     group: "Connexions",
-    keywords: ["skill", "skills", "argus", "simplifier", "skillzer", "claude code", "codex", "détection", "compétences", "installation", "dossiers", "chemins"],
+    keywords: ["skill", "skills", "argus", "skillzer", "claude code", "codex", "détection", "compétences", "installation", "dossiers", "chemins"],
   },
   {
     id: "github",

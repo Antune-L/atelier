@@ -11,7 +11,6 @@ import type { ResearchOptionKey } from "./constants.ts";
 import { githubLoginSchema } from "./github.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
 import { codexRuntimeStatusSchema } from "./codexCapabilities.ts";
-import { SKILL_TIERS } from "./skills.ts";
 import { isNotionUrl } from "./notion.ts";
 import type { ChannelEvent as ProtocolChannelEvent } from "./protocol.ts";
 import { projectValidationSchema } from "./quality.ts";
@@ -1006,7 +1005,6 @@ export type UploadResult = z.infer<typeof uploadResultSchema>;
 /** Detection result for one host skill, per agent provider (see HOST_SKILL_ROOTS). */
 export const skillStatusSchema = z.object({
   name: z.string(),
-  tier: z.enum(SKILL_TIERS),
   purpose: z.string(),
   roots: z.object({ claude: z.array(z.string()), codex: z.array(z.string()) }).optional(),
   /** `<name>/SKILL.md` exists in at least one of the provider's host skill roots. */

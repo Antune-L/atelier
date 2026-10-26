@@ -17,10 +17,18 @@ import {
   buildImplementSessionConfig,
   buildSplitSessionConfig,
   buildTriageSessionConfig,
+  CONTRACT_SKILLS,
   delegatedImplementerPermissions,
 } from "./sessionConfig.ts";
 
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
+import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
+
+describe("CONTRACT_SKILLS", () => {
+  test("mirrors the host skills listed in SKILL_REQUIREMENTS", () => {
+    expect(SKILL_REQUIREMENTS.map((skill) => skill.name).sort()).toEqual([...CONTRACT_SKILLS].sort());
+  });
+});
 
 const COMPOSER_SCRIPT = "/tmp/composer-driver.sh";
 const CWD = "/tmp/worktree";

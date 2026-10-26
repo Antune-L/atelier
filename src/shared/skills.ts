@@ -18,14 +18,10 @@ const SKILLS_CLI_AGENTS: Record<Orchestrator, string> = {
   codex: "codex",
 };
 
-export const SKILL_TIERS = ["required", "recommended"] as const;
-export type SkillTier = (typeof SKILL_TIERS)[number];
-
+/** Host skill invoked by the pipeline contract. */
 export interface SkillRequirement {
   /** Directory name under each provider's host skill root (the folder holding `SKILL.md`). */
   name: string;
-  /** `required`: invoked by the pipeline contract. `recommended`: cited by the host CLAUDE.md merged into sessions. */
-  tier: SkillTier;
   /** Short French label shown to the user explaining what the skill is used for. */
   purpose: string;
   /** French install hint, for both providers, when the skill is not published in skillzer (null → `npx skills add` from skillzer). */
@@ -33,28 +29,18 @@ export interface SkillRequirement {
 }
 
 /**
- * Host skills the app depends on. The `required` ones mirror CONTRACT_SKILLS in
- * src/server/agents/sessionConfig.ts and must stay in sync with it.
+ * Host skills invoked by the pipeline contract. Must mirror CONTRACT_SKILLS in
+ * src/server/agents/sessionConfig.ts.
  */
 export const SKILL_REQUIREMENTS: readonly SkillRequirement[] = [
-  { name: "argus-review", tier: "required", purpose: "Review bloquante avant PR (étape reviewing)", installHint: null },
-  { name: "regression-check", tier: "required", purpose: "Carte des consommateurs après modification", installHint: null },
-  { name: "minos-pr-feedback", tier: "required", purpose: "Triage des commentaires de PR (GitHub uniquement)", installHint: null },
+  { name: "argus-review", purpose: "Review bloquante avant PR (étape reviewing)", installHint: null },
+  { name: "regression-check", purpose: "Carte des consommateurs après modification", installHint: null },
+  { name: "minos-pr-feedback", purpose: "Triage des commentaires de PR (GitHub uniquement)", installHint: null },
   {
     name: "mockup-fidelity-review",
-    tier: "required",
     purpose: "Comparaison aux maquettes (tickets verifyFeature)",
     installHint: "absent de skillzer : à copier dans ~/.claude/skills et ~/.agents/skills",
   },
-  {
-    name: "simplifier",
-    tier: "recommended",
-    purpose: "Passe de simplification après chaque implémentation",
-    installHint: "skill officiel Claude, à installer via /plugin",
-  },
-  { name: "coding-convention", tier: "recommended", purpose: "Conventions imposées par CLAUDE.md", installHint: null },
-  { name: "ts-search-first", tier: "recommended", purpose: "Réutilisation avant tout nouveau code", installHint: null },
-  { name: "prd", tier: "recommended", purpose: "Rédaction de PRD hors app", installHint: null },
 ];
 
 export function skillzerInstallCommand(name: string): string {

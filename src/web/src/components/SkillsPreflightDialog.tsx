@@ -55,16 +55,9 @@ function providerList(missing: MissingSkill[]): string {
 }
 
 function preflightCopy(missing: MissingSkill[]): PreflightCopy {
-  const missingRequired = missing.filter((entry) => entry.skill.tier === "required");
-  if (missingRequired.length === 0) {
-    return {
-      title: "Skills recommandés absents",
-      description: `Le pipeline fonctionne, mais tes instructions globales citent des skills introuvables pour ${providerList(missing)} : les agents les ignoreront. Ils sont disponibles sur skillzer.`,
-    };
-  }
-  const plural = missingRequired.length > 1 ? "s" : "";
+  const plural = missing.length > 1 ? "s" : "";
   return {
-    title: `${missingRequired.length} skill${plural} requis manquant${plural} pour ${providerList(missingRequired)}`,
+    title: `${missing.length} skill${plural} requis manquant${plural} pour ${providerList(missing)}`,
     description:
       "Les agents ne pourront pas exécuter certaines étapes du pipeline (review, régression) : l'app fonctionnera moins bien. Installe-les depuis skillzer.",
   };

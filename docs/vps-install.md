@@ -109,7 +109,7 @@ sudo -u kanban -H /opt/kanban/current/node_modules/.bin/codex login --device-aut
 **Skills.** On the Mac:
 
 ```bash
-tar -C ~/.codex/skills -czhf /tmp/kanban-skills.tgz argus-review regression-check minos-pr-feedback mockup-fidelity-review simplifier
+tar -C ~/.codex/skills -czhf /tmp/kanban-skills.tgz argus-review regression-check minos-pr-feedback mockup-fidelity-review
 scp -P <ssh-port> /tmp/kanban-skills.tgz <vps>:/tmp/
 ```
 

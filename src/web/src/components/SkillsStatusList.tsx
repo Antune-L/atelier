@@ -3,14 +3,7 @@ import { useRef, useState } from "react";
 
 import { ORCHESTRATORS, ORCHESTRATOR_LABELS } from "@shared/constants";
 import type { Orchestrator } from "@shared/constants";
-import {
-  SKILL_TIERS,
-  SKILLZER_REPO_URL,
-  expectedSkillPaths,
-  missingSkillProviders,
-  skillzerInstallCommand,
-} from "@shared/skills";
-import type { SkillTier } from "@shared/skills";
+import { SKILLZER_REPO_URL, expectedSkillPaths, missingSkillProviders, skillzerInstallCommand } from "@shared/skills";
 import type { SkillStatus } from "@shared/schemas";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -18,16 +11,8 @@ import { refreshCapabilities } from "@/hooks/useCapabilities";
 import { useSavedFlash } from "@/hooks/useSavedFlash";
 import { cn } from "@/lib/utils";
 
-const TIER_LABELS: Record<SkillTier, string> = {
-  required: "Requis par le pipeline",
-  recommended: "Recommandés (CLAUDE.md global)",
-};
-
-const MISSING_DOT_CLASSES: Record<SkillTier, string> = {
-  required: "bg-danger",
-  recommended: "bg-warning",
-};
-
+const GROUP_LABEL = "Requis par le pipeline";
+const MISSING_DOT_CLASS = "bg-danger";
 const INSTALLED_DOT_CLASS = "bg-success";
 const INSTALLED_LABEL = "installé";
 const MISSING_LABEL = "manquant";
@@ -69,10 +54,9 @@ interface SkillsStatusListProps {
   query?: string;
 }
 
-/** Host skills grouped by tier with their per-provider detection state, plus install commands for the missing ones. */
+/** Host skills required by the pipeline with their per-provider detection state, plus install commands for the missing ones. */
 export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, query = "" }: SkillsStatusListProps) {
   const missing = skills.filter((skill) => !isFullyInstalled(skill));
-  const requiredMissing = missing.filter((skill) => skill.tier === "required");
 
   return (
     <div className="space-y-4">
@@ -80,11 +64,11 @@ export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, q
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold">État des compétences</p>
           <span
-            className={cn("text-xs", requiredMissing.length > 0 ? "text-danger" : "text-muted-foreground")}
+            className={cn("text-xs", missing.length > 0 ? "text-danger" : "text-muted-foreground")}
             role="status"
           >
             {skills.length === 0 && "Aucune compétence détectée"}
-            {skills.length > 0 && (requiredMissing.length > 0 ? `${requiredMissing.length} compétence(s) requise(s) manquante(s)` : "Compétences requises détectées")}
+            {skills.length > 0 && (missing.length > 0 ? `${missing.length} compétence(s) requise(s) manquante(s)` : "Compétences requises détectées")}
           </span>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -103,15 +87,7 @@ export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, q
       {missing.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium">À compléter</p>
-          {SKILL_TIERS.map((tier) => (
-            <SkillTierGroup
-              key={tier}
-              tier={tier}
-              skills={missing.filter((skill) => skill.tier === tier)}
-              availableProviders={availableProviders}
-              searching={query !== ""}
-            />
-          ))}
+          <SkillGroup skills={missing} availableProviders={availableProviders} searching={query !== ""} />
           <details className="rounded-md border p-3" open={query !== "" || undefined}>
             <summary className="cursor-pointer text-xs font-medium text-primary">Installer les compétences manquantes</summary>
             <div className="mt-3">
@@ -123,15 +99,7 @@ export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, q
       <details className="rounded-md border p-3" open={query !== "" || undefined}>
         <summary className="cursor-pointer text-sm font-medium">Voir toutes les compétences ({skills.length})</summary>
         <div className="mt-3 space-y-3">
-          {SKILL_TIERS.map((tier) => (
-            <SkillTierGroup
-              key={tier}
-              tier={tier}
-              skills={skills.filter((skill) => skill.tier === tier)}
-              availableProviders={availableProviders}
-              searching={query !== ""}
-            />
-          ))}
+          <SkillGroup skills={skills} availableProviders={availableProviders} searching={query !== ""} />
         </div>
       </details>
       <SkillsActions />
@@ -139,21 +107,20 @@ export function SkillsStatusList({ skills, availableProviders = ORCHESTRATORS, q
   );
 }
 
-interface SkillTierGroupProps {
-  tier: SkillTier;
+interface SkillGroupProps {
   skills: SkillStatus[];
   availableProviders: readonly Orchestrator[];
   searching?: boolean;
 }
 
-function SkillTierGroup({ tier, skills, availableProviders, searching = false }: SkillTierGroupProps) {
+function SkillGroup({ skills, availableProviders, searching = false }: SkillGroupProps) {
   if (skills.length === 0) return null;
   const installedCount = skills.filter(isFullyInstalled).length;
 
   return (
     <section className="space-y-1.5">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{TIER_LABELS[tier]}</span>
+        <span>{GROUP_LABEL}</span>
         <span className="font-mono">
           {installedCount}/{skills.length}
         </span>
@@ -202,7 +169,7 @@ interface ProviderStatusProps {
 
 function ProviderStatus({ skill, provider, available, searching }: ProviderStatusProps) {
   const installed = skill.installed[provider];
-  const dotClass = installed ? INSTALLED_DOT_CLASS : MISSING_DOT_CLASSES[skill.tier];
+  const dotClass = installed ? INSTALLED_DOT_CLASS : MISSING_DOT_CLASS;
 
   return (
     <li className={cn("text-2xs text-muted-foreground", !available && "opacity-50")}>

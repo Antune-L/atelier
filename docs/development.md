@@ -100,6 +100,8 @@ The pipeline contract injected into each session (`src/server/agents/contract.ts
 
 **Ask** tickets and **conflict-resolution** runs do not invoke a dedicated skill — read-only exploration or manual git per the contract.
 
+The ticket pipeline contract also includes a single code-lightening pass after implementation (before formatting, checks and review). It is described inline in the contract and does not depend on any host skill, so the former `simplifier` recommendation is no longer needed.
+
 `argus`'s inline posting (`--post`) and `minos-pr-feedback` both drive the GitHub API (REST and GraphQL), so they are **GitHub-only**. On an Azure DevOps project they are bypassed: `minos-pr-feedback` is not even listed for the session, and both the Claude and the Codex clean contracts carry the equivalent `az devops invoke` commands inline instead. Review publication never goes through `argus --post` on either provider — it is the backend's `publish_review` (see below).
 
 ### Azure DevOps: review and clean behaviour

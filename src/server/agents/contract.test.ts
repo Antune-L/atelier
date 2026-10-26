@@ -17,6 +17,7 @@ import {
   buildFeasibilityBatchContract,
   buildReviewContract,
   buildTicketContract,
+  LIGHTENING_PASS_HINT,
 } from "./contract.ts";
 
 const COMMIT_LANGUAGE: CommitLanguage = "en";
@@ -284,6 +285,60 @@ describe("buildConflictResolutionContract", () => {
     const contract = buildConflictResolutionContract(conflictTicket("codex", "codex"), REVIEW_OPTS);
     expect(contract).toContain("session Codex");
     expect(contract).toContain("delegate_review");
+  });
+});
+
+describe("lightening pass", () => {
+  const PASS = "Passe d'allègement, UNE seule fois";
+
+  test("never names a skill", () => {
+    expect(LIGHTENING_PASS_HINT).toContain(PASS);
+    expect(LIGHTENING_PASS_HINT).not.toMatch(/simplifier/i);
+  });
+
+  test("is part of the ticket contract for every implementer and before formatting", () => {
+    const tickets = [
+      makeTicket({ orchestrator: "claude", implementer: "claude" }),
+      makeTicket({ orchestrator: "codex", implementer: "codex" }),
+      makeTicket({ id: "tc-composer", orchestrator: "claude", implementer: "composer" }),
+      makeTicket({ orchestrator: "codex", implementer: "codex", autonomous: true }),
+    ];
+    for (const ticket of tickets) {
+      const contract = buildTicketContract(ticket, TICKET_OPTS);
+      expect(contract).toContain(LIGHTENING_PASS_HINT);
+      expect(contract.indexOf(PASS)).toBeLessThan(contract.indexOf("AVANT CHAQUE batch de reviewers"));
+    }
+  });
+
+  test("autonomous tickets delegate the pass as one last lot", () => {
+    const contract = buildTicketContract(makeTicket({ orchestrator: "codex", implementer: "codex", autonomous: true }), TICKET_OPTS);
+    expect(contract).toContain('delegate_implementation({label:"allègement"');
+  });
+
+  test("is absent from conflict, review-fix and clean contracts", () => {
+    const contracts = [
+      buildConflictResolutionContract(
+        makeTicket({ orchestrator: "claude", implementer: "claude", branch: "feat/z", prUrl: "https://github.com/o/r/pull/9", error: "x" }),
+        REVIEW_OPTS,
+      ),
+      buildReviewContract(
+        makeTicket({
+          kind: "review",
+          orchestrator: "claude",
+          implementer: "claude",
+          prNumber: 42,
+          prHeadBranch: "feat/x",
+          prUrl: "https://github.com/o/r/pull/42",
+          fixComments: true,
+        }),
+        REVIEW_OPTS,
+      ),
+      buildCleanContract(
+        makeTicket({ kind: "clean", orchestrator: "claude", implementer: "claude", prNumber: 7, prHeadBranch: "feat/c", prUrl: "https://github.com/o/r/pull/7" }),
+        REVIEW_OPTS,
+      ),
+    ];
+    for (const contract of contracts) expect(contract).not.toContain(PASS);
   });
 });
 

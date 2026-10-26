@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { isAllowedAgentPair } from "../../shared/constants.ts";
 import type { CommitLanguage, Implementer, Orchestrator } from "../../shared/constants.ts";
+import { qualityIterationSchema } from "../../shared/quality.ts";
 import { getProject, initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
@@ -313,6 +314,34 @@ describe("lightening pass", () => {
   test("autonomous tickets delegate the pass as one last lot", () => {
     const contract = buildTicketContract(makeTicket({ orchestrator: "codex", implementer: "codex", autonomous: true }), TICKET_OPTS);
     expect(contract).toContain('delegate_implementation({label:"allègement"');
+  });
+
+  test("is absent from quality-correction iterations, which already had their pass", () => {
+    const qualityIteration = qualityIterationSchema.parse({
+      id: "it-1",
+      ticketId: "tc-iteration",
+      project: FIXTURE_PROJECT_KEY,
+      prUrl: "https://github.com/o/r/pull/5",
+      headBranch: "feat/it",
+      sourceRunId: "run-1",
+      sourceRevision: "abc123",
+      criteriaSnapshot: null,
+      originalTicket: { title: "t", description: "d", prdMarkdown: null },
+      provider: "claude",
+      mode: "correction",
+      status: "correcting",
+      resultRunId: null,
+      resultRevision: null,
+      diagnostic: null,
+      createdAt: 1,
+      updatedAt: 1,
+      completedAt: null,
+    });
+    for (const implementer of ["claude", "composer"] satisfies Implementer[]) {
+      const contract = buildTicketContract(makeTicket({ id: "tc-iteration", orchestrator: "claude", implementer }), { ...TICKET_OPTS, qualityIteration });
+      expect(contract).not.toContain(PASS);
+      expect(contract).not.toContain("passe d'allègement");
+    }
   });
 
   test("is absent from conflict, review-fix and clean contracts", () => {

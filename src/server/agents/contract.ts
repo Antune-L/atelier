@@ -66,6 +66,7 @@ function buildImplementingSteps(
   ticket: Ticket,
   opts: { composerScriptPath: string },
   prdPath: string,
+  withLighteningPass: boolean,
 ): string[] {
   if (ticket.autonomous) {
     return [
@@ -73,8 +74,12 @@ function buildImplementingSteps(
       `   Si le projet a des tests unitaires, lance D'ABORD delegate_implementation({label:"${AUTONOMOUS_UNIT_TEST_LOT}",plan:"préparer les tests unitaires des cas du plan figé, sans implémenter la fonctionnalité",files:[...]}), termine ton tour et attends sa réussite. Les nouveaux tests peuvent échouer avant la fonctionnalité ; aucun test existant ne doit être affaibli. Le backend refuse tout lot de fonctionnalité avant cette préparation.`,
       `   Ensuite délègue la fonctionnalité complète selon le plan figé. Pour plusieurs lots persistants, chaque lot de fonctionnalité dépend de "${AUTONOMOUS_UNIT_TEST_LOT}" si sa préparation est incluse dans le même plan ; conserve des fichiers disjoints. Une absence de suite unitaire identifiée est explicitement inscrite dans le plan, jamais remplacée par un succès fictif.`,
       "   Après chaque délégation, termine ton tour et attends implementation_done ; consulte read_implementation_plan après une interruption. Toute correction passe aussi par un lot délégué. Conserve les critères, le budget et les travaux ; appelle fail si la délégation ne peut pas aboutir.",
-      "   Quand tous les autres lots ont réussi (corrections prévues par le plan figé comprises), délègue UN dernier lot via delegate_implementation({label:\"allègement\",plan:<consignes ci-dessous>,files:[fichiers modifiés par le ticket]}), exécuté après tous les autres et compté dans le budget commun. Cette passe n'a lieu qu'une fois, jamais après les corrections de review. Consignes à transmettre :",
-      `   ${LIGHTENING_PASS_HINT}`,
+      ...(withLighteningPass
+        ? [
+            "   Quand tous les autres lots ont réussi (corrections prévues par le plan figé comprises), délègue UN dernier lot via delegate_implementation({label:\"allègement\",plan:<consignes ci-dessous>,files:[fichiers modifiés par le ticket]}), exécuté après tous les autres et compté dans le budget commun. Cette passe n'a lieu qu'une fois, jamais après les corrections de review. Consignes à transmettre :",
+            `   ${LIGHTENING_PASS_HINT}`,
+          ]
+        : []),
     ];
   }
   if (ticket.implementer === "codex" || ticket.implementer === "claude") {
@@ -96,9 +101,13 @@ function buildImplementingSteps(
         : []),
       `   ${ticket.prdEnabled ? "b" : "a"}. Décide d'ABORD du découpage depuis ${planSource}. Pour plusieurs lots, appelle UNE fois submit_implementation_plan({lots:[{label,plan,files,dependsOn}],maxParallel:${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS}}). Chaque label est distinct, chaque plan est autonome et chaque files déclare des fichiers ou dossiers relatifs au dépôt déjà identifiés, sans glob et sans chevauchement. dependsOn liste les labels à intégrer AVANT ce lot. Le backend vérifie et persiste le plan, démarre automatiquement les lots indépendants puis débloque leurs dépendants après intégration réussie ; ${DEFAULT_PLAN_PARALLEL_IMPLEMENTERS} lots concurrents par défaut, ${MAX_PARALLEL_IMPLEMENTERS} maximum seulement si le découpage le justifie, avec un plafond partagé entre tickets. Pour un petit changement indivisible, fais UN SEUL appel delegate_implementation avec le plan complet et le périmètre files quand il est connu ; sans files, ce lot réserve tout le dépôt. Chaque session ${providerName} écrit le code et ne commit JAMAIS.`,
       `   ${ticket.prdEnabled ? "c" : "b"}. TERMINE ton tour immédiatement après la soumission réussie (ne boucle pas, ne surveille rien : l'attente est gérée par le backend). Tu recevras un événement implementation_done par lot.`,
-      `   ${ticket.prdEnabled ? "d" : "c"}. À chaque implementation_done reçu : si remaining > 0, TERMINE de nouveau ton tour et attends les suivants. Quand remaining vaut 0, relis read_implementation_plan() si un plan a été soumis : vérifie que tous ses lots ont réussi, aucun failed, blocked ou interrupted. Un événement manquant ou un redémarrage impose de relire cet état durable, jamais de resoumettre un plan ni de redéléguer un lot réussi. Sur échec du code, relance delegate_implementation UNE seule fois pour CE lot (même label et mêmes files) ; ses dépendants seront débloqués automatiquement après réussite. Pour un plan persistant, un échec d'intégration après réussite de l'enfant se reprend avec recover_implementation_plan({action:"retry_integration",label,reason}), sans refaire son code. ${recoveryDirective} Quand tous les lots ont réussi, relis le diff intégré (git diff), comble les manques, fais toi-même la passe d'allègement ci-dessous puis enchaîne sur la review. Une nouvelle correction après un lot réussi est un nouveau lot avec un nouveau label.`,
-      `   ${LIGHTENING_PASS_HINT}`,
-      "   Pas de passe d'allègement après une reprise recover_implementation_plan (takeover/assess) : toute modification invaliderait l'évaluation.",
+      `   ${ticket.prdEnabled ? "d" : "c"}. À chaque implementation_done reçu : si remaining > 0, TERMINE de nouveau ton tour et attends les suivants. Quand remaining vaut 0, relis read_implementation_plan() si un plan a été soumis : vérifie que tous ses lots ont réussi, aucun failed, blocked ou interrupted. Un événement manquant ou un redémarrage impose de relire cet état durable, jamais de resoumettre un plan ni de redéléguer un lot réussi. Sur échec du code, relance delegate_implementation UNE seule fois pour CE lot (même label et mêmes files) ; ses dépendants seront débloqués automatiquement après réussite. Pour un plan persistant, un échec d'intégration après réussite de l'enfant se reprend avec recover_implementation_plan({action:"retry_integration",label,reason}), sans refaire son code. ${recoveryDirective} Quand tous les lots ont réussi, relis le diff intégré (git diff), comble les manques${withLighteningPass ? ", fais toi-même la passe d'allègement ci-dessous" : ""} puis enchaîne sur la review. Une nouvelle correction après un lot réussi est un nouveau lot avec un nouveau label.`,
+      ...(withLighteningPass
+        ? [
+            `   ${LIGHTENING_PASS_HINT}`,
+            "   Pas de passe d'allègement après une reprise recover_implementation_plan (takeover/assess) : toute modification invaliderait l'évaluation.",
+          ]
+        : []),
       ...recoveryAssessment,
     ];
   }
@@ -114,8 +123,10 @@ function buildImplementingSteps(
       `      Script à invoquer : ${opts.composerScriptPath}, avec en premier argument le répertoire de travail courant, et en second le fichier de plan /tmp/composer-plan-${ticket.id}.md. Redirige stdout et stderr vers /tmp/composer-${ticket.id}.log, puis écris son code de retour dans /tmp/composer-${ticket.id}.rc une fois terminé — c'est ce fichier .rc que tu surveilleras (étape c).`,
       `   c. SURVEILLE SANS TERMINER TON TOUR : boucle avec \`sleep 60\` puis teste l'existence de /tmp/composer-${ticket.id}.rc. NE termine PAS ton tour tant que le fichier .rc n'existe pas (sinon le pipeline croit que tu es bloqué et t'escalade en stalled). Toutes les ~3 minutes pendant l'attente, appelle update_stage("implementing") comme heartbeat (sinon le watchdog te marquera inactif — le sleep ne le rafraîchit pas).`,
       "   d. Quand le .rc existe, lis le code de retour :",
-      "      - 0 : relis le diff produit (git diff) et vérifie que le projet typecheck. Si l'implémentation est partielle (build cassé, fichiers orphelins) → fais UNE seule passe ciblée (réécris un gaps file listant les manques précis puis relance le script sur le même worktree) OU termine le câblage toi-même. Ne boucle JAMAIS Composer plus d'une passe. Fais ensuite toi-même la passe d'allègement sur le diff produit, sans relire le diff une seconde fois :",
-      `      ${LIGHTENING_PASS_HINT}`,
+      "      - 0 : relis le diff produit (git diff) et vérifie que le projet typecheck. Si l'implémentation est partielle (build cassé, fichiers orphelins) → fais UNE seule passe ciblée (réécris un gaps file listant les manques précis puis relance le script sur le même worktree) OU termine le câblage toi-même. Ne boucle JAMAIS Composer plus d'une passe.",
+      ...(withLighteningPass
+        ? ["        Fais ensuite toi-même la passe d'allègement sur le diff produit, sans relire le diff une seconde fois :", `        ${LIGHTENING_PASS_HINT}`]
+        : []),
       "      - 3 ou 4 : Cursor absent ou non authentifié → appelle fail(\"Composer indisponible : binaire Cursor absent ou non authentifié\"). N'implémente PAS toi-même en silence.",
       "      - 5 : échec ou timeout de Composer → fail avec la raison.",
       "      - 6 : Composer n'a produit aucun changement (probable limite de contexte) → implémente toi-même OU fail.",
@@ -336,7 +347,8 @@ export function buildTicketContract(
   const vcs = vcsCommands(project.vcsProvider);
   const prCreateCmd = vcs.createPr({ draft: prIsDraft, baseBranch });
   const prdPath = `/tmp/prd-${ticket.id}.md`;
-  const implementingSteps = buildImplementingSteps(ticket, opts, prdPath);
+  // A quality-correction iteration only fixes the reported faults: the single lightening pass already ran.
+  const implementingSteps = buildImplementingSteps(ticket, opts, prdPath, !iteration);
 
   // The completion directive, the finalisation step and the signalling step each have three variants
   // (directPush → stealth → standard PR). Resolved here as plain branches to avoid nested ternaries.

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { api } from "@/lib/api";
 import { defaultAgentSettings, type AtelierAgentSettings, type AtelierSeed } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
@@ -28,6 +29,8 @@ interface NewConversationFormProps {
 }
 
 const DEFAULT_ORCHESTRATOR = "claude";
+const NEW_CONVERSATION_MESSAGE_DRAFT = "atelier:new:message";
+const NEW_CONVERSATION_TITLE_DRAFT = "atelier:new:title";
 
 function seedMessage(seed: AtelierSeed | null): string {
   if (seed === null) return "";
@@ -41,8 +44,14 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
   const capabilities = useCapabilities();
   const [projectChoice, setProjectChoice] = useState<string | null>(seed?.project ?? defaultProject);
   const project = resolveProjectChoice(projects, projectChoice);
-  const [title, setTitle] = useState(seed?.title ?? "");
-  const [message, setMessage] = useState(() => seedMessage(seed));
+  const [draftTitle, setDraftTitle, clearDraftTitle] = useLocalDraft(NEW_CONVERSATION_TITLE_DRAFT);
+  const [draftMessage, setDraftMessage, clearDraftMessage] = useLocalDraft(NEW_CONVERSATION_MESSAGE_DRAFT);
+  const [seededTitle, setSeededTitle] = useState(seed?.title ?? "");
+  const [seededMessage, setSeededMessage] = useState(() => seedMessage(seed));
+  const title = seed === null ? draftTitle : seededTitle;
+  const setTitle = seed === null ? setDraftTitle : setSeededTitle;
+  const message = seed === null ? draftMessage : seededMessage;
+  const setMessage = seed === null ? setDraftMessage : setSeededMessage;
   const [agent, setAgent] = useState<AtelierAgentSettings>(() =>
     defaultAgentSettings(DEFAULT_ORCHESTRATOR, capabilities.defaultCodexFast),
   );
@@ -70,6 +79,10 @@ export function NewConversationForm({ projects, defaultProject, seed, onCreated,
         seed: message.trim(),
       });
       boardStore.rememberConversation(conversation);
+      if (seed === null) {
+        clearDraftTitle();
+        clearDraftMessage();
+      }
       onCreated(conversation);
     }, "Création de la conversation impossible");
   };

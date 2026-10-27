@@ -1366,6 +1366,11 @@ export class SlotManager {
     log.info("contrat délivré à l'agent", { ticketId: ticket.id });
   }
 
+  /** Whether buildContractPayload renders the feature contract, which already lists the ticket's comments. */
+  private contractCarriesComments(ticket: Ticket): boolean {
+    return !ticket.resolvingConflicts && ticket.kind === "feature" && this.store.getActiveQualityIteration(ticket.id)?.mode !== "correction";
+  }
+
   private buildContractPayload(ticket: Ticket): string {
     const { commitLanguage } = this.store.getAppSettings();
     if (ticket.resolvingConflicts) {
@@ -1406,6 +1411,7 @@ export class SlotManager {
       composerScriptPath: resolveTemplatePaths(this.config.projectRoot).composerScriptPath,
       commitLanguage,
       baseBranch,
+      comments: this.store.listComments(ticket.id),
     });
   }
 
@@ -2737,7 +2743,7 @@ export class SlotManager {
       await this.delegationDrain?.(ticketId);
     }
     executionGuard?.assertAllowed();
-    const recoveryContext = buildRecoveryContext(ticket, this.store, restoredStage);
+    const recoveryContext = buildRecoveryContext(ticket, this.store, restoredStage, { commentsInContract: this.contractCarriesComments(ticket) });
     if (iteration?.mode === "correction" && this.store.getActiveQualityIteration(ticketId)?.id !== iteration.id) throw new Error("Correction qualité annulée pendant la reprise.");
     const currentTicket = this.store.getTicket(ticketId);
     if (!currentTicket || currentTicket.testing || currentTicket.archived || currentTicket.column === "abandoned" || currentTicket.slotId !== slotId || this.store.getSlot(slotId)?.ticketId !== ticketId

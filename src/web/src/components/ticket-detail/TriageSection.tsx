@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, RotateCw, Sparkles } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardPaste, Copy, MessageSquareReply, RotateCw, Sparkles } from "lucide-react";
 import { useId, useRef, useState } from "react";
 
 import { AGENT_EFFORT_LABELS, AGENT_MODEL_LABELS, type AgentEffort, type AgentModel, type FeasibilityEngine } from "@shared/constants";
@@ -31,6 +31,17 @@ interface TriageSectionProps {
   onAnswerFeasibility: (input: FeasibilityAnswerInput) => Promise<{ started: boolean; id: string }>;
   onAnswerFeasibilityBatch: (input: FeasibilityAnswerBatchInput) => Promise<{ started: boolean; ids: string[] }>;
   onApplyReformulation: (text: string) => Promise<void>;
+  /** Quotes a feasibility question into the comment composer (TODO tickets only). */
+  onReplyToQuestion?: (question: string) => void;
+}
+
+/** « Répondre » action quoting a feasibility question into the comment composer. */
+export function ReplyToQuestionButton({ question, onReply }: { question: string; onReply: (question: string) => void }) {
+  return (
+    <Button type="button" size="sm" variant="ghost" onClick={() => onReply(question)}>
+      <MessageSquareReply className="h-3.5 w-3.5" /> Répondre
+    </Button>
+  );
 }
 
 /** How long the reformulation copy/apply buttons show their "Copié"/"Appliqué" confirmation. */
@@ -48,6 +59,7 @@ export function TriageSection({
   onAnswerFeasibility,
   onAnswerFeasibilityBatch,
   onApplyReformulation,
+  onReplyToQuestion,
 }: TriageSectionProps) {
   const { codex } = useCapabilities();
   const engineLabelId = useId();
@@ -279,6 +291,9 @@ export function TriageSection({
                         <p className="text-2xs text-muted-foreground">Question {index + 1} sur {questions.length}</p>
                         <FeasibilityQuestion ticket={ticket} question={question} index={index}
                           answer={answers[index] ?? ""} submissionPending={submissionPending} onAnswerChange={(value) => setAnswerAt(index, value)} onSubmit={handleAnswerQuestion} />
+                        {ticket.column === "todo" && onReplyToQuestion && (
+                          <ReplyToQuestionButton question={question.question} onReply={onReplyToQuestion} />
+                        )}
                       </div>
                     ))}
                     {questions.length > 1 && (

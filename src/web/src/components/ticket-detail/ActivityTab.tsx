@@ -5,17 +5,26 @@ import type { Comment, Ticket } from "@shared/schemas";
 import { CommentRow } from "@/components/ticket-detail/CommentRow";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useLocalDraft } from "@/hooks/useLocalDraft";
 
-/** Columns where the API rejects new free-form comments. */
-const NO_COMMENT_COLUMNS: Ticket["column"][] = ["todo", "done", "merged"];
+/** Columns where the API rejects new free-form comments (TODO accepts them for the next analysis). */
+const NO_COMMENT_COLUMNS: Ticket["column"][] = ["done", "merged"];
+
+/** Appends a Markdown quote of `question` to `draft`, keeping any text already typed. */
+export function appendQuote(draft: string, question: string): string {
+  const quote = `${question.split("\n").map((line) => `> ${line}`).join("\n")}\n\n`;
+  if (!draft) return quote;
+  return `${draft.endsWith("\n") ? draft : `${draft}\n`}${quote}`;
+}
 
 interface ActivityTabProps {
   ticket: Ticket;
   comments: Comment[];
   onAnswer: (questionId: string, body: string) => Promise<void>;
   onComment: (body: string) => Promise<void>;
+  /** Composer draft, owned by the parent so other sections can quote into it. */
+  draft: string;
+  setDraft: (next: string) => void;
+  clearDraft: () => void;
   /** Feasibility block, rendered below the thread (TODO tickets only). */
   triage?: ReactNode;
 }
@@ -25,8 +34,7 @@ function isUnanswered(comment: Comment): boolean {
 }
 
 /** Agent questions, the comment thread and the composer. */
-export function ActivityTab({ ticket, comments, onAnswer, onComment, triage }: ActivityTabProps) {
-  const [draft, setDraft, clearDraft] = useLocalDraft(`comment:${ticket.id}`);
+export function ActivityTab({ ticket, comments, onAnswer, onComment, triage, draft, setDraft, clearDraft }: ActivityTabProps) {
   const questions = comments.filter(isUnanswered);
   const thread = comments.filter((c) => !isUnanswered(c) && c.author !== "system");
   const journal = comments.filter((c) => c.author === "system");
@@ -57,15 +65,26 @@ export function ActivityTab({ ticket, comments, onAnswer, onComment, triage }: A
           thread.map((c) => <CommentRow key={c.id} comment={c} onAnswer={onAnswer} />)
         )}
         {canComment && (
-          <div className="flex gap-2">
-          <Input
-            aria-label="Ajouter un commentaire"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Votre message…"
-            onKeyDown={(e) => e.key === "Enter" && void submit()}
-          />
-          <Button size="sm" disabled={!draft.trim()} onClick={() => void submit()}>Envoyer</Button>
+          <div className="space-y-1">
+            <div className="flex items-end gap-2">
+              <textarea
+                aria-label="Ajouter un commentaire"
+                rows={2}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Votre message…"
+                className="flex min-h-9 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || e.shiftKey) return;
+                  e.preventDefault();
+                  void submit();
+                }}
+              />
+              <Button size="sm" disabled={!draft.trim()} onClick={() => void submit()}>Envoyer</Button>
+            </div>
+            {ticket.column === "todo" && (
+              <p className="text-2xs text-muted-foreground">Votre commentaire sera pris en compte à la prochaine analyse.</p>
+            )}
           </div>
         )}
       </section>

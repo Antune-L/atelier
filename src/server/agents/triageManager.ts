@@ -111,8 +111,8 @@ export class TriageManager {
       }
       this.sessions.set(ticketId, { timer: null, workspace });
       const prompt = deep
-        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver)
-        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver);
+        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, this.store.listComments(ticket.id))
+        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, this.store.listComments(ticket.id));
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,

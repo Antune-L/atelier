@@ -1,6 +1,7 @@
 import { expect, mock, test } from "bun:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { Ticket } from "@shared/schemas";
 import { makeTicket } from "../../../../server/testing/fixtures.ts";
 
 // The real Markdown instantiates DOMPurify on `window`, which does not exist under SSR.
@@ -9,12 +10,12 @@ mock.module("@/components/ui/markdown", () => ({
   renderMarkdownToSafeHtml: (content: string) => content,
 }));
 
-const { TriageSection } = await import("./TriageSection");
+const { ReplyToQuestionButton, TriageSection } = await import("./TriageSection");
 
 const BATCH_LABEL = "Intégrer toutes les réponses";
 const QUESTIONS = ["Quelle couleur ?", "Quelle taille ?", "Quel format ?"];
 
-function render(questions: string[]): string {
+function render(questions: string[], options: { column?: Ticket["column"]; onReplyToQuestion?: (question: string) => void } = {}): string {
   const triageReport = JSON.stringify({
     verdict: "implementable",
     summary: "Résumé",
@@ -22,7 +23,7 @@ function render(questions: string[]): string {
     questions: questions.map((question) => ({ question, recommendedAnswer: null })),
     files: [],
   });
-  const ticket = makeTicket({ column: "todo", triageStatus: "done", triageVerdict: "implementable", triageReport, feasibilityReportVersion: 1, feasibilityAnswers: [] });
+  const ticket = makeTicket({ column: options.column ?? "todo",triageStatus: "done", triageVerdict: "implementable", triageReport, feasibilityReportVersion: 1, feasibilityAnswers: [] });
   return renderToStaticMarkup(<TriageSection
     ticket={ticket}
     onTriage={async () => {}}
@@ -33,8 +34,30 @@ function render(questions: string[]): string {
     onReformulate={async () => ({ started: true })}
     onAnswerFeasibility={async () => ({ started: true, id: "run" })}
     onAnswerFeasibilityBatch={async () => ({ started: true, ids: [] })}
-    onApplyReformulation={async () => {}} />);
+    onApplyReformulation={async () => {}}
+    onReplyToQuestion={options.onReplyToQuestion} />);
 }
+
+const REPLY_LABEL = "Répondre";
+
+test("reply button is shown per question on a todo card with the handler", () => {
+  const html = render(QUESTIONS, { onReplyToQuestion: () => {} });
+  expect(html.split(REPLY_LABEL).length - 1).toBe(QUESTIONS.length);
+});
+
+test("reply button is absent without the handler or outside todo", () => {
+  expect(render(QUESTIONS)).not.toContain(REPLY_LABEL);
+  expect(render(QUESTIONS, { column: "done", onReplyToQuestion: () => {} })).not.toContain(REPLY_LABEL);
+});
+
+test("clicking « Répondre » passes the question text to the handler", () => {
+  const onReply = mock((_question: string) => {});
+  const button = ReplyToQuestionButton({ question: "Quelle couleur ?", onReply });
+  const onClick: unknown = button.props.onClick;
+  expect(typeof onClick).toBe("function");
+  if (typeof onClick === "function") onClick();
+  expect(onReply).toHaveBeenCalledWith("Quelle couleur ?");
+});
 
 test("batch integrate button is rendered after the question list", () => {
   const html = render(QUESTIONS);

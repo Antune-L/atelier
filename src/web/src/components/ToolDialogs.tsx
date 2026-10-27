@@ -1,20 +1,19 @@
-import { FileUp, GitBranch, GitPullRequest, MessageCircleQuestion, Sparkles } from "lucide-react";
+import { FileUp, GitBranch, GitPullRequest, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 
 import type { ProjectInfo } from "@shared/schemas";
 
-import { AskPanel } from "@/components/AskPanel";
 import { CleanPrPanel } from "@/components/CleanPrPanel";
 import { ImportTicketsPanel } from "@/components/ImportTicketsPanel";
 import { ReviewPrPanel } from "@/components/ReviewPrPanel";
 import { WorktreePanel } from "@/components/WorktreePanel";
 import { Dialog, type DialogSize } from "@/components/ui/dialog";
 
-/** The five standalone tools reachable from the header's « Autres outils » menu. */
-export type ToolKind = "import" | "review" | "clean" | "ask" | "worktree";
+/** The four standalone tools reachable from the header's « Autres outils » menu. */
+export type ToolKind = "import" | "review" | "clean" | "worktree";
 
-export const TOOL_KINDS: ToolKind[] = ["import", "review", "clean", "ask", "worktree"];
+export const TOOL_KINDS: ToolKind[] = ["import", "review", "clean", "worktree"];
 
 interface ToolMeta {
   /** Menu entry wording. */
@@ -48,13 +47,6 @@ export const TOOLS: Record<ToolKind, ToolMeta> = {
     size: "lg",
     Panel: CleanPrPanel,
   },
-  ask: {
-    label: "Poser une question",
-    title: "Poser une question",
-    Icon: MessageCircleQuestion,
-    size: "md",
-    Panel: AskPanel,
-  },
   worktree: {
     label: "Créer un espace de travail",
     title: "Créer un espace de travail",
@@ -71,7 +63,7 @@ interface ToolDialogsProps {
   onClose: () => void;
 }
 
-/** Owns the five tool dialogs; only the open one is mounted, so each panel resets between uses. */
+/** Owns the four tool dialogs; only the open one is mounted, so each panel resets between uses. */
 export function ToolDialogs({ openTool, projects, onClose }: ToolDialogsProps) {
   const handleOpenChange = (next: boolean): void => {
     if (!next) onClose();

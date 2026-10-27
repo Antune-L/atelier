@@ -17,7 +17,7 @@ export function recoveryStage(ticket: Ticket, store: Store): Stage {
   return "implementing";
 }
 
-export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage): string {
+export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage, opts: { commentsInContract?: boolean } = {}): string {
   const lines = [
     "Reprise de l'exécution après interruption. Cet état persistant complète le contrat et prend priorité sur ses instructions de démarrage.",
     `Étape à reprendre : ${stage}. Conserve les modifications présentes et vérifie l'état réel du worktree avant de poursuivre.`,
@@ -34,8 +34,13 @@ export function buildRecoveryContext(ticket: Ticket, store: Store, stage: Stage)
     lines.push(bounded);
     length += bounded.length + 1;
   };
-  for (const comment of store.listComments(ticket.id).filter((entry) => entry.author === "user" || entry.questionId !== null).slice(-MAX_RECOVERY_ENTRIES)) {
-    append("Contexte utilisateur", { author: comment.author, questionId: comment.questionId, answered: comment.answered, body: comment.body });
+  // The re-delivered feature contract already lists the comments: repeating them would inject them twice.
+  if (opts.commentsInContract) {
+    lines.push("Les commentaires utilisateur figurent dans le contrat.");
+  } else {
+    for (const comment of store.listComments(ticket.id).filter((entry) => entry.author === "user" || entry.questionId !== null).slice(-MAX_RECOVERY_ENTRIES)) {
+      append("Contexte utilisateur", { author: comment.author, questionId: comment.questionId, answered: comment.answered, body: comment.body });
+    }
   }
   const plan = store.getImplementationPlan(ticket.id);
   if (plan !== null) {

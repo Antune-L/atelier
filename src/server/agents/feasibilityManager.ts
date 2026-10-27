@@ -237,7 +237,8 @@ export class FeasibilityBatchManager {
         void releaseAnalysisWorkspace(this.system, this.repoMutex, session.workspace);
         return;
       }
-      const prompt = buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider);
+      const commentsByTicket = new Map(tickets.map((ticket) => [ticket.id, this.store.listComments(ticket.id)]));
+      const prompt = buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider, commentsByTicket);
       session.timer = setTimeout(
         () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
         FEASIBILITY_TIMEOUT_MS,

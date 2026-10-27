@@ -7,7 +7,7 @@ import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { ReviewLevelDot } from "@/components/ReviewLevelDot";
-import { ActivityTab } from "@/components/ticket-detail/ActivityTab";
+import { ActivityTab, appendQuote } from "@/components/ticket-detail/ActivityTab";
 import { DescriptionTab } from "@/components/ticket-detail/DescriptionTab";
 import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
 import { OverviewTab } from "@/components/ticket-detail/OverviewTab";
@@ -22,6 +22,7 @@ import { VerificationTab, canShowVerification } from "@/components/ticket-detail
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
+import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { api } from "@/lib/api";
 import { stageLabel, stageSteps, ticketCardState, type CardState } from "@/lib/display";
 import { canRecoverImplementation, IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
@@ -114,6 +115,8 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
   const [tab, setTab] = useState<TicketTab>(DEFAULT_TAB);
   const [moveError, setMoveError] = useState<string | null>(null);
   const [prdOpen, setPrdOpen] = useState(false);
+  // Shared by the composer and the feasibility « Répondre » buttons; the key follows the open ticket.
+  const [commentDraft, setCommentDraft, clearCommentDraft] = useLocalDraft(`comment:${ticket?.id ?? ""}`);
 
   // Load comments when a new ticket is opened (render-phase guard, no useEffect).
   // Ticket fields come from the prop: App keeps it fresh via WS pushes.
@@ -310,6 +313,10 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
         onApplyReformulation={(text) =>
           api.updateTicket(current.id, { description: text }).then(() => undefined)
         }
+        onReplyToQuestion={(question) => {
+          setCommentDraft((prev) => appendQuote(prev, question));
+          selectTab("activity");
+        }}
       />
     ) : undefined;
 
@@ -366,6 +373,9 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
                   comments={comments}
                   onAnswer={answer}
                   onComment={addComment}
+                  draft={commentDraft}
+                  setDraft={setCommentDraft}
+                  clearDraft={clearCommentDraft}
                 />
               </div>
             )}

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { isAllowedAgentPair } from "../../shared/constants.ts";
 import type { CommitLanguage, Implementer, Orchestrator } from "../../shared/constants.ts";
 import { qualityIterationSchema } from "../../shared/quality.ts";
+import type { Comment } from "../../shared/schemas.ts";
 import { getProject, initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
@@ -70,6 +71,59 @@ describe("buildFeasibilityBatchContract", () => {
     expect(contract).toContain('fork_turns: "none"');
     expect(contract).toContain('agent_type: "feasibility-scout"');
     expect(contract).toContain('agent_type: "feasibility-verifier"');
+  });
+
+  test("includes a long structured description verbatim, without truncation", () => {
+    const section = "### Section\n\n- item one\n- item two\n\n```ts\nconst x = 1;\n```\n\n";
+    const description = section.repeat(Math.ceil(5_000 / section.length)).slice(0, 5_000);
+    const contract = buildFeasibilityBatchContract([makeTicket({ project: FIXTURE_PROJECT_KEY, description })], getProject(FIXTURE_PROJECT_KEY), "main");
+    expect(contract).toContain(description);
+    expect(contract).not.toContain("…");
+  });
+
+  test("includes a 50,000-char description entirely", () => {
+    const description = "a".repeat(50_000);
+    const contract = buildFeasibilityBatchContract([makeTicket({ project: FIXTURE_PROJECT_KEY, description })], getProject(FIXTURE_PROJECT_KEY), "main");
+    expect(contract).toContain(description);
+  });
+
+  test("renders one block per card with its [id] and its own comments", () => {
+    const first = makeTicket({ id: "t-one", title: "One", project: FIXTURE_PROJECT_KEY, description: "" });
+    const second = makeTicket({ id: "t-two", title: "Two", project: FIXTURE_PROJECT_KEY });
+    const comment: Comment = { id: "c1", ticketId: first.id, author: "user", body: "Use the blue variant", questionId: null, answered: false, createdAt: 1 };
+    const comments = new Map([[first.id, [comment]]]);
+    const contract = buildFeasibilityBatchContract([first, second], getProject(FIXTURE_PROJECT_KEY), "main", "claude", comments);
+    expect(contract).toContain("### [t-one] One");
+    expect(contract).toContain("### [t-two] Two");
+    expect(contract).toContain("(vide)");
+    expect(contract.indexOf("Use the blue variant")).toBeLessThan(contract.indexOf("### [t-two]"));
+    expect(contract.indexOf("Use the blue variant")).toBeGreaterThan(contract.indexOf("### [t-one]"));
+  });
+
+  test.each(["claude", "codex"] satisfies Orchestrator[])("%s contract asks to copy each card block verbatim to its own sub-agents", (driver) => {
+    const contract = buildFeasibilityBatchContract([makeTicket({ project: FIXTURE_PROJECT_KEY })], getProject(FIXTURE_PROJECT_KEY), "main", driver);
+    expect(contract).toContain("bloc COMPLET de SA carte (description et commentaires) recopié mot pour mot");
+    expect(contract).toContain("N'inclus JAMAIS le contenu d'une autre carte");
+  });
+});
+
+describe("buildTicketContract — comments", () => {
+  test("lists the user comments posted before start", () => {
+    const ticket = makeTicket({ id: "tc-comments" });
+    const contract = buildTicketContract(ticket, {
+      ...TICKET_OPTS,
+      comments: [
+        { id: "c1", ticketId: ticket.id, author: "user", body: "Keep the legacy endpoint", questionId: null, answered: false, createdAt: 1 },
+        { id: "c2", ticketId: ticket.id, author: "system", body: "system noise", questionId: null, answered: false, createdAt: 2 },
+      ],
+    });
+    expect(contract).toContain("Commentaires :");
+    expect(contract).toContain("Keep the legacy endpoint");
+    expect(contract).not.toContain("system noise");
+  });
+
+  test("omits the section without useful comments", () => {
+    expect(buildTicketContract(makeTicket(), { ...TICKET_OPTS, comments: [] })).not.toContain("Commentaires :");
   });
 });
 

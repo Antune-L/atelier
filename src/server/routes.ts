@@ -1634,13 +1634,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .post("/tickets/:id/comments", ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
-      if (ticket.column === "todo") {
-        return jsonError(set, HTTP_CONFLICT, "commentaire inutile sur un ticket non démarré");
-      }
       const parsed = createCommentSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const comment = store.addComment(params.id, "user", parsed.data.body, parsed.data.questionId);
       hub.pushComment(comment);
+      // A todo card has no implementation session (triage/split sessions share its id): only store
+      // the comment, which reaches feasibility analyses and the contract at start.
+      if (ticket.column === "todo") {
+        if (parsed.data.questionId) store.markQuestionAnswered(parsed.data.questionId);
+        return comment;
+      }
       if (parsed.data.questionId) {
         coordinator.answerQuestion(params.id, parsed.data.questionId, parsed.data.body);
       } else {

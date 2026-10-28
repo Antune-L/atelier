@@ -15,13 +15,13 @@ const { ReplyToQuestionButton, TriageSection } = await import("./TriageSection")
 const BATCH_LABEL = "Intégrer toutes les réponses";
 const QUESTIONS = ["Quelle couleur ?", "Quelle taille ?", "Quel format ?"];
 
-function render(questions: string[], options: { column?: Ticket["column"]; onReplyToQuestion?: (question: string) => void } = {}): string {
+function render(questions: string[], options: { column?: Ticket["column"]; onReplyToQuestion?: (question: string) => void; files?: string[] } = {}): string {
   const triageReport = JSON.stringify({
     verdict: "implementable",
     summary: "Résumé",
     reasons: [],
     questions: questions.map((question) => ({ question, recommendedAnswer: null })),
-    files: [],
+    files: options.files ?? [],
   });
   const ticket = makeTicket({ column: options.column ?? "todo",triageStatus: "done", triageVerdict: "implementable", triageReport, feasibilityReportVersion: 1, feasibilityAnswers: [] });
   return renderToStaticMarkup(<TriageSection
@@ -79,4 +79,14 @@ test("batch integrate button is absent with a single question", () => {
   const html = render(["Unique question ?"]);
   expect(html).toContain("Unique question ?");
   expect(html).not.toContain(BATCH_LABEL);
+});
+
+test("relevant files are collapsed in a closed details by default", () => {
+  const html = render([], { files: ["a.ts", "b.ts"] });
+  const details = /<details[^>]*>(?:(?!<\/details>).)*Fichiers concernés \(2\)(?:(?!<\/details>).)*<\/details>/s.exec(html)?.[0] ?? "";
+  expect(details).toContain("<summary");
+  expect(details).not.toMatch(/^<details[^>]*\sopen/);
+  expect(details).toContain("a.ts");
+  expect(details).toContain("b.ts");
+  expect(render([])).not.toContain("Fichiers concernés");
 });

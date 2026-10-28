@@ -198,9 +198,15 @@ export function TriageSection({
         </div>
       )}
       {result.files.length > 0 && (
-        <ul className="font-mono text-2xs text-muted-foreground">
-          {result.files.map((file) => <li key={file}>{file}</li>)}
-        </ul>
+        <details className="group/files">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform group-open/files:rotate-180" />
+            Fichiers concernés ({result.files.length})
+          </summary>
+          <ul className="mt-1 font-mono text-2xs text-muted-foreground">
+            {result.files.map((file) => <li key={file}>{file}</li>)}
+          </ul>
+        </details>
       )}
       {result.solutions && result.solutions.length > 0 && (
         <div>

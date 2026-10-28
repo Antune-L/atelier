@@ -54,12 +54,20 @@ function fenceEnd(content: string, index: number): number | null {
   return content.length;
 }
 
+/** Offset of the next blank line after `index` (or the content end): code spans never cross paragraphs. */
+function paragraphEnd(content: string, index: number): number {
+  const blank = /\n[ \t]*\n/g;
+  blank.lastIndex = index;
+  return blank.exec(content)?.index ?? content.length;
+}
+
 /** Returns the end offset of the inline code span opening at `index`, or null when unmatched. */
 function codeSpanEnd(content: string, index: number, length: number): number | null {
+  const limit = paragraphEnd(content, index);
   let cursor = index + length;
-  while (cursor < content.length) {
+  while (cursor < limit) {
     const next = content.indexOf("`", cursor);
-    if (next === -1) return null;
+    if (next === -1 || next >= limit) return null;
     const run = runLength(content, next, "`");
     if (run === length) return next + run;
     cursor = next + run;
@@ -136,8 +144,14 @@ function scan(content: string): Scan {
   return { mockups, visibleEnd: content.length };
 }
 
-export function splitMockupBlocks(content: string): MockupSegment[] {
-  const { mockups, visibleEnd } = scan(content);
+/**
+ * `streaming` hides a trailing partial `<mockup` tag that may still grow; a finished
+ * message keeps it as plain text.
+ */
+export function splitMockupBlocks(content: string, { streaming = false }: { streaming?: boolean } = {}): MockupSegment[] {
+  const scanned = scan(content);
+  const { mockups } = scanned;
+  const visibleEnd = streaming ? scanned.visibleEnd : content.length;
   if (mockups.length === 0 && visibleEnd === content.length) return content ? [{ kind: "text", text: content }] : [];
   const segments: MockupSegment[] = [];
   const pushText = (text: string): void => {

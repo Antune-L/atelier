@@ -83,13 +83,29 @@ describe("splitMockupBlocks", () => {
     expect(splitMockupBlocks("<mockups>x</mockups>")).toEqual([{ kind: "text", text: "<mockups>x</mockups>" }]);
   });
 
-  test("hides a partial tag at the end of the buffer", () => {
-    expect(splitMockupBlocks("Voici <mo")).toEqual([{ kind: "text", text: "Voici " }]);
-    expect(splitMockupBlocks("Voici <")).toEqual([{ kind: "text", text: "Voici " }]);
-    expect(splitMockupBlocks("Voici <mockup")).toEqual([{ kind: "text", text: "Voici " }]);
-    expect(splitMockupBlocks('Voici <mockup title="a"')).toEqual([{ kind: "text", text: "Voici " }]);
-    expect(splitMockupBlocks("<mo")).toEqual([]);
-    expect(splitMockupBlocks("Voici `<mo` fin")).toEqual([{ kind: "text", text: "Voici `<mo` fin" }]);
+  test("hides a partial tag at the end of the buffer while streaming", () => {
+    const streaming = { streaming: true };
+    expect(splitMockupBlocks("Voici <mo", streaming)).toEqual([{ kind: "text", text: "Voici " }]);
+    expect(splitMockupBlocks("Voici <", streaming)).toEqual([{ kind: "text", text: "Voici " }]);
+    expect(splitMockupBlocks("Voici <mockup", streaming)).toEqual([{ kind: "text", text: "Voici " }]);
+    expect(splitMockupBlocks('Voici <mockup title="a"', streaming)).toEqual([{ kind: "text", text: "Voici " }]);
+    expect(splitMockupBlocks("<mo", streaming)).toEqual([]);
+    expect(splitMockupBlocks("Voici `<mo` fin", streaming)).toEqual([{ kind: "text", text: "Voici `<mo` fin" }]);
+  });
+
+  test("keeps a trailing partial tag as text once the message is finished", () => {
+    expect(splitMockupBlocks("Voici <")).toEqual([{ kind: "text", text: "Voici <" }]);
+    expect(splitMockupBlocks("la balise <mockup")).toEqual([{ kind: "text", text: "la balise <mockup" }]);
+    expect(splitMockupBlocks('Voici <mockup title="a"')).toEqual([{ kind: "text", text: 'Voici <mockup title="a"' }]);
+  });
+
+  test("an unmatched backtick does not open a code span across paragraphs", () => {
+    const content = 'Appuie sur ` puis Entrée.\n\n<mockup title="A"><p>x</p></mockup>\n\nUtilise `title`.';
+    expect(splitMockupBlocks(content)).toEqual([
+      { kind: "text", text: "Appuie sur ` puis Entrée.\n\n" },
+      { kind: "mockup", title: "A", html: "<p>x</p>", complete: true },
+      { kind: "text", text: "\n\nUtilise `title`." },
+    ]);
   });
 });
 

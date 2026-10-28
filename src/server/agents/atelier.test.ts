@@ -9,6 +9,7 @@ import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
 import { buildAtelierPrompt } from "./atelier.ts";
 import { ATELIER_BOARD_RESULT_PREFIX } from "./atelierTicketTools.ts";
+import { STEER_PREFIX } from "./sessionHub.ts";
 
 const PROJECT = projectConfigSchema.parse({ label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000 });
 const ADVERSARIAL_SECTION = "## Revue adversariale (activée)";
@@ -81,9 +82,18 @@ describe("buildAtelierPrompt — adversarial review", () => {
   });
 });
 
+describe("buildAtelierPrompt — steering", () => {
+  test("explains the steering prefix without inviting a PRD resubmission", () => {
+    const text = prompt(conversation("claude", false, DEFAULT_RESEARCH_OPTIONS));
+    expect(text).toContain("## Aiguillages");
+    expect(text).toContain(STEER_PREFIX.trim());
+    expect(text).toContain("ne demande jamais de régénérer ni de consolider un PRD");
+  });
+});
+
 describe("buildAtelierPrompt — history", () => {
   function message(content: string, agentId: string | null): ConversationMessage {
-    return { id: content, conversationId: "c1", role: "activity", content, turnId: null, agentId, agentLabel: agentId, createdAt: 0 };
+    return { id: content, conversationId: "c1", role: "activity", content, turnId: null, agentId, agentLabel: agentId, steering: null, createdAt: 0 };
   }
 
   test("sub-agent activity lines are never replayed, board results included", () => {

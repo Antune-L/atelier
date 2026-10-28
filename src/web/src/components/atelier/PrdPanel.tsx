@@ -204,7 +204,7 @@ export function PrdPanel({
       {actionable && (
         <div className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2">
           {error && <p className="min-w-0 flex-1 truncate text-xs text-danger">{error}</p>}
-          <Button size="sm" variant="outline" className="ml-auto" onClick={regenerate} disabled={busy || !hasFeedback}>
+          <Button size="sm" variant="outline" className="ml-auto" onClick={regenerate} disabled={busy || regenerating || !hasFeedback}>
             <RefreshCw className="h-3.5 w-3.5" />
             Régénérer avec les commentaires
           </Button>

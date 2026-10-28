@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { WorkerToolName } from "../../shared/protocol.ts";
-import type { AgentImageInput, AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
+import type { AgentImageInput, AgentSendOptions, AgentSessionHandle, AgentSessionOptions, AgentTurnUsage } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 
 import type {
@@ -12,13 +12,14 @@ import type {
   SessionMessageStatus,
   SessionStartConfig,
 } from "./sessionHub.ts";
-import { SessionHub } from "./sessionHub.ts";
+import { renderChannelEvent, SessionHub, STEER_PREFIX } from "./sessionHub.ts";
 
 interface RecordedSession {
   opts: AgentSessionOptions;
   sent: string[];
   messageIds: string[];
   images: Array<readonly AgentImageInput[] | undefined>;
+  options: Array<AgentSendOptions | undefined>;
   resolveClose(): void;
   disposed: boolean;
   failSend: boolean;
@@ -32,16 +33,17 @@ class RecordingSystem extends FakeSystemAdapter {
     const closePromise = new Promise<void>((resolve) => {
       resolveClose = resolve;
     });
-    const record: RecordedSession = { opts, sent: [], messageIds: [], images: [], resolveClose, disposed: false, failSend: false };
+    const record: RecordedSession = { opts, sent: [], messageIds: [], images: [], options: [], resolveClose, disposed: false, failSend: false };
     this.sessions.push(record);
     return {
       ticketId: opts.ticketId,
-      send: (content, messageId, images) => {
+      send: (content, messageId, images, options) => {
         if (record.failSend) throw new Error("transport fermé");
         const resolvedMessageId = messageId ?? "fixture-message";
         record.sent.push(content);
         record.messageIds.push(resolvedMessageId);
         record.images.push(images);
+        record.options.push(options);
         return resolvedMessageId;
       },
       interrupt: async () => undefined,
@@ -94,6 +96,24 @@ describe("SessionHub generations", () => {
     expect(session.images).toEqual([[image]]);
     expect(queued[0]?.content).toContain("Describe the attachment");
     expect(queued[0]).not.toHaveProperty("images");
+    hub.disconnect("ticket-1");
+    session.resolveClose();
+  });
+
+  test("frames a steering chat message and asks the provider to steer the running turn", () => {
+    expect(renderChannelEvent({ type: "chat", content: "Plutôt X" })).toBe("Plutôt X");
+    expect(renderChannelEvent({ type: "chat", content: "Plutôt X", steer: true })).toBe(`${STEER_PREFIX}Plutôt X`);
+
+    const system = new RecordingSystem();
+    const hub = new SessionHub(system);
+    hub.start(sessionConfig());
+    const session = system.sessions[0];
+    if (!session) throw new Error("session missing");
+
+    expect(hub.sendEvent("ticket-1", { type: "chat", content: "Bonjour" })).toBe(true);
+    expect(hub.sendEvent("ticket-1", { type: "chat", content: "Plutôt X", steer: true })).toBe(true);
+    expect(session.sent).toEqual(["Bonjour", `${STEER_PREFIX}Plutôt X`]);
+    expect(session.options).toEqual([undefined, { steer: true }]);
     hub.disconnect("ticket-1");
     session.resolveClose();
   });

@@ -12,10 +12,23 @@ import {
   type ConversationStatus,
   type Orchestrator,
 } from "@shared/constants";
-import type { Conversation, ConversationMessage } from "@shared/schemas";
+import type { Conversation, ConversationMessage, ConversationSteering } from "@shared/schemas";
 
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { ResolvedAgentDefaults } from "@/lib/agentDefaults";
+
+const STEERING_LABELS: Record<ConversationSteering, string> = {
+  pending: "aiguillé",
+  steered: "aiguillé",
+  queued: "en file",
+  failed: "non transmis",
+  abandoned: "non traité",
+};
+
+/** Badge label of a user message sent during a running turn; null for a regular turn. */
+export function steeringLabel(steering: ConversationSteering | null): string | null {
+  return steering === null ? null : STEERING_LABELS[steering];
+}
 
 export const ATELIER_STEPS = ["conversation", "prd", "cards"] as const;
 export type AtelierStep = (typeof ATELIER_STEPS)[number];

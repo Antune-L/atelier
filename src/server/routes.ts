@@ -58,6 +58,7 @@ import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
 import type { AtelierManager } from "./agents/atelierManager.ts";
+import { AtelierBusyError } from "./agents/atelierManager.ts";
 import type { QualityManager } from "./agents/qualityManager.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
@@ -839,7 +840,12 @@ function createAtelierRoutes(deps: RouteDeps) {
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = consolidatePrdSchema.safeParse(body ?? {});
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      void atelier.consolidate(params.id, parsed.data.feedback).delivered;
+      try {
+        void atelier.consolidate(params.id, parsed.data.feedback).delivered;
+      } catch (error) {
+        if (error instanceof AtelierBusyError) return jsonError(set, HTTP_CONFLICT, error.message);
+        throw error;
+      }
       return { ok: true };
     })
     .patch("/prd/:id", ({ params, body, set }) => {
@@ -854,7 +860,12 @@ function createAtelierRoutes(deps: RouteDeps) {
     })
     .post("/prd/:id/regenerate", ({ params, set }) => {
       if (!store.getPrdDocument(params.id)) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
-      void atelier.regenerate(params.id).delivered;
+      try {
+        void atelier.regenerate(params.id).delivered;
+      } catch (error) {
+        if (error instanceof AtelierBusyError) return jsonError(set, HTTP_CONFLICT, error.message);
+        throw error;
+      }
       return { ok: true };
     })
     .get("/prd/:id/export.json", ({ params, set }) => {

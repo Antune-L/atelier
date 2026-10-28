@@ -23,3 +23,15 @@ Provider endpoint overrides (server addresses) are inherited. Successful authent
 ```sh
 KANBAN_LOG=warn ATELIER_QUALIFY_PROVIDERS=claude bun -e 'delete process.env.ANTHROPIC_BASE_URL; await import("./src/server/testing/qualifyAtelierProviders.ts");'
 ```
+
+## Mid-turn steering probe
+
+Atelier steering (a chat message sent while the agent runs a turn, see [atelier-state.md](./atelier-state.md#steering-aiguillage)) relies on provider behavior that has **not been validated live on Claude nor Codex yet**: only simulated tests (fake sessions, scripted SDK query) cover it. On Claude, the backend sends steering messages with SDK `priority: "next"`; whether such a message is absorbed by the running turn or opens a follow-up turn is unmeasured.
+
+The standalone probe measures it against a real, authenticated Claude installation:
+
+```sh
+KANBAN_LOG=warn bun src/server/testing/probeClaudeSteering.ts [none|next|later]...
+```
+
+It defaults to `none next`. Each variant starts a fresh session whose first turn runs three slow shell commands, pushes a steering message with the variant's priority once the first tool call is observed, and reports the number of turn ends and whether the requested marker word appears in the turn that was running. `now` is never measured because it can abort a tool in flight. The probe does not cover Codex; Codex steering uses App Server `turn/steer` and replays a refused steer through `turn/start`, also unvalidated live.

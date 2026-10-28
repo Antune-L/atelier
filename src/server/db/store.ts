@@ -52,7 +52,7 @@ import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewK
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
-import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
@@ -241,6 +241,7 @@ export interface NewConversationMessage {
   turnId: string | null;
   agentId?: string | null;
   agentLabel?: string | null;
+  steering?: ConversationSteering | null;
 }
 
 export interface NewPrdDocument {
@@ -3077,16 +3078,17 @@ export class Store {
     this.transaction(() => {
       this.db
         .query(
-          "INSERT INTO conversation_messages (id, conversation_id, role, content, turn_id, agent_id, agent_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO conversation_messages (id, conversation_id, role, content, turn_id, agent_id, agent_label, steering, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .run(id, input.conversationId, input.role, input.content, input.turnId, input.agentId ?? null, input.agentLabel ?? null, now);
+        .run(id, input.conversationId, input.role, input.content, input.turnId, input.agentId ?? null, input.agentLabel ?? null, input.steering ?? null, now);
       this.touchConversation(input.conversationId, now);
     });
     return this.requireConversationMessage(id);
   }
 
-  updateConversationMessage(id: string, patch: { content: string }): ConversationMessage {
-    this.db.query("UPDATE conversation_messages SET content = ? WHERE id = ?").run(patch.content, id);
+  updateConversationMessage(id: string, patch: { content?: string; steering?: ConversationSteering | null }): ConversationMessage {
+    if (patch.content !== undefined) this.db.query("UPDATE conversation_messages SET content = ? WHERE id = ?").run(patch.content, id);
+    if (patch.steering !== undefined) this.db.query("UPDATE conversation_messages SET steering = ? WHERE id = ?").run(patch.steering, id);
     return this.requireConversationMessage(id);
   }
 

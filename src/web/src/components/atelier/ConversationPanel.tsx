@@ -1,4 +1,4 @@
-import { FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
+import { CornerDownRight, FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { RESEARCH_OPTION_LABELS } from "@shared/constants";
@@ -20,7 +20,7 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, groupActivityRows, subagentCountLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, groupActivityRows, subagentCountLabel, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -112,7 +112,7 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
 
   const send = async (): Promise<void> => {
     const content = draft.trim();
-    if (!content || busy || running || uploading) return;
+    if (!content || busy || uploading) return;
     if (await post(content)) clearDraft();
   };
 
@@ -250,7 +250,7 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
       <div className="shrink-0 border-t border-border bg-card px-4 py-3">
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>{running ? "L’agent travaille. Vous pouvez interrompre la session." : "Poursuivez la discussion ou préparez le PRD pour le relire."}</span>
+            <span>{running ? "L’agent travaille. Vous pouvez l’aiguiller ou l’interrompre." : "Poursuivez la discussion ou préparez le PRD pour le relire."}</span>
             {!following && (
               <Button size="sm" variant="ghost" onClick={() => {
                 pinnedToBottom.current = true;
@@ -267,7 +267,11 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
             onPaste={onPaste}
             rows={3}
             className="min-h-[72px] resize-none"
-            placeholder="Réponds à l'agent… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
+            placeholder={
+              running
+                ? "Aiguille l'agent pendant son tour… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
+                : "Réponds à l'agent… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
+            }
             aria-label="Message à l'agent"
           />
           <div className="flex flex-wrap items-center gap-2">
@@ -279,9 +283,15 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
                 Interrompre
               </Button>
             )}
-            <Button size="sm" className="ml-auto" onClick={() => void send()} disabled={!draft.trim() || busy || running || uploading}>
-              <Send className="h-3.5 w-3.5" />
-              Envoyer
+            <Button
+              size="sm"
+              className={running ? undefined : "ml-auto"}
+              onClick={() => void send()}
+              disabled={!draft.trim() || busy || uploading}
+              title={running ? "Envoyer ce message à l'agent sans interrompre son tour" : undefined}
+            >
+              {running ? <CornerDownRight className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+              {running ? "Aiguiller" : "Envoyer"}
             </Button>
           </div>
         </div>
@@ -309,8 +319,14 @@ function ContextUsage({ contextTokens, contextWindow }: { contextTokens: number 
 
 function MessageBubble({ message, agent }: { message: ConversationMessage; agent: string }) {
   if (message.role === "user") {
+    const steering = steeringLabel(message.steering);
     return (
       <div className="ml-auto max-w-[80%] rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+        {steering !== null && (
+          <Badge variant="outline" className="mb-1 text-2xs text-muted-foreground">
+            {steering}
+          </Badge>
+        )}
         <Markdown content={message.content} />
       </div>
     );

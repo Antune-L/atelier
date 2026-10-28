@@ -1189,6 +1189,10 @@ export const conversationSchema = z.object({
 });
 export type Conversation = z.infer<typeof conversationSchema>;
 
+/** pending: sent mid-turn; steered: absorbed by the running turn; queued: handled by a follow-up turn; failed: not transmitted; abandoned: dropped. */
+export const conversationSteeringSchema = z.enum(["pending", "steered", "queued", "failed", "abandoned"]);
+export type ConversationSteering = z.infer<typeof conversationSteeringSchema>;
+
 export const conversationMessageSchema = z.object({
   id: z.string().min(1),
   conversationId: z.string().min(1),
@@ -1198,6 +1202,8 @@ export const conversationMessageSchema = z.object({
   /** Sub-agent that authored this activity line; null for the main agent. */
   agentId: z.string().nullable().default(null),
   agentLabel: z.string().nullable().default(null),
+  /** Mid-turn steering state of a user message; null for a regular turn. */
+  steering: conversationSteeringSchema.nullable().default(null),
   createdAt: z.number().int(),
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;

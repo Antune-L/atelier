@@ -11,10 +11,25 @@ import {
   formatTokenCount,
   groupActivityRows,
   splitConversations,
+  steeringLabel,
 } from "./atelier";
 
+describe("steeringLabel", () => {
+  test("maps each steering state to its French label", () => {
+    expect(steeringLabel("pending")).toBe("aiguillé");
+    expect(steeringLabel("steered")).toBe("aiguillé");
+    expect(steeringLabel("queued")).toBe("en file");
+    expect(steeringLabel("failed")).toBe("non transmis");
+    expect(steeringLabel("abandoned")).toBe("non traité");
+  });
+
+  test("returns null for a regular turn", () => {
+    expect(steeringLabel(null)).toBeNull();
+  });
+});
+
 function activity(id: string, agentId: string | null = null, agentLabel: string | null = null): ConversationMessage {
-  return { id, conversationId: "c1", role: "activity", content: id, turnId: "t1", agentId, agentLabel, createdAt: 0 };
+  return { id, conversationId: "c1", role: "activity", content: id, turnId: "t1", agentId, agentLabel, steering: null, createdAt: 0 };
 }
 
 function makeConversation(id: string, updatedAt: number, settled: boolean): Conversation {

@@ -133,6 +133,20 @@ test("Claude delivers uploaded images as native vision blocks and keeps plain tu
   await session.close();
 });
 
+test("Claude yields a steering message with priority next and leaves regular turns unprioritized", async () => {
+  const fixture = scriptedQuery();
+  const events: AgentSessionEvent[] = [];
+  const session = createSdkAgentSession(options(events, false), fixture.dependencies);
+
+  session.send("Bonjour", "plain-turn");
+  session.send("Plutôt X", "steer-turn", undefined, { steer: true });
+  await waitFor(() => turnEnds(events) === 2);
+
+  expect(fixture.messages[0]?.priority).toBeUndefined();
+  expect(fixture.messages[1]?.priority).toBe("next");
+  await session.close();
+});
+
 test("Claude reports the context usage after each turn and compacts through /compact", async () => {
   const fixture = scriptedQuery();
   const events: AgentSessionEvent[] = [];

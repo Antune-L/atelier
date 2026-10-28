@@ -12,6 +12,7 @@ import type { Conversation, ConversationMessage } from "../../shared/schemas.ts"
 import type { ProjectConfig } from "../config.ts";
 
 import { ATELIER_BOARD_RESULT_PREFIX } from "./atelierTicketTools.ts";
+import { STEER_PREFIX } from "./sessionHub.ts";
 
 const SUBMIT_TOOL = "submit_prd_document";
 const MAX_QUESTIONS_PER_TURN = 3;
@@ -182,6 +183,13 @@ function buildAuthoringRules(): string[] {
   ];
 }
 
+function buildSteeringRules(): string[] {
+  return [
+    "## Aiguillages",
+    `Un message qui commence par « ${STEER_PREFIX.trim()} » est une redirection envoyée pendant que tu travailles : intègre-la au travail en cours sans repartir de zéro et réponds-y dans ta réponse en cours ou la suivante. À lui seul, il ne demande jamais de régénérer ni de consolider un PRD : n'appelle pas à nouveau \`${SUBMIT_TOOL}\` sauf si le message le demande explicitement.`,
+  ];
+}
+
 function buildHistory(history: ConversationMessage[] | undefined): string[] {
   const turns = (history ?? []).flatMap((message) => {
     // Sub-agent lines are never replayed to the model, board results included.
@@ -208,6 +216,7 @@ export function buildAtelierPrompt({ conversation, project, history }: AtelierPr
     buildResearch(conversation),
     buildAdversarialReview(conversation),
     buildAuthoringRules(),
+    buildSteeringRules(),
     buildHistory(history),
     ["## Message de l'utilisateur"],
   ].filter((section) => section.length > 0);

@@ -3,8 +3,8 @@ import { z } from "zod";
 
 import { getErrorMessage } from "../../shared/errors.ts";
 import { compileFeedback } from "../../shared/prdFeedback.ts";
-import type { WorkerToolName } from "../../shared/protocol.ts";
-import type { ActiveSubagent, Conversation, ConversationMessage, PrdDocument } from "../../shared/schemas.ts";
+import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
+import type { ActiveSubagent, Conversation, ConversationMessage, ConversationSteering, PrdDocument } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 import type { ConversationPatch, Store } from "../db/store.ts";
@@ -42,6 +42,18 @@ const COMPACT_LABEL = "Compacter le contexte";
 export const COMPACT_NO_SESSION_MESSAGE = "Aucune session active à compacter : le contexte sera reconstruit au prochain message.";
 export const COMPACT_RUNNING_MESSAGE = "L'agent est en cours de réponse.";
 const COMPACT_FAILED_MESSAGE = "Échec du compactage du contexte.";
+/** How long after a turn_end a pending steer may still start a follow-up turn before it counts as absorbed. */
+export const ATELIER_STEER_GRACE_MS = 10_000;
+export const CONSOLIDATE_BUSY_MESSAGE = "L'agent est en cours de réponse : attends la fin du tour ou interromps-le avant de consolider.";
+export const REGENERATE_BUSY_MESSAGE = "L'agent est en cours de réponse : attends la fin du tour ou interromps-le avant de régénérer le PRD.";
+
+/** A PRD action refused because the agent is running a turn. */
+export class AtelierBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AtelierBusyError";
+  }
+}
 const tokenFormatter = new Intl.NumberFormat("fr-FR");
 
 /** `85 000`, with a plain space instead of the narrow no-break space Intl emits. */
@@ -77,6 +89,14 @@ interface ConversationRuntime {
   backgroundTasks: ReadonlySet<string>;
   /** A turn ended while background tasks were still running: the final notification is deferred. */
   awaitingBackground: boolean;
+  /** Ids of the user messages sent mid-turn and not yet resolved, in send order. */
+  pendingSteers: string[];
+  /** Turn of the latest steer whose reply bubble is not opened yet. */
+  splitTurnId: string | null;
+  /** Armed after a turn_end with pending steers: output before it fires means a follow-up turn took them. */
+  steerGraceTimer: ReturnType<typeof setTimeout> | null;
+  /** Tail of the conversation's deliveries: sends stay in submission order. */
+  delivery: Promise<void>;
 }
 
 export type CompactOutcome =
@@ -95,6 +115,7 @@ export interface AtelierManagerDeps {
   idleTimeoutMs?: number;
   subagentCeilingMs?: number;
   flushIntervalMs?: number;
+  steerGraceMs?: number;
 }
 
 export interface SubmittedTurn {
@@ -119,6 +140,20 @@ export function describeToolUse(name: string, input: unknown): string {
     if (typeof value === "string" && value.trim()) return truncate(`${name} ${value}`);
   }
   return truncate(name);
+}
+
+/** Output of the main agent itself, as opposed to sub-agents or side sources. */
+function isMainOutput(event: AgentSessionEvent): boolean {
+  switch (event.type) {
+    case "assistant_text":
+    case "thinking":
+      return !event.sourceId && !event.subagent;
+    case "tool_use":
+    case "progress":
+      return !event.subagent;
+    default:
+      return false;
+  }
 }
 
 function labelWithNote(label: string, note: string | undefined): string {
@@ -147,6 +182,7 @@ export class AtelierManager {
   private readonly idleTimeoutMs: number;
   private readonly subagentCeilingMs: number;
   private readonly flushIntervalMs: number;
+  private readonly steerGraceMs: number;
 
   constructor(deps: AtelierManagerDeps) {
     this.uploadsRoot = deps.uploadsRoot;
@@ -160,12 +196,17 @@ export class AtelierManager {
     this.idleTimeoutMs = deps.idleTimeoutMs ?? ATELIER_IDLE_TIMEOUT_MS;
     this.subagentCeilingMs = deps.subagentCeilingMs ?? ATELIER_SUBAGENT_CEILING_MS;
     this.flushIntervalMs = deps.flushIntervalMs ?? ASSISTANT_FLUSH_INTERVAL_MS;
+    this.steerGraceMs = deps.steerGraceMs ?? ATELIER_STEER_GRACE_MS;
   }
 
   recoverStale(): void {
     for (const conversation of this.store.listConversations()) {
       const patch: ConversationPatch = {};
-      if (conversation.sessionStatus === "running") patch.sessionStatus = "idle";
+      if (conversation.sessionStatus === "running") {
+        patch.sessionStatus = "idle";
+        const pending = this.store.listConversationMessages(conversation.id).filter((message) => message.steering === "pending").map((message) => message.id);
+        this.resolveSteers(conversation.id, pending, "abandoned", "redémarrage du backend");
+      }
       // No session survives a restart: the context figures described the previous process.
       if (conversation.contextTokens !== null || conversation.contextWindow !== null) {
         patch.contextTokens = null;
@@ -210,10 +251,12 @@ export class AtelierManager {
   }
 
   postMessage(conversationId: string, content: string): SubmittedTurn {
+    if (this.store.getConversation(conversationId)?.sessionStatus === "running") return this.submitSteer(conversationId, content);
     return this.submitTurn(conversationId, content, content);
   }
 
   consolidate(conversationId: string, feedback?: string): SubmittedTurn {
+    if (this.store.getConversation(conversationId)?.sessionStatus === "running") throw new AtelierBusyError(CONSOLIDATE_BUSY_MESSAGE);
     const note = feedback?.trim();
     return this.submitTurn(conversationId, labelWithNote(CONSOLIDATE_LABEL, note), buildAtelierConsolidateTurn(note));
   }
@@ -221,6 +264,7 @@ export class AtelierManager {
   regenerate(prdId: string): SubmittedTurn {
     const prd = this.store.getPrdDocument(prdId);
     if (!prd) throw new Error("PRD introuvable");
+    if (this.store.getConversation(prd.conversationId)?.sessionStatus === "running") throw new AtelierBusyError(REGENERATE_BUSY_MESSAGE);
     const feedback = compileFeedback(prd.annotations, prd.generalNote);
     const visible = labelWithNote(`Régénérer le PRD (révision ${prd.revision})`, feedback);
     return this.submitTurn(prd.conversationId, visible, buildAtelierRegenerationTurn(feedback));
@@ -230,6 +274,7 @@ export class AtelierManager {
     await this.sessionHub.interrupt(atelierSessionKey(conversationId));
     this.flush(conversationId);
     const runtime = this.runtimes.get(conversationId);
+    this.abandonSteers(conversationId, runtime, "interrompu");
     this.clearSubagents(conversationId, runtime);
     if (runtime?.awaitingBackground) {
       runtime.awaitingBackground = false;
@@ -240,6 +285,8 @@ export class AtelierManager {
   }
 
   settingsChanged(conversationId: string): void {
+    this.flush(conversationId);
+    this.abandonSteers(conversationId, this.runtimes.get(conversationId), "réglages modifiés");
     this.closeSession(conversationId);
     const conversation = this.store.getConversation(conversationId);
     if (!conversation) return;
@@ -261,6 +308,7 @@ export class AtelierManager {
       runtime.flushTimer = null;
       runtime.idleTimer = null;
       runtime.ceilingTimer = null;
+      this.clearSteerGrace(runtime);
     }
   }
 
@@ -297,21 +345,136 @@ export class AtelierManager {
     this.clearIdleTimer(runtime);
     // A user-resumed conversation returns to the active list.
     this.patchConversation(conversationId, { sessionStatus: "running", error: null, settled: false });
-    return { message, delivered: this.deliver(conversationId, agentContent, message.id) };
+    return { message, delivered: this.enqueueDelivery(conversationId, runtime, agentContent, message.id, false) };
   }
 
-  private async deliver(conversationId: string, content: string, messageId: string): Promise<void> {
+  /** A message sent while a turn runs: it redirects that turn instead of opening a new one. */
+  private submitSteer(conversationId: string, content: string): SubmittedTurn {
+    // The text written so far stays above the steer; its later fragments keep updating the same bubble.
+    this.flush(conversationId);
+    const turnId = nanoid(10);
+    const message = this.store.addConversationMessage({ conversationId, role: "user", content, turnId, steering: "pending" });
+    this.hub.pushConversationMessage(message);
+    const runtime = this.runtime(conversationId);
+    const afterTurnEnd = runtime.steerGraceTimer !== null;
+    if (afterTurnEnd) {
+      // No follow-up turn started for the earlier steers: the ended turn absorbed them, whatever this one starts.
+      this.resolveSteers(conversationId, runtime.pendingSteers, "steered");
+      runtime.pendingSteers = [];
+    }
+    runtime.pendingSteers.push(message.id);
+    runtime.splitTurnId = turnId;
+    runtime.lastUserTurnId = turnId;
+    this.clearIdleTimer(runtime);
+    // Already past a turn_end: give this steer its own window to start the follow-up turn.
+    if (afterTurnEnd) this.armSteerGrace(conversationId, runtime);
+    return { message, delivered: this.enqueueDelivery(conversationId, runtime, content, message.id, true) };
+  }
+
+  private enqueueDelivery(conversationId: string, runtime: ConversationRuntime, content: string, messageId: string, steer: boolean): Promise<void> {
+    const delivered = runtime.delivery.then(() => this.deliver(conversationId, content, messageId, steer));
+    runtime.delivery = delivered;
+    return delivered;
+  }
+
+  private async deliver(conversationId: string, content: string, messageId: string, steer: boolean): Promise<void> {
     try {
       const sentAsFirstTurn = await this.ensureSession(conversationId, content, messageId);
       if (sentAsFirstTurn) return;
       const history = this.historyBefore(conversationId, messageId).filter((message) => message.role === "user").map((message) => message.content).join(PART_SEPARATOR);
       const prepared = await this.prepareAttachments(content, history);
-      if (!this.sessionHub.sendEvent(atelierSessionKey(conversationId), { type: "chat", content: prepared.content }, prepared.images)) {
+      const event: ChannelEvent = steer ? { type: "chat", content: prepared.content, steer: true } : { type: "chat", content: prepared.content };
+      if (!this.sessionHub.sendEvent(atelierSessionKey(conversationId), event, prepared.images)) {
         throw new Error(SESSION_UNAVAILABLE_MESSAGE);
       }
     } catch (error) {
-      this.markError(conversationId, getErrorMessage(error));
+      const reason = getErrorMessage(error);
+      if (steer) this.steerFailed(conversationId, messageId, reason);
+      if (!steer || this.store.getConversation(conversationId)?.sessionStatus !== "running") this.markError(conversationId, reason);
     }
+  }
+
+  /** A steer that never reached the agent leaves the running turn untouched. */
+  private steerFailed(conversationId: string, messageId: string, reason: string): void {
+    const runtime = this.runtime(conversationId);
+    if (!runtime.pendingSteers.includes(messageId)) return;
+    runtime.pendingSteers = runtime.pendingSteers.filter((id) => id !== messageId);
+    const turnId = this.resolveSteers(conversationId, [messageId], "failed");
+    if (turnId !== null && runtime.splitTurnId === turnId) runtime.splitTurnId = null;
+    if (this.store.getConversation(conversationId)?.sessionStatus !== "running") return;
+    const line = this.store.addConversationMessage({ conversationId, role: "activity", content: `Message non transmis : ${reason}`, turnId });
+    this.hub.pushConversationMessage(line);
+  }
+
+  /** Settles steer messages; an abandonment leaves one activity line under the last of them. */
+  private resolveSteers(conversationId: string, ids: readonly string[], steering: ConversationSteering, abandonReason?: string): string | null {
+    let lastTurnId: string | null = null;
+    for (const id of ids) {
+      try {
+        const message = this.store.updateConversationMessage(id, { steering });
+        this.hub.pushConversationMessage(message);
+        lastTurnId = message.turnId;
+      } catch (error) {
+        log.warn("état d'aiguillage non persisté", { conversationId, reason: getErrorMessage(error) });
+      }
+    }
+    if (abandonReason && ids.length > 0 && this.store.getConversation(conversationId)) {
+      const line = this.store.addConversationMessage({ conversationId, role: "activity", content: `Aiguillage non traité : ${abandonReason}`, turnId: lastTurnId });
+      this.hub.pushConversationMessage(line);
+    }
+    return lastTurnId;
+  }
+
+  private abandonSteers(conversationId: string, runtime: ConversationRuntime | undefined, reason: string): void {
+    if (!runtime) return;
+    this.clearSteerGrace(runtime);
+    runtime.splitTurnId = null;
+    const ids = runtime.pendingSteers;
+    runtime.pendingSteers = [];
+    this.resolveSteers(conversationId, ids, "abandoned", reason);
+  }
+
+  private armSteerGrace(conversationId: string, runtime: ConversationRuntime): void {
+    this.clearSteerGrace(runtime);
+    runtime.steerGraceTimer = setTimeout(() => {
+      runtime.steerGraceTimer = null;
+      // No follow-up turn started: the ended turn absorbed the steers.
+      const ids = runtime.pendingSteers;
+      runtime.pendingSteers = [];
+      runtime.splitTurnId = null;
+      this.resolveSteers(conversationId, ids, "steered");
+      this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
+      this.armIdleTimer(conversationId, runtime);
+    }, this.steerGraceMs);
+    runtime.steerGraceTimer.unref?.();
+  }
+
+  private clearSteerGrace(runtime: ConversationRuntime): void {
+    if (runtime.steerGraceTimer) clearTimeout(runtime.steerGraceTimer);
+    runtime.steerGraceTimer = null;
+  }
+
+  /** Main-agent output after a turn_end with pending steers: a follow-up turn is handling them. */
+  private onSteerFollowUp(conversationId: string): void {
+    const runtime = this.runtimes.get(conversationId);
+    if (!runtime?.steerGraceTimer) return;
+    this.clearSteerGrace(runtime);
+    const ids = runtime.pendingSteers;
+    runtime.pendingSteers = [];
+    runtime.splitTurnId = null;
+    const turnId = this.resolveSteers(conversationId, ids, "queued");
+    if (turnId !== null) runtime.lastUserTurnId = turnId;
+  }
+
+  /** Close the bubble written before the latest steer so the next item opens one under it. */
+  private splitForSteer(conversationId: string, runtime: ConversationRuntime): void {
+    const turnId = runtime.splitTurnId;
+    if (turnId === null) return;
+    runtime.splitTurnId = null;
+    this.flush(conversationId);
+    runtime.turn = emptyTurn();
+    runtime.turn.turnId = turnId;
+    this.markRunning(conversationId);
   }
 
   private async ensureSession(conversationId: string, content: string, messageId: string): Promise<boolean> {
@@ -388,6 +551,7 @@ export class AtelierManager {
   }
 
   private onEvent(conversationId: string, event: AgentSessionEvent): void {
+    if (isMainOutput(event)) this.onSteerFollowUp(conversationId);
     switch (event.type) {
       case "init":
         this.onInit(conversationId, event.sessionId);
@@ -442,6 +606,10 @@ export class AtelierManager {
   }
 
   private appendAssistant(conversationId: string, text: string, key: string | null, delta: boolean): void {
+    const runtime = this.runtime(conversationId);
+    const known = key === null ? undefined : runtime.turn.parts.find((part) => part.key === key);
+    // Fragments of an item already being written never move: only a new item opens the steer's bubble.
+    if (!known) this.splitForSteer(conversationId, runtime);
     const turn = this.openTurn(conversationId);
     const existing = key === null ? undefined : turn.parts.find((part) => part.key === key);
     if (existing) existing.text = delta ? existing.text + text : text;
@@ -452,6 +620,7 @@ export class AtelierManager {
 
   private addActivity(conversationId: string, content: string): void {
     if (!content) return;
+    this.splitForSteer(conversationId, this.runtime(conversationId));
     const turn = this.openTurn(conversationId);
     this.flush(conversationId);
     const message = this.store.addConversationMessage({ conversationId, role: "activity", content, turnId: turn.turnId });
@@ -515,6 +684,8 @@ export class AtelierManager {
       runtime.ceilingTimer = null;
       log.warn("session atelier fermée : plafond des sous-agents atteint", { conversationId });
       this.clearIdleTimer(runtime);
+      this.flush(conversationId);
+      this.abandonSteers(conversationId, runtime, "session fermée");
       const awaiting = runtime.awaitingBackground;
       this.resetBackground(runtime);
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
@@ -559,6 +730,12 @@ export class AtelierManager {
       return;
     }
     runtime.awaitingBackground = false;
+    if (runtime.pendingSteers.length > 0) {
+      // A steer may still start a follow-up turn: stay running until the grace window decides.
+      this.clearIdleTimer(runtime);
+      this.armSteerGrace(conversationId, runtime);
+      return;
+    }
     this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
     this.armIdleTimer(conversationId, runtime);
   }
@@ -619,6 +796,7 @@ export class AtelierManager {
   private onFailure(conversationId: string, reason: string): void {
     const runtime = this.runtime(conversationId);
     this.flush(conversationId);
+    this.abandonSteers(conversationId, runtime, "session en échec");
     runtime.turn = emptyTurn();
     runtime.compaction = null;
     this.resetBackground(runtime);
@@ -639,7 +817,10 @@ export class AtelierManager {
   // NOTE(ali): a queued Claude turn keeps streaming after the previous turn_end marked the conversation idle.
   private markRunning(conversationId: string): void {
     const conversation = this.store.getConversation(conversationId);
-    if (conversation && conversation.sessionStatus === "idle") this.patchConversation(conversationId, { sessionStatus: "running" });
+    if (!conversation || conversation.sessionStatus !== "idle") return;
+    const runtime = this.runtimes.get(conversationId);
+    if (runtime) this.clearIdleTimer(runtime);
+    this.patchConversation(conversationId, { sessionStatus: "running" });
   }
 
   private scheduleFlush(conversationId: string): void {
@@ -679,6 +860,9 @@ export class AtelierManager {
     const runtime = this.runtimes.get(conversationId);
     if (runtime) {
       this.clearIdleTimer(runtime);
+      this.clearSteerGrace(runtime);
+      runtime.pendingSteers = [];
+      runtime.splitTurnId = null;
       runtime.turn = emptyTurn();
       runtime.resumed = false;
       runtime.compaction = null;
@@ -707,6 +891,10 @@ export class AtelierManager {
         compaction: null,
         backgroundTasks: new Set(),
         awaitingBackground: false,
+        pendingSteers: [],
+        splitTurnId: null,
+        steerGraceTimer: null,
+        delivery: Promise.resolve(),
       };
       this.runtimes.set(conversationId, runtime);
     }

@@ -4,11 +4,13 @@ import type {
   SDKCompactBoundaryMessage,
   SDKMessage,
   SDKResultSuccess,
+  SDKTaskNotificationMessage,
+  SDKTaskStartedMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AgentImageInput, AgentSessionEvent, AgentSessionOptions } from "./agentSession.ts";
-import { createSdkAgentSession, dispatchClaudeMessage, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
+import { createClaudeSubagentTracker, createSdkAgentSession, dispatchClaudeMessage, type ClaudeQuery, type ClaudeSessionDependencies } from "./claudeProvider.ts";
 
 const RESULT = {
   type: "result",
@@ -181,6 +183,89 @@ test("a failing context read never breaks the Claude stream", async () => {
   await waitFor(() => turnEnds(events) === 2);
   await session.close();
   expect(events.some((event) => event.type === "error" || event.type === "context_usage")).toBe(false);
+});
+
+function toolResultMessage(parentToolUseId: string | null, extra: Partial<SDKUserMessage> = {}): SDKUserMessage {
+  return {
+    type: "user",
+    parent_tool_use_id: parentToolUseId,
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: "call-1", content: "ok" }] },
+    ...extra,
+  };
+}
+
+function taskStarted(extra: Partial<SDKTaskStartedMessage>): SDKTaskStartedMessage {
+  return {
+    type: "system",
+    subtype: "task_started",
+    task_id: "task-1",
+    tool_use_id: "agent-call-1",
+    description: "Explorer le code",
+    subagent_type: "Explore",
+    task_type: "local_agent",
+    uuid: "00000000-0000-4000-8000-000000000004",
+    session_id: "s1",
+    ...extra,
+  };
+}
+
+function taskNotification(taskId: string, status: SDKTaskNotificationMessage["status"]): SDKTaskNotificationMessage {
+  return {
+    type: "system",
+    subtype: "task_notification",
+    task_id: taskId,
+    status,
+    output_file: "/tmp/out",
+    summary: "",
+    uuid: "00000000-0000-4000-8000-000000000005",
+    session_id: "s1",
+  };
+}
+
+test("Claude attributes sub-agent events from parent_tool_use_id without touching sourceId", () => {
+  const events: AgentSessionEvent[] = [];
+  const tracker = createClaudeSubagentTracker();
+  const push = (event: AgentSessionEvent): void => { events.push(event); };
+
+  dispatchClaudeMessage(toolResultMessage(null), push, undefined, tracker);
+  dispatchClaudeMessage(toolResultMessage("p1", { task_description: "Lire", subagent_type: "Explore" }), push, undefined, tracker);
+  dispatchClaudeMessage(toolResultMessage("p2", { subagent_type: "Explore" }), push, undefined, tracker);
+  dispatchClaudeMessage(toolResultMessage("p3"), push, undefined, tracker);
+  dispatchClaudeMessage(taskStarted({ tool_use_id: "p4", description: "Chercher", subagent_type: undefined }), push, undefined, tracker);
+  dispatchClaudeMessage(toolResultMessage("p4"), push, undefined, tracker);
+
+  const results = events.filter((event) => event.type === "tool_result");
+  expect(results[0]).toEqual({ type: "tool_result", toolCallId: "call-1", output: "ok", ok: true });
+  expect(results.map((event) => event.subagent)).toEqual([
+    undefined,
+    { id: "p1", label: "Lire · Explore" },
+    { id: "p2", label: "Explore" },
+    { id: "p3", label: "Sous-agent" },
+    { id: "p4", label: "Chercher" },
+  ]);
+  expect(results.some((event) => event.sourceId !== undefined)).toBe(false);
+});
+
+test("Claude reports the lifecycle of local agents only", () => {
+  const events: AgentSessionEvent[] = [];
+  const tracker = createClaudeSubagentTracker();
+  const push = (event: AgentSessionEvent): void => { events.push(event); };
+
+  dispatchClaudeMessage(taskStarted({}), push, undefined, tracker);
+  dispatchClaudeMessage(taskStarted({ task_id: "bash", tool_use_id: "b", task_type: "local_bash" }), push, undefined, tracker);
+  dispatchClaudeMessage(taskStarted({ task_id: "amb", tool_use_id: "a", ambient: true }), push, undefined, tracker);
+  dispatchClaudeMessage(taskStarted({ task_id: "task-2", tool_use_id: undefined, description: "", subagent_type: undefined }), push, undefined, tracker);
+  dispatchClaudeMessage(taskNotification("bash", "completed"), push, undefined, tracker);
+  dispatchClaudeMessage(taskNotification("task-1", "completed"), push, undefined, tracker);
+  dispatchClaudeMessage(taskNotification("task-1", "completed"), push, undefined, tracker);
+  dispatchClaudeMessage(taskNotification("task-2", "failed"), push, undefined, tracker);
+
+  expect(events).toEqual([
+    { type: "subagent_lifecycle", phase: "started", id: "agent-call-1", label: "Explorer le code · Explore" },
+    { type: "subagent_lifecycle", phase: "started", id: "task-2", label: "Sous-agent" },
+    { type: "subagent_lifecycle", phase: "ended", id: "agent-call-1", label: "Explorer le code · Explore", status: "completed" },
+    { type: "subagent_lifecycle", phase: "ended", id: "task-2", label: "Sous-agent", status: "failed" },
+  ]);
 });
 
 test("Claude reports live non-ambient background tasks, including an empty set", () => {

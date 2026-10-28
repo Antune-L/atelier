@@ -1156,6 +1156,9 @@ export function researchOptionsFromKeys(keys: Iterable<ResearchOptionKey>): Rese
   };
 }
 
+export const activeSubagentSchema = z.object({ id: z.string().min(1), label: z.string(), startedAt: z.number().int() });
+export type ActiveSubagent = z.infer<typeof activeSubagentSchema>;
+
 export const conversationSchema = z.object({
   id: z.string().min(1),
   project: projectKeySchema,
@@ -1179,6 +1182,8 @@ export const conversationSchema = z.object({
   contextTokens: z.number().int().nonnegative().nullable(),
   /** Context window of the live session, or null when unknown / no session. */
   contextWindow: z.number().int().positive().nullable(),
+  /** Sub-agents currently running in the live session (server-owned); empty when none. */
+  activeSubagents: z.array(activeSubagentSchema).default([]),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
@@ -1190,6 +1195,9 @@ export const conversationMessageSchema = z.object({
   role: conversationMessageRoleSchema,
   content: z.string(),
   turnId: z.string().nullable(),
+  /** Sub-agent that authored this activity line; null for the main agent. */
+  agentId: z.string().nullable().default(null),
+  agentLabel: z.string().nullable().default(null),
   createdAt: z.number().int(),
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;

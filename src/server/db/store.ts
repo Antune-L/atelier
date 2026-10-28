@@ -52,7 +52,7 @@ import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewK
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
-import type { OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord } from "../../shared/statistics.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
@@ -231,6 +231,7 @@ export interface ConversationPatch {
   settled?: boolean;
   contextTokens?: number | null;
   contextWindow?: number | null;
+  activeSubagents?: ActiveSubagent[];
 }
 
 export interface NewConversationMessage {
@@ -238,6 +239,8 @@ export interface NewConversationMessage {
   role: ConversationMessageRole;
   content: string;
   turnId: string | null;
+  agentId?: string | null;
+  agentLabel?: string | null;
 }
 
 export interface NewPrdDocument {
@@ -3034,7 +3037,8 @@ export class Store {
     const touchesConversation = builder.hasChanges();
     if (patch.contextTokens !== undefined) set("context_tokens", patch.contextTokens);
     if (patch.contextWindow !== undefined) set("context_window", patch.contextWindow);
-    // Live context figures are telemetry: they must not reorder the conversation list.
+    if (patch.activeSubagents !== undefined) set("active_subagents", JSON.stringify(patch.activeSubagents));
+    // Live context figures and sub-agents are telemetry: they must not reorder the conversation list.
     if (touchesConversation || !builder.hasChanges()) set("updated_at", Date.now());
     builder.run(this.db, "conversations", id);
     return this.requireConversation(id, "updateConversation");
@@ -3072,8 +3076,10 @@ export class Store {
     const now = Date.now();
     this.transaction(() => {
       this.db
-        .query("INSERT INTO conversation_messages (id, conversation_id, role, content, turn_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id, input.conversationId, input.role, input.content, input.turnId, now);
+        .query(
+          "INSERT INTO conversation_messages (id, conversation_id, role, content, turn_id, agent_id, agent_label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .run(id, input.conversationId, input.role, input.content, input.turnId, input.agentId ?? null, input.agentLabel ?? null, now);
       this.touchConversation(input.conversationId, now);
     });
     return this.requireConversationMessage(id);

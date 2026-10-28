@@ -9,9 +9,10 @@ import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
-import type { AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   prNotificationSchema,
+  activeSubagentSchema,
   agentMessageChannelSchema,
   agentMessageStatusSchema,
   agentEffortSchema,
@@ -733,6 +734,7 @@ const conversationRowSchema = z.object({
   settled: z.number(),
   context_tokens: z.number().int().nonnegative().nullable(),
   context_window: z.number().int().positive().nullable(),
+  active_subagents: z.string(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -743,6 +745,8 @@ const conversationMessageRowSchema = z.object({
   role: z.string(),
   content: z.string(),
   turn_id: z.string().nullable(),
+  agent_id: z.string().nullable(),
+  agent_label: z.string().nullable(),
   created_at: z.number(),
 });
 
@@ -768,6 +772,10 @@ function parseJsonColumn(raw: string): unknown {
 
 function parseResearchOptions(raw: string): ResearchOptions {
   return researchOptionsSchema.catch(DEFAULT_RESEARCH_OPTIONS).parse(parseJsonColumn(raw));
+}
+
+function parseActiveSubagents(raw: string): ActiveSubagent[] {
+  return z.array(activeSubagentSchema).catch([]).parse(parseJsonColumn(raw));
 }
 
 function parsePrdAnnotations(raw: string): PrdAnnotation[] {
@@ -796,6 +804,7 @@ export function mapConversationRow(raw: unknown): Conversation {
     settled: row.settled === 1,
     contextTokens: row.context_tokens,
     contextWindow: row.context_window,
+    activeSubagents: parseActiveSubagents(row.active_subagents),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -809,6 +818,8 @@ export function mapConversationMessageRow(raw: unknown): ConversationMessage {
     role: conversationMessageRoleSchema.parse(row.role),
     content: row.content,
     turnId: row.turn_id,
+    agentId: row.agent_id,
+    agentLabel: row.agent_label,
     createdAt: row.created_at,
   };
 }

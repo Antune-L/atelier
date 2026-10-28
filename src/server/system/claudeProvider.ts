@@ -37,8 +37,10 @@ import type {
   AgentSessionOptions,
   AgentSessionRole,
   AgentSubagentDefinition,
+  AgentSubagentRef,
   AgentTurnUsage,
 } from "./agentSession.ts";
+import { SUBAGENT_DEFAULT_LABEL } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
 import { AUTONOMOUS_NATIVE_DELEGATION_DENIAL, watchAutonomousPermission } from "./autonomousPermission.ts";
 import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
@@ -407,6 +409,7 @@ export function createSdkAgentSession(
 
 async function pumpStream(sessionPromise: Promise<ClaudeQuery>, options: AgentSessionOptions, reportedDenials: Set<string>): Promise<void> {
   const denialReasons = new Map<string, { reason: string; sourceId?: string }>();
+  const subagents = createClaudeSubagentTracker();
   try {
     const session = await sessionPromise;
     for await (const message of session) {
@@ -429,7 +432,7 @@ async function pumpStream(sessionPromise: Promise<ClaudeQuery>, options: AgentSe
           ...(details?.sourceId ? { sourceId: details.sourceId } : {}),
         });
         denialReasons.delete(denial.tool_use_id);
-      });
+      }, subagents);
       if (options.reportContextUsage && shouldReportContextUsage(message)) {
         await reportClaudeContextUsage(session, options.onEvent);
       }
@@ -468,18 +471,50 @@ function safeDispatchClaudeMessage(
   message: SDKMessage,
   onEvent: (event: AgentSessionEvent) => void,
   onPermissionDenied: (denial: SDKPermissionDenial) => void,
+  tracker: ClaudeSubagentTracker,
 ): void {
   try {
-    dispatchClaudeMessage(message, onEvent, onPermissionDenied);
+    dispatchClaudeMessage(message, onEvent, onPermissionDenied, tracker);
   } catch (error) {
     log.error("traitement d'un message du flux impossible", { type: message.type, stack: getErrorStack(error) });
   }
+}
+
+/** Per-session memory of the sub-agents announced by `task_started` (keyed by event id and task id). */
+export interface ClaudeSubagentTracker {
+  labels: Map<string, string>;
+  taskKeys: Map<string, string>;
+}
+
+export function createClaudeSubagentTracker(): ClaudeSubagentTracker {
+  return { labels: new Map(), taskKeys: new Map() };
+}
+
+/** Sub-agent attribution fields; parsed from the raw message since not every `user` variant types them. */
+const subagentMessageFieldsSchema = z.object({
+  task_description: z.string().optional(),
+  subagent_type: z.string().optional(),
+});
+
+export function formatSubagentLabel(description: string | undefined, type: string | undefined): string | null {
+  const parts = [description?.trim(), type?.trim()].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function subagentRef(message: SDKMessage, parentToolUseId: string | null, tracker: ClaudeSubagentTracker): { subagent?: AgentSubagentRef } {
+  if (parentToolUseId === null) return {};
+  const fields = subagentMessageFieldsSchema.safeParse(message);
+  const label = (fields.success ? formatSubagentLabel(fields.data.task_description, fields.data.subagent_type) : null)
+    ?? tracker.labels.get(parentToolUseId)
+    ?? SUBAGENT_DEFAULT_LABEL;
+  return { subagent: { id: parentToolUseId, label } };
 }
 
 export function dispatchClaudeMessage(
   message: SDKMessage,
   onEvent: (event: AgentSessionEvent) => void,
   onPermissionDenied?: (denial: SDKPermissionDenial) => void,
+  tracker: ClaudeSubagentTracker = createClaudeSubagentTracker(),
 ): void {
   switch (message.type) {
     case "system":
@@ -489,23 +524,41 @@ export function dispatchClaudeMessage(
           type: "background_tasks",
           activeTaskIds: message.tasks.filter((task) => task.ambient !== true).map((task) => task.task_id),
         });
+      } else if (message.subtype === "task_started") {
+        if (message.task_type !== "local_agent" || message.ambient === true) return;
+        const id = message.tool_use_id ?? message.task_id;
+        const label = formatSubagentLabel(message.description, message.subagent_type) ?? SUBAGENT_DEFAULT_LABEL;
+        tracker.labels.set(id, label);
+        tracker.taskKeys.set(message.task_id, id);
+        onEvent({ type: "subagent_lifecycle", phase: "started", id, label });
+      } else if (message.subtype === "task_notification") {
+        const id = tracker.taskKeys.get(message.task_id) ?? message.tool_use_id;
+        const label = id === undefined ? undefined : tracker.labels.get(id);
+        if (id === undefined || label === undefined) return;
+        tracker.labels.delete(id);
+        tracker.taskKeys.delete(message.task_id);
+        onEvent({ type: "subagent_lifecycle", phase: "ended", id, label, status: message.status });
       }
       return;
-    case "assistant":
+    case "assistant": {
+      const ref = subagentRef(message, message.parent_tool_use_id, tracker);
       for (const block of message.message.content) {
-        if (block.type === "text") onEvent({ type: "assistant_text", text: block.text });
-        else if (block.type === "thinking") onEvent({ type: "thinking", text: block.thinking });
-        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input, toolCallId: block.id });
+        if (block.type === "text") onEvent({ type: "assistant_text", text: block.text, ...ref });
+        else if (block.type === "thinking") onEvent({ type: "thinking", text: block.thinking, ...ref });
+        else if (block.type === "tool_use") onEvent({ type: "tool_use", name: block.name, input: block.input, toolCallId: block.id, ...ref });
       }
       return;
-    case "user":
+    }
+    case "user": {
       if (typeof message.message.content === "string") return;
+      const ref = subagentRef(message, message.parent_tool_use_id, tracker);
       for (const block of message.message.content) {
         if (block.type === "tool_result") {
-          onEvent({ type: "tool_result", toolCallId: block.tool_use_id, output: block.content, ok: block.is_error !== true });
+          onEvent({ type: "tool_result", toolCallId: block.tool_use_id, output: block.content, ok: block.is_error !== true, ...ref });
         }
       }
       return;
+    }
     case "result": {
       const ok = message.subtype === "success";
       for (const denial of message.permission_denials) onPermissionDenied?.(denial);

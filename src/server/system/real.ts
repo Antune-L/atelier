@@ -23,7 +23,7 @@ import { collectGitAuditRange } from "./auditRange.ts";
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
-import { claudeProvider, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
+import { claudeProvider, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
@@ -826,9 +826,10 @@ export class RealSystemAdapter implements SystemAdapter {
     const assistantText: string[] = [];
     let resultText = "";
     let resultError = "";
+    const subagents = createClaudeSubagentTracker();
     try {
       for await (const message of session) {
-        if (onEvent) dispatchClaudeMessage(message, onEvent);
+        if (onEvent) dispatchClaudeMessage(message, onEvent, undefined, subagents);
         if (message.type === "assistant") {
           for (const block of message.message.content) {
             if (block.type === "text") assistantText.push(block.text);

@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import { DEFAULT_RESEARCH_OPTIONS } from "@shared/schemas";
-import type { Conversation } from "@shared/schemas";
+import type { Conversation, ConversationMessage } from "@shared/schemas";
 
-import { SETTLED_PREVIEW_COUNT, contextUsageSummary, formatTokenCount, splitConversations } from "./atelier";
+import { SETTLED_PREVIEW_COUNT, contextUsageSummary, formatTokenCount, groupActivityRows, splitConversations } from "./atelier";
+
+function activity(id: string, agentId: string | null = null, agentLabel: string | null = null): ConversationMessage {
+  return { id, conversationId: "c1", role: "activity", content: id, turnId: "t1", agentId, agentLabel, createdAt: 0 };
+}
 
 function makeConversation(id: string, updatedAt: number, settled: boolean): Conversation {
   return {
@@ -26,6 +30,7 @@ function makeConversation(id: string, updatedAt: number, settled: boolean): Conv
     settled,
     contextTokens: null,
     contextWindow: null,
+    activeSubagents: [],
     createdAt: 0,
     updatedAt,
   };
@@ -52,6 +57,31 @@ describe("splitConversations", () => {
 
   test("previews ten settled conversations", () => {
     expect(SETTLED_PREVIEW_COUNT).toBe(10);
+  });
+});
+
+describe("groupActivityRows", () => {
+  test("groups interleaved sub-agent rows at their first position", () => {
+    const entries = groupActivityRows([
+      activity("m1"),
+      activity("a1", "a", "Analyse · atelier-analyst"),
+      activity("b1", "b", null),
+      activity("m2"),
+      activity("a2", "a", "Analyse · atelier-analyst"),
+    ]);
+    expect(entries.map((entry) => (entry.kind === "row" ? entry.row.id : `${entry.label}:${entry.rows.map((row) => row.id).join(",")}`))).toEqual([
+      "m1",
+      "Analyse · atelier-analyst:a1,a2",
+      "Sous-agent:b1",
+      "m2",
+    ]);
+  });
+
+  test("keeps a main-agent-only block unchanged", () => {
+    expect(groupActivityRows([activity("m1"), activity("m2")])).toEqual([
+      { kind: "row", row: activity("m1") },
+      { kind: "row", row: activity("m2") },
+    ]);
   });
 });
 

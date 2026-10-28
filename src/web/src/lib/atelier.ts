@@ -12,7 +12,7 @@ import {
   type ConversationStatus,
   type Orchestrator,
 } from "@shared/constants";
-import type { Conversation } from "@shared/schemas";
+import type { Conversation, ConversationMessage } from "@shared/schemas";
 
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { ResolvedAgentDefaults } from "@/lib/agentDefaults";
@@ -154,4 +154,36 @@ export function agentSummary(settings: AtelierAgentSettings, defaults: ResolvedA
   const modelLabel = model === null ? "" : ` ${AGENT_MODEL_FULL_LABELS[model]}`;
   const effortLabel = effort === null ? "" : ` · ${AGENT_EFFORT_FULL_LABELS[effort]}`;
   return `Claude${modelLabel}${effortLabel}`;
+}
+
+export const SUBAGENT_FALLBACK_LABEL = "Sous-agent";
+
+export type ActivityEntry =
+  | { kind: "row"; row: ConversationMessage }
+  | { kind: "subagent"; agentId: string; label: string; rows: ConversationMessage[] };
+
+/** Splits an activity block into main-agent rows and per-sub-agent groups, each group placed at its first row. */
+export function groupActivityRows(rows: readonly ConversationMessage[]): ActivityEntry[] {
+  const entries: ActivityEntry[] = [];
+  const groups = new Map<string, ConversationMessage[]>();
+  for (const row of rows) {
+    if (row.agentId === null) {
+      entries.push({ kind: "row", row });
+      continue;
+    }
+    const group = groups.get(row.agentId);
+    if (group) {
+      group.push(row);
+      continue;
+    }
+    const created = [row];
+    groups.set(row.agentId, created);
+    entries.push({ kind: "subagent", agentId: row.agentId, label: row.agentLabel ?? SUBAGENT_FALLBACK_LABEL, rows: created });
+  }
+  return entries;
+}
+
+/** "1 sous-agent" / "N sous-agents". */
+export function subagentCountLabel(count: number): string {
+  return count === 1 ? "1 sous-agent" : `${count} sous-agents`;
 }

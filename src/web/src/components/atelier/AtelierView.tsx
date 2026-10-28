@@ -7,6 +7,7 @@ import type { Conversation, ProjectInfo } from "@shared/schemas";
 import { CardsPanel } from "@/components/atelier/CardsPanel";
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConversationPanel } from "@/components/atelier/ConversationPanel";
+import { SubagentsPanel } from "@/components/atelier/SubagentsPanel";
 import { NewConversationForm } from "@/components/atelier/NewConversationForm";
 import { PrdPanel } from "@/components/atelier/PrdPanel";
 import { SettledConversations } from "@/components/atelier/SettledConversations";
@@ -233,7 +234,12 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
         <CardsPanel conversation={conversation} prd={prd} projects={projects} onBackToPrd={() => setStep("prd")} />
       );
     }
-    return <ConversationPanel key={conversation.id} conversation={conversation} messages={detail.messages} />;
+    return (
+      <div className="flex min-h-0 flex-1">
+        <ConversationPanel key={conversation.id} conversation={conversation} messages={detail.messages} />
+        <SubagentsPanel subagents={conversation.activeSubagents} />
+      </div>
+    );
   };
 
   const showStepper = compose === null && conversation !== null && selectedId !== null;

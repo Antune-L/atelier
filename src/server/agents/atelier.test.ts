@@ -3,11 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { ATELIER_ADVERSARIAL_SUBAGENTS, ATELIER_REVIEWER_AGENT_NAME, RESEARCH_OPTION_LABELS } from "../../shared/constants.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import { DEFAULT_RESEARCH_OPTIONS, researchOptionsFromKeys } from "../../shared/schemas.ts";
-import type { Conversation, ResearchOptions } from "../../shared/schemas.ts";
+import type { Conversation, ConversationMessage, ResearchOptions } from "../../shared/schemas.ts";
 import { projectConfigSchema } from "../config.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
 import { buildAtelierPrompt } from "./atelier.ts";
+import { ATELIER_BOARD_RESULT_PREFIX } from "./atelierTicketTools.ts";
 
 const PROJECT = projectConfigSchema.parse({ label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000 });
 const ADVERSARIAL_SECTION = "## Revue adversariale (activée)";
@@ -34,6 +35,7 @@ function conversation(orchestrator: Orchestrator, researchEnabled: boolean, rese
     settled: false,
     contextTokens: null,
     contextWindow: null,
+    activeSubagents: [],
     createdAt: 0,
     updatedAt: 0,
   };
@@ -76,5 +78,19 @@ describe("buildAtelierPrompt — adversarial review", () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     const off = prompt(conversation("claude", true, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: false }));
     for (const label of labels) expect(off).not.toContain(label);
+  });
+});
+
+describe("buildAtelierPrompt — history", () => {
+  function message(content: string, agentId: string | null): ConversationMessage {
+    return { id: content, conversationId: "c1", role: "activity", content, turnId: null, agentId, agentLabel: agentId, createdAt: 0 };
+  }
+
+  test("sub-agent activity lines are never replayed, board results included", () => {
+    const history = [message(`${ATELIER_BOARD_RESULT_PREFIX} main`, null), message(`${ATELIER_BOARD_RESULT_PREFIX} sub`, "a1"), message("sub activity", "a1")];
+    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, history });
+    expect(text).toContain(`${ATELIER_BOARD_RESULT_PREFIX} main`);
+    expect(text).not.toContain(`${ATELIER_BOARD_RESULT_PREFIX} sub`);
+    expect(text).not.toContain("sub activity");
   });
 });

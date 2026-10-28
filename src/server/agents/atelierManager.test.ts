@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { ATELIER_SLOT_ID, ORCHESTRATORS } from "../../shared/constants.ts";
 import { DEFAULT_RESEARCH_OPTIONS, prdDocumentSchema } from "../../shared/schemas.ts";
-import type { PrdDocument } from "../../shared/schemas.ts";
+import type { Conversation, PrdDocument } from "../../shared/schemas.ts";
 import { initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
@@ -87,7 +87,7 @@ afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-function setup(idleTimeoutMs?: number, uploadsRoot?: string) {
+function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?: number) {
   const db = createDatabase(":memory:");
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
@@ -95,14 +95,29 @@ function setup(idleTimeoutMs?: number, uploadsRoot?: string) {
   const system = new CapturingSystem();
   const hub = new ClientHub(store);
   const sessionHub = new SessionHub(system);
-  const manager = new AtelierManager({ store, hub, sessionHub, system, uploadsRoot, flushIntervalMs: 0, ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}) });
+  const pushedConversations: Conversation[] = [];
+  const pushConversation = hub.pushConversation.bind(hub);
+  hub.pushConversation = (conversation) => {
+    pushedConversations.push(conversation);
+    pushConversation(conversation);
+  };
+  const manager = new AtelierManager({
+    store,
+    hub,
+    sessionHub,
+    system,
+    uploadsRoot,
+    flushIntervalMs: 0,
+    ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
+    ...(subagentCeilingMs !== undefined ? { subagentCeilingMs } : {}),
+  });
   closers.push(async () => {
     manager.stop();
     sessionHub.disconnectAll();
     await sessionHub.drainClosingSessions();
     db.close();
   });
-  return { store, system, sessionHub, manager };
+  return { store, system, sessionHub, manager, pushedConversations };
 }
 
 function loadTemplate(): PrdDocument {
@@ -465,6 +480,106 @@ describe("AtelierManager", () => {
     store.updateConversation(conversation.id, { contextTokens: 5, contextWindow: 10, sessionStatus: "running" });
     manager.recoverStale();
     expect(store.getConversation(conversation.id)).toMatchObject({ contextTokens: null, contextWindow: null, sessionStatus: "idle" });
+  });
+
+  describe("sub-agents", () => {
+    const SUBAGENT = { id: "agent-1", label: "Explorer le dépôt · Explore" };
+    const STARTED: AgentSessionEvent = { type: "subagent_lifecycle", phase: "started", ...SUBAGENT };
+    const ENDED: AgentSessionEvent = { type: "subagent_lifecycle", phase: "ended", ...SUBAGENT, status: "completed" };
+
+    test.each([...ORCHESTRATORS])("%s sub-agent lines after the main turn keep the conversation idle", async (orchestrator) => {
+      const { store, system, manager } = setup();
+      const conversation = store.createConversation({ ...(orchestrator === "codex" ? CODEX_CONVERSATION : CLAUDE_CONVERSATION) });
+      const { message, delivered } = manager.postMessage(conversation.id, "Bonjour");
+      await delivered;
+      system.emit({ type: "assistant_text", text: "Réponse principale." });
+      system.emit(TURN_END);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+
+      system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/a.ts" }, subagent: SUBAGENT });
+      system.emit({ type: "progress", kind: "subagent", message: "Analyse en cours", subagent: SUBAGENT });
+      system.emit({ type: "assistant_text", text: "Texte du sous-agent", subagent: SUBAGENT });
+      system.emit({ type: "assistant_text", text: "Texte sourcé", sourceId: "agent-1" });
+
+      const messages = store.listConversationMessages(conversation.id);
+      expect(messages.map((entry) => [entry.role, entry.content, entry.agentId, entry.agentLabel])).toEqual([
+        ["user", "Bonjour", null, null],
+        ["assistant", "Réponse principale.", null, null],
+        ["activity", "Read src/a.ts", SUBAGENT.id, SUBAGENT.label],
+        ["activity", "Analyse en cours", SUBAGENT.id, SUBAGENT.label],
+      ]);
+      expect(messages.at(-1)?.turnId).toBe(message.turnId);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+    });
+
+    test("lifecycle events maintain and push the active list", async () => {
+      const { store, system, manager, pushedConversations } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(STARTED);
+      system.emit({ ...STARTED, id: "agent-2", label: "Relire · Plan" });
+      system.emit({ ...STARTED, label: "Renommé · Explore" });
+      expect(store.getConversation(conversation.id)?.activeSubagents.map((entry) => [entry.id, entry.label])).toEqual([
+        ["agent-1", "Renommé · Explore"],
+        ["agent-2", "Relire · Plan"],
+      ]);
+      expect(pushedConversations.at(-1)?.activeSubagents.length).toBe(2);
+
+      system.emit(ENDED);
+      expect(store.getConversation(conversation.id)?.activeSubagents.map((entry) => entry.id)).toEqual(["agent-2"]);
+      expect(pushedConversations.at(-1)?.activeSubagents.map((entry) => entry.id)).toEqual(["agent-2"]);
+    });
+
+    test.each(["failure", "interrupt", "close", "settingsChanged"] as const)("%s clears the active list", async (trigger) => {
+      const { store, system, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(STARTED);
+      expect(store.getConversation(conversation.id)?.activeSubagents.length).toBe(1);
+      if (trigger === "failure") system.emit({ type: "error", message: "processus mort" });
+      else if (trigger === "interrupt") await manager.interrupt(conversation.id);
+      else if (trigger === "close") manager.close(conversation.id);
+      else manager.settingsChanged(conversation.id);
+      expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([]);
+    });
+
+    test("recoverStale clears the active list of an idle conversation", () => {
+      const { store, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      store.updateConversation(conversation.id, { activeSubagents: [{ id: "agent-1", label: "x", startedAt: 1 }] });
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+      manager.recoverStale();
+      expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([]);
+    });
+
+    test("the idle close waits for the last active sub-agent", async () => {
+      const { store, system, sessionHub, manager } = setup(20);
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      const key = atelierSessionKey(conversation.id);
+      system.emit(STARTED);
+      system.emit(TURN_END);
+      await Bun.sleep(40);
+      expect(sessionHub.isConnected(key)).toBe(true);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+
+      system.emit(ENDED);
+      for (let attempt = 0; attempt < 100 && sessionHub.isConnected(key); attempt += 1) await Bun.sleep(5);
+      expect(sessionHub.isConnected(key)).toBe(false);
+    });
+
+    test("the ceiling closes the session and clears the active list", async () => {
+      const { store, system, sessionHub, manager } = setup(10_000, undefined, 30);
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      const key = atelierSessionKey(conversation.id);
+      system.emit(STARTED);
+      system.emit({ type: "context_usage", usedTokens: 1_000, maxTokens: 200_000 });
+      system.emit(TURN_END);
+      for (let attempt = 0; attempt < 100 && sessionHub.isConnected(key); attempt += 1) await Bun.sleep(5);
+      expect(sessionHub.isConnected(key)).toBe(false);
+      expect(store.getConversation(conversation.id)).toMatchObject({ activeSubagents: [], sessionStatus: "idle", contextTokens: null });
+    });
   });
 
   test("session keys round-trip and tool traces stay one line", () => {

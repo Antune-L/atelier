@@ -106,6 +106,27 @@ describe("Store atelier", () => {
     expect(messages[1]?.turnId).toBe("turn-1");
   });
 
+  test("records the sub-agent author of a message", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    const main = store.addConversationMessage({ conversationId: conversation.id, role: "activity", content: "main", turnId: null });
+    const sub = store.addConversationMessage({ conversationId: conversation.id, role: "activity", content: "sub", turnId: null, agentId: "a1", agentLabel: "Reviewer" });
+    expect(main).toMatchObject({ agentId: null, agentLabel: null });
+    expect(store.listConversationMessages(conversation.id).find((message) => message.id === sub.id)).toMatchObject({ agentId: "a1", agentLabel: "Reviewer" });
+  });
+
+  test("stores the active sub-agents without reordering the conversation", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    expect(conversation.activeSubagents).toEqual([]);
+    const subagents = [{ id: "a1", label: "Reviewer", startedAt: 1_000 }];
+    const updated = store.updateConversation(conversation.id, { activeSubagents: subagents });
+    expect(updated.activeSubagents).toEqual(subagents);
+    expect(updated.updatedAt).toBe(conversation.updatedAt);
+    expect(store.getConversation(conversation.id)?.activeSubagents).toEqual(subagents);
+    expect(store.updateConversation(conversation.id, { activeSubagents: [] }).activeSubagents).toEqual([]);
+  });
+
   test("increments PRD revisions and forces document.revision", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

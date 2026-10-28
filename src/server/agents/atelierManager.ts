@@ -4,13 +4,13 @@ import { z } from "zod";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { compileFeedback } from "../../shared/prdFeedback.ts";
 import type { WorkerToolName } from "../../shared/protocol.ts";
-import type { Conversation, ConversationMessage, PrdDocument } from "../../shared/schemas.ts";
+import type { ActiveSubagent, Conversation, ConversationMessage, PrdDocument } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 import type { ConversationPatch, Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import { createLogger } from "../logger.ts";
-import type { AgentSessionEvent } from "../system/agentSession.ts";
+import type { AgentSessionEvent, AgentSubagentRef } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
 import type { TicketOperations } from "../ticketOperations.ts";
 
@@ -27,6 +27,8 @@ import type { SessionHub } from "./sessionHub.ts";
 const log = createLogger("atelier");
 
 export const ATELIER_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+/** Longest an active sub-agent keeps the Atelier session open. */
+export const ATELIER_SUBAGENT_CEILING_MS = 60 * 60 * 1000;
 const ASSISTANT_FLUSH_INTERVAL_MS = 150;
 const ACTIVITY_MAX_LENGTH = 160;
 const ELLIPSIS = "…";
@@ -66,6 +68,8 @@ interface ConversationRuntime {
   lastUserTurnId: string | null;
   flushTimer: ReturnType<typeof setTimeout> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Closes the session once the oldest active sub-agent reaches the ceiling. */
+  ceilingTimer: ReturnType<typeof setTimeout> | null;
   resumed: boolean;
   /** Set while a compaction turn runs: context occupancy before, and after once reported. */
   compaction: { before: number | null; after: number | null } | null;
@@ -89,6 +93,7 @@ export interface AtelierManagerDeps {
   ticketOperations?: TicketOperations;
   uploadsRoot?: string;
   idleTimeoutMs?: number;
+  subagentCeilingMs?: number;
   flushIntervalMs?: number;
 }
 
@@ -140,6 +145,7 @@ export class AtelierManager {
   private readonly lookupProject: (key: string) => ProjectConfig | null;
   private readonly defaults: () => ExecutionDefaults;
   private readonly idleTimeoutMs: number;
+  private readonly subagentCeilingMs: number;
   private readonly flushIntervalMs: number;
 
   constructor(deps: AtelierManagerDeps) {
@@ -152,6 +158,7 @@ export class AtelierManager {
     this.lookupProject = deps.getProject ?? defaultProjectLookup;
     this.defaults = deps.defaults ?? defaultExecutionDefaults;
     this.idleTimeoutMs = deps.idleTimeoutMs ?? ATELIER_IDLE_TIMEOUT_MS;
+    this.subagentCeilingMs = deps.subagentCeilingMs ?? ATELIER_SUBAGENT_CEILING_MS;
     this.flushIntervalMs = deps.flushIntervalMs ?? ASSISTANT_FLUSH_INTERVAL_MS;
   }
 
@@ -164,6 +171,8 @@ export class AtelierManager {
         patch.contextTokens = null;
         patch.contextWindow = null;
       }
+      // Whatever their status, no sub-agent outlives the previous process.
+      if (conversation.activeSubagents.length > 0) patch.activeSubagents = [];
       if (Object.keys(patch).length > 0) this.store.updateConversation(conversation.id, patch);
     }
   }
@@ -221,6 +230,7 @@ export class AtelierManager {
     await this.sessionHub.interrupt(atelierSessionKey(conversationId));
     this.flush(conversationId);
     const runtime = this.runtimes.get(conversationId);
+    this.clearSubagents(conversationId, runtime);
     if (runtime?.awaitingBackground) {
       runtime.awaitingBackground = false;
       // The deferred turn_end left no idle close, and no relaunch turn may come to arm one.
@@ -247,8 +257,10 @@ export class AtelierManager {
     for (const runtime of this.runtimes.values()) {
       if (runtime.flushTimer) clearTimeout(runtime.flushTimer);
       if (runtime.idleTimer) clearTimeout(runtime.idleTimer);
+      if (runtime.ceilingTimer) clearTimeout(runtime.ceilingTimer);
       runtime.flushTimer = null;
       runtime.idleTimer = null;
+      runtime.ceilingTimer = null;
     }
   }
 
@@ -381,17 +393,22 @@ export class AtelierManager {
         this.onInit(conversationId, event.sessionId);
         return;
       case "assistant_text":
-        if (event.sourceId) return;
+        if (event.sourceId || event.subagent) return;
         // A compaction turn gets a backend-written summary instead of the provider's own output.
         if (this.runtimes.get(conversationId)?.compaction) return;
         this.appendAssistant(conversationId, event.text, event.stream?.itemId ?? null, event.stream?.mode === "delta");
         return;
       case "tool_use":
-        this.addActivity(conversationId, describeToolUse(event.name, event.input));
+        if (event.subagent) this.addSubagentActivity(conversationId, describeToolUse(event.name, event.input), event.subagent);
+        else this.addActivity(conversationId, describeToolUse(event.name, event.input));
         return;
       case "progress":
         if (event.stream || !ACTIVITY_PROGRESS_KINDS.has(event.kind)) return;
-        this.addActivity(conversationId, truncate(event.message));
+        if (event.subagent) this.addSubagentActivity(conversationId, truncate(event.message), event.subagent);
+        else this.addActivity(conversationId, truncate(event.message));
+        return;
+      case "subagent_lifecycle":
+        this.onSubagentLifecycle(conversationId, event.phase, { id: event.id, label: event.label });
         return;
       case "turn_end":
         this.onTurnEnd(conversationId, event.ok);
@@ -439,6 +456,78 @@ export class AtelierManager {
     this.flush(conversationId);
     const message = this.store.addConversationMessage({ conversationId, role: "activity", content, turnId: turn.turnId });
     this.hub.pushConversationMessage(message);
+  }
+
+  /** A sub-agent line never opens a turn, changes the status or freezes the main reply. */
+  private addSubagentActivity(conversationId: string, content: string, subagent: AgentSubagentRef): void {
+    if (!content || !this.store.getConversation(conversationId)) return;
+    const runtime = this.runtime(conversationId);
+    const message = this.store.addConversationMessage({
+      conversationId,
+      role: "activity",
+      content,
+      turnId: runtime.turn.turnId ?? runtime.lastUserTurnId,
+      agentId: subagent.id,
+      agentLabel: subagent.label,
+    });
+    this.hub.pushConversationMessage(message);
+  }
+
+  private onSubagentLifecycle(conversationId: string, phase: "started" | "ended", subagent: AgentSubagentRef): void {
+    const conversation = this.store.getConversation(conversationId);
+    if (!conversation) return;
+    const runtime = this.runtime(conversationId);
+    const current = conversation.activeSubagents;
+    let next: ActiveSubagent[];
+    if (phase === "started") {
+      next = current.some((entry) => entry.id === subagent.id)
+        ? current.map((entry) => (entry.id === subagent.id ? { ...entry, label: subagent.label } : entry))
+        : [...current, { id: subagent.id, label: subagent.label, startedAt: Date.now() }];
+    } else {
+      next = current.filter((entry) => entry.id !== subagent.id);
+      if (next.length === current.length) return;
+    }
+    this.patchConversation(conversationId, { activeSubagents: next });
+    this.scheduleCeiling(conversationId, runtime, next);
+    if (phase === "started") {
+      this.clearIdleTimer(runtime);
+      return;
+    }
+    if (next.length > 0 || runtime.compaction) return;
+    // The deferred background notification leaves the status running while nothing is left to wait for.
+    const settledBackground = runtime.awaitingBackground && runtime.backgroundTasks.size === 0;
+    if (conversation.sessionStatus !== "running" || settledBackground) this.armIdleTimer(conversationId, runtime);
+  }
+
+  private clearSubagents(conversationId: string, runtime: ConversationRuntime | undefined): void {
+    if (runtime) this.clearCeilingTimer(runtime);
+    const conversation = this.store.getConversation(conversationId);
+    if (conversation && conversation.activeSubagents.length > 0) this.patchConversation(conversationId, { activeSubagents: [] });
+  }
+
+  /** One timer per runtime, due when the oldest active sub-agent reaches the ceiling. */
+  private scheduleCeiling(conversationId: string, runtime: ConversationRuntime, active: readonly ActiveSubagent[]): void {
+    this.clearCeilingTimer(runtime);
+    if (active.length === 0) return;
+    const oldest = Math.min(...active.map((entry) => entry.startedAt));
+    const delay = Math.max(0, oldest + this.subagentCeilingMs - Date.now());
+    runtime.ceilingTimer = setTimeout(() => {
+      runtime.ceilingTimer = null;
+      log.warn("session atelier fermée : plafond des sous-agents atteint", { conversationId });
+      this.clearIdleTimer(runtime);
+      const awaiting = runtime.awaitingBackground;
+      this.resetBackground(runtime);
+      this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      this.clearSubagents(conversationId, runtime);
+      this.patchConversation(conversationId, awaiting ? { sessionStatus: "idle", unread: true } : { sessionStatus: "idle" });
+      this.clearContext(conversationId);
+    }, delay);
+    runtime.ceilingTimer.unref?.();
+  }
+
+  private clearCeilingTimer(runtime: ConversationRuntime): void {
+    if (runtime.ceilingTimer) clearTimeout(runtime.ceilingTimer);
+    runtime.ceilingTimer = null;
   }
 
   private onContextUsage(conversationId: string, rawUsed: number, rawMax: number | null): void {
@@ -489,12 +578,15 @@ export class AtelierManager {
   /** Close the live session after `idleTimeoutMs` without a new turn. */
   private armIdleTimer(conversationId: string, runtime: ConversationRuntime): void {
     this.clearIdleTimer(runtime);
+    // An active sub-agent keeps the session open: its end, or the ceiling, closes it.
+    if ((this.store.getConversation(conversationId)?.activeSubagents.length ?? 0) > 0) return;
     runtime.idleTimer = setTimeout(() => {
       runtime.idleTimer = null;
       log.info("session atelier fermée après inactivité", { conversationId });
       const awaiting = runtime.awaitingBackground;
       this.resetBackground(runtime);
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      this.clearSubagents(conversationId, runtime);
       if (awaiting) this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
       this.clearContext(conversationId);
     }, this.idleTimeoutMs);
@@ -535,6 +627,7 @@ export class AtelierManager {
     runtime.resumed = false;
     log.warn("session atelier en échec", { conversationId, reason });
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "failed");
+    this.clearSubagents(conversationId, runtime);
     this.patchConversation(conversationId, patch);
   }
 
@@ -592,6 +685,7 @@ export class AtelierManager {
       this.resetBackground(runtime);
     }
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "cancelled");
+    this.clearSubagents(conversationId, runtime);
     this.clearContext(conversationId);
   }
 
@@ -608,6 +702,7 @@ export class AtelierManager {
         lastUserTurnId: null,
         flushTimer: null,
         idleTimer: null,
+        ceilingTimer: null,
         resumed: false,
         compaction: null,
         backgroundTasks: new Set(),

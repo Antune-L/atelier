@@ -184,6 +184,8 @@ function buildAuthoringRules(): string[] {
 
 function buildHistory(history: ConversationMessage[] | undefined): string[] {
   const turns = (history ?? []).flatMap((message) => {
+    // Sub-agent lines are never replayed to the model, board results included.
+    if (message.role === "activity" && message.agentId !== null) return [];
     if (message.role === "activity" && !message.content.startsWith(ATELIER_BOARD_RESULT_PREFIX)) return [];
     const content = message.content.trim();
     if (!content) return [];

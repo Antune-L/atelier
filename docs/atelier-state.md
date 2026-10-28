@@ -373,6 +373,17 @@ REST contract implemented as specified. Deviations and precisions:
 - Only Codex streams token deltas; Claude emits whole text blocks.
 - `WebSearch`/`WebFetch` are allow-listed only for orchestrator sessions today.
 
+## Settled conversations
+
+Conversations carry a `settled` flag (`conversations.settled` column, additive migration; `settled`
+in `conversationSchema`). `POST /atelier/conversations/:id/settle` and `/unsettle` toggle it through
+`store.setConversationSettled`, which does not bump `updated_at`, and push the conversation over the
+hub (404 on unknown id, no-op when already in that state). `AtelierManager.submitTurn` resets it to
+false, so sending a message, consolidating or regenerating a PRD brings the conversation back to the
+active list; turn ends and errors leave it untouched. The web list (`splitConversations`) shows active
+conversations first, then a collapsible "Classées" section (collapse persisted in
+`atelier:settled-collapsed`) with compact rows, limited to `SETTLED_PREVIEW_COUNT` until "Afficher N de plus".
+
 ## Open questions / hypotheses
 
 - Tickets still have one `dependsOn`: independent PRD prerequisites require a single document card

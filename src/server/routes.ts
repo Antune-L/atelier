@@ -745,6 +745,15 @@ function createAtelierRoutes(deps: RouteDeps) {
     hub.pushConversation(store.updateConversation(conversationId, { status }));
   }
 
+  function setConversationSettled(conversationId: string, settled: boolean, set: { status?: number | string }): Conversation | { error: string } {
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+    if (conversation.settled === settled) return conversation;
+    const updated = store.setConversationSettled(conversationId, settled);
+    hub.pushConversation(updated);
+    return updated;
+  }
+
   function setConversationUnread(conversationId: string, unread: boolean, set: { status?: number | string }): Conversation | { error: string } {
     const conversation = store.getConversation(conversationId);
     if (!conversation) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
@@ -824,6 +833,8 @@ function createAtelierRoutes(deps: RouteDeps) {
     })
     .post("/conversations/:id/read", ({ params, set }) => setConversationUnread(params.id, false, set))
     .post("/conversations/:id/unread", ({ params, set }) => setConversationUnread(params.id, true, set))
+    .post("/conversations/:id/settle", ({ params, set }) => setConversationSettled(params.id, true, set))
+    .post("/conversations/:id/unsettle", ({ params, set }) => setConversationSettled(params.id, false, set))
     .post("/conversations/:id/consolidate", ({ params, body, set }) => {
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = consolidatePrdSchema.safeParse(body ?? {});

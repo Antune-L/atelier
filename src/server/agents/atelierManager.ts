@@ -283,7 +283,8 @@ export class AtelierManager {
     const runtime = this.runtime(conversationId);
     runtime.lastUserTurnId = turnId;
     this.clearIdleTimer(runtime);
-    this.patchConversation(conversationId, { sessionStatus: "running", error: null });
+    // A user-resumed conversation returns to the active list.
+    this.patchConversation(conversationId, { sessionStatus: "running", error: null, settled: false });
     return { message, delivered: this.deliver(conversationId, agentContent, message.id) };
   }
 

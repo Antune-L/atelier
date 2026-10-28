@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 
 import { parseTriageReport } from "../shared/schemas.ts";
+import type { Conversation } from "../shared/schemas.ts";
 import { initProjectRegistry } from "./config.ts";
 import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
@@ -56,4 +57,26 @@ test("seeding twice does not duplicate seed tickets", () => {
   const titles = store.listTickets(true).map((ticket) => ticket.title).filter((title) => title.startsWith("[seed]"));
   expect(titles.length).toBeGreaterThan(0);
   expect(titles.length).toBe(new Set(titles).size);
+});
+
+function seedConversations(store: Store): Conversation[] {
+  return store.listConversations(FIXTURE_PROJECT_KEY).filter((conversation) => conversation.title.startsWith("[seed]"));
+}
+
+test("seeds active and settled Atelier conversations with messages", () => {
+  const store = openStore();
+  seedPreviewDemoData(store);
+  const conversations = seedConversations(store);
+  expect(conversations.filter((conversation) => !conversation.settled).length).toBe(3);
+  expect(conversations.filter((conversation) => conversation.settled).length).toBe(12);
+  for (const conversation of conversations) {
+    expect(store.listConversationMessages(conversation.id).length).toBeGreaterThanOrEqual(2);
+  }
+});
+
+test("seeding twice does not duplicate seed conversations", () => {
+  const store = openStore();
+  seedPreviewDemoData(store);
+  seedPreviewDemoData(store);
+  expect(seedConversations(store).length).toBe(15);
 });

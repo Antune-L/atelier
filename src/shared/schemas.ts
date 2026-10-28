@@ -1173,6 +1173,8 @@ export const conversationSchema = z.object({
   sessionId: z.string().nullable(),
   error: z.string().nullable(),
   unread: z.boolean(),
+  /** Settled conversations are grouped at the bottom of the Atelier list. */
+  settled: z.boolean(),
   /** Context occupancy of the LIVE agent session (server-owned); null when no session is live. */
   contextTokens: z.number().int().nonnegative().nullable(),
   /** Context window of the live session, or null when unknown / no session. */

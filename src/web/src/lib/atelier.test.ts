@@ -1,6 +1,59 @@
 import { describe, expect, test } from "bun:test";
 
-import { contextUsageSummary, formatTokenCount } from "./atelier";
+import { DEFAULT_RESEARCH_OPTIONS } from "@shared/schemas";
+import type { Conversation } from "@shared/schemas";
+
+import { SETTLED_PREVIEW_COUNT, contextUsageSummary, formatTokenCount, splitConversations } from "./atelier";
+
+function makeConversation(id: string, updatedAt: number, settled: boolean): Conversation {
+  return {
+    id,
+    project: "demo",
+    title: id,
+    orchestrator: "claude",
+    model: null,
+    effort: null,
+    codexModel: null,
+    codexEffort: null,
+    codexFast: false,
+    researchEnabled: true,
+    researchOptions: DEFAULT_RESEARCH_OPTIONS,
+    status: "exploring",
+    sessionStatus: "idle",
+    sessionId: null,
+    error: null,
+    unread: false,
+    settled,
+    contextTokens: null,
+    contextWindow: null,
+    createdAt: 0,
+    updatedAt,
+  };
+}
+
+describe("splitConversations", () => {
+  test("splits active and settled conversations, each sorted by recent activity", () => {
+    const input = [
+      makeConversation("a1", 10, false),
+      makeConversation("s1", 5, true),
+      makeConversation("a2", 30, false),
+      makeConversation("s2", 50, true),
+      makeConversation("a3", 20, false),
+    ];
+    const { active, settled } = splitConversations(input);
+    expect(active.map((conversation) => conversation.id)).toEqual(["a2", "a3", "a1"]);
+    expect(settled.map((conversation) => conversation.id)).toEqual(["s2", "s1"]);
+    expect(input.map((conversation) => conversation.id)).toEqual(["a1", "s1", "a2", "s2", "a3"]);
+  });
+
+  test("empty input yields empty groups", () => {
+    expect(splitConversations([])).toEqual({ active: [], settled: [] });
+  });
+
+  test("previews ten settled conversations", () => {
+    expect(SETTLED_PREVIEW_COUNT).toBe(10);
+  });
+});
 
 describe("formatTokenCount", () => {
   test("formats with French decimals", () => {

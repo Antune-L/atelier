@@ -1,4 +1,4 @@
-import { Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
+import { Archive, Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
@@ -9,6 +9,7 @@ import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConversationPanel } from "@/components/atelier/ConversationPanel";
 import { NewConversationForm } from "@/components/atelier/NewConversationForm";
 import { PrdPanel } from "@/components/atelier/PrdPanel";
+import { SettledConversations } from "@/components/atelier/SettledConversations";
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
   ATELIER_STEP_LABELS,
   CONVERSATION_STATUS_VARIANTS,
   UNTITLED_CONVERSATION_LABEL,
+  splitConversations,
   type AtelierSeed,
   type AtelierStep,
   type AtelierTarget,
@@ -134,9 +136,11 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     }
   }
 
-  const visible = conversations
-    .filter((c) => projectFilter === ALL_PROJECTS || c.project === projectFilter)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const { active, settled } = splitConversations(
+    conversations.filter((c) => projectFilter === ALL_PROJECTS || c.project === projectFilter),
+  );
+  const total = active.length + settled.length;
+  const latest = active[0] ?? settled[0];
 
   const remove = async (conversationId: string): Promise<void> => {
     await api.atelierDeleteConversation(conversationId);
@@ -153,6 +157,19 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
         const current = boardStore.getSnapshot().conversations.find((c) => c.id === item.id);
         if (current) boardStore.rememberConversation({ ...current, unread: false });
         boardStore.notify("Échec", "La conversation n'a pas pu être marquée comme non lue.");
+      },
+    );
+  };
+
+  const setSettled = (item: Conversation, settledValue: boolean): void => {
+    boardStore.rememberConversation({ ...item, settled: settledValue });
+    const request = settledValue ? api.atelierSettleConversation(item.id) : api.atelierUnsettleConversation(item.id);
+    request.then(
+      (updated) => boardStore.rememberConversation(updated),
+      () => {
+        const current = boardStore.getSnapshot().conversations.find((c) => c.id === item.id);
+        if (current) boardStore.rememberConversation({ ...current, settled: !settledValue });
+        boardStore.notify("Échec", settledValue ? "La conversation n'a pas pu être classée." : "La conversation n'a pas pu être remise en actif.");
       },
     );
   };
@@ -185,19 +202,16 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
               ? detail.error
               : "Discutez avec un agent, relisez le PRD, puis confirmez les cartes à créer dans TODO."}
           </p>
-          {visible[0] && (
+          {latest && (
             <div className="w-full max-w-md space-y-3 rounded-lg border border-border bg-background p-4 text-left">
               <p className="text-xs text-muted-foreground">Dernière discussion</p>
-              <h3 className="break-words text-sm font-medium">{visible[0].title || UNTITLED_CONVERSATION_LABEL}</h3>
-              <p className="text-xs text-muted-foreground">{resolveProjectLabel(projects, visible[0].project)}</p>
-              <Badge variant={CONVERSATION_STATUS_VARIANTS[visible[0].status]}>{CONVERSATION_STATUS_LABELS[visible[0].status]}</Badge>
-              <Button size="sm" variant="outline" className="w-full" onClick={() => {
-                const latestConversation = visible[0];
-                if (latestConversation) select(latestConversation.id);
-              }}>Reprendre la discussion</Button>
+              <h3 className="break-words text-sm font-medium">{latest.title || UNTITLED_CONVERSATION_LABEL}</h3>
+              <p className="text-xs text-muted-foreground">{resolveProjectLabel(projects, latest.project)}</p>
+              <Badge variant={CONVERSATION_STATUS_VARIANTS[latest.status]}>{CONVERSATION_STATUS_LABELS[latest.status]}</Badge>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => select(latest.id)}>Reprendre la discussion</Button>
             </div>
           )}
-          {!visible[0] && <p className="text-xs text-muted-foreground">Commencez avec « Nouvelle discussion ».</p>}
+          {!latest && <p className="text-xs text-muted-foreground">Commencez avec « Nouvelle discussion ».</p>}
         </div>
       );
     }
@@ -241,7 +255,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
           aria-label="Déplier « Discussions »"
         >
           <PanelLeftOpen className="h-3.5 w-3.5" />
-          <span className="font-mono text-2xs">{visible.length}</span>
+          <span className="font-mono text-2xs">{total}</span>
           <span className="text-2xs uppercase tracking-wider [writing-mode:vertical-rl]">Discussions</span>
         </button>
       )}
@@ -257,7 +271,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
             >
               <PanelLeftClose className="h-3.5 w-3.5" />
             </button>
-            <h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{visible.length}</span></h2>
+            <h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{total}</span></h2>
           </div>
           <Button size="sm" variant="ghost" className="md:hidden" onClick={() => setListOpen(!listOpen)}>{listOpen ? "Masquer" : "Afficher"}</Button>
         </div>
@@ -265,70 +279,92 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle discussion
         </Button>
-        <ul className={cn("max-h-52 min-h-0 flex-1 space-y-2 overflow-y-auto md:max-h-none", !listOpen && (selectedId !== null || compose !== null) && "hidden md:block")}>
-          {visible.length === 0 && (
-            <li className="px-2 py-3 text-xs text-muted-foreground">Aucune conversation pour ce filtre.</li>
-          )}
-          {visible.map((item) => (
-            <li key={item.id}>
-              <div
-                className={cn(
-                  "group flex items-start gap-2 rounded-lg border px-3 py-3 transition-colors",
-                  item.id === selectedId && compose === null
-                    ? "border-border bg-accent"
-                    : "border-border/60 hover:bg-accent/50",
-                )}
-              >
-                <button type="button" onClick={() => select(item.id)} className="min-w-0 flex-1 text-left">
-                  <span className="flex items-center gap-1.5">
-                    {item.sessionStatus === "running" && <LiveDot />}
-                    {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
-                    <span className="line-clamp-2 text-sm font-medium">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
-                    {item.unread && (
-                      <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
-                    )}
-                  </span>
-                  <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>
-                    <span className="shrink-0">· {formatRelativeDuration(item.updatedAt, now)}</span>
-                  </span>
-                  <span className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="text-2xs text-muted-foreground">Étape</span>
-                    <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="px-1.5 py-0 text-2xs">
-                      {CONVERSATION_STATUS_LABELS[item.status]}
-                    </Badge>
-                  </span>
-                </button>
-                {!item.unread && (
+        <div className={cn("max-h-52 min-h-0 flex-1 overflow-y-auto md:max-h-none", !listOpen && (selectedId !== null || compose !== null) && "hidden md:block")}>
+          <ul className="space-y-2">
+            {total === 0 && (
+              <li className="px-2 py-3 text-xs text-muted-foreground">Aucune conversation pour ce filtre.</li>
+            )}
+            {active.map((item) => (
+              <li key={item.id}>
+                <div
+                  className={cn(
+                    "group flex items-start gap-2 rounded-lg border px-3 py-3 transition-colors",
+                    item.id === selectedId && compose === null
+                      ? "border-border bg-accent"
+                      : "border-border/60 hover:bg-accent/50",
+                  )}
+                >
+                  <button type="button" onClick={() => select(item.id)} className="min-w-0 flex-1 text-left">
+                    <span className="flex items-center gap-1.5">
+                      {item.sessionStatus === "running" && <LiveDot />}
+                      {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
+                      <span className="line-clamp-2 text-sm font-medium">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
+                      {item.unread && (
+                        <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
+                      )}
+                    </span>
+                    <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>
+                      <span className="shrink-0">· {formatRelativeDuration(item.updatedAt, now)}</span>
+                    </span>
+                    <span className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="text-2xs text-muted-foreground">Étape</span>
+                      <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="px-1.5 py-0 text-2xs">
+                        {CONVERSATION_STATUS_LABELS[item.status]}
+                      </Badge>
+                    </span>
+                  </button>
+                  {!item.unread && (
+                    <button
+                      type="button"
+                      aria-label="Marquer comme non lue"
+                      title="Marquer comme non lue"
+                      onClick={() => markUnread(item)}
+                      className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Mail className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     type="button"
-                    aria-label="Marquer comme non lue"
-                    title="Marquer comme non lue"
-                    onClick={() => markUnread(item)}
+                    aria-label="Classer la conversation"
+                    title="Classer la conversation"
+                    onClick={() => setSettled(item, true)}
                     className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                   >
-                    <Mail className="h-3.5 w-3.5" />
+                    <Archive className="h-3.5 w-3.5" />
                   </button>
-                )}
-                <ConfirmPopover
-                  title="Supprimer la conversation"
-                  description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
-                  confirmLabel="Supprimer"
-                  destructive
-                  onConfirm={() => remove(item.id)}
-                >
-                  <button
-                    type="button"
-                    aria-label="Supprimer la conversation"
-                    className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                  <ConfirmPopover
+                    title="Supprimer la conversation"
+                    description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
+                    confirmLabel="Supprimer"
+                    destructive
+                    onConfirm={() => remove(item.id)}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </ConfirmPopover>
-              </div>
-            </li>
-          ))}
-        </ul>
+                    <button
+                      type="button"
+                      aria-label="Supprimer la conversation"
+                      className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </ConfirmPopover>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {settled.length > 0 && (
+            <SettledConversations
+              conversations={settled}
+              selectedId={compose === null ? selectedId : null}
+              now={now}
+              projectLabel={(project) => resolveProjectLabel(projects, project)}
+              onSelect={(conversationId) => select(conversationId)}
+              onUnsettle={(item) => setSettled(item, false)}
+              onDelete={remove}
+            />
+          )}
+        </div>
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">

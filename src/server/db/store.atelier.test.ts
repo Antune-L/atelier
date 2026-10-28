@@ -81,6 +81,19 @@ describe("Store atelier", () => {
     expect(read.updatedAt).toBe(unread.updatedAt);
   });
 
+  test("tracks the settled flag without reordering", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    expect(conversation.settled).toBe(false);
+    const settled = store.setConversationSettled(conversation.id, true);
+    expect(settled.settled).toBe(true);
+    expect(settled.updatedAt).toBe(conversation.updatedAt);
+    const unsettled = store.setConversationSettled(conversation.id, false);
+    expect(unsettled.settled).toBe(false);
+    expect(unsettled.updatedAt).toBe(conversation.updatedAt);
+    expect(store.updateConversation(conversation.id, { settled: true }).settled).toBe(true);
+  });
+
   test("appends and edits messages in order", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

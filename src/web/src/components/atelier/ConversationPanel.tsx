@@ -9,6 +9,7 @@ import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
 import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/ui/markdown";
@@ -19,7 +20,7 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, agentLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, agentLabel, groupActivityRows, subagentCountLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -77,12 +78,23 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
   const items = buildThread(messages);
   const label = agentLabel(settings, defaults);
   const lastMessage = messages[messages.length - 1];
-  const scrollSignature = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.sessionStatus}`;
+  const scrollSignature = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.sessionStatus}:${conversation.activeSubagents.length}`;
 
   useLayoutEffect(() => {
     const el = threadRef.current;
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [scrollSignature]);
+
+  // The sub-agents panel narrows the thread: re-pin once the new width has been laid out.
+  useLayoutEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedToBottom.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const onThreadScroll = (): void => {
     const el = threadRef.current;
@@ -145,6 +157,11 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
           </p>
           <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
         </div>
+        {conversation.activeSubagents.length > 0 && (
+          <Badge variant="info" className="lg:hidden">
+            {subagentCountLabel(conversation.activeSubagents.length)}
+          </Badge>
+        )}
         <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
           <PopoverTrigger>
             <Button size="sm" variant="ghost">
@@ -306,19 +323,38 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
 }
 
 function ActivityBlock({ rows, live }: { rows: ConversationMessage[]; live: boolean }) {
+  const entries = groupActivityRows(rows);
+  const mainCount = entries.filter((entry) => entry.kind === "row").length;
   return (
     <details className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground">
         {live && <LiveDot />}
         <span className={FIELD_LABEL_CLASSES}>Journal de session</span>
-        <span className="font-mono text-2xs">{rows.length}</span>
+        <span className="font-mono text-2xs">{mainCount}</span>
       </summary>
       <ul className="mt-2 space-y-1 font-mono text-2xs text-muted-foreground">
-        {rows.map((row) => (
-          <li key={row.id} className="truncate">
-            {row.content}
-          </li>
-        ))}
+        {entries.map((entry) =>
+          entry.kind === "row" ? (
+            <li key={entry.row.id} className="truncate">
+              {entry.row.content}
+            </li>
+          ) : (
+            <li key={`subagent:${entry.agentId}`}>
+              <details className="rounded border border-border/60 px-2 py-1">
+                <summary className="cursor-pointer truncate" title={entry.label}>
+                  {entry.label} · {entry.rows.length} {entry.rows.length === 1 ? "action" : "actions"}
+                </summary>
+                <ul className="mt-1 space-y-1 pl-2">
+                  {entry.rows.map((row) => (
+                    <li key={row.id} className="truncate">
+                      {row.content}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+          ),
+        )}
       </ul>
     </details>
   );

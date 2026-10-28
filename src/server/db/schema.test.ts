@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { ORCHESTRATOR_BACKFILL_META_KEY } from "../../shared/constants.ts";
+import { DEFAULT_RESEARCH_OPTIONS } from "../../shared/schemas.ts";
 import { initProjectRegistry } from "../config.ts";
 import { makeTicket } from "../testing/fixtures.ts";
 import { removeDbFiles, tmpDbPath } from "../testing/tmpDb.ts";
@@ -225,6 +226,31 @@ describe("implementation_finished_at backfill", () => {
     expect(ticketNumberOf(reopened, "implementation_started_at", toReview)).toBeNull();
     expect(ticketNumberOf(reopened, "implementation_finished_at", mergedWithDone)).toBeNull();
     reopened.close();
+  });
+});
+
+describe("atelier sub-agent columns", () => {
+  test("adds the sub-agent columns to a DB that predates them without data loss", () => {
+    const path = reserveDbPath();
+    const seed = createDatabase(path);
+    const store = new Store(seed);
+    store.createProject("p", { label: "P", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
+    initProjectRegistry(store);
+    const conversation = store.createConversation({ project: "p", title: "Legacy", orchestrator: "claude", model: null, effort: null, codexModel: null, codexEffort: null, codexFast: false, researchEnabled: false, researchOptions: DEFAULT_RESEARCH_OPTIONS });
+    const message = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Bonjour", turnId: null });
+    seed.exec("ALTER TABLE conversations DROP COLUMN active_subagents");
+    seed.exec("ALTER TABLE conversation_messages DROP COLUMN agent_id");
+    seed.exec("ALTER TABLE conversation_messages DROP COLUMN agent_label");
+    seed.close();
+
+    const db = createDatabase(path);
+    expect(hasColumn(db, "conversations", "active_subagents")).toBe(true);
+    expect(hasColumn(db, "conversation_messages", "agent_id")).toBe(true);
+    expect(hasColumn(db, "conversation_messages", "agent_label")).toBe(true);
+    const reopened = new Store(db);
+    expect(reopened.getConversation(conversation.id)).toMatchObject({ title: "Legacy", activeSubagents: [] });
+    expect(reopened.listConversationMessages(conversation.id)).toEqual([{ ...message, agentId: null, agentLabel: null }]);
+    db.close();
   });
 });
 

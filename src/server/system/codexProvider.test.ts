@@ -1092,6 +1092,41 @@ test("native child streams stay isolated and cannot end the parent turn", async 
   await session.close();
 });
 
+test("native children carry a numbered sub-agent identity and a start/end lifecycle", async () => {
+  const fixture = appServerFixture();
+  const events: AgentSessionEvent[] = [];
+  const provider = createCodexProvider(new WorkerMcpManager(), {
+    connect: fixture.connect, resolveBinary: () => "/fixture/codex", projectEnvironment: () => ({}),
+  });
+  const session = provider.createSession(options(events));
+  session.send("review");
+  await waitFor(() => fixture.requests.some((request) => request.method === "turn/start"));
+  fixture.notify({ method: "thread/started", params: { thread: { id: "child-a", parentThreadId: "thread-1" } } });
+  fixture.notify({ method: "thread/started", params: { thread: { id: "child-b", parentThreadId: "thread-1" } } });
+  fixture.notify({ method: "thread/started", params: { thread: { id: "child-a", parentThreadId: "thread-1" } } });
+  for (const threadId of ["thread-1", "child-a", "child-b"]) {
+    fixture.notify({ method: "item/agentMessage/delta", params: { threadId, turnId: "turn-1", itemId: "i", delta: threadId } });
+  }
+  fixture.notify({ method: "turn/completed", params: { threadId: "child-a", turn: { id: "turn-c", status: "interrupted", error: null } } });
+  fixture.notify({ method: "turn/started", params: { threadId: "child-a", turn: { id: "turn-d" } } });
+
+  const messages = events.filter((event) => event.type === "assistant_text");
+  expect(messages[0]?.subagent).toBeUndefined();
+  expect(messages[0]?.sourceId).toBeUndefined();
+  expect(messages[1]).toMatchObject({ sourceId: "child-a", subagent: { id: "child-a", label: "Sous-agent 1" } });
+  expect(messages[2]).toMatchObject({ sourceId: "child-b", subagent: { id: "child-b", label: "Sous-agent 2" } });
+  expect(events.filter((event) => event.type === "subagent_lifecycle")).toEqual([
+    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1" },
+    { type: "subagent_lifecycle", phase: "started", id: "child-b", label: "Sous-agent 2" },
+    { type: "subagent_lifecycle", phase: "ended", id: "child-a", label: "Sous-agent 1", status: "stopped" },
+    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1" },
+  ]);
+  expect(events.some((event) => event.type === "turn_end")).toBe(false);
+  fixture.notify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } } });
+  await waitFor(() => events.some((event) => event.type === "turn_end"));
+  await session.close();
+});
+
 test("forced disposal reaches a connection whose graceful close is stuck", async () => {
   const fixture = appServerFixture();
   let disposed = false;

@@ -479,6 +479,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   settled INTEGER NOT NULL DEFAULT 0,
   context_tokens INTEGER,
   context_window INTEGER,
+  active_subagents TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -489,6 +490,8 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   turn_id TEXT,
+  agent_id TEXT,
+  agent_label TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -657,6 +660,12 @@ const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "settled", ddl: "ALTER TABLE conversations ADD COLUMN settled INTEGER NOT NULL DEFAULT 0" },
   { column: "context_tokens", ddl: "ALTER TABLE conversations ADD COLUMN context_tokens INTEGER" },
   { column: "context_window", ddl: "ALTER TABLE conversations ADD COLUMN context_window INTEGER" },
+  { column: "active_subagents", ddl: "ALTER TABLE conversations ADD COLUMN active_subagents TEXT NOT NULL DEFAULT '[]'" },
+];
+
+const CONVERSATION_MESSAGE_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "agent_id", ddl: "ALTER TABLE conversation_messages ADD COLUMN agent_id TEXT" },
+  { column: "agent_label", ddl: "ALTER TABLE conversation_messages ADD COLUMN agent_label TEXT" },
 ];
 
 const AUDIT_STATE_MIGRATIONS: { column: string; ddl: string }[] = [
@@ -687,6 +696,7 @@ export function createDatabase(path: string): Database {
   migrate(db, "review_approvals", REVIEW_RESULT_MIGRATIONS);
   migrate(db, "quality_validation_runs", QUALITY_RUN_MIGRATIONS);
   migrate(db, "conversations", CONVERSATION_MIGRATIONS);
+  migrate(db, "conversation_messages", CONVERSATION_MESSAGE_MIGRATIONS);
   migrate(db, "audit_project_state", AUDIT_STATE_MIGRATIONS);
   if (!reviewPassPolicyExisted) {
     db.exec(`UPDATE review_passes SET requires_approval = 0

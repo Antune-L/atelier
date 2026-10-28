@@ -211,6 +211,33 @@ active` when nothing is live) and a `Compacter` button.
   `thread/compact/start` + `modelContextWindow` were only checked against the SDK types and the
   strings in the bundled Codex 0.160.0 binary; the tests use scripted providers.
 
+### Sub-agent activity
+
+Sub-agents launched by the Atelier session (Claude `Agent`/`Task`, Codex `spawn_agent`) are shown
+as attributed activity lines and as a live list on the conversation.
+
+- Seam (`agentSession.ts`): any event may carry `subagent?: { id, label }` identifying the
+  sub-agent that produced it; a dedicated `{ type: "subagent_lifecycle"; phase: "started" |
+  "ended"; id; label; status? }` event reports starts and ends. Both Claude and Codex emit them.
+  Labels read `description · type`.
+- Messages: `conversation_messages.agent_id` / `agent_label` (nullable) are set on `activity` rows
+  produced by a sub-agent (`tool_use`, and `plan`/`subagent` `progress`); null for the main agent.
+  Such a line takes the current or last user turn id but never opens a turn, never changes
+  `sessionStatus` and never flushes (freezes) the main assistant reply. A sub-agent's
+  `assistant_text` (with `subagent` or `sourceId`) is ignored. Sub-agent lines are excluded from
+  the history replayed when a session is relaunched.
+- Conversations: `activeSubagents: { id, label, startedAt }[]` (JSON column, server-owned) is
+  updated and pushed on every lifecycle event (`started` adds or relabels, `ended` removes). It is
+  cleared on session failure, interrupt, close, settings change, idle close, ceiling close and, at
+  server start, by `recoverStale` for every conversation regardless of its status.
+- Idle close: while the list is non-empty the idle timer is not armed. When the last sub-agent
+  ends and the conversation is not `running` (and no compaction runs), the idle timer is armed.
+- Ceiling: an active sub-agent keeps the session open for at most `ATELIER_SUBAGENT_CEILING_MS`
+  (60 min, injectable as `subagentCeilingMs`) counted from the oldest `startedAt`. On expiry the
+  session is disconnected like an idle close: background state reset, list cleared,
+  `sessionStatus` set to `idle` (unread if a background notification was pending) and context
+  figures cleared.
+
 ## Lots and status
 
 | Lot | Scope | Status |

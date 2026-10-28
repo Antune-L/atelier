@@ -24,6 +24,7 @@ import type {
   AgentSubagentDefinition,
   AgentTurnUsage,
 } from "./agentSession.ts";
+import { SUBAGENT_DEFAULT_LABEL } from "./agentSession.ts";
 import {
   CodexAppServerRpcError,
   connectCodexAppServer,
@@ -705,6 +706,8 @@ function createCodexAgentSession(
   const finalAgentMessageByTurn = new Map<string, string>();
   const endedTurns = new Set<string>();
   const childThreads = new Set<string>();
+  const childLabels = new Map<string, string>();
+  const activeChildren = new Set<string>();
   const workerTools = workerToolsForRole(options.role);
   const hasWorkerServer = options.disableWorkerTools !== true && workerTools.length > 0;
   const workerToken = hasWorkerServer ? nanoid(32) : null;
@@ -842,8 +845,28 @@ function createCodexAgentSession(
     return id === threadId || childThreads.has(id);
   }
 
+  function addChildThread(id: string): void {
+    if (childThreads.size >= 64 || id === threadId) return;
+    childThreads.add(id);
+    if (!childLabels.has(id)) childLabels.set(id, `${SUBAGENT_DEFAULT_LABEL} ${childLabels.size + 1}`);
+  }
+
+  function childLabel(id: string): string {
+    return childLabels.get(id) ?? SUBAGENT_DEFAULT_LABEL;
+  }
+
+  function startChild(id: string): void {
+    if (activeChildren.has(id)) return;
+    activeChildren.add(id);
+    emit({ type: "subagent_lifecycle", phase: "started", id, label: childLabel(id) });
+  }
+
   function emitFrom(sourceThreadId: string, event: AgentSessionEvent): void {
-    emit(sourceThreadId === threadId ? event : { ...event, sourceId: sourceThreadId });
+    emit(sourceThreadId === threadId ? event : {
+      ...event,
+      sourceId: sourceThreadId,
+      subagent: { id: sourceThreadId, label: childLabel(sourceThreadId) },
+    });
   }
 
   function parseItem(notification: CodexAppServerNotification, completed: boolean): void {
@@ -898,9 +921,7 @@ function createCodexAgentSession(
       return;
     }
     if (item.type === "collabAgentToolCall") {
-      for (const receiver of item.receiverThreadIds) {
-        if (childThreads.size < 64 && receiver !== threadId) childThreads.add(receiver);
-      }
+      for (const receiver of item.receiverThreadIds) addChildThread(receiver);
       if (!completed) emit({ type: "tool_use", name: `collaboration__${item.tool}`, input: { receivers: item.receiverThreadIds } });
       emit({ type: "progress", kind: "subagent", message: `${item.tool} : ${item.status}` });
       return;
@@ -917,8 +938,9 @@ function createCodexAgentSession(
     if (cleaned) return;
     if (notification.method === "thread/started") {
       const parsed = z.object({ thread: z.object({ id: z.string(), parentThreadId: z.string().nullable() }) }).safeParse(notification.params);
-      if (parsed.success && parsed.data.thread.parentThreadId && observedThread(parsed.data.thread.parentThreadId) && childThreads.size < 64) {
-        childThreads.add(parsed.data.thread.id);
+      if (parsed.success && parsed.data.thread.parentThreadId && observedThread(parsed.data.thread.parentThreadId)) {
+        addChildThread(parsed.data.thread.id);
+        if (childThreads.has(parsed.data.thread.id)) startChild(parsed.data.thread.id);
       }
       return;
     }
@@ -983,12 +1005,29 @@ function createCodexAgentSession(
     if (notification.method === "turn/started") {
       const parsed = turnStartedSchema.safeParse(notification.params);
       if (parsed.success && parsed.data.threadId === threadId) activeTurnId = parsed.data.turn.id;
+      else if (parsed.success && childThreads.has(parsed.data.threadId)) startChild(parsed.data.threadId);
       return;
     }
     if (notification.method === "turn/completed") {
       preparedHook.drainDenials();
       const parsed = turnCompletedSchema.safeParse(notification.params);
-      if (!parsed.success || parsed.data.threadId !== threadId) return;
+      if (!parsed.success) return;
+      const sourceThreadId = parsed.data.threadId;
+      if (sourceThreadId !== threadId && childThreads.has(sourceThreadId)) {
+        // A child turn ending must never end the main turn.
+        if (activeChildren.delete(sourceThreadId)) {
+          const status = parsed.data.turn.status;
+          emit({
+            type: "subagent_lifecycle",
+            phase: "ended",
+            id: sourceThreadId,
+            label: childLabel(sourceThreadId),
+            status: status === "completed" ? "completed" : status === "interrupted" ? "stopped" : "failed",
+          });
+        }
+        return;
+      }
+      if (sourceThreadId !== threadId) return;
       const turn = parsed.data.turn;
       clearActiveTurn(turn.id);
       if (turn.error) emit({ type: "error", message: describeCodexError(turn.error.message) });

@@ -78,7 +78,24 @@ export type AgentSessionEvent = (
   | { type: "context_usage"; usedTokens: number; maxTokens: number | null }
   /** Live non-ambient background tasks of the session (REPLACE semantics: the full set each time). Claude only. */
   | { type: "background_tasks"; activeTaskIds: string[] }
-) & { sourceId?: string };
+  /** A sub-agent of the session started or ended (no transcript line). */
+  | {
+      type: "subagent_lifecycle";
+      phase: "started" | "ended";
+      id: string;
+      label: string;
+      status?: "completed" | "failed" | "stopped";
+    }
+) & { sourceId?: string; subagent?: AgentSubagentRef };
+
+/** Identifies the sub-agent that produced an event. */
+export interface AgentSubagentRef {
+  id: string;
+  label: string;
+}
+
+/** Fallback display label of a sub-agent when the provider gives no description. */
+export const SUBAGENT_DEFAULT_LABEL = "Sous-agent";
 
 /**
  * SDK permission modes the backend uses (subset of the SDK's full set). `dontAsk` mirrors the old

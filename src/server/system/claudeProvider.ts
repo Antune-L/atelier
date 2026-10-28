@@ -32,6 +32,7 @@ import { createLogger } from "../logger.ts";
 import type {
   AgentImageInput,
   AgentProvider,
+  AgentSendOptions,
   AgentSessionEvent,
   AgentSessionHandle,
   AgentSessionOptions,
@@ -196,7 +197,7 @@ export function createSdkAgentSession(
     resume?.();
   }
 
-  function enqueue(content: string, messageId?: string, images?: readonly AgentImageInput[]): string {
+  function enqueue(content: string, messageId?: string, images?: readonly AgentImageInput[], options?: AgentSendOptions): string {
     const id = messageId ?? nanoid(16);
     if (closed) {
       opts.onEvent({ type: "message_status", messageId: id, status: "rejected", turnId: null });
@@ -212,6 +213,9 @@ export function createSdkAgentSession(
         });
       }
     }
+    // NOTE: unmeasured live (see probeClaudeSteering.ts). `next` asks the CLI to inject the message at
+    // the next opportunity of the running turn; `now` would abort an in-flight tool call.
+    if (options?.steer) prompt.priority = "next";
     inbox.push({ id, prompt });
     opts.onEvent({ type: "message_status", messageId: id, status: "received", turnId: null });
     wake();

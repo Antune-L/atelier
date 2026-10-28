@@ -492,6 +492,7 @@ CREATE TABLE IF NOT EXISTS conversation_messages (
   turn_id TEXT,
   agent_id TEXT,
   agent_label TEXT,
+  steering TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -666,6 +667,7 @@ const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
 const CONVERSATION_MESSAGE_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "agent_id", ddl: "ALTER TABLE conversation_messages ADD COLUMN agent_id TEXT" },
   { column: "agent_label", ddl: "ALTER TABLE conversation_messages ADD COLUMN agent_label TEXT" },
+  { column: "steering", ddl: "ALTER TABLE conversation_messages ADD COLUMN steering TEXT" },
 ];
 
 const AUDIT_STATE_MIGRATIONS: { column: string; ddl: string }[] = [

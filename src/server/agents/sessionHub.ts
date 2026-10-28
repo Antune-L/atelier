@@ -221,6 +221,9 @@ function renderImplementationDone(event: Extract<ChannelEvent, { type: "implemen
   return `Lot «${event.label}» terminé : la session déléguée a rendu la main. ${summary}\nTous les lots sont terminés. Implémentation déléguée terminée. Tu es la session orchestratrice : reprends avec tes propres permissions, relis le diff produit (git diff), comble les manques puis effectue le formatage, les validations, la review et la publication prévus par le contrat. L'absence de validations finales ou de publication chez l'enfant est attendue. Ne relaie pas une demande d'autorisation de l'enfant : essaie toi-même la commande directe nécessaire ; si elle est refusée, indique la commande exacte et le motif avant de demander une autorisation.`;
 }
 
+/** Frames a chat message sent while the agent is running a turn. */
+export const STEER_PREFIX = "Aiguillage de l'utilisateur pendant ton tour (réoriente le travail en cours sans repartir de zéro) : ";
+
 /** Render a backend channel event as the user-turn text injected into the live session. */
 export function renderChannelEvent(event: ChannelEvent): string {
   switch (event.type) {
@@ -243,7 +246,7 @@ export function renderChannelEvent(event: ChannelEvent): string {
     case "user_comment":
       return `Commentaire de l'utilisateur (à prendre en compte dans le travail en cours) : ${event.body}`;
     case "chat":
-      return event.content;
+      return event.steer ? `${STEER_PREFIX}${event.content}` : event.content;
   }
 }
 
@@ -466,7 +469,8 @@ export class SessionHub {
     try {
       this.handlers?.onMessageQueued?.(context);
       live.messageMetadata.set(messageId, { channel: event.type, generationId: live.generationId });
-      const sentMessageId = live.handle.send(content, messageId, images);
+      const steer = event.type === "chat" && event.steer === true;
+      const sentMessageId = steer ? live.handle.send(content, messageId, images, { steer: true }) : live.handle.send(content, messageId, images);
       if (sentMessageId !== messageId) throw new Error("Le provider n'a pas conservé l'identifiant du message.");
       return true;
     } catch (error) {

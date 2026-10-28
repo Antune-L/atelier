@@ -233,12 +233,18 @@ export interface AgentImageInput {
   data: string;
 }
 
+/** Delivery hints for one user message; providers that cannot honor them ignore them. */
+export interface AgentSendOptions {
+  /** The message redirects the turn currently running instead of opening a new one. */
+  steer?: boolean;
+}
+
 /** A live handle to a running agent session. */
 export interface AgentSessionHandle {
   readonly ticketId: string;
   /** Inject a user turn into the live session (contract / answer / nudge / user_comment). */
   /** Queue one identified user message and return its client id. */
-  send(content: string, messageId?: string, images?: readonly AgentImageInput[]): string;
+  send(content: string, messageId?: string, images?: readonly AgentImageInput[], options?: AgentSendOptions): string;
   /** Preempt the current turn (best-effort; surfaces as a non-success turn_end). */
   interrupt(): Promise<void>;
   /**

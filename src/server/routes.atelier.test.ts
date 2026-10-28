@@ -6,7 +6,7 @@ import { conversationMessageSchema, conversationSchema, prdDocumentRecordSchema,
 import type { PrdDocument } from "../shared/schemas.ts";
 import type { Orchestrator } from "../shared/constants.ts";
 import { z } from "zod";
-import { AtelierManager } from "./agents/atelierManager.ts";
+import { AtelierManager, CONSOLIDATE_BUSY_MESSAGE, REGENERATE_BUSY_MESSAGE } from "./agents/atelierManager.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
@@ -281,6 +281,34 @@ describe("Atelier routes", () => {
     expect((await request("GET", `/conversations/${conversation.id}`)).status).toBe(HTTP_NOT_FOUND);
     expect((await request("POST", "/conversations/absent/messages", { content: "x" })).status).toBe(HTTP_NOT_FOUND);
     expect((await request("PATCH", "/prd/absent", { status: "validated" })).status).toBe(HTTP_NOT_FOUND);
+  });
+
+  test("refuses consolidation and regeneration while a turn runs but accepts steering messages", async () => {
+    const { store, request } = setup();
+    const conversation = conversationSchema.parse(await (await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY })).json());
+    expect((await request("POST", `/conversations/${conversation.id}/messages`, { content: "Bonjour" })).status).toBe(HTTP_OK);
+    await flushMicrotasks();
+    expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+    const record = store.createPrdDocument({ conversationId: conversation.id, document: loadTemplate() });
+    const errorSchema = z.object({ error: z.string() });
+
+    const consolidate = await request("POST", `/conversations/${conversation.id}/consolidate`, {});
+    expect(consolidate.status).toBe(HTTP_CONFLICT);
+    expect(errorSchema.parse(await consolidate.json()).error).toBe(CONSOLIDATE_BUSY_MESSAGE);
+    const regenerate = await request("POST", `/prd/${record.id}/regenerate`);
+    expect(regenerate.status).toBe(HTTP_CONFLICT);
+    expect(errorSchema.parse(await regenerate.json()).error).toBe(REGENERATE_BUSY_MESSAGE);
+
+    expect((await request("POST", `/conversations/${conversation.id}/messages`, { content: "Plutôt X" })).status).toBe(HTTP_OK);
+    expect(store.listConversationMessages(conversation.id).map((message) => [message.content, message.steering])).toEqual([
+      ["Bonjour", null],
+      ["Plutôt X", "pending"],
+    ]);
+
+    store.updateConversation(conversation.id, { sessionStatus: "idle" });
+    expect((await request("POST", `/conversations/${conversation.id}/consolidate`, {})).status).toBe(HTTP_OK);
+    store.updateConversation(conversation.id, { sessionStatus: "idle" });
+    expect((await request("POST", `/prd/${record.id}/regenerate`)).status).toBe(HTTP_OK);
   });
 
   test("settles and unsettles a conversation without reordering it", async () => {

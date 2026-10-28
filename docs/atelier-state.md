@@ -238,6 +238,47 @@ as attributed activity lines and as a live list on the conversation.
   `sessionStatus` set to `idle` (unread if a background notification was pending) and context
   figures cleared.
 
+### Steering (« Aiguillage »)
+
+- Composer: while `sessionStatus === "running"` the composer stays enabled and its action becomes
+  « Aiguiller ». `POST /conversations/:id/messages` is never refused for a running conversation.
+- Persistence: the user message keeps its RAW content (no prefix) with
+  `conversation_messages.steering = "pending"` (nullable column, `ConversationSteering`). States:
+  `pending` (sent mid-turn, unresolved), `steered` (absorbed by the running turn), `queued`
+  (handled by a follow-up turn, badge « en file »), `failed` (not transmitted), `abandoned`
+  (dropped). Regular messages keep `steering: null`.
+- Framing: the chat channel event carries `steer: true`; `renderChannelEvent` prefixes the content
+  with `STEER_PREFIX` (« Aiguillage de l'utilisateur pendant ton tour … : »), which the Atelier
+  prompt explains (integrate without restarting, never by itself a PRD regeneration/consolidation).
+  `SessionHub.sendEvent` passes `{ steer: true }` as the 4th `send` argument (`AgentSendOptions`).
+- Claude: the steering `SDKUserMessage` gets `priority: "next"` (never `now`, which can abort a
+  running tool). **Unmeasured**: the real-Claude measurement was not run; the probe
+  `src/server/testing/probeClaudeSteering.ts` is available (see
+  [atelierProviderQualification.md](./atelierProviderQualification.md#mid-turn-steering-probe)).
+- Codex: unchanged provider; `send` uses `turn/steer` on an active turn and replays a refused steer
+  through `turn/start`, which shows up as a follow-up turn (« en file »).
+- Bubbles: the text written before the steer is flushed above it; fragments of an item already
+  being written keep updating that bubble, and the next new item (text or main-agent activity)
+  opens a new bubble under the steer's `turnId`. No empty bubble is created when nothing follows.
+- Resolution heuristic: a `turn_end` with pending steers keeps the conversation `running` and arms
+  a grace timer (`ATELIER_STEER_GRACE_MS`, 10 s, injectable as `steerGraceMs`). Main-agent output
+  before it fires marks every pending steer `queued` and attaches the reply under the last steer;
+  the next `turn_end` idles normally. Expiry without output marks them `steered` and idles
+  (unread). A steer sent during the grace window first settles the earlier pending steers as
+  `steered`, then re-arms the window for itself alone. Known degradation: a slow follow-up turn may briefly show idle then running again, and
+  Claude's absorbed-vs-queued state is inferred from output after the turn end, not reported.
+  `markRunning` clears the idle close when the conversation flips back to running.
+- Order: deliveries of one conversation are chained, so several steers reach the provider in send
+  order.
+- Failure: a steer that cannot be sent while the turn still runs is marked `failed` with an
+  activity line « Message non transmis : <raison> » and leaves the status `running`; with no turn
+  running the usual error path (« Réessayer ») applies.
+- Abandonment: interrupt, settings change, session failure and the sub-agent ceiling close mark
+  pending steers `abandoned` with one activity line « Aiguillage non traité : <raison> »;
+  `recoverStale` does the same at boot (« redémarrage du backend »).
+- Guards: consolidation and regeneration throw `AtelierBusyError` while running; the routes answer
+  409 with a French message. The web disables « Valider » / « Régénérer » while running.
+
 ## Lots and status
 
 | Lot | Scope | Status |
@@ -325,7 +366,8 @@ Deviations / decisions:
   "PRD introuvable" when none owns it.
 - "Réessayer" (session error) re-posts the last user message (no dedicated retry route); Lot B should
   clear `error`/`sessionStatus` on the next message.
-- Sending is disabled while `sessionStatus === "running"` (no queued user turns).
+- Sending while `sessionStatus === "running"` steers the current turn (« Aiguiller »), see
+  [Steering](#steering-aiguillage).
 - A new PRD revision arriving for the open conversation switches to the PRD step on the latest revision.
   "L'agent régénère…" is driven by `conversation.sessionStatus === "running"`.
 - Annotation is only possible on the latest draft revision; older revisions are read-only.

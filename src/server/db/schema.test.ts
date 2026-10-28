@@ -252,6 +252,24 @@ describe("atelier sub-agent columns", () => {
     expect(reopened.listConversationMessages(conversation.id)).toEqual([{ ...message, agentId: null, agentLabel: null }]);
     db.close();
   });
+
+  test("adds the steering column to a DB that predates it without data loss", () => {
+    const path = reserveDbPath();
+    const seed = createDatabase(path);
+    const store = new Store(seed);
+    store.createProject("p", { label: "P", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
+    initProjectRegistry(store);
+    const conversation = store.createConversation({ project: "p", title: "Legacy", orchestrator: "claude", model: null, effort: null, codexModel: null, codexEffort: null, codexFast: false, researchEnabled: false, researchOptions: DEFAULT_RESEARCH_OPTIONS });
+    const message = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Bonjour", turnId: null });
+    seed.exec("ALTER TABLE conversation_messages DROP COLUMN steering");
+    seed.close();
+
+    const db = createDatabase(path);
+    expect(hasColumn(db, "conversation_messages", "steering")).toBe(true);
+    const reopened = new Store(db);
+    expect(reopened.listConversationMessages(conversation.id)).toEqual([{ ...message, steering: null }]);
+    db.close();
+  });
 });
 
 describe("fresh database seeding", () => {

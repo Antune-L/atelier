@@ -11,13 +11,13 @@ import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
 import type { NewConversation } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
-import type { AgentImageInput, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
+import type { AgentImageInput, AgentSendOptions, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
-import { AtelierManager, COMPACT_NO_SESSION_MESSAGE, COMPACT_RUNNING_MESSAGE, describeToolUse } from "./atelierManager.ts";
+import { AtelierBusyError, AtelierManager, COMPACT_NO_SESSION_MESSAGE, COMPACT_RUNNING_MESSAGE, describeToolUse } from "./atelierManager.ts";
 import { atelierSessionKey, parseAtelierSessionKey } from "./sessionConfig.ts";
-import { SessionHub } from "./sessionHub.ts";
+import { SessionHub, STEER_PREFIX } from "./sessionHub.ts";
 
 const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "..", "vendor", "prd", "prd-template.json");
 
@@ -25,8 +25,10 @@ class CapturingSystem extends FakeSystemAdapter {
   readonly sessions: AgentSessionOptions[] = [];
   readonly sent: string[][] = [];
   readonly images: AgentImageInput[][][] = [];
+  readonly sendOptions: Array<AgentSendOptions | undefined> = [];
   compacts = 0;
   compactError: string | null = null;
+  failSend = false;
 
   override startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.sessions.push(opts);
@@ -36,9 +38,11 @@ class CapturingSystem extends FakeSystemAdapter {
     this.images.push(sentImages);
     return {
       ticketId: opts.ticketId,
-      send: (content, messageId = crypto.randomUUID(), images = []) => {
+      send: (content, messageId = crypto.randomUUID(), images = [], options = undefined) => {
+        if (this.failSend) throw new Error("transport fermé");
         sent.push(content);
         sentImages.push([...images]);
+        this.sendOptions.push(options);
         return messageId;
       },
       compact: async () => {
@@ -87,7 +91,7 @@ afterEach(async () => {
   for (const close of closers.splice(0)) await close();
 });
 
-function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?: number) {
+function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?: number, steerGraceMs?: number) {
   const db = createDatabase(":memory:");
   const store = new Store(db);
   store.createProject(FIXTURE_PROJECT_KEY, { label: "Test", repoPath: "/tmp/repo", baseBranch: "main", commitTimeoutMs: 60_000, defaultAutoMerge: false, defaultAddScreenshots: false });
@@ -110,6 +114,7 @@ function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?:
     flushIntervalMs: 0,
     ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
     ...(subagentCeilingMs !== undefined ? { subagentCeilingMs } : {}),
+    ...(steerGraceMs !== undefined ? { steerGraceMs } : {}),
   });
   closers.push(async () => {
     manager.stop();
@@ -579,6 +584,183 @@ describe("AtelierManager", () => {
       for (let attempt = 0; attempt < 100 && sessionHub.isConnected(key); attempt += 1) await Bun.sleep(5);
       expect(sessionHub.isConnected(key)).toBe(false);
       expect(store.getConversation(conversation.id)).toMatchObject({ activeSubagents: [], sessionStatus: "idle", contextTokens: null });
+    });
+  });
+
+  describe("steering", () => {
+    const delta = (text: string, itemId: string): AgentSessionEvent => ({ type: "assistant_text", text, stream: { itemId, mode: "delta" } });
+
+    async function running(steerGraceMs?: number, idleTimeoutMs?: number) {
+      const context = setup(idleTimeoutMs, undefined, undefined, steerGraceMs);
+      const conversation = context.store.createConversation(CODEX_CONVERSATION);
+      const first = context.manager.postMessage(conversation.id, "Bonjour");
+      await first.delivered;
+      return { ...context, conversation, first: first.message };
+    }
+    const rows = (context: { store: Store }, conversationId: string) =>
+      context.store.listConversationMessages(conversationId).map((entry) => [entry.role, entry.content, entry.turnId, entry.steering]);
+
+    test("keeps fragments of the current item in place and opens the steer's bubble on the next item", async () => {
+      const context = await running();
+      const { store, system, conversation, first } = context;
+      system.emit(delta("Début", "i1"));
+      const steer = context.manager.postMessage(conversation.id, "Plutôt X");
+      await steer.delivered;
+      expect(steer.message.steering).toBe("pending");
+      expect(steer.message.content).toBe("Plutôt X");
+      expect(system.sent[0]?.at(-1)).toBe(`${STEER_PREFIX}Plutôt X`);
+      expect(system.sendOptions.at(-1)).toEqual({ steer: true });
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+
+      system.emit(delta(" suite", "i1"));
+      system.emit(delta("Réponse à X", "i2"));
+      system.emit(TURN_END);
+      expect(rows(context, conversation.id)).toEqual([
+        ["user", "Bonjour", first.turnId, null],
+        ["assistant", "Début suite", first.turnId, null],
+        ["user", "Plutôt X", steer.message.turnId, "pending"],
+        ["assistant", "Réponse à X", steer.message.turnId, null],
+      ]);
+    });
+
+    test("creates no empty bubble when nothing new follows the steer, and stays running at the turn end", async () => {
+      const context = await running(10_000);
+      const { store, system, conversation } = context;
+      system.emit(delta("Début", "i1"));
+      await context.manager.postMessage(conversation.id, "Plutôt X").delivered;
+      system.emit(TURN_END);
+      expect(store.listConversationMessages(conversation.id).map((entry) => entry.role)).toEqual(["user", "assistant", "user"]);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+    });
+
+    test("an expired grace window marks the steers absorbed and idles", async () => {
+      const context = await running(10);
+      const { store, system, conversation } = context;
+      const steer = context.manager.postMessage(conversation.id, "Plutôt X");
+      await steer.delivered;
+      system.emit(TURN_END);
+      await Bun.sleep(30);
+      expect(store.listConversationMessages(conversation.id).find((entry) => entry.id === steer.message.id)?.steering).toBe("steered");
+      expect(store.getConversation(conversation.id)).toMatchObject({ sessionStatus: "idle", unread: true });
+    });
+
+    test("output after the turn end marks the steers queued under the last steer, then idles at the next turn end", async () => {
+      const context = await running(10_000);
+      const { store, system, conversation } = context;
+      const one = context.manager.postMessage(conversation.id, "Un");
+      const two = context.manager.postMessage(conversation.id, "Deux");
+      await two.delivered;
+      expect(system.sent[0]?.slice(-2)).toEqual([`${STEER_PREFIX}Un`, `${STEER_PREFIX}Deux`]);
+      system.emit(TURN_END);
+      system.emit({ type: "assistant_text", text: "Suite donnée" });
+      await Bun.sleep(5);
+      const messages = store.listConversationMessages(conversation.id);
+      expect(messages.filter((entry) => entry.steering !== null).map((entry) => [entry.id, entry.steering])).toEqual([
+        [one.message.id, "queued"],
+        [two.message.id, "queued"],
+      ]);
+      expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "Suite donnée", turnId: two.message.turnId });
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+      system.emit(TURN_END);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+    });
+
+    test("a steer sent after the turn end settles the earlier steers as absorbed", async () => {
+      const context = await running(10_000);
+      const { store, system, conversation } = context;
+      const one = context.manager.postMessage(conversation.id, "Un");
+      await one.delivered;
+      system.emit(TURN_END);
+      const two = context.manager.postMessage(conversation.id, "Deux");
+      await two.delivered;
+      system.emit({ type: "assistant_text", text: "Réponse à Deux" });
+      await Bun.sleep(5);
+      const messages = store.listConversationMessages(conversation.id);
+      expect(messages.filter((entry) => entry.steering !== null).map((entry) => [entry.id, entry.steering])).toEqual([
+        [one.message.id, "steered"],
+        [two.message.id, "queued"],
+      ]);
+      expect(messages.at(-1)).toMatchObject({ role: "assistant", content: "Réponse à Deux", turnId: two.message.turnId });
+      system.emit(TURN_END);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+    });
+
+    test("restarting output clears the idle close", async () => {
+      const { store, system, sessionHub, manager: atelier } = setup(20);
+      const conversation = store.createConversation(CODEX_CONVERSATION);
+      await atelier.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(TURN_END);
+      system.emit({ type: "assistant_text", text: "Encore" });
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("running");
+      await Bun.sleep(40);
+      expect(sessionHub.isConnected(atelierSessionKey(conversation.id))).toBe(true);
+    });
+
+    test("a steer that cannot be sent during a turn leaves an activity line and keeps the turn running", async () => {
+      const context = await running();
+      const { store, system, conversation } = context;
+      system.failSend = true;
+      const steer = context.manager.postMessage(conversation.id, "Plutôt X");
+      await steer.delivered;
+      const messages = store.listConversationMessages(conversation.id);
+      expect(messages.find((entry) => entry.id === steer.message.id)?.steering).toBe("failed");
+      expect(messages.at(-1)).toMatchObject({ role: "activity", turnId: steer.message.turnId });
+      expect(messages.at(-1)?.content.startsWith("Message non transmis : ")).toBe(true);
+      expect(store.getConversation(conversation.id)).toMatchObject({ sessionStatus: "running", error: null });
+      system.emit(TURN_END);
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
+    });
+
+    test("a regular message that cannot be sent still reports an error", async () => {
+      const { store, system, manager: atelier } = setup();
+      const conversation = store.createConversation(CODEX_CONVERSATION);
+      await atelier.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(TURN_END);
+      system.failSend = true;
+      await atelier.postMessage(conversation.id, "Suite").delivered;
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("error");
+    });
+
+    test.each([
+      ["interrupt", "interrompu"],
+      ["settingsChanged", "réglages modifiés"],
+      ["failure", "session en échec"],
+    ] as const)("%s abandons the pending steers with one activity line", async (trigger, reason) => {
+      const context = await running();
+      const { store, system, conversation } = context;
+      const one = context.manager.postMessage(conversation.id, "Un");
+      const two = context.manager.postMessage(conversation.id, "Deux");
+      await two.delivered;
+      if (trigger === "interrupt") await context.manager.interrupt(conversation.id);
+      else if (trigger === "settingsChanged") context.manager.settingsChanged(conversation.id);
+      else system.emit({ type: "error", message: "processus mort" });
+      const messages = store.listConversationMessages(conversation.id);
+      expect([one.message.id, two.message.id].map((id) => messages.find((entry) => entry.id === id)?.steering)).toEqual(["abandoned", "abandoned"]);
+      const lines = messages.filter((entry) => entry.content.startsWith("Aiguillage non traité"));
+      expect(lines).toEqual([expect.objectContaining({ role: "activity", content: `Aiguillage non traité : ${reason}`, turnId: two.message.turnId })]);
+      expect(store.getConversation(conversation.id)?.sessionStatus).not.toBe("running");
+    });
+
+    test("consolidation and regeneration are refused while a turn runs", async () => {
+      const context = await running();
+      const { store, conversation } = context;
+      const before = store.listConversationMessages(conversation.id).length;
+      expect(() => context.manager.consolidate(conversation.id)).toThrow(AtelierBusyError);
+      const record = store.createPrdDocument({ conversationId: conversation.id, document: loadTemplate() });
+      expect(() => context.manager.regenerate(record.id)).toThrow(AtelierBusyError);
+      expect(store.listConversationMessages(conversation.id).length).toBe(before);
+    });
+
+    test("recoverStale abandons the steers left pending by a running conversation", () => {
+      const { store, manager: atelier } = setup();
+      const conversation = store.createConversation(CODEX_CONVERSATION);
+      const steer = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "X", turnId: "t1", steering: "pending" });
+      store.updateConversation(conversation.id, { sessionStatus: "running" });
+      atelier.recoverStale();
+      const messages = store.listConversationMessages(conversation.id);
+      expect(messages.find((entry) => entry.id === steer.id)?.steering).toBe("abandoned");
+      expect(messages.at(-1)).toMatchObject({ role: "activity", content: "Aiguillage non traité : redémarrage du backend", turnId: "t1" });
+      expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
     });
   });
 

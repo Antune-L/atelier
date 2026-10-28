@@ -552,6 +552,6 @@ export const channelEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("nudge"), message: z.string() }),
   z.object({ type: z.literal("user_comment"), body: z.string() }),
-  z.object({ type: z.literal("chat"), content: z.string() }),
+  z.object({ type: z.literal("chat"), content: z.string(), steer: z.boolean().optional() }),
 ]);
 export type ChannelEvent = z.infer<typeof channelEventSchema>;

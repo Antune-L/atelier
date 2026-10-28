@@ -115,6 +115,17 @@ describe("Store atelier", () => {
     expect(store.listConversationMessages(conversation.id).find((message) => message.id === sub.id)).toMatchObject({ agentId: "a1", agentLabel: "Reviewer" });
   });
 
+  test("records and updates the steering state of a message independently of its content", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    const plain = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Bonjour", turnId: null });
+    const steer = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Plutôt X", turnId: "t1", steering: "pending" });
+    expect(plain.steering).toBeNull();
+    expect(steer.steering).toBe("pending");
+    expect(store.updateConversationMessage(steer.id, { steering: "queued" })).toMatchObject({ content: "Plutôt X", steering: "queued" });
+    expect(store.updateConversationMessage(steer.id, { content: "Plutôt Y" })).toMatchObject({ content: "Plutôt Y", steering: "queued" });
+  });
+
   test("stores the active sub-agents without reordering the conversation", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

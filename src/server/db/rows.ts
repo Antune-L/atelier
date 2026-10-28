@@ -25,6 +25,7 @@ import {
   commitLanguageSchema,
   conversationMessageRoleSchema,
   conversationSessionStatusSchema,
+  conversationSteeringSchema,
   conversationStatusSchema,
   DEFAULT_RESEARCH_OPTIONS,
   errorDetailsSchema,
@@ -747,6 +748,7 @@ const conversationMessageRowSchema = z.object({
   turn_id: z.string().nullable(),
   agent_id: z.string().nullable(),
   agent_label: z.string().nullable(),
+  steering: conversationSteeringSchema.nullable(),
   created_at: z.number(),
 });
 
@@ -820,6 +822,7 @@ export function mapConversationMessageRow(raw: unknown): ConversationMessage {
     turnId: row.turn_id,
     agentId: row.agent_id,
     agentLabel: row.agent_label,
+    steering: row.steering,
     createdAt: row.created_at,
   };
 }

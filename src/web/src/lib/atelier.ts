@@ -56,6 +56,15 @@ export const CONVERSATION_STATUS_VARIANTS: Record<ConversationStatus, BadgeVaria
   cards_created: "secondary",
 };
 
+/** Settled rows shown before the "show more" button. */
+export const SETTLED_PREVIEW_COUNT = 10;
+
+/** Splits conversations into active and settled lists, each a new array sorted by most recent update. */
+export function splitConversations(conversations: readonly Conversation[]): { active: Conversation[]; settled: Conversation[] } {
+  const sorted = [...conversations].sort((a, b) => b.updatedAt - a.updatedAt);
+  return { active: sorted.filter((c) => !c.settled), settled: sorted.filter((c) => c.settled) };
+}
+
 export function agentSettingsOf(conversation: Conversation): AtelierAgentSettings {
   return {
     orchestrator: conversation.orchestrator,

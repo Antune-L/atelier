@@ -10,7 +10,7 @@ export const PREVIEW_SEED_ENV = "KANBAN_PREVIEW_SEED";
 const PREVIEW_SEED_ENABLED = "1";
 const REAL_MODE = "0";
 const PREVIEW_SEED_META_KEY = "preview_seed_version";
-const PREVIEW_SEED_VERSION = "2";
+const PREVIEW_SEED_VERSION = "3";
 const SEED_TITLE_PREFIX = "[seed]";
 const SEED_PR_BASE_URL = "https://github.com/example/preview-demo/pull/";
 const ORCHESTRATOR_ROLE = "orchestrator";
@@ -128,6 +128,43 @@ const SEED_TICKETS: SeedTicket[] = [
   },
 ];
 
+interface SeedConversation {
+  title: string;
+  question: string;
+  answer: string;
+  settled: boolean;
+}
+
+const SEED_CONVERSATIONS: SeedConversation[] = [
+  { title: "Discussion active 1 : filtres du tableau", question: "Peut-on filtrer le tableau par orchestrateur ?", answer: "Oui, un filtre peut s'ajouter à côté du sélecteur de projet.", settled: false },
+  { title: "Discussion active 2 : export des statistiques", question: "Comment exporter les statistiques en CSV ?", answer: "Un bouton d'export peut générer le CSV à partir des exécutions.", settled: false },
+  { title: "Discussion active 3 : notifications de PR", question: "Faut-il regrouper les notifications d'une même PR ?", answer: "Oui, les regrouper par PR allège le centre de notifications.", settled: false },
+  { title: "Discussion classée 1 : thème sombre", question: "Le thème sombre suit-il le système ?", answer: "Oui, il suit la préférence du système par défaut.", settled: true },
+  { title: "Discussion classée 2 : raccourcis clavier", question: "Quels raccourcis ajouter au tableau ?", answer: "N pour un nouveau ticket et / pour la recherche.", settled: true },
+  { title: "Discussion classée 3 : pagination des tickets", question: "Faut-il paginer la colonne mergée ?", answer: "Un chargement progressif suffit pour l'instant.", settled: true },
+  { title: "Discussion classée 4 : modèles par défaut", question: "Quel modèle utiliser par défaut ?", answer: "Le modèle configuré dans les réglages du projet.", settled: true },
+  { title: "Discussion classée 5 : branches de base", question: "Peut-on choisir la branche de base par ticket ?", answer: "Oui, le champ existe déjà dans le formulaire avancé.", settled: true },
+  { title: "Discussion classée 6 : captures d'écran", question: "Les captures sont-elles jointes à la PR ?", answer: "Oui, quand l'option est activée sur le ticket.", settled: true },
+  { title: "Discussion classée 7 : dépendances", question: "Un ticket peut-il attendre un autre ticket ?", answer: "Oui, via le champ de dépendance.", settled: true },
+  { title: "Discussion classée 8 : coûts", question: "Où voir le coût d'une exécution ?", answer: "Dans la page statistiques et le détail du ticket.", settled: true },
+  { title: "Discussion classée 9 : relance", question: "Comment relancer un ticket en échec ?", answer: "Avec le bouton de relance du détail du ticket.", settled: true },
+  { title: "Discussion classée 10 : revue", question: "La revue peut-elle boucler automatiquement ?", answer: "Oui, avec l'option de revue multi-passes.", settled: true },
+  { title: "Discussion classée 11 : fusion", question: "Le merge automatique attend-il la CI ?", answer: "Oui, il attend que les vérifications passent.", settled: true },
+  { title: "Discussion classée 12 : recherche", question: "La recherche couvre-t-elle les descriptions ?", answer: "Oui, titres et descriptions sont indexés.", settled: true },
+];
+
+function insertSeedConversation(store: Store, project: string, seed: SeedConversation): void {
+  const conversation = store.createConversation({
+    project, title: `${SEED_TITLE_PREFIX} ${seed.title}`, orchestrator: "claude",
+    model: null, effort: null, codexModel: null, codexEffort: null, codexFast: false, researchEnabled: false,
+    researchOptions: { feasibility: false, howTo: false, externalDocs: false, duplicates: false, adversarialReview: false },
+  });
+  const turnId = crypto.randomUUID();
+  store.addConversationMessage({ conversationId: conversation.id, role: "user", content: seed.question, turnId });
+  store.addConversationMessage({ conversationId: conversation.id, role: "assistant", content: seed.answer, turnId });
+  if (seed.settled) store.setConversationSettled(conversation.id, true);
+}
+
 function newSeedTicket(project: string, seed: SeedTicket): NewTicket {
   const claude = seed.orchestrator === "claude";
   return {
@@ -196,7 +233,11 @@ export function seedPreviewDemoData(store: Store): void {
     for (const seed of SEED_TICKETS) {
       if (!existingTitles.has(`${SEED_TITLE_PREFIX} ${seed.title}`)) insertSeedTicket(store, project, seed, now);
     }
+    const existingConversations = new Set(store.listConversations(project).map((conversation) => conversation.title));
+    for (const seed of SEED_CONVERSATIONS) {
+      if (!existingConversations.has(`${SEED_TITLE_PREFIX} ${seed.title}`)) insertSeedConversation(store, project, seed);
+    }
     store.setMeta(PREVIEW_SEED_META_KEY, PREVIEW_SEED_VERSION);
   });
-  log.info("données de démonstration de preview insérées", { project, tickets: SEED_TICKETS.length });
+  log.info("données de démonstration de preview insérées", { project, tickets: SEED_TICKETS.length, conversations: SEED_CONVERSATIONS.length });
 }

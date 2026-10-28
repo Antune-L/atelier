@@ -31,6 +31,7 @@ function conversation(orchestrator: Orchestrator, researchEnabled: boolean, rese
     sessionId: null,
     error: null,
     unread: false,
+    settled: false,
     contextTokens: null,
     contextWindow: null,
     createdAt: 0,

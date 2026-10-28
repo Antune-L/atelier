@@ -283,6 +283,25 @@ describe("Atelier routes", () => {
     expect((await request("PATCH", "/prd/absent", { status: "validated" })).status).toBe(HTTP_NOT_FOUND);
   });
 
+  test("settles and unsettles a conversation without reordering it", async () => {
+    const { request } = setup();
+    const conversation = conversationSchema.parse(await (await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY })).json());
+    const settledResponse = await request("POST", `/conversations/${conversation.id}/settle`);
+    expect(settledResponse.status).toBe(HTTP_OK);
+    const settled = conversationSchema.parse(await settledResponse.json());
+    expect(settled.settled).toBe(true);
+    expect(settled.updatedAt).toBe(conversation.updatedAt);
+    const again = conversationSchema.parse(await (await request("POST", `/conversations/${conversation.id}/settle`)).json());
+    expect(again.settled).toBe(true);
+    const unsettledResponse = await request("POST", `/conversations/${conversation.id}/unsettle`);
+    expect(unsettledResponse.status).toBe(HTTP_OK);
+    const unsettled = conversationSchema.parse(await unsettledResponse.json());
+    expect(unsettled.settled).toBe(false);
+    expect(unsettled.updatedAt).toBe(conversation.updatedAt);
+    expect((await request("POST", "/conversations/absent/settle")).status).toBe(HTTP_NOT_FOUND);
+    expect((await request("POST", "/conversations/absent/unsettle")).status).toBe(HTTP_NOT_FOUND);
+  });
+
   test("PRD review, exports and cards chained in tasks mode", async () => {
     const { store, request, feasibility, slots } = setup();
     const analysis = spyOn(feasibility, "start");

@@ -268,6 +268,23 @@ describe("AtelierManager", () => {
     expect(store.getConversation(conversation.id)?.unread).toBe(true);
   });
 
+  test("posting a message reopens a settled conversation", async () => {
+    const { store, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    store.updateConversation(conversation.id, { settled: true });
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    expect(store.getConversation(conversation.id)?.settled).toBe(false);
+  });
+
+  test("a turn end keeps a conversation settled", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    store.updateConversation(conversation.id, { settled: true });
+    system.emit(TURN_END);
+    expect(store.getConversation(conversation.id)?.settled).toBe(true);
+  });
+
   test("notifies only once the orchestrator finishes after its background sub-agents", async () => {
     const { store, system, manager } = setup();
     const conversation = store.createConversation(CLAUDE_CONVERSATION);

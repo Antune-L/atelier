@@ -228,6 +228,7 @@ export interface ConversationPatch {
   sessionId?: string | null;
   error?: string | null;
   unread?: boolean;
+  settled?: boolean;
   contextTokens?: number | null;
   contextWindow?: number | null;
 }
@@ -3029,6 +3030,7 @@ export class Store {
     if (patch.sessionId !== undefined) set("session_id", patch.sessionId);
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.unread !== undefined) set("unread", patch.unread ? 1 : 0);
+    if (patch.settled !== undefined) set("settled", patch.settled ? 1 : 0);
     const touchesConversation = builder.hasChanges();
     if (patch.contextTokens !== undefined) set("context_tokens", patch.contextTokens);
     if (patch.contextWindow !== undefined) set("context_window", patch.contextWindow);
@@ -3042,6 +3044,12 @@ export class Store {
   setConversationUnread(id: string, unread: boolean): Conversation {
     this.db.query("UPDATE conversations SET unread = ? WHERE id = ?").run(unread ? 1 : 0, id);
     return this.requireConversation(id, "setConversationUnread");
+  }
+
+  /** Sets the settled flag without bumping updated_at, so the list order stays stable. */
+  setConversationSettled(id: string, settled: boolean): Conversation {
+    this.db.query("UPDATE conversations SET settled = ? WHERE id = ?").run(settled ? 1 : 0, id);
+    return this.requireConversation(id, "setConversationSettled");
   }
 
   deleteConversation(id: string): void {

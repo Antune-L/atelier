@@ -367,6 +367,10 @@ export const api = {
     request(`${atelierConversationPath(id)}/read`, { method: "POST" }),
   atelierMarkConversationUnread: (id: string): Promise<Conversation> =>
     request(`${atelierConversationPath(id)}/unread`, { method: "POST" }),
+  atelierSettleConversation: (id: string): Promise<Conversation> =>
+    request(`${atelierConversationPath(id)}/settle`, { method: "POST" }),
+  atelierUnsettleConversation: (id: string): Promise<Conversation> =>
+    request(`${atelierConversationPath(id)}/unsettle`, { method: "POST" }),
   atelierConsolidate: (id: string, feedback?: string): Promise<{ ok: boolean }> =>
     request(`${atelierConversationPath(id)}/consolidate`, { method: "POST", body: JSON.stringify({ feedback }) }),
   atelierUpdatePrd: (id: string, patch: UpdatePrdDocumentInput): Promise<PrdDocumentRecord> =>

@@ -476,6 +476,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   session_id TEXT,
   error TEXT,
   unread INTEGER NOT NULL DEFAULT 0,
+  settled INTEGER NOT NULL DEFAULT 0,
   context_tokens INTEGER,
   context_window INTEGER,
   created_at INTEGER NOT NULL,
@@ -653,6 +654,7 @@ const QUALITY_RUN_MIGRATIONS: { column: string; ddl: string }[] = [
 
 const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "unread", ddl: "ALTER TABLE conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0" },
+  { column: "settled", ddl: "ALTER TABLE conversations ADD COLUMN settled INTEGER NOT NULL DEFAULT 0" },
   { column: "context_tokens", ddl: "ALTER TABLE conversations ADD COLUMN context_tokens INTEGER" },
   { column: "context_window", ddl: "ALTER TABLE conversations ADD COLUMN context_window INTEGER" },
 ];

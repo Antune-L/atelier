@@ -1,5 +1,5 @@
 import { CornerDownRight, FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { RESEARCH_OPTION_LABELS } from "@shared/constants";
 import { enabledResearchOptionKeys } from "@shared/schemas";
@@ -8,6 +8,7 @@ import type { Conversation, ConversationMessage, UpdateConversationInput } from 
 import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
 import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { LiveDot } from "@/components/atelier/LiveDot";
+import { MockupFrame } from "@/components/atelier/MockupFrame";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, buildAtelierThread, subagentCountLabel, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import type { ActivityEntry, ReasoningEntry } from "@/lib/atelier";
+import { splitMockupBlocks } from "@/lib/mockupBlocks";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -315,10 +317,26 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
     );
   }
   return (
-    <div className="max-w-full text-sm">
-      <p className="mb-1 font-mono text-2xs text-muted-foreground">{agent}</p>
-      <Markdown content={message.content} />
+    <div className="flex w-full max-w-full flex-col gap-2 text-sm">
+      <p className="font-mono text-2xs text-muted-foreground">{agent}</p>
+      <AssistantContent content={message.content} running={false} />
     </div>
+  );
+}
+
+/** Assistant text with its `<mockup>` blocks rendered inline; `running` marks a reply still streaming. */
+function AssistantContent({ content, running }: { content: string; running: boolean }) {
+  const segments = useMemo(() => splitMockupBlocks(content), [content]);
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.kind === "text" ? (
+          <Markdown key={index} content={segment.text} />
+        ) : (
+          <MockupFrame key={index} title={segment.title} html={segment.html} complete={segment.complete} running={running} />
+        ),
+      )}
+    </>
   );
 }
 
@@ -338,8 +356,8 @@ function ReasoningBlock({ entries, live }: { entries: ReasoningEntry[]; live: bo
       <div className="mt-2 space-y-2">
         {entries.map((entry) =>
           entry.kind === "text" ? (
-            <div key={entry.message.id} className={live ? "text-sm" : "text-xs text-muted-foreground"}>
-              <Markdown content={entry.message.content} />
+            <div key={entry.message.id} className={`flex flex-col gap-2 ${live ? "text-sm" : "text-xs text-muted-foreground"}`}>
+              <AssistantContent content={entry.message.content} running={live} />
             </div>
           ) : (
             <ActivityList key={entry.id} entries={entry.entries} />

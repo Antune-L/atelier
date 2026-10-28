@@ -200,6 +200,33 @@ describe("AtelierManager", () => {
     expect(updated?.sessionId).toBe("claude-session");
   });
 
+  test("a mockup split across Claude text parts around a tool use is persisted intact", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Fais une maquette").delivered;
+
+    system.emit({ type: "assistant_text", text: '<mockup title="Liste"><html><body>' });
+    system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/x.css" } });
+    system.emit({ type: "assistant_text", text: "<p>x</p></body></html></mockup>" });
+    system.emit(TURN_END);
+
+    const assistant = store.listConversationMessages(conversation.id).filter((entry) => entry.role === "assistant");
+    const content = assistant.map((entry) => entry.content).join("");
+    expect(content.replace(/\s+/g, "")).toContain('<mockuptitle="Liste"><html><body><p>x</p></body></html></mockup>');
+  });
+
+  test("a mockup streamed as Codex deltas is merged by item", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CODEX_CONVERSATION);
+    await manager.postMessage(conversation.id, "Fais une maquette").delivered;
+
+    system.emit({ type: "assistant_text", text: '<mockup title="Liste"><html>', stream: { itemId: "t1:i1", mode: "delta" } });
+    system.emit({ type: "assistant_text", text: "<body>x</body></html></mockup>", stream: { itemId: "t1:i1", mode: "delta" } });
+    system.emit(TURN_END);
+
+    expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe('<mockup title="Liste"><html><body>x</body></html></mockup>');
+  });
+
   test("merges Codex deltas by item and sends later turns as raw chat", async () => {
     const { store, system, manager } = setup();
     const conversation = store.createConversation(CODEX_CONVERSATION);

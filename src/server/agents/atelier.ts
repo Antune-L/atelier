@@ -6,6 +6,7 @@ import {
   RESEARCH_OPTION_LABELS,
 } from "../../shared/constants.ts";
 import type { ResearchOptionKey } from "../../shared/constants.ts";
+import { MOCKUP_MAX_BYTES, collapseMockupHistory } from "../../shared/mockupBlocks.ts";
 import { PRD_MAX_AXES, PRD_SCHEMA_VERSION } from "../../shared/prdDocument.ts";
 import { enabledResearchOptionKeys } from "../../shared/schemas.ts";
 import type { Conversation, ConversationMessage } from "../../shared/schemas.ts";
@@ -213,12 +214,32 @@ function buildSteeringRules(): string[] {
   ];
 }
 
+function buildMockupRules(): string[] {
+  return [
+    "## Maquettes HTML",
+    "- Ne produis une maquette que sur demande explicite de l'utilisateur, ou après qu'il a accepté ta proposition d'en faire une.",
+    "- Reproduis l'écran ou le composant réel du projet géré, avec la fonctionnalité placée dedans. Lis au plus 3 fichiers d'UI ou de style, extrais couleurs, polices et rayons dans un bloc `:root{}` et signale les valeurs devinées.",
+    '- HTML et CSS inline uniquement, AUCUN JavaScript (ni `<script>`, ni attribut `on*`). Interactions en CSS seulement : `<details>`, `:target` via `href="#id"`, `:checked`. Le `<style>` va toujours dans `<head>`.',
+    `- Aucune ressource externe (ni lien http, ni police, ni image hors \`data:\`), données fictives, ${MOCKUP_MAX_BYTES / 1024} Ko maximum.`,
+    '- Format : `<mockup title="Nom court">…document HTML complet…</mockup>` dans le texte normal de ta réponse, jamais dans un bloc de code.',
+    "- Pour itérer, réutilise le même `title` et renvoie le document complet.",
+    "- N'écris jamais de fichier (session en lecture seule) et ne mets jamais de balise `<mockup>` dans le PRD.",
+  ];
+}
+
 function buildHistory(history: ConversationMessage[] | undefined): string[] {
-  const turns = (history ?? []).flatMap((message) => {
+  const messages = history ?? [];
+  // Only the latest version of each mockup title is replayed. Known asymmetry: a resumed
+  // Codex thread keeps its own full context, so this only affects rebuilt prompts
+  // (Claude relaunch, or no thread to resume).
+  const assistantIndexes = messages.flatMap((message, index) => (message.role === "assistant" ? [index] : []));
+  const collapsed = collapseMockupHistory(assistantIndexes.map((index) => messages[index]?.content ?? ""));
+  const assistantContent = new Map(assistantIndexes.map((messageIndex, position) => [messageIndex, collapsed[position]]));
+  const turns = messages.flatMap((message, index) => {
     // Sub-agent lines are never replayed to the model, board results included.
     if (message.role === "activity" && message.agentId !== null) return [];
     if (message.role === "activity" && !message.content.startsWith(ATELIER_BOARD_RESULT_PREFIX)) return [];
-    const content = message.content.trim();
+    const content = (assistantContent.get(index) ?? message.content).trim();
     if (!content) return [];
     return [`### ${HISTORY_ROLE_LABELS[message.role]}`, content, ""];
   });
@@ -241,6 +262,7 @@ export function buildAtelierPrompt({ conversation, project, history }: AtelierPr
     buildAdversarialReview(conversation),
     buildAuthoringRules(),
     buildSteeringRules(),
+    buildMockupRules(),
     buildHistory(history),
     ["## Message de l'utilisateur"],
   ].filter((section) => section.length > 0);
@@ -248,7 +270,7 @@ export function buildAtelierPrompt({ conversation, project, history }: AtelierPr
 }
 
 export function buildAtelierConsolidateTurn(feedback?: string): string {
-  const instruction = `Consolider en PRD : consolide maintenant notre échange en PRD structuré et soumets-le via le tool \`${SUBMIT_TOOL}\`, en respectant les règles de consolidation de ton contrat.`;
+  const instruction = `Consolider en PRD : consolide maintenant notre échange en PRD structuré et soumets-le via le tool \`${SUBMIT_TOOL}\`, en respectant les règles de consolidation de ton contrat. Transcris les décisions visuelles validées via des maquettes en exigences ou dans \`designConsiderations\`, sans y intégrer les maquettes elles-mêmes.`;
   const note = feedback?.trim();
   return note ? `${instruction}\n\nConsignes supplémentaires de l'utilisateur :\n${note}` : instruction;
 }

@@ -468,6 +468,32 @@ active list; turn ends and errors leave it untouched. The web list (`splitConver
 conversations first, then a collapsible "Classées" section (collapse persisted in
 `atelier:settled-collapsed`) with compact rows, limited to `SETTLED_PREVIEW_COUNT` until "Afficher N de plus".
 
+## HTML mockups
+
+On explicit request (or after the user accepts its proposal), the Atelier agent writes a static mockup
+in its normal reply text as `<mockup title="Short name">…full HTML document…</mockup>` (prompt section
+`## Maquettes HTML` in `buildMockupRules`). HTML + inline CSS only, no JavaScript, no external
+resource, at most 64 KB. Reusing a `title` iterates on the same mockup. There is no worker tool, table
+or WS event: assistant text is already persisted raw for Claude and Codex.
+
+- **Parsing** — `src/shared/mockupBlocks.ts` (`splitMockupBlocks`, shared by server and web) is a
+  hand-written scanner. Tags inside fenced code blocks or inline code spans stay text. The mockup body
+  is raw HTML: no code tracking, and the first `</mockup>` closes it (a premature closing tag is a
+  known limitation). An unclosed block is an incomplete segment; a partial `<mockup` prefix or an
+  opening tag still missing its `>` at the end of the buffer is hidden so streaming does not flash it.
+- **Rendering** — a sandboxed iframe with an empty `sandbox` (`MOCKUP_SANDBOX`, opaque origin, no
+  scripts) and `srcdoc`. The HTML goes through a dedicated DOMPurify configuration first, then
+  `buildMockupSrcdoc` injects the `MOCKUP_CSP` meta as the first child of `<head>` (after any
+  doctype). Mockups over `MOCKUP_MAX_BYTES` (UTF-8) are not rendered; an incomplete block shows a
+  placeholder while streaming.
+- **History** — `buildHistory` replays only the latest version of each title across assistant
+  messages (`collapseMockupHistory`); earlier versions become
+  `[version précédente de la maquette « X » omise]`. Untouched messages stay byte-identical.
+  Asymmetry: a resumed Codex thread keeps its own full context, so the truncation only affects
+  rebuilt prompts (Claude relaunch, or no thread to resume).
+- **Consolidation** — the consolidate turn asks to transcribe visually validated decisions into
+  requirements or `designConsiderations`; mockups are never embedded in the PRD.
+
 ## Open questions / hypotheses
 
 - Tickets still have one `dependsOn`: independent PRD prerequisites require a single document card

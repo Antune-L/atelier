@@ -274,21 +274,20 @@ describe("read-only triage/split sessions", () => {
 });
 
 describe("buildAtelierSessionConfig — sub-agents", () => {
-  const atelierConfig = (driver: "claude" | "codex", researchEnabled: boolean, adversarialReview: boolean) =>
+  const atelierConfig = (driver: "claude" | "codex", adversarialReview: boolean) =>
     buildAtelierSessionConfig({
       conversationId: "c1",
       cwd: CWD,
       model: driver === "codex" ? "gpt-6-sol" : "opus",
       effort: "medium",
       driver,
-      researchEnabled,
       researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview },
       resumeSessionId: driver === "codex" ? "thread-1" : null,
     });
   const agentNames = [ATELIER_EXPLORER_AGENT_NAME, ATELIER_ANALYST_AGENT_NAME, ATELIER_REVIEWER_AGENT_NAME];
 
   test("claude fans out three read-only sonnet/medium sub-agents through Agent", () => {
-    const config = atelierConfig("claude", true, true);
+    const config = atelierConfig("claude", true);
     expect(config.provider).toBe("claude");
     expect(config.allowedTools).toContain("Agent");
     expect(config.allowedTools).toContain("WebSearch");
@@ -306,7 +305,7 @@ describe("buildAtelierSessionConfig — sub-agents", () => {
   });
 
   test("codex keeps the read-only sandbox and declares three luna/high sub-agents", () => {
-    const config = atelierConfig("codex", true, true);
+    const config = atelierConfig("codex", true);
     expect(config.provider).toBe("codex");
     expect(config.readOnly).toBe(true);
     expect(config.resumeSessionId).toBe("thread-1");
@@ -319,10 +318,10 @@ describe("buildAtelierSessionConfig — sub-agents", () => {
     }
   });
 
-  test("sub-agents are exposed whatever the research and adversarial options", () => {
+  test("sub-agents are exposed whether or not the adversarial review is enabled", () => {
     for (const driver of ["claude", "codex"] as const) {
-      for (const [enabled, adversarial] of [[true, true], [true, false], [false, true], [false, false]] as const) {
-        const config = atelierConfig(driver, enabled, adversarial);
+      for (const adversarial of [true, false]) {
+        const config = atelierConfig(driver, adversarial);
         expect(Object.keys(config.agents ?? {}).sort()).toEqual([...agentNames].sort());
         if (driver === "claude") {
           expect(config.allowedTools).toContain("Agent");
@@ -333,7 +332,7 @@ describe("buildAtelierSessionConfig — sub-agents", () => {
         }
       }
     }
-    expect(atelierConfig("claude", false, false).allowedTools).toContain("WebFetch");
+    expect(atelierConfig("claude", false).allowedTools).toContain("WebFetch");
   });
 });
 
@@ -350,7 +349,6 @@ describe("fan-out sessions keep the sub-agent tool", () => {
         model: "m",
         effort: null,
         driver,
-        researchEnabled: true,
         researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true },
       }),
     },
@@ -362,7 +360,6 @@ describe("fan-out sessions keep the sub-agent tool", () => {
         model: "m",
         effort: null,
         driver,
-        researchEnabled: false,
         researchOptions: DEFAULT_RESEARCH_OPTIONS,
       }),
     },

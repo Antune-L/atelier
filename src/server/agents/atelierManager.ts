@@ -623,6 +623,12 @@ export class AtelierManager {
     this.splitForSteer(conversationId, this.runtime(conversationId));
     const turn = this.openTurn(conversationId);
     this.flush(conversationId);
+    // A main-agent activity seals the current text segment: the next text opens a new assistant message.
+    // An unsaved segment is kept so a later flush can persist it.
+    if (!turn.dirty) {
+      turn.parts = [];
+      turn.messageId = null;
+    }
     const message = this.store.addConversationMessage({ conversationId, role: "activity", content, turnId: turn.turnId });
     this.hub.pushConversationMessage(message);
   }
@@ -843,12 +849,12 @@ export class AtelierManager {
     if (!turn.dirty) return;
     const content = turn.parts.map((part) => part.text.trim()).filter((text) => text.length > 0).join(PART_SEPARATOR);
     if (!content || !this.store.getConversation(conversationId)) return;
-    turn.dirty = false;
     try {
       const message = turn.messageId === null
         ? this.store.addConversationMessage({ conversationId, role: "assistant", content, turnId: turn.turnId })
         : this.store.updateConversationMessage(turn.messageId, { content });
       turn.messageId = message.id;
+      turn.dirty = false;
       this.hub.pushConversationMessage(message);
     } catch (error) {
       log.warn("message assistant non persisté", { conversationId, reason: getErrorMessage(error) });

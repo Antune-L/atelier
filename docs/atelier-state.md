@@ -38,8 +38,11 @@ Three new tables in `SCHEMA_SQL` (+ indexes), rows zod-validated in `rows.ts`, a
   `session_id` (provider thread id, Codex resume), `error`, `created_at`, `updated_at`.
 - `conversation_messages`: `id`, `conversation_id`, `role` (`user|assistant|activity`), `content`
   (markdown; for `activity` a one-line tool trace such as `Read src/x.ts`), `turn_id` (nullable),
-  `created_at`. Activity rows are grouped by the UI under a collapsible "Réflexion" block preceding
-  the assistant reply of the same turn.
+  `created_at`. An assistant message is one text segment: a turn may hold several, interleaved
+  with its activity rows. For a finished turn the UI shows only the last assistant message as the
+  answer and folds the earlier texts and activity rows into a collapsed, indented "Réflexion" block;
+  the live turn is one open "Réflexion" block. Older conversations (one merged assistant message
+  per turn) render unchanged: that message is the answer.
 - `prd_documents`: `id`, `conversation_id`, `revision` (INTEGER, 1..n), `document_json` (validated
   `prdDocumentSchema`), `status` (`draft|validated`), `annotations_json` (`PRD_ANNOTATIONS_SCHEMA`
   shape: `{id, quote, comment}[]`), `general_note`, `created_at`, `updated_at`.
@@ -82,7 +85,8 @@ Three new tables in `SCHEMA_SQL` (+ indexes), rows zod-validated in `rows.ts`, a
   (`src/server/agents/atelier.ts`) followed by the user message. Later messages go through
   `sessionHub.sendEvent(key, { type: "chat", content })`. Captures events through a new
   `SessionStartCallbacks.onEvent` tap: `assistant_text` → assistant message (merge deltas by
-  `stream.itemId`, throttle pushes to ~150 ms), `tool_use`/`progress` → activity rows,
+  `stream.itemId`, throttle pushes to ~150 ms), `tool_use`/`progress` → activity rows (a
+  main-agent activity seals the current text segment: the next text opens a new assistant message),
   `turn_end` → `session_status = idle`. Idle sessions are closed after 30 min; a later message
   relaunches with `resumeSessionId` on Codex, and on Claude with the persisted history rendered as a
   "## Historique de la conversation" section of the first turn. Changing model/effort/orchestrator
@@ -416,8 +420,9 @@ REST contract implemented as specified. Deviations and precisions:
   (`AtelierManager.recoverStale`).
 - Activity rows: every `tool_use`, plus `progress` of kind `plan`/`subagent` without stream (Codex
   reports command/file/mcp items twice otherwise). Sub-agent `assistant_text` (with `sourceId`) is
-  ignored. An assistant message covers one provider turn: text streamed after a mid-turn user
-  message stays in the current bubble until `turn_end`.
+  ignored. An assistant message covers one text segment of a provider turn: a main-agent activity
+  seals it (sub-agent lines do not), and text streamed after a mid-turn user message stays in the
+  current segment until the next activity or `turn_end`.
 - Dry-run: `FakeSystemAdapter` answers each Atelier `send` with a simulated reply + `turn_end`
   (other roles unchanged).
 - `AgentCoordinator` takes an 11th constructor argument `atelier`; `RouteDeps` gains `atelier` and an

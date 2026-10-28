@@ -91,7 +91,7 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
   return (
     <div className="space-y-5 pb-4">
       {ticket.scheduledStartMissedAt !== null && <MissedLaunchNotice ticketId={ticket.id} missedAt={ticket.scheduledStartMissedAt} />}
-      <TicketBrief key={ticket.id} description={ticket.description} onEdit={() => onNavigate("description")} />
+      <TicketBrief key={`brief:${ticket.id}`} description={ticket.description} onEdit={() => onNavigate("description")} />
 
       {ticket.error && <p role="alert" className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger">{ticket.error}</p>}
       {ticket.implementationPlan && (ticket.implementationPlan.recovery || canRecoverImplementation(ticket)) && <ImplementationRecovery key={`${ticket.id}:${ticket.implementationPlan.id}:${ticket.implementationPlan.recovery?.generation ?? "delegated"}:${ticket.slotId}`} ticket={ticket} plan={ticket.implementationPlan} />}
@@ -114,7 +114,7 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
         {ticket.column !== "todo" && <Button variant="outline" size="sm" onClick={() => onNavigate("validation")}>Voir les preuves et réserves</Button>}
       </section>}
 
-      {ticket.kind === "feature" && ticket.prUrl !== null && <PreviewPanel key={ticket.id} ticket={ticket} />}
+      {ticket.kind === "feature" && ticket.prUrl !== null && <PreviewPanel key={`preview:${ticket.id}`} ticket={ticket} />}
       {showSummary && ticket.agentSummary !== null && <details className="rounded-lg border border-border"><summary className="cursor-pointer px-4 py-3 text-sm font-medium">Résumé de l’agent</summary><div className="border-t border-border p-4"><Markdown content={ticket.agentSummary} /></div></details>}
 
       {isTodo ? <section className="space-y-4 rounded-lg border border-border p-4"><SectionHeader>Préparer le lancement</SectionHeader><LaunchForm ticket={ticket} projects={projects} canEditTarget={!locked} />{triage}</section> : <details className="rounded-lg border border-border"><summary className="cursor-pointer px-4 py-3 text-sm font-medium">Réglages utilisés</summary><div className="border-t border-border p-4"><TicketConfigSummary ticket={ticket} /></div></details>}

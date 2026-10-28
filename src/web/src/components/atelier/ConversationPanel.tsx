@@ -20,7 +20,8 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, groupActivityRows, subagentCountLabel, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, buildAtelierThread, subagentCountLabel, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import type { ActivityEntry, ReasoningEntry } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -31,26 +32,8 @@ interface ConversationPanelProps {
   projectLabel: string;
 }
 
-type ThreadItem =
-  | { kind: "message"; message: ConversationMessage }
-  | { kind: "activity"; id: string; rows: ConversationMessage[] };
-
 const BOTTOM_THRESHOLD_PX = 24;
 const RESEARCH_OFF_LABEL = "réflexion préalable off";
-
-function buildThread(messages: ConversationMessage[]): ThreadItem[] {
-  const items: ThreadItem[] = [];
-  for (const message of messages) {
-    if (message.role !== "activity") {
-      items.push({ kind: "message", message });
-      continue;
-    }
-    const last = items[items.length - 1];
-    if (last?.kind === "activity") last.rows.push(message);
-    else items.push({ kind: "activity", id: message.id, rows: [message] });
-  }
-  return items;
-}
 
 function researchSummary(conversation: Conversation): string {
   if (!conversation.researchEnabled) return RESEARCH_OFF_LABEL;
@@ -76,7 +59,7 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
   const running = conversation.sessionStatus === "running";
   const hasAssistantReply = messages.some((m) => m.role === "assistant");
   const lastUserMessage = messages.findLast((m) => m.role === "user");
-  const items = buildThread(messages);
+  const items = buildAtelierThread(messages, running);
   const label = agentLabel(settings, defaults);
   const lastMessage = messages[messages.length - 1];
   const scrollSignature = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.sessionStatus}:${conversation.activeSubagents.length}`;
@@ -221,13 +204,13 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
               Décris ton idée : l'agent pose ses questions puis t'aide à la consolider en PRD.
             </p>
           )}
-          {items.map((item, index) => {
-            if (item.kind === "activity") {
-              const live = running && index === items.length - 1;
-              return <ActivityBlock key={item.id} rows={item.rows} live={live} />;
-            }
-            return <MessageBubble key={item.message.id} message={item.message} agent={label} />;
-          })}
+          {items.map((item) =>
+            item.kind === "reasoning" ? (
+              <ReasoningBlock key={item.id} entries={item.entries} live={item.live} />
+            ) : (
+              <MessageBubble key={item.message.id} message={item.message} agent={label} />
+            ),
+          )}
           {running && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <LiveDot />
@@ -339,40 +322,59 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
   );
 }
 
-function ActivityBlock({ rows, live }: { rows: ConversationMessage[]; live: boolean }) {
-  const entries = groupActivityRows(rows);
-  const mainCount = entries.filter((entry) => entry.kind === "row").length;
+function ReasoningBlock({ entries, live }: { entries: ReasoningEntry[]; live: boolean }) {
+  const count = entries.reduce(
+    (total, entry) => total + (entry.kind === "text" ? 1 : entry.entries.filter((activity) => activity.kind === "row").length),
+    0,
+  );
+  const frame = live ? "rounded-md border border-border bg-muted/30 px-3 py-2" : "ml-4 border-l-2 border-border pl-3 text-muted-foreground";
   return (
-    <details className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+    <details open={live} className={`text-xs ${frame}`}>
       <summary className="flex cursor-pointer list-none items-center gap-2 text-muted-foreground">
         {live && <LiveDot />}
-        <span className={FIELD_LABEL_CLASSES}>Journal de session</span>
-        <span className="font-mono text-2xs">{mainCount}</span>
+        <span className={FIELD_LABEL_CLASSES}>Réflexion</span>
+        <span className="font-mono text-2xs">{count}</span>
       </summary>
-      <ul className="mt-2 space-y-1 font-mono text-2xs text-muted-foreground">
+      <div className="mt-2 space-y-2">
         {entries.map((entry) =>
-          entry.kind === "row" ? (
-            <li key={entry.row.id} className="truncate">
-              {entry.row.content}
-            </li>
+          entry.kind === "text" ? (
+            <div key={entry.message.id} className={live ? "text-sm" : "text-xs text-muted-foreground"}>
+              <Markdown content={entry.message.content} />
+            </div>
           ) : (
-            <li key={`subagent:${entry.agentId}`}>
-              <details className="rounded border border-border/60 px-2 py-1">
-                <summary className="cursor-pointer truncate" title={entry.label}>
-                  {entry.label} · {entry.rows.length} {entry.rows.length === 1 ? "action" : "actions"}
-                </summary>
-                <ul className="mt-1 space-y-1 pl-2">
-                  {entry.rows.map((row) => (
-                    <li key={row.id} className="truncate">
-                      {row.content}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </li>
+            <ActivityList key={entry.id} entries={entry.entries} />
           ),
         )}
-      </ul>
+      </div>
     </details>
+  );
+}
+
+function ActivityList({ entries }: { entries: ActivityEntry[] }) {
+  return (
+    <ul className="space-y-1 font-mono text-2xs text-muted-foreground">
+      {entries.map((entry) =>
+        entry.kind === "row" ? (
+          <li key={entry.row.id} className="truncate">
+            {entry.row.content}
+          </li>
+        ) : (
+          <li key={`subagent:${entry.agentId}`}>
+            <details className="rounded border border-border/60 px-2 py-1">
+              <summary className="cursor-pointer truncate" title={entry.label}>
+                {entry.label} · {entry.rows.length} {entry.rows.length === 1 ? "action" : "actions"}
+              </summary>
+              <ul className="mt-1 space-y-1 pl-2">
+                {entry.rows.map((row) => (
+                  <li key={row.id} className="truncate">
+                    {row.content}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </li>
+        ),
+      )}
+    </ul>
   );
 }

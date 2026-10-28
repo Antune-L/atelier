@@ -6,6 +6,7 @@ import type { Conversation, ConversationMessage } from "@shared/schemas";
 import {
   SETTLED_PREVIEW_COUNT,
   UNTITLED_CONVERSATION_LABEL,
+  buildAtelierThread,
   contextUsageSummary,
   conversationTooltip,
   formatTokenCount,
@@ -146,5 +147,50 @@ describe("contextUsageSummary", () => {
 
   test("used only when the limit is unknown", () => {
     expect(contextUsageSummary(45_200, null)).toEqual({ label: "Contexte : 45,2k tokens", percent: null, warn: false });
+  });
+});
+
+describe("buildAtelierThread", () => {
+  function msg(id: string, role: ConversationMessage["role"], turnId: string): ConversationMessage {
+    return { id, conversationId: "c1", role, content: id, turnId, agentId: null, agentLabel: null, createdAt: 0 };
+  }
+
+  function shape(messages: ConversationMessage[], running: boolean): unknown[] {
+    return buildAtelierThread(messages, running).map((item) => {
+      if (item.kind !== "reasoning") return [item.kind, item.message.id];
+      return [item.kind, item.live, item.entries.map((entry) => (entry.kind === "text" ? entry.message.id : entry.entries.map((e) => (e.kind === "row" ? e.row.id : e.agentId))))];
+    });
+  }
+
+  const finished = [msg("u1", "user", "t1"), msg("a1", "assistant", "t1"), msg("x1", "activity", "t1"), msg("x2", "activity", "t1"), msg("a2", "assistant", "t1")];
+
+  test("splits a finished turn into a collapsed reasoning and the final answer", () => {
+    expect(shape(finished, false)).toEqual([["user", "u1"], ["reasoning", false, ["a1", ["x1", "x2"]]], ["answer", "a2"]]);
+  });
+
+  test("keeps the whole live turn in an open reasoning block", () => {
+    expect(shape(finished, true)).toEqual([["user", "u1"], ["reasoning", true, ["a1", ["x1", "x2"], "a2"]]]);
+  });
+
+  test("still splits earlier turns while a later one runs", () => {
+    const messages = [...finished, msg("u2", "user", "t2"), msg("x3", "activity", "t2")];
+    expect(shape(messages, true)).toEqual([
+      ["user", "u1"],
+      ["reasoning", false, ["a1", ["x1", "x2"]]],
+      ["answer", "a2"],
+      ["user", "u2"],
+      ["reasoning", true, [["x3"]]],
+    ]);
+    expect(shape([...finished, msg("u2", "user", "t2")], true).at(-2)).toEqual(["answer", "a2"]);
+  });
+
+  test("a turn with only activities is a reasoning block", () => {
+    expect(shape([msg("u1", "user", "t1"), msg("x1", "activity", "t1")], false)).toEqual([["user", "u1"], ["reasoning", false, [["x1"]]]]);
+  });
+
+  test("an old merged turn shows its activities folded before the answer", () => {
+    const messages = [msg("u1", "user", "t1"), msg("x1", "activity", "t1"), msg("a1", "assistant", "t1")];
+    expect(shape(messages, false)).toEqual([["user", "u1"], ["reasoning", false, [["x1"]]], ["answer", "a1"]]);
+    expect(shape([msg("u1", "user", "t1"), msg("a1", "assistant", "t1")], false)).toEqual([["user", "u1"], ["answer", "a1"]]);
   });
 });

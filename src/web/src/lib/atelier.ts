@@ -201,6 +201,74 @@ export function groupActivityRows(rows: readonly ConversationMessage[]): Activit
   return entries;
 }
 
+export type ReasoningEntry =
+  | { kind: "text"; message: ConversationMessage }
+  | { kind: "activity"; id: string; entries: ActivityEntry[] };
+
+export type AtelierThreadItem =
+  | { kind: "user"; message: ConversationMessage }
+  | { kind: "reasoning"; id: string; entries: ReasoningEntry[]; live: boolean }
+  | { kind: "answer"; message: ConversationMessage };
+
+/** Intermediate texts as-is, consecutive activity rows grouped by sub-agent. */
+function reasoningEntries(messages: readonly ConversationMessage[]): ReasoningEntry[] {
+  const entries: ReasoningEntry[] = [];
+  let activity: ConversationMessage[] = [];
+  const closeActivity = (): void => {
+    const first = activity[0];
+    if (first) entries.push({ kind: "activity", id: first.id, entries: groupActivityRows(activity) });
+    activity = [];
+  };
+  for (const message of messages) {
+    if (message.role === "activity") {
+      activity.push(message);
+      continue;
+    }
+    closeActivity();
+    entries.push({ kind: "text", message });
+  }
+  closeActivity();
+  return entries;
+}
+
+/**
+ * Splits each agent turn into a « Réflexion » block (intermediate texts and activity) and its final answer,
+ * the last assistant message. The live turn stays a single reasoning block until it ends.
+ */
+export function buildAtelierThread(messages: readonly ConversationMessage[], running: boolean): AtelierThreadItem[] {
+  const items: Array<AtelierThreadItem | ConversationMessage[]> = [];
+  let current: ConversationMessage[] | null = null;
+  for (const message of messages) {
+    if (message.role === "user") {
+      current = null;
+      items.push({ kind: "user", message });
+      continue;
+    }
+    const head = current?.[0];
+    if (current && head && head.turnId === message.turnId) {
+      current.push(message);
+      continue;
+    }
+    current = [message];
+    items.push(current);
+  }
+  // Only a run closing the thread can be the live turn: a trailing user message means the reply has not started.
+  const lastRun = items[items.length - 1];
+  return items.flatMap((item): AtelierThreadItem[] => {
+    if (!Array.isArray(item)) return [item];
+    const first = item[0];
+    if (!first) return [];
+    const id = `reasoning:${first.turnId ?? first.id}`;
+    if (running && item === lastRun) return [{ kind: "reasoning", id, entries: reasoningEntries(item), live: true }];
+    const answer = item.findLast((message) => message.role === "assistant");
+    const rest = item.filter((message) => message !== answer);
+    const result: AtelierThreadItem[] = [];
+    if (rest.length > 0) result.push({ kind: "reasoning", id, entries: reasoningEntries(rest), live: false });
+    if (answer) result.push({ kind: "answer", message: answer });
+    return result;
+  });
+}
+
 /** "1 sous-agent" / "N sous-agents". */
 export function subagentCountLabel(count: number): string {
   return count === 1 ? "1 sous-agent" : `${count} sous-agents`;

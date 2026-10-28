@@ -218,6 +218,84 @@ describe("AtelierManager", () => {
     expect(system.sent[0]?.[1]).toBe("Suite");
   });
 
+  test("a main-agent activity seals the current text segment", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    const { message, delivered } = manager.postMessage(conversation.id, "Analyse.");
+    await delivered;
+    system.emit({ type: "assistant_text", text: "Je regarde." });
+    system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/x.ts" } });
+    system.emit({ type: "assistant_text", text: "Réponse finale." });
+    system.emit(TURN_END);
+
+    const messages = store.listConversationMessages(conversation.id);
+    expect(messages.map((entry) => [entry.role, entry.content])).toEqual([
+      ["user", "Analyse."],
+      ["assistant", "Je regarde."],
+      ["activity", "Read src/x.ts"],
+      ["assistant", "Réponse finale."],
+    ]);
+    expect(new Set(messages.map((entry) => entry.turnId))).toEqual(new Set([message.turnId]));
+  });
+
+  test("keeps an unsaved text segment when its flush fails before an activity", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Analyse.").delivered;
+    const addMessage = store.addConversationMessage.bind(store);
+    let failNextAssistant = true;
+    store.addConversationMessage = (input) => {
+      if (failNextAssistant && input.role === "assistant") {
+        failNextAssistant = false;
+        throw new Error("disque plein");
+      }
+      return addMessage(input);
+    };
+    system.emit({ type: "assistant_text", text: "Je regarde." });
+    system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/x.ts" } });
+    system.emit({ type: "assistant_text", text: "Réponse finale." });
+    system.emit(TURN_END);
+
+    expect(store.listConversationMessages(conversation.id).map((entry) => [entry.role, entry.content])).toEqual([
+      ["user", "Analyse."],
+      ["activity", "Read src/x.ts"],
+      ["assistant", "Je regarde.\n\nRéponse finale."],
+    ]);
+  });
+
+  test("a sub-agent activity does not split the main reply", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CLAUDE_CONVERSATION);
+    await manager.postMessage(conversation.id, "Analyse.").delivered;
+    const subagent = { id: "agent-1", label: "Explorer le dépôt · Explore" };
+    system.emit({ type: "assistant_text", text: "Début." });
+    system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/a.ts" }, subagent });
+    system.emit({ type: "assistant_text", text: "Fin." });
+    system.emit(TURN_END);
+
+    const assistant = store.listConversationMessages(conversation.id).filter((entry) => entry.role === "assistant");
+    expect(assistant.map((entry) => entry.content)).toEqual(["Début.\n\nFin."]);
+  });
+
+  test("merges Codex deltas within their segment and opens a new message after an activity", async () => {
+    const { store, system, manager } = setup();
+    const conversation = store.createConversation(CODEX_CONVERSATION);
+    await manager.postMessage(conversation.id, "Bonjour").delivered;
+    system.emit({ type: "assistant_text", text: "Je ", stream: { itemId: "t1:i1", mode: "delta" } });
+    system.emit({ type: "assistant_text", text: "cherche.", stream: { itemId: "t1:i1", mode: "delta" } });
+    system.emit({ type: "tool_use", name: "Read", input: { file_path: "src/x.ts" } });
+    system.emit({ type: "assistant_text", text: "Voi", stream: { itemId: "t1:i2", mode: "delta" } });
+    system.emit({ type: "assistant_text", text: "là.", stream: { itemId: "t1:i2", mode: "delta" } });
+    system.emit(TURN_END);
+
+    expect(store.listConversationMessages(conversation.id).map((entry) => [entry.role, entry.content])).toEqual([
+      ["user", "Bonjour"],
+      ["assistant", "Je cherche."],
+      ["activity", "Read src/x.ts"],
+      ["assistant", "Voilà."],
+    ]);
+  });
+
   test("relaunches with the history after a settings change and resumes nothing", async () => {
     const { store, system, manager } = setup();
     const conversation = store.createConversation(CODEX_CONVERSATION);

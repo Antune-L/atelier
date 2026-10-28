@@ -5,7 +5,7 @@ import type { Conversation } from "@shared/schemas";
 
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConfirmPopover } from "@/components/ui/confirm";
-import { SETTLED_PREVIEW_COUNT, UNTITLED_CONVERSATION_LABEL } from "@/lib/atelier";
+import { SETTLED_PREVIEW_COUNT, UNTITLED_CONVERSATION_LABEL, conversationTooltip } from "@/lib/atelier";
 import { formatRelativeDuration } from "@/lib/display";
 import { cn } from "@/lib/utils";
 
@@ -61,7 +61,7 @@ export function SettledConversations({ conversations, selectedId, now, projectLa
                 <button
                   type="button"
                   onClick={() => onSelect(item.id)}
-                  title={projectLabel(item.project)}
+                  title={conversationTooltip(item.title, projectLabel(item.project))}
                   className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                 >
                   {item.sessionStatus === "running" && <LiveDot />}

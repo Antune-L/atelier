@@ -49,6 +49,11 @@ export interface AtelierAgentSettings {
 
 export const UNTITLED_CONVERSATION_LABEL = "Nouvelle idée";
 
+/** Hover text of a (possibly truncated) conversation title: "titre — projet". */
+export function conversationTooltip(title: string, projectLabel: string): string {
+  return `${title || UNTITLED_CONVERSATION_LABEL} — ${projectLabel}`;
+}
+
 export const CONVERSATION_STATUS_VARIANTS: Record<ConversationStatus, BadgeVariant> = {
   exploring: "outline",
   prd_draft: "warning",

@@ -20,7 +20,7 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, agentLabel, groupActivityRows, subagentCountLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, groupActivityRows, subagentCountLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { appendMarkdownLine } from "@/lib/paste";
 import { boardStore } from "@/lib/store";
@@ -28,6 +28,7 @@ import { boardStore } from "@/lib/store";
 interface ConversationPanelProps {
   conversation: Conversation;
   messages: ConversationMessage[];
+  projectLabel: string;
 }
 
 type ThreadItem =
@@ -57,7 +58,7 @@ function researchSummary(conversation: Conversation): string {
   return `réflexion préalable : ${labels.join(", ") || "aucune vérification"}`;
 }
 
-export function ConversationPanel({ conversation, messages }: ConversationPanelProps) {
+export function ConversationPanel({ conversation, messages, projectLabel }: ConversationPanelProps) {
   const capabilities = useCapabilities();
   const defaults = resolveAgentDefaults(capabilities);
   const settings = agentSettingsOf(conversation);
@@ -151,7 +152,7 @@ export function ConversationPanel({ conversation, messages }: ConversationPanelP
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-medium">{conversation.title || UNTITLED_CONVERSATION_LABEL}</h2>
+          <h2 className="truncate text-sm font-medium" title={conversationTooltip(conversation.title, projectLabel)}>{conversation.title || UNTITLED_CONVERSATION_LABEL}</h2>
           <p className="truncate font-mono text-2xs text-muted-foreground">
             {agentSummary(settings, defaults)} · {researchSummary(conversation)}
           </p>

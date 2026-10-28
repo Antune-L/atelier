@@ -3,7 +3,15 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_RESEARCH_OPTIONS } from "@shared/schemas";
 import type { Conversation, ConversationMessage } from "@shared/schemas";
 
-import { SETTLED_PREVIEW_COUNT, contextUsageSummary, formatTokenCount, groupActivityRows, splitConversations } from "./atelier";
+import {
+  SETTLED_PREVIEW_COUNT,
+  UNTITLED_CONVERSATION_LABEL,
+  contextUsageSummary,
+  conversationTooltip,
+  formatTokenCount,
+  groupActivityRows,
+  splitConversations,
+} from "./atelier";
 
 function activity(id: string, agentId: string | null = null, agentLabel: string | null = null): ConversationMessage {
   return { id, conversationId: "c1", role: "activity", content: id, turnId: "t1", agentId, agentLabel, createdAt: 0 };
@@ -35,6 +43,16 @@ function makeConversation(id: string, updatedAt: number, settled: boolean): Conv
     updatedAt,
   };
 }
+
+describe("conversationTooltip", () => {
+  test("joins the full title and the project label", () => {
+    expect(conversationTooltip("Refonte du board", "Atelier")).toBe("Refonte du board — Atelier");
+  });
+
+  test("falls back to the untitled label when the title is empty", () => {
+    expect(conversationTooltip("", "Atelier")).toBe(`${UNTITLED_CONVERSATION_LABEL} — Atelier`);
+  });
+});
 
 describe("splitConversations", () => {
   test("splits active and settled conversations, each sorted by recent activity", () => {

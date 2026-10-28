@@ -24,6 +24,7 @@ import {
   ATELIER_STEP_LABELS,
   CONVERSATION_STATUS_VARIANTS,
   UNTITLED_CONVERSATION_LABEL,
+  conversationTooltip,
   splitConversations,
   type AtelierSeed,
   type AtelierStep,
@@ -236,7 +237,12 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     }
     return (
       <div className="flex min-h-0 flex-1">
-        <ConversationPanel key={conversation.id} conversation={conversation} messages={detail.messages} />
+        <ConversationPanel
+          key={conversation.id}
+          conversation={conversation}
+          messages={detail.messages}
+          projectLabel={resolveProjectLabel(projects, conversation.project)}
+        />
         <SubagentsPanel subagents={conversation.activeSubagents} />
       </div>
     );
@@ -304,7 +310,12 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
                     <span className="flex items-center gap-1.5">
                       {item.sessionStatus === "running" && <LiveDot />}
                       {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
-                      <span className="line-clamp-2 text-sm font-medium">{item.title || UNTITLED_CONVERSATION_LABEL}</span>
+                      <span
+                        className="line-clamp-2 text-sm font-medium"
+                        title={conversationTooltip(item.title, resolveProjectLabel(projects, item.project))}
+                      >
+                        {item.title || UNTITLED_CONVERSATION_LABEL}
+                      </span>
                       {item.unread && (
                         <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
                       )}

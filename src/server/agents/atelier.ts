@@ -23,7 +23,7 @@ const MIN_AXES = 3;
 const RESEARCH_HEADING = "### Réflexion préalable";
 const ADVERSARIAL_HEADING = "### Revue adversariale";
 const ADVERSARIAL_MIN_ANALYSTS = 2;
-const ADVERSARIAL_MAX_SUBAGENTS = 10;
+const ATELIER_MAX_SUBAGENTS = 10;
 const ADVERSARIAL_MAX_QUESTIONS = 2;
 const ADVERSARIAL_BULLET_BUDGET = "une ligne, ~20 mots max";
 const HISTORY_HEADING = "## Historique de la conversation";
@@ -116,11 +116,34 @@ function buildResearch(conversation: Conversation): string[] {
   ];
 }
 
-function buildAdversarialReview(conversation: Conversation): string[] {
-  if (!conversation.researchEnabled || !conversation.researchOptions.adversarialReview) return [];
+function isAdversarialReviewEnabled(conversation: Conversation): boolean {
+  return conversation.researchEnabled && conversation.researchOptions.adversarialReview;
+}
+
+/** How the orchestrator spawns the Atelier sub-agents, shared by the sub-agent and adversarial sections. */
+function atelierSubagentSpawn(conversation: Conversation): { spawnTool: string; agents: string; label: string } {
   const { label } = ATELIER_ADVERSARIAL_SUBAGENTS[conversation.orchestrator];
   const spawnTool = conversation.orchestrator === "codex" ? "tes sous-agents natifs Codex" : "le tool `Agent`";
   const agents = `\`${ATELIER_EXPLORER_AGENT_NAME}\`, \`${ATELIER_ANALYST_AGENT_NAME}\` et \`${ATELIER_REVIEWER_AGENT_NAME}\``;
+  return { spawnTool, agents, label };
+}
+
+function buildSubagentRules(conversation: Conversation): string[] {
+  const { spawnTool, agents, label } = atelierSubagentSpawn(conversation);
+  const exception = isAdversarialReviewEnabled(conversation) ? " (sauf la revue adversariale ci-dessous si elle est activée)" : "";
+  return [
+    "## Sous-agents",
+    `- Tu peux lancer des sous-agents UNIQUEMENT si l'utilisateur le demande explicitement dans son message courant (ex. « lance des sous-agents », « utilise des agents en parallèle »). Sans demande explicite, n'en lance jamais${exception}.`,
+    `- Lance-les via ${spawnTool}, uniquement ${agents} (ils tournent sur ${label}), en LECTURE SEULE. N'utilise jamais d'autre type d'agent.`,
+    "- Les sous-agents n'héritent pas de la conversation : passe-leur tout le contexte utile dans leur prompt.",
+    `- Au plus ${ATELIER_MAX_SUBAGENTS} sous-agents par demande ; synthétise toi-même leurs résultats avant de répondre.`,
+    "- Si les sous-agents sont indisponibles dans cette session, dis-le explicitement.",
+  ];
+}
+
+function buildAdversarialReview(conversation: Conversation): string[] {
+  if (!isAdversarialReviewEnabled(conversation)) return [];
+  const { spawnTool, agents, label } = atelierSubagentSpawn(conversation);
   return [
     "## Revue adversariale (activée)",
     "### Quand",
@@ -130,7 +153,7 @@ function buildAdversarialReview(conversation: Conversation): string[] {
     `- Tu restes l'orchestrateur. Lance les sous-agents via ${spawnTool}, uniquement ${agents} (ils tournent sur ${label}). N'utilise jamais d'autre type d'agent.`,
     "- Les sous-agents n'héritent pas de la conversation : passe-leur le dossier en entier dans leur prompt (aucun fichier n'est écrit).",
     "### Budget",
-    `- Au moins ${ADVERSARIAL_MIN_ANALYSTS} analystes indépendants et 1 relecteur adversarial neuf ; au plus ${ADVERSARIAL_MAX_SUBAGENTS} sous-agents par run, explorateurs et re-revue compris.`,
+    `- Au moins ${ADVERSARIAL_MIN_ANALYSTS} analystes indépendants et 1 relecteur adversarial neuf ; au plus ${ATELIER_MAX_SUBAGENTS} sous-agents par run, explorateurs et re-revue compris.`,
     "- Léger : 2 explorateurs si du code est concerné (sinon 0), 2 analystes, 1 challenger.",
     "- Standard (par défaut) : 2 explorateurs, 3 analystes, 3 relecteurs = 8 ; garde une place pour la re-revue.",
     "### Étapes",
@@ -214,6 +237,7 @@ export function buildAtelierPrompt({ conversation, project, history }: AtelierPr
     buildRole(),
     buildBoardRules(),
     buildResearch(conversation),
+    buildSubagentRules(conversation),
     buildAdversarialReview(conversation),
     buildAuthoringRules(),
     buildSteeringRules(),

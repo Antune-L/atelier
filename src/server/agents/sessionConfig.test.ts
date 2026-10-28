@@ -273,7 +273,7 @@ describe("read-only triage/split sessions", () => {
   });
 });
 
-describe("buildAtelierSessionConfig — adversarial review", () => {
+describe("buildAtelierSessionConfig — sub-agents", () => {
   const atelierConfig = (driver: "claude" | "codex", researchEnabled: boolean, adversarialReview: boolean) =>
     buildAtelierSessionConfig({
       conversationId: "c1",
@@ -319,17 +319,21 @@ describe("buildAtelierSessionConfig — adversarial review", () => {
     }
   });
 
-  test("without the option (or with research off) the config is unchanged", () => {
+  test("sub-agents are exposed whatever the research and adversarial options", () => {
     for (const driver of ["claude", "codex"] as const) {
-      for (const [enabled, adversarial] of [[true, false], [false, true]] as const) {
+      for (const [enabled, adversarial] of [[true, true], [true, false], [false, true], [false, false]] as const) {
         const config = atelierConfig(driver, enabled, adversarial);
-        expect(config.agents).toBeUndefined();
-        expect(config.allowedTools ?? []).not.toContain("Agent");
-        expect(config.permissionDeny).toBeUndefined();
+        expect(Object.keys(config.agents ?? {}).sort()).toEqual([...agentNames].sort());
+        if (driver === "claude") {
+          expect(config.allowedTools).toContain("Agent");
+          expect(config.disallowedTools).toEqual(["Edit", "Write", "Bash"]);
+          expect(config.permissionDeny).toEqual(["Agent(general-purpose)", "Agent(Explore)", "Agent(Plan)"]);
+        } else {
+          expect(config.readOnly).toBe(true);
+        }
       }
     }
     expect(atelierConfig("claude", false, false).allowedTools).toContain("WebFetch");
-    expect(atelierConfig("claude", true, false).disallowedTools).toEqual(["Edit", "Write", "Bash", "Task", "Agent"]);
   });
 });
 
@@ -348,6 +352,18 @@ describe("fan-out sessions keep the sub-agent tool", () => {
         driver,
         researchEnabled: true,
         researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true },
+      }),
+    },
+    {
+      label: `atelier ${driver}`,
+      config: buildAtelierSessionConfig({
+        conversationId: "c1",
+        cwd: CWD,
+        model: "m",
+        effort: null,
+        driver,
+        researchEnabled: false,
+        researchOptions: DEFAULT_RESEARCH_OPTIONS,
       }),
     },
     { label: `feasibility ${driver}`, config: buildFeasibilitySessionConfig({ batchId: "b1", cwd: CWD, model: "m", effort: null, driver }) },

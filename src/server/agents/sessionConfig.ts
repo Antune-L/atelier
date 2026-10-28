@@ -344,8 +344,8 @@ function atelierSubagent(driver: Orchestrator, description: string, prompt: stri
   };
 }
 
-/** The three read-only sub-agents of the Atelier adversarial review, on the orchestrator's provider. */
-function atelierAdversarialAgents(driver: Orchestrator): Record<string, AgentSubagentDefinition> {
+/** The three read-only Atelier sub-agents (explicit user request or adversarial review), on the orchestrator's provider. */
+function atelierAgents(driver: Orchestrator): Record<string, AgentSubagentDefinition> {
   return {
     [ATELIER_EXPLORER_AGENT_NAME]: atelierSubagent(driver, "Établit en lecture seule les faits du dépôt pour une question bornée, sans proposer de solution.", ATELIER_EXPLORER_PROMPT),
     [ATELIER_ANALYST_AGENT_NAME]: atelierSubagent(driver, "Rédige en lecture seule une analyse et une solution indépendantes selon un angle donné.", ATELIER_ANALYST_PROMPT),
@@ -354,8 +354,7 @@ function atelierAdversarialAgents(driver: Orchestrator): Record<string, AgentSub
 }
 
 export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionStartConfig {
-  const { conversationId, cwd, model, effort, serviceTier = "default", driver, researchEnabled, researchOptions, resumeSessionId } = input;
-  const adversarial = researchEnabled && researchOptions.adversarialReview;
+  const { conversationId, cwd, model, effort, serviceTier = "default", driver, researchOptions, resumeSessionId } = input;
   const base = {
     ticketId: atelierSessionKey(conversationId),
     slotId: ATELIER_SLOT_ID,
@@ -375,26 +374,17 @@ export function buildAtelierSessionConfig(input: AtelierSessionInput): SessionSt
       serviceTier,
       readOnly: true,
       ...(resumeSessionId ? { resumeSessionId } : {}),
-      ...(adversarial ? { agents: atelierAdversarialAgents(driver) } : {}),
+      agents: atelierAgents(driver),
     };
   }
   const tools = [...READONLY_TOOLS, ...ATELIER_SOURCE_TOOLS, ...(researchOptions.externalDocs ? ATELIER_RESEARCH_TOOLS : [])];
-  if (!adversarial) {
-    return {
-      ...base,
-      provider: "claude",
-      allowedTools: tools,
-      disallowedTools: READONLY_PLAIN_DISALLOWED,
-      skills: NO_SKILLS,
-    };
-  }
   return {
     ...base,
     provider: "claude",
     allowedTools: [...tools, "Agent"],
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: atelierAdversarialAgents(driver),
+    agents: atelierAgents(driver),
     skills: NO_SKILLS,
   };
 }

@@ -301,7 +301,6 @@ export interface AtelierSessionInput {
   effort: string | null;
   serviceTier?: "default" | "fast";
   driver: Orchestrator;
-  researchEnabled: boolean;
   researchOptions: ResearchOptions;
   resumeSessionId?: string | null;
 }

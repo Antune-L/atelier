@@ -67,7 +67,6 @@ test.skipIf(!process.env.KANBAN_REAL_SDK_PROBE)(
         model: "sonnet",
         effort: "low",
         driver: "claude",
-        researchEnabled: true,
         researchOptions: { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true },
       });
       const binary = await ensureClaudeBinary();

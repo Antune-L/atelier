@@ -13,7 +13,7 @@ import type { Conversation, ConversationMessage, ResearchOptions } from "../../s
 import { projectConfigSchema } from "../config.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
-import { buildAtelierPrompt } from "./atelier.ts";
+import { buildAtelierConsolidateTurn, buildAtelierPrompt } from "./atelier.ts";
 import { ATELIER_BOARD_RESULT_PREFIX } from "./atelierTicketTools.ts";
 import { STEER_PREFIX } from "./sessionHub.ts";
 
@@ -138,5 +138,34 @@ describe("buildAtelierPrompt — history", () => {
     expect(text).toContain(`${ATELIER_BOARD_RESULT_PREFIX} main`);
     expect(text).not.toContain(`${ATELIER_BOARD_RESULT_PREFIX} sub`);
     expect(text).not.toContain("sub activity");
+  });
+
+  test("only the latest version of each mockup title is replayed", () => {
+    const assistant = (content: string): ConversationMessage => ({ ...message(content, null), role: "assistant" });
+    const history = [
+      assistant('v1 <mockup title="Liste">ancienne</mockup> <mockup title="Fiche">fiche</mockup>'),
+      { ...message("Encore", null), role: "user" as const },
+      assistant('v2 <mockup title="Liste">nouvelle</mockup>'),
+    ];
+    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, history });
+    expect(text).toContain("v1 [version précédente de la maquette « Liste » omise]");
+    expect(text).not.toContain("ancienne");
+    expect(text).toContain('<mockup title="Fiche">fiche</mockup>');
+    expect(text).toContain('<mockup title="Liste">nouvelle</mockup>');
+  });
+});
+
+describe("buildAtelierPrompt — mockups", () => {
+  test("the mockup rules are in the first-turn prompt for both orchestrators", () => {
+    for (const orchestrator of ["claude", "codex"] as const) {
+      const text = prompt(conversation(orchestrator, false, DEFAULT_RESEARCH_OPTIONS));
+      expect(text).toContain("## Maquettes HTML");
+      expect(text).toContain('<mockup title="Nom court">');
+      expect(text).toContain("64 Ko");
+    }
+  });
+
+  test("the consolidate turn transcribes validated visual decisions", () => {
+    expect(buildAtelierConsolidateTurn()).toContain("designConsiderations");
   });
 });

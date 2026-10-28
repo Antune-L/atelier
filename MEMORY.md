@@ -79,3 +79,7 @@ Reserve a manual quality request before revision capture or other preparation. I
 Redact sensitive text before storage, but preserve trusted action identifiers and artifact references structurally. Replacing a short value throughout serialized JSON can corrupt identifiers and break exact evidence links. Compare bounded raw observations only in memory before redacting the persisted evidence.
 
 Provider event dispatchers can absorb callback exceptions, so an audit write failure needs an explicit owner-level abort signal. Progress writes must not prevent compensating closure. Record each native session's cleanup obligation before startup and retain it when closure is unknown; restart recovery and deletion must honor the obligation, including planner and repository sessions without a browser.
+
+## Atelier mockup iframe sandbox
+
+Never add `allow-same-origin` to the mockup iframe sandbox (`MOCKUP_SANDBOX`), nor `allow-scripts` without a security review. The app has no authentication and exposes `/ws/terminal` on the same origin, so same-origin agent-written HTML could drive a shell. An opaque-origin iframe's requests carry `Origin: null`, which `src/server/requestGuard.ts` rejects.

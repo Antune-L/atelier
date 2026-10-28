@@ -326,7 +326,7 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
 
 /** Assistant text with its `<mockup>` blocks rendered inline; `running` marks a reply still streaming. */
 function AssistantContent({ content, running }: { content: string; running: boolean }) {
-  const segments = useMemo(() => splitMockupBlocks(content), [content]);
+  const segments = useMemo(() => splitMockupBlocks(content, { streaming: running }), [content, running]);
   return (
     <>
       {segments.map((segment, index) =>

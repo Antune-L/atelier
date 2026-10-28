@@ -400,7 +400,7 @@ function prepareAgents(
   } else if (role === "orchestrator") {
     declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS };
   } else if (role === "atelier") {
-    // Atelier adversarial review: read-only scouts that must never spawn further sub-agents.
+    // Atelier sub-agents (explicit user request or adversarial review): read-only scouts that must never spawn further sub-agents.
     declarations = { enabled: true, max_concurrent_threads_per_session: CODEX_MAX_CONCURRENT_SUBAGENT_THREADS, max_depth: 1 };
   }
   for (const [name, definition] of definitions) {

@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import { ATELIER_ADVERSARIAL_SUBAGENTS, ATELIER_REVIEWER_AGENT_NAME, RESEARCH_OPTION_LABELS } from "../../shared/constants.ts";
+import {
+  ATELIER_ADVERSARIAL_SUBAGENTS,
+  ATELIER_ANALYST_AGENT_NAME,
+  ATELIER_EXPLORER_AGENT_NAME,
+  ATELIER_REVIEWER_AGENT_NAME,
+  RESEARCH_OPTION_LABELS,
+} from "../../shared/constants.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import { DEFAULT_RESEARCH_OPTIONS, researchOptionsFromKeys } from "../../shared/schemas.ts";
 import type { Conversation, ConversationMessage, ResearchOptions } from "../../shared/schemas.ts";
@@ -88,6 +94,36 @@ describe("buildAtelierPrompt — steering", () => {
     expect(text).toContain("## Aiguillages");
     expect(text).toContain(STEER_PREFIX.trim());
     expect(text).toContain("ne demande jamais de régénérer ni de consolider un PRD");
+  });
+});
+
+describe("buildAtelierPrompt — sub-agents on explicit request", () => {
+  const SUBAGENT_SECTION = "## Sous-agents";
+  const ADVERSARIAL_EXCEPTION = "sauf la revue adversariale ci-dessous";
+  const SPAWN_TOOLS = { claude: "le tool `Agent`", codex: "tes sous-agents natifs Codex" } as const;
+
+  for (const orchestrator of ["claude", "codex"] as const) {
+    for (const adversarialReview of [false, true]) {
+      test(`${orchestrator}, adversarial ${adversarialReview ? "on" : "off"}: the section is present`, () => {
+        const text = prompt(conversation(orchestrator, true, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview }));
+        expect(text).toContain(SUBAGENT_SECTION);
+        expect(text).toContain("UNIQUEMENT si l'utilisateur le demande explicitement dans son message courant");
+        for (const name of [ATELIER_EXPLORER_AGENT_NAME, ATELIER_ANALYST_AGENT_NAME, ATELIER_REVIEWER_AGENT_NAME]) expect(text).toContain(name);
+        expect(text).toContain(`Lance-les via ${SPAWN_TOOLS[orchestrator]}`);
+        if (adversarialReview) {
+          expect(text).toContain(ADVERSARIAL_EXCEPTION);
+          expect(text.indexOf(SUBAGENT_SECTION)).toBeLessThan(text.indexOf(ADVERSARIAL_SECTION));
+        } else {
+          expect(text).not.toContain(ADVERSARIAL_EXCEPTION);
+        }
+      });
+    }
+  }
+
+  test("the adversarial exception is omitted when research is off", () => {
+    const text = prompt(conversation("codex", false, { ...DEFAULT_RESEARCH_OPTIONS, adversarialReview: true }));
+    expect(text).toContain(SUBAGENT_SECTION);
+    expect(text).not.toContain(ADVERSARIAL_EXCEPTION);
   });
 });
 

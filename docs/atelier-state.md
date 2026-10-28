@@ -157,11 +157,21 @@ already validated and must be implemented as-is (no `submit_prd`).
   read-only `scout` sub-agents: `atelier-explorer`, `atelier-analyst`,
   `atelier-adversarial-reviewer`. Claude gets `Agent` + the built-in agent deny list; Codex keeps the
   read-only sandbox, and `prepareAgents` caps role `atelier` at `max_depth: 1`.
-- Non-adversarial session configs are unchanged; the "Réflexion préalable" checklist excludes the key.
+- The session config no longer depends on the option (see below); the "Réflexion préalable"
+  checklist excludes the key.
 - UI: the sub-agent model is not shown. Sub-agents always follow the Atelier agent's provider, so
   `ResearchFields` only exposes the option toggle (change the agent to change the sub-agent model).
 - Files: `shared/constants.ts`, `shared/schemas.ts`, `server/agents/{atelier,sessionConfig,atelierManager}.ts`,
   `server/system/codexProvider.ts`, `web/src/components/atelier/{ResearchFields,NewConversationForm,ConversationPanel}.tsx`.
+
+#### Sub-agents on explicit request
+
+- The three read-only sub-agents are exposed in every Atelier session, on both providers
+  (`buildAtelierSessionConfig` always sets `agents`; Claude always gets the fan-out tool shape).
+- The prompt's `## Sous-agents` section restricts spawning to an explicit request in the current
+  user message (≤10 sub-agents, read-only, full context passed in their prompt).
+- The adversarial review still self-triggers when enabled; the section then names it as the only
+  exception.
 
 #### Gotcha: the Claude sub-agent tool is `Task` internally
 

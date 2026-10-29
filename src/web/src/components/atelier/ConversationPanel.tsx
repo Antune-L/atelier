@@ -10,6 +10,7 @@ import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { MockupFrame } from "@/components/atelier/MockupFrame";
 import { SubagentsPanel } from "@/components/atelier/SubagentsPanel";
+import { SubagentsSidePanel } from "@/components/atelier/SubagentsSidePanel";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -93,6 +94,19 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
     if (!el) return;
     pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
     setFollowing(pinnedToBottom.current);
+  };
+
+  /** Opens the last rendered block of a sub-agent (and its enclosing reasoning block) and scrolls to it. */
+  const revealSubagent = (agentId: string): void => {
+    const blocks = threadRef.current?.querySelectorAll<HTMLDetailsElement>(`details[data-subagent-id="${CSS.escape(agentId)}"]`);
+    const block = blocks?.[blocks.length - 1];
+    if (!block) return;
+    pinnedToBottom.current = false;
+    setFollowing(false);
+    for (let el: HTMLElement | null = block; el !== null && el !== threadRef.current; el = el.parentElement) {
+      if (el instanceof HTMLDetailsElement) el.open = true;
+    }
+    block.scrollIntoView({ block: "center", behavior: "smooth" });
   };
 
   const post = async (content: string): Promise<boolean> => {
@@ -234,37 +248,40 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
         </div>
       </header>
 
-      <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8">
-        <div className="mx-auto flex max-w-[58rem] flex-col gap-4">
-          {items.length === 0 && (
-            <p className="text-center text-sm text-muted-foreground">
-              Décris ton idée : l'agent pose ses questions puis t'aide à la consolider en PRD.
-            </p>
-          )}
-          {items.map((item) =>
-            item.kind === "reasoning" ? (
-              <ReasoningBlock key={item.id} entries={item.entries} live={item.live} />
-            ) : (
-              <MessageBubble key={item.message.id} message={item.message} agent={label} />
-            ),
-          )}
-          {running && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <LiveDot />
-              L'agent réfléchit…
-            </div>
-          )}
-          {conversation.sessionStatus === "error" && (
-            <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">{conversation.error ?? "La session a échoué."}</span>
-              {lastUserMessage !== undefined && (
-                <Button size="sm" variant="outline" onClick={retry} disabled={busy}>
-                  Réessayer
-                </Button>
-              )}
-            </div>
-          )}
+      <div className="flex min-h-0 flex-1">
+        <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col gap-4">
+            {items.length === 0 && (
+              <p className="text-center text-sm text-muted-foreground">
+                Décris ton idée : l'agent pose ses questions puis t'aide à la consolider en PRD.
+              </p>
+            )}
+            {items.map((item) =>
+              item.kind === "reasoning" ? (
+                <ReasoningBlock key={item.id} entries={item.entries} live={item.live} />
+              ) : (
+                <MessageBubble key={item.message.id} message={item.message} agent={label} />
+              ),
+            )}
+            {running && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <LiveDot />
+                L'agent réfléchit…
+              </div>
+            )}
+            {conversation.sessionStatus === "error" && (
+              <div className="flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-danger">
+                <span className="min-w-0 flex-1 whitespace-pre-wrap">{conversation.error ?? "La session a échoué."}</span>
+                {lastUserMessage !== undefined && (
+                  <Button size="sm" variant="outline" onClick={retry} disabled={busy}>
+                    Réessayer
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+        <SubagentsSidePanel conversation={conversation} messages={messages} onSelect={revealSubagent} />
       </div>
 
       <div className="shrink-0 px-3 pb-3 pt-2 sm:px-8 sm:pb-4">
@@ -430,7 +447,7 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
           </li>
         ) : (
           <li key={`subagent:${entry.agentId}`}>
-            <details className="rounded border border-border/60 px-2 py-1">
+            <details data-subagent-id={entry.agentId} className="rounded border border-border/60 px-2 py-1">
               <summary className="cursor-pointer truncate" title={entry.label}>
                 {entry.label} · {entry.rows.length} {entry.rows.length === 1 ? "action" : "actions"}
               </summary>

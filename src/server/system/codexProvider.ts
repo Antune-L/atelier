@@ -858,7 +858,8 @@ function createCodexAgentSession(
   function startChild(id: string): void {
     if (activeChildren.has(id)) return;
     activeChildren.add(id);
-    emit({ type: "subagent_lifecycle", phase: "started", id, label: childLabel(id) });
+    // Codex reports no agent type: the ordinal label doubles as the name.
+    emit({ type: "subagent_lifecycle", phase: "started", id, label: childLabel(id), name: childLabel(id) });
   }
 
   function emitFrom(sourceThreadId: string, event: AgentSessionEvent): void {
@@ -1022,6 +1023,7 @@ function createCodexAgentSession(
             phase: "ended",
             id: sourceThreadId,
             label: childLabel(sourceThreadId),
+            name: childLabel(sourceThreadId),
             status: status === "completed" ? "completed" : status === "interrupted" ? "stopped" : "failed",
           });
         }

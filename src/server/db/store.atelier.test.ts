@@ -130,14 +130,27 @@ describe("Store atelier", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);
     expect(conversation.activeSubagents).toEqual([]);
-    const subagents = [{ id: "a1", label: "Reviewer", startedAt: 1_000 }];
-    const updated = store.updateConversation(conversation.id, { activeSubagents: subagents });
-    expect(updated.activeSubagents).toEqual(subagents);
+    const subagents = [{ id: "a1", label: "Reviewer", name: "Reviewer", type: null, provider: "claude", startedAt: 1_000 }] as const;
+    const updated = store.updateConversation(conversation.id, { activeSubagents: [...subagents] });
+    expect(updated.activeSubagents).toEqual([...subagents]);
     expect(updated.updatedAt).toBe(conversation.updatedAt);
-    expect(store.getConversation(conversation.id)?.activeSubagents).toEqual(subagents);
+    expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([...subagents]);
     expect(store.updateConversation(conversation.id, { activeSubagents: [] }).activeSubagents).toEqual([]);
   });
 
+  test("round-trips the finished sub-agents history", () => {
+    const store = openStore();
+    const conversation = store.createConversation(NEW_CONVERSATION);
+    expect(conversation.finishedSubagents).toEqual([]);
+    const history = [
+      { id: "a1", label: "Lire · Explore", name: "Lire", type: "Explore", provider: "claude", startedAt: 1_000, endedAt: 2_000, status: "done" },
+      { id: "a2", label: "Sous-agent 1", name: "Sous-agent 1", type: null, provider: "codex", startedAt: 3_000, endedAt: 4_000, status: "interrupted" },
+    ] as const;
+    store.updateConversation(conversation.id, { finishedSubagents: [...history] });
+    const reloaded = store.getConversation(conversation.id);
+    expect(reloaded?.finishedSubagents).toEqual([...history]);
+    expect(reloaded?.activeSubagents).toEqual([]);
+  });
   test("increments PRD revisions and forces document.revision", () => {
     const store = openStore();
     const conversation = store.createConversation(NEW_CONVERSATION);

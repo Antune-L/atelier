@@ -44,6 +44,7 @@ function conversation(orchestrator: Orchestrator, researchEnabled: boolean, rese
     contextTokens: null,
     contextWindow: null,
     activeSubagents: [],
+    finishedSubagents: [],
     snapshotSha: null,
     snapshotCommittedAt: null,
     snapshotBaseBranch: null,

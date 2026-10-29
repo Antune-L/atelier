@@ -240,10 +240,25 @@ as attributed activity lines and as a live list on the conversation.
   `sessionStatus` and never flushes (freezes) the main assistant reply. A sub-agent's
   `assistant_text` (with `subagent` or `sourceId`) is ignored. Sub-agent lines are excluded from
   the history replayed when a session is relaunched.
-- Conversations: `activeSubagents: { id, label, startedAt }[]` (JSON column, server-owned) is
-  updated and pushed on every lifecycle event (`started` adds or relabels, `ended` removes). It is
-  cleared on session failure, interrupt, close, settings change, idle close, ceiling close and, at
-  server start, by `recoverStale` for every conversation regardless of its status.
+- The lifecycle event also carries optional `name` and `subagentType`, kept apart from `label`:
+  Claude sends the trimmed task description and `subagent_type` (on start and on the matching end);
+  Codex sends its ordinal label (`Sous-agent N`) as name and no type.
+- Conversations: `activeSubagents: { id, label, name, type, provider, startedAt }[]` (JSON column,
+  server-owned) is updated and pushed on every lifecycle event (`started` adds or refreshes
+  label/name/type, `ended` removes). `name` falls back to the label, `type` to null. `provider` is
+  the conversation orchestrator at the first start and is never rewritten, so a later orchestrator
+  switch does not relabel running or finished sub-agents. Legacy rows default to `name: ""`,
+  `type: null`, `provider: "claude"`. The list is cleared on session failure, interrupt, close,
+  settings change, idle close, ceiling close and, at server start, by `recoverStale` for every
+  conversation regardless of its status.
+- History: `finishedSubagents` (same entries plus `endedAt` and `status: done | failed |
+  interrupted`) is the whole-conversation history of ended sub-agents, oldest first, capped to the
+  last `ATELIER_SUBAGENT_HISTORY_LIMIT` (200) entries. An `ended` event moves the entry there in
+  the same patch (`completed` or no status → `done`, `failed` → `failed`, `stopped` →
+  `interrupted`). Every clear above (session close of any kind, restart recovery) moves the
+  remaining active entries there as `interrupted` with `endedAt` = now. It lives in its own
+  `finished_subagents` column: the VPS upgrade guard (`deploy/vps/kanban-upgrade.sh`) requires
+  `active_subagents` to be `[]` for an idle conversation, so history never goes there.
 - Idle close: while the list is non-empty the idle timer is not armed. When the last sub-agent
   ends and the conversation is not `running` (and no compaction runs), the idle timer is armed.
 - Ceiling: an active sub-agent keeps the session open for at most `ATELIER_SUBAGENT_CEILING_MS`

@@ -825,10 +825,76 @@ describe("AtelierManager", () => {
     test("recoverStale clears the active list of an idle conversation", () => {
       const { store, manager } = setup();
       const conversation = store.createConversation(CLAUDE_CONVERSATION);
-      store.updateConversation(conversation.id, { activeSubagents: [{ id: "agent-1", label: "x", startedAt: 1 }] });
+      const earlier = { id: "agent-0", label: "y", name: "y", type: null, provider: "claude", startedAt: 0, endedAt: 1, status: "done" } as const;
+      store.updateConversation(conversation.id, {
+        activeSubagents: [{ id: "agent-1", label: "x", name: "x", type: "Explore", provider: "codex", startedAt: 1 }],
+        finishedSubagents: [earlier],
+      });
       expect(store.getConversation(conversation.id)?.sessionStatus).toBe("idle");
       manager.recoverStale();
-      expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([]);
+      const after = store.getConversation(conversation.id);
+      expect(after?.activeSubagents).toEqual([]);
+      expect(after?.finishedSubagents).toEqual([
+        earlier,
+        { id: "agent-1", label: "x", name: "x", type: "Explore", provider: "codex", startedAt: 1, endedAt: expect.any(Number), status: "interrupted" },
+      ]);
+    });
+
+    test("lifecycle events record identity, provider and the finished history", async () => {
+      const { store, system, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit({ ...STARTED, name: "Explorer le dépôt", subagentType: "Explore" });
+      expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([
+        { id: "agent-1", label: SUBAGENT.label, name: "Explorer le dépôt", type: "Explore", provider: "claude", startedAt: expect.any(Number) },
+      ]);
+      const startedAt = store.getConversation(conversation.id)?.activeSubagents[0]?.startedAt ?? -1;
+      // The orchestrator changes between two sub-agents: the running one keeps its provider.
+      store.updateConversation(conversation.id, { orchestrator: "codex" });
+      system.emit({ ...STARTED, label: "Renommé" });
+      system.emit({ type: "subagent_lifecycle", phase: "started", id: "agent-2", label: "Sous-agent 1", name: "Sous-agent 1" });
+      expect(store.getConversation(conversation.id)?.activeSubagents).toEqual([
+        { id: "agent-1", label: "Renommé", name: "Renommé", type: null, provider: "claude", startedAt },
+        { id: "agent-2", label: "Sous-agent 1", name: "Sous-agent 1", type: null, provider: "codex", startedAt: expect.any(Number) },
+      ]);
+
+      system.emit(ENDED);
+      system.emit({ type: "subagent_lifecycle", phase: "ended", id: "unknown", label: "?", status: "failed" });
+      const after = store.getConversation(conversation.id);
+      expect(after?.activeSubagents.map((entry) => entry.id)).toEqual(["agent-2"]);
+      expect(after?.finishedSubagents).toEqual([
+        { id: "agent-1", label: "Renommé", name: "Renommé", type: null, provider: "claude", startedAt, endedAt: expect.any(Number), status: "done" },
+      ]);
+    });
+
+    test.each([
+      ["completed", "done"],
+      ["failed", "failed"],
+      ["stopped", "interrupted"],
+      [undefined, "done"],
+    ] as const)("an ended status %s is recorded as %s", async (status, expected) => {
+      const { store, system, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(STARTED);
+      system.emit(status === undefined ? { type: "subagent_lifecycle", phase: "ended", ...SUBAGENT } : { ...ENDED, status });
+      expect(store.getConversation(conversation.id)?.finishedSubagents.map((entry) => entry.status)).toEqual([expected]);
+    });
+
+    test("a session close interrupts the active sub-agents and keeps the history", async () => {
+      const { store, system, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(STARTED);
+      system.emit(ENDED);
+      system.emit({ ...STARTED, id: "agent-2" });
+      manager.close(conversation.id);
+      const after = store.getConversation(conversation.id);
+      expect(after?.activeSubagents).toEqual([]);
+      expect(after?.finishedSubagents.map((entry) => [entry.id, entry.status])).toEqual([
+        ["agent-1", "done"],
+        ["agent-2", "interrupted"],
+      ]);
     });
 
     test("the idle close waits for the last active sub-agent", async () => {

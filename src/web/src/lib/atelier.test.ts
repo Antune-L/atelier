@@ -11,6 +11,8 @@ import {
   contextUsageSummary,
   conversationMatchesSearch,
   conversationTooltip,
+  countSubagentRunActions,
+  formatSubagentDuration,
   formatTokenCount,
   groupActivityRows,
   splitConversations,
@@ -58,6 +60,7 @@ function makeConversation(id: string, updatedAt: number, settled: boolean): Conv
     contextTokens: null,
     contextWindow: null,
     activeSubagents: [],
+    finishedSubagents: [],
     snapshotSha: null,
     snapshotCommittedAt: null,
     snapshotBaseBranch: null,
@@ -154,6 +157,38 @@ describe("groupActivityRows", () => {
       { kind: "row", row: activity("m1") },
       { kind: "row", row: activity("m2") },
     ]);
+  });
+});
+
+describe("countSubagentRunActions", () => {
+  const at = (message: ConversationMessage, createdAt: number): ConversationMessage => ({ ...message, createdAt });
+
+  test("counts activity rows per run and ignores main-agent rows", () => {
+    const messages = [activity("m1"), activity("a1", "a", null), activity("b1", "b", null), activity("a2", "a", null)];
+    const counts = countSubagentRunActions(messages, [{ id: "a", startedAt: 0 }, { id: "b", startedAt: 0, endedAt: 5 }]);
+    expect([...counts.entries()]).toEqual([
+      ["a:0", 2],
+      ["b:0", 1],
+    ]);
+  });
+
+  test("splits the rows of an id across its successive runs", () => {
+    const messages = [at(activity("a1", "a", null), 10), at(activity("a2", "a", null), 20), at(activity("a3", "a", null), 40), at(activity("a4", "a", null), 60)];
+    const runs = [{ id: "a", startedAt: 50 }, { id: "a", startedAt: 5, endedAt: 25 }, { id: "a", startedAt: 30, endedAt: 45 }];
+    expect(countSubagentRunActions(messages, runs)).toEqual(new Map([
+      ["a:5", 2],
+      ["a:30", 1],
+      ["a:50", 1],
+    ]));
+  });
+});
+
+describe("formatSubagentDuration", () => {
+  test("formats seconds, minutes and hours", () => {
+    expect(formatSubagentDuration(-5)).toBe("0s");
+    expect(formatSubagentDuration(41_900)).toBe("41s");
+    expect(formatSubagentDuration(125_000)).toBe("2m 05s");
+    expect(formatSubagentDuration(3_780_000)).toBe("1h 03m");
   });
 });
 

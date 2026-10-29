@@ -1116,10 +1116,10 @@ test("native children carry a numbered sub-agent identity and a start/end lifecy
   expect(messages[1]).toMatchObject({ sourceId: "child-a", subagent: { id: "child-a", label: "Sous-agent 1" } });
   expect(messages[2]).toMatchObject({ sourceId: "child-b", subagent: { id: "child-b", label: "Sous-agent 2" } });
   expect(events.filter((event) => event.type === "subagent_lifecycle")).toEqual([
-    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1" },
-    { type: "subagent_lifecycle", phase: "started", id: "child-b", label: "Sous-agent 2" },
-    { type: "subagent_lifecycle", phase: "ended", id: "child-a", label: "Sous-agent 1", status: "stopped" },
-    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1" },
+    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1", name: "Sous-agent 1" },
+    { type: "subagent_lifecycle", phase: "started", id: "child-b", label: "Sous-agent 2", name: "Sous-agent 2" },
+    { type: "subagent_lifecycle", phase: "ended", id: "child-a", label: "Sous-agent 1", name: "Sous-agent 1", status: "stopped" },
+    { type: "subagent_lifecycle", phase: "started", id: "child-a", label: "Sous-agent 1", name: "Sous-agent 1" },
   ]);
   expect(events.some((event) => event.type === "turn_end")).toBe(false);
   fixture.notify({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", error: null } } });

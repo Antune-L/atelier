@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { compileFeedback } from "../../shared/prdFeedback.ts";
 import type { ChannelEvent, WorkerToolName } from "../../shared/protocol.ts";
-import type { ActiveSubagent, Conversation, ConversationMessage, ConversationSteering, PrdDocument } from "../../shared/schemas.ts";
+import type { ActiveSubagent, Conversation, ConversationMessage, ConversationSteering, FinishedSubagent, PrdDocument, SubagentStatus } from "../../shared/schemas.ts";
 import type { ProjectConfig } from "../config.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 import type { ConversationPatch, Store } from "../db/store.ts";
@@ -27,6 +27,34 @@ import { atelierSessionKey, buildAtelierSessionConfig } from "./sessionConfig.ts
 import type { SessionHub } from "./sessionHub.ts";
 
 const log = createLogger("atelier");
+
+/** Bounds the `finished_subagents` JSON column: only the most recent entries are kept. */
+export const ATELIER_SUBAGENT_HISTORY_LIMIT = 200;
+
+type SubagentLifecycle = Extract<AgentSessionEvent, { type: "subagent_lifecycle" }>;
+
+function appendFinished(history: readonly FinishedSubagent[], ended: readonly FinishedSubagent[]): FinishedSubagent[] {
+  return [...history, ...ended].slice(-ATELIER_SUBAGENT_HISTORY_LIMIT);
+}
+
+function finishedStatus(status: SubagentLifecycle["status"]): SubagentStatus {
+  if (status === "failed") return "failed";
+  if (status === "stopped") return "interrupted";
+  return "done";
+}
+
+/** Moves every active sub-agent to the history as interrupted; empty patch when none is active. */
+function interruptSubagentsPatch(conversation: Conversation): ConversationPatch {
+  if (conversation.activeSubagents.length === 0) return {};
+  const endedAt = Date.now();
+  return {
+    activeSubagents: [],
+    finishedSubagents: appendFinished(
+      conversation.finishedSubagents,
+      conversation.activeSubagents.map((entry) => ({ ...entry, endedAt, status: "interrupted" })),
+    ),
+  };
+}
 
 export const ATELIER_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 /** Longest an active sub-agent keeps the Atelier session open. */
@@ -254,7 +282,7 @@ export class AtelierManager {
         patch.contextWindow = null;
       }
       // Whatever their status, no sub-agent outlives the previous process.
-      if (conversation.activeSubagents.length > 0) patch.activeSubagents = [];
+      Object.assign(patch, interruptSubagentsPatch(conversation));
       if (Object.keys(patch).length > 0) this.store.updateConversation(conversation.id, patch);
     }
   }
@@ -684,7 +712,7 @@ export class AtelierManager {
         else this.addActivity(conversationId, truncate(event.message));
         return;
       case "subagent_lifecycle":
-        this.onSubagentLifecycle(conversationId, event.phase, { id: event.id, label: event.label });
+        this.onSubagentLifecycle(conversationId, event);
         return;
       case "turn_end":
         this.onTurnEnd(conversationId, event.ok);
@@ -760,21 +788,29 @@ export class AtelierManager {
     this.hub.pushConversationMessage(message);
   }
 
-  private onSubagentLifecycle(conversationId: string, phase: "started" | "ended", subagent: AgentSubagentRef): void {
+  private onSubagentLifecycle(conversationId: string, event: SubagentLifecycle): void {
     const conversation = this.store.getConversation(conversationId);
     if (!conversation) return;
+    const { phase } = event;
     const runtime = this.runtime(conversationId);
     const current = conversation.activeSubagents;
     let next: ActiveSubagent[];
     if (phase === "started") {
-      next = current.some((entry) => entry.id === subagent.id)
-        ? current.map((entry) => (entry.id === subagent.id ? { ...entry, label: subagent.label } : entry))
-        : [...current, { id: subagent.id, label: subagent.label, startedAt: Date.now() }];
+      const identity = { label: event.label, name: event.name || event.label, type: event.subagentType ?? null };
+      // A repeated start refreshes the identity only: provider and startedAt stay those of the first start.
+      next = current.some((entry) => entry.id === event.id)
+        ? current.map((entry) => (entry.id === event.id ? { ...entry, ...identity } : entry))
+        : [...current, { id: event.id, ...identity, provider: conversation.orchestrator, startedAt: Date.now() }];
+      this.patchConversation(conversationId, { activeSubagents: next });
     } else {
-      next = current.filter((entry) => entry.id !== subagent.id);
-      if (next.length === current.length) return;
+      const ended = current.find((entry) => entry.id === event.id);
+      if (!ended) return;
+      next = current.filter((entry) => entry.id !== event.id);
+      this.patchConversation(conversationId, {
+        activeSubagents: next,
+        finishedSubagents: appendFinished(conversation.finishedSubagents, [{ ...ended, endedAt: Date.now(), status: finishedStatus(event.status) }]),
+      });
     }
-    this.patchConversation(conversationId, { activeSubagents: next });
     this.scheduleCeiling(conversationId, runtime, next);
     if (phase === "started") {
       this.clearIdleTimer(runtime);
@@ -789,7 +825,7 @@ export class AtelierManager {
   private clearSubagents(conversationId: string, runtime: ConversationRuntime | undefined): void {
     if (runtime) this.clearCeilingTimer(runtime);
     const conversation = this.store.getConversation(conversationId);
-    if (conversation && conversation.activeSubagents.length > 0) this.patchConversation(conversationId, { activeSubagents: [] });
+    if (conversation && conversation.activeSubagents.length > 0) this.patchConversation(conversationId, interruptSubagentsPatch(conversation));
   }
 
   /** One timer per runtime, due when the oldest active sub-agent reaches the ceiling. */

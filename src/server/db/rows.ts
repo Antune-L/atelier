@@ -9,10 +9,11 @@ import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
-import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
+import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, FinishedSubagent, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
 import {
   prNotificationSchema,
   activeSubagentSchema,
+  finishedSubagentSchema,
   agentMessageChannelSchema,
   agentMessageStatusSchema,
   agentEffortSchema,
@@ -736,6 +737,7 @@ const conversationRowSchema = z.object({
   context_tokens: z.number().int().nonnegative().nullable(),
   context_window: z.number().int().positive().nullable(),
   active_subagents: z.string(),
+  finished_subagents: z.string(),
   snapshot_sha: z.string().nullable(),
   snapshot_committed_at: z.number().int().nullable(),
   snapshot_base_branch: z.string().nullable(),
@@ -784,6 +786,10 @@ function parseActiveSubagents(raw: string): ActiveSubagent[] {
   return z.array(activeSubagentSchema).catch([]).parse(parseJsonColumn(raw));
 }
 
+function parseFinishedSubagents(raw: string): FinishedSubagent[] {
+  return z.array(finishedSubagentSchema).catch([]).parse(parseJsonColumn(raw));
+}
+
 function parsePrdAnnotations(raw: string): PrdAnnotation[] {
   return prdAnnotationsSchema.catch([]).parse(parseJsonColumn(raw));
 }
@@ -811,6 +817,7 @@ export function mapConversationRow(raw: unknown): Conversation {
     contextTokens: row.context_tokens,
     contextWindow: row.context_window,
     activeSubagents: parseActiveSubagents(row.active_subagents),
+    finishedSubagents: parseFinishedSubagents(row.finished_subagents),
     snapshotSha: row.snapshot_sha,
     snapshotCommittedAt: row.snapshot_committed_at,
     snapshotBaseBranch: row.snapshot_base_branch,

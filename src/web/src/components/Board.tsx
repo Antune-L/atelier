@@ -252,7 +252,6 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
         }
       }
     } finally {
-      for (const ticketId of toMerge) boardStore.endMerge(ticketId);
       mergingAllRef.current = false;
       setMergingAll(false);
     }

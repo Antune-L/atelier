@@ -41,7 +41,7 @@ interface ConversationPanelProps {
 
 const BOTTOM_THRESHOLD_PX = 24;
 const RESEARCH_OFF_LABEL = "réflexion préalable off";
-const CHAT_PROSE_CLASSES = "[&.markdown]:text-[15px] [&.markdown]:leading-[1.65]";
+const CHAT_PROSE_CLASSES = "atelier-chat-prose min-w-0 max-w-full [&.markdown]:text-[15px] [&.markdown]:leading-[1.65]";
 
 function researchSummary(conversation: Conversation): string {
   if (!conversation.researchEnabled) return RESEARCH_OFF_LABEL;

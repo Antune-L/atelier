@@ -319,6 +319,17 @@
     @apply my-3 border-border;
   }
 
+  .atelier-chat-prose {
+    overflow-wrap: anywhere;
+  }
+  .atelier-chat-prose table {
+    @apply block max-w-full overflow-x-auto;
+  }
+  .atelier-chat-prose th,
+  .atelier-chat-prose td {
+    @apply min-w-32;
+  }
+
   /* PRD annotation markers (PrdReviewDialog): highlighted quote + numbered pin. */
   .prd-annotation {
     @apply cursor-pointer rounded bg-warning/30 px-0.5 text-foreground transition-colors;

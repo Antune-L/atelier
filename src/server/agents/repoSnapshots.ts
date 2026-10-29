@@ -33,6 +33,15 @@ const sidecarSchema = z.object({
   createdAt: z.number(),
 });
 
+/** A sidecar truncated by a crash is unreadable, not fatal: it fails schema validation like any invalid one. */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export type RepoSnapshotSystem = Pick<SystemAdapter, "dryRun" | "fetch" | "readGitRef" | "readCommitTimestamp" | "addSnapshotWorktree" | "removeSnapshotWorktree">;
 
 export interface RepoSnapshotsOptions {
@@ -183,7 +192,7 @@ export class RepoSnapshots {
 
   private async gcRecorded(path: string): Promise<void> {
     const sidecar = `${path}${SIDECAR_SUFFIX}`;
-    const parsed = sidecarSchema.safeParse(JSON.parse(await readFile(sidecar, "utf8")));
+    const parsed = sidecarSchema.safeParse(parseJson(await readFile(sidecar, "utf8")));
     if (!parsed.success) {
       if (this.leases.has(path)) return;
       await rm(path, { recursive: true, force: true });

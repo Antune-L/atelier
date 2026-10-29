@@ -343,6 +343,20 @@ export class AtelierManager {
     if (conversation.sessionStatus === "running" || this.starting.has(conversationId)) throw new AtelierBusyError(REFRESH_BUSY_MESSAGE);
     const project = this.lookupProject(conversation.project);
     if (!project) throw new Error(`Projet inconnu : ${conversation.project}`);
+    // Registered as a start: a message sent during the fetch waits, then opens its session on the new SHA.
+    const repin = this.repin(conversation, project);
+    const blocking = repin.then(() => false, () => false);
+    this.starting.set(conversationId, blocking);
+    try {
+      await repin;
+    } finally {
+      if (this.starting.get(conversationId) === blocking) this.starting.delete(conversationId);
+    }
+    return this.requireConversation(conversationId);
+  }
+
+  private async repin(conversation: Conversation, project: ProjectConfig): Promise<void> {
+    const conversationId = conversation.id;
     this.flush(conversationId);
     this.closeSession(conversationId);
     const baseBranch = conversation.snapshotBaseBranch ?? project.baseBranch;
@@ -358,7 +372,6 @@ export class AtelierManager {
     } finally {
       lease.release();
     }
-    return this.requireConversation(conversationId);
   }
 
   close(conversationId: string): void {

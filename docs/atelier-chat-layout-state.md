@@ -4,9 +4,9 @@
 
 - Updated: 2026-10-29.
 - Current correction base: `eafba08` on `main`; the remote statistics changes were fast-forwarded before debugging. The original layout intake was `9a8a03820c5ed42eeed1de52dc383398ff1a600b`.
-- Approved direction: B, conversation first. Hide conversation history by default, open it on demand, simplify the header, widen the chat and compact the composer while preserving existing actions.
+- Approved direction: B, conversation first. Show conversation history by default when entering the Atelier module, allow closing it, simplify the header, widen the chat and compact the composer while preserving existing actions.
 - B was delivered as `9f5c4d5`. The horizontal-overflow correction is implemented and verified; direct-main delivery remains authorized. Agent execution and delivery code are unchanged.
-- Conversation history is closed by default and opens from the left. PRD/cards open in existing document sheets while the chat stays mounted. Session details and system/project controls remain accessible on demand.
+- Conversation history opens by default from the left when entering the Atelier module and can be closed. PRD/cards open in existing document sheets while the chat stays mounted. Session details and system/project controls remain accessible on demand.
 - Desktop verification at 1280×780: 56px navigation rail, 64px conversation header, conversation Markdown at 15px with 24.75px line height, wider reading and composer surfaces.
 - The user reported transcript horizontal scrolling with real conversation content. Reproduction at 2000×999 found a 1944px transcript with 35569px scroll width from long tokens and a wide Markdown table; the initial visual fixtures had missed this content case.
 - Scoped chat Markdown now wraps unbroken prose, links and inline code. Tables scroll inside their own bounded frame; fenced code retains its existing local scrolling and copy button. Shared Markdown styling is unchanged.

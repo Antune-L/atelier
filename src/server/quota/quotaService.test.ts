@@ -75,7 +75,7 @@ test("a session event after a live read keeps the other live windows and stays t
   live = async () => {
     throw new Error("boom");
   };
-  const result = await quotaService.read("claude");
+  const result = await quotaService.read("claude", { force: true });
   expect(result).toMatchObject({ state: "error", source: "session", observedAt: NOW + 1000 });
   expect(result.windows.find((window) => window.id === "claude:five_hour")?.usedPercent).toBe(42);
   expect(result.windows.find((window) => window.id === "claude:seven_day")?.usedPercent).toBe(63);
@@ -116,6 +116,108 @@ test("not_applicable passes through without windows", async () => {
   const quotaService = service(async () => quota("claude", "not_applicable"));
   quotaService.recordClaudeRateLimit(SESSION_EVENT, NOW);
   expect(await quotaService.read("claude")).toMatchObject({ state: "not_applicable", windows: [], source: null });
+});
+
+const PROVIDERS: QuotaProvider[] = ["claude", "codex"];
+
+function liveWindow(provider: QuotaProvider): QuotaWindow {
+  return { id: `${provider}:weekly`, kind: "weekly", model: null, usedPercent: 30, windowDurationMins: 10_080, resetsAt: null };
+}
+
+/** Service whose both providers go through `read`, counting adapter calls, with a controllable clock. */
+function countingService(provider: QuotaProvider, initial: () => Promise<ProviderQuota>, timeoutMs = 1000) {
+  const clock = { now: NOW };
+  const calls = { count: 0 };
+  let next = initial;
+  const adapter = () => {
+    calls.count += 1;
+    return next();
+  };
+  const fallback = async () => quota(provider === "claude" ? "codex" : "claude", "ok");
+  const quotaService = new ProviderQuotaService({
+    system: provider === "claude" ? { readClaudeUsage: adapter, readCodexQuota: fallback } : { readClaudeUsage: fallback, readCodexQuota: adapter },
+    persistence: memoryPersistence(),
+    now: () => clock.now,
+    timeoutMs,
+  });
+  return {
+    quotaService,
+    clock,
+    calls,
+    setLive: (live: () => Promise<ProviderQuota>) => {
+      next = live;
+    },
+  };
+}
+
+for (const provider of PROVIDERS) {
+  test(`${provider}: concurrent reads share one adapter call`, async () => {
+    let resolve: (value: ProviderQuota) => void = () => {};
+    const { quotaService, calls } = countingService(provider, () => new Promise((settle) => (resolve = settle)));
+    const first = quotaService.read(provider);
+    const second = quotaService.read(provider, { force: true });
+    resolve(quota(provider, "ok", [liveWindow(provider)]));
+    const results = await Promise.all([first, second]);
+    expect(calls.count).toBe(1);
+    expect(results.map((result) => result.source)).toEqual(["live", "live"]);
+  });
+
+  test(`${provider}: a read after a timeout reuses the still running adapter call`, async () => {
+    let resolve: (value: ProviderQuota) => void = () => {};
+    const { quotaService, calls } = countingService(provider, () => new Promise((settle) => (resolve = settle)), 20);
+    expect(await quotaService.read(provider)).toMatchObject({ state: "timeout" });
+    const second = quotaService.read(provider);
+    resolve(quota(provider, "ok", [liveWindow(provider)]));
+    expect(await second).toMatchObject({ state: "ok", source: "live" });
+    expect(calls.count).toBe(1);
+  });
+
+  test(`${provider}: a recent ok live read is reused unless forced or older than 60 s`, async () => {
+    const { quotaService, calls, clock } = countingService(provider, async () => quota(provider, "ok", [liveWindow(provider)]));
+    await quotaService.read(provider);
+    expect(calls.count).toBe(1);
+    clock.now = NOW + 59_000;
+    expect(await quotaService.read(provider)).toMatchObject({ state: "ok", source: "cache", windows: [liveWindow(provider)] });
+    expect(calls.count).toBe(1);
+    expect(await quotaService.read(provider, { force: true })).toMatchObject({ source: "live" });
+    expect(calls.count).toBe(2);
+    clock.now = NOW + 59_000 + 60_000;
+    expect(await quotaService.read(provider)).toMatchObject({ source: "live" });
+    expect(calls.count).toBe(3);
+  });
+
+  test(`${provider}: last() only returns a usable known quota`, async () => {
+    const { quotaService, setLive } = countingService(provider, async () => quota(provider, "ok", [liveWindow(provider)]));
+    expect(quotaService.last(provider)).toBeNull();
+    await quotaService.read(provider);
+    expect(quotaService.last(provider)).toMatchObject({ state: "ok", source: "cache", windows: [liveWindow(provider)] });
+    setLive(async () => quota(provider, "unauthenticated"));
+    await quotaService.read(provider, { force: true });
+    expect(quotaService.last(provider)).toBeNull();
+  });
+
+  test(`${provider}: an account change on a shared read empties the quota and last()`, async () => {
+    let resolve: (value: ProviderQuota) => void = () => {};
+    const { quotaService, setLive } = countingService(provider, async () => ({
+      ...quota(provider, "ok", [liveWindow(provider)]),
+      accountEmail: "a@example.com",
+    }));
+    await quotaService.read(provider);
+    setLive(() => new Promise((settle) => (resolve = settle)));
+    const first = quotaService.read(provider, { force: true });
+    const second = quotaService.read(provider, { force: true });
+    resolve({ ...quota(provider, "error"), message: "boom", accountEmail: "b@example.com" });
+    for (const result of await Promise.all([first, second])) {
+      expect(result).toMatchObject({ state: "error", source: null, windows: [] });
+    }
+    expect(quotaService.last(provider)).toBeNull();
+  });
+}
+
+test("last() returns a session-sourced quota after a Claude rate-limit event", () => {
+  const quotaService = service(async () => quota("claude", "no_data"));
+  quotaService.recordClaudeRateLimit(SESSION_EVENT, NOW);
+  expect(quotaService.last("claude")).toMatchObject({ source: "session", state: "ok" });
 });
 
 test("store persistence round-trips a snapshot and rejects invalid JSON", () => {

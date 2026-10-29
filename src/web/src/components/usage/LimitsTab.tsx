@@ -70,7 +70,7 @@ function ProviderQuotaCard({ view, now, login }: { view: ProviderQuotaView; now:
           {loading && (
             <span className="inline-flex items-center gap-1">
               <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-              Chargement…
+              {quota !== null ? "Actualisation…" : "Chargement…"}
             </span>
           )}
           {showAge && quota.observedAt !== null && <span>{formatAgo(quota.observedAt, now)}</span>}

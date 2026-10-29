@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { DEFAULT_USAGE_PERIOD, USAGE_PERIODS, usagePeriodSchema } from "@shared/providerUsage";
 import type { UsagePeriod } from "@shared/providerUsage";
@@ -14,7 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useClaudeLogin } from "@/hooks/useClaudeLogin";
 import { useProviderQuota } from "@/hooks/useProviderQuota";
 import { useUsageSummary } from "@/hooks/useUsageSummary";
-import { formatClock, LOCAL_HISTORY_NOTE, USAGE_PERIOD_LABELS, USAGE_PROVIDER_FILTER_OPTIONS, USAGE_TAB_OPTIONS } from "@/lib/usageDisplay";
+import { formatClock, latestObservedAt, LOCAL_HISTORY_NOTE, USAGE_PERIOD_LABELS, USAGE_PROVIDER_FILTER_OPTIONS, USAGE_TAB_OPTIONS } from "@/lib/usageDisplay";
 import type { UsageProviderFilter, UsageTab } from "@/lib/usageDisplay";
 import { cn } from "@/lib/utils";
 
@@ -24,19 +24,20 @@ export function UsageView(): ReactNode {
   const [filter, setFilter] = useState<UsageProviderFilter>("all");
   const [nonce, setNonce] = useState(0);
   const [claudeNonce, setClaudeNonce] = useState(0);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
   const claude = useProviderQuota("claude", nonce + claudeNonce);
   const codex = useProviderQuota("codex", nonce);
-  const usage = useUsageSummary(period, nonce);
+  const usage = useUsageSummary(period, nonce, tab !== "limits");
   const claudeLogin = useClaudeLogin((status) => {
     if (!status.restartRequired) setClaudeNonce((n) => n + 1);
   });
-  const loading = claude.loading || codex.loading || usage.loading;
-
-  useEffect(() => {
-    if (!loading) setLastUpdated(Date.now());
-  }, [loading]);
+  const quotaViews = ([
+    { provider: "codex", ...codex },
+    { provider: "claude", ...claude },
+  ] satisfies ProviderQuotaView[]).filter((view) => filter === "all" || view.provider === filter);
+  // Loading state and freshness of the block currently visible only.
+  const loading = tab === "limits" ? quotaViews.some((view) => view.loading) : usage.loading;
+  const lastUpdated = tab === "limits" ? latestObservedAt(quotaViews.map((view) => view.quota)) : (usage.summary?.generatedAt ?? null);
 
   const onPeriodChange = (value: string): void => {
     const parsed = usagePeriodSchema.safeParse(value);
@@ -44,12 +45,13 @@ export function UsageView(): ReactNode {
   };
 
   const renderSummaryTab = (): ReactNode => {
-    if (usage.error !== null) return <p role="alert" className="text-sm text-danger">{usage.error}</p>;
-    if (usage.summary === null) return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    const errorAlert = usage.error !== null && <p role="alert" className="text-sm text-danger">{usage.error}</p>;
+    if (usage.summary === null) return errorAlert || <p className="text-sm text-muted-foreground">Chargement…</p>;
     const coverage = usage.summary.historyCoverage;
     const partialHistory = coverage !== undefined && coverage.failedFiles + coverage.failedRoots > 0;
     return (
       <div className="flex flex-col gap-3">
+        {errorAlert}
         {tab === "cost" ? <CostTab summary={usage.summary} filter={filter} /> : <TokensTab summary={usage.summary} filter={filter} />}
         {partialHistory && <p role="status" className="text-sm text-warning">Historique local partiel : certains fichiers ou dossiers n’ont pas pu être lus, ou dépassent les limites de lecture. Les totaux affichés sont incomplets.</p>}
         <p className="text-xs text-muted-foreground">{LOCAL_HISTORY_NOTE}</p>
@@ -95,13 +97,7 @@ export function UsageView(): ReactNode {
         </ToggleGroup>
       </div>
       {tab === "limits" ? (
-        <LimitsTab
-          providers={([
-            { provider: "codex", ...codex },
-            { provider: "claude", ...claude },
-          ] satisfies ProviderQuotaView[]).filter((view) => filter === "all" || view.provider === filter)}
-          claudeLogin={claudeLogin}
-        />
+        <LimitsTab providers={quotaViews} claudeLogin={claudeLogin} />
       ) : (
         renderSummaryTab()
       )}

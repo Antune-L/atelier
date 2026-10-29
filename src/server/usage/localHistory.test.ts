@@ -141,6 +141,17 @@ describe("LocalUsageHistory", () => {
     expect(result.failedFiles).toBe(1);
   });
 
+  test("keeps every entry of a file too large to spread into push()", async () => {
+    // Bun's push(...arr) overflows somewhere between 600k and 700k arguments.
+    const count = 750_000;
+    const line = JSON.stringify({ type: "assistant", sessionId: "s", timestamp: TS, message: { model: "m", usage: {} } });
+    const files = new Map([["/c/projects/big.jsonl", { text: `${line}\n`.repeat(count), mtimeMs: 1 }]]);
+    const { fs } = fakeFs(files);
+    const result = await new LocalUsageHistory(fs, roots).read();
+    expect(result.entries).toHaveLength(count);
+    expect(result.failedFiles).toBe(0);
+  }, 20_000);
+
   test("roots follow CLAUDE_CONFIG_DIR and CODEX_HOME", () => {
     expect(localHistoryRoots({}, "/h")).toEqual({ claudeProjects: "/h/.claude/projects", codexSessions: "/h/.codex/sessions" });
     expect(localHistoryRoots({ CLAUDE_CONFIG_DIR: "/cc", CODEX_HOME: "/cx" }, "/h"))

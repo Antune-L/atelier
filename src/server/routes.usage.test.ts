@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { providerQuotaSchema } from "../shared/providerQuota.ts";
+import { lastProviderQuotaResponseSchema, providerQuotaSchema } from "../shared/providerQuota.ts";
 import { USAGE_PERIODS, usageSummarySchema } from "../shared/providerUsage.ts";
 import { claudeLoginStatusSchema } from "../shared/claudeLogin.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
@@ -94,6 +94,21 @@ test("usage limits return the dry-run quotas of both providers and persist them"
 test("usage limits reject an unknown provider", async () => {
   const { get } = setup();
   expect((await get("/usage/limits/cursor")).status).toBe(HTTP_BAD_REQUEST);
+  expect((await get("/usage/limits/cursor/last")).status).toBe(HTTP_BAD_REQUEST);
+});
+
+test("last usage limits serve the known quota without a live read", async () => {
+  const { get } = setup();
+  const empty = await get("/usage/limits/claude/last");
+  expect(empty.status).toBe(HTTP_OK);
+  expect(lastProviderQuotaResponseSchema.parse(await empty.json())).toEqual({ quota: null });
+
+  const fresh = await get("/usage/limits/claude?fresh=1");
+  expect(fresh.status).toBe(HTTP_OK);
+  expect(providerQuotaSchema.parse(await fresh.json())).toMatchObject({ provider: "claude", state: "ok", source: "live" });
+
+  const { quota } = lastProviderQuotaResponseSchema.parse(await (await get("/usage/limits/claude/last")).json());
+  expect(quota).toMatchObject({ provider: "claude", source: "cache" });
 });
 
 test("usage summary accepts the 24h/7d/30d/90d periods and rejects any other", async () => {

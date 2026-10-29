@@ -6,6 +6,7 @@ import type { UsagePeriod } from "@shared/providerUsage";
 
 import { CostTab } from "@/components/usage/CostTab";
 import { LimitsTab } from "@/components/usage/LimitsTab";
+import type { ProviderQuotaView } from "@/components/usage/LimitsTab";
 import { TokensTab } from "@/components/usage/TokensTab";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
@@ -17,7 +18,6 @@ import { formatClock, LOCAL_HISTORY_NOTE, USAGE_PERIOD_LABELS, USAGE_PROVIDER_FI
 import type { UsageProviderFilter, UsageTab } from "@/lib/usageDisplay";
 import { cn } from "@/lib/utils";
 
-/** "Consommation" page: subscription limits plus indicative cost and tokens per provider. */
 export function UsageView(): ReactNode {
   const [tab, setTab] = useState<UsageTab>("limits");
   const [period, setPeriod] = useState<UsagePeriod>(DEFAULT_USAGE_PERIOD);
@@ -29,7 +29,6 @@ export function UsageView(): ReactNode {
   const claude = useProviderQuota("claude", nonce + claudeNonce);
   const codex = useProviderQuota("codex", nonce);
   const usage = useUsageSummary(period, nonce);
-  // After a successful login, refetch Claude limits unless the env token still masks the session.
   const claudeLogin = useClaudeLogin((status) => {
     if (!status.restartRequired) setClaudeNonce((n) => n + 1);
   });
@@ -56,10 +55,10 @@ export function UsageView(): ReactNode {
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-7 px-4 py-5 sm:px-8 sm:py-7">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">Consommation</h2>
+          <h2 className="text-xl font-semibold tracking-tight">Consommation</h2>
           <p className="text-xs text-muted-foreground">
             Dernière mise à jour : {lastUpdated === null ? "—" : formatClock(lastUpdated)}
           </p>
@@ -70,10 +69,9 @@ export function UsageView(): ReactNode {
         </Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs options={USAGE_TAB_OPTIONS} value={tab} onChange={setTab} aria-label="Vue de la consommation" />
-        {tab !== "limits" && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Tabs options={USAGE_PROVIDER_FILTER_OPTIONS} value={filter} onChange={setFilter} aria-label="Fournisseur" />
+        <div className="flex flex-wrap items-center gap-3">
+          <Tabs options={USAGE_PROVIDER_FILTER_OPTIONS} value={filter} onChange={setFilter} aria-label="Fournisseur" />
+          {tab !== "limits" && (
             <ToggleGroup type="single" value={period} onValueChange={onPeriodChange} aria-label="Période" variant="outline" size="sm">
               {USAGE_PERIODS.map((value) => (
                 <ToggleGroupItem key={value} value={value}>
@@ -81,15 +79,16 @@ export function UsageView(): ReactNode {
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
-          </div>
-        )}
+          )}
+          <Tabs options={USAGE_TAB_OPTIONS} value={tab} onChange={setTab} aria-label="Vue de la consommation" />
+        </div>
       </div>
       {tab === "limits" ? (
         <LimitsTab
-          providers={[
-            { provider: "claude", ...claude },
+          providers={([
             { provider: "codex", ...codex },
-          ]}
+            { provider: "claude", ...claude },
+          ] satisfies ProviderQuotaView[]).filter((view) => filter === "all" || view.provider === filter)}
           claudeLogin={claudeLogin}
         />
       ) : (

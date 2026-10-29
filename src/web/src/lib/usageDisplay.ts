@@ -6,6 +6,24 @@ import type { TabOption } from "@/components/ui/tabs";
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
+const USAGE_USD_FORMATTER = new Intl.NumberFormat("fr-FR", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+const COMPACT_TOKEN_FORMATTER = new Intl.NumberFormat("fr-FR", {
+  notation: "compact",
+  maximumFractionDigits: 2,
+});
+
+export function formatUsageUsd(value: number): string {
+  return USAGE_USD_FORMATTER.format(value);
+}
+
+export function formatCompactTokens(value: number): string {
+  return COMPACT_TOKEN_FORMATTER.format(value);
+}
 
 export const QUOTA_PROVIDER_LABELS: Record<QuotaProvider, string> = { claude: "Claude", codex: "Codex" };
 

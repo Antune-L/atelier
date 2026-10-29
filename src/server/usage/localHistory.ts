@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isCodexFastServiceTier } from "../../shared/codexCapabilities.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
 
@@ -151,13 +152,14 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
       if (total !== null && total === lastTotal) continue;
       lastTotal = total;
       const usage = tokenCount.data.info.last_token_usage;
-      const fast = serviceTier !== null && serviceTier !== "default";
+      // Same FAST rule as DB executions; any other non-default tier stays visible through `speed`.
+      const fast = isCodexFastServiceTier(serviceTier);
       entries.push({
         provider: "codex",
         sessionId,
         timestamp,
         model: model ?? metaModel ?? "unknown",
-        speed: fast && serviceTier !== null ? serviceTier : "standard",
+        speed: serviceTier === null || serviceTier === "default" ? "standard" : serviceTier,
         fast,
         // Codex convention: input includes cached and written tokens; reasoning is part of output.
         tokens: {

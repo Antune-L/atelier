@@ -57,6 +57,14 @@ describe("parseCodexHistory", () => {
     expect(entries[1]).toMatchObject({ speed: "priority", fast: true, tokens: { input: 5, output: 1, cacheRead: 0, cacheCreate: 0 } });
   });
 
+  test("keeps a non-fast tier visible without FAST pricing", () => {
+    const text = [
+      { timestamp: TS, type: "turn_context", payload: { model: "gpt-6-astra", service_tier: "flex" } },
+      { timestamp: TS, type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: 5 } } } },
+    ].map((line) => JSON.stringify(line)).join("\n");
+    expect(parseCodexHistory(text, "/s/rollout-x.jsonl")[0]).toMatchObject({ speed: "flex", fast: false });
+  });
+
   test("skips a re-emitted token_count whose cumulative total did not change", () => {
     const count = (total: number) => ({ timestamp: TS, type: "event_msg", payload: { type: "token_count", info: {
       last_token_usage: { input_tokens: 10, output_tokens: 2 },

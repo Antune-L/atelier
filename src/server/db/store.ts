@@ -53,7 +53,10 @@ import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchem
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
 import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
-import { projectStatRecord } from "../../shared/statistics.ts";
+import { projectStatRecord, residualLegacyUsage } from "../../shared/statistics.ts";
+import { providerQuotaSchema } from "../../shared/providerQuota.ts";
+import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
+import type { UsageSource } from "../../shared/providerUsage.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
@@ -86,6 +89,7 @@ export class TicketCreationRequestConflictError extends Error {
 }
 
 const log = createLogger("store");
+const PROVIDER_QUOTA_META_PREFIX = "provider_quota:";
 const persistedReviewStatusSchema = z.enum(["pending", "completed", "failed"]);
 const reviewVerdictSchema = z.enum(["approve", "revise"]);
 const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verified", "failed"]);
@@ -1351,6 +1355,39 @@ export class Store {
       const ticket = mapTicketRow(row, 0);
       return projectStatRecord(ticket, byTicket.get(ticket.id) ?? []);
     });
+  }
+
+  /** Per-ticket usage for the usage page; `legacy` excludes what executions already account for. */
+  listUsageSources(): UsageSource[] {
+    const byTicket = new Map<string, ExecutionRun[]>();
+    for (const execution of this.listExecutionRuns("ticket")) {
+      const runs = byTicket.get(execution.ownerId) ?? [];
+      runs.push(execution);
+      byTicket.set(execution.ownerId, runs);
+    }
+    return this.db.query("SELECT * FROM tickets ORDER BY created_at ASC").all().map((row) => {
+      const ticket = mapTicketRow(row, 0);
+      const executions = byTicket.get(ticket.id) ?? [];
+      return { createdAt: ticket.createdAt, legacy: residualLegacyUsage(ticket, executions), executions };
+    });
+  }
+
+  /** Last known quota of a provider; null when absent or no longer valid. */
+  getProviderQuotaSnapshot(provider: QuotaProvider): ProviderQuota | null {
+    const stored = this.getMeta(`${PROVIDER_QUOTA_META_PREFIX}${provider}`);
+    if (stored === null) return null;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(stored);
+    } catch {
+      return null;
+    }
+    const parsed = providerQuotaSchema.safeParse(raw);
+    return parsed.success && parsed.data.provider === provider ? parsed.data : null;
+  }
+
+  saveProviderQuotaSnapshot(provider: QuotaProvider, quota: ProviderQuota): void {
+    this.setMeta(`${PROVIDER_QUOTA_META_PREFIX}${provider}`, JSON.stringify(providerQuotaSchema.parse(quota)));
   }
 
   getTicket(id: string): Ticket | null {

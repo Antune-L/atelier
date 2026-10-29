@@ -58,6 +58,10 @@ import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestP
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
+import { providerQuotaSchema } from "@shared/providerQuota";
+import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
+import { usageSummarySchema } from "@shared/providerUsage";
+import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
 import { auditFindingSchema, auditOverviewSchema, auditProjectViewSchema, auditRunDetailSchema, auditRunSchema } from "@shared/audit";
 import type { AuditCreateCardInput, AuditDecisionInput, AuditFinding, AuditOverview, AuditProjectView, AuditRun, AuditRunDetail, AuditSetStartInput, UpdateAuditProjectSettingsInput } from "@shared/audit";
@@ -229,6 +233,10 @@ export const api = {
     request(`/api/pr-notifications/${encodeURIComponent(id)}/review`, { method: "POST", body: JSON.stringify(options) }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
+  usageLimits: async (provider: QuotaProvider, signal?: AbortSignal): Promise<ProviderQuota> =>
+    providerQuotaSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}`, { signal })),
+  usageSummary: async (period: UsagePeriod): Promise<UsageSummary> =>
+    usageSummarySchema.parse(await request<unknown>(`/api/usage/summary?period=${encodeURIComponent(period)}`)),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),
   recoverImplementationPlan: async (id: string, input: RecoverImplementationPlanInput): Promise<Ticket> => {

@@ -1,5 +1,5 @@
 import { isCodexFastServiceTier } from "./codexCapabilities.ts";
-import { summarizeSessionCosts, totalTokensOfSessions } from "./pricing.ts";
+import { costOfExecutionUsage, summarizeSessionCosts, totalTokensOfSessions } from "./pricing.ts";
 import type { ExecutionRun, SessionUsage, StatRecord, Ticket } from "./schemas.ts";
 
 function executionTokens(run: ExecutionRun): number {
@@ -16,16 +16,14 @@ function executionCosts(runs: ExecutionRun[], legacy: SessionUsage): Pick<StatRe
   let hasKnown = summary.costUsd !== null || summary.partial;
   let hasUnknown = Object.keys(legacy).length > 0 && summary.costUsd === null;
   for (const run of runs) {
-    if (run.codexFast || isCodexFastServiceTier(run.configuredServiceTier)) {
-      if (Object.keys(run.usageByModel).length > 0) hasUnknown = true;
-      continue;
-    }
-    for (const usage of Object.values(run.usageByModel)) {
-      if (usage.costUsd === null) {
+    const fast = run.codexFast || isCodexFastServiceTier(run.configuredServiceTier);
+    for (const [model, usage] of Object.entries(run.usageByModel)) {
+      const cost = costOfExecutionUsage(model, usage, fast);
+      if (cost === null) {
         hasUnknown = true;
       } else {
         hasKnown = true;
-        knownCostUsd += usage.costUsd;
+        knownCostUsd += cost;
       }
     }
   }
@@ -36,10 +34,8 @@ function executionCosts(runs: ExecutionRun[], legacy: SessionUsage): Pick<StatRe
   };
 }
 
-/** Include unmatched legacy sessions without counting a captured execution's usage twice. */
-export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): StatRecord {
-  const latest = executions.findLast((execution) => execution.role === "orchestrator") ?? executions[executions.length - 1];
-  const hasExecutionUsage = executions.some((run) => Object.keys(run.usageByModel).length > 0);
+/** A ticket's legacy session usage minus what its captured executions already account for. */
+export function residualLegacyUsage(ticket: Ticket, executions: ExecutionRun[]): SessionUsage {
   const legacy = structuredClone(ticket.sessionUsage);
   for (const run of executions) {
     if (!run.sessionId) continue;
@@ -56,6 +52,14 @@ export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): S
     }
     if (Object.keys(session).length === 0) delete legacy[run.sessionId];
   }
+  return legacy;
+}
+
+/** Include unmatched legacy sessions without counting a captured execution's usage twice. */
+export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): StatRecord {
+  const latest = executions.findLast((execution) => execution.role === "orchestrator") ?? executions[executions.length - 1];
+  const hasExecutionUsage = executions.some((run) => Object.keys(run.usageByModel).length > 0);
+  const legacy = residualLegacyUsage(ticket, executions);
   const hasLegacyUsage = Object.keys(legacy).length > 0;
   const costs = executionCosts(executions, legacy);
   const totalTokens = hasExecutionUsage || hasLegacyUsage

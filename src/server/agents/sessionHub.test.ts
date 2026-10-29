@@ -12,7 +12,7 @@ import type {
   SessionMessageStatus,
   SessionStartConfig,
 } from "./sessionHub.ts";
-import { renderChannelEvent, SessionHub, STEER_PREFIX } from "./sessionHub.ts";
+import { renderChannelEvent, renderSessionEvent, SessionHub, STEER_PREFIX } from "./sessionHub.ts";
 
 interface RecordedSession {
   opts: AgentSessionOptions;
@@ -247,6 +247,22 @@ describe("SessionHub generations", () => {
 
     second.resolveClose();
     hub.disconnect("ticket-1");
+  });
+
+  test("forwards typed rate-limit events to the quota listener and keeps the transcript line", () => {
+    const system = new RecordingSystem();
+    const hub = new SessionHub(system);
+    const received: Array<{ rateLimitType: string | null; utilization: number | null }> = [];
+    hub.setRateLimitListener((event) => received.push({ rateLimitType: event.rateLimitType, utilization: event.utilization }));
+    hub.start(sessionConfig());
+    const session = system.sessions[0];
+    if (!session) throw new Error("session missing");
+    session.opts.onEvent({ type: "rate_limit", status: "allowed", resetsAt: null, rateLimitType: "five_hour", utilization: 0.42 });
+    session.opts.onEvent({ type: "rate_limit", status: "allowed", resetsAt: null, rateLimitType: null, utilization: null });
+    expect(received).toEqual([{ rateLimitType: "five_hour", utilization: 0.42 }]);
+    expect(renderSessionEvent({ type: "rate_limit", status: "allowed", resetsAt: null, rateLimitType: "five_hour", utilization: 0.42 })).toBe("⏳ rate limit : allowed");
+    hub.disconnect("ticket-1");
+    session.resolveClose();
   });
 
   test("persists init immediately and refuses queued turns after close", () => {

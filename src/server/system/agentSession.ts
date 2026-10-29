@@ -72,7 +72,15 @@ export type AgentSessionEvent = (
       turnId?: string | null;
       structuredOutput?: unknown;
     }
-  | { type: "rate_limit"; status: string; resetsAt: number | null }
+  | {
+      type: "rate_limit";
+      status: string;
+      resetsAt: number | null;
+      /** Upstream rate-limit window (Claude `rateLimitType`), null when unknown. */
+      rateLimitType: string | null;
+      /** Utilization ratio 0-1, null when unknown. */
+      utilization: number | null;
+    }
   | { type: "error"; message: string }
   /** Current context-window occupancy of the live session (only with `reportContextUsage`). */
   | { type: "context_usage"; usedTokens: number; maxTokens: number | null }

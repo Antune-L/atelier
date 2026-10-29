@@ -53,6 +53,7 @@ import { seedPreviewDemoData } from "./previewSeed.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
 import { createRequestGuard, resolveBindHost } from "./requestGuard.ts";
 import { createApiRoutes } from "./routes.ts";
+import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { configureClaudeProvisionDir, ensureClaudeBinary } from "./system/claudeBinary.ts";
 import { createSystemAdapter } from "./system/index.ts";
 import { configureGithubAccountsRoot, setGithubProjectSource } from "./system/github/accountEnv.ts";
@@ -260,6 +261,14 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
   const sessionHub = new SessionHub(system);
+  const quotaService = new ProviderQuotaService({
+    system,
+    persistence: {
+      load: (provider) => store.getProviderQuotaSnapshot(provider),
+      save: (provider, quota) => store.saveProviderQuotaSnapshot(provider, quota),
+    },
+  });
+  sessionHub.setRateLimitListener((event, receivedAt) => quotaService.recordClaudeRateLimit(event, receivedAt));
   const notifier = new Notifier(clientHub, opts.onNotify);
   const prNotificationMonitor = new PrNotificationMonitor(store, system, clientHub, notifier);
   const lifecycle = new TicketLifecycle(store, clientHub, notifier);
@@ -414,6 +423,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   });
 
   const api = createApiRoutes({
+    quota: quotaService,
     previews: previewManager,
     quality: qualityManager,
     qualityArtifactDirectory: join(dataRoot, "quality-artifacts"),

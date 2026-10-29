@@ -68,7 +68,7 @@ interface DurationGroup {
 
 const NULL_KEY = "__default__";
 
-function effectiveModelLabel(model: string | null): string {
+export function effectiveModelLabel(model: string | null): string {
   if (model === null) return "Non attribué";
   const agent = agentModelSchema.safeParse(model);
   if (agent.success) return AGENT_MODEL_LABELS[agent.data];

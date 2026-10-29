@@ -21,6 +21,7 @@ import { SlotPips } from "@/components/SlotPips";
 import { HostMetricsBadge } from "@/components/HostMetricsBadge";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
+import { UsageView } from "@/components/UsageView";
 import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
 import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
@@ -206,6 +207,7 @@ export function App() {
 
   const renderView = (): ReactNode => {
     if (view === "stats") return <StatsView projects={projects} />;
+    if (view === "usage") return <UsageView />;
     if (view === "automation") return <AutomationView />;
     if (view === "audits") return <AuditsView projects={projects} target={auditTarget} />;
     if (view === "atelier") {

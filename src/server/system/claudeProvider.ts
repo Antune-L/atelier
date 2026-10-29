@@ -595,6 +595,8 @@ export function dispatchClaudeMessage(
         type: "rate_limit",
         status: message.rate_limit_info.status,
         resetsAt: message.rate_limit_info.resetsAt ?? null,
+        rateLimitType: message.rate_limit_info.rateLimitType ?? null,
+        utilization: message.rate_limit_info.utilization ?? null,
       });
       return;
     default:

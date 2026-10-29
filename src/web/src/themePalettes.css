@@ -80,7 +80,7 @@
   --foreground: 296 55.56% 21.18%;
   --card: 292.5 50% 96.86%;
   --card-foreground: 296 55.56% 21.18%;
-  --popover: 0 0% 100%;
+  --popover: 300 60% 99.5%;
   --popover-foreground: 296 55.56% 21.18%;
   --primary: 333.33 71.43% 50.59%;
   --primary-foreground: 0 0% 100%;
@@ -118,7 +118,7 @@
   --foreground: 260 27.27% 97.84%;
   --card: 276 12.5% 15.69%;
   --card-foreground: 260 27.27% 97.84%;
-  --popover: 320 23.08% 5.1%;
+  --popover: 270 16.13% 15.66%;
   --popover-foreground: 260 27.27% 97.84%;
   --primary: 332.02 100% 31.96%;
   --primary-foreground: 326.51 84.31% 90%;
@@ -156,7 +156,7 @@
   --foreground: 304 26.32% 11.18%;
   --card: 135 20% 96.08%;
   --card-foreground: 304 26.32% 11.18%;
-  --popover: 150 4.35% 90.98%;
+  --popover: 135 20% 99%;
   --popover-foreground: 304 26.32% 11.18%;
   --primary: 152.45 64.47% 29.8%;
   --primary-foreground: 300 100% 99.02%;
@@ -194,7 +194,7 @@
   --foreground: 300 100% 99.02%;
   --card: 147.69 19.4% 13.14%;
   --card-foreground: 300 100% 99.02%;
-  --popover: 153.33 6.21% 28.43%;
+  --popover: 147.69 19.4% 16.64%;
   --popover-foreground: 300 100% 99.02%;
   --primary: 146.97 57.07% 62.55%;
   --primary-foreground: 304 26.32% 11.18%;
@@ -232,7 +232,7 @@
   --foreground: 304 26.32% 11.18%;
   --card: 200 17.65% 96.67%;
   --card-foreground: 304 26.32% 11.18%;
-  --popover: 220 6.98% 91.57%;
+  --popover: 200 17.65% 99%;
   --popover-foreground: 304 26.32% 11.18%;
   --primary: 206.72 64.32% 41.76%;
   --primary-foreground: 300 100% 99.02%;
@@ -270,7 +270,7 @@
   --foreground: 300 100% 99.02%;
   --card: 210 30.3% 12.94%;
   --card-foreground: 300 100% 99.02%;
-  --popover: 213.75 10.96% 28.63%;
+  --popover: 210 30.3% 16.44%;
   --popover-foreground: 300 100% 99.02%;
   --primary: 205.24 78.75% 68.63%;
   --primary-foreground: 304 26.32% 11.18%;
@@ -308,7 +308,7 @@
   --foreground: 304 26.32% 11.18%;
   --card: 30 25% 96.86%;
   --card-foreground: 304 26.32% 11.18%;
-  --popover: 0 7.32% 91.96%;
+  --popover: 30 25% 99%;
   --popover-foreground: 304 26.32% 11.18%;
   --primary: 19.55 61.11% 42.35%;
   --primary-foreground: 300 100% 99.02%;
@@ -346,7 +346,7 @@
   --foreground: 300 100% 99.02%;
   --card: 16 22.39% 13.14%;
   --card-foreground: 300 100% 99.02%;
-  --popover: 10 8.22% 28.63%;
+  --popover: 16 22.39% 16.64%;
   --popover-foreground: 300 100% 99.02%;
   --primary: 23.14 82.35% 66.67%;
   --primary-foreground: 304 26.32% 11.18%;
@@ -384,7 +384,7 @@
   --foreground: 304 26.32% 11.18%;
   --card: 270 14.29% 97.25%;
   --card-foreground: 304 26.32% 11.18%;
-  --popover: 270 10% 92.16%;
+  --popover: 270 14.29% 99%;
   --popover-foreground: 304 26.32% 11.18%;
   --primary: 258.24 42.15% 52.55%;
   --primary-foreground: 300 100% 99.02%;
@@ -422,7 +422,7 @@
   --foreground: 300 100% 99.02%;
   --card: 255 24.24% 12.94%;
   --card-foreground: 300 100% 99.02%;
-  --popover: 252.86 9.59% 28.63%;
+  --popover: 255 24.24% 16.44%;
   --popover-foreground: 300 100% 99.02%;
   --primary: 256.41 81.82% 71.96%;
   --primary-foreground: 304 26.32% 11.18%;

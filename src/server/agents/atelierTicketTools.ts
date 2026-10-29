@@ -5,6 +5,7 @@ import {
   atelierCreateTodoArgsSchema,
   atelierGetTicketArgsSchema,
   atelierListTicketsArgsSchema,
+  atelierSettleConversationArgsSchema,
   atelierStartTicketArgsSchema,
   atelierTicketActionArgsSchema,
 } from "../../shared/protocol.ts";
@@ -21,7 +22,7 @@ const TICKETS_API_URL = "http://atelier.internal/api/tickets";
 const MAX_RESULT_CHARS = 60_000;
 const TRUNCATED_PREFIX = "[truncated] ";
 const MIN_AUTHORIZATION_QUOTE_CHARS = 12;
-const MUTATING_TOOLS: readonly WorkerToolName[] = ["atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action"];
+const MUTATING_TOOLS: readonly WorkerToolName[] = ["atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action", "atelier_settle_conversation"];
 
 /** In-process entry point of the board HTTP API, so Atelier actions reuse the exact UI routes and their checks. */
 export type BoardRouteHandler = (request: Request) => Promise<Response>;
@@ -146,6 +147,11 @@ export class AtelierTicketTools {
           throw new Error("Atelier cannot move a card to another project.");
         }
         outcome = await this.runAction(input.ticketId, input.action, input.body);
+      } else if (name === "atelier_settle_conversation") {
+        const input = atelierSettleConversationArgsSchema.parse(args);
+        this.assertAuthority(currentUserMessage, input.authorizationQuote);
+        if (!conversation.settled) this.deps.hub.pushConversation(this.deps.store.setConversationSettled(conversationId, true));
+        outcome = { ok: true, result: JSON.stringify({ conversationId, settled: true }) };
       } else {
         return { ok: false, result: "This tool is unavailable in Atelier." };
       }
@@ -181,7 +187,7 @@ export class AtelierTicketTools {
   private assertAuthority(message: ConversationMessage | undefined, quote: string): void {
     const excerpt = quote.trim();
     const meaningful = message !== undefined && excerpt.length >= Math.min(MIN_AUTHORIZATION_QUOTE_CHARS, message.content.trim().length);
-    if (!meaningful || !quotesWholeWords(message.content, excerpt)) throw new Error("Quote the current user's explicit authorization before changing a card.");
+    if (!meaningful || !quotesWholeWords(message.content, excerpt)) throw new Error("Quote the current user's explicit authorization before changing a card or this conversation.");
   }
 }
 

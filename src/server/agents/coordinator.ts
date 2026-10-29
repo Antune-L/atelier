@@ -480,6 +480,7 @@ export class AgentCoordinator {
     atelier_create_todo: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     atelier_start_ticket: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     atelier_ticket_action: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
+    atelier_settle_conversation: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
   };
 

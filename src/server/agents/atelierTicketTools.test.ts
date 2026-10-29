@@ -72,6 +72,26 @@ describe("Atelier project board operations", () => {
       expect(activities[0]?.content).toContain(user.id);
       expect(activities[0]?.content).toContain(ticket?.id ?? "missing");
     });
+
+    test(`${provider} archives the current conversation only with the current user's authorization`, async () => {
+      const { tools, conversation, store } = setup(provider);
+      store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Merci, explique-moi juste le plan.", turnId: "turn-2" });
+      const stale = await tools.handle(conversation.id, "atelier_settle_conversation", { authorizationQuote: AUTHORIZATION }, "stale");
+      expect(stale.ok).toBe(false);
+      expect((await tools.handle(conversation.id, "atelier_settle_conversation", {}, "missing")).ok).toBe(false);
+      expect(store.getConversation(conversation.id)?.settled).toBe(false);
+      const quote = "C'est bon, tu peux archiver la conversation.";
+      store.addConversationMessage({ conversationId: conversation.id, role: "user", content: quote, turnId: "turn-3" });
+      const settled = await tools.handle(conversation.id, "atelier_settle_conversation", { authorizationQuote: quote }, "settle");
+      expect(settled).toEqual({ ok: true, result: JSON.stringify({ conversationId: conversation.id, settled: true }) });
+      expect(store.getConversation(conversation.id)?.settled).toBe(true);
+      expect((await tools.handle(conversation.id, "atelier_settle_conversation", { authorizationQuote: quote }, "again")).ok).toBe(true);
+      expect(store.getConversation(conversation.id)?.settled).toBe(true);
+      const activities = store.listConversationMessages(conversation.id).filter((message) => message.role === "activity");
+      expect(activities).toHaveLength(4);
+      expect(activities[2]?.content).toStartWith(ATELIER_BOARD_RESULT_PREFIX);
+      expect(activities[2]?.content).toContain('"tool":"atelier_settle_conversation"');
+    });
   }
 
   test("scopes reads, creates, dependencies and starts to the conversation project", async () => {

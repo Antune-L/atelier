@@ -130,8 +130,9 @@ export const atelierTicketActionArgsSchema = atelierTicketIdSchema.extend({
   body: z.record(z.string(), z.unknown()).optional().describe("Request body of the matching board action, e.g. { column, confirmed } for move, { body } for comment, editable card fields for update. Omit when the action takes no input."),
   authorizationQuote: atelierAuthorizationSchema,
 }).strict();
+export const atelierSettleConversationArgsSchema = z.object({ authorizationQuote: atelierAuthorizationSchema }).strict();
 
-export const ATELIER_BOARD_TOOL_NAMES = ["atelier_list_tickets", "atelier_get_ticket", "atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action"] satisfies readonly WorkerToolName[];
+export const ATELIER_BOARD_TOOL_NAMES = ["atelier_list_tickets", "atelier_get_ticket", "atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action", "atelier_settle_conversation"] satisfies readonly WorkerToolName[];
 
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
@@ -469,6 +470,11 @@ export const WORKER_TOOLS = [
     name: "atelier_ticket_action",
     description: "Run one board action on an existing card in this conversation's project only when the current user explicitly authorizes that action: edit, move or abandon (move with confirmed true), comment or answer a question, validate its PRD, merge or mark merged, retry, relaunch, resolve conflicts, test, create the PR, analyze, triage, split, reformulate, preview, quality validation, or delete. The same server checks as the board UI apply; report the server response as returned.",
     argsSchema: atelierTicketActionArgsSchema,
+  },
+  {
+    name: "atelier_settle_conversation",
+    description: "Archive (settle) this Atelier conversation only when the current user explicitly authorizes archiving it. It only moves the conversation to the archived list; it never touches cards. A later user message reopens it.",
+    argsSchema: atelierSettleConversationArgsSchema,
   },
   {
     name: "submit_prd_document",

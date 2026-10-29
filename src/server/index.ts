@@ -31,6 +31,7 @@ import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
 import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { QualityManager } from "./agents/qualityManager.ts";
+import { RepoSnapshots } from "./agents/repoSnapshots.ts";
 import { SplitManager } from "./agents/splitManager.ts";
 import { TriageManager } from "./agents/triageManager.ts";
 import { Watchdog } from "./agents/watchdog.ts";
@@ -275,8 +276,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const repoMutex = new KeyedMutex();
   const triageManager = new TriageManager(store, system, sessionHub, clientHub, notifier, repoMutex);
   const feasibilityManager = new FeasibilityBatchManager(store, system, sessionHub, clientHub, notifier, repoMutex);
-  const splitManager = new SplitManager(store, system, sessionHub);
-  const reformulateManager = new ReformulateManager(store, system, clientHub, notifier);
+  // Frozen origin/<base> snapshots for read-only sessions; the Atelier lot also consumes `repoSnapshots`.
+  const repoSnapshots = new RepoSnapshots({ system, repoMutex });
+  const splitManager = new SplitManager(store, system, sessionHub, repoSnapshots);
+  const reformulateManager = new ReformulateManager(store, system, clientHub, notifier, repoSnapshots);
   const feasibilityAnswerManager = new FeasibilityAnswerManager(store, system, clientHub);
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
@@ -302,7 +305,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     slots: slotManager,
     feasibility: feasibilityManager,
   });
-  const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system, ticketOperations, uploadsRoot: join(dataRoot, UPLOADS_DIR) });
+  const atelierManager = new AtelierManager({ store, hub: clientHub, sessionHub, system, snapshots: repoSnapshots, ticketOperations, uploadsRoot: join(dataRoot, UPLOADS_DIR) });
   const delegationManager = new DelegationManager(store, system, sessionHub, clientHub, undefined, repoMutex);
   sessionHub.setAutonomousGuardFactory((config) => createAutonomousSessionGuard(store, config.ticketId, "orchestrator"));
   slotManager.setAutonomousRecovery({
@@ -412,6 +415,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   reformulateManager.recoverStale();
   feasibilityAnswerManager.recoverStale();
   atelierManager.recoverStale();
+  repoSnapshots.start();
   slotManager.resumeQueuedTickets();
   watchdog.start();
   automationManager.start();
@@ -592,6 +596,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await prNotificationMonitor.stop();
       watchdog.stop();
       atelierManager.stop();
+      repoSnapshots.stop();
       automationManager.stop();
       auditManager.stop();
       launchScheduler.stop();

@@ -118,6 +118,7 @@ function fakeMissingKey(name: string, provider: Orchestrator): string {
 }
 
 const FAKE_GIT_COMMIT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const FAKE_COMMIT_TIMESTAMP_MS = 1_767_225_600_000;
 const FAKE_AUDIT_BASE_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const FAKE_AUDIT_FILE = "src/example.ts";
 const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n--- a/${FAKE_AUDIT_FILE}\n+++ b/${FAKE_AUDIT_FILE}\n@@ -1 +1 @@\n-export const example = 1;\n+export const example = 2;\n`;
@@ -268,6 +269,22 @@ export class FakeSystemAdapter implements SystemAdapter {
     assertOperationActive(options);
     this.log("readGitRef", { repoPath, ref });
     return FAKE_GIT_COMMIT_SHA;
+  }
+
+  async readCommitTimestamp(repoPath: string, ref: string, options: OperationDeadlineOptions = {}): Promise<number> {
+    assertOperationActive(options);
+    this.log("readCommitTimestamp", { repoPath, ref });
+    return FAKE_COMMIT_TIMESTAMP_MS;
+  }
+
+  async addSnapshotWorktree(repoPath: string, path: string, sha: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    assertOperationActive(options);
+    this.log("addSnapshotWorktree", { repoPath, path, sha });
+  }
+
+  async removeSnapshotWorktree(repoPath: string, path: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    assertOperationActive(options);
+    this.log("removeSnapshotWorktree", { repoPath, path });
   }
 
   async updateDependencyBase(options: UpdateDependencyBaseOptions): Promise<UpdateDependencyBaseResult> {

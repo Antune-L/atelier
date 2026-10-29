@@ -1184,10 +1184,17 @@ export const conversationSchema = z.object({
   contextWindow: z.number().int().positive().nullable(),
   /** Sub-agents currently running in the live session (server-owned); empty when none. */
   activeSubagents: z.array(activeSubagentSchema).default([]),
+  /** Frozen origin/<base> commit the conversation reads; null until the first snapshot is pinned. */
+  snapshotSha: z.string().nullable().default(null),
+  /** Commit timestamp (ms) of `snapshotSha`. */
+  snapshotCommittedAt: z.number().int().nullable().default(null),
+  snapshotBaseBranch: z.string().nullable().default(null),
+  /** Opt-in: read the local checkout (project.repoPath) instead of the frozen snapshot. */
+  readLocalCheckout: z.boolean().default(false),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
-export type Conversation = z.infer<typeof conversationSchema>;
+export type Conversation =z.infer<typeof conversationSchema>;
 
 /** pending: sent mid-turn; steered: absorbed by the running turn; queued: handled by a follow-up turn; failed: not transmitted; abandoned: dropped. */
 export const conversationSteeringSchema = z.enum(["pending", "steered", "queued", "failed", "abandoned"]);
@@ -1251,6 +1258,7 @@ export const updateConversationSchema = z.object({
   researchEnabled: z.boolean().optional(),
   researchOptions: researchOptionsSchema.optional(),
   status: conversationStatusSchema.optional(),
+  readLocalCheckout: z.boolean().optional(),
 });
 export type UpdateConversationInput = z.infer<typeof updateConversationSchema>;
 

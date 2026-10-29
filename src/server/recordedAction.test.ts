@@ -4,7 +4,9 @@ import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
 import { initProjectRegistry } from "./config.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { RepoSnapshots } from "./agents/repoSnapshots.ts";
 import { ClientHub } from "./hub.ts";
+import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { FakeSystemAdapter } from "./system/fake.ts";
 import type { ReformulateOptions } from "./system/types.ts";
@@ -61,7 +63,9 @@ test("ticket reformulation persists its effective run and partial usage on failu
     db.query(`INSERT INTO tickets (id, title, project, orchestrator, codex_model, codex_effort, created_at, updated_at)
       VALUES ('reformulate-ticket', 'Test', 'reformulate-project', 'codex', 'gpt-6-sol', 'max', 1, 1)`).run();
     const hub = new ClientHub(store);
-    new ReformulateManager(store, new FailedReformulation(), hub, new Notifier(hub)).start("reformulate-ticket");
+    const system = new FailedReformulation();
+    const snapshots = new RepoSnapshots({ system, repoMutex: new KeyedMutex() });
+    new ReformulateManager(store, system, hub, new Notifier(hub), snapshots).start("reformulate-ticket");
     await Bun.sleep(0);
     const run = store.listExecutionRuns("ticket", "reformulate-ticket")[0];
     expect(run?.status).toBe("failed");

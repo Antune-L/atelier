@@ -12,6 +12,7 @@ import { AutomationManager } from "./agents/automationManager.ts";
 import { DelegationManager } from "./agents/delegationManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { RepoSnapshots } from "./agents/repoSnapshots.ts";
 import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { atelierSessionKey } from "./agents/sessionConfig.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
@@ -23,6 +24,7 @@ import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
+import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { createTicketOperations } from "./ticketOperations.ts";
 import { PYTHON_BINARY } from "./prd/renderPrdHtml.ts";
@@ -80,15 +82,16 @@ function setupWith<System extends FakeSystemAdapter>(system: System) {
   const lifecycle = new TicketLifecycle(store, hub, notifier);
   const triage = new TriageManager(store, system, sessionHub, hub, notifier);
   const feasibility = new FeasibilityBatchManager(store, system, sessionHub, hub, notifier);
-  const split = new SplitManager(store, system, sessionHub);
+  const snapshots = new RepoSnapshots({ system, repoMutex: new KeyedMutex() });
+  const split = new SplitManager(store, system, sessionHub, snapshots);
   const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
   const delegation = new DelegationManager(store, system, sessionHub, hub);
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility });
-  const atelier = new AtelierManager({ store, hub, sessionHub, system, ticketOperations, flushIntervalMs: 0 });
+  const atelier = new AtelierManager({ store, hub, sessionHub, system, snapshots, ticketOperations, flushIntervalMs: 0 });
   const coordinator = new AgentCoordinator(store, hub, sessionHub, notifier, lifecycle, slots, triage, feasibility, split, delegation, atelier);
   const app = createApiRoutes({
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
-    reformulate: new ReformulateManager(store, system, hub, notifier),
+    reformulate: new ReformulateManager(store, system, hub, notifier, snapshots),
     feasibilityAnswers: new FeasibilityAnswerManager(store, system, hub),
     automations: new AutomationManager(store, system, hub),
     projectRoot: "/tmp", composerAvailable: true,
@@ -256,6 +259,26 @@ describe("Atelier routes", () => {
       expect((await request("POST", "/conversations/absent/compact")).status).toBe(HTTP_NOT_FOUND);
     });
   }
+
+  test("refresh re-pins the snapshot, refuses busy or local conversations and 404s unknown ones", async () => {
+    const { store, request } = setupWith(new FakeSystemAdapter());
+    expect((await request("POST", "/conversations/absent/refresh")).status).toBe(HTTP_NOT_FOUND);
+    const conversation = conversationSchema.parse(await (await request("POST", "/conversations", { project: FIXTURE_PROJECT_KEY })).json());
+
+    const refreshed = await request("POST", `/conversations/${conversation.id}/refresh`);
+    expect(refreshed.status).toBe(HTTP_OK);
+    const body = z.object({ conversation: conversationSchema }).parse(await refreshed.json());
+    expect(body.conversation.snapshotSha).not.toBeNull();
+    expect(body.conversation.sessionId).toBeNull();
+    expect(store.listConversationMessages(conversation.id).at(-1)?.content).toContain("Instantané rafraîchi");
+
+    store.updateConversation(conversation.id, { sessionStatus: "running" });
+    expect((await request("POST", `/conversations/${conversation.id}/refresh`)).status).toBe(HTTP_CONFLICT);
+    store.updateConversation(conversation.id, { sessionStatus: "idle" });
+
+    expect((await request("PATCH", `/conversations/${conversation.id}`, { readLocalCheckout: true })).status).toBe(HTTP_OK);
+    expect((await request("POST", `/conversations/${conversation.id}/refresh`)).status).toBe(HTTP_CONFLICT);
+  });
 
   test("conversation CRUD, settings change and 404s", async () => {
     const { sessionHub, request } = setup();

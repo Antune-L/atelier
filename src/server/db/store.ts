@@ -215,6 +215,7 @@ export interface NewConversation {
   codexFast: boolean;
   researchEnabled: boolean;
   researchOptions: ResearchOptions;
+  readLocalCheckout?: boolean;
 }
 
 export interface ConversationPatch {
@@ -236,6 +237,10 @@ export interface ConversationPatch {
   contextTokens?: number | null;
   contextWindow?: number | null;
   activeSubagents?: ActiveSubagent[];
+  snapshotSha?: string | null;
+  snapshotCommittedAt?: number | null;
+  snapshotBaseBranch?: string | null;
+  readLocalCheckout?: boolean;
 }
 
 export interface NewConversationMessage {
@@ -3050,8 +3055,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO conversations (id, project, title, orchestrator, model, effort, codex_model, codex_effort, codex_fast, research_enabled, research_options, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO conversations (id, project, title, orchestrator, model, effort, codex_model, codex_effort, codex_fast, research_enabled, research_options, read_local_checkout, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -3065,6 +3070,7 @@ export class Store {
         input.codexFast ? 1 : 0,
         input.researchEnabled ? 1 : 0,
         JSON.stringify(input.researchOptions),
+        input.readLocalCheckout ? 1 : 0,
         now,
         now,
       );
@@ -3089,7 +3095,12 @@ export class Store {
     if (patch.error !== undefined) set("error", patch.error);
     if (patch.unread !== undefined) set("unread", patch.unread ? 1 : 0);
     if (patch.settled !== undefined) set("settled", patch.settled ? 1 : 0);
+    if (patch.readLocalCheckout !== undefined) set("read_local_checkout", patch.readLocalCheckout ? 1 : 0);
     const touchesConversation = builder.hasChanges();
+    // Snapshot pinning is session bookkeeping: like telemetry, it does not reorder the list.
+    if (patch.snapshotSha !== undefined) set("snapshot_sha", patch.snapshotSha);
+    if (patch.snapshotCommittedAt !== undefined) set("snapshot_committed_at", patch.snapshotCommittedAt);
+    if (patch.snapshotBaseBranch !== undefined) set("snapshot_base_branch", patch.snapshotBaseBranch);
     if (patch.contextTokens !== undefined) set("context_tokens", patch.contextTokens);
     if (patch.contextWindow !== undefined) set("context_window", patch.contextWindow);
     if (patch.activeSubagents !== undefined) set("active_subagents", JSON.stringify(patch.activeSubagents));

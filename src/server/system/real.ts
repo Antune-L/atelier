@@ -442,6 +442,23 @@ export class RealSystemAdapter implements SystemAdapter {
     }
   }
 
+  async readCommitTimestamp(repoPath: string, ref: string, options: OperationDeadlineOptions = {}): Promise<number> {
+    const result = await runBoundedCommand(["git", "-C", repoPath, "show", "-s", "--format=%ct", `${ref}^{commit}`], repoPath, options);
+    const seconds = Number(result.stdout.trim());
+    if (result.exitCode !== 0 || result.timedOut || !Number.isFinite(seconds)) {
+      throw new Error(`Lecture de la date du commit ${ref} impossible : ${boundedCommandDetail(result)}`);
+    }
+    return seconds * 1000;
+  }
+
+  async addSnapshotWorktree(repoPath: string, path: string, sha: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    await addDetachedWorktree(repoPath, path, sha, options);
+  }
+
+  async removeSnapshotWorktree(repoPath: string, path: string, options: OperationDeadlineOptions = {}): Promise<void> {
+    await removeDetachedWorktree(repoPath, path, options);
+  }
+
   async readGitRef(repoPath: string, ref: string, options: OperationDeadlineOptions = {}): Promise<string> {
     const result = await runBoundedCommand(["git", "-C", repoPath, "rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], repoPath, options);
     if (result.exitCode !== 0 || result.timedOut) {

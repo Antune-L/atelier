@@ -15,7 +15,8 @@ import type { AgentImageInput, AgentSendOptions, AgentSessionEvent, AgentSession
 import { FakeSystemAdapter } from "../system/fake.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
-import { AtelierBusyError, AtelierManager, COMPACT_NO_SESSION_MESSAGE, COMPACT_RUNNING_MESSAGE, describeToolUse } from "./atelierManager.ts";
+import { AtelierBusyError, AtelierLocalCheckoutError, AtelierManager, COMPACT_NO_SESSION_MESSAGE, COMPACT_RUNNING_MESSAGE, describeToolUse } from "./atelierManager.ts";
+import type { AcquireSnapshotInput, SnapshotLease } from "./repoSnapshots.ts";
 import { atelierSessionKey, parseAtelierSessionKey } from "./sessionConfig.ts";
 import { SessionHub, STEER_PREFIX } from "./sessionHub.ts";
 
@@ -85,6 +86,38 @@ const CODEX_CONVERSATION: NewConversation = {
   codexEffort: "medium",
 };
 
+const ORIGIN_SHA = "a".repeat(40);
+const NEXT_SHA = "b".repeat(40);
+const SNAPSHOT_COMMITTED_AT = Date.UTC(2026, 9, 1, 12, 0);
+
+class StubSnapshots {
+  readonly calls: AcquireSnapshotInput[] = [];
+  originSha = ORIGIN_SHA;
+  fetchError: string | null = null;
+  failPinned = false;
+  live = 0;
+
+  async acquire(input: AcquireSnapshotInput): Promise<SnapshotLease> {
+    this.calls.push(input);
+    if (input.sha && this.failPinned) throw new Error("commit introuvable");
+    const sha = input.sha ?? this.originSha;
+    this.live += 1;
+    let released = false;
+    return {
+      cwd: `/snapshots/${input.projectKey}/${sha}`,
+      sha,
+      committedAt: SNAPSHOT_COMMITTED_AT,
+      baseBranch: input.baseBranch,
+      fetchError: input.fetch ? this.fetchError : null,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.live -= 1;
+      },
+    };
+  }
+}
+
 const closers: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
@@ -105,11 +138,13 @@ function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?:
     pushedConversations.push(conversation);
     pushConversation(conversation);
   };
+  const snapshots = new StubSnapshots();
   const manager = new AtelierManager({
     store,
     hub,
     sessionHub,
     system,
+    snapshots,
     uploadsRoot,
     flushIntervalMs: 0,
     ...(idleTimeoutMs !== undefined ? { idleTimeoutMs } : {}),
@@ -122,7 +157,7 @@ function setup(idleTimeoutMs?: number, uploadsRoot?: string, subagentCeilingMs?:
     await sessionHub.drainClosingSessions();
     db.close();
   });
-  return { store, system, sessionHub, manager, pushedConversations };
+  return { store, system, sessionHub, manager, pushedConversations, snapshots };
 }
 
 function loadTemplate(): PrdDocument {
@@ -356,6 +391,119 @@ describe("AtelierManager", () => {
     expect(system.sent[1]?.[0]).toContain("## Historique de la conversation");
     expect(system.sent[1]?.[0]).toContain("Premier message");
     expect(system.sent[1]?.[0]?.endsWith("Retour")).toBe(true);
+  });
+
+  describe("snapshots", () => {
+    test("the first session pins origin and reads the snapshot, never the checkout", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      expect(snapshots.calls).toEqual([{ projectKey: FIXTURE_PROJECT_KEY, repoPath: "/tmp/repo", baseBranch: "main", sha: null, fetch: true, requireFetch: false }]);
+      expect(system.sessions[0]?.cwd).toBe(`/snapshots/${FIXTURE_PROJECT_KEY}/${ORIGIN_SHA}`);
+      expect(system.sent[0]?.[0]).not.toContain("/tmp/repo");
+      const pinned = store.getConversation(conversation.id);
+      expect(pinned?.snapshotSha).toBe(ORIGIN_SHA);
+      expect(pinned?.snapshotCommittedAt).toBe(SNAPSHOT_COMMITTED_AT);
+      expect(pinned?.snapshotBaseBranch).toBe("main");
+      expect(snapshots.live).toBe(1);
+    });
+
+    test("a restart keeps the pinned SHA without fetching", async () => {
+      const { store, system, sessionHub, manager, snapshots } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit(TURN_END);
+      snapshots.originSha = NEXT_SHA;
+      manager.settingsChanged(conversation.id);
+      expect(snapshots.live).toBe(0);
+      sessionHub.disconnect(atelierSessionKey(conversation.id), "completed");
+      await manager.postMessage(conversation.id, "Encore").delivered;
+      expect(snapshots.calls[1]).toMatchObject({ sha: ORIGIN_SHA, fetch: false });
+      expect(system.sessions[1]?.cwd).toBe(`/snapshots/${FIXTURE_PROJECT_KEY}/${ORIGIN_SHA}`);
+      expect(store.getConversation(conversation.id)?.snapshotSha).toBe(ORIGIN_SHA);
+    });
+
+    test("refresh re-pins on the new origin, notes it and drops the session", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const conversation = store.createConversation(CODEX_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      system.emit({ type: "init", sessionId: "thread-1" });
+      system.emit(TURN_END);
+      snapshots.originSha = NEXT_SHA;
+      const refreshed = await manager.refresh(conversation.id);
+      expect(refreshed.snapshotSha).toBe(NEXT_SHA);
+      expect(refreshed.sessionId).toBeNull();
+      expect(snapshots.calls.at(-1)).toMatchObject({ sha: null, fetch: true, requireFetch: false });
+      expect(snapshots.live).toBe(0);
+      expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe(`Instantané rafraîchi : aaaaaaa → bbbbbbb`);
+      await manager.refresh(conversation.id);
+      expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe("Instantané déjà à jour (bbbbbbb)");
+    });
+
+    test("refresh refuses a running turn and a local checkout", async () => {
+      const { store, manager } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      store.updateConversation(conversation.id, { sessionStatus: "running" });
+      await expect(manager.refresh(conversation.id)).rejects.toBeInstanceOf(AtelierBusyError);
+      store.updateConversation(conversation.id, { sessionStatus: "idle", readLocalCheckout: true });
+      await expect(manager.refresh(conversation.id)).rejects.toBeInstanceOf(AtelierLocalCheckoutError);
+    });
+
+    test("a failed fetch starts on the last known origin with a visible warning", async () => {
+      const { store, manager, snapshots } = setup();
+      snapshots.fetchError = "réseau coupé";
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      const warning = store.listConversationMessages(conversation.id).find((message) => message.role === "activity");
+      expect(warning?.content).toBe("⚠️ Récupération d'origin/main impossible (réseau coupé) : l'Atelier lit le dernier origin/main connu (aaaaaaa).");
+    });
+
+    test("a vanished pinned commit asks the user to refresh", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      store.updateConversation(conversation.id, { snapshotSha: ORIGIN_SHA, snapshotCommittedAt: SNAPSHOT_COMMITTED_AT, snapshotBaseBranch: "main" });
+      snapshots.failPinned = true;
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      expect(system.sessions).toHaveLength(0);
+      expect(store.getConversation(conversation.id)?.error).toContain("« Rafraîchir »");
+    });
+
+    test("local mode reads the checkout without any snapshot", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      store.updateConversation(conversation.id, { readLocalCheckout: true });
+      await manager.postMessage(conversation.id, "Bonjour").delivered;
+      expect(snapshots.calls).toHaveLength(0);
+      expect(system.sessions[0]?.cwd).toBe("/tmp/repo");
+      expect(system.sent[0]?.[0]).toContain("Code lu : checkout local /tmp/repo");
+    });
+
+    test("the lease is released on close and on failure", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const first = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(first.id, "Bonjour").delivered;
+      expect(snapshots.live).toBe(1);
+      manager.close(first.id);
+      expect(snapshots.live).toBe(0);
+
+      const second = store.createConversation(CLAUDE_CONVERSATION);
+      await manager.postMessage(second.id, "Bonjour").delivered;
+      expect(snapshots.live).toBe(1);
+      system.emit({ type: "error", message: "plantage" });
+      expect(snapshots.live).toBe(0);
+    });
+
+    test("a resumed Codex thread is told which snapshot it reads", async () => {
+      const { store, system, sessionHub, manager } = setup();
+      const conversation = store.createConversation(CODEX_CONVERSATION);
+      await manager.postMessage(conversation.id, "Premier message").delivered;
+      system.emit({ type: "init", sessionId: "thread-1" });
+      system.emit(TURN_END);
+      sessionHub.disconnect(atelierSessionKey(conversation.id), "completed");
+      await manager.postMessage(conversation.id, "Retour").delivered;
+      expect(system.sessions[1]?.resumeSessionId).toBe("thread-1");
+      expect(system.sent[1]?.[0]?.startsWith(`[Instantané : origin/main @ aaaaaaa (2026-10-01 12:00 UTC) — dossier /snapshots/${FIXTURE_PROJECT_KEY}/${ORIGIN_SHA}]`)).toBe(true);
+    });
   });
 
   test("stores each submitted PRD as the next revision", () => {

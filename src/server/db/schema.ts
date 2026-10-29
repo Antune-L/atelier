@@ -480,6 +480,10 @@ CREATE TABLE IF NOT EXISTS conversations (
   context_tokens INTEGER,
   context_window INTEGER,
   active_subagents TEXT NOT NULL DEFAULT '[]',
+  snapshot_sha TEXT,
+  snapshot_committed_at INTEGER,
+  snapshot_base_branch TEXT,
+  read_local_checkout INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -662,6 +666,10 @@ const CONVERSATION_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "context_tokens", ddl: "ALTER TABLE conversations ADD COLUMN context_tokens INTEGER" },
   { column: "context_window", ddl: "ALTER TABLE conversations ADD COLUMN context_window INTEGER" },
   { column: "active_subagents", ddl: "ALTER TABLE conversations ADD COLUMN active_subagents TEXT NOT NULL DEFAULT '[]'" },
+  { column: "snapshot_sha", ddl: "ALTER TABLE conversations ADD COLUMN snapshot_sha TEXT" },
+  { column: "snapshot_committed_at", ddl: "ALTER TABLE conversations ADD COLUMN snapshot_committed_at INTEGER" },
+  { column: "snapshot_base_branch", ddl: "ALTER TABLE conversations ADD COLUMN snapshot_base_branch TEXT" },
+  { column: "read_local_checkout", ddl: "ALTER TABLE conversations ADD COLUMN read_local_checkout INTEGER NOT NULL DEFAULT 0" },
 ];
 
 const CONVERSATION_MESSAGE_MIGRATIONS: { column: string; ddl: string }[] = [

@@ -1,5 +1,5 @@
-import { CornerDownRight, FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { CornerDownRight, FileText, Minimize2, RefreshCw, Send, Settings2, Square } from "lucide-react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { CONVERSATION_STATUS_LABELS, RESEARCH_OPTION_LABELS } from "@shared/constants";
 import { enabledResearchOptionKeys } from "@shared/schemas";
@@ -16,13 +16,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Markdown } from "@/components/ui/markdown";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, buildAtelierThread, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, codeSourceLabel, conversationTooltip, agentLabel, buildAtelierThread, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import type { ActivityEntry, ReasoningEntry } from "@/lib/atelier";
 import { splitMockupBlocks } from "@/lib/mockupBlocks";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
@@ -121,6 +122,13 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
     }, "Compactage impossible");
   };
 
+  const refreshSnapshot = (): void => {
+    void run(async () => {
+      const { conversation: updated } = await api.atelierRefreshSnapshot(conversation.id);
+      boardStore.rememberConversation(updated);
+    }, "Rafraîchissement impossible");
+  };
+
   const consolidate = (): void => {
     void run(() => api.atelierConsolidate(conversation.id), "Consolidation impossible");
   };
@@ -144,10 +152,27 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
         {historyButton}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium" title={conversationTooltip(conversation.title, projectLabel)}>{conversation.title || UNTITLED_CONVERSATION_LABEL}</h2>
-          <p className="truncate text-2xs text-muted-foreground">{projectLabel} · {CONVERSATION_STATUS_LABELS[conversation.status]}</p>
+          <p className="truncate text-2xs text-muted-foreground">
+            {projectLabel} · {CONVERSATION_STATUS_LABELS[conversation.status]} ·{" "}
+            <span className="font-mono" title={conversation.snapshotSha ?? undefined}>{codeSourceLabel(conversation)}</span>
+          </p>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {documentActions}
+          {!conversation.readLocalCheckout && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="px-2"
+              onClick={refreshSnapshot}
+              disabled={running || busy}
+              aria-label="Rafraîchir"
+              title="Relire le dernier origin : la session se rouvre sur le nouveau commit"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span className="hidden lg:inline">Rafraîchir</span>
+            </Button>
+          )}
           <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
             <PopoverTrigger>
               <Button size="sm" variant="ghost" className="px-2" aria-label="Réglages de session">
@@ -172,6 +197,10 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
                   onEnabledChange={(researchEnabled) => updateSettings({ researchEnabled })}
                   onOptionsChange={(researchOptions) => updateSettings({ researchOptions })}
                 />
+              </div>
+              <div className="space-y-2 border-t border-border pt-3">
+                <h3 className="text-sm font-medium">Code lu</h3>
+                <LocalCheckoutField checked={conversation.readLocalCheckout} onChange={(readLocalCheckout) => updateSettings({ readLocalCheckout })} />
               </div>
               <div className="border-t border-border pt-3">
                 <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
@@ -291,6 +320,19 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LocalCheckoutField({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  const id = useId();
+  return (
+    <div className="flex items-center gap-2">
+      <Switch checked={checked} onCheckedChange={onChange} aria-labelledby={`${id}-local`} />
+      <span id={`${id}-local`} className="text-sm">Lire mon checkout local</span>
+      <span className="text-xs text-muted-foreground">
+        {checked ? "voit les modifications non commitées" : "instantané figé d'origin"}
+      </span>
     </div>
   );
 }

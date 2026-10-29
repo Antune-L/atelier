@@ -1,0 +1,28 @@
+[Unit]
+Description=Kanban authenticated application updater
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=kanban
+WorkingDirectory=/
+ExecStartPre=/usr/bin/rm -f /run/kanban-updater/control.sock
+ExecStart=/usr/local/bin/bun /opt/kanban-updater/updater.ts
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=kanban-updater
+RuntimeDirectoryMode=0750
+StateDirectory=kanban-updater
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

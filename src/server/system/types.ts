@@ -7,6 +7,7 @@
  * resolves the provider half to a `VcsClient` (see `./vcs/types.ts`).
  */
 
+import type { VpsUpdateAction, VpsUpdateStatus } from "../../shared/vpsUpdate.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import type { RepoInspectionContext } from "./repoInspection.ts";
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
@@ -309,6 +310,7 @@ export interface SpawnShellOptions {
 }
 
 export interface SystemAdapter {
+  vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;
   readPreviewRepository?(repoPath: string): Promise<{ repository: string; host: string; visibility: "public" | "private" }>;

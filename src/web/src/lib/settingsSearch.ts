@@ -5,6 +5,7 @@ export const SETTINGS_GROUPS = ["Application", "Connexions"] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export type SettingsSectionId =
+  | "vps"
   | "appearance"
   | "defaults"
   | "quality"
@@ -24,6 +25,7 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
+  { id: "vps", label: "Serveur VPS", group: "Application", keywords: ["mise à jour", "vps", "serveur", "redémarrage"] },
   {
     id: "appearance",
     label: "Apparence",

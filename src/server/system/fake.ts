@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
+import type { VpsUpdateAction, VpsUpdateStatus } from "../../shared/vpsUpdate.ts";
 import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from "../../shared/schemas.ts";
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
@@ -122,6 +123,10 @@ const FAKE_AUDIT_FILE = "src/example.ts";
 const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n--- a/${FAKE_AUDIT_FILE}\n+++ b/${FAKE_AUDIT_FILE}\n@@ -1 +1 @@\n-export const example = 1;\n+export const example = 2;\n`;
 
 export class FakeSystemAdapter implements SystemAdapter {
+  vpsUpdate(_action: VpsUpdateAction, _assertion: string): Promise<VpsUpdateStatus> {
+    return Promise.resolve({ phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });
+  }
+
   readonly coolifyRequest = createFakeCoolifyTransport();
   async readPreviewRepository(_repoPath: string) {
     return { repository: "example/preview-demo", host: "github.com", visibility: "public" } satisfies { repository: string; host: string; visibility: "public" | "private" };

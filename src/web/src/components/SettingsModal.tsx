@@ -22,6 +22,7 @@ import {
 import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { availableSkillProviders } from "@shared/skills";
 
+import { VpsUpdateSettings } from "@/components/VpsUpdateSettings";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
 import { CoolifySettings } from "@/components/CoolifySettings";
@@ -121,6 +122,7 @@ interface SettingsNavProps {
 }
 
 function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChange }: SettingsNavProps) {
+  const { prOnly } = useCapabilities();
   return (
     <nav aria-label="Sections des réglages" className="flex w-full shrink-0 flex-col gap-3 md:w-48">
       <div className="relative">
@@ -139,7 +141,7 @@ function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChang
       {SETTINGS_GROUPS.map((group) => (
         <div key={group} className="flex flex-wrap items-stretch gap-1 md:flex-col md:gap-0">
           <p className={cn("hidden px-1 pb-1 md:block", FIELD_LABEL_CLASSES)}>{group}</p>
-          {SETTINGS_SECTIONS.filter((section) => section.group === group).map((section) => {
+          {SETTINGS_SECTIONS.filter((section) => section.group === group && (section.id !== "vps" || prOnly)).map((section) => {
             const active = section.id === sectionId;
             const count = counts[section.id];
             return (
@@ -166,6 +168,8 @@ function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChang
 }
 
 function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSectionId; query: string }) {
+  const { prOnly } = useCapabilities();
+  if (sectionId === "vps") return prOnly ? <VpsUpdateSettings /> : null;
   if (sectionId === "appearance") return <AppearanceSettings query={query} />;
   if (sectionId === "defaults") return <AgentDefaultsSettings query={query} />;
   if (sectionId === "quality") return <QualitySettings query={query} />;

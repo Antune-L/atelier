@@ -7,6 +7,7 @@ import { appendFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import type { VpsUpdateAction, VpsUpdateStatus } from "../../shared/vpsUpdate.ts";
 import { TERMINAL_DEFAULT_COLS, TERMINAL_DEFAULT_ROWS } from "../../shared/constants.ts";
 import type { PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
@@ -25,6 +26,7 @@ import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
+import { requestVpsUpdate } from "./vpsUpdate.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
@@ -250,6 +252,10 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
  * Never instantiated in the default dev/test path.
  */
 export class RealSystemAdapter implements SystemAdapter {
+  vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus> {
+    return requestVpsUpdate(action, assertion);
+  }
+
   readonly dryRun = false;
   coolifyRequest(request: CoolifyRequest): Promise<CoolifyResponse> {
     const brokerSocket = previewBrokerSocket();

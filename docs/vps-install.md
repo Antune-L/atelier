@@ -331,3 +331,7 @@ Use this if `kanban-upgrade` is unavailable.
    ```
 
 Roll back by running `kanban-release` with the previous commit, then restarting the service, but only if the database schema is compatible. Never restore an older database after new pull requests or previews were created.
+
+### Optional authenticated application update button
+
+For the cloud settings button, install the independent root updater following [vps-app-updates.md](./vps-app-updates.md). It requires a signed Cloudflare Access user token and does not grant sudo to the application. Read its active-work race and code-only rollback limitations before enabling it. The manual upgrade procedure remains available.

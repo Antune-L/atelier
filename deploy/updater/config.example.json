@@ -1,0 +1,5 @@
+{
+  "issuer": "https://your-team.cloudflareaccess.com",
+  "audience": "your-access-application-aud-tag",
+  "email": "owner@example.com"
+}

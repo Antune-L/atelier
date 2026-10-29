@@ -74,6 +74,7 @@ import { slugify } from "./agents/slotManager.ts";
 import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
+import type { VpsUpdateAction, VpsUpdateStatus } from "../shared/vpsUpdate.ts";
 import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
@@ -120,6 +121,7 @@ const DISALLOWED_AGENT_PAIR_MSG =
   "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).";
 
 interface PaneReader {
+  vpsUpdate?(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
@@ -1045,6 +1047,21 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.
+    .get("/vps-update", async ({ request }) => {
+      if (!isCloudHost()) return null;
+      if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
+      return Response.json(await deps.system.vpsUpdate("status", request.headers.get("Cf-Access-Jwt-Assertion") ?? ""), { headers: { "cache-control": "no-store" } });
+    })
+    .post("/vps-update", async ({ request, set }) => {
+      const origin = request.headers.get("origin");
+      const host = request.headers.get("host");
+      if (!isCloudHost() || origin !== `https://${host}` || request.headers.get("x-kanban-update") !== "confirm") {
+        set.status = 403;
+        return { error: "A same-origin cloud UI confirmation is required." };
+      }
+      if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
+      return Response.json(await deps.system.vpsUpdate("start", request.headers.get("Cf-Access-Jwt-Assertion") ?? ""), { headers: { "cache-control": "no-store" } });
+    })
     .get("/host-metrics", async () => {
       const metrics = isCloudHost() ? await readHostMetrics() : null;
       return new Response(JSON.stringify(metrics), { headers: { "content-type": "application/json" } });

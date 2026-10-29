@@ -7,7 +7,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -134,10 +134,7 @@ export class RepoSnapshots {
   private async create(repoPath: string, projectKey: string, sha: string, path: string): Promise<void> {
     const sidecar = `${path}${SIDECAR_SUFFIX}`;
     await mkdir(join(this.root, projectKey), { recursive: true });
-    // Written then renamed: the GC never reads a half-written sidecar as invalid and removes it mid-creation.
-    const pending = `${sidecar}.tmp`;
-    await writeFile(pending, JSON.stringify({ repoPath, projectKey, sha, createdAt: Date.now() }));
-    await rename(pending, sidecar);
+    await writeFile(sidecar, JSON.stringify({ repoPath, projectKey, sha, createdAt: Date.now() }));
     if (existsSync(path)) await this.system.removeSnapshotWorktree(repoPath, path);
     try {
       await this.system.addSnapshotWorktree(repoPath, path, sha);

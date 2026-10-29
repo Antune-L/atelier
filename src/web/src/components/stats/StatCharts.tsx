@@ -20,7 +20,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { formatDuration } from "@/lib/display";
+import { formatDuration, formatTokens, formatUsd } from "@/lib/display";
 import {
   kindCounts,
   meanDurationByEffort,
@@ -28,6 +28,7 @@ import {
   outcomeCounts,
   projectCounts,
   recordOutcome,
+  tokensByProject,
   weeklyThroughput,
   type Outcome,
 } from "@/lib/stats";
@@ -233,6 +234,74 @@ export function KindChart({ records }: { records: StatRecord[] }): ReactNode {
         </Bar>
       </BarChart>
     </ChartContainer>
+  );
+}
+
+// --- Card 7: tokens by project ---
+
+export function TokensByProjectChart({
+  records,
+  projects,
+}: {
+  records: StatRecord[];
+  projects: ProjectInfo[];
+}): ReactNode {
+  const byProject = useMemo(() => tokensByProject(records, projects), [records, projects]);
+  const total = useMemo(() => byProject.reduce((sum, d) => sum + d.tokens, 0), [byProject]);
+  if (byProject.length === 0) return <StatEmpty />;
+  const config: ChartConfig = { tokens: { label: "Tokens" } };
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="text-2xl font-bold tabular-nums">{formatTokens(total)}</div>
+        <div className="text-xs text-muted-foreground">tokens au total</div>
+      </div>
+      <ChartContainer config={config} className="h-48">
+        <BarChart data={byProject} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="label" {...AXIS_PROPS} />
+          <YAxis tickFormatter={(v: number) => formatTokens(v)} width={56} {...AXIS_PROPS} />
+          <ChartTooltip
+            cursor={BAR_CURSOR}
+            content={
+              <ChartTooltipContent
+                valueFormatter={(value) => formatTokens(typeof value === "number" ? value : 0)}
+                extraFormatter={(item) => {
+                  const datum = item.payload;
+                  const count = datum && typeof datum.count === "number" ? datum.count : 0;
+                  return `n = ${count}`;
+                }}
+              />
+            }
+          />
+          <Bar dataKey="tokens" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
+            {byProject.map((d, index) => (
+              <Cell key={d.key} fill={colorAt(index)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
+    </div>
+  );
+}
+
+export function CostSummary({ records }: { records: StatRecord[] }): ReactNode {
+  const withUsage = records.filter((record) => record.totalTokens !== null);
+  if (withUsage.length === 0) return <StatEmpty />;
+  const knownCost = withUsage.reduce((total, record) => total + record.knownCostUsd, 0);
+  const hasUnknown = withUsage.some((record) => record.costUsd === null);
+  return (
+    <div className="flex h-full flex-col justify-center gap-2">
+      <div className="text-2xl font-bold tabular-nums">
+        {hasUnknown ? "Indisponible" : formatUsd(knownCost)}
+      </div>
+      {hasUnknown && knownCost > 0 && (
+        <p className="text-xs text-muted-foreground">Sous-total connu : {formatUsd(knownCost)}</p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {hasUnknown ? "Au moins une exécution n'a pas de tarif ou de coût remonté." : `${withUsage.length} ticket(s) avec usage`}
+      </p>
+    </div>
   );
 }
 

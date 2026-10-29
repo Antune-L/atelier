@@ -175,6 +175,33 @@ export function projectCounts(records: StatRecord[], projects: ProjectInfo[]): P
     .sort((a, b) => b.count - a.count);
 }
 
+// ---- Token aggregation ----
+
+export interface TokenGroup {
+  key: string;
+  label: string;
+  /** Total tokens over the records contributing to this group. */
+  tokens: number;
+  /** Number of records (with usage) contributing. */
+  count: number;
+}
+
+/** Tokens per project, sorted descending by token count. */
+export function tokensByProject(records: StatRecord[], projects: ProjectInfo[]): TokenGroup[] {
+  const labelByKey = new Map(projects.map((p) => [p.key, p.label]));
+  const totals = new Map<string, { tokens: number; count: number }>();
+  for (const record of records) {
+    if (record.totalTokens === null) continue;
+    const entry = totals.get(record.project) ?? { tokens: 0, count: 0 };
+    entry.tokens += record.totalTokens;
+    entry.count += 1;
+    totals.set(record.project, entry);
+  }
+  return [...totals.entries()]
+    .map(([key, { tokens, count }]) => ({ key, label: labelByKey.get(key) ?? key, tokens, count }))
+    .sort((a, b) => b.tokens - a.tokens);
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DAYS_PER_WEEK = 7;
 const WEEK_MS = DAYS_PER_WEEK * MS_PER_DAY;

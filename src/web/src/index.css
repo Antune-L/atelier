@@ -337,6 +337,10 @@
   .prd-annotation.is-active {
     @apply bg-warning/60;
   }
+  /* Outline-anchored PRD headings: keep them clear of the sticky search bar when scrolled to. */
+  .prd-anchor {
+    scroll-margin-top: 3.5rem;
+  }
   .prd-annotation-pin {
     @apply ml-0.5 rounded-full bg-warning px-1 align-super text-[10px] font-semibold text-warning-foreground no-underline;
   }

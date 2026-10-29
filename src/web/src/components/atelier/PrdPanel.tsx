@@ -1,8 +1,8 @@
-import { ArrowLeft, ArrowRight, Check, Copy, Download, RefreshCw, RotateCcw } from "lucide-react";
-import { useRef, useState } from "react";
+import { ArrowRight, Check, Copy, Download, RefreshCw, RotateCcw } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 
 import type { Conversation, PrdAnnotation, PrdDocumentRecord } from "@shared/schemas";
-import { renderPrdMarkdown } from "@shared/prdMarkdown";
+import { prdOutline, renderPrdMarkdown } from "@shared/prdMarkdown";
 
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { PrdAnnotator } from "@/components/PrdAnnotator";
@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useBusyAction } from "@/hooks/useBusyAction";
 import { api, atelierPrdExportUrl } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
+import { scrollToPrdAnchor } from "@/lib/prdOutline";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +23,6 @@ interface PrdPanelProps {
   prds: PrdDocumentRecord[];
   onSelectPrd: (prdId: string) => void;
   onApplyPrd: (prd: PrdDocumentRecord) => void;
-  onBackToConversation: () => void;
   onCreateCards: () => void;
 }
 
@@ -35,6 +35,7 @@ interface FeedbackDraft {
 const SAVE_DEBOUNCE_MS = 400;
 const JSON_INDENT = 2;
 const EXPORT_LINK_CLASSES = buttonVariants({ variant: "outline", size: "sm" });
+const DECISIONS_ANCHOR = "prd-decisions";
 
 function draftOf(prd: PrdDocumentRecord): FeedbackDraft {
   return { prdId: prd.id, annotations: prd.annotations, generalNote: prd.generalNote };
@@ -46,12 +47,12 @@ export function PrdPanel({
   prds,
   onSelectPrd,
   onApplyPrd,
-  onBackToConversation,
   onCreateCards,
 }: PrdPanelProps) {
   const [draft, setDraft] = useState<FeedbackDraft>(() => draftOf(prd));
   const { busy, error, setError, run } = useBusyAction();
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const outline = useMemo(() => prdOutline(prd.document), [prd.document]);
 
   const persist = async (next: FeedbackDraft): Promise<void> => {
     const updated = await api.atelierUpdatePrd(next.prdId, {
@@ -114,76 +115,72 @@ export function PrdPanel({
       .catch(() => setError("Copie impossible"));
   };
 
+  const asideHeader = (
+    <div className="space-y-3 border-b border-border pb-3">
+      <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Révision du PRD">
+        {prds.map((revision) => (
+          <button
+            key={revision.id}
+            type="button"
+            role="radio"
+            aria-checked={revision.id === prd.id}
+            onClick={() => onSelectPrd(revision.id)}
+            className={cn(
+              "rounded-full border px-2 py-0.5 font-mono text-2xs transition-colors",
+              revision.id === prd.id ? "border-foreground/40 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground",
+            )}
+          >rév. {revision.revision}</button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={validated ? "success" : "outline"}>{validated ? "Validé" : "Brouillon"}</Badge>
+        {!isLatest && <Badge variant="outline">Historique · lecture seule</Badge>}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {!isLatest ? "Cette révision est en lecture seule. Vous pouvez préparer ses cartes ou sélectionner la dernière pour la modifier." : validated ? "PRD validé. Choisissez ensuite les cartes à créer dans TODO." : "Relisez le document et ajoutez vos commentaires avant de le valider."}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {validated ? (
+          <>
+            <Button size="sm" variant="outline" onClick={() => setStatus("draft")} disabled={busy || regenerating || !isLatest}><RotateCcw className="h-3.5 w-3.5" />Rouvrir</Button>
+            <Button size="sm" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
+            <Button size="sm" onClick={() => setStatus("validated")} disabled={busy || regenerating || !isLatest}><Check className="h-3.5 w-3.5" />Valider le PRD</Button>
+          </>
+        )}
+      </div>
+      <div className="space-y-2 text-xs">
+        <SectionHeader aside={<Button size="sm" variant="ghost" className="h-auto px-1 py-0 text-xs underline-offset-2 hover:underline" onClick={() => scrollToPrdAnchor(DECISIONS_ANCHOR)}>Voir la section</Button>}>Décisions attendues · {openQuestions.length}</SectionHeader>
+        {openQuestions.length === 0 ? <p className="text-muted-foreground">Toutes les questions ouvertes sont tranchées.</p> : <ol className="list-decimal space-y-1 pl-4">{openQuestions.map((question) => <li key={question}>{question}</li>)}</ol>}
+      </div>
+    </div>
+  );
+
+  const asideFooter = (
+    <div className="space-y-2 border-t border-border pt-3">
+      {actionable && (
+        <Button size="sm" variant="outline" className="w-full" onClick={regenerate} disabled={busy || regenerating || !hasFeedback}>
+          <RefreshCw className="h-3.5 w-3.5" />
+          Régénérer avec les commentaires
+        </Button>
+      )}
+      <Popover>
+        <PopoverTrigger><Button size="sm" variant="outline"><Download className="h-3.5 w-3.5" />Exporter</Button></PopoverTrigger>
+        <PopoverContent className="flex w-56 flex-col gap-2 p-3">
+          <a href={atelierPrdExportUrl(prd.id, "json")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />JSON source</a>
+          <a href={atelierPrdExportUrl(prd.id, "html")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />HTML généré</a>
+          <Button size="sm" variant="ghost" onClick={copyJson}><Copy className="h-3.5 w-3.5" />Copier le JSON</Button>
+        </PopoverContent>
+      </Popover>
+      {error && <p className="text-xs text-danger">{error}</p>}
+    </div>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="shrink-0 space-y-3 border-b border-border bg-card px-4 py-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <h2 className="break-words text-base font-semibold">{prd.document.title}</h2>
-            <p className="text-xs text-muted-foreground">PRD · Le JSON est la source du document et de ses exports.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="ghost" onClick={onBackToConversation}>
-              <ArrowLeft className="h-3.5 w-3.5" />Discussion
-            </Button>
-            <Popover>
-              <PopoverTrigger><Button size="sm" variant="outline"><Download className="h-3.5 w-3.5" />Exporter</Button></PopoverTrigger>
-              <PopoverContent className="flex w-56 flex-col gap-2 p-3">
-                <a href={atelierPrdExportUrl(prd.id, "json")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />JSON source</a>
-                <a href={atelierPrdExportUrl(prd.id, "html")} download className={EXPORT_LINK_CLASSES}><Download className="h-3.5 w-3.5" />HTML généré</a>
-                <Button size="sm" variant="ghost" onClick={copyJson}><Copy className="h-3.5 w-3.5" />Copier le JSON</Button>
-              </PopoverContent>
-            </Popover>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Révision du PRD">
-          {prds.map((revision) => (
-            <button
-              key={revision.id}
-              type="button"
-              role="radio"
-              aria-checked={revision.id === prd.id}
-              onClick={() => onSelectPrd(revision.id)}
-              className={cn(
-                "rounded-full border px-2 py-0.5 font-mono text-2xs transition-colors",
-                revision.id === prd.id ? "border-foreground/40 bg-accent text-foreground" : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >rév. {revision.revision}</button>
-          ))}
-          <Badge variant={validated ? "success" : "outline"}>{validated ? "Validé" : "Brouillon"}</Badge>
-          {!isLatest && <Badge variant="outline">Historique · lecture seule</Badge>}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background p-3">
-          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {!isLatest ? "Cette révision est en lecture seule. Vous pouvez préparer ses cartes ou sélectionner la dernière pour la modifier." : validated ? "PRD validé. Choisissez ensuite les cartes à créer dans TODO." : "Relisez le document et ajoutez vos commentaires avant de le valider."}
-          </p>
-          {validated ? (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setStatus("draft")} disabled={busy || regenerating || !isLatest}><RotateCcw className="h-3.5 w-3.5" />Rouvrir</Button>
-              <Button size="sm" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
-            </>
-          ) : (
-            <>
-              <Button size="sm" variant="outline" onClick={onCreateCards} disabled={busy || regenerating}>Préparer les cartes<ArrowRight className="h-3.5 w-3.5" /></Button>
-              <Button size="sm" onClick={() => setStatus("validated")} disabled={busy || regenerating || !isLatest}><Check className="h-3.5 w-3.5" />Valider le PRD</Button>
-            </>
-          )}
-        </div>
-        <details className="rounded-md border border-border px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-medium">Décisions attendues · {openQuestions.length} · Axes · {prd.document.axes.length}</summary>
-          <div className="mt-3 flex flex-col gap-4 md:flex-row">
-            <div className="min-w-0 flex-1 space-y-2">
-              <SectionHeader>Décisions attendues</SectionHeader>
-              {openQuestions.length === 0 ? <p className="text-muted-foreground">Toutes les questions ouvertes sont tranchées.</p> : <ol className="list-decimal space-y-1 pl-4">{openQuestions.map((question) => <li key={question}>{question}</li>)}</ol>}
-            </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              <SectionHeader>Axes</SectionHeader>
-              <ul className="space-y-2">{prd.document.axes.map((axis) => <li key={axis.id}><span className="mr-2 font-mono text-muted-foreground">{axis.id}</span><strong className="font-medium">{axis.title}</strong><span className="text-muted-foreground"> · {axis.summary}</span></li>)}</ul>
-            </div>
-          </div>
-        </details>
-      </header>
-
       {regenerating && (
         <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
           <LiveDot />
@@ -199,18 +196,10 @@ export function PrdPanel({
         onAnnotationsChange={(annotations) => scheduleSave({ ...draft, annotations })}
         generalNote={draft.generalNote}
         onGeneralNoteChange={(generalNote) => scheduleSave({ ...draft, generalNote })}
+        outline={outline}
+        asideHeader={asideHeader}
+        asideFooter={asideFooter}
       />
-
-      {actionable && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2">
-          {error && <p className="min-w-0 flex-1 truncate text-xs text-danger">{error}</p>}
-          <Button size="sm" variant="outline" className="ml-auto" onClick={regenerate} disabled={busy || regenerating || !hasFeedback}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            Régénérer avec les commentaires
-          </Button>
-        </div>
-      )}
-      {!actionable && error && <p className="shrink-0 px-4 py-2 text-xs text-danger">{error}</p>}
     </div>
   );
 }

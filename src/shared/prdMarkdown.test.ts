@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { prdDocumentSchema } from "./prdDocument.ts";
 import type { PrdDocument } from "./prdDocument.ts";
-import { orderSelectedPrdTasks, renderPrdAxisBrief, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief } from "./prdMarkdown.ts";
+import { orderSelectedPrdTasks, renderPrdAxisBrief, prdOutline, renderPrdMarkdown, renderPrdSingleBrief, renderPrdTaskBrief } from "./prdMarkdown.ts";
 
 const TEMPLATE_PATH = join(import.meta.dir, "..", "..", "vendor", "prd", "prd-template.json");
 
@@ -112,6 +112,47 @@ describe("renderPrdMarkdown", () => {
     expect(markdown).toContain("### Jalon restore — Restore searches");
     expect(markdown).toContain("A saved search restores its filters.");
     expect(markdown).toContain("**Jalon :** capture");
+  });
+});
+
+describe("prdOutline", () => {
+  function headingLines(markdown: string): string[] {
+    return markdown.split("\n").filter((line) => /^#{1,6} /.test(line));
+  }
+
+  function expectOutlineMatchesHeadings(doc: PrdDocument): void {
+    const lines = headingLines(renderPrdMarkdown(doc));
+    let cursor = 0;
+    for (const entry of prdOutline(doc)) {
+      const expected = `${"#".repeat(entry.level)} ${entry.heading}`;
+      const index = lines.indexOf(expected, cursor);
+      expect(index).toBeGreaterThanOrEqual(cursor);
+      cursor = index + 1;
+    }
+  }
+
+  test("lists every navigable heading in document order with stable anchors", () => {
+    const doc = loadTemplate();
+    expectOutlineMatchesHeadings(doc);
+    const anchors = prdOutline(doc).map((entry) => entry.anchor);
+    expect(anchors[0]).toBe("prd-decisions");
+    expect(anchors[1]).toBe("prd-need");
+    expect(anchors).toContain("prd-axis-A1");
+    expect(anchors).toContain("prd-req-FR1");
+    expect(anchors).toContain("prd-task-T2");
+    expect(anchors[anchors.length - 1]).toBe("prd-context");
+    expect(anchors).not.toContain("prd-roadmap");
+    expect(new Set(anchors).size).toBe(anchors.length);
+  });
+
+  test("includes the roadmap and skips empty optional sections", () => {
+    expectOutlineMatchesHeadings(loadRoadmap());
+    expect(prdOutline(loadRoadmap()).map((entry) => entry.anchor)).toContain("prd-roadmap");
+    const bare = { ...loadTemplate(), goals: [], users: [], userStories: [], designConsiderations: [], successMetrics: [], sources: [], preDraft: { reuse: [], sharedSurfaces: [], sourcePriority: [] } };
+    expectOutlineMatchesHeadings(bare);
+    const anchors = prdOutline(bare).map((entry) => entry.anchor);
+    expect(anchors).not.toContain("prd-goals");
+    expect(anchors).not.toContain("prd-context");
   });
 });
 

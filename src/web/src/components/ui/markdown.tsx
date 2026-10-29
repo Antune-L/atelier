@@ -1,7 +1,16 @@
 import createDOMPurify from "dompurify";
-import { X } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { marked } from "marked";
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
@@ -9,6 +18,8 @@ import { cn } from "@/lib/utils";
 interface MarkdownProps {
   content: string;
   className?: string;
+  /** Adds a copy button in the top-right corner of each fenced code block. */
+  copyableCode?: boolean;
 }
 
 interface LightboxImage {
@@ -91,6 +102,85 @@ export function renderMarkdownToSafeHtml(content: string, options?: { interactiv
   }
 }
 
+export const COPY_CODE_LABEL = "Copier le code";
+export const COPY_CODE_DONE_LABEL = "Copié";
+export const COPY_CODE_FAILED_LABEL = "Échec de la copie";
+// How long the "copied"/"failed" feedback stays before the button reverts.
+const COPY_FEEDBACK_MS = 1500;
+
+export type CopyCodeStatus = "idle" | "copied" | "failed";
+
+/** Writes `text` to the clipboard and reports the outcome instead of rejecting. */
+export async function copyCodeText(
+  text: string,
+  writeText: (text: string) => Promise<void>,
+): Promise<Exclude<CopyCodeStatus, "idle">> {
+  try {
+    await writeText(text);
+    return "copied";
+  } catch {
+    return "failed";
+  }
+}
+
+function writeToClipboard(text: string): Promise<void> {
+  if (!navigator.clipboard) return Promise.reject(new Error("Clipboard unavailable"));
+  return navigator.clipboard.writeText(text);
+}
+
+export function copyButtonLabel(status: CopyCodeStatus): string {
+  if (status === "copied") return COPY_CODE_DONE_LABEL;
+  if (status === "failed") return COPY_CODE_FAILED_LABEL;
+  return COPY_CODE_LABEL;
+}
+
+/** Text a code block's copy button puts on the clipboard (the <code> child, never the button). */
+export function codeBlockText(pre: Element): string {
+  return (pre.querySelector("code") ?? pre).textContent ?? "";
+}
+
+interface CopyCodeButtonProps {
+  getText: () => string;
+  writeText?: (text: string) => Promise<void>;
+}
+
+/** Small ghost button copying a code block's text, with transient React-managed feedback. */
+export function CopyCodeButton({ getText, writeText = writeToClipboard }: CopyCodeButtonProps) {
+  const [status, setStatus] = useState<CopyCodeStatus>("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const onClick = (): void => {
+    void copyCodeText(getText(), writeText).then((next) => {
+      setStatus(next);
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => setStatus("idle"), COPY_FEEDBACK_MS);
+    });
+  };
+
+  const label = copyButtonLabel(status);
+  const Icon = status === "copied" ? Check : Copy;
+  return (
+    <button
+      type="button"
+      // Visibility (hidden until the block is hovered/focused) lives in index.css.
+      className="markdown-copy-button absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded border border-border bg-background/80 text-muted-foreground transition-opacity hover:text-foreground"
+      data-copy-status={status}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden />
+    </button>
+  );
+}
+
 /** Full-screen overlay showing a single image; closes on backdrop click, Escape, or the close button. */
 function ImageLightbox({ image, onClose }: ImageLightboxProps) {
   const [closeButton, setCloseButton] = useState<HTMLButtonElement | null>(null);
@@ -156,9 +246,17 @@ function ImageLightbox({ image, onClose }: ImageLightboxProps) {
 }
 
 /** Renders trusted-but-sanitized markdown as styled HTML. Storage stays markdown. */
-export function Markdown({ content, className }: MarkdownProps) {
+export function Markdown({ content, className, copyableCode = false }: MarkdownProps) {
   const html = useMemo(() => renderMarkdownToSafeHtml(content, { interactiveImages: true }), [content]);
   const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const [codeBlocks, setCodeBlocks] = useState<HTMLPreElement[]>([]);
+
+  // The sanitized HTML is left untouched; copy buttons are portaled into each <pre>.
+  // innerHTML is only replaced when `html` changes, so re-collect the blocks then.
+  useLayoutEffect(() => {
+    setCodeBlocks(copyableCode && container ? Array.from(container.querySelectorAll("pre")) : []);
+  }, [container, html, copyableCode]);
 
   const openLightbox = useCallback((image: HTMLImageElement) => {
     const src = image.getAttribute("src");
@@ -189,12 +287,16 @@ export function Markdown({ content, className }: MarkdownProps) {
   return (
     <>
       <div
-        className={cn("markdown", "[&_img]:cursor-zoom-in", className)}
+        ref={setContainer}
+        className={cn("markdown", "[&_img]:cursor-zoom-in", copyableCode && "markdown-copyable", className)}
         onClick={onContentClick}
         onKeyDown={onContentKeyDown}
         // Sanitized above with DOMPurify.
         dangerouslySetInnerHTML={{ __html: html }}
       />
+      {codeBlocks.map((pre, index) =>
+        createPortal(<CopyCodeButton getText={() => codeBlockText(pre)} />, pre, `copy-code-${index}`),
+      )}
       {lightbox && <ImageLightbox image={lightbox} onClose={closeLightbox} />}
     </>
   );

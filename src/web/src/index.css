@@ -283,6 +283,18 @@
   .markdown pre {
     @apply my-2 overflow-x-auto rounded-md border border-border bg-muted p-3 text-xs text-foreground;
   }
+  /* Room for the copy button so it never covers the first line of code. */
+  .markdown-copyable pre {
+    @apply relative pr-10;
+  }
+  .markdown-copy-button {
+    @apply opacity-0;
+  }
+  .markdown-copyable pre:hover .markdown-copy-button,
+  .markdown-copyable pre:focus-within .markdown-copy-button,
+  .markdown-copy-button:not([data-copy-status="idle"]) {
+    @apply opacity-100;
+  }
   .markdown pre code {
     @apply bg-transparent p-0 text-inherit;
   }

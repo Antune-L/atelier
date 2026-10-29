@@ -312,7 +312,7 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
             {steering}
           </Badge>
         )}
-        <Markdown content={message.content} />
+        <Markdown content={message.content} copyableCode />
       </div>
     );
   }
@@ -331,7 +331,7 @@ function AssistantContent({ content, running }: { content: string; running: bool
     <>
       {segments.map((segment, index) =>
         segment.kind === "text" ? (
-          <Markdown key={index} content={segment.text} />
+          <Markdown key={index} content={segment.text} copyableCode />
         ) : (
           <MockupFrame key={index} title={segment.title} html={segment.html} complete={segment.complete} running={running} />
         ),

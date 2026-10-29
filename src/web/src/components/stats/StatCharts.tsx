@@ -20,16 +20,14 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { formatDuration, formatTokens, formatUsd } from "@/lib/display";
+import { formatDuration } from "@/lib/display";
 import {
   kindCounts,
-  summarizeCodexTiers,
   meanDurationByEffort,
   meanDurationByModel,
   outcomeCounts,
   projectCounts,
   recordOutcome,
-  tokensByProject,
   weeklyThroughput,
   type Outcome,
 } from "@/lib/stats";
@@ -235,118 +233,6 @@ export function KindChart({ records }: { records: StatRecord[] }): ReactNode {
         </Bar>
       </BarChart>
     </ChartContainer>
-  );
-}
-
-// --- Card 7: tokens by project ---
-
-export function TokensByProjectChart({
-  records,
-  projects,
-}: {
-  records: StatRecord[];
-  projects: ProjectInfo[];
-}): ReactNode {
-  const byProject = useMemo(() => tokensByProject(records, projects), [records, projects]);
-  const total = useMemo(() => byProject.reduce((sum, d) => sum + d.tokens, 0), [byProject]);
-  if (byProject.length === 0) return <StatEmpty />;
-  const config: ChartConfig = { tokens: { label: "Tokens" } };
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <div className="text-2xl font-bold tabular-nums">{formatTokens(total)}</div>
-        <div className="text-xs text-muted-foreground">tokens au total</div>
-      </div>
-      <ChartContainer config={config} className="h-48">
-        <BarChart data={byProject} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-          <CartesianGrid vertical={false} />
-          <XAxis dataKey="label" {...AXIS_PROPS} />
-          <YAxis tickFormatter={(v: number) => formatTokens(v)} width={56} {...AXIS_PROPS} />
-          <ChartTooltip
-            cursor={BAR_CURSOR}
-            content={
-              <ChartTooltipContent
-                valueFormatter={(value) => formatTokens(typeof value === "number" ? value : 0)}
-                extraFormatter={(item) => {
-                  const datum = item.payload;
-                  const count = datum && typeof datum.count === "number" ? datum.count : 0;
-                  return `n = ${count}`;
-                }}
-              />
-            }
-          />
-          <Bar dataKey="tokens" radius={[4, 4, 0, 0]} activeBar={ACTIVE_BAR}>
-            {byProject.map((d, index) => (
-              <Cell key={d.key} fill={colorAt(index)} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ChartContainer>
-    </div>
-  );
-}
-
-export function CostSummary({ records }: { records: StatRecord[] }): ReactNode {
-  const withUsage = records.filter((record) => record.totalTokens !== null);
-  if (withUsage.length === 0) {
-    return (
-      <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm font-medium">Aucun usage enregistré</p>
-        <p className="text-xs text-muted-foreground">Le coût ne peut pas être calculé sans données d'usage pour les projets sélectionnés.</p>
-      </div>
-    );
-  }
-  const knownCost = withUsage.reduce((total, record) => total + record.knownCostUsd, 0);
-  const hasUnknown = withUsage.some((record) => record.costUsd === null);
-  return (
-    <div className="flex h-full flex-col justify-center gap-2">
-      <div className="text-2xl font-bold tabular-nums">
-        {hasUnknown ? "Indisponible" : formatUsd(knownCost)}
-      </div>
-      {hasUnknown && knownCost > 0 && (
-        <p className="text-xs text-muted-foreground">Sous-total connu : {formatUsd(knownCost)}</p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        {hasUnknown ? "Au moins une exécution n'a pas de tarif ou de coût remonté." : `${withUsage.length} ticket(s) avec usage`}
-      </p>
-    </div>
-  );
-}
-
-export function CodexTierSummary({ records }: { records: StatRecord[] }): ReactNode {
-  const summary = useMemo(() => summarizeCodexTiers(records), [records]);
-  if (summary.total === 0) return <StatEmpty />;
-  return (
-    <div className="grid gap-4 text-sm">
-      <div>
-        <p className="mb-2 text-xs font-medium text-muted-foreground">Demandé</p>
-        <div className="grid grid-cols-2 gap-2">
-          <TierCount label="FAST" count={summary.requestedFast} />
-          <TierCount label="Normal" count={summary.requestedDefault} />
-        </div>
-      </div>
-      <div>
-        <p className="mb-2 text-xs font-medium text-muted-foreground">Confirmé par Codex</p>
-        <div className="grid grid-cols-2 gap-2">
-          <TierCount label="FAST" count={summary.confirmedFast} />
-          <TierCount label="Normal" count={summary.confirmedDefault} />
-          <TierCount label="Inconnu" count={summary.confirmedUnknown} />
-          {summary.confirmedOther.map(({ tier, count }) => (
-            <TierCount key={tier} label={tier} count={count} />
-          ))}
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">{summary.total} exécution(s) Codex historisée(s)</p>
-    </div>
-  );
-}
-
-function TierCount({ label, count }: { label: string; count: number }): ReactNode {
-  return (
-    <div className="rounded-md border bg-muted/20 px-3 py-2">
-      <div className="text-lg font-semibold tabular-nums">{count}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-    </div>
   );
 }
 

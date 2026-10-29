@@ -64,10 +64,11 @@ export function useAtelierAttachments(appendText: (markdown: string) => void, on
 interface AtelierAttachmentsProps {
   uploading: boolean;
   disabled?: boolean;
+  compact?: boolean;
   uploadFiles: (files: File[]) => Promise<boolean>;
 }
 
-export function AtelierAttachments({ uploading, disabled, uploadFiles }: AtelierAttachmentsProps) {
+export function AtelierAttachments({ uploading, disabled, compact = false, uploadFiles }: AtelierAttachmentsProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -83,9 +84,9 @@ export function AtelierAttachments({ uploading, disabled, uploadFiles }: Atelier
           void uploadSelectedAttachments(event.currentTarget, uploadFiles);
         }}
       />
-      <Button size="sm" variant="outline" disabled={disabled || uploading} onClick={() => inputRef.current?.click()}>
+      <Button size="sm" variant={compact ? "ghost" : "outline"} className={compact ? "gap-1 px-1" : undefined} aria-label={uploading ? "Ajout en cours…" : "Joindre des fichiers"} disabled={disabled || uploading} onClick={() => inputRef.current?.click()}>
         <Paperclip className="h-3.5 w-3.5" />
-        {uploading ? "Ajout en cours…" : "Joindre des fichiers"}
+        <span className={compact ? "sr-only sm:not-sr-only" : undefined}>{uploading ? "Ajout en cours…" : "Joindre des fichiers"}</span>
       </Button>
       {uploading && <span role="status" className="text-xs text-muted-foreground">Attendez la fin de l’ajout avant d’envoyer.</span>}
     </div>

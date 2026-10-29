@@ -1,5 +1,6 @@
-import { Archive, Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Search, Trash2 } from "lucide-react";
+import { Archive, FileText, LayoutGrid, Mail, MessageSquarePlus, PanelLeftOpen, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
 import type { Conversation, ProjectInfo } from "@shared/schemas";
@@ -7,7 +8,6 @@ import type { Conversation, ProjectInfo } from "@shared/schemas";
 import { CardsPanel } from "@/components/atelier/CardsPanel";
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConversationPanel } from "@/components/atelier/ConversationPanel";
-import { SubagentsPanel } from "@/components/atelier/SubagentsPanel";
 import { NewConversationForm } from "@/components/atelier/NewConversationForm";
 import { PrdPanel } from "@/components/atelier/PrdPanel";
 import { SettledConversations } from "@/components/atelier/SettledConversations";
@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
+import { Sheet } from "@/components/ui/sheet";
 import { useBoard } from "@/hooks/useBoard";
 import { useConversationDetail } from "@/hooks/useConversationDetail";
 import { useTickTimer } from "@/hooks/useTickTimer";
@@ -38,13 +39,13 @@ import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const ALL_PROJECTS = "all";
-const LIST_COLLAPSED_KEY = "atelier:list-collapsed";
 
 interface AtelierViewProps {
   projects: ProjectInfo[];
   projectFilter: string;
   /** A request from another surface (ticket sheet, ticket detail) to open a conversation or a form. */
   target: AtelierTarget | null;
+  toolbar?: ReactNode;
 }
 
 interface ComposeState {
@@ -65,7 +66,7 @@ async function findPrdConversation(candidates: Conversation[], prdId: string): P
   return null;
 }
 
-export function AtelierView({ projects, projectFilter, target }: AtelierViewProps) {
+export function AtelierView({ projects, projectFilter, target, toolbar }: AtelierViewProps) {
   const { conversations } = useBoard();
   const now = useTickTimer();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -73,12 +74,13 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const [prdChoice, setPrdChoice] = useState<string | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [listOpen, setListOpen] = useState(false);
-  const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem(LIST_COLLAPSED_KEY) === "1");
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
   const [search, setSearch] = useState("");
   const composeSeq = useRef(0);
   const resolveSeq = useRef(0);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const documentButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const detail = useConversationDetail(selectedId);
 
@@ -188,6 +190,26 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const activeStep = prd === undefined ? "conversation" : step;
   const defaultProject = projectFilter === ALL_PROJECTS ? null : projectFilter;
 
+  const historyButton = (
+    <Button ref={historyButtonRef} size="sm" variant="outline" onClick={() => setListOpen(true)} aria-label="Ouvrir les discussions" aria-haspopup="dialog">
+      <PanelLeftOpen className="h-4 w-4" />
+      <span className="hidden sm:inline">Discussions</span>
+      <span className="hidden font-mono text-2xs text-muted-foreground sm:inline">{total}</span>
+    </Button>
+  );
+
+  const documentActions = prd === undefined ? null : (
+    <nav aria-label="Documents de la discussion" className="flex items-center gap-1">
+      {ATELIER_STEPS.filter((value) => value !== "conversation").map((value) => (
+        <Button key={value} size="sm" variant={activeStep === value ? "secondary" : "ghost"} className="px-2 sm:px-3" aria-label={ATELIER_STEP_LABELS[value]} title={ATELIER_STEP_LABELS[value]} onClick={(event) => { documentButtonRef.current = event.currentTarget; setStep(value); }}>
+          {value === "prd" ? <FileText className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
+          <span className="hidden sm:inline">{ATELIER_STEP_LABELS[value]}</span>
+        </Button>
+      ))}
+    </nav>
+  );
+
+
   const renderPanel = () => {
     if (compose !== null) {
       return (
@@ -223,218 +245,170 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
         </div>
       );
     }
-    if (activeStep === "prd" && prd !== undefined) {
-      return (
-        <PrdPanel
-          conversation={conversation}
-          prd={prd}
-          prds={prds}
-          onSelectPrd={setPrdChoice}
-          onApplyPrd={detail.applyPrd}
-          onBackToConversation={() => setStep("conversation")}
-          onCreateCards={() => setStep("cards")}
-        />
-      );
-    }
-    if (activeStep === "cards" && prd !== undefined) {
-      return (
-        <CardsPanel conversation={conversation} prd={prd} projects={projects} onBackToPrd={() => setStep("prd")} />
-      );
-    }
     return (
-      <div className="flex min-h-0 flex-1">
-        <ConversationPanel
-          key={conversation.id}
-          conversation={conversation}
-          messages={detail.messages}
-          projectLabel={resolveProjectLabel(projects, conversation.project)}
-        />
-        <SubagentsPanel subagents={conversation.activeSubagents} />
-      </div>
+      <ConversationPanel
+        key={conversation.id}
+        conversation={conversation}
+        messages={detail.messages}
+        projectLabel={resolveProjectLabel(projects, conversation.project)}
+        historyButton={historyButton}
+        documentActions={documentActions}
+        toolbar={toolbar}
+        hasPrd={prd !== undefined}
+      />
     );
   };
 
-  const showStepper = compose === null && conversation !== null && selectedId !== null;
+  const showConversationHeader = compose === null && conversation !== null && selectedId !== null;
 
-  const toggleListCollapsed = (): void => {
-    const next = !listCollapsed;
-    localStorage.setItem(LIST_COLLAPSED_KEY, next ? "1" : "0");
-    setListCollapsed(next);
-  };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 md:flex-row">
-      {listCollapsed && (
-        <button
-          type="button"
-          onClick={toggleListCollapsed}
-          className="hidden w-10 shrink-0 flex-col items-center gap-2 py-1 text-muted-foreground hover:text-foreground md:flex"
-          title="Déplier « Discussions »"
-          aria-label="Déplier « Discussions »"
-        >
-          <PanelLeftOpen className="h-3.5 w-3.5" />
-          <span className="font-mono text-2xs">{total}</span>
-          <span className="text-2xs uppercase tracking-wider [writing-mode:vertical-rl]">Discussions</span>
-        </button>
-      )}
-      <aside className={cn("flex w-full shrink-0 flex-col gap-3 overflow-hidden md:w-72", listCollapsed && "md:hidden")}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={toggleListCollapsed}
-              className="hidden text-muted-foreground transition-colors hover:text-foreground md:block"
-              title="Replier « Discussions »"
-              aria-label="Replier « Discussions »"
-            >
-              <PanelLeftClose className="h-3.5 w-3.5" />
-            </button>
-            <h2 className="text-sm font-medium">Discussions <span className="text-muted-foreground">{total}</span></h2>
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <Sheet open={listOpen} onOpenChange={setListOpen} side="left" size="md" title={<>Discussions <span className="ml-1 font-normal text-muted-foreground">{total}</span></>} className="w-80" onCloseAutoFocus={(event) => { event.preventDefault(); historyButtonRef.current?.focus(); }}>
+        <aside className="flex min-h-0 w-full flex-col gap-3 p-4" aria-label="Historique des discussions">
+          <Button size="sm" onClick={() => openCompose(null)}>
+            <MessageSquarePlus className="h-4 w-4" />
+            Nouvelle discussion
+          </Button>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setSearch("");
+              }}
+              placeholder="Rechercher une discussion…"
+              aria-label="Rechercher une discussion par titre"
+              className="h-8 w-full pl-7 text-xs"
+            />
           </div>
-          <Button size="sm" variant="ghost" className="md:hidden" onClick={() => setListOpen(!listOpen)}>{listOpen ? "Masquer" : "Afficher"}</Button>
-        </div>
-        <Button size="sm" onClick={() => openCompose(null)}>
-          <MessageSquarePlus className="h-4 w-4" />
-          Nouvelle discussion
-        </Button>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setSearch("");
-            }}
-            placeholder="Rechercher une discussion…"
-            aria-label="Rechercher une discussion par titre"
-            className="h-8 w-full pl-7 text-xs"
-          />
-        </div>
-        <div className={cn("max-h-52 min-h-0 flex-1 overflow-y-auto md:max-h-none", !listOpen && (selectedId !== null || compose !== null) && "hidden md:block")}>
-          <ul className="space-y-2">
-            {total === 0 && (
-              <li className="px-2 py-3 text-xs text-muted-foreground">
-                {searchQuery !== "" ? "Aucune conversation pour cette recherche." : "Aucune conversation pour ce filtre."}
-              </li>
-            )}
-            {active.map((item) => (
-              <li key={item.id}>
-                <div
-                  className={cn(
-                    "group flex items-start gap-2 rounded-lg border px-3 py-3 transition-colors",
-                    item.id === selectedId && compose === null
-                      ? "border-border bg-accent"
-                      : "border-border/60 hover:bg-accent/50",
-                  )}
-                >
-                  <button type="button" onClick={() => select(item.id)} className="min-w-0 flex-1 text-left">
-                    <span className="flex items-center gap-1.5">
-                      {item.sessionStatus === "running" && <LiveDot />}
-                      {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
-                      <span
-                        className="line-clamp-2 text-sm font-medium"
-                        title={conversationTooltip(item.title, resolveProjectLabel(projects, item.project))}
-                      >
-                        {item.title || UNTITLED_CONVERSATION_LABEL}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ul className="space-y-1">
+              {total === 0 && (
+                <li className="px-2 py-3 text-xs text-muted-foreground">
+                  {searchQuery !== "" ? "Aucune conversation pour cette recherche." : "Aucune conversation pour ce filtre."}
+                </li>
+              )}
+              {active.map((item) => (
+                <li key={item.id}>
+                  <div
+                    className={cn(
+                      "group flex items-start gap-2 rounded-md border-l-2 px-2 py-2 transition-colors",
+                      item.id === selectedId && compose === null
+                        ? "border-primary bg-accent"
+                        : "border-transparent hover:bg-accent/50",
+                    )}
+                  >
+                    <button type="button" onClick={() => select(item.id)} className="min-w-0 flex-1 text-left">
+                      <span className="flex items-center gap-1.5">
+                        {item.sessionStatus === "running" && <LiveDot />}
+                        {item.sessionStatus === "error" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
+                        <span
+                          className="line-clamp-2 text-sm font-medium"
+                          title={conversationTooltip(item.title, resolveProjectLabel(projects, item.project))}
+                        >
+                          {item.title || UNTITLED_CONVERSATION_LABEL}
+                        </span>
+                        {item.unread && (
+                          <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
+                        )}
                       </span>
-                      {item.unread && (
-                        <span aria-label="Nouvelle réponse" className="ml-auto h-2 w-2 shrink-0 rounded-full bg-danger" />
-                      )}
-                    </span>
-                    <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>
-                      <span className="shrink-0">· {formatRelativeDuration(item.updatedAt, now)}</span>
-                    </span>
-                    <span className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="text-2xs text-muted-foreground">Étape</span>
-                      <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="px-1.5 py-0 text-2xs">
-                        {CONVERSATION_STATUS_LABELS[item.status]}
-                      </Badge>
-                    </span>
-                  </button>
-                  {!item.unread && (
+                      <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="truncate">{resolveProjectLabel(projects, item.project)}</span>
+                        <span className="shrink-0">· {formatRelativeDuration(item.updatedAt, now)}</span>
+                      </span>
+                      <span className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-2xs text-muted-foreground">Étape</span>
+                        <Badge variant={CONVERSATION_STATUS_VARIANTS[item.status]} className="px-1.5 py-0 text-2xs">
+                          {CONVERSATION_STATUS_LABELS[item.status]}
+                        </Badge>
+                      </span>
+                    </button>
+                    {!item.unread && (
+                      <button
+                        type="button"
+                        aria-label="Marquer comme non lue"
+                        title="Marquer comme non lue"
+                        onClick={() => markUnread(item)}
+                        className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                     <button
                       type="button"
-                      aria-label="Marquer comme non lue"
-                      title="Marquer comme non lue"
-                      onClick={() => markUnread(item)}
+                      aria-label="Classer la conversation"
+                      title="Classer la conversation"
+                      onClick={() => setSettled(item, true)}
                       className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                     >
-                      <Mail className="h-3.5 w-3.5" />
+                      <Archive className="h-3.5 w-3.5" />
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    aria-label="Classer la conversation"
-                    title="Classer la conversation"
-                    onClick={() => setSettled(item, true)}
-                    className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                  >
-                    <Archive className="h-3.5 w-3.5" />
-                  </button>
-                  <ConfirmPopover
-                    title="Supprimer la conversation"
-                    description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
-                    confirmLabel="Supprimer"
-                    destructive
-                    onConfirm={() => remove(item.id)}
-                  >
-                    <button
-                      type="button"
-                      aria-label="Supprimer la conversation"
-                      className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                    <ConfirmPopover
+                      title="Supprimer la conversation"
+                      description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
+                      confirmLabel="Supprimer"
+                      destructive
+                      onConfirm={() => remove(item.id)}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </ConfirmPopover>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {settled.length > 0 && (
-            <SettledConversations
-              conversations={settled}
-              selectedId={compose === null ? selectedId : null}
-              now={now}
-              projectLabel={(project) => resolveProjectLabel(projects, project)}
-              onSelect={(conversationId) => select(conversationId)}
-              onUnsettle={(item) => setSettled(item, false)}
-              onDelete={remove}
-              searching={searchQuery !== ""}
-            />
-          )}
-        </div>
-      </aside>
+                      <button
+                        type="button"
+                        aria-label="Supprimer la conversation"
+                        className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </ConfirmPopover>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {settled.length > 0 && (
+              <SettledConversations
+                conversations={settled}
+                selectedId={compose === null ? selectedId : null}
+                now={now}
+                projectLabel={(project) => resolveProjectLabel(projects, project)}
+                onSelect={(conversationId) => select(conversationId)}
+                onUnsettle={(item) => setSettled(item, false)}
+                onDelete={remove}
+                searching={searchQuery !== ""}
+              />
+            )}
+          </div>
+        </aside>
+      </Sheet>
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-card">
-        {showStepper && (
-          <nav aria-label="Étapes" className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5">
-            {ATELIER_STEPS.map((value, index) => {
-              const enabled = value === "conversation" || prd !== undefined;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  disabled={!enabled}
-                  aria-current={activeStep === value ? "step" : undefined}
-                  onClick={() => setStep(value)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                    activeStep === value
-                      ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--info))]"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <span className="font-mono text-2xs">{index + 1}</span>
-                  {ATELIER_STEP_LABELS[value]}
-                </button>
-              );
-            })}
-          </nav>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {!showConversationHeader && (
+          <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-5">
+            {historyButton}
+            <Button size="sm" variant="ghost" onClick={() => openCompose(null)}>
+              <MessageSquarePlus className="h-4 w-4" />
+              Nouvelle discussion
+            </Button>
+            <div className="ml-auto flex items-center gap-1">{toolbar}</div>
+          </div>
         )}
         {renderPanel()}
       </section>
+      <Sheet open={showConversationHeader && activeStep !== "conversation"} onOpenChange={(open) => { if (!open) setStep("conversation"); }} title={ATELIER_STEP_LABELS[activeStep]} size="lg" onCloseAutoFocus={(event) => { event.preventDefault(); const button = documentButtonRef.current?.isConnected ? documentButtonRef.current : historyButtonRef.current; button?.focus(); }}>
+        {prd !== undefined && conversation !== null && (activeStep === "cards" ? (
+          <CardsPanel conversation={conversation} prd={prd} projects={projects} onBackToPrd={() => setStep("prd")} />
+        ) : (
+          <PrdPanel
+            conversation={conversation}
+            prd={prd}
+            prds={prds}
+            onSelectPrd={setPrdChoice}
+            onApplyPrd={detail.applyPrd}
+            onBackToConversation={() => setStep("conversation")}
+            onCreateCards={() => setStep("cards")}
+          />
+        ))}
+      </Sheet>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { CornerDownRight, FileText, Minimize2, Send, Settings2, Square } from "lucide-react";
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { RESEARCH_OPTION_LABELS } from "@shared/constants";
+import { CONVERSATION_STATUS_LABELS, RESEARCH_OPTION_LABELS } from "@shared/constants";
 import { enabledResearchOptionKeys } from "@shared/schemas";
 import type { Conversation, ConversationMessage, UpdateConversationInput } from "@shared/schemas";
 
@@ -9,6 +9,7 @@ import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
 import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { MockupFrame } from "@/components/atelier/MockupFrame";
+import { SubagentsPanel } from "@/components/atelier/SubagentsPanel";
 import { ResearchFields } from "@/components/atelier/ResearchFields";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { resolveAgentDefaults } from "@/lib/agentDefaults";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
-import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, buildAtelierThread, subagentCountLabel, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
+import { UNTITLED_CONVERSATION_LABEL, conversationTooltip, agentLabel, buildAtelierThread, steeringLabel, agentSettingsOf, agentSummary, contextUsageSummary } from "@/lib/atelier";
 import type { ActivityEntry, ReasoningEntry } from "@/lib/atelier";
 import { splitMockupBlocks } from "@/lib/mockupBlocks";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
@@ -32,10 +33,15 @@ interface ConversationPanelProps {
   conversation: Conversation;
   messages: ConversationMessage[];
   projectLabel: string;
+  historyButton: ReactNode;
+  documentActions: ReactNode;
+  toolbar?: ReactNode;
+  hasPrd: boolean;
 }
 
 const BOTTOM_THRESHOLD_PX = 24;
 const RESEARCH_OFF_LABEL = "réflexion préalable off";
+const CHAT_PROSE_CLASSES = "[&.markdown]:text-[15px] [&.markdown]:leading-[1.65]";
 
 function researchSummary(conversation: Conversation): string {
   if (!conversation.researchEnabled) return RESEARCH_OFF_LABEL;
@@ -43,7 +49,7 @@ function researchSummary(conversation: Conversation): string {
   return `réflexion préalable : ${labels.join(", ") || "aucune vérification"}`;
 }
 
-export function ConversationPanel({ conversation, messages, projectLabel }: ConversationPanelProps) {
+export function ConversationPanel({ conversation, messages, projectLabel, historyButton, documentActions, toolbar, hasPrd }: ConversationPanelProps) {
   const capabilities = useCapabilities();
   const defaults = resolveAgentDefaults(capabilities);
   const settings = agentSettingsOf(conversation);
@@ -71,7 +77,6 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
     if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
   }, [scrollSignature]);
 
-  // The sub-agents panel narrows the thread: re-pin once the new width has been laid out.
   useLayoutEffect(() => {
     const el = threadRef.current;
     if (!el) return;
@@ -135,72 +140,73 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 py-2">
+      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
+        {historyButton}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium" title={conversationTooltip(conversation.title, projectLabel)}>{conversation.title || UNTITLED_CONVERSATION_LABEL}</h2>
-          <p className="truncate font-mono text-2xs text-muted-foreground">
-            {agentSummary(settings, defaults)} · {researchSummary(conversation)}
-          </p>
-          <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
+          <p className="truncate text-2xs text-muted-foreground">{projectLabel} · {CONVERSATION_STATUS_LABELS[conversation.status]}</p>
         </div>
-        {conversation.activeSubagents.length > 0 && (
-          <Badge variant="info" className="lg:hidden">
-            {subagentCountLabel(conversation.activeSubagents.length)}
-          </Badge>
-        )}
-        <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
-          <PopoverTrigger>
-            <Button size="sm" variant="ghost">
-              <Settings2 className="h-3.5 w-3.5" />
-              Session
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="max-h-[70vh] w-[min(420px,calc(100vw-2rem))] space-y-4 overflow-y-auto p-4">
-            <p className="text-xs text-muted-foreground">
-              Changer d'agent ferme la session en cours ; le prochain message la relance.
-            </p>
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium">Agent</h3>
-              <AtelierAgentFields value={settings} onChange={updateSettings} />
-            </div>
-            <div className="space-y-2 border-t border-border pt-3">
-              <h3 className="text-sm font-medium">Avant de proposer</h3>
-              <ResearchFields
-                enabled={conversation.researchEnabled}
-                options={conversation.researchOptions}
-                onEnabledChange={(researchEnabled) => updateSettings({ researchEnabled })}
-                onOptionsChange={(researchOptions) => updateSettings({ researchOptions })}
-              />
-            </div>
-            <div className="border-t border-border pt-3">
-              <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-2"
-                onClick={compact}
-                disabled={conversation.contextTokens === null || running || busy}
-                title="Compacter le contexte de la session"
-              >
-                <Minimize2 className="h-3.5 w-3.5" />
-                Compacter le contexte
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {documentActions}
+          <Popover open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <PopoverTrigger>
+              <Button size="sm" variant="ghost" className="px-2" aria-label="Réglages de session">
+                <Settings2 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Session</span>
               </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-        <Button
-          size="sm"
-          onClick={consolidate}
-          disabled={!hasAssistantReply || running || busy || uploading}
-          title={hasAssistantReply ? undefined : "Disponible après la première réponse de l'agent"}
-        >
-          <FileText className="h-3.5 w-3.5" />
-          Préparer le PRD
-        </Button>
-      </div>
+            </PopoverTrigger>
+            <PopoverContent className="max-h-[70vh] w-[min(420px,calc(100vw-2rem))] space-y-4 overflow-y-auto p-4">
+              <p className="font-mono text-2xs text-muted-foreground">{agentSummary(settings, defaults)} · {researchSummary(conversation)}</p>
+              <p className="text-xs text-muted-foreground">
+                Changer d'agent ferme la session en cours ; le prochain message la relance.
+              </p>
+              <div className="space-y-2">
+                <h3 className="text-sm font-medium">Agent</h3>
+                <AtelierAgentFields value={settings} onChange={updateSettings} />
+              </div>
+              <div className="space-y-2 border-t border-border pt-3">
+                <h3 className="text-sm font-medium">Avant de proposer</h3>
+                <ResearchFields
+                  enabled={conversation.researchEnabled}
+                  options={conversation.researchOptions}
+                  onEnabledChange={(researchEnabled) => updateSettings({ researchEnabled })}
+                  onOptionsChange={(researchOptions) => updateSettings({ researchOptions })}
+                />
+              </div>
+              <div className="border-t border-border pt-3">
+                <ContextUsage contextTokens={conversation.contextTokens} contextWindow={conversation.contextWindow} />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-2"
+                  onClick={compact}
+                  disabled={conversation.contextTokens === null || running || busy}
+                  title="Compacter le contexte de la session"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  Compacter le contexte
+                </Button>
+              </div>
+              {hasPrd && (
+                <Button size="sm" variant="outline" onClick={consolidate} disabled={!hasAssistantReply || running || busy || uploading}>
+                  <FileText className="h-3.5 w-3.5" />
+                  Préparer un nouveau PRD
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
+          {!hasPrd && (
+            <Button size="sm" className="px-2 sm:px-3" onClick={consolidate} disabled={!hasAssistantReply || running || busy || uploading} aria-label="Préparer le PRD" title={hasAssistantReply ? "Préparer le PRD" : "Disponible après la première réponse de l'agent"}>
+              <FileText className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Préparer le PRD</span>
+            </Button>
+          )}
+          {toolbar}
+        </div>
+      </header>
 
-      <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8">
+        <div className="mx-auto flex max-w-[58rem] flex-col gap-4">
           {items.length === 0 && (
             <p className="text-center text-sm text-muted-foreground">
               Décris ton idée : l'agent pose ses questions puis t'aide à la consolider en PRD.
@@ -232,10 +238,11 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border bg-card px-4 py-3">
-        <div className="mx-auto flex max-w-3xl flex-col gap-2">
+      <div className="shrink-0 px-3 pb-3 pt-2 sm:px-8 sm:pb-4">
+        <div className="mx-auto flex max-w-[58rem] flex-col gap-2">
+          <SubagentsPanel subagents={conversation.activeSubagents} />
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>{running ? "L’agent travaille. Vous pouvez l’aiguiller ou l’interrompre." : "Poursuivez la discussion ou préparez le PRD pour le relire."}</span>
+            <span className="text-2xs">{running ? "Analyse en cours · Vous pouvez continuer à écrire." : "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne"}</span>
             {!following && (
               <Button size="sm" variant="ghost" onClick={() => {
                 pinnedToBottom.current = true;
@@ -245,39 +252,42 @@ export function ConversationPanel({ conversation, messages, projectLabel }: Conv
               }}>Reprendre le suivi</Button>
             )}
           </div>
-          <Textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            rows={3}
-            className="min-h-[72px] resize-none"
-            placeholder={
-              running
-                ? "Aiguille l'agent pendant son tour… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
-                : "Réponds à l'agent… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)"
-            }
-            aria-label="Message à l'agent"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <AtelierAttachments uploading={uploading} disabled={busy} uploadFiles={uploadFiles} />
-            {error && <p role="alert" className="min-w-0 flex-1 text-xs text-danger">{error}</p>}
-            {running && (
-              <Button size="sm" variant="outline" className="ml-auto" onClick={interrupt} disabled={busy}>
-                <Square className="h-3.5 w-3.5" />
-                Interrompre
+          <div className="rounded-md border border-border bg-card px-3 py-2 focus-within:border-primary">
+            <Textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              rows={2}
+              className="min-h-11 max-h-40 resize-y border-0 bg-transparent px-0 py-1 shadow-none focus-visible:ring-0"
+              placeholder={
+                running
+                  ? "Aiguille l'agent pendant son tour…"
+                  : "Réponds à l'agent…"
+              }
+              aria-label="Message à l'agent"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <AtelierAttachments compact uploading={uploading} disabled={busy} uploadFiles={uploadFiles} />
+              {error && <p role="alert" className="min-w-0 flex-1 text-xs text-danger">{error}</p>}
+              {running && (
+                <Button size="sm" variant="outline" className="ml-auto" onClick={interrupt} disabled={busy}>
+                  <Square className="h-3.5 w-3.5" />
+                  Interrompre
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className={running ? undefined : "ml-auto"}
+                onClick={() => void send()}
+                disabled={!draft.trim() || busy || uploading}
+                aria-label={running ? "Aiguiller l'agent" : "Envoyer le message"}
+                title={running ? "Envoyer ce message à l'agent sans interrompre son tour" : "Envoyer le message"}
+              >
+                {running ? <CornerDownRight className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
+                <span className="sr-only">{running ? "Aiguiller" : "Envoyer"}</span>
               </Button>
-            )}
-            <Button
-              size="sm"
-              className={running ? undefined : "ml-auto"}
-              onClick={() => void send()}
-              disabled={!draft.trim() || busy || uploading}
-              title={running ? "Envoyer ce message à l'agent sans interrompre son tour" : undefined}
-            >
-              {running ? <CornerDownRight className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
-              {running ? "Aiguiller" : "Envoyer"}
-            </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -312,7 +322,7 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
             {steering}
           </Badge>
         )}
-        <Markdown content={message.content} copyableCode />
+        <Markdown content={message.content} className={CHAT_PROSE_CLASSES} copyableCode />
       </div>
     );
   }
@@ -331,7 +341,7 @@ function AssistantContent({ content, running }: { content: string; running: bool
     <>
       {segments.map((segment, index) =>
         segment.kind === "text" ? (
-          <Markdown key={index} content={segment.text} copyableCode />
+          <Markdown key={index} content={segment.text} className={CHAT_PROSE_CLASSES} copyableCode />
         ) : (
           <MockupFrame key={index} title={segment.title} html={segment.html} complete={segment.complete} running={running} />
         ),

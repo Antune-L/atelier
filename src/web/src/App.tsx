@@ -1,5 +1,5 @@
-import { ChevronDown, Cloud, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, Cloud, Cpu, GitBranch, LayoutGrid, MonitorPlay, Plus, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { AuditTicketOrigin } from "@shared/audit";
 import type { Ticket } from "@shared/schemas";
@@ -16,6 +16,7 @@ import { ProjectSelect } from "@/components/ProjectSelect";
 import { ProjectsSettings } from "@/components/projects-settings/ProjectsSettings";
 import { SettingsModal } from "@/components/SettingsModal";
 import { Sidebar, type SidebarView } from "@/components/Sidebar";
+import { Sheet } from "@/components/ui/sheet";
 import { SkillsPreflightDialog } from "@/components/SkillsPreflightDialog";
 import { SlotPips } from "@/components/SlotPips";
 import { HostMetricsBadge } from "@/components/HostMetricsBadge";
@@ -83,6 +84,8 @@ export function App() {
   const [toolSearch, setToolSearch] = useState("");
   const [openTool, setOpenTool] = useState<ToolKind | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationButtonRef = useRef<HTMLButtonElement>(null);
   const [updating, setUpdating] = useState(false);
   const [atelierTarget, setAtelierTarget] = useState<AtelierTarget | null>(null);
   const [auditTarget, setAuditTarget] = useState<AuditTarget | null>(null);
@@ -211,13 +214,47 @@ export function App() {
     if (view === "automation") return <AutomationView />;
     if (view === "audits") return <AuditsView projects={projects} target={auditTarget} />;
     if (view === "atelier") {
-      return <AtelierView projects={selectableProjects} projectFilter={effectiveFilter} target={atelierTarget} />;
+      return (
+        <AtelierView
+          projects={selectableProjects}
+          projectFilter={effectiveFilter}
+          target={atelierTarget}
+          toolbar={(
+            <>
+              <Button ref={navigationButtonRef} variant="ghost" size="icon" className="h-8 w-8 sm:hidden" aria-label="Ouvrir la navigation" title="Navigation" onClick={() => setNavigationOpen(true)}>
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+              <div className="hidden items-center gap-1 sm:flex">
+                <Popover>
+                  <PopoverTrigger>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Projet et système" title="Projet et système">
+                      <Cpu className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[min(360px,calc(100vw-2rem))] space-y-4 p-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium">Projet</p>
+                      {projectFilterSelect}
+                    </div>
+                    <div className="space-y-3 border-t border-border pt-3">
+                      <p className="text-xs font-medium">Sessions et ressources système</p>
+                      <SlotPips slots={slots} />
+                      <HostMetricsBadge />
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <NotificationCenter projects={projects} />
+            </>
+          )}
+        />
+      );
     }
     return renderHome();
   };
 
   return (
-    <div className="flex h-screen flex-row bg-background">
+    <div className="flex h-[100dvh] flex-row bg-background">
       <Sidebar
         view={view}
         onSelect={selectView}
@@ -227,96 +264,115 @@ export function App() {
         updating={updating}
         canUpdate={canUpdate}
       />
+      <Sheet open={navigationOpen} onOpenChange={setNavigationOpen} side="left" size="md" title="Navigation" className="w-80" onCloseAutoFocus={(event) => { if (navigationButtonRef.current) { event.preventDefault(); navigationButtonRef.current.focus(); } }}>
+        <div className="min-h-0 w-full overflow-y-auto">
+          <Sidebar
+            expanded
+            view={view}
+            onSelect={(nextView) => { selectView(nextView); setNavigationOpen(false); }}
+            badges={{ atelier: atelierUnread, audits: auditsAlert }}
+            onOpenSettings={() => { setNavigationOpen(false); setSettingsOpen(true); }}
+            onUpdate={handleUpdate}
+            updating={updating}
+            canUpdate={canUpdate}
+          />
+          <div className="space-y-3 border-t border-border p-4">
+            {projectFilterSelect}
+            <SlotPips slots={slots} />
+            <HostMetricsBadge />
+          </div>
+        </div>
+      </Sheet>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
-          {view === "home" && (
-            <div className="flex max-w-full items-center overflow-x-auto">
-              {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setHomeView(value)}
-                  aria-pressed={homeView === value}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors",
-                    homeView === value
-                      ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--info))]"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <SlotPips slots={slots} />
-          <HostMetricsBadge />
-
-          {view === "home" && (
-            <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={homeView === "worktree" ? "Rechercher une session…" : "Rechercher…"}
-                className="h-8 w-44 text-xs"
-                aria-label={homeView === "worktree" ? "Rechercher une session de travail" : "Rechercher dans la vue actuelle"}
-              />
-              {projectFilterSelect}
-              <div className="flex items-center gap-0.5">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  title="Nouveau ticket"
-                  aria-label="Nouveau ticket"
-                  onClick={() => setCreating(true)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
-                <Popover open={toolsMenuOpen} onOpenChange={(open) => { setToolsMenuOpen(open); if (!open) setToolSearch(""); }}>
-                  <PopoverTrigger>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      title="Autres outils"
-                      aria-label="Autres outils"
-                      aria-haspopup="menu"
-                    >
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-64">
-                    <Input autoFocus value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="Rechercher un outil…" aria-label="Rechercher un outil" className="mb-2 h-8 text-xs" />
-                    {TOOL_KINDS.filter((kind) => matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)).map((kind) => {
-                      const { label, Icon } = TOOLS[kind];
-                      return (
-                        <PopoverMenuItem
-                          key={kind}
-                          onClick={() => {
-                            setToolsMenuOpen(false);
-                            setOpenTool(kind);
-                          }}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          {label}
-                        </PopoverMenuItem>
-                      );
-                    })}
-                    {TOOL_KINDS.every((kind) => !matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)) && <p className="px-2 py-3 text-xs text-muted-foreground">Aucun outil pour cette recherche.</p>}
-                  </PopoverContent>
-                </Popover>
+        {view !== "atelier" && (
+          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
+            {view === "home" && (
+              <div className="flex max-w-full items-center overflow-x-auto">
+                {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setHomeView(value)}
+                    aria-pressed={homeView === value}
+                    className={cn(
+                      "inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-xs font-medium transition-colors",
+                      homeView === value
+                        ? "text-foreground shadow-[inset_0_-2px_0_hsl(var(--info))]"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                  </button>
+                ))}
               </div>
-            </div>
-          )}
-          {view === "atelier" && <div className="ml-auto flex items-center">{projectFilterSelect}</div>}
-          <NotificationCenter projects={projects} className={view === "home" || view === "atelier" ? undefined : "ml-auto"} />
-        </div>
+            )}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
+            <SlotPips slots={slots} />
+            <HostMetricsBadge />
+
+            {view === "home" && (
+              <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={homeView === "worktree" ? "Rechercher une session…" : "Rechercher…"}
+                  className="h-8 w-44 text-xs"
+                  aria-label={homeView === "worktree" ? "Rechercher une session de travail" : "Rechercher dans la vue actuelle"}
+                />
+                {projectFilterSelect}
+                <div className="flex items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Nouveau ticket"
+                    aria-label="Nouveau ticket"
+                    onClick={() => setCreating(true)}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                  <Popover open={toolsMenuOpen} onOpenChange={(open) => { setToolsMenuOpen(open); if (!open) setToolSearch(""); }}>
+                    <PopoverTrigger>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Autres outils"
+                        aria-label="Autres outils"
+                        aria-haspopup="menu"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64">
+                      <Input autoFocus value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="Rechercher un outil…" aria-label="Rechercher un outil" className="mb-2 h-8 text-xs" />
+                      {TOOL_KINDS.filter((kind) => matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)).map((kind) => {
+                        const { label, Icon } = TOOLS[kind];
+                        return (
+                          <PopoverMenuItem
+                            key={kind}
+                            onClick={() => {
+                              setToolsMenuOpen(false);
+                              setOpenTool(kind);
+                            }}
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                            {label}
+                          </PopoverMenuItem>
+                        );
+                      })}
+                      {TOOL_KINDS.every((kind) => !matchesQuery(normalizeSearch(toolSearch), TOOLS[kind].label)) && <p className="px-2 py-3 text-xs text-muted-foreground">Aucun outil pour cette recherche.</p>}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </div>
+            )}
+            <NotificationCenter projects={projects} className={view === "home" ? undefined : "ml-auto"} />
+          </div>
+        )}
+        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view !== "atelier" && "p-4")}>
           <main className="min-h-0 flex-1 overflow-auto">
             {renderView()}
           </main>

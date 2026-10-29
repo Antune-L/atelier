@@ -1,11 +1,12 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { KeyboardEventHandler, ReactNode } from "react";
+import type { ComponentProps, KeyboardEventHandler, ReactNode } from "react";
 
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { cn } from "@/lib/utils";
 
 export type SheetSize = "md" | "lg" | "xl";
+type SheetSide = "left" | "right";
 
 const SHEET_WIDTH: Record<SheetSize, string> = {
   md: "w-[480px]",
@@ -20,12 +21,18 @@ const SHEET_PUSHED_OFFSET: Record<SheetSize, string> = {
 };
 
 const DEFAULT_SIZE: SheetSize = "lg";
+const DEFAULT_SIDE: SheetSide = "right";
+
+const SHEET_SIDE_CLASSES: Record<SheetSide, string> = {
+  left: "left-0 border-r data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left",
+  right: "right-0 border-l data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
+};
 
 const OVERLAY_CLASSES =
   "fixed inset-0 z-sheet bg-background/60 duration-150 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-100 motion-reduce:animate-none";
 
 const CONTENT_CLASSES =
-  "fixed inset-y-0 right-0 z-sheet flex max-h-[100dvh] min-w-0 max-w-full flex-col overflow-hidden border-l border-border bg-card text-card-foreground shadow-xl outline-none duration-150 data-[state=open]:animate-in data-[state=open]:slide-in-from-right data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=closed]:duration-100 motion-reduce:animate-none";
+  "fixed inset-y-0 z-sheet flex max-h-[100dvh] min-w-0 max-w-full flex-col overflow-hidden border-border bg-card text-card-foreground shadow-xl outline-none duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-100 motion-reduce:animate-none";
 
 const CLOSE_CLASSES =
   "ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -36,6 +43,7 @@ export interface SheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   size?: SheetSize;
+  side?: SheetSide;
   /** Width of the sheet stacked on top of this one; shifts this sheet left by that width. */
   pushedBy?: SheetSize | null;
   /** Stack breadcrumb rendered above the title, e.g. ["Ticket", "PRD"] (last item is the current one). */
@@ -49,12 +57,14 @@ export interface SheetProps {
   className?: string;
   /** Forwarded to the content element, e.g. for arrow-key navigation while focus is trapped. */
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
+  onCloseAutoFocus?: ComponentProps<typeof DialogPrimitive.Content>["onCloseAutoFocus"];
 }
 
 export function Sheet({
   open,
   onOpenChange,
   size = DEFAULT_SIZE,
+  side = DEFAULT_SIDE,
   pushedBy = null,
   breadcrumb,
   title,
@@ -63,6 +73,7 @@ export function Sheet({
   children,
   className,
   onKeyDown,
+  onCloseAutoFocus,
 }: SheetProps) {
   const pushedStyle = pushedBy ? { transform: SHEET_PUSHED_OFFSET[pushedBy] } : undefined;
   const hasBreadcrumb = breadcrumb !== undefined && breadcrumb.length > 0;
@@ -74,12 +85,15 @@ export function Sheet({
         <DialogPrimitive.Content
           className={cn(
             CONTENT_CLASSES,
+            SHEET_SIDE_CLASSES[side],
             SHEET_WIDTH[size],
             pushedBy ? "transition-transform duration-150" : undefined,
             className,
           )}
           style={pushedStyle}
           onKeyDown={onKeyDown}
+          onCloseAutoFocus={onCloseAutoFocus}
+          aria-describedby={undefined}
         >
           <div className="shrink-0">
             {hasBreadcrumb ? (

@@ -21,6 +21,7 @@ interface SidebarProps {
   onUpdate?: () => void;
   updating?: boolean;
   canUpdate?: boolean;
+  expanded?: boolean;
   /** Views showing an unread dot on their icon. */
   badges?: Partial<Record<SidebarView, boolean>>;
 }
@@ -46,7 +47,7 @@ const BADGE_TITLES: Partial<Record<SidebarView, string>> = {
 };
 
 const ITEM_BASE =
-  "flex h-9 w-9 items-center justify-center gap-2 rounded-md transition-colors xl:w-full xl:justify-start xl:px-3";
+  "flex h-9 w-9 items-center justify-center gap-2 rounded-md transition-colors";
 const ITEM_INACTIVE =
   "text-muted-foreground hover:bg-accent/60 hover:text-foreground";
 const ITEM_ACTIVE =
@@ -60,12 +61,17 @@ export function Sidebar({
   onUpdate,
   updating = false,
   canUpdate = false,
+  expanded = false,
   badges = {},
 }: SidebarProps): ReactNode {
+  const compact = view === "atelier" && !expanded;
+  const itemClasses = cn(ITEM_BASE, expanded && "w-full justify-start px-3", !compact && !expanded && "xl:w-full xl:justify-start xl:px-3");
+  const labelClasses = cn("text-xs", !expanded && "hidden", !compact && !expanded && "xl:inline");
+
   return (
-    <nav aria-label="Navigation principale" className="flex w-12 shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2 xl:w-40">
-      <span className="hidden w-full px-3 py-2 font-mono text-xs font-medium tracking-wider text-brand xl:block">
-        ATELIER
+    <nav aria-label="Navigation principale" className={cn("flex shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2", compact && "hidden w-14 sm:flex", !compact && !expanded && "w-12 xl:w-40", expanded && "w-full border-r-0")}>
+      <span className={cn("py-2 font-mono font-medium text-brand", compact ? "mb-3 text-lg" : "w-full px-3 text-xs tracking-wider", !compact && !expanded && "hidden xl:block")} aria-label="Atelier">
+        {compact ? "A" : "ATELIER"}
       </span>
       {NAV_ENTRIES.map(({ value, label, Icon }) => {
         const badged = badges[value] === true;
@@ -79,10 +85,10 @@ export function Sidebar({
             aria-pressed={view === value}
             aria-label={title}
             title={title}
-            className={cn(ITEM_BASE, "relative", view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
+            className={cn(itemClasses, "relative", view === value ? ITEM_ACTIVE : ITEM_INACTIVE)}
           >
             <Icon className="h-4 w-4" />
-            <span className="hidden text-xs xl:inline">{label}</span>
+            <span className={labelClasses}>{label}</span>
             {badged && <span className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-danger ring-2 ring-background" />}
           </button>
         );
@@ -97,10 +103,10 @@ export function Sidebar({
           disabled={updating}
           aria-label="Mettre à jour l'app"
           title="Mettre à jour l'app (git pull main + rebuild + relaunch)"
-          className={cn(ITEM_BASE, ITEM_INACTIVE, "disabled:opacity-50")}
+          className={cn(itemClasses, ITEM_INACTIVE, "disabled:opacity-50")}
         >
           <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
-          <span className="hidden text-xs xl:inline">Mettre à jour</span>
+          <span className={labelClasses}>Mettre à jour</span>
         </button>
       )}
 
@@ -110,10 +116,10 @@ export function Sidebar({
         aria-pressed={false}
         title="Réglages"
         aria-label="Ouvrir les réglages"
-        className={cn(ITEM_BASE, ITEM_INACTIVE)}
+        className={cn(itemClasses, ITEM_INACTIVE)}
       >
         <Settings className="h-4 w-4" />
-        <span className="hidden text-xs xl:inline">Réglages</span>
+        <span className={labelClasses}>Réglages</span>
       </button>
     </nav>
   );

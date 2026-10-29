@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { isQuotaStale, normalizeEpochMs, QUOTA_STALE_AFTER_MS, quotaWindowPace } from "./providerQuota.ts";
+import { isQuotaStale, normalizeEpochMs, providerQuotaSchema, QUOTA_STALE_AFTER_MS, quotaWindowPace } from "./providerQuota.ts";
 import type { ProviderQuota, QuotaWindow } from "./providerQuota.ts";
 
 const HOUR = 3_600_000;
@@ -40,6 +40,13 @@ describe("isQuotaStale", () => {
     expect(isQuotaStale(quota, NOW + QUOTA_STALE_AFTER_MS + 1)).toBe(true);
     expect(isQuotaStale({ ...quota, observedAt: null }, NOW)).toBe(true);
   });
+});
+
+test("the quota schema accepts token_without_limits and still parses older snapshots", () => {
+  const snapshot = { provider: "claude", state: "no_data", source: "cache", observedAt: NOW, planType: "max", windows: [], message: null };
+  expect(providerQuotaSchema.parse(snapshot).state).toBe("no_data");
+  expect(providerQuotaSchema.parse({ ...snapshot, state: "token_without_limits" }).state).toBe("token_without_limits");
+  expect(providerQuotaSchema.safeParse({ ...snapshot, state: "unknown" }).success).toBe(false);
 });
 
 test("normalizeEpochMs converts seconds", () => {

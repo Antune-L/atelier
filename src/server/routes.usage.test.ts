@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 
 import { providerQuotaSchema } from "../shared/providerQuota.ts";
-import { usageSummarySchema } from "../shared/providerUsage.ts";
+import { USAGE_PERIODS, usageSummarySchema } from "../shared/providerUsage.ts";
+import { claudeLoginStatusSchema } from "../shared/claudeLogin.ts";
 import { AgentCoordinator } from "./agents/coordinator.ts";
 import { AtelierManager } from "./agents/atelierManager.ts";
 import { AutomationManager } from "./agents/automationManager.ts";
@@ -65,7 +66,12 @@ function setup() {
     db.close();
   });
   const get = (path: string) => app.handle(new Request(`http://localhost/api${path}`));
-  return { store, get };
+  const send = (method: string, path: string, body?: unknown) => app.handle(new Request(`http://localhost/api${path}`, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }));
+  return { store, get, send };
 }
 
 test("usage limits return the dry-run quotas of both providers and persist them", async () => {
@@ -87,12 +93,61 @@ test("usage limits reject an unknown provider", async () => {
   expect((await get("/usage/limits/cursor")).status).toBe(HTTP_BAD_REQUEST);
 });
 
-test("usage summary returns both providers for a valid period and rejects an invalid one", async () => {
+test("usage summary accepts the 24h/7d/30d/90d periods and rejects any other", async () => {
   const { get } = setup();
   const summary = usageSummarySchema.parse(await (await get("/usage/summary")).json());
   expect(summary.period).toBe("30d");
   expect(Object.keys(summary.providers).sort()).toEqual(["claude", "codex"]);
-  const all = usageSummarySchema.parse(await (await get("/usage/summary?period=all")).json());
-  expect(all.since).toBeNull();
+  for (const period of USAGE_PERIODS) {
+    const response = await get(`/usage/summary?period=${period}`);
+    expect(response.status).toBe(HTTP_OK);
+    expect(usageSummarySchema.parse(await response.json()).period).toBe(period);
+  }
+  expect((await get("/usage/summary?period=all")).status).toBe(HTTP_BAD_REQUEST);
   expect((await get("/usage/summary?period=1y")).status).toBe(HTTP_BAD_REQUEST);
+});
+
+test("usage summary includes the local history of both providers, unknown and Claude fast rows unpriced", async () => {
+  const { get } = setup();
+  const week = usageSummarySchema.parse(await (await get("/usage/summary?period=7d")).json());
+  expect(week.providers.claude.sessionCount).toBe(2);
+  expect(week.providers.codex.sessionCount).toBe(1);
+  expect(week.providers.claude.costUsd).toBeGreaterThan(0);
+  const fastRow = week.providers.claude.models.find((row) => row.fast);
+  expect(fastRow?.costUsd).toBeNull();
+  expect(fastRow?.totalTokens).toBeGreaterThan(0);
+
+  const quarter = usageSummarySchema.parse(await (await get("/usage/summary?period=90d")).json());
+  expect(quarter.providers.claude.sessionCount).toBe(3);
+  expect(quarter.providers.codex.sessionCount).toBe(3);
+  const unknown = quarter.providers.claude.models.find((row) => row.model === "claude-experimental-x");
+  expect(unknown?.costUsd).toBeNull();
+  expect(quarter.providers.claude.partial).toBe(true);
+});
+
+test("usage summary skips history sessions already counted by the store", async () => {
+  const { store, get } = setup();
+  store.listUsageCountedSessionIds = () => new Set(["fake-history-claude-1", "fake-history-codex-1"]);
+  const week = usageSummarySchema.parse(await (await get("/usage/summary?period=7d")).json());
+  expect(week.providers.claude.sessionCount).toBe(1);
+  expect(week.providers.codex.sessionCount).toBe(0);
+});
+
+test("claude login routes drive the dry-run flow and never echo the code", async () => {
+  const { send, get } = setup();
+  expect(claudeLoginStatusSchema.parse(await (await get("/usage/claude-login")).json()).state).toBe("idle");
+  const started = claudeLoginStatusSchema.parse(await (await send("POST", "/usage/claude-login")).json());
+  expect(started.state).toBe("awaiting_code");
+  expect(started.url).toStartWith("https://");
+  expect((await send("POST", "/usage/claude-login/code", { code: "" })).status).toBe(HTTP_BAD_REQUEST);
+  expect((await send("POST", "/usage/claude-login/code", {})).status).toBe(HTTP_BAD_REQUEST);
+  const response = await send("POST", "/usage/claude-login/code", { code: "secret-code-123" });
+  const text = await response.text();
+  expect(text).not.toContain("secret-code-123");
+  expect(claudeLoginStatusSchema.parse(JSON.parse(text)).state).toBe("success");
+
+  await send("POST", "/usage/claude-login");
+  const cancelled = claudeLoginStatusSchema.parse(await (await send("DELETE", "/usage/claude-login")).json());
+  expect(cancelled.state).toBe("cancelled");
+  expect(cancelled.url).toBeNull();
 });

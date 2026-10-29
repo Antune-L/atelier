@@ -1372,6 +1372,21 @@ export class Store {
     });
   }
 
+  /**
+   * Session ids already counted by `listUsageSources`: ticket executions plus legacy ticket sessions.
+   * Other owners (conversations, audits, actions, batches) are left to the local history scan.
+   */
+  listUsageCountedSessionIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const source of this.listUsageSources()) {
+      for (const execution of source.executions) {
+        if (execution.sessionId) ids.add(execution.sessionId);
+      }
+      for (const sessionId of Object.keys(source.legacy)) ids.add(sessionId);
+    }
+    return ids;
+  }
+
   /** Last known quota of a provider; null when absent or no longer valid. */
   getProviderQuotaSnapshot(provider: QuotaProvider): ProviderQuota | null {
     const stored = this.getMeta(`${PROVIDER_QUOTA_META_PREFIX}${provider}`);

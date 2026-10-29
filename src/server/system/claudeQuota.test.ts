@@ -109,3 +109,72 @@ test("closes a hung get_usage query at the deadline", async () => {
   expect(result).toMatchObject({ state: "timeout", message: "Délai dépassé" });
   expect(closed).toBe(true);
 });
+
+const NO_LIMITS = { subscription_type: null, rate_limits_available: false };
+
+test("an API key wins over an OAuth token and stays not_applicable", async () => {
+  const result = await readClaudeUsageLive({
+    environment: { ANTHROPIC_API_KEY: "sk-test", CLAUDE_CODE_OAUTH_TOKEN: "oat" },
+    resolveBinary: () => "/bin/claude",
+    startQuery: () => ({ close: () => {} }),
+  });
+  expect(result.state).toBe("not_applicable");
+});
+
+test("an SDK-reported API key source is not_applicable even with an OAuth token", async () => {
+  const result = await readClaudeUsageLive({
+    environment: { CLAUDE_CODE_OAUTH_TOKEN: "oat" },
+    resolveBinary: () => "/bin/claude",
+    startQuery: () => ({
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => NO_LIMITS,
+      accountInfo: async () => ({ apiKeySource: "apiKeyHelper" }),
+      close: () => {},
+    }),
+  });
+  expect(result).toMatchObject({ state: "not_applicable", message: "Clé API Anthropic : pas de quota d'abonnement" });
+});
+
+test("an OAuth token without rate limits is token_without_limits", async () => {
+  const startQuery = (raw: unknown) => () => ({
+    usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => raw,
+    accountInfo: async () => {
+      throw new Error("indisponible");
+    },
+    close: () => {},
+  });
+  const environment = { CLAUDE_CODE_OAUTH_TOKEN: "oat-secret" };
+  for (const raw of [NO_LIMITS, { subscription_type: "max", rate_limits_available: false }]) {
+    const result = await readClaudeUsageLive({ environment, resolveBinary: () => "/bin/claude", now: () => NOW, startQuery: startQuery(raw) });
+    expect(result).toMatchObject({ state: "token_without_limits", source: null, windows: [] });
+    expect(result.message).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+    expect(JSON.stringify(result)).not.toContain("oat-secret");
+  }
+  const withoutToken = await readClaudeUsageLive({ environment: {}, resolveBinary: () => "/bin/claude", startQuery: startQuery(NO_LIMITS) });
+  expect(withoutToken.state).toBe("not_applicable");
+});
+
+test("an OAuth token keeps real errors and timeouts", async () => {
+  const environment = { CLAUDE_CODE_OAUTH_TOKEN: "oat" };
+  const failed = await readClaudeUsageLive({
+    environment,
+    resolveBinary: () => "/bin/claude",
+    startQuery: () => ({
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => {
+        throw new Error("boom");
+      },
+      close: () => {},
+    }),
+  });
+  expect(failed).toMatchObject({ state: "error", message: "boom" });
+  const hung = await readClaudeUsageLive({
+    environment,
+    resolveBinary: () => "/bin/claude",
+    timeoutMs: 10,
+    startQuery: () => ({
+      usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => NO_LIMITS,
+      accountInfo: () => new Promise(() => {}),
+      close: () => {},
+    }),
+  });
+  expect(hung).toMatchObject({ state: "timeout", message: "Délai dépassé" });
+});

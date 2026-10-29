@@ -2,7 +2,23 @@ import { describe, expect, test } from "bun:test";
 
 import type { ProviderQuota, QuotaWindow } from "@shared/providerQuota";
 
-import { formatAgo, formatRemaining, paceText, quotaStateMessage, quotaWindowLabel, resetCountdownText, sharePercent, usageBarClass } from "./usageDisplay";
+import {
+  filteredProviders,
+  formatAgo,
+  formatCostOrUnpriced,
+  formatDayLabel,
+  formatRemaining,
+  paceText,
+  quotaAgeText,
+  quotaStateMessage,
+  quotaWindowLabel,
+  resetCountdownText,
+  sessionCountText,
+  sharePercent,
+  showsLastKnownWindows,
+  usageBarClass,
+  USAGE_PERIOD_LABELS,
+} from "./usageDisplay";
 
 const MIN = 60_000;
 
@@ -61,6 +77,43 @@ describe("quotaStateMessage", () => {
     expect(quotaStateMessage(quota({ state: "not_applicable", provider: "codex" }))).toBe("Non disponible pour ce type de compte.");
     expect(quotaStateMessage(quota({ state: "timeout" }))).toBe("Délai dépassé.");
     expect(quotaStateMessage(quota({ state: "error", message: "boom" }))).toBe("boom");
+  });
+});
+
+describe("token_without_limits and last known windows", () => {
+  test("reconnect message", () => {
+    expect(quotaStateMessage(quota({ state: "token_without_limits" }))).toContain("reconnecte Claude");
+  });
+
+  test("states keeping the last windows", () => {
+    for (const state of ["token_without_limits", "error", "timeout", "no_data"] as const) {
+      expect(showsLastKnownWindows(quota({ state }))).toBe(true);
+    }
+    expect(showsLastKnownWindows(quota({ state: "ok" }))).toBe(false);
+    expect(showsLastKnownWindows(quota({ state: "not_applicable" }))).toBe(false);
+  });
+
+  test("age with source", () => {
+    expect(quotaAgeText(quota({ source: "session", observedAt: 0 }), 12 * MIN)).toBe("il y a 12 min · session");
+    expect(quotaAgeText(quota({ source: "cache", observedAt: 0 }), 3 * 60 * MIN)).toBe("il y a 3 h · cache");
+    expect(quotaAgeText(quota({ source: "live", observedAt: 0 }), MIN)).toBeNull();
+    expect(quotaAgeText(quota({ source: null, observedAt: null }), MIN)).toBeNull();
+  });
+});
+
+describe("periods and formatting", () => {
+  test("period labels", () => {
+    expect(USAGE_PERIOD_LABELS).toEqual({ "24h": "24 h", "7d": "7 j", "30d": "30 j", "90d": "90 j" });
+  });
+
+  test("provider filter, unpriced cost, day label and session count", () => {
+    expect(filteredProviders("all")).toEqual(["claude", "codex"]);
+    expect(filteredProviders("codex")).toEqual(["codex"]);
+    expect(formatCostOrUnpriced(null, String)).toBe("non tarifé");
+    expect(formatCostOrUnpriced(0, String)).toBe("0");
+    expect(formatDayLabel("2026-10-12")).toBe("12 oct.");
+    expect(sessionCountText(1)).toBe("1 session");
+    expect(sessionCountText(3)).toBe("3 sessions");
   });
 });
 

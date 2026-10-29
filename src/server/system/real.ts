@@ -38,6 +38,11 @@ import { addDetachedWorktree, removeDetachedWorktree } from "./detachedWorktree.
 import { probeCodexRuntime } from "./codexRuntime.ts";
 import { readCodexQuota } from "./codexQuota.ts";
 import { readClaudeUsageLive } from "./claudeQuota.ts";
+import { ClaudeLoginManager, spawnClaudeLoginProcess } from "./claudeLogin.ts";
+import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
+import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
+import { createLocalUsageHistory } from "../usage/localHistory.ts";
+import type { LocalUsageHistory } from "../usage/localHistory.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { createGithubAccountRegistry } from "./github/accounts.ts";
@@ -290,6 +295,8 @@ export class RealSystemAdapter implements SystemAdapter {
   /** The agent backends behind the session seam, keyed by `AgentSessionOptions.provider`. */
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
+  private localUsageHistory: LocalUsageHistory | null = null;
+  private claudeLogin: ClaudeLoginManager | null = null;
   private readonly delegationWorkspace = new DelegationWorkspace();
   private readonly shellStartupDirectories = new Map<string, string>();
   /** The PR hosts behind the VCS seam, keyed by the project's `vcsProvider`. */
@@ -1523,15 +1530,7 @@ export class RealSystemAdapter implements SystemAdapter {
   readClaudeUsage(): Promise<ProviderQuota> {
     return readClaudeUsageLive({
       environment: process.env,
-      resolveBinary: () => {
-        try {
-          const bundled = resolveClaudeBinary();
-          if (existsSync(bundled)) return bundled;
-        } catch {
-          // The SDK platform package is absent (packaged app before provisioning): fall through to PATH.
-        }
-        return Bun.which(CLAUDE_BINARY_NAME);
-      },
+      resolveBinary: resolveRunnableClaudeBinary,
       startQuery: (binaryPath, prompt) =>
         query({
           prompt,
@@ -1546,6 +1545,53 @@ export class RealSystemAdapter implements SystemAdapter {
         }),
     });
   }
+
+  /** One long-lived reader so unchanged history files are served from its per-file cache. */
+  async readLocalUsageHistory(): Promise<HistoryUsageEntry[]> {
+    this.localUsageHistory ??= createLocalUsageHistory(process.env, homedir());
+    try {
+      return (await this.localUsageHistory.read()).entries;
+    } catch (error) {
+      log.warn("lecture de l'historique local impossible", { reason: getErrorMessage(error) });
+      return [];
+    }
+  }
+
+  private claudeLoginManager(): ClaudeLoginManager {
+    this.claudeLogin ??= new ClaudeLoginManager({
+      environment: process.env,
+      resolveBinary: resolveRunnableClaudeBinary,
+      spawn: spawnClaudeLoginProcess,
+    });
+    return this.claudeLogin;
+  }
+
+  startClaudeLogin(): ClaudeLoginStatus {
+    return this.claudeLoginManager().start();
+  }
+
+  submitClaudeLoginCode(code: string): ClaudeLoginStatus {
+    return this.claudeLoginManager().submitCode(code);
+  }
+
+  cancelClaudeLogin(): ClaudeLoginStatus {
+    return this.claudeLoginManager().cancel();
+  }
+
+  claudeLoginStatus(): ClaudeLoginStatus {
+    return this.claudeLoginManager().status();
+  }
+}
+
+/** SDK platform binary when present, else a `claude` on PATH; null when neither exists. */
+function resolveRunnableClaudeBinary(): string | null {
+  try {
+    const bundled = resolveClaudeBinary();
+    if (existsSync(bundled)) return bundled;
+  } catch {
+    // The SDK platform package is absent (packaged app before provisioning): fall through to PATH.
+  }
+  return Bun.which(CLAUDE_BINARY_NAME);
 }
 
 /** Monotonic suffix so concurrent streams on the same session never collide on a FIFO path. */

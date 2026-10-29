@@ -23,7 +23,7 @@ export const quotaWindowSchema = z.object({
 });
 export type QuotaWindow = z.infer<typeof quotaWindowSchema>;
 
-export const providerQuotaStateSchema = z.enum(["ok", "not_applicable", "no_data", "unauthenticated", "error", "timeout"]);
+export const providerQuotaStateSchema = z.enum(["ok", "not_applicable", "no_data", "unauthenticated", "error", "timeout", "token_without_limits"]);
 export type ProviderQuotaState = z.infer<typeof providerQuotaStateSchema>;
 
 /**

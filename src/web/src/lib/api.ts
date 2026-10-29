@@ -62,6 +62,8 @@ import { providerQuotaSchema } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 import { usageSummarySchema } from "@shared/providerUsage";
 import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
+import { claudeLoginStatusSchema } from "@shared/claudeLogin";
+import type { ClaudeLoginStatus } from "@shared/claudeLogin";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
 import { auditFindingSchema, auditOverviewSchema, auditProjectViewSchema, auditRunDetailSchema, auditRunSchema } from "@shared/audit";
 import type { AuditCreateCardInput, AuditDecisionInput, AuditFinding, AuditOverview, AuditProjectView, AuditRun, AuditRunDetail, AuditSetStartInput, UpdateAuditProjectSettingsInput } from "@shared/audit";
@@ -237,6 +239,14 @@ export const api = {
     providerQuotaSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}`, { signal })),
   usageSummary: async (period: UsagePeriod): Promise<UsageSummary> =>
     usageSummarySchema.parse(await request<unknown>(`/api/usage/summary?period=${encodeURIComponent(period)}`)),
+  claudeLoginStatus: async (): Promise<ClaudeLoginStatus> =>
+    claudeLoginStatusSchema.parse(await request<unknown>("/api/usage/claude-login")),
+  startClaudeLogin: async (): Promise<ClaudeLoginStatus> =>
+    claudeLoginStatusSchema.parse(await request<unknown>("/api/usage/claude-login", { method: "POST" })),
+  submitClaudeLoginCode: async (code: string): Promise<ClaudeLoginStatus> =>
+    claudeLoginStatusSchema.parse(await request<unknown>("/api/usage/claude-login/code", { method: "POST", body: JSON.stringify({ code }) })),
+  cancelClaudeLogin: async (): Promise<ClaudeLoginStatus> =>
+    claudeLoginStatusSchema.parse(await request<unknown>("/api/usage/claude-login", { method: "DELETE" })),
   ticketDetail: (id: string): Promise<{ ticket: Ticket; comments: Comment[] }> =>
     request(`/api/tickets/${id}`),
   recoverImplementationPlan: async (id: string, input: RecoverImplementationPlanInput): Promise<Ticket> => {

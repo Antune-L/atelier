@@ -41,6 +41,8 @@ export class SplitManager {
   private readonly pending = new Map<string, PendingSplit>();
   /** Snapshot lease held by each in-flight split, released on every terminal path. */
   private readonly leases = new Map<string, SnapshotLease>();
+  /** Tickets between the concurrency guard and their session start. */
+  private readonly launching = new Set<string>();
 
   constructor(
     private readonly store: Store,
@@ -65,7 +67,8 @@ export class SplitManager {
 
     // Guard against a concurrent split of the same ticket (e.g. a double-click): the first run owns the
     // session keyed by this ticketId, so a second would tear it down and start a duplicate decomposition.
-    if (this.pending.has(ticketId)) {
+    // The launch window (availability check + snapshot fetch) is guarded too, not only the live session.
+    if (this.pending.has(ticketId) || this.launching.has(ticketId)) {
       throw new Error("découpage déjà en cours pour ce ticket");
     }
 
@@ -78,18 +81,23 @@ export class SplitManager {
       model: MODELS.triage,
       effort: MODELS.triageEffort,
     });
-    await assertExecutionAvailable(this.system, execution);
     const driver = execution.provider;
     const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
-    // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
-    const lease = await this.snapshots.acquire({
-      projectKey: ticket.project,
-      repoPath: project.repoPath,
-      baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
-      fetch: true,
-      requireFetch: true,
-    });
-    this.leases.get(ticketId)?.release();
+    this.launching.add(ticketId);
+    let lease: SnapshotLease;
+    try {
+      await assertExecutionAvailable(this.system, execution);
+      // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
+      lease = await this.snapshots.acquire({
+        projectKey: ticket.project,
+        repoPath: project.repoPath,
+        baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
+        fetch: true,
+        requireFetch: true,
+      });
+    } finally {
+      this.launching.delete(ticketId);
+    }
     this.leases.set(ticketId, lease);
 
     return new Promise<SplitResult>((resolve, reject) => {

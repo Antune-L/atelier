@@ -440,6 +440,27 @@ describe("AtelierManager", () => {
       expect(store.listConversationMessages(conversation.id).at(-1)?.content).toBe("Instantané déjà à jour (bbbbbbb)");
     });
 
+    test("a message sent during a refresh opens its session on the new SHA", async () => {
+      const { store, system, manager, snapshots } = setup();
+      const conversation = store.createConversation(CLAUDE_CONVERSATION);
+      store.updateConversation(conversation.id, { snapshotSha: ORIGIN_SHA, snapshotCommittedAt: SNAPSHOT_COMMITTED_AT, snapshotBaseBranch: "main" });
+      snapshots.originSha = NEXT_SHA;
+      let openFetch = (): void => undefined;
+      const fetched = new Promise<void>((resolve) => { openFetch = resolve; });
+      const acquire = snapshots.acquire.bind(snapshots);
+      snapshots.acquire = async (input) => {
+        if (input.fetch) await fetched;
+        return acquire(input);
+      };
+      const refreshing = manager.refresh(conversation.id);
+      const delivered = manager.postMessage(conversation.id, "Pendant le rafraîchissement").delivered;
+      openFetch();
+      await refreshing;
+      await delivered;
+      expect(system.sessions[0]?.cwd).toBe(`/snapshots/${FIXTURE_PROJECT_KEY}/${NEXT_SHA}`);
+      expect(store.getConversation(conversation.id)?.snapshotSha).toBe(NEXT_SHA);
+    });
+
     test("refresh refuses a running turn and a local checkout", async () => {
       const { store, manager } = setup();
       const conversation = store.createConversation(CLAUDE_CONVERSATION);

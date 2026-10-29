@@ -179,4 +179,13 @@ describe("RepoSnapshots.gc", () => {
     expect(system.calls).toContainEqual({ op: "removeSnapshotWorktree", args: ["/repo/demo", partial] });
     expect(existsSync(`${partial}.json`)).toBe(false);
   });
+
+  test("a truncated sidecar is treated as invalid and its snapshot removed", async () => {
+    const truncated = join(root, "demo", SHA_B);
+    await mkdir(truncated, { recursive: true });
+    await writeFile(`${truncated}.json`, '{"repoPath": "/repo/de');
+    await snapshots.gc();
+    expect(existsSync(truncated)).toBe(false);
+    expect(existsSync(`${truncated}.json`)).toBe(false);
+  });
 });

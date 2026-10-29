@@ -83,3 +83,7 @@ Provider event dispatchers can absorb callback exceptions, so an audit write fai
 ## Atelier mockup iframe sandbox
 
 Never add `allow-same-origin` to the mockup iframe sandbox (`MOCKUP_SANDBOX`), nor `allow-scripts` without a security review. The app has no authentication and exposes `/ws/terminal` on the same origin, so same-origin agent-written HTML could drive a shell. An opaque-origin iframe's requests carry `Origin: null`, which `src/server/requestGuard.ts` rejects.
+
+## Root updater capabilities on systemd 259
+
+UID 0 and CapabilityBoundingSet do not prove effective CAP_SETUID. On the VPS, systemd 259.5 started the root updater without that effective capability, causing runuser to fail before cutover. Its seccomp execution path drops CAP_SETUID unless retained in AmbientCapabilities. Preserve CAP_SETUID explicitly for this updater; retain NoNewPrivileges and all application hardening. Verify /proc service capabilities and a harmless user-switch probe separately from a real upgrade, and never reset failed updater state while an upgrade is running.

@@ -2,6 +2,10 @@
 
 ## Current state
 
+- 2026-10-29 updater live diagnosis: the operator installed release `900de3a9ce18f0af8e607ab720640e81195034b6` and the root updater. A UI update toward `e977ae621d095f5508ad701ec148cd7141090c8f` failed before cutover: `runuser: cannot set user id: Operation not permitted`. The app remains active on `900de3a`; updater state is `failed`, exit code 1. Inspection stayed read-only.
+- Verified cause: on systemd 259.5 the updater's effective/permitted capabilities omit `CAP_SETUID`, although its bounding set includes it. Root Bun plus the same group and NoNewPrivileges can run `runuser ... id` outside systemd. The systemd v259 execution source explicitly drops CAP_SETUID during seccomp setup unless it is ambient. The unit now retains that single capability; no application hardening was removed.
+- Next action: operator installs the corrected unit, stops the idle updater, archives its failed state and restarts it after daemon reload. Live corrected-service capabilities and a successful update remain unverified; do not claim qualification from local checks.
+
 - Update-button base: `main` at `ac2f552f989ec83cb35be7e0c295a688c94e599f`, local Bun 1.3.14, no deployment.
 - 2026-10-29 update-button work: local implementation in the shared checkout; VPS remains read-only and nothing is deployed. The existing idle-check/cutover race is explicitly retained, with no scheduling/provider behavior changes. Root installation and real Access/systemd qualification are operator prerequisites.
 - Verified findings: application HTTP boundary uses Host/Origin checks but no independent user identity; shared UID socket permissions do not protect against agents. Root daemon verifies the signed operator JWT itself.

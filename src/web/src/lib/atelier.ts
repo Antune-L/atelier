@@ -16,6 +16,7 @@ import type { Conversation, ConversationMessage, ConversationSteering } from "@s
 
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { ResolvedAgentDefaults } from "@/lib/agentDefaults";
+import { matchesQuery } from "@/lib/search";
 
 const STEERING_LABELS: Record<ConversationSteering, string> = {
   pending: "aiguillé",
@@ -65,6 +66,11 @@ export const UNTITLED_CONVERSATION_LABEL = "Nouvelle idée";
 /** Hover text of a (possibly truncated) conversation title: "titre — projet". */
 export function conversationTooltip(title: string, projectLabel: string): string {
   return `${title || UNTITLED_CONVERSATION_LABEL} — ${projectLabel}`;
+}
+
+/** Whether a conversation's title matches an already-normalized search query (see normalizeSearch). */
+export function conversationMatchesSearch(conversation: Conversation, query: string): boolean {
+  return matchesQuery(query, conversation.title || UNTITLED_CONVERSATION_LABEL);
 }
 
 export const CONVERSATION_STATUS_VARIANTS: Record<ConversationStatus, BadgeVariant> = {

@@ -19,13 +19,16 @@ interface SettledConversationsProps {
   onSelect: (conversationId: string) => void;
   onUnsettle: (conversation: Conversation) => void;
   onDelete: (conversationId: string) => Promise<void>;
+  /** A title search is active: every match is shown, whatever the collapsed state. */
+  searching: boolean;
 }
 
 /** Compact, collapsible list of settled conversations shown below the active ones. */
-export function SettledConversations({ conversations, selectedId, now, projectLabel, onSelect, onUnsettle, onDelete }: SettledConversationsProps) {
+export function SettledConversations({ conversations, selectedId, now, projectLabel, onSelect, onUnsettle, onDelete, searching }: SettledConversationsProps) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SETTLED_COLLAPSED_KEY) === "1");
   const [showAll, setShowAll] = useState(false);
-  const shown = showAll ? conversations : conversations.slice(0, SETTLED_PREVIEW_COUNT);
+  const expanded = searching || !collapsed;
+  const shown = showAll || searching ? conversations : conversations.slice(0, SETTLED_PREVIEW_COUNT);
   const remaining = conversations.length - shown.length;
 
   const toggle = (): void => {
@@ -38,17 +41,17 @@ export function SettledConversations({ conversations, selectedId, now, projectLa
     <div className="mt-4 border-t border-border pt-3">
       <button
         type="button"
-        aria-expanded={!collapsed}
+        aria-expanded={expanded}
         onClick={toggle}
         className="flex w-full items-center justify-between gap-2 px-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
       >
         <span>Classées</span>
         <span className="flex items-center gap-1">
           <span className="font-mono text-muted-foreground">{conversations.length}</span>
-          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </span>
       </button>
-      {!collapsed && (
+      {expanded && (
         <ul className="mt-2 space-y-0.5">
           {shown.map((item) => (
             <li key={item.id}>

@@ -8,12 +8,14 @@ import {
   UNTITLED_CONVERSATION_LABEL,
   buildAtelierThread,
   contextUsageSummary,
+  conversationMatchesSearch,
   conversationTooltip,
   formatTokenCount,
   groupActivityRows,
   splitConversations,
   steeringLabel,
 } from "./atelier";
+import { normalizeSearch } from "./search";
 
 describe("steeringLabel", () => {
   test("maps each steering state to its French label", () => {
@@ -67,6 +69,27 @@ describe("conversationTooltip", () => {
 
   test("falls back to the untitled label when the title is empty", () => {
     expect(conversationTooltip("", "Atelier")).toBe(`${UNTITLED_CONVERSATION_LABEL} — Atelier`);
+  });
+});
+
+describe("conversationMatchesSearch", () => {
+  const titled = (title: string): Conversation => ({ ...makeConversation("c1", 0, false), title });
+
+  test("an empty query matches every conversation", () => {
+    expect(conversationMatchesSearch(titled("Refonte du board"), normalizeSearch(""))).toBe(true);
+  });
+
+  test("matches a title substring regardless of case and accents", () => {
+    expect(conversationMatchesSearch(titled("Planning de l'été"), normalizeSearch("ÉTÉ"))).toBe(true);
+    expect(conversationMatchesSearch(titled("Planning de l'été"), normalizeSearch("planning"))).toBe(true);
+  });
+
+  test("rejects a title that does not contain the query", () => {
+    expect(conversationMatchesSearch(titled("Refonte du board"), normalizeSearch("hiver"))).toBe(false);
+  });
+
+  test("an empty title matches the untitled label", () => {
+    expect(conversationMatchesSearch(titled(""), normalizeSearch(UNTITLED_CONVERSATION_LABEL))).toBe(true);
   });
 });
 

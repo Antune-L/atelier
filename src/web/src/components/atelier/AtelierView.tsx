@@ -1,4 +1,4 @@
-import { Archive, Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react";
+import { Archive, Mail, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
@@ -15,6 +15,7 @@ import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmPopover } from "@/components/ui/confirm";
+import { Input } from "@/components/ui/input";
 import { useBoard } from "@/hooks/useBoard";
 import { useConversationDetail } from "@/hooks/useConversationDetail";
 import { useTickTimer } from "@/hooks/useTickTimer";
@@ -24,6 +25,7 @@ import {
   ATELIER_STEP_LABELS,
   CONVERSATION_STATUS_VARIANTS,
   UNTITLED_CONVERSATION_LABEL,
+  conversationMatchesSearch,
   conversationTooltip,
   splitConversations,
   type AtelierSeed,
@@ -31,6 +33,7 @@ import {
   type AtelierTarget,
 } from "@/lib/atelier";
 import { formatRelativeDuration } from "@/lib/display";
+import { normalizeSearch } from "@/lib/search";
 import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +76,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
   const [listCollapsed, setListCollapsed] = useState(() => localStorage.getItem(LIST_COLLAPSED_KEY) === "1");
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
+  const [search, setSearch] = useState("");
   const composeSeq = useRef(0);
   const resolveSeq = useRef(0);
 
@@ -138,11 +142,13 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
     }
   }
 
-  const { active, settled } = splitConversations(
-    conversations.filter((c) => projectFilter === ALL_PROJECTS || c.project === projectFilter),
-  );
+  const searchQuery = normalizeSearch(search);
+  const projectConversations = conversations.filter((c) => projectFilter === ALL_PROJECTS || c.project === projectFilter);
+  const { active, settled } = splitConversations(projectConversations.filter((c) => conversationMatchesSearch(c, searchQuery)));
   const total = active.length + settled.length;
-  const latest = active[0] ?? settled[0];
+  // Taken before the search so the welcome card does not change while typing.
+  const unsearched = splitConversations(projectConversations);
+  const latest = unsearched.active[0] ?? unsearched.settled[0];
 
   const remove = async (conversationId: string): Promise<void> => {
     await api.atelierDeleteConversation(conversationId);
@@ -291,10 +297,26 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
           <MessageSquarePlus className="h-4 w-4" />
           Nouvelle discussion
         </Button>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearch("");
+            }}
+            placeholder="Rechercher une discussion…"
+            aria-label="Rechercher une discussion par titre"
+            className="h-8 w-full pl-7 text-xs"
+          />
+        </div>
         <div className={cn("max-h-52 min-h-0 flex-1 overflow-y-auto md:max-h-none", !listOpen && (selectedId !== null || compose !== null) && "hidden md:block")}>
           <ul className="space-y-2">
             {total === 0 && (
-              <li className="px-2 py-3 text-xs text-muted-foreground">Aucune conversation pour ce filtre.</li>
+              <li className="px-2 py-3 text-xs text-muted-foreground">
+                {searchQuery !== "" ? "Aucune conversation pour cette recherche." : "Aucune conversation pour ce filtre."}
+              </li>
             )}
             {active.map((item) => (
               <li key={item.id}>
@@ -379,6 +401,7 @@ export function AtelierView({ projects, projectFilter, target }: AtelierViewProp
               onSelect={(conversationId) => select(conversationId)}
               onUnsettle={(item) => setSettled(item, false)}
               onDelete={remove}
+              searching={searchQuery !== ""}
             />
           )}
         </div>

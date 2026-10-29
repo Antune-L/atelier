@@ -305,7 +305,7 @@ Root never opens the database: every query and the backup run as `kanban`. Betwe
 
 **Rollback.** If the health check fails, the command points `current` back to the previous release, restarts the service and checks its health again. It never restores the database. The output names the backup taken before the upgrade. The database schema only migrates forward, so the new release may already have migrated it: restore that backup only if the previous release fails on the migrated schema, with the service stopped and as `kanban`, and never after new pull requests or previews were created.
 
-Exit codes: `0` upgraded or already current, `1` refused or failed with the service on the previous release, `2` the rollback health check failed too, `64` bad usage.
+Exit codes: `0` upgraded or already current, `1` failed, `2` the rollback health check failed too, `64` bad usage, `75` active work prevented the upgrade before stopping the service (retryable).
 
 **Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3.
 

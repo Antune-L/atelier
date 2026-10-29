@@ -10,6 +10,7 @@ const MAX_PROGRESS_LENGTH = 512;
 const MILLISECONDS_PER_SECOND = 1_000;
 const KEY_TTL_MS = 300_000;
 const MAX_BUFFER_LENGTH = 8_192;
+const EXIT_ACTIVE_WORK = 75;
 const config: unknown = JSON.parse(readFileSync("/etc/kanban-updater/config.json", "utf8"));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,7 +38,7 @@ function persist(phase: string, progress: string, target: string | null = status
 try {
   const saved: unknown = JSON.parse(readFileSync(STATE, "utf8"));
   if (!isRecord(saved) || typeof saved.phase !== "string" || typeof saved.progress !== "string"
-    || !["idle", "resolving", "running", "succeeded", "failed", "interrupted"].includes(saved.phase)) {
+    || !["idle", "resolving", "running", "succeeded", "refused", "failed", "interrupted"].includes(saved.phase)) {
     throw new Error("Invalid persisted updater state; operator inspection is required.");
   }
   const target = typeof saved.target === "string" && /^[0-9a-f]{40}$/.test(saved.target) ? saved.target : null;
@@ -109,7 +110,8 @@ async function upgrade(): Promise<void> {
     }
     const exitCode = await child.exited;
     if (exitCode === 0) persist("succeeded", "Update completed, or the release was already current.", target, exitCode);
-    else persist("failed", "Upgrade refused or failed. Inspect the updater journal; rollback restores code only. Do not retry before inspection.", target, exitCode);
+    else if (exitCode === EXIT_ACTIVE_WORK) persist("refused", "Work is still running. Finish active tasks, then confirm and retry. The application was not stopped.", target, exitCode);
+    else persist("failed", "Upgrade failed. Inspect the updater journal; rollback restores code only. Do not retry before inspection.", target, exitCode);
   } catch {
     persist("failed", "Updater failed. Operator inspection is required before retrying.");
   } finally {

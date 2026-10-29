@@ -14,7 +14,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const UPDATE_PATH = "/api/vps-update";
 const PHASE_LABELS: Record<VpsUpdateStatus["phase"], string> = {
   idle: "Prêt", resolving: "Recherche de la version", running: "Mise à jour en cours",
-  succeeded: "Mise à jour terminée", failed: "Échec ou refus : intervention requise", interrupted: "Mise à jour interrompue : intervention requise",
+  succeeded: "Mise à jour terminée", refused: "Mise à jour reportée : des tâches sont actives", failed: "Échec : intervention requise", interrupted: "Mise à jour interrompue : intervention requise",
 };
 
 const UPDATE_STEPS = [
@@ -32,6 +32,7 @@ const SHORT_SHA_LENGTH = 12;
 function getUpdateProgress(status: VpsUpdateStatus) {
   if (status.phase === "succeeded") return { value: TOTAL_STEPS, label: "Le serveur est prêt à être utilisé." };
   if (status.phase === "idle") return { value: null, label: "En attente de votre confirmation." };
+  if (status.phase === "refused") return { value: null, label: "Le serveur n’a pas été arrêté. Terminez les tâches actives, puis confirmez pour réessayer." };
   if (status.phase === "failed" || status.phase === "interrupted") {
     return { value: null, label: "Vérifiez les détails avant toute nouvelle tentative." };
   }
@@ -86,7 +87,7 @@ export function VpsUpdateSettings() {
   }
 
   if (status === null && error === null) return null;
-  const canStart = status?.phase === "idle" || status?.phase === "succeeded";
+  const canStart = status?.phase === "idle" || status?.phase === "succeeded" || status?.phase === "refused";
   const progress = status === null ? null : getUpdateProgress(status);
   const isFailure = status?.phase === "failed" || status?.phase === "interrupted";
   const showProgress = status?.phase === "resolving" || status?.phase === "running" || status?.phase === "succeeded";

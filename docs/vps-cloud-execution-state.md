@@ -2,6 +2,13 @@
 
 ## Current state
 
+- Current correction base: `origin/main` at `f5bdb5d`, including the switch/progress UI. The CAP_SETUID correction is committed locally; the idle-session/refusal correction is ready for review and push. VPS access remains read-only; no remote upgrade or state reset was performed by the agent.
+- Verified behavior on disposable in-memory fixtures: the original idle-session block reproduces; 35 checks cover matching idle Claude/Codex sessions, active turns/subagents, malformed/unknown session state, quality/preview/slot blockers, exit outcomes and retry admission. Active-work refusal now exits 75 and persists `refused`; genuine failures/interruption stay locked. Old exit-1 failures are not automatically reclassified.
+- Checks: typecheck, lint and web build passed; 86 existing tests passed and two ShellCheck cases were skipped (tool unavailable). Simplifier and independent regression review found no blocking mismatch. No test files were added. Browser validation was attempted but both local server starts failed with EADDRINUSE, so browser behavior is not qualified by this correction.
+- Next action: push the reviewed correction to main; operator installation must update the root upgrade helper, daemon and unit as well as the app, preserve Access configuration, and archive only the inspected old failure while the updater is idle. A full real VPS update remains unverified. The existing idle-check/cutover race and code-only rollback remain documented limits.
+
+## History
+
 - 2026-10-29 updater live diagnosis: the operator installed release `900de3a9ce18f0af8e607ab720640e81195034b6` and the root updater. A UI update toward `e977ae621d095f5508ad701ec148cd7141090c8f` failed before cutover: `runuser: cannot set user id: Operation not permitted`. The app remains active on `900de3a`; updater state is `failed`, exit code 1. Inspection stayed read-only.
 - Verified cause: on systemd 259.5 the updater's effective/permitted capabilities omit `CAP_SETUID`, although its bounding set includes it. Root Bun plus the same group and NoNewPrivileges can run `runuser ... id` outside systemd. The systemd v259 execution source explicitly drops CAP_SETUID during seccomp setup unless it is ambient. The unit now retains that single capability; no application hardening was removed.
 - Next action: operator installs the corrected unit, stops the idle updater, archives its failed state and restarts it after daemon reload. Live corrected-service capabilities and a successful update remain unverified; do not claim qualification from local checks.

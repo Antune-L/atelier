@@ -3,8 +3,7 @@
 # Installed as /usr/local/sbin/kanban-upgrade (root only) from a reviewed commit (docs/vps-install.md). Neither
 # this script nor kanban-release ever updates itself from a release.
 #
-# Exit codes: 0 upgraded or already current, 1 refused or failed with the service on the previous release,
-# 2 rollback health check failed too, 64 bad usage.
+# NOTE(ali): Exit codes: 0 upgraded/current, 1 failure, 2 unhealthy rollback, 64 bad usage, 75 active work (retryable).
 set -euo pipefail
 
 readonly REPO_URL=https://github.com/Antune-L/atelier.git
@@ -28,6 +27,7 @@ readonly KEEP_BACKUPS=10
 readonly HEALTH_OK_REQUIRED=5
 readonly HEALTH_INTERVAL=4
 readonly HEALTH_TIMEOUT=120
+readonly EXIT_ACTIVE_WORK=75
 
 export PATH="$SAFE_PATH"
 unset KANBAN_REPO_URL
@@ -164,8 +164,17 @@ target="$RELEASES/$sha"
 # between this check and the stop below; a human runs this command, and there is no drain mode.
 step "Checking for running work"
 active_query="
-SELECT 'execution run ' || id || ' (' || owner_type || ' ' || owner_id || ', ' || role || ')'
-  FROM execution_runs WHERE status = 'running'
+SELECT 'execution run ' || e.id || ' (' || e.owner_type || ' ' || e.owner_id || ', ' || e.role || ')'
+  FROM execution_runs e
+  WHERE e.status = 'running' AND NOT EXISTS (
+    SELECT 1 FROM conversations c
+    WHERE e.owner_type = 'conversation' AND e.role = 'atelier'
+      AND c.id = e.owner_id AND e.session_id IS NOT NULL AND c.session_id = e.session_id
+      AND c.orchestrator = e.orchestrator AND c.session_status = 'idle'
+      AND CASE WHEN json_valid(c.active_subagents)
+        THEN json_type(c.active_subagents) = 'array' AND json_array_length(c.active_subagents) = 0
+        ELSE 0 END
+  )
 UNION ALL
 SELECT 'quality validation ' || id || ' (ticket ' || ticket_id || ', ' || status || ')'
   FROM quality_validation_runs WHERE status IN ('queued', 'running')
@@ -193,7 +202,8 @@ if [[ -n "$active" ]]; then
   if [[ $force -eq 1 ]]; then
     echo "    continuing because of --force: these will be interrupted"
   else
-    fail "work is running on the VPS. Wait for it to finish, or rerun with --force"
+    echo "kanban-upgrade: work is running on the VPS. Wait for it to finish, or rerun with --force" >&2
+    exit "$EXIT_ACTIVE_WORK"
   fi
 else
   echo "    nothing running"

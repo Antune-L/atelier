@@ -275,9 +275,9 @@ test("Claude reports the lifecycle of local agents only", () => {
   dispatchClaudeMessage(taskNotification("task-2", "failed"), push, undefined, tracker);
 
   expect(events).toEqual([
-    { type: "subagent_lifecycle", phase: "started", id: "agent-call-1", label: "Explorer le code · Explore" },
+    { type: "subagent_lifecycle", phase: "started", id: "agent-call-1", label: "Explorer le code · Explore", name: "Explorer le code", subagentType: "Explore" },
     { type: "subagent_lifecycle", phase: "started", id: "task-2", label: "Sous-agent" },
-    { type: "subagent_lifecycle", phase: "ended", id: "agent-call-1", label: "Explorer le code · Explore", status: "completed" },
+    { type: "subagent_lifecycle", phase: "ended", id: "agent-call-1", label: "Explorer le code · Explore", name: "Explorer le code", subagentType: "Explore", status: "completed" },
     { type: "subagent_lifecycle", phase: "ended", id: "task-2", label: "Sous-agent", status: "failed" },
   ]);
 });

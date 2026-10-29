@@ -4,6 +4,7 @@ import type { Conversation } from "@shared/schemas";
 
 import { LiveDot } from "@/components/atelier/LiveDot";
 import { Badge } from "@/components/ui/badge";
+import { ProviderLogo } from "@/components/usage/ProviderLogo";
 
 interface SubagentsPanelProps {
   subagents: Conversation["activeSubagents"];
@@ -13,7 +14,7 @@ export function SubagentsPanel({ subagents }: SubagentsPanelProps) {
   if (subagents.length === 0) return null;
   const title = subagents.length === 1 ? "sous-agent en cours" : "sous-agents en cours";
   return (
-    <details className="group border-t border-border text-xs">
+    <details className="group border-t border-border text-xs min-[1100px]:hidden">
       <summary className="flex cursor-pointer list-none items-center gap-2 py-2 text-muted-foreground">
         <Badge variant="info">{subagents.length}</Badge>
         <span>{title}</span>
@@ -23,6 +24,7 @@ export function SubagentsPanel({ subagents }: SubagentsPanelProps) {
         {subagents.map((subagent) => (
           <li key={subagent.id} className="flex min-w-0 items-center gap-2">
             <LiveDot />
+            <ProviderLogo provider={subagent.provider} className="h-3.5 w-3.5" />
             <span className="truncate" title={subagent.label}>
               {subagent.label}
             </span>

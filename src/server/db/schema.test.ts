@@ -239,16 +239,24 @@ describe("atelier sub-agent columns", () => {
     const conversation = store.createConversation({ project: "p", title: "Legacy", orchestrator: "claude", model: null, effort: null, codexModel: null, codexEffort: null, codexFast: false, researchEnabled: false, researchOptions: DEFAULT_RESEARCH_OPTIONS });
     const message = store.addConversationMessage({ conversationId: conversation.id, role: "user", content: "Bonjour", turnId: null });
     seed.exec("ALTER TABLE conversations DROP COLUMN active_subagents");
+    seed.exec("ALTER TABLE conversations DROP COLUMN finished_subagents");
     seed.exec("ALTER TABLE conversation_messages DROP COLUMN agent_id");
     seed.exec("ALTER TABLE conversation_messages DROP COLUMN agent_label");
     seed.close();
 
     const db = createDatabase(path);
     expect(hasColumn(db, "conversations", "active_subagents")).toBe(true);
+    expect(hasColumn(db, "conversations", "finished_subagents")).toBe(true);
     expect(hasColumn(db, "conversation_messages", "agent_id")).toBe(true);
     expect(hasColumn(db, "conversation_messages", "agent_label")).toBe(true);
+    // Legacy active entries predate name/type/provider: the schema defaults fill them in.
+    db.exec(`UPDATE conversations SET active_subagents = '[{"id":"a1","label":"x","startedAt":1}]'`);
     const reopened = new Store(db);
-    expect(reopened.getConversation(conversation.id)).toMatchObject({ title: "Legacy", activeSubagents: [] });
+    expect(reopened.getConversation(conversation.id)).toMatchObject({
+      title: "Legacy",
+      activeSubagents: [{ id: "a1", label: "x", name: "", type: null, provider: "claude", startedAt: 1 }],
+      finishedSubagents: [],
+    });
     expect(reopened.listConversationMessages(conversation.id)).toEqual([{ ...message, agentId: null, agentLabel: null }]);
     db.close();
   });

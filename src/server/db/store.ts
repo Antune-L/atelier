@@ -52,7 +52,7 @@ import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewK
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
-import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, FinishedSubagent, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord, residualLegacyUsage } from "../../shared/statistics.ts";
 import { providerQuotaSchema } from "../../shared/providerQuota.ts";
 import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
@@ -237,6 +237,7 @@ export interface ConversationPatch {
   contextTokens?: number | null;
   contextWindow?: number | null;
   activeSubagents?: ActiveSubagent[];
+  finishedSubagents?: FinishedSubagent[];
   snapshotSha?: string | null;
   snapshotCommittedAt?: number | null;
   snapshotBaseBranch?: string | null;
@@ -3135,6 +3136,7 @@ export class Store {
     if (patch.contextTokens !== undefined) set("context_tokens", patch.contextTokens);
     if (patch.contextWindow !== undefined) set("context_window", patch.contextWindow);
     if (patch.activeSubagents !== undefined) set("active_subagents", JSON.stringify(patch.activeSubagents));
+    if (patch.finishedSubagents !== undefined) set("finished_subagents", JSON.stringify(patch.finishedSubagents));
     // Live context figures and sub-agents are telemetry: they must not reorder the conversation list.
     if (touchesConversation || !builder.hasChanges()) set("updated_at", Date.now());
     builder.run(this.db, "conversations", id);

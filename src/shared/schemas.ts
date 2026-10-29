@@ -1156,8 +1156,24 @@ export function researchOptionsFromKeys(keys: Iterable<ResearchOptionKey>): Rese
   };
 }
 
-export const activeSubagentSchema = z.object({ id: z.string().min(1), label: z.string(), startedAt: z.number().int() });
+export const activeSubagentSchema = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+  /** Sub-agent name (Claude task description, Codex ordinal label); empty on legacy rows. */
+  name: z.string().default(""),
+  /** Sub-agent type when the provider reports one (Claude `subagent_type`), else null. */
+  type: z.string().nullable().default(null),
+  /** Orchestrator of the conversation when the sub-agent started; never rewritten afterwards. */
+  provider: orchestratorSchema.default("claude"),
+  startedAt: z.number().int(),
+});
 export type ActiveSubagent = z.infer<typeof activeSubagentSchema>;
+
+export const subagentStatusSchema = z.enum(["done", "failed", "interrupted"]);
+export type SubagentStatus = z.infer<typeof subagentStatusSchema>;
+
+export const finishedSubagentSchema = activeSubagentSchema.extend({ endedAt: z.number().int(), status: subagentStatusSchema });
+export type FinishedSubagent = z.infer<typeof finishedSubagentSchema>;
 
 export const conversationSchema = z.object({
   id: z.string().min(1),
@@ -1184,6 +1200,11 @@ export const conversationSchema = z.object({
   contextWindow: z.number().int().positive().nullable(),
   /** Sub-agents currently running in the live session (server-owned); empty when none. */
   activeSubagents: z.array(activeSubagentSchema).default([]),
+  /**
+   * Whole-conversation history of ended sub-agents (server-owned), oldest first. Survives turns,
+   * session closes and backend restarts.
+   */
+  finishedSubagents: z.array(finishedSubagentSchema).default([]),
   /** Frozen origin/<base> commit the conversation reads; null until the first snapshot is pinned. */
   snapshotSha: z.string().nullable().default(null),
   /** Commit timestamp (ms) of `snapshotSha`. */

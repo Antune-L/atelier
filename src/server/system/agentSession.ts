@@ -92,6 +92,10 @@ export type AgentSessionEvent = (
       phase: "started" | "ended";
       id: string;
       label: string;
+      /** Sub-agent name, kept apart from `label` (Claude task description, Codex ordinal label). */
+      name?: string;
+      /** Sub-agent type when the provider reports one (Claude `subagent_type`). */
+      subagentType?: string;
       status?: "completed" | "failed" | "stopped";
     }
 ) & { sourceId?: string; subagent?: AgentSubagentRef };

@@ -289,3 +289,46 @@ export function buildAtelierThread(messages: readonly ConversationMessage[], run
 export function subagentCountLabel(count: number): string {
   return count === 1 ? "1 sous-agent" : `${count} sous-agents`;
 }
+
+export interface SubagentRun {
+  id: string;
+  startedAt: number;
+  /** Absent while the run is still active. */
+  endedAt?: number;
+}
+
+/** A Codex child thread can run several times under one id: the start time identifies the run. */
+export function subagentRunKey(run: SubagentRun): string {
+  return `${run.id}:${run.startedAt}`;
+}
+
+/**
+ * Number of activity rows of each sub-agent run, keyed by `subagentRunKey`. A row belongs to the
+ * earliest run of its agent id that had not ended when the row was written.
+ */
+export function countSubagentRunActions(messages: readonly ConversationMessage[], runs: readonly SubagentRun[]): Map<string, number> {
+  const runsById = new Map<string, SubagentRun[]>();
+  for (const run of [...runs].sort((a, b) => a.startedAt - b.startedAt)) {
+    runsById.set(run.id, [...(runsById.get(run.id) ?? []), run]);
+  }
+  const counts = new Map<string, number>();
+  for (const message of messages) {
+    if (message.role !== "activity" || message.agentId === null) continue;
+    const run = runsById.get(message.agentId)?.find((candidate) => candidate.endedAt === undefined || message.createdAt <= candidate.endedAt);
+    if (!run) continue;
+    const key = subagentRunKey(run);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Compact duration: "41s", "2m 05s", "1h 03m". */
+export function formatSubagentDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  return `${seconds}s`;
+}

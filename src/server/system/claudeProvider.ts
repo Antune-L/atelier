@@ -488,10 +488,17 @@ function safeDispatchClaudeMessage(
 export interface ClaudeSubagentTracker {
   labels: Map<string, string>;
   taskKeys: Map<string, string>;
+  /** Name/type reported at start, echoed on the matching end. */
+  identities: Map<string, SubagentIdentity>;
+}
+
+interface SubagentIdentity {
+  name?: string;
+  subagentType?: string;
 }
 
 export function createClaudeSubagentTracker(): ClaudeSubagentTracker {
-  return { labels: new Map(), taskKeys: new Map() };
+  return { labels: new Map(), taskKeys: new Map(), identities: new Map() };
 }
 
 /** Sub-agent attribution fields; parsed from the raw message since not every `user` variant types them. */
@@ -534,14 +541,22 @@ export function dispatchClaudeMessage(
         const label = formatSubagentLabel(message.description, message.subagent_type) ?? SUBAGENT_DEFAULT_LABEL;
         tracker.labels.set(id, label);
         tracker.taskKeys.set(message.task_id, id);
-        onEvent({ type: "subagent_lifecycle", phase: "started", id, label });
+        const identity: SubagentIdentity = {};
+        const name = message.description?.trim();
+        const subagentType = message.subagent_type?.trim();
+        if (name) identity.name = name;
+        if (subagentType) identity.subagentType = subagentType;
+        tracker.identities.set(id, identity);
+        onEvent({ type: "subagent_lifecycle", phase: "started", id, label, ...identity });
       } else if (message.subtype === "task_notification") {
         const id = tracker.taskKeys.get(message.task_id) ?? message.tool_use_id;
         const label = id === undefined ? undefined : tracker.labels.get(id);
         if (id === undefined || label === undefined) return;
+        const identity = tracker.identities.get(id) ?? {};
         tracker.labels.delete(id);
         tracker.taskKeys.delete(message.task_id);
-        onEvent({ type: "subagent_lifecycle", phase: "ended", id, label, status: message.status });
+        tracker.identities.delete(id);
+        onEvent({ type: "subagent_lifecycle", phase: "ended", id, label, ...identity, status: message.status });
       }
       return;
     case "assistant": {

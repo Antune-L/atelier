@@ -89,6 +89,7 @@ export function App() {
   const [updating, setUpdating] = useState(false);
   const [atelierTarget, setAtelierTarget] = useState<AtelierTarget | null>(null);
   const [auditTarget, setAuditTarget] = useState<AuditTarget | null>(null);
+  const [atelierListRequest, setAtelierListRequest] = useState(0);
   const [appliedAuditRequest, setAppliedAuditRequest] = useState<AuditTarget | null>(requestedAuditTarget);
   const { canUpdate } = useCapabilities();
 
@@ -144,6 +145,7 @@ export function App() {
   };
 
   const selectView = (next: SidebarView): void => {
+    if (next === "atelier" && view === "atelier") setAtelierListRequest((n) => n + 1);
     setAtelierTarget(null);
     setAuditTarget(null);
     setView(next);
@@ -219,6 +221,7 @@ export function App() {
           projects={selectableProjects}
           projectFilter={effectiveFilter}
           target={atelierTarget}
+          listRequest={atelierListRequest}
           toolbar={(
             <>
               <Button ref={navigationButtonRef} variant="ghost" size="icon" className="h-8 w-8 sm:hidden" aria-label="Ouvrir la navigation" title="Navigation" onClick={() => setNavigationOpen(true)}>

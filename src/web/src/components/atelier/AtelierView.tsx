@@ -45,6 +45,8 @@ interface AtelierViewProps {
   projectFilter: string;
   /** A request from another surface (ticket sheet, ticket detail) to open a conversation or a form. */
   target: AtelierTarget | null;
+  /** Bumped when the Atelier navigation entry is selected again, to reopen the discussions list. */
+  listRequest: number;
   toolbar?: ReactNode;
 }
 
@@ -66,7 +68,7 @@ async function findPrdConversation(candidates: Conversation[], prdId: string): P
   return null;
 }
 
-export function AtelierView({ projects, projectFilter, target, toolbar }: AtelierViewProps) {
+export function AtelierView({ projects, projectFilter, target, listRequest, toolbar }: AtelierViewProps) {
   const { conversations } = useBoard();
   const now = useTickTimer();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,6 +77,7 @@ export function AtelierView({ projects, projectFilter, target, toolbar }: Atelie
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [listOpen, setListOpen] = useState(true);
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
+  const [appliedListRequest, setAppliedListRequest] = useState(listRequest);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
   const [search, setSearch] = useState("");
   const composeSeq = useRef(0);
@@ -130,6 +133,11 @@ export function AtelierView({ projects, projectFilter, target, toolbar }: Atelie
     if (target?.kind === "conversation") select(target.conversationId);
     if (target?.kind === "seed") openCompose(target.seed);
     if (target?.kind === "prd") openPrdOrigin(target.prdId, target.project);
+  }
+
+  if (listRequest !== appliedListRequest) {
+    setAppliedListRequest(listRequest);
+    setListOpen(true);
   }
 
   const prds = detail.prds;

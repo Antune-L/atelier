@@ -104,7 +104,15 @@ Token permissions depend on operations, repositories and organization policies. 
 sudo -u kanban -H /opt/kanban/current/node_modules/.bin/codex login --device-auth
 ```
 
-**Claude.** On the Mac, run `claude setup-token` and copy the token. On the VPS, add one line `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `/etc/kanban/kanban.env` with `sudo nano /etc/kanban/kanban.env`.
+**Claude.** Prefer `claude auth login` over `claude setup-token`. `claude` is not on the `kanban` user's PATH: run the SDK's bundled binary as that user (replace `linux-x64` with `linux-arm64` on ARM):
+
+```bash
+sudo -u kanban -H env HOME=/var/lib/kanban /opt/kanban/current/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude auth login
+```
+
+Open the printed URL, authorize, then paste the code back into the terminal. You can also use the **Connecter Claude** button in the app (Consommation → Limites, Claude card): it runs the same command on the server, shows the authorization URL and takes the code.
+
+A `setup-token` token (`CLAUDE_CODE_OAUTH_TOKEN=<token>` in `/etc/kanban/kanban.env`) still runs agents, but it cannot read the subscription limits shown on the usage page. If one is set, it probably takes precedence over the login: comment the `CLAUDE_CODE_OAUTH_TOKEN` line out in `/etc/kanban/kanban.env` (`sudo nano /etc/kanban/kanban.env`), then run `sudo systemctl restart kanban`.
 
 **Skills.** On the Mac:
 

@@ -6,8 +6,10 @@ import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 
 import { StatCard } from "@/components/stats/StatCard";
 import { Badge } from "@/components/ui/badge";
+import { ClaudeLoginPanel } from "@/components/usage/ClaudeLoginPanel";
 import { QuotaWindowBar } from "@/components/usage/QuotaWindowBar";
-import { formatAgo, QUOTA_PROVIDER_LABELS, quotaStateMessage } from "@/lib/usageDisplay";
+import type { useClaudeLogin } from "@/hooks/useClaudeLogin";
+import { formatAgo, QUOTA_PROVIDER_LABELS, quotaAgeText, quotaStateMessage, showsLastKnownWindows } from "@/lib/usageDisplay";
 import { cn } from "@/lib/utils";
 
 const NOW_TICK_MS = 30_000;
@@ -18,6 +20,8 @@ export interface ProviderQuotaView {
   loading: boolean;
   error: string | null;
 }
+
+export type ClaudeLoginView = ReturnType<typeof useClaudeLogin>;
 
 function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
@@ -31,6 +35,8 @@ function useNow(): number {
 function QuotaBody({ quota, now }: { quota: ProviderQuota; now: number }): ReactNode {
   const message = quotaStateMessage(quota);
   const failed = quota.state === "error" || quota.state === "timeout";
+  const lastKnown = showsLastKnownWindows(quota) && quota.windows.length > 0;
+  const age = lastKnown ? quotaAgeText(quota, now) : null;
   return (
     <div className="flex flex-col gap-3">
       {message !== null && (
@@ -38,14 +44,21 @@ function QuotaBody({ quota, now }: { quota: ProviderQuota; now: number }): React
           {message}
         </p>
       )}
-      {(quota.state === "ok" || failed) && quota.windows.map((window) => <QuotaWindowBar key={window.id} window={window} now={now} />)}
+      {age !== null && <p className="text-xs text-muted-foreground">Dernières limites connues, {age}</p>}
+      {(quota.state === "ok" || lastKnown) && quota.windows.map((window) => <QuotaWindowBar key={window.id} window={window} now={now} />)}
     </div>
   );
 }
 
-function ProviderQuotaCard({ view, now }: { view: ProviderQuotaView; now: number }): ReactNode {
+/** Whether the Claude card offers the login flow: limits unreadable, or a flow already shown. */
+function showsClaudeLogin(quota: ProviderQuota | null, login: ClaudeLoginView): boolean {
+  if ((login.status?.state ?? "idle") !== "idle") return true;
+  return quota !== null && (quota.state === "token_without_limits" || quota.state === "unauthenticated");
+}
+
+function ProviderQuotaCard({ view, now, login }: { view: ProviderQuotaView; now: number; login: ClaudeLoginView | null }): ReactNode {
   const { quota, loading, error } = view;
-  const showAge = quota !== null && quota.observedAt !== null && (quota.source === "session" || quota.source === "cache");
+  const showAge = quota !== null && quota.observedAt !== null && (quota.source === "session" || quota.source === "cache") && !showsLastKnownWindows(quota);
   return (
     <StatCard title={QUOTA_PROVIDER_LABELS[view.provider]}>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -64,17 +77,27 @@ function ProviderQuotaCard({ view, now }: { view: ProviderQuotaView; now: number
       ) : (
         quota !== null && <QuotaBody quota={quota} now={now} />
       )}
+      {login !== null && showsClaudeLogin(quota, login) && (
+        <ClaudeLoginPanel
+          status={login.status}
+          pending={login.pending}
+          error={login.error}
+          onStart={login.start}
+          onSubmit={login.submit}
+          onCancel={login.cancel}
+        />
+      )}
     </StatCard>
   );
 }
 
 /** "Limites" tab: one subscription-quota card per provider, each loading independently. */
-export function LimitsTab({ providers }: { providers: ProviderQuotaView[] }): ReactNode {
+export function LimitsTab({ providers, claudeLogin }: { providers: ProviderQuotaView[]; claudeLogin: ClaudeLoginView }): ReactNode {
   const now = useNow();
   return (
     <div className="grid gap-4 md:grid-cols-2">
       {providers.map((view) => (
-        <ProviderQuotaCard key={view.provider} view={view} now={now} />
+        <ProviderQuotaCard key={view.provider} view={view} now={now} login={view.provider === "claude" ? claudeLogin : null} />
       ))}
     </div>
   );

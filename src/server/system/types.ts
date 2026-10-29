@@ -12,6 +12,8 @@ import type { RepoInspectionContext } from "./repoInspection.ts";
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
+import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
+import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -514,6 +516,16 @@ export interface SystemAdapter {
   readCodexQuota(): Promise<ProviderQuota>;
   /** Fresh Claude subscription usage through the SDK `get_usage` control request; never throws. */
   readClaudeUsage(): Promise<ProviderQuota>;
+
+  // ---- local usage history (read-only; usage fields only, never conversation content) ----
+  /** Token usage read from this machine's Claude and Codex histories; never throws. */
+  readLocalUsageHistory(): Promise<HistoryUsageEntry[]>;
+
+  // ---- in-app `claude auth login` flow (one at a time; the pasted code is never logged nor returned) ----
+  startClaudeLogin(): ClaudeLoginStatus;
+  submitClaudeLoginCode(code: string): ClaudeLoginStatus;
+  cancelClaudeLogin(): ClaudeLoginStatus;
+  claudeLoginStatus(): ClaudeLoginStatus;
 
   // ---- desktop self-update guards (dev desktop only) ----
   /** Current checked-out branch (`git rev-parse --abbrev-ref HEAD`); "" when it can't be read. */

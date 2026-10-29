@@ -54,14 +54,12 @@ export class ProviderQuotaService {
     if (live.state === "not_applicable" || live.state === "unauthenticated") {
       return { ...live, source: null, windows: [] };
     }
+    // token_without_limits, error, timeout, no_data: keep the last known windows with their source and age,
+    // but expose the live state and message so the failure is never masked.
+    const message = live.state === "no_data" ? (live.message ?? NO_DATA_MESSAGE) : live.message;
     const known = this.lastKnown(provider);
-    if (live.state === "no_data") {
-      if (known?.source === "session") return { ...known, state: "ok" };
-      if (known) return { ...known, state: "no_data", message: live.message ?? NO_DATA_MESSAGE };
-      return emptyQuota(provider, "no_data", live.observedAt ?? this.now(), live.message ?? NO_DATA_MESSAGE);
-    }
-    if (known) return { ...known, state: live.state, message: live.message };
-    return { ...live, source: null, windows: [] };
+    if (known) return { ...known, state: live.state, message };
+    return { ...emptyQuota(provider, live.state, live.observedAt ?? this.now(), message), planType: live.planType };
   }
 
   /** Merge a Claude session rate-limit event into the latest known state (keeping its other windows) and persist it. */

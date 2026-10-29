@@ -6,6 +6,9 @@ import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
+import { CLAUDE_LOGIN_TIMEOUT_MS, isClaudeLoginActive } from "../../shared/claudeLogin.ts";
+import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
+import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
@@ -62,6 +65,7 @@ import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.t
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
+const FAKE_CLAUDE_LOGIN_URL = "https://claude.ai/oauth/authorize?simulation=1";
 
 const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
@@ -777,6 +781,52 @@ export class FakeSystemAdapter implements SystemAdapter {
         { id: "claude:model:Fable", kind: "weekly_model", model: "Fable", usedPercent: 20, windowDurationMins: 10_080, resetsAt: now + 3 * DAY_MS },
       ],
     };
+  }
+
+  /** Fixed entries relative to now (like the fake quotas), never reads ~/.claude nor ~/.codex. */
+  async readLocalUsageHistory(): Promise<HistoryUsageEntry[]> {
+    const now = Date.now();
+    const entry = (provider: Orchestrator, sessionId: string, ageMs: number, model: string, speed: string, tokens: HistoryUsageEntry["tokens"]): HistoryUsageEntry => ({
+      provider, sessionId, timestamp: now - ageMs, model, speed, fast: speed !== "standard", tokens, dedupKey: null,
+    });
+    return [
+      entry("claude", "fake-history-claude-1", 2 * HOUR_MS, "claude-opus-5-5", "standard", { input: 1_200, output: 3_400, cacheRead: 52_000, cacheCreate: 6_000 }),
+      entry("claude", "fake-history-claude-1", 3 * DAY_MS, "claude-opus-5-5", "standard", { input: 800, output: 2_100, cacheRead: 30_000, cacheCreate: 4_000 }),
+      entry("claude", "fake-history-claude-2", 5 * HOUR_MS, "claude-opus-5-5", "fast", { input: 400, output: 1_500, cacheRead: 12_000, cacheCreate: 2_000 }),
+      entry("claude", "fake-history-claude-3", 20 * DAY_MS, "claude-experimental-x", "standard", { input: 600, output: 900, cacheRead: 5_000, cacheCreate: 1_000 }),
+      entry("codex", "fake-history-codex-1", 4 * HOUR_MS, "gpt-6.1-sol", "standard", { input: 40_000, output: 2_500, cacheRead: 30_000, cacheCreate: 0 }),
+      entry("codex", "fake-history-codex-2", 10 * DAY_MS, "gpt-6.1-sol", "priority", { input: 25_000, output: 1_800, cacheRead: 18_000, cacheCreate: 0 }),
+      entry("codex", "fake-history-codex-3", 60 * DAY_MS, "gpt-6-luna", "standard", { input: 15_000, output: 900, cacheRead: 9_000, cacheCreate: 0 }),
+    ];
+  }
+
+  /** In-memory login state machine: fake URL, any non-empty code succeeds; never spawns a process. */
+  private fakeLogin: ClaudeLoginStatus = { state: "idle", url: null, expiresAt: null, message: null, oauthTokenEnvSet: false, restartRequired: false };
+
+  startClaudeLogin(): ClaudeLoginStatus {
+    if (isClaudeLoginActive(this.fakeLogin.state)) return this.claudeLoginStatus();
+    this.fakeLogin = {
+      ...this.fakeLogin, state: "awaiting_code", url: FAKE_CLAUDE_LOGIN_URL, expiresAt: Date.now() + CLAUDE_LOGIN_TIMEOUT_MS,
+      message: "Ouvre le lien, autorise l'accès puis colle le code affiché", restartRequired: false,
+    };
+    return this.claudeLoginStatus();
+  }
+
+  submitClaudeLoginCode(code: string): ClaudeLoginStatus {
+    if (this.fakeLogin.state !== "awaiting_code" || code.trim().length === 0) return this.claudeLoginStatus();
+    this.fakeLogin = { ...this.fakeLogin, state: "success", url: null, expiresAt: null, message: "Claude est connecté (simulation)" };
+    return this.claudeLoginStatus();
+  }
+
+  cancelClaudeLogin(): ClaudeLoginStatus {
+    if (isClaudeLoginActive(this.fakeLogin.state)) {
+      this.fakeLogin = { ...this.fakeLogin, state: "cancelled", url: null, expiresAt: null, message: "Connexion annulée" };
+    }
+    return this.claudeLoginStatus();
+  }
+
+  claudeLoginStatus(): ClaudeLoginStatus {
+    return { ...this.fakeLogin };
   }
 
   async readCodexQuota(): Promise<ProviderQuota> {

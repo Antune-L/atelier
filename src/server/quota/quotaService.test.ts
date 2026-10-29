@@ -38,7 +38,7 @@ test("a session rate-limit event is the fallback when the live read has no data"
   const quotaService = service(async () => quota("claude", "no_data"), persistence);
   quotaService.recordClaudeRateLimit(SESSION_EVENT, NOW - 1000);
   const result = await quotaService.read("claude");
-  expect(result).toMatchObject({ state: "ok", source: "session", observedAt: NOW - 1000 });
+  expect(result).toMatchObject({ state: "no_data", message: "Aucune donnée de quota reçue", source: "session", observedAt: NOW - 1000 });
   expect(result.windows).toEqual([{ id: "claude:five_hour", kind: "session", model: null, usedPercent: 42, windowDurationMins: 300, resetsAt: 1_800_003_600_000 }]);
   expect(persistence.stored.get("claude")?.source).toBe("session");
 });
@@ -88,6 +88,28 @@ test("merging a session event drops carried windows that already reset", async (
   await quotaService.read("claude");
   quotaService.recordClaudeRateLimit(SESSION_EVENT, NOW + 1000);
   expect(persistence.stored.get("claude")?.windows.map((window) => window.id)).toEqual(["claude:five_hour"]);
+});
+
+test("token_without_limits keeps the last known windows with their source, age and the live message", async () => {
+  const message = "Jeton d'abonnement (CLAUDE_CODE_OAUTH_TOKEN) sans accès aux limites : reconnecte Claude";
+  const quotaService = service(async () => ({ ...quota("claude", "token_without_limits"), message }));
+  quotaService.recordClaudeRateLimit(SESSION_EVENT, NOW - 5000);
+  const result = await quotaService.read("claude");
+  expect(result).toMatchObject({ state: "token_without_limits", source: "session", observedAt: NOW - 5000, message });
+  expect(result.windows).toHaveLength(1);
+});
+
+test("token_without_limits without known windows is an empty quota with the live message", async () => {
+  const result = await service(async () => ({ ...quota("claude", "token_without_limits"), message: "jeton" })).read("claude");
+  expect(result).toMatchObject({ state: "token_without_limits", source: null, windows: [], message: "jeton" });
+});
+
+test("a persisted snapshot is shown as cache on no_data", async () => {
+  const persistence = memoryPersistence();
+  const window: QuotaWindow = { id: "claude:seven_day", kind: "weekly", model: null, usedPercent: 50, windowDurationMins: 10_080, resetsAt: null };
+  persistence.stored.set("claude", { ...quota("claude", "ok", [window]), observedAt: NOW - 60_000 });
+  const result = await service(async () => quota("claude", "no_data"), persistence).read("claude");
+  expect(result).toMatchObject({ state: "no_data", source: "cache", observedAt: NOW - 60_000, windows: [window] });
 });
 
 test("not_applicable passes through without windows", async () => {

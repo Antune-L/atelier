@@ -89,6 +89,9 @@ import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { quotaProviderSchema } from "../shared/providerQuota.ts";
 import type { ProviderQuota } from "../shared/providerQuota.ts";
 import { DEFAULT_USAGE_PERIOD, summarizeProviderUsage, usagePeriodSchema, usagePeriodStart } from "../shared/providerUsage.ts";
+import type { HistoryUsageEntry } from "../shared/providerUsage.ts";
+import { claudeLoginCodeSchema } from "../shared/claudeLogin.ts";
+import type { ClaudeLoginStatus } from "../shared/claudeLogin.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
@@ -136,6 +139,11 @@ interface PaneReader {
   checkClaudeAvailable(): Promise<boolean>;
   readClaudeUsage(): Promise<ProviderQuota>;
   readCodexQuota(): Promise<ProviderQuota>;
+  readLocalUsageHistory(): Promise<HistoryUsageEntry[]>;
+  startClaudeLogin(): ClaudeLoginStatus;
+  submitClaudeLoginCode(code: string): ClaudeLoginStatus;
+  cancelClaudeLogin(): ClaudeLoginStatus;
+  claudeLoginStatus(): ClaudeLoginStatus;
   checkSkills(): Promise<SkillStatus[]>;
   githubAccounts(): GithubAccountRegistry;
   listGithubRepos(account: string | null): Promise<GithubRepoSummary[]>;
@@ -1341,12 +1349,25 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!provider.success) return jsonError(set, HTTP_BAD_REQUEST, "fournisseur inconnu");
       return quotaService.read(provider.data);
     })
-    .get("/usage/summary", ({ query, set }) => {
+    .get("/usage/summary", async ({ query, set }) => {
       const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);
       if (!period.success) return jsonError(set, HTTP_BAD_REQUEST, "période invalide");
+      const entries = await deps.system.readLocalUsageHistory();
       const now = Date.now();
-      return summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now);
+      return summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now, {
+        entries,
+        countedSessionIds: store.listUsageCountedSessionIds(),
+      });
     })
+    // Request bodies of the login routes are never logged nor echoed: the code is a one-time secret.
+    .get("/usage/claude-login", () => deps.system.claudeLoginStatus())
+    .post("/usage/claude-login", () => deps.system.startClaudeLogin())
+    .post("/usage/claude-login/code", ({ body, set }) => {
+      const parsed = claudeLoginCodeSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "code invalide");
+      return deps.system.submitClaudeLoginCode(parsed.data.code);
+    })
+    .delete("/usage/claude-login", () => deps.system.cancelClaudeLogin())
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

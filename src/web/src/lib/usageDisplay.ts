@@ -1,5 +1,5 @@
 import type { ProviderQuota, QuotaProvider, QuotaWindow, QuotaWindowPace } from "@shared/providerQuota";
-import type { UsagePeriod } from "@shared/providerUsage";
+import type { DailyUsage, ProviderUsage, UsagePeriod } from "@shared/providerUsage";
 
 import type { TabOption } from "@/components/ui/tabs";
 
@@ -9,7 +9,68 @@ const DAY_MS = 24 * HOUR_MS;
 
 export const QUOTA_PROVIDER_LABELS: Record<QuotaProvider, string> = { claude: "Claude", codex: "Codex" };
 
-export const USAGE_PERIOD_LABELS: Record<UsagePeriod, string> = { "7d": "7 j", "30d": "30 j", all: "Tout" };
+export const USAGE_PERIOD_LABELS: Record<UsagePeriod, string> = { "24h": "24 h", "7d": "7 j", "30d": "30 j", "90d": "90 j" };
+
+export type UsageProviderFilter = "all" | QuotaProvider;
+
+export const USAGE_PROVIDER_FILTER_OPTIONS: TabOption<UsageProviderFilter>[] = [
+  { value: "all", label: "Tous" },
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+];
+
+/** Providers shown for a filter, in display order. */
+export function filteredProviders(filter: UsageProviderFilter): QuotaProvider[] {
+  return filter === "all" ? ["claude", "codex"] : [filter];
+}
+
+export const LOCAL_HISTORY_NOTE = "Historiques de ce serveur : les sessions lancées sur une autre machine ne sont pas comptées.";
+
+export const OAUTH_TOKEN_ENV_WARNING =
+  "CLAUDE_CODE_OAUTH_TOKEN est défini : il passe probablement avant la session et masque les limites ; commente-le dans /etc/kanban/kanban.env puis redémarre le service.";
+
+/** Cost of a row, never "$0" for unpriced usage. */
+export function formatCostOrUnpriced(costUsd: number | null, format: (value: number) => string): string {
+  return costUsd === null ? "non tarifé" : format(costUsd);
+}
+
+/** States in which the last known windows (session event or cache) are still worth showing. */
+export function showsLastKnownWindows(quota: ProviderQuota): boolean {
+  return quota.state === "token_without_limits" || quota.state === "error" || quota.state === "timeout" || quota.state === "no_data";
+}
+
+/** "il y a 12 min · session" for windows that are not a fresh live read; null otherwise. */
+export function quotaAgeText(quota: ProviderQuota, now: number): string | null {
+  if (quota.observedAt === null || quota.source === null || quota.source === "live") return null;
+  return `${formatAgo(quota.observedAt, now)} · ${quota.source === "session" ? "session" : "cache"}`;
+}
+
+const DAY_FORMATTER = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** UTC `YYYY-MM-DD` as a short French day label ("12 oct."). */
+export function formatDayLabel(date: string): string {
+  const ms = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(ms) ? DAY_FORMATTER.format(new Date(ms)) : date;
+}
+
+/** Per-day totals summed across providers, sorted by date. */
+export function mergeDaily(usages: ProviderUsage[]): DailyUsage[] {
+  const days = new Map<string, DailyUsage>();
+  for (const usage of usages) {
+    for (const day of usage.daily) {
+      const merged = days.get(day.date) ?? { date: day.date, costUsd: 0, unpricedTokens: 0, totalTokens: 0 };
+      merged.costUsd += day.costUsd;
+      merged.unpricedTokens += day.unpricedTokens;
+      merged.totalTokens += day.totalTokens;
+      days.set(day.date, merged);
+    }
+  }
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function sessionCountText(count: number): string {
+  return `${count} session${count > 1 ? "s" : ""}`;
+}
 
 export type UsageTab = "limits" | "cost" | "tokens";
 
@@ -32,6 +93,8 @@ export function quotaStateMessage(quota: ProviderQuota): string | null {
       return "Aucune donnée de quota reçue.";
     case "unauthenticated":
       return "Connexion requise.";
+    case "token_without_limits":
+      return "Le jeton configuré lance les agents mais ne permet pas de lire les limites d'abonnement : reconnecte Claude.";
     case "timeout":
       return "Délai dépassé.";
     case "error":

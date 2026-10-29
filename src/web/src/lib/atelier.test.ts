@@ -152,7 +152,7 @@ describe("contextUsageSummary", () => {
 
 describe("buildAtelierThread", () => {
   function msg(id: string, role: ConversationMessage["role"], turnId: string): ConversationMessage {
-    return { id, conversationId: "c1", role, content: id, turnId, agentId: null, agentLabel: null, createdAt: 0 };
+    return { id, conversationId: "c1", role, content: id, turnId, agentId: null, agentLabel: null, steering: null, createdAt: 0 };
   }
 
   function shape(messages: ConversationMessage[], running: boolean): unknown[] {

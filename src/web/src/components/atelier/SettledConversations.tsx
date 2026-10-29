@@ -42,8 +42,9 @@ export function SettledConversations({ conversations, selectedId, now, projectLa
       <button
         type="button"
         aria-expanded={expanded}
+        disabled={searching}
         onClick={toggle}
-        className="flex w-full items-center justify-between gap-2 px-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center justify-between gap-2 px-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground enabled:hover:text-foreground"
       >
         <span>Classées</span>
         <span className="flex items-center gap-1">

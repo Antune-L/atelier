@@ -56,6 +56,8 @@ export interface BoardState {
   connected: boolean;
   toasts: Toast[];
   openTicketId: string | null;
+  /** Tickets whose PR merge was triggered manually from this tab and is still in flight. */
+  mergingTicketIds: ReadonlySet<string>;
 }
 
 type Listener = () => void;
@@ -79,6 +81,7 @@ class BoardStore {
     connected: false,
     toasts: [],
     openTicketId: null,
+    mergingTicketIds: new Set<string>(),
   };
   private readonly listeners = new Set<Listener>();
   private readonly commentListeners = new Set<CommentListener>();
@@ -271,6 +274,22 @@ class BoardStore {
 
   closeTicket(): void {
     this.set({ openTicketId: null });
+  }
+
+  /** Marks the tickets as merging and returns the ones that were not already merging. */
+  beginMerge(ticketIds: string[]): string[] {
+    const current = this.state.mergingTicketIds;
+    const started = ticketIds.filter((id, index) => !current.has(id) && ticketIds.indexOf(id) === index);
+    if (started.length === 0) return [];
+    this.set({ mergingTicketIds: new Set([...current, ...started]) });
+    return started;
+  }
+
+  endMerge(ticketId: string): void {
+    if (!this.state.mergingTicketIds.has(ticketId)) return;
+    const next = new Set(this.state.mergingTicketIds);
+    next.delete(ticketId);
+    this.set({ mergingTicketIds: next });
   }
 }
 

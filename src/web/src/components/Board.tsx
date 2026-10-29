@@ -57,7 +57,7 @@ function isColumn(value: string): value is Column {
 }
 
 export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAddTicket }: BoardProps) {
-  const { tickets, slots, audits } = useBoard();
+  const { tickets, slots, audits, mergingTicketIds } = useBoard();
   const [pendingAbandon, setPendingAbandon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [movingAll, setMovingAll] = useState(false);
@@ -222,12 +222,15 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     const target = ticket.dependencyLaunch?.baseBranch ?? parent?.branch ?? ticket.baseBranch ?? project.baseBranch;
     return target === project.baseBranch;
   };
-  const mergeableTickets = ticketsByColumn("done").filter((t) => canMergePr(t) && targetsProjectBase(t));
+  const mergeableTickets = ticketsByColumn("done").filter(
+    (t) => canMergePr(t) && targetsProjectBase(t) && !mergingTicketIds.has(t.id),
+  );
   const mergeAllCount = mergeableTickets.length;
 
   const handleMergeAll = async (): Promise<void> => {
     if (mergingAllRef.current) return;
-    const toMerge = mergeableTickets;
+    // Ids stay marked as merging while queued so their cards show the spinner until processed.
+    const toMerge = boardStore.beginMerge(mergeableTickets.map((t) => t.id));
     if (toMerge.length === 0) return;
     mergingAllRef.current = true;
     setMergingAll(true);
@@ -236,17 +239,20 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     let failures = 0;
     try {
       // Sequential: each merge moves the base branch, so the next PR's mergeability must be read afterwards.
-      for (const ticket of toMerge) {
+      for (const ticketId of toMerge) {
         try {
-          const result = await api.mergePr(ticket.id);
+          const result = await api.mergePr(ticketId);
           if (result.merged) merged += 1;
           else if (result.conflicts) conflicts += 1;
           else failures += 1;
         } catch {
           failures += 1;
+        } finally {
+          boardStore.endMerge(ticketId);
         }
       }
     } finally {
+      for (const ticketId of toMerge) boardStore.endMerge(ticketId);
       mergingAllRef.current = false;
       setMergingAll(false);
     }

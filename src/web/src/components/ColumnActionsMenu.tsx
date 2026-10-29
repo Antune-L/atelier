@@ -1,8 +1,9 @@
-import { MoreHorizontal } from "lucide-react";
+import { Loader2, MoreHorizontal } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 
 import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
 
 interface ColumnMenuItem {
   label: string;
@@ -10,6 +11,7 @@ interface ColumnMenuItem {
   onSelect: () => void;
   disabled?: boolean;
   title?: string;
+  busy?: boolean;
 }
 
 interface ColumnActionsMenuProps {
@@ -42,7 +44,7 @@ export function ColumnActionsMenu({ items, ariaLabel }: ColumnActionsMenuProps) 
       </PopoverTrigger>
       <PopoverContent role="menu" className={MENU_CONTENT_CLASSES}>
         {items.map((item) => {
-          const Icon = item.icon;
+          const Icon = item.busy === true ? Loader2 : item.icon;
           return (
             <PopoverMenuItem
               key={item.label}
@@ -51,7 +53,7 @@ export function ColumnActionsMenu({ items, ariaLabel }: ColumnActionsMenuProps) 
               disabled={item.disabled}
               title={item.title}
             >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <Icon className={cn("h-3.5 w-3.5 shrink-0", item.busy === true && "animate-spin")} />
               <span className="flex flex-col gap-0.5 text-left"><span>{item.label}</span>{item.title && <span className="text-2xs font-normal text-muted-foreground">{item.title}</span>}</span>
             </PopoverMenuItem>
           );

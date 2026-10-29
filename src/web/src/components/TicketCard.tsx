@@ -1,7 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Clock, ExternalLink, GitMerge, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { isDependencyReady } from "@shared/dependencies";
@@ -24,6 +24,7 @@ import {
   type CardState,
 } from "@/lib/display";
 import { useTickTimer } from "@/hooks/useTickTimer";
+import { boardStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { needsImplementationRecovery } from "@/lib/implementationRecovery";
 import { formatScheduleShort, missedLaunchMessage, scheduledLaunchState } from "@/lib/scheduledLaunch";
@@ -101,6 +102,8 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
   const now = useTickTimer();
   const parentBlocked = ticket.dependsOn !== null && !isDependencyReady(ticket, parent ?? null);
   const [checkingMerge, setCheckingMerge] = useState(false);
+  // Boolean selector: a card only rerenders when its own merge state flips.
+  const merging = useSyncExternalStore(boardStore.subscribe, () => boardStore.getSnapshot().mergingTicketIds.has(ticket.id));
   const implementationDuration = ticket.column === "merged" ? ticketImplementationDuration(ticket) : null;
   const prNumber = ticketPrNumber(ticket);
   const partial = ticket.autonomousState?.phase === "published_partial" || ticket.autonomousState?.phase === "publication_failed";
@@ -172,6 +175,11 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
               <Loader2 className="h-3 w-3 animate-spin" /> Analyse…
             </span>
           )}
+          {merging && (
+            <span className="inline-flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> Merge en cours…
+            </span>
+          )}
           {ticket.prUrl && (
             <a
               href={ticket.prUrl}
@@ -187,7 +195,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
           {ticket.column === "done" && ticket.kind === "feature" && !partial && onCheckMerge && (
             <button
               type="button"
-              disabled={checkingMerge}
+              disabled={checkingMerge || merging}
               onClick={(e) => {
                 e.stopPropagation();
                 setCheckingMerge(true);

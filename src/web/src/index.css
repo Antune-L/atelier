@@ -283,9 +283,13 @@
   .markdown pre {
     @apply my-2 overflow-x-auto rounded-md border border-border bg-muted p-3 text-xs text-foreground;
   }
-  /* Room for the copy button so it never covers the first line of code. */
+  /* The <code> scrolls instead of the <pre>, so the copy button stays pinned top-right;
+     the padding keeps it off the code. */
   .markdown-copyable pre {
-    @apply relative pr-10;
+    @apply relative overflow-x-visible pr-10;
+  }
+  .markdown-copyable pre code {
+    @apply block overflow-x-auto;
   }
   .markdown-copy-button {
     @apply opacity-0;

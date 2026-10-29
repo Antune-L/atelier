@@ -134,9 +134,12 @@ export function copyButtonLabel(status: CopyCodeStatus): string {
   return COPY_CODE_LABEL;
 }
 
-/** Text a code block's copy button puts on the clipboard (the <code> child, never the button). */
+/**
+ * Text a code block's copy button puts on the clipboard (the <code> child, never the button),
+ * without the trailing newline marked appends so a pasted command never runs on its own.
+ */
 export function codeBlockText(pre: Element): string {
-  return (pre.querySelector("code") ?? pre).textContent ?? "";
+  return ((pre.querySelector("code") ?? pre).textContent ?? "").replace(/\n$/, "");
 }
 
 interface CopyCodeButtonProps {

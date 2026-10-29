@@ -468,6 +468,12 @@ active list; turn ends and errors leave it untouched. The web list (`splitConver
 conversations first, then a collapsible "Classées" section (collapse persisted in
 `atelier:settled-collapsed`) with compact rows, limited to `SETTLED_PREVIEW_COUNT` until "Afficher N de plus".
 
+The Atelier agent (Claude and Codex) can archive its own conversation with the worker tool
+`atelier_settle_conversation({ authorizationQuote })` (part of `ATELIER_BOARD_TOOL_NAMES`, handled by
+`AtelierTicketTools`). Like other mutating Atelier tools, the quote must come from the current user
+message; the call is idempotent, never touches cards, and records an `ATELIER_BOARD_RESULT` activity.
+The next user message reopens the conversation through the `submitTurn` reset above.
+
 ## HTML mockups
 
 On explicit request (or after the user accepts its proposal), the Atelier agent writes a static mockup

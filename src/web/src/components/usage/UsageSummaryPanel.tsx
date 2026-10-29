@@ -4,6 +4,7 @@ import type { UsageSummary } from "@shared/providerUsage";
 
 import { Badge } from "@/components/ui/badge";
 import { DailyUsageChart } from "@/components/usage/DailyUsageChart";
+import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent } from "@/lib/usageDisplay";
 import type { UsageProviderFilter } from "@/lib/usageDisplay";
 
@@ -34,10 +35,10 @@ export function UsageSummaryPanel({ summary, filter, metric }: {
           {providers.map((provider) => (<li key={provider} className="space-y-1 text-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${provider === "claude" ? "bg-orange-400" : "bg-foreground"}`} />{QUOTA_PROVIDER_LABELS[provider]}</span>
+                <ProviderLogo provider={provider} />{QUOTA_PROVIDER_LABELS[provider]}</span>
               <span className="font-medium tabular-nums">{format(valueOf(provider))}</span>
             </div>
-            <div className="flex justify-between pl-4 text-xs text-muted-foreground">
+            <div className="flex justify-between pl-6 text-xs text-muted-foreground">
               <span>{sessionCountText(summary.providers[provider].sessionCount)}</span>
               <span>{formatPercent(sharePercent(valueOf(provider), total))}</span>
             </div>

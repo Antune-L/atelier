@@ -71,17 +71,25 @@ export function UsageView(): ReactNode {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <Tabs options={USAGE_PROVIDER_FILTER_OPTIONS} value={filter} onChange={setFilter} aria-label="Fournisseur" />
-          {tab !== "limits" && (
-            <ToggleGroup type="single" value={period} onValueChange={onPeriodChange} aria-label="Période" variant="outline" size="sm">
-              {USAGE_PERIODS.map((value) => (
-                <ToggleGroupItem key={value} value={value}>
-                  {USAGE_PERIOD_LABELS[value]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-          )}
           <Tabs options={USAGE_TAB_OPTIONS} value={tab} onChange={setTab} aria-label="Vue de la consommation" />
         </div>
+        <ToggleGroup
+          type="single"
+          value={period}
+          onValueChange={onPeriodChange}
+          aria-label="Période"
+          aria-hidden={tab === "limits"}
+          disabled={tab === "limits"}
+          variant="outline"
+          size="sm"
+          className={cn("ml-auto shrink-0", tab === "limits" && "invisible")}
+        >
+          {USAGE_PERIODS.map((value) => (
+            <ToggleGroupItem key={value} value={value}>
+              {USAGE_PERIOD_LABELS[value]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
       {tab === "limits" ? (
         <LimitsTab

@@ -5,6 +5,7 @@ import { providerOfModel } from "@shared/pricing";
 import type { DailyUsage, ModelUsageRow, ProviderUsage } from "@shared/providerUsage";
 
 import { Tabs } from "@/components/ui/tabs";
+import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { effectiveModelLabel } from "@/lib/stats";
 import { formatCompactTokens, formatCostOrUnpriced, formatDayLabel, formatPercent, formatUsageUsd, sharePercent } from "@/lib/usageDisplay";
 type TokenBreakdown = ProviderUsage["tokens"];
@@ -77,7 +78,7 @@ export function ModelTable({ models, metric = "cost" }: {
           <td className="min-w-48 py-3 pr-6">
             <div className="mb-2 flex gap-3">
               <span className="w-3 text-xs text-muted-foreground">{index + 1}</span>
-              <span>{usageModelLabel(row)}</span>
+              <span className="flex items-center gap-2"><ProviderLogo provider={providerOfModel(row.model)} />{usageModelLabel(row)}</span>
             </div>
             <div className="ml-6 h-0.5 bg-muted">
               <div className={`h-full ${providerOfModel(row.model) === "claude" ? "bg-orange-400" : "bg-foreground"}`} style={{ width: `${sharePercent(valueOf(row), total)}%` }} />

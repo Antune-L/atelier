@@ -1,4 +1,4 @@
-import { Bot, Loader2, TerminalSquare } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { isQuotaStale } from "@shared/providerQuota";
@@ -6,6 +6,7 @@ import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 
 import { Badge } from "@/components/ui/badge";
 import { ClaudeLoginPanel } from "@/components/usage/ClaudeLoginPanel";
+import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { QuotaWindowBar } from "@/components/usage/QuotaWindowBar";
 import type { useClaudeLogin } from "@/hooks/useClaudeLogin";
 import { formatAgo, QUOTA_PROVIDER_LABELS, quotaAgeText, quotaStateMessage, showsLastKnownWindows } from "@/lib/usageDisplay";
@@ -61,7 +62,7 @@ function ProviderQuotaCard({ view, now, login }: { view: ProviderQuotaView; now:
     <section className="flex min-w-0 flex-col gap-4" aria-label={QUOTA_PROVIDER_LABELS[view.provider]}>
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="flex items-center gap-2 text-lg font-semibold">
-          {view.provider === "codex" ? <TerminalSquare className="h-5 w-5" aria-hidden /> : <Bot className="h-5 w-5" aria-hidden />}
+          <ProviderLogo provider={view.provider} className="h-5 w-5" />
           {QUOTA_PROVIDER_LABELS[view.provider]}
         </h3>
         {quota?.planType && <span className="text-sm text-muted-foreground">{quota.planType}</span>}

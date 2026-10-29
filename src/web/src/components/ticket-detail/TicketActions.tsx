@@ -3,6 +3,7 @@ import {
   FlaskConical,
   GitMerge,
   GitPullRequest,
+  Loader2,
   MoreHorizontal,
   Rocket,
   RotateCw,
@@ -10,7 +11,7 @@ import {
   Square,
   type LucideIcon,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
@@ -30,6 +31,7 @@ import { api } from "@/lib/api";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 import { formatScheduleDate, formatScheduleTime } from "@/lib/scheduledLaunch";
 import { boardStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 interface ConfirmSpec {
   title: string;
@@ -45,6 +47,8 @@ interface TicketAction {
   Icon?: LucideIcon;
   title?: string;
   disabled?: boolean;
+  /** Animates the icon (in-flight operation). */
+  spinning?: boolean;
   destructive?: boolean;
   confirm?: ConfirmSpec;
   run: () => Promise<void>;
@@ -60,6 +64,9 @@ interface TicketActionsProps {
 
 const RETRY_STAGES: Ticket["stage"][] = ["failed", "interrupted", "stalled"];
 const IMPLEMENT_ACTION_ID = "implement";
+const MERGE_ACTION_ID = "merge";
+/** Actions locked while a manual merge of the ticket's PR is in flight. */
+const MERGE_ACTION_IDS = new Set([MERGE_ACTION_ID, "check-merge", "mark-merged", "resolve-conflicts"]);
 
 
 /**
@@ -74,6 +81,8 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
   const { prOnly } = useCapabilities();
 
   const hasConflicts = conflictTicketId === ticket.id;
+  // Read from the store so the spinner survives closing and reopening the detail mid-merge.
+  const merging = useSyncExternalStore(boardStore.subscribe, () => boardStore.getSnapshot().mergingTicketIds.has(ticket.id));
   const actions = buildActions(ticket, {
     prOnly,
     onRefresh,
@@ -82,6 +91,10 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
     onRecovery,
     hasConflicts,
     onConflicts: () => setConflictTicketId(ticket.id),
+  }).map((action) => {
+    if (!merging || !MERGE_ACTION_IDS.has(action.id)) return action;
+    if (action.id !== MERGE_ACTION_ID) return { ...action, disabled: true };
+    return { ...action, label: "Merge en cours…", Icon: Loader2, spinning: true, disabled: true };
   });
   const dependencyReason = ticket.dependencyStatus?.reason;
   const dependencyManualCommand = ticket.dependencyStatus?.manualCommand;
@@ -146,7 +159,7 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
         disabled={action.disabled === true || busyId !== null}
         onClick={() => trigger(action)}
       >
-        {action.Icon !== undefined && <action.Icon className="h-3.5 w-3.5" />}
+        {action.Icon !== undefined && <action.Icon className={cn("h-3.5 w-3.5", action.spinning === true && "animate-spin")} />}
         {action.label}
       </Button>
     );
@@ -204,7 +217,7 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
                   disabled={action.disabled === true}
                   onClick={() => trigger(action)}
                 >
-                  {action.Icon !== undefined && <action.Icon className="h-3.5 w-3.5" />}
+                  {action.Icon !== undefined && <action.Icon className={cn("h-3.5 w-3.5", action.spinning === true && "animate-spin")} />}
                   {action.label}
                 </PopoverMenuItem>
               ))
@@ -410,7 +423,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
   if (isFinishedFeature) {
     if (canMergePr(ticket) && !ctx.hasConflicts) {
       actions.push({
-        id: "merge",
+        id: MERGE_ACTION_ID,
         label: "Merger la PR",
         Icon: GitMerge,
         confirm: {
@@ -419,6 +432,7 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
           confirmLabel: "Merger",
         },
         run: async () => {
+          if (boardStore.beginMerge([ticket.id]).length === 0) return;
           try {
             const result = await api.mergePr(ticket.id);
             if (result.merged) {
@@ -429,6 +443,8 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
             ctx.onError(result.reason ?? "Merge de la PR échoué");
           } catch (error) {
             ctx.onError(errorMessage(error, "Merge de la PR échoué"));
+          } finally {
+            boardStore.endMerge(ticket.id);
           }
         },
       });

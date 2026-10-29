@@ -326,6 +326,7 @@ export function BoardColumn({
     icon: GitMerge,
     onSelect: onMergeAll ?? NOOP,
     disabled: onMergeAll === undefined || mergeAllCount === 0 || mergeAllBusy,
+    busy: mergeAllBusy,
     title: resolveMergeAllTitle(mergeAllCount, mergeAllBusy),
   }] : [
     {

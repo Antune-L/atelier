@@ -1,6 +1,6 @@
-import { Archive, FileText, LayoutGrid, Mail, MessageSquarePlus, PanelLeftOpen, Search, Trash2 } from "lucide-react";
+import { Archive, FileText, LayoutGrid, Mail, MessageSquare, MessageSquarePlus, PanelLeftOpen, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import { CONVERSATION_STATUS_LABELS } from "@shared/constants";
 import type { Conversation, ProjectInfo } from "@shared/schemas";
@@ -60,6 +60,10 @@ interface PrdSeen {
   count: number;
 }
 
+function isVisible(element: HTMLElement | null | undefined): element is HTMLElement {
+  return element !== null && element !== undefined && element.isConnected && element.offsetParent !== null;
+}
+
 async function findPrdConversation(candidates: Conversation[], prdId: string): Promise<string | null> {
   for (const candidate of candidates) {
     const detail = await api.atelierConversation(candidate.id).catch(() => null);
@@ -84,6 +88,9 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const resolveSeq = useRef(0);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const documentButtonRef = useRef<HTMLButtonElement | null>(null);
+  const documentHistoryButtonRef = useRef<HTMLButtonElement>(null);
+  const documentHeaderRef = useRef<HTMLElement>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
 
   const detail = useConversationDetail(selectedId);
 
@@ -199,18 +206,44 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const activeStep = prd === undefined ? "conversation" : step;
   const defaultProject = projectFilter === ALL_PROJECTS ? null : projectFilter;
 
-  const historyButton = (
-    <Button ref={historyButtonRef} size="sm" variant="outline" onClick={() => setListOpen(true)} aria-label="Ouvrir les discussions" aria-haspopup="dialog">
+  const renderHistoryButton = (ref: RefObject<HTMLButtonElement>) => (
+    <Button ref={ref} size="sm" variant="outline" onClick={() => setListOpen(true)} aria-label="Ouvrir les discussions" aria-haspopup="dialog">
       <PanelLeftOpen className="h-4 w-4" />
       <span className="hidden sm:inline">Discussions</span>
       <span className="hidden font-mono text-2xs text-muted-foreground sm:inline">{total}</span>
     </Button>
   );
 
+  const showDocument = compose === null && selectedId !== null && conversation !== null && prd !== undefined && activeStep !== "conversation";
+
+  // Focus follows the visible header when the document replaces the discussion (and back).
+  const previousStep = useRef<AtelierStep>(activeStep);
+  useEffect(() => {
+    const previous = previousStep.current;
+    previousStep.current = activeStep;
+    if (previous === activeStep) return;
+    if (activeStep === "conversation") {
+      const remembered = documentButtonRef.current;
+      const fallback = conversationRef.current?.querySelector<HTMLButtonElement>(`[data-atelier-step="${previous}"]`);
+      const target = [remembered, fallback, historyButtonRef.current].find(isVisible);
+      target?.focus();
+      return;
+    }
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== document.body && isVisible(focused)) return;
+    documentHeaderRef.current?.querySelector<HTMLButtonElement>(`[data-atelier-step="${activeStep}"]`)?.focus();
+  }, [activeStep]);
+
   const documentActions = prd === undefined ? null : (
     <nav aria-label="Documents de la discussion" className="flex items-center gap-1">
+      {activeStep !== "conversation" && (
+        <Button size="sm" variant="ghost" className="px-2 sm:px-3" aria-label="Discussion" title="Discussion" onClick={() => setStep("conversation")}>
+          <MessageSquare className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Discussion</span>
+        </Button>
+      )}
       {ATELIER_STEPS.filter((value) => value !== "conversation").map((value) => (
-        <Button key={value} size="sm" variant={activeStep === value ? "secondary" : "ghost"} className="px-2 sm:px-3" aria-label={ATELIER_STEP_LABELS[value]} title={ATELIER_STEP_LABELS[value]} onClick={(event) => { documentButtonRef.current = event.currentTarget; setStep(value); }}>
+        <Button key={value} data-atelier-step={value} size="sm" variant={activeStep === value ? "secondary" : "ghost"} className="px-2 sm:px-3" aria-label={ATELIER_STEP_LABELS[value]} title={ATELIER_STEP_LABELS[value]} onClick={(event) => { if (activeStep === "conversation") documentButtonRef.current = event.currentTarget; setStep(value); }}>
           {value === "prd" ? <FileText className="h-3.5 w-3.5" /> : <LayoutGrid className="h-3.5 w-3.5" />}
           <span className="hidden sm:inline">{ATELIER_STEP_LABELS[value]}</span>
         </Button>
@@ -255,16 +288,49 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
       );
     }
     return (
-      <ConversationPanel
-        key={conversation.id}
-        conversation={conversation}
-        messages={detail.messages}
-        projectLabel={resolveProjectLabel(projects, conversation.project)}
-        historyButton={historyButton}
-        documentActions={documentActions}
-        toolbar={toolbar}
-        hasPrd={prd !== undefined}
-      />
+      <>
+        {/* Kept mounted while a document is shown so its scroll position and live state survive. */}
+        <div ref={conversationRef} className={cn("min-h-0 flex-1 flex-col", showDocument ? "hidden" : "flex")}>
+          <ConversationPanel
+            key={conversation.id}
+            conversation={conversation}
+            messages={detail.messages}
+            projectLabel={resolveProjectLabel(projects, conversation.project)}
+            historyButton={renderHistoryButton(historyButtonRef)}
+            documentActions={showDocument ? null : documentActions}
+            toolbar={showDocument ? null : toolbar}
+            hasPrd={prd !== undefined}
+          />
+        </div>
+        {showDocument && prd !== undefined && (
+          <>
+            <header ref={documentHeaderRef} className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
+              {renderHistoryButton(documentHistoryButtonRef)}
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <h2 className="truncate text-sm font-medium" title={prd.document.title}>{prd.document.title}</h2>
+                <Badge variant={prd.status === "validated" ? "success" : "outline"} className="shrink-0">{prd.status === "validated" ? "Validé" : "Brouillon"}</Badge>
+                <span className="hidden shrink-0 font-mono text-2xs text-muted-foreground sm:inline">rév. {prd.revision}</span>
+              </div>
+              <div className="ml-auto flex shrink-0 items-center gap-1">
+                {documentActions}
+                {toolbar}
+              </div>
+            </header>
+            {activeStep === "cards" ? (
+              <CardsPanel conversation={conversation} prd={prd} projects={projects} onBackToPrd={() => setStep("prd")} />
+            ) : (
+              <PrdPanel
+                conversation={conversation}
+                prd={prd}
+                prds={prds}
+                onSelectPrd={setPrdChoice}
+                onApplyPrd={detail.applyPrd}
+                onCreateCards={() => setStep("cards")}
+              />
+            )}
+          </>
+        )}
+      </>
     );
   };
 
@@ -273,7 +339,7 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <Sheet open={listOpen} onOpenChange={setListOpen} side="left" size="md" title={<>Discussions <span className="ml-1 font-normal text-muted-foreground">{total}</span></>} className="w-80" onCloseAutoFocus={(event) => { event.preventDefault(); historyButtonRef.current?.focus(); }}>
+      <Sheet open={listOpen} onOpenChange={setListOpen} side="left" size="md" title={<>Discussions <span className="ml-1 font-normal text-muted-foreground">{total}</span></>} className="w-80" onCloseAutoFocus={(event) => { event.preventDefault(); [documentHistoryButtonRef.current, historyButtonRef.current].find(isVisible)?.focus(); }}>
         <aside className="flex min-h-0 w-full flex-col gap-3 p-4" aria-label="Historique des discussions">
           <Button size="sm" onClick={() => openCompose(null)}>
             <MessageSquarePlus className="h-4 w-4" />
@@ -393,7 +459,7 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {!showConversationHeader && (
           <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-5">
-            {historyButton}
+            {renderHistoryButton(historyButtonRef)}
             <Button size="sm" variant="ghost" onClick={() => openCompose(null)}>
               <MessageSquarePlus className="h-4 w-4" />
               Nouvelle discussion
@@ -403,21 +469,6 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
         )}
         {renderPanel()}
       </section>
-      <Sheet open={showConversationHeader && activeStep !== "conversation"} onOpenChange={(open) => { if (!open) setStep("conversation"); }} title={ATELIER_STEP_LABELS[activeStep]} size="lg" onCloseAutoFocus={(event) => { event.preventDefault(); const button = documentButtonRef.current?.isConnected ? documentButtonRef.current : historyButtonRef.current; button?.focus(); }}>
-        {prd !== undefined && conversation !== null && (activeStep === "cards" ? (
-          <CardsPanel conversation={conversation} prd={prd} projects={projects} onBackToPrd={() => setStep("prd")} />
-        ) : (
-          <PrdPanel
-            conversation={conversation}
-            prd={prd}
-            prds={prds}
-            onSelectPrd={setPrdChoice}
-            onApplyPrd={detail.applyPrd}
-            onBackToConversation={() => setStep("conversation")}
-            onCreateCards={() => setStep("cards")}
-          />
-        ))}
-      </Sheet>
     </div>
   );
 }

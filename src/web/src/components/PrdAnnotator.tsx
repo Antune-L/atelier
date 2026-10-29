@@ -1,6 +1,10 @@
 import { ChevronDown, ChevronUp, MessageSquarePlus, Search, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
+import type { PrdOutlineEntry } from "@shared/prdMarkdown";
+
+import { PrdOutlineNav } from "@/components/atelier/PrdOutlineNav";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { renderMarkdownToSafeHtml } from "@/components/ui/markdown";
@@ -12,6 +16,7 @@ import {
   type SelectionState,
 } from "@/lib/prdAnnotations";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+import { applyHeadingAnchors, scrollToPrdAnchor } from "@/lib/prdOutline";
 import { cn } from "@/lib/utils";
 
 interface PrdAnnotatorProps {
@@ -22,14 +27,23 @@ interface PrdAnnotatorProps {
   onAnnotationsChange: (annotations: PrdAnnotation[]) => void;
   generalNote: string;
   onGeneralNoteChange: (note: string) => void;
+  /** Full-screen layout: anchors the headings, adds a "Sommaire" column and centres the text at reading width. */
+  outline?: PrdOutlineEntry[];
+  /** Rendered above the annotations in the right column; shows the column even when not actionable. */
+  asideHeader?: ReactNode;
+  /** Rendered below the general note in the right column; shows the column even when not actionable. */
+  asideFooter?: ReactNode;
 }
 
 const GENERAL_NOTE_ID = "prd-general-note";
 
 /**
  * Renders a PRD markdown with text-selection → floating "Commenter" button and an annotations
- * sidebar (focus/remove + general note). A re-generated PRD invalidates anchors built on the old
- * text, so consumers must remount this with `key={markdown}` to start from a clean slate.
+ * sidebar (focus/remove + general note). With `outline`, it switches to a full-screen layout:
+ * anchored headings, a left "Sommaire" column (a menu below `md`) and a centred reading column;
+ * `asideHeader` and `asideFooter` frame the annotations in the same right column. A re-generated
+ * PRD invalidates anchors built on the old text, so consumers must remount this with
+ * `key={markdown}` to start from a clean slate.
  */
 export function PrdAnnotator({
   markdown,
@@ -38,6 +52,9 @@ export function PrdAnnotator({
   onAnnotationsChange,
   generalNote,
   onGeneralNoteChange,
+  outline,
+  asideHeader,
+  asideFooter,
 }: PrdAnnotatorProps) {
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [composing, setComposing] = useState<string | null>(null);
@@ -46,13 +63,22 @@ export function PrdAnnotator({
 
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const baseHtml = useMemo(() => renderMarkdownToSafeHtml(markdown), [markdown]);
+  // Heading ids are set after sanitization and before annotation injection, which keeps attributes.
+  const baseHtml = useMemo(() => {
+    const safe = renderMarkdownToSafeHtml(markdown);
+    return outline ? applyHeadingAnchors(safe, outline) : safe;
+  }, [markdown, outline]);
   const { html, anchoredIds } = useMemo(
     () => injectAnnotations(baseHtml, annotations, activeId),
     [baseHtml, annotations, activeId],
   );
 
   const search = usePrdSearch({ contentRef, htmlVersion: html });
+
+  const fullScreen = outline !== undefined;
+  const framed = asideHeader !== undefined || asideFooter !== undefined;
+
+  const navigate = (anchor: string): void => scrollToPrdAnchor(anchor, contentRef.current);
 
   const captureSelection = (): void => {
     if (!actionable) return;
@@ -116,8 +142,30 @@ export function PrdAnnotator({
     }
   };
 
+  const documentBody = (
+    <>
+      {actionable && (
+        <p className={cn("mb-3", FIELD_LABEL_CLASSES)}>
+          Sélectionne un passage pour y attacher un retour.
+        </p>
+      )}
+      <div
+        className="markdown"
+        // Sanitized by renderMarkdownToSafeHtml; only heading ids and <mark>/<sup> are injected on top.
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
+      {outline && (
+        <PrdOutlineNav
+          entries={outline}
+          onNavigate={navigate}
+          className="hidden shrink-0 overflow-y-auto border-r border-border px-2 py-3 md:block md:w-56"
+        />
+      )}
       <div
         ref={contentRef}
         onMouseUp={captureSelection}
@@ -174,16 +222,13 @@ export function PrdAnnotator({
             </div>
           </div>
         )}
-        {actionable && (
-          <p className={cn("mb-3", FIELD_LABEL_CLASSES)}>
-            Sélectionne un passage pour y attacher un retour.
-          </p>
+        {outline && (
+          <details className="mb-3 rounded-md border border-border md:hidden">
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Sommaire</summary>
+            <PrdOutlineNav entries={outline} onNavigate={navigate} className="px-1 pb-2" />
+          </details>
         )}
-        <div
-          className="markdown"
-          // Sanitized by renderMarkdownToSafeHtml; only <mark>/<sup> are injected on top.
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        {fullScreen ? <div className="mx-auto w-full max-w-[72ch]">{documentBody}</div> : documentBody}
         {actionable && selection && (
           <div className="absolute z-10" style={{ top: selection.top, left: selection.left }}>
             <Button
@@ -198,10 +243,16 @@ export function PrdAnnotator({
         )}
       </div>
 
-      {actionable && (
-        <aside className="flex max-h-72 w-full shrink-0 flex-col overflow-hidden border-t border-border md:max-h-none md:w-64 md:border-l md:border-t-0">
+      {(actionable || framed) && (
+        <aside
+          className={cn(
+            "flex w-full shrink-0 flex-col overflow-hidden border-t border-border md:max-h-none md:border-l md:border-t-0",
+            framed ? "md:w-72" : "max-h-72 md:w-64",
+          )}
+        >
           <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
-            {composing !== null && (
+            {asideHeader}
+            {actionable && composing !== null && (
               <div className="space-y-2 rounded-md border border-warning/50 bg-warning/10 p-3">
                 <p className="text-xs italic text-muted-foreground">« {composing} »</p>
                 <Textarea
@@ -222,64 +273,69 @@ export function PrdAnnotator({
               </div>
             )}
 
-            <div>
-              <h4 className={cn("mb-2", FIELD_LABEL_CLASSES)}>
-                Annotations {annotations.length > 0 && `(${annotations.length})`}
-              </h4>
-              {annotations.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Aucune annotation pour l'instant.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {annotations.map((a, i) => (
-                    <li
-                      key={a.id}
-                      className={cn(
-                        "rounded-md border p-2 text-sm",
-                        a.id === activeId && "border-warning/60 bg-warning/10",
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => focusAnnotation(a.id)}
-                          className="min-w-0 flex-1 text-left"
-                        >
-                          <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning font-mono text-2xs font-semibold text-warning-foreground">
-                            {i + 1}
-                          </span>
-                          <span className="text-xs italic text-muted-foreground">« {a.quote} »</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeAnnotation(a.id)}
-                          aria-label="Supprimer l'annotation"
-                          className="text-muted-foreground transition-colors hover:text-danger"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                      <p className="mt-1 whitespace-pre-wrap">{a.comment}</p>
-                      {!anchoredIds.has(a.id) && (
-                        <p className="mt-1 text-2xs text-muted-foreground">
-                          Non surligné dans le texte (passage à cheval sur plusieurs éléments) — envoyé quand même.
-                        </p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {actionable && (
+              <div>
+                <h4 className={cn("mb-2", FIELD_LABEL_CLASSES)}>
+                  Annotations {annotations.length > 0 && `(${annotations.length})`}
+                </h4>
+                {annotations.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Aucune annotation pour l'instant.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {annotations.map((a, i) => (
+                      <li
+                        key={a.id}
+                        className={cn(
+                          "rounded-md border p-2 text-sm",
+                          a.id === activeId && "border-warning/60 bg-warning/10",
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => focusAnnotation(a.id)}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <span className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-warning font-mono text-2xs font-semibold text-warning-foreground">
+                              {i + 1}
+                            </span>
+                            <span className="text-xs italic text-muted-foreground">« {a.quote} »</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAnnotation(a.id)}
+                            aria-label="Supprimer l'annotation"
+                            className="text-muted-foreground transition-colors hover:text-danger"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap">{a.comment}</p>
+                        {!anchoredIds.has(a.id) && (
+                          <p className="mt-1 text-2xs text-muted-foreground">
+                            Non surligné dans le texte (passage à cheval sur plusieurs éléments) — envoyé quand même.
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
-            <div className="space-y-1.5">
-              <Label htmlFor={GENERAL_NOTE_ID}>Retour général (optionnel)</Label>
-              <Textarea
-                id={GENERAL_NOTE_ID}
-                value={generalNote}
-                onChange={(e) => onGeneralNoteChange(e.target.value)}
-                className="min-h-[60px]"
-                placeholder="Remarque globale sur le PRD…"
-              />
-            </div>
+            {actionable && (
+              <div className="space-y-1.5">
+                <Label htmlFor={GENERAL_NOTE_ID}>Retour général (optionnel)</Label>
+                <Textarea
+                  id={GENERAL_NOTE_ID}
+                  value={generalNote}
+                  onChange={(e) => onGeneralNoteChange(e.target.value)}
+                  className="min-h-[60px]"
+                  placeholder="Remarque globale sur le PRD…"
+                />
+              </div>
+            )}
+            {asideFooter}
           </div>
         </aside>
       )}

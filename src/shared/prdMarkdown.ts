@@ -187,6 +187,46 @@ export function renderPrdMarkdown(doc: PrdDocument): string {
   return joinBlocks(blocks);
 }
 
+export interface PrdOutlineEntry {
+  /** Stable DOM id assigned to the rendered heading. */
+  anchor: string;
+  /** Text shown in the table of contents. */
+  label: string;
+  /** Exact heading text emitted by renderPrdMarkdown. */
+  heading: string;
+  /** Markdown heading level (2 for `##`). */
+  level: number;
+  /** Nesting depth in the table of contents (0 = top level). */
+  depth: number;
+  /** Heading prefix (`A1 · `, `FR1 — `) still recognisable when inline markdown alters the title text. */
+  prefix?: string;
+}
+
+function anchorId(kind: string, id: string): string {
+  return `prd-${kind}-${id.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+}
+
+/** Navigable headings of renderPrdMarkdown(doc), in document order, built from the same heading helpers. */
+export function prdOutline(doc: PrdDocument): PrdOutlineEntry[] {
+  const top = (anchor: string, text: string, level = H2): PrdOutlineEntry => ({ anchor, label: text, heading: text, level, depth: level === H2 ? 0 : 1 });
+  const entries: PrdOutlineEntry[] = [top("prd-decisions", LABELS.decisions), top("prd-need", LABELS.need)];
+  if (doc.goals.length > 0) entries.push(top("prd-goals", LABELS.goals, H3));
+  entries.push(top("prd-out-of-scope", LABELS.outOfScope));
+  if (doc.roadmap) entries.push(top("prd-roadmap", LABELS.roadmap));
+  for (const axis of doc.axes) {
+    const axisHeading = `${axis.id}${META_SEPARATOR}${axis.title}`;
+    entries.push({ anchor: anchorId("axis", axis.id), label: axisHeading, heading: axisHeading, level: H2, depth: 0, prefix: `${axis.id}${META_SEPARATOR}` });
+    for (const requirement of doc.requirements.filter((candidate) => candidate.axis === axis.id)) {
+      entries.push({ anchor: anchorId("req", requirement.id), label: `${requirement.id}${SEPARATOR}${requirement.title}`, heading: requirementTitle(requirement), level: H4, depth: 1, prefix: `${requirement.id}${SEPARATOR}` });
+    }
+    for (const task of doc.tasks.filter((candidate) => candidate.axis === axis.id)) {
+      entries.push({ anchor: anchorId("task", task.id), label: taskTitle(task), heading: taskTitle(task), level: H4, depth: 1, prefix: `${task.id}${SEPARATOR}` });
+    }
+  }
+  if (renderContext(doc).length > 0) entries.push(top("prd-context", LABELS.context));
+  return entries;
+}
+
 export function orderSelectedPrdTasks(doc: PrdDocument, selected: ReadonlySet<string>): PrdTask[] {
   const pending = doc.tasks.filter((task) => selected.has(task.id));
   const ordered: PrdTask[] = [];

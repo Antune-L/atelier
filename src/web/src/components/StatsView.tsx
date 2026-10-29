@@ -7,14 +7,11 @@ import { ProjectSelect } from "@/components/ProjectSelect";
 import { StatCard } from "@/components/stats/StatCard";
 import {
   DurationChart,
-  CostSummary,
-  CodexTierSummary,
   KindChart,
   OutcomeChart,
   ProjectChart,
   SuccessRateChart,
   ThroughputChart,
-  TokensByProjectChart,
 } from "@/components/stats/StatCharts";
 import { Button } from "@/components/ui/button";
 import { useStats } from "@/hooks/useStats";
@@ -92,20 +89,6 @@ export function StatsView({ projects }: StatsViewProps): ReactNode {
           </StatCard>
           <StatCard title="Débit dans le temps" description="Tickets réussis par semaine">
             <ThroughputChart records={filtered} />
-          </StatCard>
-        </div>
-      </section>
-      <section aria-label="Coûts" className="space-y-3">
-        <h2 className="text-base font-semibold">Coûts</h2>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <StatCard title="Coût des exécutions" description="Total disponible ou sous-total explicitement partiel">
-            <CostSummary records={filtered} />
-          </StatCard>
-          <StatCard title="Tokens par projet" description="Nombre de tokens par projet">
-            <TokensByProjectChart records={filtered} projects={projects} />
-          </StatCard>
-          <StatCard title="Mode FAST Codex" description="Tier demandé et configuration confirmée">
-            <CodexTierSummary records={filtered} />
           </StatCard>
         </div>
       </section>

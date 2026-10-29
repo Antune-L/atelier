@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { ExecutionRun, StatRecord } from "@shared/schemas";
 
-import { meanDurationByModel, summarizeCodexTiers } from "./stats";
+import { meanDurationByModel } from "./stats";
 
 function record(executions: ExecutionRun[]): StatRecord {
   return {
@@ -58,47 +58,5 @@ describe("effective execution statistics", () => {
     expect(meanDurationByModel([record([execution])])).toEqual([
       { key: "gpt-6-sol", label: "6 Sol", meanMs: 1_500, count: 1 },
     ]);
-  });
-
-  test("distinguishes requested, confirmed and unknown Codex tiers", () => {
-    const base = record([]);
-    const execution = (id: string, codexFast: boolean, configuredServiceTier: string | null): ExecutionRun => ({
-      id,
-      ownerType: "ticket",
-      ownerId: "ticket-1",
-      generationId: id,
-      sessionId: null,
-      role: "orchestrator",
-      orchestrator: "codex",
-      effectiveModel: "gpt-6-sol",
-      effectiveEffort: "medium",
-      delegateProvider: null,
-      delegateEffectiveModel: null,
-      delegateEffectiveEffort: null,
-      delegateCodexFast: null,
-      codexFast,
-      configuredServiceTier,
-      usageByModel: {},
-      status: "completed",
-      error: null,
-      errorDetails: null,
-      startedAt: 0,
-      finishedAt: 1,
-    });
-    expect(summarizeCodexTiers([{ ...base, executions: [
-      execution("fast", true, "fast"),
-      execution("default", false, "default"),
-      execution("unknown", true, null),
-      execution("priority", false, "priority"),
-      execution("flex", false, "flex"),
-    ] }])).toEqual({
-      total: 5,
-      requestedFast: 2,
-      requestedDefault: 3,
-      confirmedFast: 2,
-      confirmedDefault: 1,
-      confirmedUnknown: 1,
-      confirmedOther: [{ tier: "flex", count: 1 }],
-    });
   });
 });

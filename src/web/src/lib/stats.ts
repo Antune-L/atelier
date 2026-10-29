@@ -1,4 +1,3 @@
-import { isCodexFastServiceTier } from "@shared/codexCapabilities";
 import {
   AGENT_EFFORT_LABELS,
   AGENT_MODEL_LABELS,
@@ -126,45 +125,6 @@ export function meanDurationByEffort(records: StatRecord[]): DurationGroup[] {
   return meanExecutionDuration(records, (execution) => execution.effectiveEffort, effectiveEffortLabel);
 }
 
-export interface CodexTierSummary {
-  total: number;
-  requestedFast: number;
-  requestedDefault: number;
-  confirmedFast: number;
-  confirmedDefault: number;
-  confirmedUnknown: number;
-  confirmedOther: Array<{ tier: string; count: number }>;
-}
-
-/** Count persisted Codex generations by requested and provider-confirmed service tier. */
-export function summarizeCodexTiers(records: StatRecord[]): CodexTierSummary {
-  const summary: CodexTierSummary = {
-    total: 0,
-    requestedFast: 0,
-    requestedDefault: 0,
-    confirmedFast: 0,
-    confirmedDefault: 0,
-    confirmedUnknown: 0,
-    confirmedOther: [],
-  };
-  const otherTiers = new Map<string, number>();
-  for (const record of records) {
-    for (const execution of record.executions) {
-      if (execution.orchestrator !== "codex") continue;
-      summary.total += 1;
-      summary[execution.codexFast ? "requestedFast" : "requestedDefault"] += 1;
-      if (execution.configuredServiceTier === null) summary.confirmedUnknown += 1;
-      else if (isCodexFastServiceTier(execution.configuredServiceTier)) summary.confirmedFast += 1;
-      else if (execution.configuredServiceTier === "default") summary.confirmedDefault += 1;
-      else otherTiers.set(execution.configuredServiceTier, (otherTiers.get(execution.configuredServiceTier) ?? 0) + 1);
-    }
-  }
-  summary.confirmedOther = [...otherTiers.entries()]
-    .map(([tier, count]) => ({ tier, count }))
-    .sort((left, right) => left.tier.localeCompare(right.tier));
-  return summary;
-}
-
 export interface OutcomeCount {
   outcome: Outcome;
   label: string;
@@ -213,33 +173,6 @@ export function projectCounts(records: StatRecord[], projects: ProjectInfo[]): P
   return [...counts.entries()]
     .map(([key, count]) => ({ key, label: labelByKey.get(key) ?? key, count }))
     .sort((a, b) => b.count - a.count);
-}
-
-// ---- Token aggregation ----
-
-export interface TokenGroup {
-  key: string;
-  label: string;
-  /** Total tokens over the records contributing to this group. */
-  tokens: number;
-  /** Number of records (with usage) contributing. */
-  count: number;
-}
-
-/** Tokens per project, sorted descending by token count. */
-export function tokensByProject(records: StatRecord[], projects: ProjectInfo[]): TokenGroup[] {
-  const labelByKey = new Map(projects.map((p) => [p.key, p.label]));
-  const totals = new Map<string, { tokens: number; count: number }>();
-  for (const record of records) {
-    if (record.totalTokens === null) continue;
-    const entry = totals.get(record.project) ?? { tokens: 0, count: 0 };
-    entry.tokens += record.totalTokens;
-    entry.count += 1;
-    totals.set(record.project, entry);
-  }
-  return [...totals.entries()]
-    .map(([key, { tokens, count }]) => ({ key, label: labelByKey.get(key) ?? key, tokens, count }))
-    .sort((a, b) => b.tokens - a.tokens);
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;

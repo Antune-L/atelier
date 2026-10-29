@@ -18,7 +18,7 @@ const TOKEN_TYPES: { key: keyof TokenBreakdown; label: string }[] = [
 export const EMPTY_USAGE_MESSAGE = "Aucune exécution sur la période.";
 
 export function usageModelLabel(row: ModelUsageRow): string {
-  const speed = row.fast ? ` · ${row.speed === "fast" ? "FAST" : row.speed.toUpperCase()}` : "";
+  const speed = row.fast || row.speed !== "standard" ? ` · ${row.speed.toUpperCase()}` : "";
   return `${effectiveModelLabel(row.model)}${speed}`;
 }
 

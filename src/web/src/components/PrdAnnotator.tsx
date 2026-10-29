@@ -166,12 +166,24 @@ export function PrdAnnotator({
           className="hidden shrink-0 overflow-y-auto border-r border-border px-2 py-3 md:block md:w-56"
         />
       )}
+      {/* Outside contentRef so the in-document search never matches the outline labels. */}
+      {outline && (
+        <details className="mx-4 mt-3 shrink-0 rounded-md border border-border md:hidden">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Sommaire</summary>
+          <PrdOutlineNav entries={outline} onNavigate={navigate} className="px-1 pb-2" />
+        </details>
+      )}
       <div
         ref={contentRef}
         onMouseUp={captureSelection}
         onScroll={() => setSelection(null)}
         onClick={onContentClick}
-        className="relative min-w-0 flex-1 overflow-y-auto px-4 py-3"
+        // Framed below `md`: natural height so the stacked right column sits under the document
+        // and the root scrolls, instead of the column squeezing the text to nothing.
+        className={cn(
+          "relative min-w-0 px-4 py-3",
+          framed ? "flex-none md:flex-1 md:overflow-y-auto" : "flex-1 overflow-y-auto",
+        )}
       >
         {search.open && (
           <div className="sticky top-0 z-20 -mx-4 -mt-3 mb-2 flex justify-end px-4 pt-3">
@@ -221,12 +233,6 @@ export function PrdAnnotator({
               </Button>
             </div>
           </div>
-        )}
-        {outline && (
-          <details className="mb-3 rounded-md border border-border md:hidden">
-            <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Sommaire</summary>
-            <PrdOutlineNav entries={outline} onNavigate={navigate} className="px-1 pb-2" />
-          </details>
         )}
         {fullScreen ? <div className="mx-auto w-full max-w-[72ch]">{documentBody}</div> : documentBody}
         {actionable && selection && (

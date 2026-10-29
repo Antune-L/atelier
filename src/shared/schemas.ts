@@ -1375,6 +1375,7 @@ export {
   recoverImplementationPlanArgsSchema,
   delegateReviewArgsSchema,
   readReviewResultsArgsSchema,
+  grantReviewPassesArgsSchema,
   publishReviewArgsSchema,
   submitReviewArgsSchema,
   submitPrdDocumentArgsSchema,

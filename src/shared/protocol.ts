@@ -221,6 +221,11 @@ export const readReviewResultsArgsSchema = z.object({
   passId: z.string().min(1).nullish(),
 });
 
+export const grantReviewPassesArgsSchema = z.object({
+  questionId: z.string().min(1),
+  count: z.number().int().min(1).max(10),
+});
+
 export const publishReviewArgsSchema = z.object({
   passId: z.string().min(1),
 });
@@ -417,6 +422,12 @@ export const WORKER_TOOLS = [
     argsSchema: readReviewResultsArgsSchema,
   },
   {
+    name: "grant_review_passes",
+    description:
+      "Applique des passes de review supplémentaires accordées explicitement par l'utilisateur dans sa réponse à une de tes questions ask_user (questionId). count = nombre N de passes accordées. Réservé aux tickets feature ; chaque question ne peut justifier qu'un seul octroi.",
+    argsSchema: grantReviewPassesArgsSchema,
+  },
+  {
     name: "publish_review",
     description:
       "Publie via le backend les résultats persistés de la passe de review sur le commit exact vérifié : REQUEST_CHANGES si un finding critical ou major est retenu, COMMENT s'il ne reste que des minor, APPROVE si aucun finding n'est retenu. Le backend publie sur l'hôte de PR du projet (review GitHub, fils de commentaires + vote Azure DevOps). Réservé aux tickets review dont le postage est activé.",
@@ -506,6 +517,7 @@ const WORKER_TOOL_NAMES = [
   "recover_implementation_plan",
   "delegate_review",
   "read_review_results",
+  "grant_review_passes",
   "publish_review",
   "submit_review",
   "submit_triage",

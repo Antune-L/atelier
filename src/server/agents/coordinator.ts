@@ -18,6 +18,7 @@ import {
   recoverImplementationPlanArgsSchema,
   submitImplementationPlanArgsSchema,
   failArgsSchema,
+  grantReviewPassesArgsSchema,
   submitAnswerArgsSchema,
   submitFeasibilityArgsSchema,
   submitPrdArgsSchema,
@@ -38,7 +39,7 @@ import { hasStructuredPrDescription, maxReviewLevel } from "../system/vcs/prDesc
 import type { AtelierManager } from "./atelierManager.ts";
 import type { DelegationManager } from "./delegationManager.ts";
 import { isFirstFeatureDelivery } from "./prDescription.ts";
-import { acceptsReviewLimit, unreviewedChangesReport } from "./reviewPass.ts";
+import { acceptsReviewLimit, allowedReviewPasses, unreviewedChangesReport } from "./reviewPass.ts";
 import type { UnreviewedChanges } from "./reviewPass.ts";
 import type { FeasibilityBatchManager } from "./feasibilityManager.ts";
 import type { QualityManager } from "./qualityManager.ts";
@@ -470,6 +471,7 @@ export class AgentCoordinator {
     recover_implementation_plan: (ctx) => this.handleRecoverImplementationPlan(ctx),
     delegate_review: (ctx) => this.handleDelegateReview(ctx),
     read_review_results: (ctx) => this.handleReadReviewResults(ctx),
+    grant_review_passes: (ctx) => this.handleGrantReviewPasses(ctx),
     publish_review: (ctx) => this.handlePublishReview(ctx),
     submit_review: () => ({ ok: false, result: "submit_review réservé aux sessions reviewer." }),
     submit_triage: (ctx) => ({ ok: false, result: `tool inconnu: ${ctx.name}` }),
@@ -1051,6 +1053,37 @@ export class AgentCoordinator {
       return { ok: false, result: "read_review_results indisponible pour cette session." };
     }
     return this.delegation.readReviewResults(ctx.ticketId, parsed.data.passId ?? null);
+  }
+
+  /**
+   * Applies extra review passes the user granted in an answer to one of the agent's questions.
+   * The question must belong to this ticket and be answered; each question backs a single grant.
+   */
+  private handleGrantReviewPasses(ctx: SessionToolCall): ToolResult {
+    const parsed = grantReviewPassesArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (ticket?.kind !== "feature") {
+      return { ok: false, result: "grant_review_passes est réservé aux tickets feature." };
+    }
+    const { questionId, count } = parsed.data;
+    const question = this.store.getAgentQuestion(ctx.ticketId, questionId);
+    if (!question) {
+      return { ok: false, result: `Question inconnue pour ce ticket : ${questionId}. Utilise l'id d'une question ask_user posée sur ce ticket.` };
+    }
+    if (!question.answered) {
+      return { ok: false, result: `La question ${questionId} n'a pas encore reçu de réponse de l'utilisateur : attends son accord explicite.` };
+    }
+    const grant = this.store.grantReviewPasses(ctx.ticketId, questionId, count);
+    if (!grant) {
+      return { ok: false, result: `La question ${questionId} a déjà justifié un octroi de passes de review : pose une nouvelle question à l'utilisateur pour en obtenir d'autres.` };
+    }
+    log.info("passes de review accordées", { ticketId: ctx.ticketId, questionId, count, previousRounds: grant.previousRounds, rounds: grant.rounds });
+    this.hub.pushTicket(grant.ticket);
+    return {
+      ok: true,
+      result: `${count} passe(s) de review accordée(s) : compteur ramené à ${grant.rounds}/${allowedReviewPasses(grant.ticket)}. Relance tous les reviewers sur le code courant.`,
+    };
   }
 
   private async handlePublishReview(ctx: SessionToolCall): Promise<ToolResult> {

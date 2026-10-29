@@ -1831,6 +1831,37 @@ export class Store {
     this.db.query("UPDATE comments SET answered = 1 WHERE question_id = ? AND author = 'agent'").run(questionId);
   }
 
+  /** The agent question `questionId` asked on `ticketId`, or null when this ticket has no such question. */
+  getAgentQuestion(ticketId: string, questionId: string): Comment | null {
+    const raw = this.db
+      .query("SELECT * FROM comments WHERE ticket_id = ? AND author = 'agent' AND question_id = ? ORDER BY created_at ASC LIMIT 1")
+      .get(ticketId, questionId);
+    return raw ? mapCommentRow(raw) : null;
+  }
+
+  /**
+   * Apply `count` user-granted review passes backed by the question `questionId`: decrements
+   * review_rounds (bounded at 0) and records the grant atomically. Returns null when that question
+   * already backed a grant on this ticket (single use per question).
+   */
+  grantReviewPasses(ticketId: string, questionId: string, count: number): { ticket: Ticket; previousRounds: number; rounds: number } | null {
+    return this.transaction(() => {
+      const used = this.scalar(
+        "SELECT COUNT(*) AS n FROM events WHERE ticket_id = ? AND type = 'review_passes_granted' AND json_extract(payload, '$.questionId') = ?",
+        ticketId,
+        questionId,
+      );
+      if (used > 0) return null;
+      const previousRounds = this.scalar("SELECT review_rounds AS n FROM tickets WHERE id = ?", ticketId);
+      this.db.query("UPDATE tickets SET review_rounds = MAX(0, review_rounds - ?) WHERE id = ?").run(count, ticketId);
+      const ticket = this.getTicket(ticketId);
+      if (!ticket) throw new Error(`ticket introuvable: ${ticketId}`);
+      const rounds = ticket.reviewRounds;
+      this.logEvent(ticketId, "review_passes_granted", { questionId, count, previousRounds, rounds });
+      return { ticket, previousRounds, rounds };
+    });
+  }
+
   listComments(ticketId: string): Comment[] {
     const rows = this.db.query("SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC").all(ticketId);
     return rows.map(mapCommentRow);

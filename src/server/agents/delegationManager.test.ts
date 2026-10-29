@@ -614,6 +614,29 @@ describe("DelegationManager — independent reviews", () => {
     });
   });
 
+  test("user-granted review passes reopen delegate_review once the budget is spent", async () => {
+    const { system, sessionHub, delegation } = setup();
+    const created = newDelegatedTicket();
+    const ticket = ticketSchema.parse({ ...created, orchestrator: "codex", reviewDepth: "light" });
+    startParentSession(sessionHub, ticket.id);
+    await startAndApproveReviews(delegation, system, ticket, LIGHT_REVIEW_KINDS);
+    store.updateTicket(ticket.id, { reviewRounds: allowedReviewPasses(ticket) });
+
+    system.fingerprint = "code-v2";
+    const refused = await delegation.startReview(ticket, 3, "quality", "diff quality");
+    expect(refused.ok).toBe(false);
+    expect(refused.result).toContain("Budget de passes de review épuisé");
+
+    store.addComment(ticket.id, "agent", "Puis-je relancer des passes de review ?", "q-budget");
+    store.markQuestionAnswered("q-budget");
+    const grant = store.grantReviewPasses(ticket.id, "q-budget", 2);
+    expect(grant?.rounds).toBe(allowedReviewPasses(ticket) - 2);
+    expect(store.getTicket(ticket.id)?.reviewRounds).toBe(allowedReviewPasses(ticket) - 2);
+
+    const accepted = await delegation.startReview(ticket, 3, "quality", "diff quality");
+    expect(accepted.ok).toBe(true);
+  });
+
   test("a missing structured response never becomes an approval", async () => {
     const { system, sessionHub, delegation } = setup();
     const created = newDelegatedTicket();

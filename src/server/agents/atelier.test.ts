@@ -14,6 +14,7 @@ import { projectConfigSchema } from "../config.ts";
 import { FIXTURE_PROJECT_KEY } from "../testing/fixtures.ts";
 
 import { buildAtelierConsolidateTurn, buildAtelierPrompt } from "./atelier.ts";
+import type { AtelierWorkspace } from "./atelier.ts";
 import { ATELIER_BOARD_RESULT_PREFIX } from "./atelierTicketTools.ts";
 import { STEER_PREFIX } from "./sessionHub.ts";
 
@@ -43,12 +44,41 @@ function conversation(orchestrator: Orchestrator, researchEnabled: boolean, rese
     contextTokens: null,
     contextWindow: null,
     activeSubagents: [],
+    snapshotSha: null,
+    snapshotCommittedAt: null,
+    snapshotBaseBranch: null,
+    readLocalCheckout: false,
     createdAt: 0,
     updatedAt: 0,
   };
 }
 
-const prompt = (c: Conversation): string => buildAtelierPrompt({ conversation: c, project: PROJECT });
+const SNAPSHOT_SHA = "0123456789abcdef0123456789abcdef01234567";
+const SNAPSHOT_WORKSPACE: AtelierWorkspace = {
+  source: "origin",
+  cwd: "/var/snapshots/test/0123456789abcdef0123456789abcdef01234567",
+  sha: SNAPSHOT_SHA,
+  committedAt: Date.UTC(2026, 9, 1, 12, 30),
+  baseBranch: "main",
+};
+
+const prompt = (c: Conversation): string => buildAtelierPrompt({ conversation: c, project: PROJECT, workspace: SNAPSHOT_WORKSPACE });
+
+describe("buildAtelierPrompt — workspace", () => {
+  test("snapshot mode names the pinned commit and never the stale checkout", () => {
+    const text = prompt(conversation("claude", false, DEFAULT_RESEARCH_OPTIONS));
+    expect(text).toContain(`Code lu : instantané figé d'origin/main @ ${SNAPSHOT_SHA} (2026-10-01 12:30 UTC) dans ${SNAPSHOT_WORKSPACE.cwd}`);
+    expect(text).toContain(".env, node_modules");
+    expect(text).toContain("« Rafraîchir »");
+    expect(text).not.toContain(PROJECT.repoPath);
+  });
+
+  test("local mode reads the checkout with uncommitted changes", () => {
+    const text = buildAtelierPrompt({ conversation: conversation("codex", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, workspace: { source: "local", cwd: PROJECT.repoPath } });
+    expect(text).toContain(`Code lu : checkout local ${PROJECT.repoPath} (modifications non commitées incluses)`);
+    expect(text).not.toContain("instantané figé");
+  });
+});
 
 describe("buildAtelierPrompt — adversarial review", () => {
   test("the section is present by default and absent when unchecked or when research is off", () => {
@@ -134,7 +164,7 @@ describe("buildAtelierPrompt — history", () => {
 
   test("sub-agent activity lines are never replayed, board results included", () => {
     const history = [message(`${ATELIER_BOARD_RESULT_PREFIX} main`, null), message(`${ATELIER_BOARD_RESULT_PREFIX} sub`, "a1"), message("sub activity", "a1")];
-    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, history });
+    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, workspace: SNAPSHOT_WORKSPACE, history });
     expect(text).toContain(`${ATELIER_BOARD_RESULT_PREFIX} main`);
     expect(text).not.toContain(`${ATELIER_BOARD_RESULT_PREFIX} sub`);
     expect(text).not.toContain("sub activity");
@@ -147,7 +177,7 @@ describe("buildAtelierPrompt — history", () => {
       { ...message("Encore", null), role: "user" as const },
       assistant('v2 <mockup title="Liste">nouvelle</mockup>'),
     ];
-    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, history });
+    const text = buildAtelierPrompt({ conversation: conversation("claude", false, DEFAULT_RESEARCH_OPTIONS), project: PROJECT, workspace: SNAPSHOT_WORKSPACE, history });
     expect(text).toContain("v1 [version précédente de la maquette « Liste » omise]");
     expect(text).not.toContain("ancienne");
     expect(text).toContain('<mockup title="Fiche">fiche</mockup>');

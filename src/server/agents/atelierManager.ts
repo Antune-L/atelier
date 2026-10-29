@@ -18,9 +18,11 @@ import { prepareAtelierAttachments } from "./atelierAttachments.ts";
 import type { PreparedAtelierAttachments } from "./atelierAttachments.ts";
 import { AtelierTicketTools } from "./atelierTicketTools.ts";
 import type { BoardRouteHandler } from "./atelierTicketTools.ts";
-import { buildAtelierConsolidateTurn, buildAtelierPrompt, buildAtelierRegenerationTurn } from "./atelier.ts";
+import { buildAtelierConsolidateTurn, buildAtelierPrompt, buildAtelierRegenerationTurn, formatSnapshotDate } from "./atelier.ts";
+import type { AtelierWorkspace } from "./atelier.ts";
 import { assertExecutionAvailable, resolveExecution } from "./executionConfig.ts";
-import type { ExecutionDefaults } from "./executionConfig.ts";
+import type { ExecutionDefaults, ResolvedExecution } from "./executionConfig.ts";
+import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { atelierSessionKey, buildAtelierSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 
@@ -46,6 +48,9 @@ const COMPACT_FAILED_MESSAGE = "Échec du compactage du contexte.";
 export const ATELIER_STEER_GRACE_MS = 10_000;
 export const CONSOLIDATE_BUSY_MESSAGE = "L'agent est en cours de réponse : attends la fin du tour ou interromps-le avant de consolider.";
 export const REGENERATE_BUSY_MESSAGE = "L'agent est en cours de réponse : attends la fin du tour ou interromps-le avant de régénérer le PRD.";
+export const REFRESH_BUSY_MESSAGE = "L'agent est en cours de réponse : attends la fin du tour ou interromps-le avant de rafraîchir l'instantané.";
+export const REFRESH_LOCAL_MESSAGE = "Cette conversation lit le checkout local : il n'y a pas d'instantané à rafraîchir.";
+const SHORT_SHA_LENGTH = 7;
 
 /** A PRD action refused because the agent is running a turn. */
 export class AtelierBusyError extends Error {
@@ -53,6 +58,27 @@ export class AtelierBusyError extends Error {
     super(message);
     this.name = "AtelierBusyError";
   }
+}
+
+/** A snapshot refresh refused because the conversation reads the local checkout. */
+export class AtelierLocalCheckoutError extends Error {
+  constructor() {
+    super(REFRESH_LOCAL_MESSAGE);
+    this.name = "AtelierLocalCheckoutError";
+  }
+}
+
+function shortSha(sha: string): string {
+  return sha.slice(0, SHORT_SHA_LENGTH);
+}
+
+function fetchWarning(lease: SnapshotLease): string {
+  return `⚠️ Récupération d'origin/${lease.baseBranch} impossible (${lease.fetchError ?? "erreur inconnue"}) : l'Atelier lit le dernier origin/${lease.baseBranch} connu (${shortSha(lease.sha)}).`;
+}
+
+function workspaceNote(workspace: AtelierWorkspace): string {
+  if (workspace.source === "local") return `Checkout local : ${workspace.cwd} (modifications non commitées incluses)`;
+  return `Instantané : origin/${workspace.baseBranch} @ ${shortSha(workspace.sha)} (${formatSnapshotDate(workspace.committedAt)}) — dossier ${workspace.cwd}`;
 }
 const tokenFormatter = new Intl.NumberFormat("fr-FR");
 
@@ -97,6 +123,18 @@ interface ConversationRuntime {
   steerGraceTimer: ReturnType<typeof setTimeout> | null;
   /** Tail of the conversation's deliveries: sends stay in submission order. */
   delivery: Promise<void>;
+  /** Snapshot held by the live session; released whenever the session ends. */
+  lease: SnapshotLease | null;
+}
+
+interface SessionLaunch {
+  conversation: Conversation;
+  project: ProjectConfig;
+  execution: ResolvedExecution;
+  workspace: AtelierWorkspace;
+  content: string;
+  messageId: string;
+  runtime: ConversationRuntime;
 }
 
 export type CompactOutcome =
@@ -108,7 +146,8 @@ export interface AtelierManagerDeps {
   hub: ClientHub;
   sessionHub: SessionHub;
   system: Pick<SystemAdapter, "checkCodexRuntime">;
-  getProject?: (key: string) => ProjectConfig | null;
+  snapshots: Pick<RepoSnapshots, "acquire">;
+  getProject?:(key: string) => ProjectConfig | null;
   defaults?: () => ExecutionDefaults;
   ticketOperations?: TicketOperations;
   uploadsRoot?: string;
@@ -177,6 +216,7 @@ export class AtelierManager {
   private readonly hub: ClientHub;
   private readonly sessionHub: SessionHub;
   private readonly system: Pick<SystemAdapter, "checkCodexRuntime">;
+  private readonly snapshots: Pick<RepoSnapshots, "acquire">;
   private readonly lookupProject: (key: string) => ProjectConfig | null;
   private readonly defaults: () => ExecutionDefaults;
   private readonly idleTimeoutMs: number;
@@ -191,6 +231,7 @@ export class AtelierManager {
     this.hub = deps.hub;
     this.sessionHub = deps.sessionHub;
     this.system = deps.system;
+    this.snapshots = deps.snapshots;
     this.lookupProject = deps.getProject ?? defaultProjectLookup;
     this.defaults = deps.defaults ?? defaultExecutionDefaults;
     this.idleTimeoutMs = deps.idleTimeoutMs ?? ATELIER_IDLE_TIMEOUT_MS;
@@ -293,6 +334,31 @@ export class AtelierManager {
     const patch: ConversationPatch = { sessionId: null, contextTokens: null, contextWindow: null };
     if (conversation.sessionStatus === "running") patch.sessionStatus = "idle";
     this.patchConversation(conversationId, patch);
+  }
+
+  /** Re-pins the conversation on the current origin/<base>; the next message opens a fresh session on it. */
+  async refresh(conversationId: string): Promise<Conversation> {
+    const conversation = this.requireConversation(conversationId);
+    if (conversation.readLocalCheckout) throw new AtelierLocalCheckoutError();
+    if (conversation.sessionStatus === "running" || this.starting.has(conversationId)) throw new AtelierBusyError(REFRESH_BUSY_MESSAGE);
+    const project = this.lookupProject(conversation.project);
+    if (!project) throw new Error(`Projet inconnu : ${conversation.project}`);
+    this.flush(conversationId);
+    this.closeSession(conversationId);
+    const baseBranch = conversation.snapshotBaseBranch ?? project.baseBranch;
+    const lease = await this.snapshots.acquire({ projectKey: conversation.project, repoPath: project.repoPath, baseBranch, sha: null, fetch: true, requireFetch: false });
+    try {
+      if (lease.fetchError) this.addNote(conversationId, fetchWarning(lease));
+      const previous = conversation.snapshotSha;
+      this.patchConversation(conversationId, { snapshotSha: lease.sha, snapshotCommittedAt: lease.committedAt, snapshotBaseBranch: lease.baseBranch, sessionId: null });
+      this.addNote(conversationId, previous === lease.sha
+        ? `Instantané déjà à jour (${shortSha(lease.sha)})`
+        : `Instantané rafraîchi : ${previous ? shortSha(previous) : "aucun"} → ${shortSha(lease.sha)}`);
+      log.info("instantané atelier rafraîchi", { conversationId, sha: lease.sha });
+    } finally {
+      lease.release();
+    }
+    return this.requireConversation(conversationId);
   }
 
   close(conversationId: string): void {
@@ -507,19 +573,53 @@ export class AtelierManager {
       this.defaults(),
     );
     await assertExecutionAvailable(this.system, execution);
+    const runtime = this.runtime(conversationId);
+    this.releaseLease(runtime);
+    const workspace = await this.openWorkspace(conversation, project, runtime);
+    try {
+      return await this.launchSession({ conversation, project, execution, workspace, content, messageId, runtime });
+    } catch (error) {
+      this.releaseLease(runtime);
+      throw error;
+    }
+  }
+
+  /** Pins the conversation on its snapshot (or the local checkout) and keeps the lease on the runtime. */
+  private async openWorkspace(conversation: Conversation, project: ProjectConfig, runtime: ConversationRuntime): Promise<AtelierWorkspace> {
+    if (conversation.readLocalCheckout) return { source: "local", cwd: project.repoPath };
+    const pinned = conversation.snapshotSha;
+    const baseBranch = conversation.snapshotBaseBranch ?? project.baseBranch;
+    let lease: SnapshotLease;
+    try {
+      lease = await this.snapshots.acquire({ projectKey: conversation.project, repoPath: project.repoPath, baseBranch, sha: pinned, fetch: pinned === null, requireFetch: false });
+    } catch (error) {
+      if (pinned === null) throw error;
+      throw new Error(`Instantané ${shortSha(pinned)} indisponible (${getErrorMessage(error)}) : clique sur « Rafraîchir » pour lire le dernier origin/${baseBranch}.`);
+    }
+    runtime.lease = lease;
+    if (lease.fetchError) this.addNote(conversation.id, fetchWarning(lease));
+    if (pinned === null) {
+      this.patchConversation(conversation.id, { snapshotSha: lease.sha, snapshotCommittedAt: lease.committedAt, snapshotBaseBranch: lease.baseBranch });
+    }
+    return { source: "origin", cwd: lease.cwd, sha: lease.sha, committedAt: lease.committedAt, baseBranch: lease.baseBranch };
+  }
+
+  private async launchSession({ conversation, project, execution, workspace, content, messageId, runtime }: SessionLaunch): Promise<boolean> {
+    const conversationId = conversation.id;
     const resumeSessionId = execution.provider === "codex" ? conversation.sessionId : null;
     const key = atelierSessionKey(conversationId);
     const history = this.historyBefore(conversationId, messageId);
-    const payload = `${buildAtelierPrompt({ conversation, project, history })}${PART_SEPARATOR}${content}`;
+    const prompt = `${buildAtelierPrompt({ conversation, project, workspace, history })}${PART_SEPARATOR}${content}`;
+    // A resumed thread keeps its older framing in context: lead with the code it reads now.
+    const payload = resumeSessionId ? `[${workspaceNote(workspace)}]${PART_SEPARATOR}${prompt}` : prompt;
     const prepared = await this.prepareAttachments(payload);
-    const runtime = this.runtime(conversationId);
     runtime.resumed = resumeSessionId !== null;
     // The SDK emits nothing at startup: a fresh CLI process starts with no background task.
     this.resetBackground(runtime);
     this.sessionHub.start(
       buildAtelierSessionConfig({
         conversationId,
-        cwd: project.repoPath,
+        cwd: workspace.cwd,
         model: execution.model,
         effort: execution.effort,
         serviceTier: execution.serviceTier,
@@ -694,8 +794,9 @@ export class AtelierManager {
       const awaiting = runtime.awaitingBackground;
       this.resetBackground(runtime);
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      this.releaseLease(runtime);
       this.clearSubagents(conversationId, runtime);
-      this.patchConversation(conversationId, awaiting ? { sessionStatus: "idle", unread: true } : { sessionStatus: "idle" });
+      this.patchConversation(conversationId, awaiting ?{ sessionStatus: "idle", unread: true } : { sessionStatus: "idle" });
       this.clearContext(conversationId);
     }, delay);
     runtime.ceilingTimer.unref?.();
@@ -768,6 +869,7 @@ export class AtelierManager {
       const awaiting = runtime.awaitingBackground;
       this.resetBackground(runtime);
       this.sessionHub.disconnect(atelierSessionKey(conversationId), "completed");
+      this.releaseLease(runtime);
       this.clearSubagents(conversationId, runtime);
       if (awaiting) this.patchConversation(conversationId, { sessionStatus: "idle", unread: true });
       this.clearContext(conversationId);
@@ -810,6 +912,7 @@ export class AtelierManager {
     runtime.resumed = false;
     log.warn("session atelier en échec", { conversationId, reason });
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "failed");
+    this.releaseLease(runtime);
     this.clearSubagents(conversationId, runtime);
     this.patchConversation(conversationId, patch);
   }
@@ -872,10 +975,23 @@ export class AtelierManager {
       runtime.resumed = false;
       runtime.compaction = null;
       this.resetBackground(runtime);
+      this.releaseLease(runtime);
     }
     this.sessionHub.disconnect(atelierSessionKey(conversationId), "cancelled");
     this.clearSubagents(conversationId, runtime);
     this.clearContext(conversationId);
+  }
+
+  private releaseLease(runtime: ConversationRuntime): void {
+    runtime.lease?.release();
+    runtime.lease = null;
+  }
+
+  /** A backend line outside any agent turn (snapshot pin, fetch warning). */
+  private addNote(conversationId: string, content: string): void {
+    if (!this.store.getConversation(conversationId)) return;
+    const message = this.store.addConversationMessage({ conversationId, role: "activity", content, turnId: this.runtimes.get(conversationId)?.lastUserTurnId ?? null });
+    this.hub.pushConversationMessage(message);
   }
 
   private clearIdleTimer(runtime: ConversationRuntime): void {
@@ -900,6 +1016,7 @@ export class AtelierManager {
         splitTurnId: null,
         steerGraceTimer: null,
         delivery: Promise.resolve(),
+        lease: null,
       };
       this.runtimes.set(conversationId, runtime);
     }

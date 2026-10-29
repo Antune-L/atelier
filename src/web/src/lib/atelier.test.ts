@@ -7,6 +7,7 @@ import {
   SETTLED_PREVIEW_COUNT,
   UNTITLED_CONVERSATION_LABEL,
   buildAtelierThread,
+  codeSourceLabel,
   contextUsageSummary,
   conversationMatchesSearch,
   conversationTooltip,
@@ -57,10 +58,24 @@ function makeConversation(id: string, updatedAt: number, settled: boolean): Conv
     contextTokens: null,
     contextWindow: null,
     activeSubagents: [],
+    snapshotSha: null,
+    snapshotCommittedAt: null,
+    snapshotBaseBranch: null,
+    readLocalCheckout: false,
     createdAt: 0,
     updatedAt,
   };
 }
+
+describe("codeSourceLabel", () => {
+  test("names the pinned origin commit, the local checkout, or a pending pin", () => {
+    const base = makeConversation("c", 0, false);
+    expect(codeSourceLabel(base)).toBe("origin (figé au prochain message)");
+    const pinned = { ...base, snapshotSha: "0123456789abcdef0123456789abcdef01234567", snapshotBaseBranch: "main", snapshotCommittedAt: null };
+    expect(codeSourceLabel(pinned)).toBe("origin/main @ 0123456");
+    expect(codeSourceLabel({ ...pinned, readLocalCheckout: true })).toBe("Checkout local");
+  });
+});
 
 describe("conversationTooltip", () => {
   test("joins the full title and the project label", () => {

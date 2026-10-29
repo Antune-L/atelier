@@ -68,6 +68,16 @@ export function conversationTooltip(title: string, projectLabel: string): string
   return `${title || UNTITLED_CONVERSATION_LABEL} — ${projectLabel}`;
 }
 
+const SHORT_SHA_LENGTH = 7;
+
+/** Which code the session reads: the pinned origin snapshot, the local checkout, or origin before the first pin. */
+export function codeSourceLabel(conversation: Conversation): string {
+  if (conversation.readLocalCheckout) return "Checkout local";
+  if (conversation.snapshotSha === null || conversation.snapshotBaseBranch === null) return "origin (figé au prochain message)";
+  const date = conversation.snapshotCommittedAt === null ? "" : ` · ${new Date(conversation.snapshotCommittedAt).toLocaleDateString("fr-FR")}`;
+  return `origin/${conversation.snapshotBaseBranch} @ ${conversation.snapshotSha.slice(0, SHORT_SHA_LENGTH)}${date}`;
+}
+
 /** Whether a conversation's title matches an already-normalized search query (see normalizeSearch). */
 export function conversationMatchesSearch(conversation: Conversation, query: string): boolean {
   return matchesQuery(query, conversation.title || UNTITLED_CONVERSATION_LABEL);

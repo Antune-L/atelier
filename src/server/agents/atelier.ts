@@ -49,20 +49,50 @@ const RESEARCH_CHECK_INSTRUCTIONS: Record<ResearchCheckKey, string> = {
   duplicates: "doublons : existe-t-il déjà quelque chose de similaire dans le dépôt (fonctionnalité, composant, route) ? cite-le.",
 };
 
+/** Where the session reads the code: a frozen origin snapshot or the local checkout. */
+export type AtelierWorkspace =
+  | { source: "origin"; cwd: string; sha: string; committedAt: number; baseBranch: string }
+  | { source: "local"; cwd: string };
+
 export interface AtelierPromptInput {
   conversation: Conversation;
   project: ProjectConfig;
+  workspace: AtelierWorkspace;
   history?: ConversationMessage[];
 }
 
-function buildFraming(conversation: Conversation, project: ProjectConfig): string[] {
+/** `2026-10-29 14:05 UTC`, stable regardless of the server locale. */
+export function formatSnapshotDate(committedAt: number): string {
+  return `${new Date(committedAt).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** One-line description of the code the session reads; never the repo path in snapshot mode. */
+export function describeAtelierWorkspace(workspace: AtelierWorkspace): string {
+  if (workspace.source === "local") return `checkout local ${workspace.cwd} (modifications non commitées incluses)`;
+  return `instantané figé d'origin/${workspace.baseBranch} @ ${workspace.sha} (${formatSnapshotDate(workspace.committedAt)}) dans ${workspace.cwd}`;
+}
+
+function buildWorkspaceLines(workspace: AtelierWorkspace): string[] {
+  const lines = [`Code lu : ${describeAtelierWorkspace(workspace)}`];
+  if (workspace.source === "origin") {
+    lines.push(
+      `Lis le code uniquement dans ${workspace.cwd} (chemins absolus compris) : aucun autre dossier ne reflète cet instantané.`,
+      "Les fichiers ignorés par git (.env, node_modules…) et les modifications non commitées sont absents de l'instantané.",
+      "L'instantané reste figé sur ce commit jusqu'à ce que l'utilisateur clique sur « Rafraîchir ».",
+    );
+  }
+  return lines;
+}
+
+function buildFraming(conversation: Conversation, project: ProjectConfig, workspace: AtelierWorkspace): string[] {
   const driverLine = conversation.orchestrator === "codex"
     ? "Tu es une session Codex en LECTURE SEULE (sandbox en lecture seule : toute écriture dans le dépôt est bloquée)."
     : "Tu es une session Claude en LECTURE SEULE (Read, Glob, Grep disponibles ; Edit/Write/Bash sont inappelables).";
   return [
     `# Atelier — ${conversation.title}`,
     "",
-    `Projet : ${project.label} (dépôt : ${project.repoPath})`,
+    `Projet : ${project.label}`,
+    ...buildWorkspaceLines(workspace),
     "",
     driverLine,
     "N'essaie jamais de modifier le dépôt ni de lancer une commande d'écriture : seuls les outils de cartes bornés au projet permettent les actions explicitement demandées.",
@@ -252,9 +282,9 @@ function buildHistory(history: ConversationMessage[] | undefined): string[] {
   ];
 }
 
-export function buildAtelierPrompt({ conversation, project, history }: AtelierPromptInput): string {
+export function buildAtelierPrompt({ conversation, project, workspace, history }: AtelierPromptInput): string {
   const sections = [
-    buildFraming(conversation, project),
+    buildFraming(conversation, project, workspace),
     buildRole(),
     buildBoardRules(),
     buildResearch(conversation),

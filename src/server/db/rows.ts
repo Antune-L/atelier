@@ -736,6 +736,10 @@ const conversationRowSchema = z.object({
   context_tokens: z.number().int().nonnegative().nullable(),
   context_window: z.number().int().positive().nullable(),
   active_subagents: z.string(),
+  snapshot_sha: z.string().nullable(),
+  snapshot_committed_at: z.number().int().nullable(),
+  snapshot_base_branch: z.string().nullable(),
+  read_local_checkout: z.number(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -807,6 +811,10 @@ export function mapConversationRow(raw: unknown): Conversation {
     contextTokens: row.context_tokens,
     contextWindow: row.context_window,
     activeSubagents: parseActiveSubagents(row.active_subagents),
+    snapshotSha: row.snapshot_sha,
+    snapshotCommittedAt: row.snapshot_committed_at,
+    snapshotBaseBranch: row.snapshot_base_branch,
+    readLocalCheckout: row.read_local_checkout === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

@@ -58,7 +58,7 @@ import type { ProjectConfig } from "./config.ts";
 import { MODELS, getProject, isProjectKey } from "./config.ts";
 
 import type { AtelierManager } from "./agents/atelierManager.ts";
-import { AtelierBusyError } from "./agents/atelierManager.ts";
+import { AtelierBusyError, AtelierLocalCheckoutError } from "./agents/atelierManager.ts";
 import type { QualityManager } from "./agents/qualityManager.ts";
 import type { AgentCoordinator } from "./agents/coordinator.ts";
 import type { AutomationManager } from "./agents/automationManager.ts";
@@ -689,6 +689,7 @@ const ATELIER_SETTING_KEYS = [
   "codexFast",
   "researchEnabled",
   "researchOptions",
+  "readLocalCheckout",
 ] as const satisfies readonly (keyof UpdateConversationInput & keyof Conversation)[];
 const PRD_JSON_CONTENT_TYPE = "application/json; charset=utf-8";
 const PRD_HTML_CONTENT_TYPE = "text/html; charset=utf-8";
@@ -849,6 +850,15 @@ function createAtelierRoutes(deps: RouteDeps) {
       if (outcome.ok) return { conversation: outcome.conversation };
       if (outcome.reason === "not_found") return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       return jsonError(set, HTTP_CONFLICT, outcome.message);
+    })
+    .post("/conversations/:id/refresh", async ({ params, set }) => {
+      if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
+      try {
+        return { conversation: await atelier.refresh(params.id) };
+      } catch (error) {
+        if (error instanceof AtelierBusyError || error instanceof AtelierLocalCheckoutError) return jsonError(set, HTTP_CONFLICT, error.message);
+        return jsonError(set, HTTP_BAD_GATEWAY, `Rafraîchissement de l'instantané impossible : ${getErrorMessage(error)}`);
+      }
     })
     .post("/conversations/:id/read", ({ params, set }) => setConversationUnread(params.id, false, set))
     .post("/conversations/:id/unread", ({ params, set }) => setConversationUnread(params.id, true, set))

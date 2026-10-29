@@ -381,6 +381,8 @@ export const api = {
     request(`${atelierConversationPath(id)}/interrupt`, { method: "POST" }),
   atelierCompact: (id: string): Promise<{ conversation: Conversation }> =>
     request(`${atelierConversationPath(id)}/compact`, { method: "POST" }),
+  atelierRefreshSnapshot: (id: string): Promise<{ conversation: Conversation }> =>
+    request(`${atelierConversationPath(id)}/refresh`, { method: "POST" }),
   atelierMarkConversationRead: (id: string): Promise<Conversation> =>
     request(`${atelierConversationPath(id)}/read`, { method: "POST" }),
   atelierMarkConversationUnread: (id: string): Promise<Conversation> =>

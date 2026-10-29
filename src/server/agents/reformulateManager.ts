@@ -9,7 +9,9 @@ import type { Notifier } from "../notifier.ts";
 import { runRecordedAction } from "../recordedAction.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
+import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildReformulatePrompt } from "./reformulate.ts";
+import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 
 const log = createLogger("reformulate");
@@ -29,6 +31,7 @@ export class ReformulateManager {
     private readonly system: SystemAdapter,
     private readonly hub: ClientHub,
     private readonly notifier: Notifier,
+    private readonly snapshots: Pick<RepoSnapshots, "acquire">,
   ) {}
 
   /** Kick off the background reformulation; the result lands on the ticket via `pushTicket`. */
@@ -54,10 +57,20 @@ export class ReformulateManager {
       model: MODELS.triage,
       effort: MODELS.triageEffort,
     });
+    let lease: SnapshotLease | null = null;
     try {
       await assertExecutionAvailable(this.system, execution);
+      // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
+      lease = await this.snapshots.acquire({
+        projectKey: ticket.project,
+        repoPath: project.repoPath,
+        baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
+        fetch: true,
+        requireFetch: true,
+      });
+      const cwd = lease.cwd;
       const markdown = await runRecordedAction(this.store, ticket.id, execution, (onEvent) => this.system.reformulate({
-        cwd: project.repoPath,
+        cwd,
         prompt: buildReformulatePrompt(ticket),
         provider: execution.provider,
         model: execution.model,
@@ -79,6 +92,8 @@ export class ReformulateManager {
       this.hub.pushTicket(failed);
       this.store.logEvent(ticket.id, "reformulate_failed", { reason });
       log.warn("reformulation échouée", { ticketId: ticket.id, reason });
+    } finally {
+      lease?.release();
     }
   }
 

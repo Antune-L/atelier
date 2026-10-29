@@ -9,6 +9,7 @@ import { DelegationManager } from "./agents/delegationManager.ts";
 import { FeasibilityAnswerManager } from "./agents/feasibilityAnswerManager.ts";
 import { FeasibilityBatchManager } from "./agents/feasibilityManager.ts";
 import { ReformulateManager } from "./agents/reformulateManager.ts";
+import { RepoSnapshots } from "./agents/repoSnapshots.ts";
 import { SessionHub } from "./agents/sessionHub.ts";
 import { SlotManager } from "./agents/slotManager.ts";
 import { SplitManager } from "./agents/splitManager.ts";
@@ -19,6 +20,7 @@ import { Store } from "./db/store.ts";
 import { PR_ONLY_MESSAGE } from "./hostRole.ts";
 import { ClientHub } from "./hub.ts";
 import { TicketLifecycle } from "./lifecycle.ts";
+import { KeyedMutex } from "./mutex.ts";
 import { Notifier } from "./notifier.ts";
 import { createApiRoutes } from "./routes.ts";
 import { FakeSystemAdapter } from "./system/fake.ts";
@@ -67,14 +69,15 @@ function setup() {
   const lifecycle = new TicketLifecycle(store, hub, notifier);
   const triage = new TriageManager(store, system, sessionHub, hub, notifier);
   const feasibility = new FeasibilityBatchManager(store, system, sessionHub, hub, notifier);
-  const split = new SplitManager(store, system, sessionHub);
+  const snapshots = new RepoSnapshots({ system, repoMutex: new KeyedMutex() });
+  const split = new SplitManager(store, system, sessionHub, snapshots);
   const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
   const delegation = new DelegationManager(store, system, sessionHub, hub);
-  const atelier = new AtelierManager({ store, hub, sessionHub, system });
+  const atelier = new AtelierManager({ store, hub, sessionHub, system, snapshots });
   const coordinator = new AgentCoordinator(store, hub, sessionHub, notifier, lifecycle, slots, triage, feasibility, split, delegation, atelier);
   const app = createApiRoutes({
     store, system, hub, sessionHub, lifecycle, triage, feasibility, split, slots, coordinator, atelier,
-    reformulate: new ReformulateManager(store, system, hub, notifier),
+    reformulate: new ReformulateManager(store, system, hub, notifier, snapshots),
     feasibilityAnswers: new FeasibilityAnswerManager(store, system, hub),
     automations: new AutomationManager(store, system, hub),
     projectRoot: "/tmp", composerAvailable: true,

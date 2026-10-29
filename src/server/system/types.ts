@@ -326,6 +326,12 @@ export interface SystemAdapter {
   worktreeRemove(repoPath: string, slotPath: string): Promise<void>;
   fetch(repoPath: string, baseBranch: string, options?: OperationDeadlineOptions): Promise<void>;
   readGitRef(repoPath: string, ref: string, options?: OperationDeadlineOptions): Promise<string>;
+  /** Commit timestamp of `ref`, in epoch milliseconds. */
+  readCommitTimestamp(repoPath: string, ref: string, options?: OperationDeadlineOptions): Promise<number>;
+  /** Add a detached, frozen worktree at `path` pinned to `sha` (read-only session snapshots). */
+  addSnapshotWorktree(repoPath: string, path: string, sha: string, options?: OperationDeadlineOptions): Promise<void>;
+  /** Remove a snapshot worktree and its registration, without any slot-specific cleanup. */
+  removeSnapshotWorktree(repoPath: string, path: string, options?: OperationDeadlineOptions): Promise<void>;
   updateDependencyBase(options: UpdateDependencyBaseOptions): Promise<UpdateDependencyBaseResult>;
   /** Fetch origin/<baseBranch> and check it out detached at `path`, so read-only analyses see the up-to-date base. */
   prepareAnalysisWorkspace(repoPath: string, path: string, baseBranch: string): Promise<void>;

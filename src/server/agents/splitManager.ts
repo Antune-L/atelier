@@ -7,6 +7,8 @@ import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
+import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
+import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { buildSplitSessionConfig } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
@@ -30,18 +32,21 @@ interface PendingSplit {
 }
 
 /**
- * Runs the read-only ticket-split decomposition as an SDK agent session on the real repo (no worktree,
+ * Runs the read-only ticket-split decomposition as an SDK agent session on a frozen origin/<base> snapshot (no slot worktree,
  * branch, install, or slot): a light read-only session whose contract is its first user turn, resolved
  * once the decomposition arrives via `submit_split`. SplitManager only produces the SplitResult — the
  * REST route owns the create-children → branch → link → mother-done orchestration.
  */
 export class SplitManager {
   private readonly pending = new Map<string, PendingSplit>();
+  /** Snapshot lease held by each in-flight split, released on every terminal path. */
+  private readonly leases = new Map<string, SnapshotLease>();
 
   constructor(
     private readonly store: Store,
     private readonly system: SystemAdapter,
     private readonly sessionHub: SessionHub,
+    private readonly snapshots: Pick<RepoSnapshots, "acquire">,
   ) {}
 
   /** Start the read-only split session, inject its prompt, and resolve once `submit_split` arrives. */
@@ -76,13 +81,23 @@ export class SplitManager {
     await assertExecutionAvailable(this.system, execution);
     const driver = execution.provider;
     const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
+    // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
+    const lease = await this.snapshots.acquire({
+      projectKey: ticket.project,
+      repoPath: project.repoPath,
+      baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
+      fetch: true,
+      requireFetch: true,
+    });
+    this.leases.get(ticketId)?.release();
+    this.leases.set(ticketId, lease);
 
     return new Promise<SplitResult>((resolve, reject) => {
       try {
         this.sessionHub.start(
           buildSplitSessionConfig({
             ticketId,
-            cwd: project.repoPath,
+            cwd: lease.cwd,
             model: execution.model,
             effort: execution.effort,
             serviceTier: execution.serviceTier,
@@ -122,6 +137,8 @@ export class SplitManager {
     const entry = this.pending.get(ticketId);
     if (entry) clearTimeout(entry.timer);
     this.pending.delete(ticketId);
+    this.leases.get(ticketId)?.release();
+    this.leases.delete(ticketId);
     this.sessionHub.disconnect(ticketId, status);
   }
 }

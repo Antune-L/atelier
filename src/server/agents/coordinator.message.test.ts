@@ -6,6 +6,7 @@ import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
 import { ClientHub } from "../hub.ts";
 import { TicketLifecycle } from "../lifecycle.ts";
+import { KeyedMutex } from "../mutex.ts";
 import { Notifier } from "../notifier.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
@@ -14,6 +15,7 @@ import { AtelierManager } from "./atelierManager.ts";
 import { AgentCoordinator } from "./coordinator.ts";
 import { DelegationManager } from "./delegationManager.ts";
 import { FeasibilityBatchManager } from "./feasibilityManager.ts";
+import { RepoSnapshots } from "./repoSnapshots.ts";
 import { SessionHub } from "./sessionHub.ts";
 import { SlotManager } from "./slotManager.ts";
 import { SplitManager } from "./splitManager.ts";
@@ -62,7 +64,8 @@ function setup(): {
   const lifecycle = new TicketLifecycle(store, hub, notifier);
   const triage = new TriageManager(store, system, sessionHub, hub, notifier);
   const feasibility = new FeasibilityBatchManager(store, system, sessionHub, hub, notifier);
-  const split = new SplitManager(store, system, sessionHub);
+  const snapshots = new RepoSnapshots({ system, repoMutex: new KeyedMutex() });
+  const split = new SplitManager(store, system, sessionHub, snapshots);
   const slots = new SlotManager(store, system, hub, sessionHub, notifier, lifecycle, { projectRoot: "/tmp" });
   const delegation = new DelegationManager(store, system, sessionHub, hub);
   new AgentCoordinator(
@@ -76,7 +79,7 @@ function setup(): {
     feasibility,
     split,
     delegation,
-    new AtelierManager({ store, hub, sessionHub, system }),
+    new AtelierManager({ store, hub, sessionHub, system, snapshots }),
   );
   return {
     store,

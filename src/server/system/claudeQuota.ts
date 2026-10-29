@@ -46,7 +46,7 @@ function isoToMs(value: string | null | undefined): number | null {
 function quota(
   state: ProviderQuotaState,
   observedAt: number,
-  fields: { planType?: string | null; windows?: QuotaWindow[]; message?: string | null } = {},
+  fields: Partial<Pick<ProviderQuota, "planType" | "accountEmail" | "accountOrganization" | "windows" | "message">> = {},
 ): ProviderQuota {
   return providerQuotaSchema.parse({
     provider: "claude",
@@ -54,6 +54,8 @@ function quota(
     source: state === "ok" ? "live" : null,
     observedAt,
     planType: fields.planType ?? null,
+    accountEmail: fields.accountEmail ?? null,
+    accountOrganization: fields.accountOrganization ?? null,
     windows: fields.windows ?? [],
     message: fields.message ?? null,
   });
@@ -136,8 +138,7 @@ export function quotaWindowFromRateLimitEvent(info: ClaudeRateLimitInfo): QuotaW
 /** Minimal surface of an SDK `Query` needed for the usage read. */
 export interface ClaudeUsageQuery {
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (opts?: { skipBehaviors?: boolean }) => Promise<unknown>;
-  /** Optional account details; only `apiKeySource` is read, to recognize a real API key. */
-  accountInfo?: () => Promise<{ apiKeySource?: string } | null | undefined>;
+  accountInfo?: () => Promise<{ apiKeySource?: string; email?: string; organization?: string; subscriptionType?: string } | null | undefined>;
   close(): void;
 }
 
@@ -148,15 +149,13 @@ const API_KEY_MESSAGE = "Clé API Anthropic : pas de quota d'abonnement";
 export const TOKEN_WITHOUT_LIMITS_MESSAGE =
   "Jeton d'abonnement (CLAUDE_CODE_OAUTH_TOKEN) sans accès aux limites : reconnecte Claude";
 
-/** Whether the optional `accountInfo()` reports a real API key; false when absent or failing. */
-async function reportsApiKey(session: ClaudeUsageQuery): Promise<boolean> {
+async function readAccountInfo(session: ClaudeUsageQuery) {
   const readAccount = session.accountInfo;
-  if (typeof readAccount !== "function") return false;
+  if (typeof readAccount !== "function") return null;
   try {
-    const account = await readAccount.call(session);
-    return API_KEY_SOURCES.has(account?.apiKeySource ?? "");
+    return await readAccount.call(session) ?? null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -179,7 +178,7 @@ export async function readClaudeUsageLive(dependencies: ClaudeUsageDependencies)
   const read = await readUsageQuota(dependencies, now);
   // A `claude setup-token` OAuth token reads no rate limits: say so instead of passing for an API key.
   if (!read.apiKey && dependencies.environment.CLAUDE_CODE_OAUTH_TOKEN && (read.result.state === "not_applicable" || read.result.state === "no_data")) {
-    return quota("token_without_limits", now(), { planType: read.result.planType, message: TOKEN_WITHOUT_LIMITS_MESSAGE });
+    return { ...read.result, state: "token_without_limits", message: TOKEN_WITHOUT_LIMITS_MESSAGE };
   }
   return read.result;
 }
@@ -225,15 +224,18 @@ async function readUsageQuota(dependencies: ClaudeUsageDependencies, now: () => 
     });
     const readUsage = active.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
     const reads = Promise.all([
-      reportsApiKey(active),
-      typeof readUsage === "function" ? readUsage.call(active, { skipBehaviors: true }).then((raw) => ({ raw })) : null,
+      readAccountInfo(active),
+      typeof readUsage === "function" ? readUsage.call(active, { skipBehaviors: true }).then((raw) => ({ raw }), (error: unknown) => ({ error })) : null,
     ]);
     const outcome = await Promise.race([reads, deadline]);
     if (outcome === "timeout") return done(quota("timeout", now(), { message: "Délai dépassé" }));
-    const [apiKey, usage] = outcome;
-    if (apiKey) return done(quota("not_applicable", now(), { message: API_KEY_MESSAGE }), true);
-    if (usage === null) return done(quota("no_data", now(), { message: "get_usage indisponible" }));
-    return done(normalizeClaudeUsage(usage.raw, now()));
+    const [account, usage] = outcome;
+    const fields = { accountEmail: account?.email ?? null, accountOrganization: account?.organization ?? null, planType: account?.subscriptionType ?? null };
+    if (API_KEY_SOURCES.has(account?.apiKeySource ?? "")) return done(quota("not_applicable", now(), { ...fields, message: API_KEY_MESSAGE }), true);
+    if (usage === null) return done(quota("no_data", now(), { ...fields, message: "get_usage indisponible" }));
+    if ("error" in usage) return done(quota("error", now(), { ...fields, message: getErrorMessage(usage.error) }));
+    const result = normalizeClaudeUsage(usage.raw, now());
+    return done({ ...result, ...fields, planType: result.planType ?? fields.planType });
   } catch (error) {
     return done(quota("error", now(), { message: getErrorMessage(error) }));
   } finally {

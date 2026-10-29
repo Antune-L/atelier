@@ -14,6 +14,7 @@ import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
 import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
+import type { LocalUsageReadResult } from "../usage/localHistory.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -520,6 +521,7 @@ export interface SystemAdapter {
   // ---- local usage history (read-only; usage fields only, never conversation content) ----
   /** Token usage read from this machine's Claude and Codex histories; never throws. */
   readLocalUsageHistory(): Promise<HistoryUsageEntry[]>;
+  readUsageHistory(): Promise<LocalUsageReadResult>;
 
   // ---- in-app `claude auth login` flow (one at a time; the pasted code is never logged nor returned) ----
   startClaudeLogin(): ClaudeLoginStatus;

@@ -46,9 +46,12 @@ export function UsageView(): ReactNode {
   const renderSummaryTab = (): ReactNode => {
     if (usage.error !== null) return <p role="alert" className="text-sm text-danger">{usage.error}</p>;
     if (usage.summary === null) return <p className="text-sm text-muted-foreground">Chargement…</p>;
+    const coverage = usage.summary.historyCoverage;
+    const partialHistory = coverage !== undefined && coverage.failedFiles + coverage.failedRoots > 0;
     return (
       <div className="flex flex-col gap-3">
         {tab === "cost" ? <CostTab summary={usage.summary} filter={filter} /> : <TokensTab summary={usage.summary} filter={filter} />}
+        {partialHistory && <p role="status" className="text-sm text-warning">Historique local partiel : certains fichiers ou dossiers n’ont pas pu être lus, ou dépassent les limites de lecture. Les totaux affichés sont incomplets.</p>}
         <p className="text-xs text-muted-foreground">{LOCAL_HISTORY_NOTE}</p>
       </div>
     );

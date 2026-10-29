@@ -40,6 +40,8 @@ export const providerQuotaSchema = z.object({
   /** Freshness timestamp, epoch ms. */
   observedAt: z.number().int().nullable(),
   planType: z.string().nullable(),
+  accountEmail: z.string().nullable().optional(),
+  accountOrganization: z.string().nullable().optional(),
   windows: z.array(quotaWindowSchema),
   message: z.string().nullable(),
 });

@@ -101,6 +101,7 @@ import { saveUpload } from "./uploads.ts";
 import { createQualityRoutes } from "./qualityRoutes.ts";
 import { createPreviewRoutes } from "./previewRoutes.ts";
 import { createAuditRoutes } from "./auditRoutes.ts";
+import type { LocalUsageReadResult } from "./usage/localHistory.ts";
 import type { AuditManager } from "./agents/auditManager.ts";
 import type { PreviewManager } from "./previewManager.ts";
 import {
@@ -140,6 +141,7 @@ interface PaneReader {
   readClaudeUsage(): Promise<ProviderQuota>;
   readCodexQuota(): Promise<ProviderQuota>;
   readLocalUsageHistory(): Promise<HistoryUsageEntry[]>;
+  readUsageHistory?(): Promise<LocalUsageReadResult>;
   startClaudeLogin(): ClaudeLoginStatus;
   submitClaudeLoginCode(code: string): ClaudeLoginStatus;
   cancelClaudeLogin(): ClaudeLoginStatus;
@@ -1352,12 +1354,17 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/usage/summary", async ({ query, set }) => {
       const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);
       if (!period.success) return jsonError(set, HTTP_BAD_REQUEST, "période invalide");
-      const entries = await deps.system.readLocalUsageHistory();
+      const history = deps.system.readUsageHistory
+        ? await deps.system.readUsageHistory()
+        : { entries: await deps.system.readLocalUsageHistory(), files: 0, failedFiles: 0, failedRoots: 0 };
       const now = Date.now();
-      return summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now, {
-        entries,
-        countedSessionIds: store.listUsageCountedSessionIds(),
-      });
+      return {
+        ...summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now, {
+          entries: history.entries,
+          countedSessionIds: store.listUsageCountedSessionIds(),
+        }),
+        historyCoverage: { files: history.files, failedFiles: history.failedFiles, failedRoots: history.failedRoots },
+      };
     })
     // Request bodies of the login routes are never logged nor echoed: the code is a one-time secret.
     .get("/usage/claude-login", () => deps.system.claudeLoginStatus())

@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+
 import { z } from "zod";
 
 import { isCodexFastServiceTier } from "../../shared/codexCapabilities.ts";
@@ -23,9 +25,14 @@ export interface LocalHistoryRoots {
   claudeProjects: string;
   /** `${CODEX_HOME}/sessions`. */
   codexSessions: string;
+  codexArchivedSessions?: string;
 }
 
 const count = z.number().nonnegative().catch(0);
+const MAX_HISTORY_FILES = 25_000;
+const MAX_HISTORY_DIRECTORIES = 25_000;
+const MAX_HISTORY_FILE_BYTES = 128 * 1024 * 1024;
+const MAX_HISTORY_READ_BYTES = 4 * 1024 * 1024 * 1024;
 
 const claudeLineSchema = z.object({
   type: z.literal("assistant"),
@@ -58,8 +65,10 @@ function parseJson(line: string): unknown {
   }
 }
 
-function linesOf(text: string): unknown[] {
-  return text.split("\n").filter((line) => line.trim() !== "").map(parseJson);
+function* linesOf(text: string): Generator<unknown> {
+  for (const line of text.split("\n")) {
+    if (line.trim() !== "") yield parseJson(line);
+  }
 }
 
 /** Claude assistant lines with usage; `dedupKey` lets the merge drop calls repeated across files. */
@@ -127,6 +136,7 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
   let model: string | null = null;
   let serviceTier: string | null = null;
   let lastTotal: number | null = null;
+  let eventIndex = 0;
   for (const raw of linesOf(text)) {
     const parsed = codexLineSchema.safeParse(raw);
     if (!parsed.success) continue;
@@ -154,6 +164,7 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
       const usage = tokenCount.data.info.last_token_usage;
       // Same FAST rule as DB executions; any other non-default tier stays visible through `speed`.
       const fast = isCodexFastServiceTier(serviceTier);
+      eventIndex += 1;
       entries.push({
         provider: "codex",
         sessionId,
@@ -168,7 +179,7 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
           cacheRead: usage.cached_input_tokens ?? 0,
           cacheCreate: usage.cache_write_input_tokens ?? 0,
         },
-        dedupKey: null,
+        dedupKey: total === null ? `${sessionId}\u0000event:${eventIndex}` : `${sessionId}\u0000${total}`,
       });
     }
   }
@@ -185,6 +196,7 @@ export interface LocalUsageReadResult {
   entries: LocalUsageEntry[];
   files: number;
   failedFiles: number;
+  failedRoots: number;
 }
 
 /** Local history reader caching parsed entries per file (keyed by path, invalidated by size + mtime). */
@@ -193,19 +205,39 @@ export class LocalUsageHistory {
 
   constructor(private readonly fs: LocalHistoryFs, private readonly roots: LocalHistoryRoots) {}
 
-  async read(): Promise<LocalUsageReadResult> {
+  async read(providerFilter?: Orchestrator, since?: number): Promise<LocalUsageReadResult> {
     const seen = new Set<string>();
     const entries: LocalUsageEntry[] = [];
     let failedFiles = 0;
-    const sources: { provider: Orchestrator; files: string[] }[] = [
-      { provider: "claude", files: await this.list(this.roots.claudeProjects, (path) => path.endsWith(".jsonl")) },
-      { provider: "codex", files: await this.list(this.roots.codexSessions, (path) => /(^|\/)rollout-[^/]*\.jsonl$/.test(path)) },
+    let failedRoots = 0;
+    const bytesByProvider: Record<Orchestrator, number> = { claude: 0, codex: 0 };
+    const roots: { provider: Orchestrator; root: string; keep: (path: string) => boolean }[] = [
+      { provider: "claude", root: this.roots.claudeProjects, keep: (path) => path.endsWith(".jsonl") },
+      { provider: "codex", root: this.roots.codexSessions, keep: (path) => /(^|\/)rollout-[^/]*\.jsonl$/.test(path) },
     ];
-    for (const { provider, files } of sources) {
+    if (this.roots.codexArchivedSessions) roots.push({ provider: "codex", root: this.roots.codexArchivedSessions, keep: (path) => /(^|\/)rollout-[^/]*\.jsonl$/.test(path) });
+    for (const { provider, root, keep } of roots) {
+      if (providerFilter && providerFilter !== provider) continue;
+      let files: string[];
+      try {
+        files = (await this.fs.listFiles(root)).filter(keep).sort();
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") continue;
+        failedRoots += 1;
+        continue;
+      }
       for (const path of files) {
         seen.add(path);
         try {
-          entries.push(...await this.entriesOf(provider, path));
+          const stats = await this.fs.stat(path);
+          if (since !== undefined && stats.mtimeMs < since) continue;
+          if (seen.size > MAX_HISTORY_FILES || stats.size > MAX_HISTORY_FILE_BYTES || bytesByProvider[provider] + stats.size > MAX_HISTORY_READ_BYTES) {
+            failedFiles += 1;
+            continue;
+          }
+          bytesByProvider[provider] += stats.size;
+          const parsed = await this.entriesOf(provider, path);
+          entries.push(...parsed.filter((entry) => since === undefined || entry.timestamp >= since));
         } catch {
           failedFiles += 1;
           this.cache.delete(path);
@@ -215,15 +247,7 @@ export class LocalUsageHistory {
     for (const path of this.cache.keys()) {
       if (!seen.has(path)) this.cache.delete(path);
     }
-    return { entries, files: seen.size, failedFiles };
-  }
-
-  private async list(root: string, keep: (path: string) => boolean): Promise<string[]> {
-    try {
-      return (await this.fs.listFiles(root)).filter(keep).sort();
-    } catch {
-      return [];
-    }
+    return { entries, files: seen.size, failedFiles, failedRoots };
   }
 
   private async entriesOf(provider: Orchestrator, path: string): Promise<LocalUsageEntry[]> {
@@ -249,8 +273,23 @@ export function nodeLocalHistoryFs(): LocalHistoryFs {
   return {
     async listFiles(root) {
       const { readdir } = await import("node:fs/promises");
-      const dirents = await readdir(root, { recursive: true, withFileTypes: true });
-      return dirents.filter((dirent) => dirent.isFile()).map((dirent) => `${dirent.parentPath}/${dirent.name}`);
+      const directories = [root];
+      const files: string[] = [];
+      let visited = 0;
+      while (directories.length > 0) {
+        const directory = directories.pop();
+        if (directory === undefined) break;
+        visited += 1;
+        if (visited > MAX_HISTORY_DIRECTORIES) throw new Error("History directory limit exceeded");
+        const dirents = await readdir(directory, { withFileTypes: true });
+        for (const entry of dirents) {
+          const path = `${directory}/${entry.name}`;
+          if (entry.isDirectory()) directories.push(path);
+          if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+          if (files.length > MAX_HISTORY_FILES || directories.length > MAX_HISTORY_DIRECTORIES) throw new Error("History file limit exceeded");
+        }
+      }
+      return files;
     },
     async stat(path) {
       const { stat } = await import("node:fs/promises");
@@ -266,5 +305,6 @@ export function nodeLocalHistoryFs(): LocalHistoryFs {
 
 /** Real reader for this machine; build it lazily (never at import time). */
 export function createLocalUsageHistory(env: Record<string, string | undefined>, homedir: string): LocalUsageHistory {
-  return new LocalUsageHistory(nodeLocalHistoryFs(), localHistoryRoots(env, homedir));
+  const roots = localHistoryRoots(env, homedir);
+  return new LocalUsageHistory(nodeLocalHistoryFs(), { ...roots, codexArchivedSessions: join(dirname(roots.codexSessions), "archived_sessions") });
 }

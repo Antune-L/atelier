@@ -6,6 +6,7 @@ import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
+import type { LocalUsageReadResult } from "../usage/localHistory.ts";
 import { CLAUDE_LOGIN_TIMEOUT_MS, isClaudeLoginActive } from "../../shared/claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
 import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
@@ -66,6 +67,7 @@ import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.t
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 const FAKE_CLAUDE_LOGIN_URL = "https://claude.ai/oauth/authorize?simulation=1";
+const FAKE_QUOTA_ACCOUNT_EMAIL = "simulation@example.invalid";
 
 const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
@@ -775,6 +777,7 @@ export class FakeSystemAdapter implements SystemAdapter {
     const now = Date.now();
     return {
       provider: "claude", state: "ok", source: "live", observedAt: now, planType: "max", message: null,
+      accountEmail: FAKE_QUOTA_ACCOUNT_EMAIL,
       windows: [
         { id: "claude:five_hour", kind: "session", model: null, usedPercent: 42, windowDurationMins: 300, resetsAt: now + 2 * HOUR_MS },
         { id: "claude:seven_day", kind: "weekly", model: null, usedPercent: 63, windowDurationMins: 10_080, resetsAt: now + 3 * DAY_MS },
@@ -787,7 +790,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   async readLocalUsageHistory(): Promise<HistoryUsageEntry[]> {
     const now = Date.now();
     const entry = (provider: Orchestrator, sessionId: string, ageMs: number, model: string, speed: string, tokens: HistoryUsageEntry["tokens"]): HistoryUsageEntry => ({
-      provider, sessionId, timestamp: now - ageMs, model, speed, fast: speed !== "standard", tokens, dedupKey: null,
+      provider, sessionId, timestamp: now - ageMs, model, speed, fast: speed !== "standard", tokens, dedupKey: `${sessionId}:${ageMs}:${model}:${speed}`,
     });
     return [
       entry("claude", "fake-history-claude-1", 2 * HOUR_MS, "claude-opus-5-5", "standard", { input: 1_200, output: 3_400, cacheRead: 52_000, cacheCreate: 6_000 }),
@@ -833,11 +836,17 @@ export class FakeSystemAdapter implements SystemAdapter {
     const now = Date.now();
     return {
       provider: "codex", state: "ok", source: "live", observedAt: now, planType: "pro", message: null,
+      accountEmail: FAKE_QUOTA_ACCOUNT_EMAIL,
       windows: [
         { id: "codex:primary", kind: "session", model: null, usedPercent: 35, windowDurationMins: 300, resetsAt: now + 90 * 60_000 },
         { id: "codex:secondary", kind: "weekly", model: null, usedPercent: 71, windowDurationMins: 10_080, resetsAt: now + 4 * DAY_MS },
       ],
     };
+  }
+
+  async readUsageHistory(): Promise<LocalUsageReadResult> {
+    const entries = await this.readLocalUsageHistory();
+    return { entries, files: 2, failedFiles: 0, failedRoots: 0 };
   }
 
   async gitCurrentBranch(): Promise<string> {

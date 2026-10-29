@@ -40,9 +40,10 @@ import { readCodexQuota } from "./codexQuota.ts";
 import { readClaudeUsageLive } from "./claudeQuota.ts";
 import { ClaudeLoginManager, spawnClaudeLoginProcess } from "./claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
+import { USAGE_HISTORY_RETENTION_MS } from "../../shared/providerUsage.ts";
 import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
 import { createLocalUsageHistory } from "../usage/localHistory.ts";
-import type { LocalUsageHistory } from "../usage/localHistory.ts";
+import type { LocalUsageHistory, LocalUsageReadResult } from "../usage/localHistory.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { createGithubAccountRegistry } from "./github/accounts.ts";
@@ -1555,6 +1556,11 @@ export class RealSystemAdapter implements SystemAdapter {
       log.warn("lecture de l'historique local impossible", { reason: getErrorMessage(error) });
       return [];
     }
+  }
+
+  async readUsageHistory(): Promise<LocalUsageReadResult> {
+    this.localUsageHistory ??= createLocalUsageHistory(process.env, homedir());
+    return this.localUsageHistory.read(undefined, Date.now() - USAGE_HISTORY_RETENTION_MS);
   }
 
   private claudeLoginManager(): ClaudeLoginManager {

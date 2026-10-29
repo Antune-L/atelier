@@ -14,6 +14,7 @@ export type UsagePeriod = z.infer<typeof usagePeriodSchema>;
 export const DEFAULT_USAGE_PERIOD: UsagePeriod = "30d";
 
 const DAY_MS = 86_400_000;
+export const USAGE_HISTORY_RETENTION_MS = 90 * DAY_MS;
 
 /** Inclusive lower bound (epoch ms) of a period. */
 export function usagePeriodStart(period: UsagePeriod, now: number): number {
@@ -100,6 +101,11 @@ export const usageSummarySchema = z.object({
   since: z.number(),
   generatedAt: z.number(),
   providers: z.object({ claude: providerUsageSchema, codex: providerUsageSchema }),
+  historyCoverage: z.object({
+    files: z.number().int().nonnegative(),
+    failedFiles: z.number().int().nonnegative(),
+    failedRoots: z.number().int().nonnegative(),
+  }).optional(),
 });
 export type UsageSummary = z.infer<typeof usageSummarySchema>;
 
@@ -209,15 +215,10 @@ function collectEntries(sources: UsageSource[], since: number | null): UsageEntr
 
 function collectHistoryEntries(history: UsageHistoryInput, since: number | null): UsageEntry[] {
   const entries: UsageEntry[] = [];
-  const seen = new Set<string>();
+  const keyedEntries = new Map<string, UsageEntry>();
   for (const entry of history.entries) {
     if (since !== null && entry.timestamp < since) continue;
     if (history.countedSessionIds.has(entry.sessionId)) continue;
-    if (entry.dedupKey !== null) {
-      const key = `${entry.provider}\u0000${entry.dedupKey}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-    }
     // No Claude fast grid exists: such tokens stay counted but unpriced.
     const costUsd = entry.provider === "claude" && entry.fast
       ? null
@@ -228,7 +229,7 @@ function collectHistoryEntries(history: UsageHistoryInput, since: number | null)
         cacheCreationTokens: entry.tokens.cacheCreate,
         costUsd: null,
       }, entry.fast);
-    entries.push({
+    const normalized: UsageEntry = {
       provider: entry.provider,
       sessionId: entry.sessionId,
       timestamp: entry.timestamp,
@@ -237,9 +238,16 @@ function collectHistoryEntries(history: UsageHistoryInput, since: number | null)
       speed: entry.speed,
       tokens: { ...entry.tokens },
       costUsd,
-    });
+    };
+    if (entry.dedupKey === null) {
+      entries.push(normalized);
+      continue;
+    }
+    const key = `${entry.provider}\u0000${entry.dedupKey}`;
+    const previous = keyedEntries.get(key);
+    if (!previous || sumOf(normalized.tokens) > sumOf(previous.tokens)) keyedEntries.set(key, normalized);
   }
-  return entries;
+  return [...entries, ...keyedEntries.values()];
 }
 
 function addDaily(days: Map<string, DailyUsage>, timestamp: number, totalTokens: number, costUsd: number | null): void {

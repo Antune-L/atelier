@@ -59,7 +59,7 @@ test("a ChatGPT account maps primary and secondary windows to session and weekly
     { id: "codex:secondary", kind: "weekly", model: null, usedPercent: 71, windowDurationMins: 10_080, resetsAt: RESET_SECONDS * 1000 },
     { id: "codex:model:codex-luna", kind: "weekly_model", model: "GPT Luna", usedPercent: 12, windowDurationMins: 10_080, resetsAt: null },
   ]);
-  expect(JSON.stringify(quota)).not.toContain("someone@example.com");
+  expect(quota.accountEmail).toBe(CHATGPT_ACCOUNT.account.email);
   expect(closed()).toBe(true);
 });
 

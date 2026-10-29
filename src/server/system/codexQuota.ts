@@ -10,9 +10,8 @@ import type { CodexAppServerConnection, CodexAppServerOptions } from "./codexApp
 import { CODEX_SDK_VERSION, resolveCodexBinary } from "./codexBinary.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
 
-/** Only the type and plan are kept: email and account ids are stripped by the schema. */
 const accountResponseSchema = z.object({
-  account: z.object({ type: z.string(), planType: z.string().nullish() }).nullable(),
+  account: z.object({ type: z.string(), planType: z.string().nullish(), email: z.string().nullish() }).nullable(),
   requiresOpenaiAuth: z.boolean(),
 });
 
@@ -105,7 +104,7 @@ function pickModelWindow(snapshot: RateLimitSnapshot): RateLimitWindow | null {
 function quota(
   state: ProviderQuotaState,
   observedAt: number,
-  fields: { planType?: string | null; windows?: QuotaWindow[]; message?: string | null } = {},
+  fields: Partial<Pick<ProviderQuota, "planType" | "accountEmail" | "windows" | "message">> = {},
 ): ProviderQuota {
   return providerQuotaSchema.parse({
     provider: "codex",
@@ -113,6 +112,7 @@ function quota(
     source: state === "ok" ? "live" : null,
     observedAt,
     planType: fields.planType ?? null,
+    accountEmail: fields.accountEmail ?? null,
     windows: fields.windows ?? [],
     message: fields.message ?? null,
   });
@@ -139,6 +139,8 @@ export async function readCodexQuota(dependencies: CodexQuotaDependencies = {}):
   }
 
   let connection: CodexAppServerConnection | null = null;
+  let accountEmail: string | null = null;
+  let planType: string | null = null;
   try {
     // Each request ends by the service deadline so a timed-out read never leaves App Server running.
     connection = await (dependencies.connect ?? connectCodexAppServer)({ binaryPath, env: environment, requestTimeoutMs: QUOTA_READ_TIMEOUT_MS });
@@ -150,17 +152,19 @@ export async function readCodexQuota(dependencies: CodexQuotaDependencies = {}):
     if (account.account.type !== "chatgpt") {
       return quota("not_applicable", now(), { planType: account.account.planType ?? null, message: "Compte Codex sans quota d'abonnement" });
     }
+    accountEmail = account.account.email ?? null;
+    planType = account.account.planType ?? null;
     const response = await connection.request("account/rateLimits/read", undefined, rateLimitsResponseSchema);
     const windows = codexQuotaWindows(response);
-    const planType = response.rateLimits.planType ?? account.account.planType ?? null;
-    if (windows.length === 0) return quota("no_data", now(), { planType, message: "Aucune donnée de quota reçue" });
-    return quota("ok", now(), { planType, windows });
+    planType = response.rateLimits.planType ?? planType;
+    if (windows.length === 0) return quota("no_data", now(), { accountEmail, planType, message: "Aucune donnée de quota reçue" });
+    return quota("ok", now(), { accountEmail, planType, windows });
   } catch (error) {
     if (isMethodUnavailable(error)) {
-      return quota("error", now(), { message: `Lecture des quotas indisponible dans Codex ${CODEX_SDK_VERSION}` });
+      return quota("error", now(), { accountEmail, planType, message: `Lecture des quotas indisponible dans Codex ${CODEX_SDK_VERSION}` });
     }
     const detail = error instanceof z.ZodError ? "Réponse de quota Codex invalide" : error instanceof Error ? error.message : String(error);
-    return quota("error", now(), { message: detail });
+    return quota("error", now(), { accountEmail, planType, message: detail });
   } finally {
     await connection?.close().catch(() => undefined);
   }

@@ -9,7 +9,7 @@ import { ClaudeLoginPanel } from "@/components/usage/ClaudeLoginPanel";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { QuotaWindowBar } from "@/components/usage/QuotaWindowBar";
 import type { useClaudeLogin } from "@/hooks/useClaudeLogin";
-import { formatAgo, QUOTA_PROVIDER_LABELS, quotaAgeText, quotaStateMessage, showsLastKnownWindows } from "@/lib/usageDisplay";
+import { formatAgo, QUOTA_ACCOUNT_NOTE, QUOTA_PROVIDER_LABELS, quotaAgeText, quotaStateMessage, showsLastKnownWindows } from "@/lib/usageDisplay";
 import { cn } from "@/lib/utils";
 
 const NOW_TICK_MS = 30_000;
@@ -77,6 +77,12 @@ function ProviderQuotaCard({ view, now, login }: { view: ProviderQuotaView; now:
           {quota !== null && quota.state !== "not_applicable" && isQuotaStale(quota, now) && <Badge variant="warning">Donnée périmée</Badge>}
         </div>
       </div>
+      {quota !== null && quota.state !== "not_applicable" && quota.state !== "unauthenticated" && (
+        <p className="break-words text-sm text-muted-foreground">
+          Compte : {quota.accountEmail || "Identité non fournie par le fournisseur"}
+          {quota.accountOrganization && <span> · {quota.accountOrganization}</span>}
+        </p>
+      )}
       {error !== null ? (
         <p role="alert" className="text-sm text-danger">{error}</p>
       ) : (
@@ -100,6 +106,7 @@ export function LimitsTab({ providers, claudeLogin }: { providers: ProviderQuota
   const now = useNow();
   return (
     <div className="flex flex-col gap-9">
+      <p className="text-sm text-muted-foreground">{QUOTA_ACCOUNT_NOTE}</p>
       {providers.map((view) => (
         <ProviderQuotaCard key={view.provider} view={view} now={now} login={view.provider === "claude" ? claudeLogin : null} />
       ))}

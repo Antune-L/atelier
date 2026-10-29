@@ -42,7 +42,9 @@ export function filteredProviders(filter: UsageProviderFilter): QuotaProvider[] 
   return filter === "all" ? ["claude", "codex"] : [filter];
 }
 
-export const LOCAL_HISTORY_NOTE = "Historiques de ce serveur : les sessions lancées sur une autre machine ne sont pas comptées.";
+export const LOCAL_HISTORY_NOTE = "Sessions Atelier et historiques disponibles sur ce serveur, y compris hors Atelier. Les autres machines, le web et le mobile ne sont pas inclus. Les coûts estimés aux tarifs API ne représentent pas la facture de l’abonnement.";
+
+export const QUOTA_ACCOUNT_NOTE = "Quotas des comptes connectés : ils incluent l’usage hors Atelier et sur les autres appareils pour les limites partagées par le fournisseur. Chaque fenêtre correspond à une période de l’abonnement, pas à un ticket Atelier.";
 
 export const OAUTH_TOKEN_ENV_WARNING =
   "CLAUDE_CODE_OAUTH_TOKEN est défini : il passe probablement avant la session et masque les limites ; commente-le dans /etc/kanban/kanban.env puis redémarre le service.";

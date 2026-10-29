@@ -1357,25 +1357,27 @@ export class Store {
     });
   }
 
-  /** Per-ticket usage for the usage page; `legacy` excludes what executions already account for. */
   listUsageSources(): UsageSource[] {
     const byTicket = new Map<string, ExecutionRun[]>();
-    for (const execution of this.listExecutionRuns("ticket")) {
+    const executions = this.listExecutionRuns();
+    for (const execution of executions) {
+      if (execution.ownerType !== "ticket") continue;
       const runs = byTicket.get(execution.ownerId) ?? [];
       runs.push(execution);
       byTicket.set(execution.ownerId, runs);
     }
-    return this.db.query("SELECT * FROM tickets ORDER BY created_at ASC").all().map((row) => {
+    const sources: UsageSource[] = this.db.query("SELECT * FROM tickets ORDER BY created_at ASC").all().map((row) => {
       const ticket = mapTicketRow(row, 0);
       const executions = byTicket.get(ticket.id) ?? [];
       return { createdAt: ticket.createdAt, legacy: residualLegacyUsage(ticket, executions), executions };
     });
+    const countedRuns = new Set(sources.flatMap((source) => source.executions.map((execution) => execution.id)));
+    for (const execution of executions) {
+      if (!countedRuns.has(execution.id)) sources.push({ createdAt: execution.startedAt, legacy: {}, executions: [execution] });
+    }
+    return sources;
   }
 
-  /**
-   * Session ids already counted by `listUsageSources`: ticket executions plus legacy ticket sessions.
-   * Other owners (conversations, audits, actions, batches) are left to the local history scan.
-   */
   listUsageCountedSessionIds(): Set<string> {
     const ids = new Set<string>();
     for (const source of this.listUsageSources()) {

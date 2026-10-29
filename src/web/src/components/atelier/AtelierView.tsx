@@ -73,7 +73,7 @@ export function AtelierView({ projects, projectFilter, target, toolbar }: Atelie
   const [step, setStep] = useState<AtelierStep>("conversation");
   const [prdChoice, setPrdChoice] = useState<string | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
-  const [listOpen, setListOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(true);
   const [appliedTarget, setAppliedTarget] = useState<AtelierTarget | null>(null);
   const [prdSeen, setPrdSeen] = useState<PrdSeen | null>(null);
   const [search, setSearch] = useState("");
@@ -113,6 +113,7 @@ export function AtelierView({ projects, projectFilter, target, toolbar }: Atelie
 
   const openPrdOrigin = (prdId: string, project: string): void => {
     const request = ++resolveSeq.current;
+    setListOpen(false);
     const candidates = conversations.filter((c) => c.project === project);
     void findPrdConversation(candidates, prdId).then((conversationId) => {
       if (request !== resolveSeq.current) return;

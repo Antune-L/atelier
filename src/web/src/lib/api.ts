@@ -58,7 +58,7 @@ import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestP
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
 import type { HostMetrics } from "@shared/types";
-import { providerQuotaSchema } from "@shared/providerQuota";
+import { lastProviderQuotaResponseSchema, providerQuotaSchema } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 import { usageSummarySchema } from "@shared/providerUsage";
 import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
@@ -235,8 +235,10 @@ export const api = {
     request(`/api/pr-notifications/${encodeURIComponent(id)}/review`, { method: "POST", body: JSON.stringify(options) }),
   tickets: (): Promise<Ticket[]> => request("/api/tickets"),
   stats: (): Promise<StatRecord[]> => request("/api/stats"),
-  usageLimits: async (provider: QuotaProvider, signal?: AbortSignal): Promise<ProviderQuota> =>
-    providerQuotaSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}`, { signal })),
+  usageLimits: async (provider: QuotaProvider, options?: { fresh?: boolean }): Promise<ProviderQuota> =>
+    providerQuotaSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}${options?.fresh ? "?fresh=1" : ""}`)),
+  usageLastLimits: async (provider: QuotaProvider): Promise<ProviderQuota | null> =>
+    lastProviderQuotaResponseSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}/last`)).quota,
   usageSummary: async (period: UsagePeriod): Promise<UsageSummary> =>
     usageSummarySchema.parse(await request<unknown>(`/api/usage/summary?period=${encodeURIComponent(period)}`)),
   claudeLoginStatus: async (): Promise<ClaudeLoginStatus> =>

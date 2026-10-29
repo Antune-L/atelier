@@ -47,7 +47,13 @@ export const providerQuotaSchema = z.object({
 });
 export type ProviderQuota = z.infer<typeof providerQuotaSchema>;
 
+/** Last known quota served without any live read; null when nothing usable is known. */
+export const lastProviderQuotaResponseSchema = z.object({ quota: providerQuotaSchema.nullable() });
+export type LastProviderQuotaResponse = z.infer<typeof lastProviderQuotaResponseSchema>;
+
 export const QUOTA_READ_TIMEOUT_MS = 15_000;
+/** A non-forced read reuses the last known quota while the last successful live read is younger than this. */
+export const QUOTA_MIN_LIVE_AGE_MS = 60_000;
 export const QUOTA_STALE_AFTER_MS = 30 * 60_000;
 /** Usage may exceed elapsed time by this many percentage points before it counts as ahead of pace. */
 export const QUOTA_PACE_TOLERANCE_POINTS = 5;

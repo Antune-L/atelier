@@ -237,7 +237,10 @@ export class LocalUsageHistory {
           }
           bytesByProvider[provider] += stats.size;
           const parsed = await this.entriesOf(provider, path);
-          entries.push(...parsed.filter((entry) => since === undefined || entry.timestamp >= since));
+          // Append one by one: spreading a huge file's entries into push() overflows the argument limit.
+          for (const entry of parsed) {
+            if (since === undefined || entry.timestamp >= since) entries.push(entry);
+          }
         } catch {
           failedFiles += 1;
           this.cache.delete(path);

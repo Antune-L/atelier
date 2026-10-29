@@ -3,11 +3,13 @@ import { describe, expect, test } from "bun:test";
 import type { ProviderQuota, QuotaWindow } from "@shared/providerQuota";
 
 import {
+  failedRevalidation,
   filteredProviders,
   formatAgo,
   formatCostOrUnpriced,
   formatDayLabel,
   formatRemaining,
+  latestObservedAt,
   paceText,
   quotaAgeText,
   quotaStateMessage,
@@ -16,6 +18,7 @@ import {
   sessionCountText,
   sharePercent,
   showsLastKnownWindows,
+  timeoutQuota,
   usageBarClass,
   USAGE_PERIOD_LABELS,
 } from "./usageDisplay";
@@ -124,5 +127,33 @@ describe("helpers", () => {
     expect(usageBarClass(10)).toBe("bg-info");
     expect(sharePercent(1, 4)).toBe(25);
     expect(sharePercent(1, 0)).toBe(0);
+  });
+});
+
+describe("failedRevalidation", () => {
+  const known = quota({ source: "cache", observedAt: 5, windows: [window({})] });
+
+  test("timeout keeps displayed windows", () => {
+    expect(failedRevalidation(known, "claude", "timeout", "x")).toEqual({ quota: { ...known, state: "timeout" }, error: null });
+  });
+
+  test("timeout without windows falls back to the timeout state", () => {
+    expect(failedRevalidation(null, "codex", "timeout", "x")).toEqual({ quota: timeoutQuota("codex"), error: null });
+    expect(failedRevalidation(quota({}), "codex", "timeout", "x")).toEqual({ quota: timeoutQuota("codex"), error: null });
+  });
+
+  test("error keeps a displayed quota with the message", () => {
+    expect(failedRevalidation(known, "claude", "error", "boom")).toEqual({ quota: { ...known, state: "error", message: "boom" }, error: null });
+  });
+
+  test("error without a displayed quota sets the error", () => {
+    expect(failedRevalidation(null, "claude", "error", "boom")).toEqual({ quota: null, error: "boom" });
+  });
+});
+
+describe("latestObservedAt", () => {
+  test("returns the most recent observation or null", () => {
+    expect(latestObservedAt([quota({ observedAt: 3 }), null, quota({ observedAt: 7 })])).toBe(7);
+    expect(latestObservedAt([null, quota({ observedAt: null })])).toBeNull();
   });
 });

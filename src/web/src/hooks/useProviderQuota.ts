@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 
 import { api } from "@/lib/api";
-import { timeoutQuota } from "@/lib/usageDisplay";
+import { failedRevalidation } from "@/lib/usageDisplay";
 
 /** Client-side safety net above the server's own 15 s bound. */
 const CLIENT_TIMEOUT_MS = 20_000;
@@ -14,31 +14,58 @@ interface UseProviderQuotaResult {
   error: string | null;
 }
 
-/** Reads one provider's quota on mount and whenever `nonce` changes; independent per provider. */
+class ClientTimeoutError extends Error {}
+
+/**
+ * Shows the last known quota immediately, then revalidates it with a live read on mount
+ * and whenever `nonce` changes (a non-zero nonce forces the read past the server's gate).
+ */
 export function useProviderQuota(provider: QuotaProvider, nonce: number): UseProviderQuotaResult {
   const [quota, setQuota] = useState<ProviderQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Mirrors the displayed quota so the effect can merge failures without depending on it.
+  const quotaRef = useRef<ProviderQuota | null>(null);
 
   useEffect(() => {
     let active = true;
-    let timedOut = false;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, CLIENT_TIMEOUT_MS);
+    let liveResolved = false;
+    const show = (next: ProviderQuota | null): void => {
+      quotaRef.current = next;
+      setQuota(next);
+    };
+
+    if (quotaRef.current === null) {
+      api
+        .usageLastLimits(provider)
+        .then((last) => {
+          if (active && !liveResolved && last !== null && quotaRef.current === null) show(last);
+        })
+        .catch(() => {
+          // The last known quota is best effort; the live read reports failures.
+        });
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new ClientTimeoutError()), CLIENT_TIMEOUT_MS);
+    });
     setLoading(true);
-    setError(null);
-    api
-      .usageLimits(provider, controller.signal)
+    Promise.race([api.usageLimits(provider, { fresh: nonce > 0 }), timeout])
       .then((data) => {
-        if (active) setQuota(data);
+        liveResolved = true;
+        if (!active) return;
+        show(data);
+        setError(null);
       })
       .catch((err: unknown) => {
+        liveResolved = true;
         if (!active) return;
-        if (timedOut) setQuota(timeoutQuota(provider));
-        else setError(err instanceof Error ? err.message : "échec du chargement");
+        const state = err instanceof ClientTimeoutError ? "timeout" : "error";
+        const message = err instanceof Error && err.message !== "" ? err.message : "échec du chargement";
+        const next = failedRevalidation(quotaRef.current, provider, state, message);
+        show(next.quota);
+        setError(next.error);
       })
       .finally(() => {
         clearTimeout(timer);
@@ -47,7 +74,6 @@ export function useProviderQuota(provider: QuotaProvider, nonce: number): UsePro
     return () => {
       active = false;
       clearTimeout(timer);
-      controller.abort();
     };
   }, [provider, nonce]);
 

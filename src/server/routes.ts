@@ -88,7 +88,7 @@ import type { CloneResult, GithubAccountSummary, GithubRepoSummary } from "../sh
 import type { ClientHub } from "./hub.ts";
 import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { quotaProviderSchema } from "../shared/providerQuota.ts";
-import type { ProviderQuota } from "../shared/providerQuota.ts";
+import type { LastProviderQuotaResponse, ProviderQuota } from "../shared/providerQuota.ts";
 import { DEFAULT_USAGE_PERIOD, summarizeProviderUsage, usagePeriodSchema, usagePeriodStart } from "../shared/providerUsage.ts";
 import type { HistoryUsageEntry } from "../shared/providerUsage.ts";
 import { claudeLoginCodeSchema } from "../shared/claudeLogin.ts";
@@ -1373,10 +1373,15 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/stats", () => store.listStatRecords())
-    .get("/usage/limits/:provider", async ({ params, set }) => {
+    .get("/usage/limits/:provider/last", ({ params, set }) => {
       const provider = quotaProviderSchema.safeParse(params.provider);
       if (!provider.success) return jsonError(set, HTTP_BAD_REQUEST, "fournisseur inconnu");
-      return quotaService.read(provider.data);
+      return { quota: quotaService.last(provider.data) } satisfies LastProviderQuotaResponse;
+    })
+    .get("/usage/limits/:provider", async ({ params, query, set }) => {
+      const provider = quotaProviderSchema.safeParse(params.provider);
+      if (!provider.success) return jsonError(set, HTTP_BAD_REQUEST, "fournisseur inconnu");
+      return query.fresh === "1" ? quotaService.read(provider.data, { force: true }) : quotaService.read(provider.data);
     })
     .get("/usage/summary", async ({ query, set }) => {
       const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);

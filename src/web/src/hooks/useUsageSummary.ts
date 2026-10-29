@@ -10,20 +10,28 @@ interface UseUsageSummaryResult {
   error: string | null;
 }
 
-/** Fetches the cost/token summary for a period; refetches when the period or `nonce` changes. */
-export function useUsageSummary(period: UsagePeriod, nonce: number): UseUsageSummaryResult {
+/**
+ * Fetches the cost/token summary for a period while `enabled`; refetches when the period,
+ * `nonce` or `enabled` changes. A failed refetch keeps the previously displayed summary.
+ */
+export function useUsageSummary(period: UsagePeriod, nonce: number, enabled: boolean): UseUsageSummaryResult {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     let active = true;
     setLoading(true);
-    setError(null);
     api
       .usageSummary(period)
       .then((data) => {
-        if (active) setSummary(data);
+        if (!active) return;
+        setSummary(data);
+        setError(null);
       })
       .catch((err: unknown) => {
         if (active) setError(err instanceof Error ? err.message : "échec du chargement");
@@ -34,7 +42,7 @@ export function useUsageSummary(period: UsagePeriod, nonce: number): UseUsageSum
     return () => {
       active = false;
     };
-  }, [period, nonce]);
+  }, [period, nonce, enabled]);
 
   return { summary, loading, error };
 }

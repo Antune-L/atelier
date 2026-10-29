@@ -194,6 +194,33 @@ export function timeoutQuota(provider: QuotaProvider): ProviderQuota {
   return { provider, state: "timeout", source: null, observedAt: null, planType: null, windows: [], message: null };
 }
 
+export interface QuotaDisplayState {
+  quota: ProviderQuota | null;
+  error: string | null;
+}
+
+/**
+ * Display state after a failed live read: a quota already shown is kept (marked
+ * timeout/error) instead of being replaced by an empty state.
+ */
+export function failedRevalidation(current: ProviderQuota | null, provider: QuotaProvider, state: "timeout" | "error", message: string): QuotaDisplayState {
+  if (state === "timeout") {
+    if (current !== null && current.windows.length > 0) return { quota: { ...current, state: "timeout" }, error: null };
+    return { quota: timeoutQuota(provider), error: null };
+  }
+  if (current !== null) return { quota: { ...current, state: "error", message }, error: null };
+  return { quota: null, error: message };
+}
+
+/** Most recent observation time among displayed quotas; null when none is known. */
+export function latestObservedAt(quotas: (ProviderQuota | null)[]): number | null {
+  let latest: number | null = null;
+  for (const quota of quotas) {
+    if (quota?.observedAt != null && (latest === null || quota.observedAt > latest)) latest = quota.observedAt;
+  }
+  return latest;
+}
+
 const CLOCK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 export function formatClock(ms: number): string {

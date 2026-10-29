@@ -1,7 +1,10 @@
-/** Provider quota reads for the usage page: fresh adapter call, timeout, session/persisted fallback. */
+/**
+ * Provider quota reads for the usage page: last known state reused while the last live read is recent,
+ * otherwise a live adapter call shared per provider, bounded by a timeout, with session/persisted fallback.
+ */
 
 import { getErrorMessage } from "../../shared/errors.ts";
-import { QUOTA_READ_TIMEOUT_MS } from "../../shared/providerQuota.ts";
+import { QUOTA_MIN_LIVE_AGE_MS, QUOTA_READ_TIMEOUT_MS } from "../../shared/providerQuota.ts";
 import type { ProviderQuota, ProviderQuotaState, QuotaProvider, QuotaWindow } from "../../shared/providerQuota.ts";
 import { createLogger } from "../logger.ts";
 import { quotaWindowFromRateLimitEvent } from "../system/claudeQuota.ts";
@@ -20,6 +23,7 @@ export interface ProviderQuotaServiceOptions {
   persistence: ProviderQuotaPersistence;
   now?: () => number;
   timeoutMs?: number;
+  minLiveAgeMs?: number;
 }
 
 const NO_DATA_MESSAGE = "Aucune donnée de quota reçue";
@@ -36,18 +40,40 @@ export class ProviderQuotaService {
   private readonly timeoutMs: number;
   /** Latest known state per provider (live read or merged session events), mirrored in persistence. */
   private readonly latest = new Map<QuotaProvider, ProviderQuota>();
+  private readonly minLiveAgeMs: number;
+  /** Time of the last successful ('ok') live read per provider; session events do not count. */
+  private readonly lastLiveOkAt = new Map<QuotaProvider, number>();
+  /** Underlying adapter call in progress per provider, shared by concurrent and timed-out reads. */
+  private readonly inflight = new Map<QuotaProvider, Promise<ProviderQuota>>();
 
   constructor(options: ProviderQuotaServiceOptions) {
     this.system = options.system;
     this.persistence = options.persistence;
     this.now = options.now ?? Date.now;
     this.timeoutMs = options.timeoutMs ?? QUOTA_READ_TIMEOUT_MS;
+    this.minLiveAgeMs = options.minLiveAgeMs ?? QUOTA_MIN_LIVE_AGE_MS;
   }
 
-  /** Fresh read (never cached), bounded by the timeout; never throws. */
-  async read(provider: QuotaProvider): Promise<ProviderQuota> {
+  /** Last known usable quota (source cache or session) without any live read; null when nothing usable is known. */
+  last(provider: QuotaProvider): ProviderQuota | null {
+    return this.lastKnown(provider);
+  }
+
+  /**
+   * Live read bounded by the timeout, unless not forced and the last successful live read is recent enough:
+   * then the last known quota is returned without calling the adapter. Never throws.
+   */
+  async read(provider: QuotaProvider, options?: { force?: boolean }): Promise<ProviderQuota> {
+    if (!options?.force) {
+      const liveOkAt = this.lastLiveOkAt.get(provider);
+      if (liveOkAt !== undefined && this.now() - liveOkAt < this.minLiveAgeMs) {
+        const known = this.lastKnown(provider);
+        if (known) return known;
+      }
+    }
     const live = await this.readLive(provider);
     if (live.state === "ok") {
+      this.lastLiveOkAt.set(provider, this.now());
       this.remember(provider, live);
       return live;
     }
@@ -112,6 +138,15 @@ export class ProviderQuotaService {
     const timeout = new Promise<ProviderQuota>((resolve) => {
       timer = setTimeout(() => resolve(emptyQuota(provider, "timeout", this.now(), TIMEOUT_MESSAGE)), this.timeoutMs);
     });
+    const call = this.inflight.get(provider) ?? this.startCall(provider);
+    try {
+      return await Promise.race([call, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private startCall(provider: QuotaProvider): Promise<ProviderQuota> {
     const call = (async (): Promise<ProviderQuota> => {
       try {
         return provider === "claude" ? await this.system.readClaudeUsage() : await this.system.readCodexQuota();
@@ -119,11 +154,11 @@ export class ProviderQuotaService {
         return emptyQuota(provider, "error", this.now(), getErrorMessage(error));
       }
     })();
-    try {
-      return await Promise.race([call, timeout]);
-    } finally {
-      clearTimeout(timer);
-    }
+    this.inflight.set(provider, call);
+    void call.finally(() => {
+      if (this.inflight.get(provider) === call) this.inflight.delete(provider);
+    });
+    return call;
   }
 
   private safeLoad(provider: QuotaProvider): ProviderQuota | null {

@@ -5,6 +5,7 @@ import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from ".
 import { SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
+import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constants.ts";
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
@@ -58,6 +59,9 @@ import type {
 } from "./types.ts";
 import { FAKE_PR_BODY, FakeVcsClient } from "./vcs/fake.ts";
 import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
 
 const dryRunLog = createLogger("dry-run");
 /** Fixed repository list served by the dry-run « Depuis GitHub » mode. */
@@ -760,6 +764,29 @@ export class FakeSystemAdapter implements SystemAdapter {
         serviceTiers: [{ id: "priority", name: "Fast", description: "Mode rapide" }],
         defaultServiceTier: null,
       })),
+    };
+  }
+
+  async readClaudeUsage(): Promise<ProviderQuota> {
+    const now = Date.now();
+    return {
+      provider: "claude", state: "ok", source: "live", observedAt: now, planType: "max", message: null,
+      windows: [
+        { id: "claude:five_hour", kind: "session", model: null, usedPercent: 42, windowDurationMins: 300, resetsAt: now + 2 * HOUR_MS },
+        { id: "claude:seven_day", kind: "weekly", model: null, usedPercent: 63, windowDurationMins: 10_080, resetsAt: now + 3 * DAY_MS },
+        { id: "claude:model:Fable", kind: "weekly_model", model: "Fable", usedPercent: 20, windowDurationMins: 10_080, resetsAt: now + 3 * DAY_MS },
+      ],
+    };
+  }
+
+  async readCodexQuota(): Promise<ProviderQuota> {
+    const now = Date.now();
+    return {
+      provider: "codex", state: "ok", source: "live", observedAt: now, planType: "pro", message: null,
+      windows: [
+        { id: "codex:primary", kind: "session", model: null, usedPercent: 35, windowDurationMins: 300, resetsAt: now + 90 * 60_000 },
+        { id: "codex:secondary", kind: "weekly", model: null, usedPercent: 71, windowDurationMins: 10_080, resetsAt: now + 4 * DAY_MS },
+      ],
     };
   }
 

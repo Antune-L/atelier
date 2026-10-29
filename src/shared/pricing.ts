@@ -1,17 +1,20 @@
-import type { AgentModel } from "./constants.ts";
+import type { AgentModel, Orchestrator } from "./constants.ts";
 
-import type { ModelUsage, SessionUsage, UsageByModel } from "./schemas.ts";
+import type { ExecutionModelUsage, ModelUsage, SessionUsage, UsageByModel } from "./schemas.ts";
 
 /**
  * Token-cost model. The SDK turn-end event ships only token counts (never prices); prices live here
  * so they stay editable and cost is recomputable retroactively from the stored token totals
  * (tokens = source of truth).
  *
- * Prices are Anthropic public list prices, expressed in USD per million tokens (MTok). Cache reads
+ * Claude prices are Anthropic public list prices, expressed in USD per million tokens (MTok). Cache reads
  * bill at 0.1x the base input rate by default (Opus 5.5: 0.05x); cache writes (creation) bill at
  * 1.25x. `MODEL_PRICING` overrides a family rate for specific model ids (matched by prefix so
  * dated ids like "claude-opus-5-5-20260915" resolve); anything else falls back to `PRICING`.
- * Maintain manually.
+ *
+ * GPT (Codex) prices are OpenAI public list prices in `GPT_PRICING` / `GPT_FAST_PRICING`, with
+ * explicit per-bucket rates and their own formula (see `gptBreakdown`). Maintain manually following
+ * docs/pricing.md on every SDK bump and every new model.
  */
 
 /**
@@ -86,17 +89,139 @@ export function normalizeModel(modelId: string): ModelFamily | null {
   return null;
 }
 
-/** Cost in USD of one model's usage; null means no explicit price is known. */
-function costOfModel(modelId: string, usage: ModelUsage): number | null {
+/** Explicit USD / MTok rates of a GPT model; `write12h` is kept for reference but never billed. */
+interface GptPricing {
+  input: number;
+  output: number;
+  cachedInput: number;
+  write30m: number;
+  write12h: number;
+}
+
+function gptPricing(input: number, output: number, cachedInput: number, write30m: number, write12h: number): GptPricing {
+  return { input, output, cachedInput, write30m, write12h };
+}
+
+/** Standard-tier GPT rates keyed by model-id prefix. `gpt-6-sol` is billed at the 6.1 Sol rates. */
+const GPT_PRICING: Record<string, GptPricing> = {
+  "gpt-6-astra": gptPricing(10, 50, 1, 12.5, 25),
+  "gpt-6.1-sol": gptPricing(2, 10, 0.1, 2.5, 5),
+  "gpt-6-sol": gptPricing(2, 10, 0.1, 2.5, 5),
+  "gpt-6.1-terra": gptPricing(1, 5, 0.05, 1.25, 2.5),
+  "gpt-6-luna": gptPricing(0.1, 0.5, 0.01, 0.125, 0.25),
+};
+
+/** FAST (priority service tier) GPT rates. */
+const GPT_FAST_PRICING: Record<string, GptPricing> = {
+  "gpt-6-astra": gptPricing(20, 100, 2, 25, 50),
+  "gpt-6.1-sol": gptPricing(4, 20, 0.2, 5, 10),
+  "gpt-6-sol": gptPricing(4, 20, 0.2, 5, 10),
+  "gpt-6.1-terra": gptPricing(2, 10, 0.1, 2.5, 5),
+  "gpt-6-luna": gptPricing(0.2, 1, 0.02, 0.25, 0.5),
+};
+
+function isGptModel(modelId: string): boolean {
+  return modelId.toLowerCase().startsWith("gpt-");
+}
+
+function uncachedGptInput(t: TokenBreakdown): number {
+  return Math.max(0, t.input - t.cacheRead - t.cacheCreate);
+}
+
+/**
+ * Raw token buckets split into non-overlapping ones for display: GPT `input` already includes the
+ * cached and written tokens, so only its uncached share stays in `input`. Claude buckets are disjoint.
+ */
+export function exclusiveTokenBuckets(modelId: string, tokens: TokenBreakdown): TokenBreakdown {
+  return isGptModel(modelId) ? { ...tokens, input: uncachedGptInput(tokens) } : tokens;
+}
+
+function gptPricingOf(modelId: string, fast: boolean): GptPricing | null {
+  const lower = modelId.toLowerCase();
+  for (const [prefix, pricing] of Object.entries(fast ? GPT_FAST_PRICING : GPT_PRICING)) {
+    // Exact id or a dated variant ("gpt-6.1-sol-2026-…"), so "gpt-6-sol" never matches "gpt-6.1-sol".
+    if (lower === prefix || lower.startsWith(`${prefix}-`)) return pricing;
+  }
+  return null;
+}
+
+/**
+ * USD per bucket for GPT. Codex `inputTokens` include cached tokens (OpenAI convention), so the
+ * billable uncached input is input − cacheRead − cacheCreate. Cache creation bills at the 30-minute
+ * write rate (the 12h rate is not distinguishable from the reported tokens).
+ */
+function gptBreakdown(p: GptPricing, t: TokenBreakdown): TokenBreakdown {
+  return {
+    input: (uncachedGptInput(t) * p.input) / MTOK,
+    output: (t.output * p.output) / MTOK,
+    cacheRead: (t.cacheRead * p.cachedInput) / MTOK,
+    cacheCreate: (t.cacheCreate * p.write30m) / MTOK,
+  };
+}
+
+function costOfGpt(p: GptPricing, t: TokenBreakdown): number {
+  const buckets = gptBreakdown(p, t);
+  return buckets.input + buckets.output + buckets.cacheRead + buckets.cacheCreate;
+}
+
+/** Cost in USD of raw token buckets; FAST only affects GPT models. Null when unpriced. */
+function costOfTokens(modelId: string, t: TokenBreakdown, options: { fast?: boolean } = {}): number | null {
+  if (isGptModel(modelId)) {
+    const gpt = gptPricingOf(modelId, options.fast ?? false);
+    return gpt === null ? null : costOfGpt(gpt, t);
+  }
   const p = pricingOf(modelId);
   if (p === null) return null;
-  return (
-    (usage.input_tokens * p.input +
-      usage.output_tokens * p.output +
-      usage.cache_read_input_tokens * p.cacheRead +
-      usage.cache_creation_input_tokens * p.cacheCreate) /
-    MTOK
-  );
+  return (t.input * p.input + t.output * p.output + t.cacheRead * p.cacheRead + t.cacheCreate * p.cacheCreate) / MTOK;
+}
+
+/** Cost in USD of one model's usage; null means no explicit price is known. */
+function costOfModel(modelId: string, usage: ModelUsage, options: { fast?: boolean } = {}): number | null {
+  return costOfTokens(modelId, {
+    input: usage.input_tokens,
+    output: usage.output_tokens,
+    cacheRead: usage.cache_read_input_tokens,
+    cacheCreate: usage.cache_creation_input_tokens,
+  }, options);
+}
+
+/** Provider of a model id: Codex for GPT/codex ids, else `fallback`. */
+export function providerOfModel(modelId: string, fallback: Orchestrator = "claude"): Orchestrator {
+  const lower = modelId.toLowerCase();
+  if (lower.startsWith("gpt-") || lower.includes("codex")) return "codex";
+  return fallback;
+}
+
+/** Whether the local grid knows a (standard-tier) price for this model id. */
+export function isPricedModel(modelId: string): boolean {
+  return isGptModel(modelId) ? gptPricingOf(modelId, false) !== null : pricingOf(modelId) !== null;
+}
+
+/** Execution usage cost: the SDK-reported cost wins, else recomputed from tokens (null when unpriced). */
+export function costOfExecutionUsage(modelId: string, usage: ExecutionModelUsage, fast: boolean): number | null {
+  if (usage.costUsd !== null) return usage.costUsd;
+  return costOfTokens(modelId, {
+    input: usage.inputTokens,
+    output: usage.outputTokens,
+    cacheRead: usage.cacheReadTokens,
+    cacheCreate: usage.cacheCreationTokens,
+  }, { fast });
+}
+
+/** USD per bucket at the local grid rates (GPT `input` = uncached input cost); null when unpriced. */
+export function costBreakdownOfModel(modelId: string, tokens: TokenBreakdown, fast: boolean): TokenBreakdown | null {
+  if (isGptModel(modelId)) {
+    const gpt = gptPricingOf(modelId, fast);
+    return gpt === null ? null : gptBreakdown(gpt, tokens);
+  }
+  const p = pricingOf(modelId);
+  if (p === null) return null;
+  return {
+    input: (tokens.input * p.input) / MTOK,
+    output: (tokens.output * p.output) / MTOK,
+    cacheRead: (tokens.cacheRead * p.cacheRead) / MTOK,
+    cacheCreate: (tokens.cacheCreate * p.cacheCreate) / MTOK,
+  };
 }
 
 /** Total cost in USD across every model in a single session's usage. */

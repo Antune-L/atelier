@@ -33,9 +33,9 @@ test("mixed historical and captured usage retains old sessions without double co
     });
     const stats = projectStatRecord(ticket, [completed]);
     expect(stats.totalTokens).toBe(1_000_100);
-    expect(stats.costUsd).toBeNull();
-    expect(stats.knownCostUsd).toBe(3);
-    expect(stats.costPartial).toBe(true);
+    expect(stats.costUsd).toBeCloseTo(3.001, 10);
+    expect(stats.knownCostUsd).toBeCloseTo(3.001, 10);
+    expect(stats.costPartial).toBe(false);
     const priced = projectStatRecord({ ...ticket, sessionUsage: { ...ticket.sessionUsage, current: {
       sonnet: { input_tokens: 100, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     } } }, [{ ...completed, usageByModel: {
@@ -48,12 +48,23 @@ test("mixed historical and captured usage retains old sessions without double co
       codexFast: false,
       configuredServiceTier: "priority",
       usageByModel: {
-        "gpt-6-astra": { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 2 },
+        "gpt-6-astra": { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
       },
     }]);
-    expect(fast.costUsd).toBeNull();
-    expect(fast.knownCostUsd).toBe(3);
-    expect(fast.costPartial).toBe(true);
+    // FAST astra input: 100 tokens × $20 / MTok.
+    expect(fast.costUsd).toBeCloseTo(3.002, 10);
+    expect(fast.costPartial).toBe(false);
+    const sol = projectStatRecord(ticket, [{ ...completed, usageByModel: {
+      "gpt-6.1-sol": { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 500_000, cacheCreationTokens: 0, costUsd: null },
+    } }]);
+    // Legacy residual (sonnet 3 + unmatched astra 0.001) + (500k uncached × 2 + 500k cached × 0.10 + 100k output × 10) / MTok.
+    expect(sol.costUsd).toBeCloseTo(3.001 + 2.05, 10);
+    const unpriced = projectStatRecord(ticket, [{ ...completed, usageByModel: {
+      "gpt-7-preview": { inputTokens: 100, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
+    } }]);
+    expect(unpriced.costUsd).toBeNull();
+    expect(unpriced.knownCostUsd).toBeCloseTo(3.001, 10);
+    expect(unpriced.costPartial).toBe(true);
     const resumed = projectStatRecord({ ...ticket, sessionUsage: { ...ticket.sessionUsage, current: {
       "gpt-6-astra": { input_tokens: 1_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     } } }, [completed]);

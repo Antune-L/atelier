@@ -36,6 +36,9 @@ import { computeCodeFingerprint, computeCodeSnapshot } from "./codeFingerprint.t
 import { DelegationWorkspace } from "./delegationWorkspace.ts";
 import { addDetachedWorktree, removeDetachedWorktree } from "./detachedWorktree.ts";
 import { probeCodexRuntime } from "./codexRuntime.ts";
+import { readCodexQuota } from "./codexQuota.ts";
+import { readClaudeUsageLive } from "./claudeQuota.ts";
+import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import { CapabilityCache } from "./capabilityCache.ts";
 import { createGithubAccountRegistry } from "./github/accounts.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
@@ -1510,6 +1513,38 @@ export class RealSystemAdapter implements SystemAdapter {
 
   checkCodexRuntime(refresh = false): Promise<CodexRuntimeStatus> {
     return this.codexCapabilities.read(refresh);
+  }
+
+  readCodexQuota(): Promise<ProviderQuota> {
+    return readCodexQuota();
+  }
+
+  /** Idle SDK query (no user message, no turn) answering the `get_usage` control request; never reads ~/.claude. */
+  readClaudeUsage(): Promise<ProviderQuota> {
+    return readClaudeUsageLive({
+      environment: process.env,
+      resolveBinary: () => {
+        try {
+          const bundled = resolveClaudeBinary();
+          if (existsSync(bundled)) return bundled;
+        } catch {
+          // The SDK platform package is absent (packaged app before provisioning): fall through to PATH.
+        }
+        return Bun.which(CLAUDE_BINARY_NAME);
+      },
+      startQuery: (binaryPath, prompt) =>
+        query({
+          prompt,
+          options: {
+            cwd: tmpdir(),
+            pathToClaudeCodeExecutable: binaryPath,
+            env: agentBaseEnv(),
+            tools: [],
+            persistSession: false,
+            stderr: () => {},
+          },
+        }),
+    });
   }
 }
 

@@ -85,6 +85,10 @@ import { redactSecrets } from "./system/secretRedaction.ts";
 import { addGithubAccountRequestSchema, cloneProjectRequestSchema, githubLoginSchema } from "../shared/github.ts";
 import type { CloneResult, GithubAccountSummary, GithubRepoSummary } from "../shared/github.ts";
 import type { ClientHub } from "./hub.ts";
+import { ProviderQuotaService } from "./quota/quotaService.ts";
+import { quotaProviderSchema } from "../shared/providerQuota.ts";
+import type { ProviderQuota } from "../shared/providerQuota.ts";
+import { DEFAULT_USAGE_PERIOD, summarizeProviderUsage, usagePeriodSchema, usagePeriodStart } from "../shared/providerUsage.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { buildNotionImportPrompt } from "./agents/notionImport.ts";
@@ -130,6 +134,8 @@ interface PaneReader {
   importNotion(opts: ImportNotionOptions): Promise<string>;
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
   checkClaudeAvailable(): Promise<boolean>;
+  readClaudeUsage(): Promise<ProviderQuota>;
+  readCodexQuota(): Promise<ProviderQuota>;
   checkSkills(): Promise<SkillStatus[]>;
   githubAccounts(): GithubAccountRegistry;
   listGithubRepos(account: string | null): Promise<GithubRepoSummary[]>;
@@ -149,6 +155,8 @@ interface RouteDeps {
   coordinator: AgentCoordinator;
   sessionHub: SessionHub;
   system: PaneReader;
+  /** Provider quota reads; built from `system` + store persistence when omitted. */
+  quota?: ProviderQuotaService;
   triage: TriageManager;
   feasibility: FeasibilityBatchManager;
   split: SplitManager;
@@ -942,6 +950,13 @@ function createAtelierRoutes(deps: RouteDeps) {
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
   const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
+  const quotaService = deps.quota ?? new ProviderQuotaService({
+    system: deps.system,
+    persistence: {
+      load: (provider) => store.getProviderQuotaSnapshot(provider),
+      save: (provider, quota) => store.saveProviderQuotaSnapshot(provider, quota),
+    },
+  });
   let reviewCountsCache: { identity: string; counts: Record<string, number | null>; checkedAt: number } | null = null;
   let pendingReviewCounts: {
     identity: string;
@@ -1321,6 +1336,17 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/tickets", ({ query }) => store.listTickets(query.archived === "true"))
     .get("/stats", () => store.listStatRecords())
+    .get("/usage/limits/:provider", async ({ params, set }) => {
+      const provider = quotaProviderSchema.safeParse(params.provider);
+      if (!provider.success) return jsonError(set, HTTP_BAD_REQUEST, "fournisseur inconnu");
+      return quotaService.read(provider.data);
+    })
+    .get("/usage/summary", ({ query, set }) => {
+      const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);
+      if (!period.success) return jsonError(set, HTTP_BAD_REQUEST, "période invalide");
+      const now = Date.now();
+      return summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now);
+    })
     .get("/tickets/:id", ({ params, set }) => {
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");

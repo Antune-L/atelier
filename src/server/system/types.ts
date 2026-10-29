@@ -11,6 +11,7 @@ import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from ".
 import type { RepoInspectionContext } from "./repoInspection.ts";
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
+import type { ProviderQuota } from "../../shared/providerQuota.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
@@ -507,6 +508,12 @@ export interface SystemAdapter {
   checkSkills(): Promise<SkillStatus[]>;
   /** Fresh runtime/account/catalog status, sharing an in-flight probe when callers refresh together. */
   checkCodexRuntime(refresh?: boolean): Promise<CodexRuntimeStatus>;
+
+  // ---- provider subscription quotas (read-only, never consume a model turn) ----
+  /** Fresh Codex ChatGPT-plan quota windows through App Server; never throws. */
+  readCodexQuota(): Promise<ProviderQuota>;
+  /** Fresh Claude subscription usage through the SDK `get_usage` control request; never throws. */
+  readClaudeUsage(): Promise<ProviderQuota>;
 
   // ---- desktop self-update guards (dev desktop only) ----
   /** Current checked-out branch (`git rev-parse --abbrev-ref HEAD`); "" when it can't be read. */

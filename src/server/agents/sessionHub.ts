@@ -32,6 +32,8 @@ import type {
 } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
 
+export type RateLimitSessionEvent = Extract<AgentSessionEvent, { type: "rate_limit" }>;
+
 const log = createLogger("session-hub");
 
 /** Everything the hub needs to start one agent session; built per ticket kind by the slot manager. */
@@ -326,7 +328,23 @@ export class SessionHub {
   /** Fired on every disconnect(ticketId) — lets attached child work (delegation) die with the parent. */
   private readonly disconnectListeners: Array<(ticketId: string) => void> = [];
 
+  /** Receives every Claude rate-limit event carrying a window type and utilization (quota page). */
+  private rateLimitListener: ((event: RateLimitSessionEvent, receivedAt: number) => void) | null = null;
+
   constructor(private readonly system: SystemAdapter, private readonly closeTimeoutMs = SESSION_CLOSE_TIMEOUT_MS) {}
+
+  setRateLimitListener(listener: ((event: RateLimitSessionEvent, receivedAt: number) => void) | null): void {
+    this.rateLimitListener = listener;
+  }
+
+  private notifyRateLimit(event: AgentSessionEvent): void {
+    if (event.type !== "rate_limit" || event.rateLimitType === null || event.utilization === null) return;
+    try {
+      this.rateLimitListener?.(event, Date.now());
+    } catch (error) {
+      log.warn("écouteur de rate limit en échec", { reason: getErrorMessage(error) });
+    }
+  }
 
   setHandlers(handlers: SessionHubHandlers): void {
     this.handlers = handlers;
@@ -750,6 +768,7 @@ export class SessionHub {
     const label = prefix.trim().replace(/^⟨|⟩$/g, "");
     const sourcePrefix = label ? `⟨${label}⟩ ` : event.sourceId ? `⟨agent ${event.sourceId}⟩ ` : "";
     const blockSource = event.sourceId ? `${sourceId}:${event.sourceId}` : sourceId;
+    this.notifyRateLimit(event);
     if ((event.type === "assistant_text" || event.type === "thinking" || event.type === "progress") && event.stream) {
       const text = event.type === "progress" ? event.message : event.text;
       const marker = event.type === "thinking" ? "💭 " : event.type === "progress" ? "… " : "";

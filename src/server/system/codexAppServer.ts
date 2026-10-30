@@ -71,6 +71,8 @@ export interface CodexAppServerOptions {
   /** Test seam. Production always uses `["app-server", "--stdio"]`. */
   commandArgs?: string[];
   requestTimeoutMs?: number;
+  /** Opt in to experimental response fields (e.g. `activePermissionProfile`), read by confined sessions. */
+  experimentalApi?: boolean;
   onNotification?(notification: CodexAppServerNotification): void;
   onStderr?(line: string): void;
 }
@@ -107,7 +109,7 @@ export async function connectCodexAppServer(options: CodexAppServerOptions): Pro
       "initialize",
       {
         clientInfo: { name: "kanban_agents", title: "Atelier", version: "0.0.0" },
-        capabilities: { experimentalApi: false },
+        capabilities: { experimentalApi: options.experimentalApi === true },
       },
       initializeResponseSchema,
     );

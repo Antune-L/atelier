@@ -52,6 +52,10 @@ import { PreviewConfig } from "./previewConfig.ts";
 import { PreviewManager } from "./previewManager.ts";
 import { seedPreviewDemoData } from "./previewSeed.ts";
 import { PublicMcpManager } from "./publicMcp.ts";
+import { readRemoteMcpConfig } from "./remoteMcp/config.ts";
+import { startRemoteMcpListener } from "./remoteMcp/listener.ts";
+import { startRemoteMcpSandboxMonitor } from "./remoteMcp/sandboxMonitor.ts";
+import { getRemoteMcpSandboxStatus } from "./remoteMcp/sandboxStatus.ts";
 import { createRequestGuard, resolveBindHost } from "./requestGuard.ts";
 import { createApiRoutes } from "./routes.ts";
 import { ProviderQuotaService } from "./quota/quotaService.ts";
@@ -280,7 +284,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const repoSnapshots = new RepoSnapshots({ system, repoMutex });
   const splitManager = new SplitManager(store, system, sessionHub, repoSnapshots);
   const reformulateManager = new ReformulateManager(store, system, clientHub, notifier, repoSnapshots);
-  const feasibilityAnswerManager = new FeasibilityAnswerManager(store, system, clientHub);
+  const feasibilityAnswerManager = new FeasibilityAnswerManager(store, system, clientHub, repoMutex);
   const terminalManager = new TerminalSessionManager(store, system, triageManager, feasibilityManager);
 
   const qualityManager = new QualityManager({
@@ -422,6 +426,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
+  const remoteMcpConfig = readRemoteMcpConfig();
   void system.checkCodexRuntime().then((codex) => {
     createLogger("boot").info("Runtime Codex vérifié", { status: codex.status });
   });
@@ -458,7 +463,11 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const app = new Elysia()
     .use(api)
-    .get("/health", () => ({ ok: true, dryRun: system.dryRun }))
+    .get("/health", () => ({
+      ok: true,
+      dryRun: system.dryRun,
+      ...(remoteMcpConfig === null ? {} : { remoteMcp: { sandbox: getRemoteMcpSandboxStatus() } }),
+    }))
     .onError(({ code, error, set, request }) => {
       // Unmatched GET outside /api → serve the built SPA (static + client-side routing). This is the
       // final else: /api misses keep their JSON 404, and /ws|/workers|/uploads never reach Elysia.
@@ -559,6 +568,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     uiServer = Bun.serve<SocketData>({ unix: socketPath, idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS, fetch: handleRequest, websocket });
     chmodSync(socketPath, UI_SOCKET_MODE);
   }
+  const remoteMcpListener = remoteMcpConfig === null
+    ? null
+    : startRemoteMcpListener(remoteMcpConfig, { store, operations: ticketOperations, system, composerAvailable });
+  const stopRemoteMcpSandboxMonitor = remoteMcpConfig === null ? null : startRemoteMcpSandboxMonitor({ store });
 
   store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
   auditManager.start();
@@ -601,6 +614,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       auditManager.stop();
       launchScheduler.stop();
       await server.stop(true);
+      stopRemoteMcpSandboxMonitor?.();
+      if (remoteMcpListener !== null) await remoteMcpListener.stop();
       if (uiServer !== null) await uiServer.stop(true);
       if (socketPath !== null) rmSync(socketPath, { force: true });
       await triageManager.teardownAll();

@@ -2,6 +2,7 @@ import { TRIAGE_RAW_REPORT_MAX, TRIAGE_TIMEOUT_MS } from "../../shared/constants
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { TriageResult } from "../../shared/schemas.ts";
 import { TRIAGE_VERDICT_LABELS } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { getProject, isProjectKey, listProjectKeys } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -15,6 +16,7 @@ import { ANALYSIS_WORKSPACES_ROOT, prepareAnalysisWorkspace, releaseAnalysisWork
 import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
+import { admitRemoteAnalysis, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { buildTriageChannelPrompt, buildTriagePlusChannelPrompt } from "./triage.ts";
@@ -38,6 +40,7 @@ const DRY_RUN_VERDICT: TriageResult = {
 interface TriageSession {
   timer: ReturnType<typeof setTimeout> | null;
   workspace: AnalysisWorkspace;
+  releaseRemote: (() => void) | null;
 }
 
 /**
@@ -92,6 +95,7 @@ export class TriageManager {
     // ticket: bail while a spawn is already in flight (a prior live session is torn down by cleanup below).
     if (this.launching.has(ticketId)) return;
     this.launching.add(ticketId);
+    let releaseRemote: (() => void) | null = null;
     try {
       // A relaunch (terminal stuck) may find a previous session still live: tear it down first so a
       // stale session and timeout can't collide with or clobber the fresh run.
@@ -104,15 +108,20 @@ export class TriageManager {
       const execution = resolveFeasibilityExecution(ticket, "triage");
       await assertExecutionAvailable(this.system, execution);
       const driver = execution.provider;
+      const remote = isRemoteTicket(ticket);
+      if (remote) releaseRemote = await admitRemoteAnalysis(this.store, driver);
       const workspace = await prepareAnalysisWorkspace(this.system, this.repoMutex, project.repoPath, baseBranch, ticketId);
       if (this.stopped) {
         void releaseAnalysisWorkspace(this.system, this.repoMutex, workspace);
+        releaseRemote?.();
         return;
       }
-      this.sessions.set(ticketId, { timer: null, workspace });
-      const prompt = deep
-        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, this.store.listComments(ticket.id))
-        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, this.store.listComments(ticket.id));
+      this.sessions.set(ticketId, { timer: null, workspace, releaseRemote });
+      const comments = this.store.listComments(ticket.id);
+      const imageLines = remote ? await copyRemoteImages([ticket.description, ...comments.map((comment) => comment.body)], workspace.cwd) : [];
+      const prompt = appendPromptLines(deep
+        ? buildTriagePlusChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, comments, remote)
+        : buildTriageChannelPrompt(ticket, project, baseBranch, triageLanguage, driver, comments, remote), imageLines);
       this.sessionHub.start(
         buildTriageSessionConfig({
           ticketId,
@@ -122,6 +131,7 @@ export class TriageManager {
           serviceTier: execution.serviceTier,
           deep,
           driver,
+          confined: remote,
         }),
         { onFailure: (reason) => void this.failTriage(ticketId, reason) },
       );
@@ -129,8 +139,9 @@ export class TriageManager {
       this.sessionHub.sendEvent(ticketId, { type: "ticket", payload: prompt });
       this.store.logEvent(ticketId, "triage_prompt_delivered", {});
       const timer = setTimeout(() => void this.failTriage(ticketId, "délai de triage dépassé"), TRIAGE_TIMEOUT_MS);
-      this.sessions.set(ticketId, { timer, workspace });
+      this.sessions.set(ticketId, { timer, workspace, releaseRemote });
     } catch (error) {
+      releaseRemote?.();
       await this.failTriage(ticketId, getErrorMessage(error));
     } finally {
       this.launching.delete(ticketId);
@@ -185,6 +196,7 @@ export class TriageManager {
       if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(ticketId);
       void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
+      entry.releaseRemote?.();
     }
     this.sessions.clear();
   }
@@ -222,5 +234,6 @@ export class TriageManager {
     this.sessions.delete(ticketId);
     this.sessionHub.disconnect(ticketId, status);
     if (entry) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
+    entry?.releaseRemote?.();
   }
 }

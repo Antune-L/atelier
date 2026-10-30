@@ -181,6 +181,13 @@ export interface AgentSessionOptions {
    * by the sandbox itself); Claude sessions enforce read-only via allowed/disallowed tools instead.
    */
   readOnly?: boolean;
+  /**
+   * Confined analysis of an untrusted (remote) card: reads limited to the isolated copy (`cwd`), no
+   * host settings, hooks, skills, connectors, web, network, sub-agents or writes. Claude drops its
+   * setting sources and scopes Read/Glob/Grep; Codex runs a named permission profile and fails
+   * closed when its effective configuration differs.
+   */
+  confined?: boolean;
   blockReviewPublishing?: boolean;
   blockTypecheck?: boolean;
   /**

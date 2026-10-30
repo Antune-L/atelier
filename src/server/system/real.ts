@@ -24,7 +24,7 @@ import { collectGitAuditRange } from "./auditRange.ts";
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail, runBoundedCommand } from "./boundedCommand.ts";
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
-import { claudeProvider, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
+import { claudeProvider, confinedClaudeEnv, confinedOneShotOptions, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { requestVpsUpdate } from "./vpsUpdate.ts";
 import { requestCoolify } from "./coolifyClient.ts";
@@ -762,7 +762,8 @@ export class RealSystemAdapter implements SystemAdapter {
     // The single injection point of every Claude and Codex session (all roles): an attached project
     // gets its account's GH_CONFIG_DIR / GIT_CONFIG_GLOBAL after an identity check; a failure throws
     // and the session never starts under another account.
-    const github = githubEnvForCwdSync(opts.cwd);
+    // A confined analysis of an untrusted card never receives a GitHub identity.
+    const github = opts.confined === true ? null : githubEnvForCwdSync(opts.cwd);
     if (github === null) return this.providers[opts.provider].createSession(opts);
     return this.providers[opts.provider].createSession({ ...opts, environment: { ...opts.environment, ...github } });
   }
@@ -772,6 +773,7 @@ export class RealSystemAdapter implements SystemAdapter {
       return runOneShotSession(this.providers.codex, {
         provider: "codex", cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default",
         permissionMode: "dontAsk", allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
+        ...(opts.confined === true ? { confined: true } : {}),
       }, opts.prompt, REFORMULATE_TIMEOUT_MS, opts.onEvent);
     }
     // `dontAsk` never prompts and denies anything not pre-approved; the read-only toolset keeps it
@@ -784,9 +786,10 @@ export class RealSystemAdapter implements SystemAdapter {
       systemPrompt: { type: "preset", preset: "claude_code" },
       permissionMode: "dontAsk",
       allowedTools: [...REFORMULATE_ALLOWED_TOOLS],
-      env: applyGithubEnvSync(envWithProjectNode(opts.cwd), opts.cwd),
+      env: opts.confined === true ? confinedClaudeEnv(envWithProjectNode(opts.cwd)) : applyGithubEnvSync(envWithProjectNode(opts.cwd), opts.cwd),
       stderr: () => {},
       ...(sdkEffort ? { effort: sdkEffort } : {}),
+      ...(opts.confined === true ? confinedOneShotOptions(opts.cwd) : {}),
     };
     return this.runOneShotQuery(opts.prompt, queryOptions, REFORMULATE_TIMEOUT_MS, "reformulation échouée", opts.onEvent);
   }

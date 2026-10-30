@@ -1,16 +1,17 @@
 import { z } from "zod";
 
-import { startBlocker } from "../shared/startBlocker.ts";
+import { needsRemoteApproval, startBlocker } from "../shared/startBlocker.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair } from "../shared/constants.ts";
-import type { Column } from "../shared/constants.ts";
+import type { Column, TicketOrigin } from "../shared/constants.ts";
 import {
   columnSchema,
   deriveTitleFromDescription,
   externalUrlSchema,
   ticketBatchOptionsSchema,
+  ticketSchema,
   updateTicketSchema,
 } from "../shared/schemas.ts";
-import type { ProjectInfo, Ticket } from "../shared/schemas.ts";
+import type { Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
 import { TicketCreationRequestConflictError } from "./db/store.ts";
@@ -149,18 +150,71 @@ export interface CompactTicket {
   updatedAt: number;
 }
 
-export interface TicketPage {
-  tickets: CompactTicket[];
+export interface TicketPageOf<T> {
+  tickets: T[];
   total: number;
   nextOffset: number | null;
 }
+
+export type TicketPage = TicketPageOf<CompactTicket>;
 
 export type CreateTodoTicketInput = z.input<typeof createTodoTicketInputSchema>;
 
 export type CreateTodoTicketFollowUp = "analyze" | "none" | "start";
 
+export type FrozenTicketAgents = Pick<NewTicket, "orchestrator" | "implementer" | "model" | "effort" | "implementerModel" | "implementerEffort" | "codexModel" | "codexEffort" | "codexFast" | "codexImplementerModel" | "codexImplementerEffort" | "codexImplementerFast" | "feasibilityEngine">;
+
+const frozenAgentsSchema = ticketSchema.pick({
+  orchestrator: true,
+  implementer: true,
+  model: true,
+  effort: true,
+  implementerModel: true,
+  implementerEffort: true,
+  codexModel: true,
+  codexEffort: true,
+  codexFast: true,
+  codexImplementerModel: true,
+  codexImplementerEffort: true,
+  codexImplementerFast: true,
+  feasibilityEngine: true,
+});
+
 export interface CreateTodoTicketOptions {
   afterCreate?: CreateTodoTicketFollowUp;
+  /** Server-side only, never part of the idempotency payload. */
+  origin?: TicketOrigin | null;
+  /** Agent settings copied verbatim from a source (profile or parent card); excluded from the idempotency payload. */
+  frozenAgents?: FrozenTicketAgents;
+}
+
+type AgentSettingsSource = Required<Omit<FrozenTicketAgents, "feasibilityEngine">>;
+
+function frozenAgentsFrom(source: AgentSettingsSource, feasibilityEngine: FrozenTicketAgents["feasibilityEngine"]): FrozenTicketAgents {
+  return {
+    orchestrator: source.orchestrator,
+    implementer: source.implementer,
+    model: source.model,
+    effort: source.effort,
+    implementerModel: source.implementerModel,
+    implementerEffort: source.implementerEffort,
+    codexModel: source.codexModel,
+    codexEffort: source.codexEffort,
+    codexFast: source.codexFast,
+    codexImplementerModel: source.codexImplementerModel,
+    codexImplementerEffort: source.codexImplementerEffort,
+    codexImplementerFast: source.codexImplementerFast,
+    feasibilityEngine,
+  };
+}
+
+export function frozenAgentsOf(ticket: Ticket): FrozenTicketAgents {
+  return frozenAgentsFrom(ticket, ticket.feasibilityEngine);
+}
+
+/** Remote cards analyse on the profile's orchestrator. */
+export function frozenAgentsOfProfile(profile: Profile): FrozenTicketAgents {
+  return frozenAgentsFrom(profile, profile.orchestrator);
 }
 
 export interface CreateTodoTicketResult {
@@ -183,6 +237,8 @@ export interface AnalyzeTicketsResult {
 
 export interface UpdateTicketOptions {
   requireTodo?: boolean;
+  /** Edit made by the owner from the board (see `UpdateTicketEdit`). */
+  humanEdit?: boolean;
 }
 
 function compactTicket(ticket: Ticket): CompactTicket {
@@ -208,6 +264,14 @@ function compactTicket(ticket: Ticket): CompactTicket {
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
   };
+}
+
+const UNAPPROVED_REMOTE_PLACEHOLDER = "[Unapproved remote card: content withheld]";
+
+/** Listed card for unconfined readers (local public MCP, Atelier): unapproved remote text is withheld. */
+function listedTicket(ticket: Ticket): CompactTicket {
+  const compact = compactTicket(ticket);
+  return needsRemoteApproval(ticket) ? { ...compact, title: UNAPPROVED_REMOTE_PLACEHOLDER, description: "", error: null } : compact;
 }
 
 function isActive(ticket: Ticket): boolean {
@@ -289,6 +353,16 @@ export class TicketOperations {
     if (input.project !== undefined && !isProjectKey(input.project)) {
       throw new TicketOperationError("INVALID_INPUT", "unknown project");
     }
+    const page = this.pageTickets(input, (ticket) => input.project === undefined || ticket.project === input.project);
+    return { ...page, tickets: page.tickets.map(listedTicket) };
+  }
+
+  /** Tickets of `projects` only, filtered before pagination and total; the caller projects the exposed fields. */
+  listTicketsWithin(projects: ReadonlySet<string>, input: Omit<ListTicketsInput, "project"> = {}): TicketPageOf<Ticket> {
+    return this.pageTickets(input, (ticket) => projects.has(ticket.project));
+  }
+
+  private pageTickets(input: Omit<ListTicketsInput, "project">, include: (ticket: Ticket) => boolean): TicketPageOf<Ticket> {
     if (input.column !== undefined && !columnSchema.safeParse(input.column).success) {
       throw new TicketOperationError("INVALID_INPUT", "unknown column");
     }
@@ -302,9 +376,9 @@ export class TicketOperations {
     }
     const filtered = this.deps.store
       .listTickets(false)
-      .filter((ticket) => input.project === undefined || ticket.project === input.project)
+      .filter(include)
       .filter((ticket) => input.column === undefined || ticket.column === input.column);
-    const tickets = filtered.slice(offset, offset + limit).map(compactTicket);
+    const tickets = filtered.slice(offset, offset + limit);
     const nextOffset = offset + tickets.length < filtered.length ? offset + tickets.length : null;
     return { tickets, total: filtered.length, nextOffset };
   }
@@ -320,8 +394,11 @@ export class TicketOperations {
     if (!isProjectKey(normalized.project)) {
       throw new TicketOperationError("INVALID_INPUT", "unknown project");
     }
-    const orchestrator = normalized.orchestrator ?? "claude";
-    const implementer = normalized.implementer ?? "claude";
+    if (options.frozenAgents !== undefined && !frozenAgentsSchema.safeParse(options.frozenAgents).success) {
+      throw new TicketOperationError("INVALID_INPUT", "invalid inherited agent settings");
+    }
+    const orchestrator = options.frozenAgents?.orchestrator ?? normalized.orchestrator ?? "claude";
+    const implementer = options.frozenAgents?.implementer ?? normalized.implementer ?? "claude";
     if (!isAllowedAgentPair(orchestrator, implementer)) {
       throw new TicketOperationError(
         "INVALID_INPUT",
@@ -377,6 +454,8 @@ export class TicketOperations {
       codexImplementerEffort: normalized.codexImplementerEffort ?? null,
       codexImplementerFast: normalized.codexImplementerFast ?? null,
       feasibilityEngine: normalized.feasibilityEngine ?? null,
+      ...options.frozenAgents,
+      origin: options.origin ?? null,
     };
     try {
       const result = this.deps.store.createTicketIdempotent(normalized.requestId, payload, ticketInput);
@@ -515,7 +594,7 @@ export class TicketOperations {
       patch.title = derived || ticket.title;
     }
 
-    const updated = this.deps.store.updateTicket(ticketId, patch);
+    const updated = this.deps.store.updateTicket(ticketId, patch, { humanEdit: options.humanEdit === true });
     this.deps.hub.pushTicket(updated);
     return updated;
   }
@@ -531,6 +610,9 @@ export class TicketOperations {
     const blocker = startBlocker(ticket, this.deps.store.getDependencyParent(ticket));
     if (blocker === "triage") {
       throw new TicketOperationError("CONFLICT", "analysis in progress: wait for the verdict before starting the implementation");
+    }
+    if (blocker === "approval") {
+      throw new TicketOperationError("CONFLICT", "remote card: the owner must approve its start first");
     }
     if (blocker === "dependency") {
       throw new TicketOperationError("CONFLICT", "waiting for the PR of the ticket it depends on");

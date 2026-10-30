@@ -74,7 +74,7 @@ export interface SnapshotLease {
 
 export class RepoSnapshots {
   private readonly system: RepoSnapshotSystem;
-  private readonly repoMutex: KeyedMutex;
+  readonly repoMutex: KeyedMutex;
   private readonly root: string;
   private readonly fetchTimeoutMs: number;
   private readonly gcIntervalMs: number;

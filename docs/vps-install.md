@@ -278,6 +278,111 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
 - `sudo cat /var/lib/kanban-preview/registry.json` lists the preview with `deletedAt` set after cleanup.
 - `sudo -u kanban cat /etc/kanban-preview/config.json` is refused.
 
+## Remote MCP (milestone 1)
+
+This lets Claude Code or Codex on the Mac list projects and cards and create TODO cards on the VPS board, through a dedicated listener behind Cloudflare Access Managed OAuth. It is independent of Phase B. The Cloudflare side, the Mac clients and the kill switch are in [vps-remote-access.md](./vps-remote-access.md#remote-mcp-milestone-1), which must already be done up to step 12 for the board.
+
+What the VPS adds:
+- A second listener on `127.0.0.1:<mcp-port>`, started only when the four `KANBAN_REMOTE_MCP_*` connection lines below are set. It never starts on the Mac or in tests.
+- Only the projects you allow are visible, every card it creates is marked remote and waits for your approval before any start, and daily quotas cap creations and analyses (reset at midnight UTC).
+- Analyses of remote cards run confined, with the engine of the remote cards profile. With Codex, that needs the bubblewrap sandbox: `/health` reports its probe as `remoteMcp.sandbox`.
+
+### M1. Engines: Claude only, Codex only, or both
+
+The remote cards profile (**Profil des cartes distantes**, M3) decides which engine creates and analyses remote cards. Only the engines used by that profile must be ready on the VPS:
+- **Claude only**: the Claude login of A4 for the `kanban` user.
+- **Codex only**: the Codex login of A4 (`codex login --device-auth` as `kanban`), the AppArmor profile of A1 for bubblewrap, and ripgrep:
+
+  ```bash
+  sudo apt install -y ripgrep
+  ```
+
+- **Both**: both of the above. Switching the profile from one engine to the other later needs nothing more.
+
+The engine the profile does not use is qualified separately, on a disposable host, before you ever select it.
+
+### M2. Service configuration
+
+Pick a free local port for `<mcp-port>`, different from `PORT` (check with `sudo ss -tlnp`). When no card is running, add these lines with `sudo nano /etc/kanban/kanban.env`:
+
+```bash
+KANBAN_REMOTE_MCP_PORT=<mcp-port>
+KANBAN_REMOTE_MCP_HOSTNAME=<mcp-host>
+KANBAN_REMOTE_MCP_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
+KANBAN_REMOTE_MCP_ACCESS_AUD=<mcp-aud>
+KANBAN_REMOTE_MCP_DAILY_CREATIONS=20
+KANBAN_REMOTE_MCP_DAILY_ANALYSES=10
+```
+
+The last two lines are the defaults and can be omitted. `<mcp-aud>` is the AUD tag of the MCP application, not the board's.
+
+Reinstall `kanban-upgrade` from the reviewed commit, so the upgrade checks the remote MCP (A3), then restart:
+
+```bash
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
+sudo systemctl restart kanban
+```
+
+Check the listener on the VPS. The first command must print `401` (no Access assertion), the second `405`:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Host: <mcp-host>' -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:<mcp-port>/mcp
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: <mcp-host>' http://127.0.0.1:<mcp-port>/mcp
+curl -s http://127.0.0.1:52817/health
+```
+
+The third command shows `remoteMcp.sandbox`: it must not be `failed`. The service runs the sandbox probe itself, in its hardened context, and only when the remote cards profile uses Codex.
+
+### M3. Board settings
+
+On the VPS board, open **Réglages**, then **MCP distant** (group **Connexions**):
+1. Under **Projets exposés**, tick the projects open to the remote MCP. The list starts empty, which refuses every project. During qualification, tick only a test project.
+2. In **Profil des cartes distantes**, select a profile (each option shows the profile name and its engines): its orchestrator, implementer and models are copied onto each remote card, and its orchestrator runs the analyses. With **Aucun (création refusée)**, remote creation is refused. The selected profile cannot be deleted.
+
+Remote cards carry the **distant** tag on the board, and **approbation requise** while they wait in TODO. Each one must be approved before it can start, whether manually, by schedule, as a dependent or from the Atelier: open the card, read it, click **Approuver le démarrage** and confirm with **Approuver**. Until then **Lancer l'implémentation** stays disabled, with the hint *Approbation requise avant le lancement*. While the card is in TODO, editing its title or description, or a comment that is not yours, removes the approval.
+
+### M4. Activation sequence
+
+1. Set up Cloudflare ([vps-remote-access.md](./vps-remote-access.md#remote-mcp-milestone-1), MCP 1 to 3), with the owner-only Allow policy attached to the MCP application. The public `401` probe of `kanban-upgrade` was observed with that policy attached; it has not been observed without any policy, so do not remove it before the upgrade.
+2. Configure the VPS (M1, M2) and the board (M3) with only a test project allowed.
+3. Run `sudo kanban-upgrade` (or `--sha` with the reviewed commit): it must pass the remote MCP checks.
+4. Connect the Mac clients (MCP 4, MCP 5) and run the qualification (M7).
+5. If any check fails, remove the Access policy at once and keep it removed until a new qualification passes.
+6. Once the evidence is recorded, allow the production projects; the policy stays.
+
+### M5. Kill switch and rollback
+
+Kill switch: remove the Access policy of the MCP application. New calls fail at the latest when the access token is refreshed (15 minutes). For an immediate cut, see [MCP kill switch](./vps-remote-access.md#mcp-kill-switch).
+
+Rollback, in this order:
+1. Cut Access: remove the policy of the MCP application.
+2. Go back to the previous release with `sudo kanban-upgrade --sha <previous-full-sha>`. If that release has no remote MCP listener, first remove the `KANBAN_REMOTE_MCP_*` lines from `/etc/kanban/kanban.env`: otherwise its remote MCP checks fail and the command rolls back to the newer release.
+
+An automatic rollback by `kanban-upgrade` after a failed remote MCP check only restores the code: it prints a reminder to remove the Access policy, which you do by hand.
+
+### M6. Accepted limits
+
+- Codex on the Mac in full-access mode calls `create_todo_ticket` without asking you. Claude Code is asked to confirm it, because the tool is marked as requiring user interaction. The server-side guards (allow-list, approval, quotas, confinement) carry the security.
+- Processes of the `kanban` user, agents included, can change the allowed projects, approvals and remote cards profile: they reach the same socket and database as the service.
+- Logins expire about every 2 weeks per client and must be redone on the Mac.
+- Cloudflare terminates TLS and sees the MCP traffic.
+
+### M7. Qualification checklist
+
+Record the delivered revision, the commands run, and the positive and negative results. Never record tokens, headers or ticket content.
+
+- `kanban-upgrade` passes the remote MCP checks: local `401` without assertion, local `GET` `405`, public `401`, sandbox not `failed`.
+- For each client used (Claude Code, Codex, or both): OAuth login with the exact Google account and the Access second factor; tool discovery shows exactly `list_projects`, `list_tickets` and `create_todo_ticket`; a creation in the allowed test project works; a replay with the same `requestId` returns the same card without a duplicate.
+- Refusals: a project that is not allowed, an unknown field, another path, `GET` or `DELETE` on `/mcp`, another Google account, a login without the second factor, and a call over quota (the error gives the reset time).
+- A remote card shows **distant** and **approbation requise**, cannot start before **Approuver le démarrage**, and shows **approbation requise** again when its title or description is edited.
+- The engine of the profile analyses a trapped TODO on the real VPS: it gives a verdict without reading a witness file outside its confined copy and without network access.
+- The origin receives the Access assertion and `cloudflared` validates it: a call through `<mcp-host>` with a valid login succeeds, the same call on the local port without assertion gets `401`.
+- The second factor is asked again when the session is renewed, and the effect of **Revoke existing tokens** on an OAuth grant is measured; promise neither before this is observed.
+- Bot Fight Mode does not block either client.
+- A project removed from the allow-list is refused at the next call.
+- With the Access policy removed, the public probe still answers `401` and a logged-in client fails within 15 minutes.
+- The engine the profile does not use is qualified on a disposable host.
+
 ## Upgrade
 
 From the Mac:
@@ -295,6 +400,7 @@ The command prints each step and the commit before and after:
 6. Backs up the database as `kanban` to `/var/lib/kanban/backups/kanban-<utc-date>-<short-sha>.db`.
 7. Stops `kanban`, points `/opt/kanban/current` at the new release, and starts it.
 8. Requires 5 consecutive healthy answers from `GET /health` on `127.0.0.1` and the service port (`PORT` from the unit or `/etc/kanban/kanban.env`, else 52817), spread over about 20 seconds, with the unit active. It gives up after 2 minutes.
+   When `KANBAN_REMOTE_MCP_PORT` is set in `/etc/kanban/kanban.env`, it then checks the [remote MCP](#remote-mcp-milestone-1) for up to 1 minute: a local `POST /mcp` (`tools/list`, `Host: <mcp-host>`, no Access assertion) answers `401`, a local `GET /mcp` answers `405`, a public `POST https://<mcp-host>/mcp` without a token answers `401`, and `/health` reports `remoteMcp.sandbox` neither `failed` nor `pending`. Any failure rolls back like a failed health check. A partial remote MCP configuration (port without hostname, team domain or AUD) stops the command before the service is touched.
 9. Keeps the 5 most recent releases and the 10 most recent backups. The current and previous releases are never removed.
 
 Options:

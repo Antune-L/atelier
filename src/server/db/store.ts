@@ -33,12 +33,15 @@ import {
   IMPLEMENT_EFFORT_META_KEY,
   IMPLEMENT_MODEL_META_KEY,
   QUALITY_OWNER_META_KEY,
+  REMOTE_MCP_CARDS_PROFILE_META_KEY,
+  REMOTE_MCP_PROJECT_IDS_META_KEY,
+  REMOTE_TICKET_ORIGIN,
   TRIAGE_EFFORT_META_KEY,
   TRIAGE_LANGUAGE_META_KEY,
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, RemoteMcpCounterKind, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
@@ -52,7 +55,8 @@ import { reviewFindingSchema, reviewKindSchema, type ReviewFinding, type ReviewK
 import { agentEffortSchema, agentModelSchema, codexEffortSchema, codexModelSchema, commitLanguageSchema, reviewDepthSchema, stageSchema } from "../../shared/schemas.ts";
 import { executionUsageByModelSchema } from "../../shared/schemas.ts";
 import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
-import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, FinishedSubagent, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
+import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, AgentMessage, AgentMessageChannel, AppSettings, ApproveRemoteStartInput, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ConversationSteering, ErrorDetails, ExecutionOwnerType, ExecutionRun, ExecutionStatus, ExecutionUsageByModel, FinishedSubagent, PrdAnnotation, PrdDocument, PrdDocumentRecord, Profile, ReformulateStatus, ResearchOptions, SessionUsage, Slot, StatRecord, Ticket, TriageStatus, TriageVerdict, UpdateAppSettingsInput, WorktreeSession } from "../../shared/schemas.ts";
 import { projectStatRecord, residualLegacyUsage } from "../../shared/statistics.ts";
 import { providerQuotaSchema } from "../../shared/providerQuota.ts";
 import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
@@ -202,6 +206,7 @@ export interface NewTicket {
   sourcePrdId?: string | null;
   sourcePrdTask?: string | null;
   scheduledStartAt?: number | null;
+  origin?: TicketOrigin | null;
 }
 
 export interface NewConversation {
@@ -406,6 +411,26 @@ export interface NewAsk {
   codexModel: CodexModel | null;
   codexEffort: CodexEffort | null;
   codexFast?: boolean;
+}
+
+export interface RemoteMcpCallInput {
+  at?: number;
+  tool: string;
+  projectId?: string | null;
+  outcome: string;
+  detail?: string | null;
+}
+
+export interface UpdateTicketEdit {
+  /** The owner's own edit from the board: it clears a remote approval only while the card is in `todo`. */
+  humanEdit?: boolean;
+}
+
+function remoteApprovalResetByEdit(before: Ticket, patch: TicketPatch, edit: UpdateTicketEdit): boolean {
+  if (!isRemoteTicket(before) || before.remoteApprovedAt === null) return false;
+  if (edit.humanEdit === true && before.column !== "todo") return false;
+  return (patch.title !== undefined && patch.title !== before.title)
+    || (patch.description !== undefined && patch.description !== before.description);
 }
 
 export interface TicketPatch {
@@ -1472,8 +1497,8 @@ export class Store {
     const now = Date.now();
     this.db
       .query(
-        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at, autonomous, autonomous_delivery, autonomous_max_corrections, autonomous_timeout_minutes, scheduled_start_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tickets (id, title, description, external_url, project, prd_enabled, pr_draft, auto_merge, add_screenshots, verify_feature, argus_multi_loop, research_plan, stealth, direct_push, base_branch, depends_on, child_order, model, effort, implementer_model, implementer_effort, implementer, orchestrator, codex_model, codex_effort, codex_fast, codex_implementer_model, codex_implementer_effort, codex_implementer_fast, feasibility_engine, prd_markdown, source_prd_id, source_prd_task, feasibility_context, column_name, stage, created_at, updated_at, last_progress_at, autonomous, autonomous_delivery, autonomous_max_corrections, autonomous_timeout_minutes, scheduled_start_at, origin)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'todo', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -1517,6 +1542,7 @@ export class Store {
         autonomousMaxCorrections,
         autonomousTimeoutMinutes,
         input.scheduledStartAt ?? null,
+        input.origin ?? null,
       );
     this.updateTicket(id, { autonomousMaxStarts, autonomousFinalizationMinutes, autonomousMaxPublicationAttempts });
     return this.finalizeCreate(id, "createTicket", { title: input.title });
@@ -1638,7 +1664,7 @@ export class Store {
     return this.finalizeCreate(id, "createAsk", { title: input.title, kind: "ask" });
   }
 
-  updateTicket(id: string, patch: TicketPatch): Ticket {
+  updateTicket(id: string, patch: TicketPatch, edit: UpdateTicketEdit = {}): Ticket {
     if (patch.column === "done") {
       const ticket = this.getTicket(id);
       const finalizedRecovery = ticket?.implementationPlan?.recovery?.status === "resolved"
@@ -1737,6 +1763,7 @@ export class Store {
     if (patch.archived !== undefined) set("archived", patch.archived ? 1 : 0);
     if (patch.watchdogFlagged !== undefined) set("watchdog_flagged", patch.watchdogFlagged ? 1 : 0);
     if (patch.lastProgressAt !== undefined) set("last_progress_at", patch.lastProgressAt);
+    if (before && remoteApprovalResetByEdit(before, patch, edit)) set("remote_approved_at", null);
     if (patch.triageStatus !== undefined) set("triage_status", patch.triageStatus);
     if (patch.triageVerdict !== undefined) set("triage_verdict", patch.triageVerdict);
     if (patch.triageReport !== undefined) set("triage_report", patch.triageReport);
@@ -1824,8 +1851,45 @@ export class Store {
     this.db
       .query("INSERT INTO comments (id, ticket_id, author, body, question_id, answered, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)")
       .run(id, ticketId, author, body, questionId, now);
+    if (author !== "user") this.resetRemoteApproval(ticketId);
     const raw = this.db.query("SELECT * FROM comments WHERE id = ?").get(id);
     return mapCommentRow(raw);
+  }
+
+  /**
+   * Human-only approval of a remote card: the REST route is its single caller. Applies only while
+   * the card still carries the reviewed text; returns null when it changed meanwhile.
+   */
+  approveRemoteTicket(id: string, reviewed: ApproveRemoteStartInput, at: number = Date.now()): Ticket | null {
+    const result = this.db
+      .query(`UPDATE tickets SET remote_approved_at = ?, updated_at = ? WHERE id = ? AND origin = ? AND ${COLUMN_TO_DB} = 'todo' AND title = ? AND description = ?`)
+      .run(at, at, id, REMOTE_TICKET_ORIGIN, reviewed.title, reviewed.description);
+    return result.changes === 1 ? this.getTicket(id) : null;
+  }
+
+  private resetRemoteApproval(id: string): void {
+    this.db
+      .query(`UPDATE tickets SET remote_approved_at = NULL WHERE id = ? AND origin = ? AND ${COLUMN_TO_DB} = 'todo' AND remote_approved_at IS NOT NULL`)
+      .run(id, REMOTE_TICKET_ORIGIN);
+  }
+
+  // ---- Remote MCP admission: daily counters and call journal ----
+
+  remoteMcpCount(day: string, kind: RemoteMcpCounterKind): number {
+    return this.scalar("SELECT count AS n FROM remote_mcp_counters WHERE day = ? AND kind = ?", day, kind);
+  }
+
+  remoteMcpIncrement(day: string, kind: RemoteMcpCounterKind): number {
+    this.db
+      .query("INSERT INTO remote_mcp_counters (day, kind, count) VALUES (?, ?, 1) ON CONFLICT(day, kind) DO UPDATE SET count = count + 1")
+      .run(day, kind);
+    return this.remoteMcpCount(day, kind);
+  }
+
+  recordRemoteMcpCall(call: RemoteMcpCallInput): void {
+    this.db
+      .query("INSERT INTO remote_mcp_calls (at, tool, project_id, outcome, detail) VALUES (?, ?, ?, ?, ?)")
+      .run(call.at ?? Date.now(), call.tool, call.projectId ?? null, call.outcome, call.detail ?? null);
   }
 
   markQuestionAnswered(questionId: string): void {
@@ -3049,7 +3113,20 @@ export class Store {
       codexEffort: parsedCodexEffort.success ? parsedCodexEffort.data : DEFAULT_CODEX_EFFORT,
       codexFast: this.getMeta(CODEX_FAST_META_KEY) === "1",
       qualityOwner: this.getMeta(QUALITY_OWNER_META_KEY) !== "0",
+      remoteMcpProjectIds: this.remoteMcpProjectIds(),
+      remoteMcpCardsProfileId: this.getMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY),
     };
+  }
+
+  private remoteMcpProjectIds(): string[] {
+    const stored = this.getMeta(REMOTE_MCP_PROJECT_IDS_META_KEY);
+    if (stored === null) return [];
+    try {
+      const parsed = z.array(z.string().min(1)).safeParse(JSON.parse(stored));
+      return parsed.success ? parsed.data : [];
+    } catch {
+      return [];
+    }
   }
 
   updateAppSettings(patch: UpdateAppSettingsInput): AppSettings {
@@ -3063,6 +3140,9 @@ export class Store {
     if (patch.codexEffort !== undefined) this.setMeta(CODEX_EFFORT_META_KEY, patch.codexEffort);
     if (patch.codexFast !== undefined) this.setMeta(CODEX_FAST_META_KEY, patch.codexFast ? "1" : "0");
     if (patch.qualityOwner !== undefined) this.setMeta(QUALITY_OWNER_META_KEY, patch.qualityOwner ? "1" : "0");
+    if (patch.remoteMcpProjectIds !== undefined) this.setMeta(REMOTE_MCP_PROJECT_IDS_META_KEY, JSON.stringify([...new Set(patch.remoteMcpProjectIds)]));
+    if (patch.remoteMcpCardsProfileId === null) this.deleteMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY);
+    else if (patch.remoteMcpCardsProfileId !== undefined) this.setMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY, patch.remoteMcpCardsProfileId);
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;
@@ -3257,6 +3337,10 @@ export class Store {
 
   setMeta(key: string, value: string): void {
     this.db.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, value);
+  }
+
+  deleteMeta(key: string): void {
+    this.db.query("DELETE FROM meta WHERE key = ?").run(key);
   }
 
   setTicketTimeline(id: string, timeline: TicketTimeline): Ticket {

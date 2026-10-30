@@ -6,11 +6,12 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
+import { isRemoteTicket, needsRemoteApproval } from "../shared/startBlocker.ts";
 import { createQualityFollowUpSchema, manualQualityEvidenceSchema, setQualityCriteriaSchema, startQualityIterationSchema, validateQualitySchema } from "../shared/quality.ts";
 
 import type { QualityManager } from "./agents/qualityManager.ts";
 import type { Store } from "./db/store.ts";
-import { TicketOperationError } from "./ticketOperations.ts";
+import { frozenAgentsOf, TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
 const manualStartSchema = validateQualitySchema.extend({ requestId: z.string().trim().min(1).max(200).optional() });
@@ -85,7 +86,7 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
   });
 
   return new Elysia({ prefix: "/tickets/:id/quality" })
-    .onBeforeHandle(({ params, set }) => {
+    .onBeforeHandle(({ params, request, set }) => {
       if (!quality) {
         set.status = HTTP_UNAVAILABLE;
         return { error: "Quality validation is unavailable." };
@@ -98,6 +99,11 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
       if (ticket.kind !== "feature") {
         set.status = HTTP_BAD_REQUEST;
         return { error: "Quality validation is available for feature tickets only." };
+      }
+      // Quality planners and validators are not confined: unapproved remote text must not reach them.
+      if (request.method !== "GET" && needsRemoteApproval(ticket)) {
+        set.status = HTTP_CONFLICT;
+        return { error: "Approve this remote card before running quality validation." };
       }
     })
     .onError(({ error, set }) => {
@@ -172,7 +178,11 @@ export function createQualityRoutes({ store, quality, qualityArtifactDirectory, 
           return { error: "Correction card creation is unavailable." };
         }
         try {
-          const result = ticketOperations.createTodoTicket({ requestId: draft.requestId, title: draft.title, description: draft.description, project: draft.project });
+          const source = store.getTicket(params.id);
+          const result = ticketOperations.createTodoTicket(
+            { requestId: draft.requestId, title: draft.title, description: draft.description, project: draft.project },
+            source !== null && isRemoteTicket(source) ? { origin: source.origin, frozenAgents: frozenAgentsOf(source) } : {},
+          );
           followUp = { created: result.created, ticketId: result.ticket.id, title: result.ticket.title, project: result.ticket.project };
         } catch (error) {
           if (error instanceof TicketOperationError && error.code !== "CONFLICT") {

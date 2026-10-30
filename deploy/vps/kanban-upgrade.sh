@@ -28,6 +28,21 @@ readonly HEALTH_OK_REQUIRED=5
 readonly HEALTH_INTERVAL=4
 readonly HEALTH_TIMEOUT=120
 readonly EXIT_ACTIVE_WORK=75
+readonly MCP_PATH=/mcp
+readonly MCP_TIMEOUT=60
+readonly MCP_PROBE_TIMEOUT=10
+readonly MCP_ACCEPT='Accept: application/json, text/event-stream'
+readonly MCP_TOOLS_LIST='{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+readonly HTTP_UNAUTHORIZED=401
+readonly HTTP_METHOD_NOT_ALLOWED=405
+readonly SANDBOX_FAILED=failed
+readonly SANDBOX_PENDING=pending
+# NOTE(ali): Prints remoteMcp.sandbox from the /health JSON on stdin, empty when absent or not a short word.
+readonly SANDBOX_FIELD_PY='import json, re, sys
+body = json.load(sys.stdin)
+remote = body.get("remoteMcp") if isinstance(body, dict) else None
+value = remote.get("sandbox") if isinstance(remote, dict) else None
+print(value if isinstance(value, str) and re.fullmatch("[a-z-]{1,32}", value) else "")'
 
 export PATH="$SAFE_PATH"
 unset KANBAN_REPO_URL
@@ -83,11 +98,17 @@ switch_current() {
 
 free_mb() { df -Pm -- "$1" | awk 'NR == 2 { print $4 }'; }
 
+# Prints the last value of a variable in the service environment file, without quotes or spaces.
+env_file_value() {
+  [[ -r "$SERVICE_ENV_FILE" ]] || return 0
+  sed -n "s/^[[:space:]]*$1=//p" "$SERVICE_ENV_FILE" | tail -n 1 | tr -d "\"' "
+}
+
 service_port() {
   local port=""
   port="$(systemctl show -p Environment --value "$SERVICE" | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -n 1)"
-  if [[ -z "$port" && -r "$SERVICE_ENV_FILE" ]]; then
-    port="$(sed -n 's/^[[:space:]]*PORT=//p' "$SERVICE_ENV_FILE" | tail -n 1 | tr -d "\"' ")"
+  if [[ -z "$port" ]]; then
+    port="$(env_file_value PORT)"
   fi
   if [[ ! "$port" =~ ^[0-9]+$ ]]; then
     port="$DEFAULT_PORT"
@@ -115,6 +136,76 @@ check_health() {
   done
   return 1
 }
+
+# Prints the HTTP status of a request, or 000 when no answer came back.
+http_status() {
+  curl -sS -o /dev/null -w '%{http_code}' --max-time "$MCP_PROBE_TIMEOUT" "$@" 2>/dev/null || true
+}
+
+# One pass of the remote MCP checks. Sets mcp_problem and fails on the first unexpected answer.
+remote_mcp_ok() {
+  local port="$1" local_url="http://127.0.0.1:$mcp_port$MCP_PATH" code sandbox
+  code="$(http_status -X POST -H "Host: $mcp_host" -H 'Content-Type: application/json' -H "$MCP_ACCEPT" \
+    --data "$MCP_TOOLS_LIST" "$local_url")"
+  if [[ "$code" != "$HTTP_UNAUTHORIZED" ]]; then
+    mcp_problem="local POST $MCP_PATH without an Access assertion answered $code, expected $HTTP_UNAUTHORIZED"
+    return 1
+  fi
+  code="$(http_status -H "Host: $mcp_host" -H "$MCP_ACCEPT" "$local_url")"
+  if [[ "$code" != "$HTTP_METHOD_NOT_ALLOWED" ]]; then
+    mcp_problem="local GET $MCP_PATH answered $code, expected $HTTP_METHOD_NOT_ALLOWED"
+    return 1
+  fi
+  code="$(http_status -X POST -H 'Content-Type: application/json' -H "$MCP_ACCEPT" \
+    --data "$MCP_TOOLS_LIST" "https://$mcp_host$MCP_PATH")"
+  if [[ "$code" != "$HTTP_UNAUTHORIZED" ]]; then
+    mcp_problem="public POST https://$mcp_host$MCP_PATH without a token answered $code, expected $HTTP_UNAUTHORIZED"
+    return 1
+  fi
+  sandbox="$(curl -fsS --max-time 3 "http://127.0.0.1:$port/health" 2>/dev/null \
+    | python3 -I -c "$SANDBOX_FIELD_PY" 2>/dev/null)" || sandbox=""
+  case "$sandbox" in
+    "")
+      mcp_problem="/health does not report remoteMcp.sandbox"
+      return 1
+      ;;
+    "$SANDBOX_FAILED" | "$SANDBOX_PENDING")
+      mcp_problem="/health reports remoteMcp.sandbox=$sandbox"
+      return 1
+      ;;
+  esac
+  echo "    remote MCP: local POST 401, local GET 405, public POST 401, sandbox $sandbox"
+}
+
+# Retries the remote MCP checks for MCP_TIMEOUT seconds, so a sandbox probe still pending can settle.
+check_remote_mcp() {
+  local port="$1" deadline
+  deadline=$((SECONDS + MCP_TIMEOUT))
+  mcp_problem=""
+  until remote_mcp_ok "$port"; do
+    if ((SECONDS >= deadline)); then
+      echo "    remote MCP check failed: $mcp_problem" >&2
+      return 1
+    fi
+    sleep "$HEALTH_INTERVAL"
+  done
+}
+
+# Remote MCP settings. The listener only starts when all four are set, so a partial setup is refused
+# before the service is touched.
+mcp_port="$(env_file_value KANBAN_REMOTE_MCP_PORT)"
+mcp_host="$(env_file_value KANBAN_REMOTE_MCP_HOSTNAME)"
+if [[ -n "$mcp_port" ]]; then
+  if [[ ! "$mcp_port" =~ ^[1-9][0-9]{0,4}$ ]] || ((mcp_port > 65535)); then
+    fail "KANBAN_REMOTE_MCP_PORT in $SERVICE_ENV_FILE is not a TCP port"
+  fi
+  [[ "$mcp_host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] \
+    || fail "KANBAN_REMOTE_MCP_HOSTNAME in $SERVICE_ENV_FILE is missing or not a hostname"
+  for name in KANBAN_REMOTE_MCP_ACCESS_TEAM_DOMAIN KANBAN_REMOTE_MCP_ACCESS_AUD; do
+    [[ -n "$(env_file_value "$name")" ]] \
+      || fail "$name is missing in $SERVICE_ENV_FILE while KANBAN_REMOTE_MCP_PORT is set"
+  done
+fi
 
 # a. One upgrade at a time. The lock lives in /run, which only root can write.
 step "Taking the upgrade lock"
@@ -227,12 +318,19 @@ switch_current "$target"
 step "Starting $SERVICE"
 systemctl start "$SERVICE" || true
 
-# h. Health.
+# h. Health, then the remote MCP entry when it is configured.
 port="$(service_port)"
 step "Checking health on 127.0.0.1:$port"
+failure=""
 if ! check_health "$port"; then
+  failure="Health check failed"
+elif [[ -n "$mcp_port" ]]; then
+  step "Checking the remote MCP on 127.0.0.1:$mcp_port and https://$mcp_host$MCP_PATH"
+  check_remote_mcp "$port" || failure="Remote MCP check failed"
+fi
+if [[ -n "$failure" ]]; then
   # i. Roll back the code only. The database is never restored automatically.
-  echo "Health check failed on $sha. Rolling back to $before." >&2
+  echo "$failure on $sha. Rolling back to $before." >&2
   systemctl stop "$SERVICE" || true
   switch_current "$previous"
   systemctl restart "$SERVICE" || true
@@ -248,6 +346,9 @@ Restore the backup only if $before fails on the migrated schema, with the servic
 and never after new pull requests or previews were created.
 See journalctl -u $SERVICE for the failure.
 EOF
+  if [[ -n "$mcp_port" ]]; then
+    echo "Remote MCP: remove the Access policy of $mcp_host until a new qualification passes." >&2
+  fi
   if [[ $rollback_ok -eq 1 ]]; then
     echo "Rolled back: $SERVICE is healthy on $before." >&2
     exit 1

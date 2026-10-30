@@ -10,7 +10,7 @@ import { useMemo, useRef, useState } from "react";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { ACTIVE_STAGES, COLUMN_LABELS, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, TERMINAL_COLUMNS, type Column } from "@shared/constants";
 import { isDependencyReady } from "@shared/dependencies";
-import { startBlocker } from "@shared/startBlocker";
+import { needsRemoteApproval, startBlocker } from "@shared/startBlocker";
 
 import { BoardColumn } from "@/components/BoardColumn";
 import { ticketDecisionLabel } from "@/components/TicketCard";
@@ -285,6 +285,10 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
       const parent = getDependencyParent(ticket, ticketsById);
       if (ticket.triageStatus === "running") {
         setError("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+        return;
+      }
+      if (needsRemoteApproval(ticket)) {
+        setError("Carte distante : approuve son démarrage avant de la lancer.");
         return;
       }
       if (!isDependencyReady(ticket, parent)) {

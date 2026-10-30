@@ -11,6 +11,7 @@ import {
 } from "../../shared/protocol.ts";
 import type { AtelierTicketAction, AtelierTicketView, WorkerToolName } from "../../shared/protocol.ts";
 import type { ConversationMessage } from "../../shared/schemas.ts";
+import { needsRemoteApproval } from "../../shared/startBlocker.ts";
 import { getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
@@ -22,6 +23,9 @@ const TICKETS_API_URL = "http://atelier.internal/api/tickets";
 const MAX_RESULT_CHARS = 60_000;
 const TRUNCATED_PREFIX = "[truncated] ";
 const MIN_AUTHORIZATION_QUOTE_CHARS = 12;
+const UNAPPROVED_REMOTE_REFUSAL = "This remote card is not approved yet: its content stays out of Atelier. Approve it on the board, or run its analysis (it runs confined).";
+const UNAPPROVED_REMOTE_ACTION_DONE = "Action accepted on an unapproved remote card; its content is withheld from Atelier.";
+const UNAPPROVED_REMOTE_ACTION_FAILED = "Action refused on an unapproved remote card; details are withheld from Atelier.";
 const MUTATING_TOOLS: readonly WorkerToolName[] = ["atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action", "atelier_settle_conversation"];
 
 /** In-process entry point of the board HTTP API, so Atelier actions reuse the exact UI routes and their checks. */
@@ -120,6 +124,7 @@ export class AtelierTicketTools {
       if (name === "atelier_get_ticket") {
         const input = atelierGetTicketArgsSchema.parse(args);
         const ticket = this.deps.operations.getProjectTicket(input.ticketId, conversation.project);
+        if (this.isUnapprovedRemote(ticket.id)) return { ok: false, result: UNAPPROVED_REMOTE_REFUSAL };
         if (input.view === "card") return { ok: true, result: JSON.stringify(ticket) };
         return await this.dispatch(`${ticketUrl(input.ticketId)}${VIEW_PATHS[input.view]}`, "GET");
       }
@@ -146,7 +151,9 @@ export class AtelierTicketTools {
         if (input.action === "update" && input.body?.project !== undefined && input.body.project !== conversation.project) {
           throw new Error("Atelier cannot move a card to another project.");
         }
+        const unapprovedRemote = this.isUnapprovedRemote(input.ticketId);
         outcome = await this.runAction(input.ticketId, input.action, input.body);
+        if (unapprovedRemote || this.isUnapprovedRemote(input.ticketId)) outcome = { ok: outcome.ok, result: outcome.ok ? UNAPPROVED_REMOTE_ACTION_DONE : UNAPPROVED_REMOTE_ACTION_FAILED };
       } else if (name === "atelier_settle_conversation") {
         const input = atelierSettleConversationArgsSchema.parse(args);
         this.assertAuthority(currentUserMessage, input.authorizationQuote);
@@ -168,6 +175,12 @@ export class AtelierTicketTools {
       this.deps.hub.pushConversationMessage(message);
     }
     return outcome;
+  }
+
+  /** Unapproved remote text never enters an Atelier session, which is not confined. */
+  private isUnapprovedRemote(ticketId: string): boolean {
+    const ticket = this.deps.store.getTicket(ticketId);
+    return ticket !== null && needsRemoteApproval(ticket);
   }
 
   private runAction(ticketId: string, action: AtelierTicketAction, body: Record<string, unknown> | undefined): Promise<AtelierToolResult> {

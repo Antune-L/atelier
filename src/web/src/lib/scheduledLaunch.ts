@@ -18,6 +18,7 @@ export const SCHEDULE_TOO_SOON_ERROR = "L'heure de lancement doit être au moins
 
 const WAITING_REASONS: Record<StartBlocker, string> = {
   triage: "analyse en cours",
+  approval: "approbation requise",
   dependency: "PR parente",
 };
 const SLOT_WAITING_REASON = "slot occupé";

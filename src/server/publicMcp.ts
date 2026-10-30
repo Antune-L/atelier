@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { COLUMNS, VCS_PROVIDERS } from "../shared/constants.ts";
@@ -192,14 +193,14 @@ const PUBLIC_TOOLS = [
   },
 ];
 
-interface McpTextResult {
+export interface McpTextResult {
   [key: string]: unknown;
   content: Array<{ type: "text"; text: string }>;
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 
-interface OutputValidator {
+export interface OutputValidator {
   safeParse(value: unknown):
     | { success: true; data: Record<string, unknown> }
     | { success: false };
@@ -242,7 +243,7 @@ function isAuthorized(request: Request, token: string): boolean {
   return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
-function toolResult(schema: OutputValidator, value: unknown): McpTextResult {
+export function toolResult(schema: OutputValidator, value: unknown): McpTextResult {
   const parsed = schema.safeParse(value);
   if (!parsed.success) return toolError(new Error("invalid MCP output"));
   const structuredContent = parsed.data;
@@ -252,19 +253,17 @@ function toolResult(schema: OutputValidator, value: unknown): McpTextResult {
   };
 }
 
-function toolError(error: unknown): McpTextResult {
-  if (error instanceof TicketOperationError) {
-    const result = { error: { code: error.code, message: error.message } };
-    return {
-      content: [{ type: TEXT_CONTENT_TYPE, text: JSON.stringify(result) }],
-      isError: true,
-    };
-  }
-  const result = { error: { code: "INTERNAL_ERROR", message: "internal server error" } };
+export function errorResult(code: string, message: string): McpTextResult {
+  const result = { error: { code, message } };
   return {
     content: [{ type: TEXT_CONTENT_TYPE, text: JSON.stringify(result) }],
     isError: true,
   };
+}
+
+function toolError(error: unknown): McpTextResult {
+  if (error instanceof TicketOperationError) return errorResult(error.code, error.message);
+  return errorResult("INTERNAL_ERROR", "internal server error");
 }
 
 function invalidInput(message: string): McpTextResult {
@@ -283,14 +282,30 @@ function listPublicProjects(operations: TicketOperations): z.infer<typeof projec
   }));
 }
 
-function createMcpServer(operations: TicketOperations, dryRun: boolean): Server {
+export function createToolServer(
+  tools: readonly object[],
+  callTool: (request: CallToolRequest) => Promise<McpTextResult>,
+): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
+  server.setRequestHandler(CallToolRequestSchema, callTool);
+  return server;
+}
 
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: PUBLIC_TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, async (request): Promise<McpTextResult> => {
+export async function serveStatelessMcp(server: Server, request: Request, parsedBody?: unknown): Promise<Response> {
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  await server.connect(transport);
+  return transport.handleRequest(request, parsedBody === undefined ? undefined : { parsedBody });
+}
+
+function createMcpServer(operations: TicketOperations, dryRun: boolean): Server {
+  return createToolServer(PUBLIC_TOOLS, async (request): Promise<McpTextResult> => {
     const input = request.params.arguments ?? {};
     try {
       if (request.params.name === "list_projects") {
@@ -341,7 +356,6 @@ function createMcpServer(operations: TicketOperations, dryRun: boolean): Server 
       return toolError(error);
     }
   });
-  return server;
 }
 
 export interface PublicMcpRequest {
@@ -381,12 +395,6 @@ export class PublicMcpManager {
       return jsonResponse(HTTP_BAD_REQUEST, "only MCP POST requests are accepted");
     }
 
-    const server = createMcpServer(this.operations, this.dryRun);
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    await server.connect(transport);
-    return transport.handleRequest(request);
+    return serveStatelessMcp(createMcpServer(this.operations, this.dryRun), request);
   }
 }

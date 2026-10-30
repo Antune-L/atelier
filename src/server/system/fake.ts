@@ -433,7 +433,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async reformulate(opts: ReformulateOptions): Promise<string> {
-    this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length });
+    this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length, ...(opts.confined === true ? { confined: true } : {}) });
     return "# Besoin reformulé (simulé)\n\nReformulation simulée (dry-run).";
   }
 

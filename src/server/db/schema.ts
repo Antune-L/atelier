@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   implementation_finished_at INTEGER,
   scheduled_start_at INTEGER,
   scheduled_start_missed_at INTEGER,
+  origin TEXT,
+  remote_approved_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -459,6 +461,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS quality_iterations_active_pr_idx ON quality_it
   WHERE pr_url IS NOT NULL AND status IN ('queued', 'correcting', 'verifying');
 CREATE INDEX IF NOT EXISTS quality_iterations_ticket_idx ON quality_iterations(ticket_id, created_at);
 
+CREATE TABLE IF NOT EXISTS remote_mcp_counters (
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, kind)
+);
+
+CREATE TABLE IF NOT EXISTS remote_mcp_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  project_id TEXT,
+  outcome TEXT NOT NULL,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS remote_mcp_calls_at_idx ON remote_mcp_calls(at);
+
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   project TEXT NOT NULL,
@@ -601,6 +620,8 @@ const TICKET_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "stealth_pr_body", ddl: "ALTER TABLE tickets ADD COLUMN stealth_pr_body TEXT" },
   { column: "scheduled_start_at", ddl: "ALTER TABLE tickets ADD COLUMN scheduled_start_at INTEGER" },
   { column: "scheduled_start_missed_at", ddl: "ALTER TABLE tickets ADD COLUMN scheduled_start_missed_at INTEGER" },
+  { column: "origin", ddl: "ALTER TABLE tickets ADD COLUMN origin TEXT" },
+  { column: "remote_approved_at", ddl: "ALTER TABLE tickets ADD COLUMN remote_approved_at INTEGER" },
 ];
 
 /**

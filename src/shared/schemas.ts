@@ -6,7 +6,7 @@ import { dependencyLaunchSchema, dependencyPrObservationSchema, dependencyStatus
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "./autonomous.ts";
 import { transcriptUpdateSchema } from "./transcript.ts";
 
-import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, REVIEW_FLAGS, REVIEW_LEVELS, STAGES, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
+import { AGENT_EFFORTS, AGENT_MODELS, AUTOMATION_MIN_INTERVAL_MINUTES, AUTOMATION_RUN_STATUSES, AUTOMATION_TRIGGERS, CODEX_EFFORTS, CODEX_MODELS, COLUMNS, COMMENT_AUTHORS, COMMIT_LANGUAGES, CONVERSATION_MESSAGE_ROLES, CONVERSATION_SESSION_STATUSES, CONVERSATION_STATUSES, DEFAULT_VCS_PROVIDER, FEASIBILITY_ENGINES, IMPLEMENTERS, IMPORT_MAX_ROWS, KINDS, ORCHESTRATORS, PR_REVIEW_STATUSES, PRD_DOCUMENT_STATUSES, PRD_SPLIT_MODES, REPO_INSPECTION_SOURCES, RESEARCH_OPTION_KEYS, REVIEW_DEPTHS, REVIEW_FLAGS, REVIEW_LEVELS, STAGES, TICKET_ORIGINS, TRIAGE_VERDICTS, VCS_PROVIDERS } from "./constants.ts";
 import type { ResearchOptionKey } from "./constants.ts";
 import { githubLoginSchema } from "./github.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
@@ -36,6 +36,7 @@ export const implementerSchema = z.enum(IMPLEMENTERS);
 /** Who pilots a full session (planning, review, tests, git, PR) — Composer only ever writes feature code. */
 export const orchestratorSchema = z.enum(ORCHESTRATORS);
 export const kindSchema = z.enum(KINDS);
+export const ticketOriginSchema = z.enum(TICKET_ORIGINS);
 export const reviewDepthSchema = z.enum(REVIEW_DEPTHS);
 export const feasibilityEngineSchema = z.enum(FEASIBILITY_ENGINES);
 export const commitLanguageSchema = z.enum(COMMIT_LANGUAGES);
@@ -181,6 +182,10 @@ export const appSettingsSchema = z.object({
   /** Whether new Codex sessions request the fast service tier by default. */
   codexFast: z.boolean(),
   qualityOwner: z.boolean(),
+  /** Projects exposed to the remote MCP listener; empty denies every project. */
+  remoteMcpProjectIds: z.array(z.string().min(1)),
+  /** Profile copied onto cards created remotely; null refuses remote creation. */
+  remoteMcpCardsProfileId: z.string().min(1).nullable(),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -195,6 +200,8 @@ export const updateAppSettingsSchema = z.object({
   codexEffort: codexEffortSchema.optional(),
   codexFast: z.boolean().optional(),
   qualityOwner: z.boolean().optional(),
+  remoteMcpProjectIds: z.array(z.string().min(1)).optional(),
+  remoteMcpCardsProfileId: z.string().min(1).nullable().optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 
@@ -430,6 +437,10 @@ export const ticketSchema = z.object({
   implementationFinishedAt: z.number().int().nullable(),
   scheduledStartAt: z.number().int().nullable(),
   scheduledStartMissedAt: z.number().int().nullable(),
+  /** "remote" when created through the remote MCP listener; immutable and inherited by derived cards. */
+  origin: ticketOriginSchema.nullable(),
+  /** Epoch ms of the owner's start approval of a remote card; null blocks every start path. */
+  remoteApprovedAt: z.number().int().nullable(),
   /** Token usage per session (sessionId → usage by model); empty until a Stop hook reports it. */
   sessionUsage: sessionUsageSchema,
   createdAt: z.number().int(),
@@ -854,6 +865,13 @@ export const scheduleTicketSchema = z.object({
   scheduledStartAt: z.number().int().nullable(),
 });
 export type ScheduleTicketInput = z.infer<typeof scheduleTicketSchema>;
+
+/** The card text the owner reviewed: approval applies only if it is still the current text. */
+export const approveRemoteStartSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+});
+export type ApproveRemoteStartInput = z.infer<typeof approveRemoteStartSchema>;
 
 export const moveTicketSchema = z.object({
   column: columnSchema,

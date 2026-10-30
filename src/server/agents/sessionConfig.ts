@@ -198,11 +198,18 @@ export interface TriageSessionInput {
   deep: boolean;
   /** Which agent drives the triage; both providers use independent scouts for Analyse +. */
   driver: Orchestrator;
+  /** Confined single-agent analysis of an untrusted remote card (no scouts). */
+  confined?: boolean;
+}
+
+/** Confined sessions get no sub-agents; others keep their scouts. */
+function analysisAgents(confined: boolean | undefined, agents: () => Record<string, AgentSubagentDefinition>): Pick<SessionStartConfig, "agents" | "confined"> {
+  return confined === true ? { confined: true } : { agents: agents() };
 }
 
 /** Config for a read-only feasibility-triage session (no slot; only `submit_triage` is gated in). */
 export function buildTriageSessionConfig(input: TriageSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort, serviceTier = "default", deep, driver } = input;
+  const { ticketId, cwd, model, effort, serviceTier = "default", deep, driver, confined } = input;
   if (driver === "codex") {
     return {
       ticketId,
@@ -218,7 +225,7 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
       allowedTools: [...CODEX_ANALYSIS_TOOLS, "Agent"],
       disallowedTools: CODEX_ANALYSIS_DISALLOWED,
       skills: NO_SKILLS,
-      agents: feasibilityAgents(driver, deep),
+      ...analysisAgents(confined, () => feasibilityAgents(driver, deep)),
     };
   }
   return {
@@ -234,7 +241,7 @@ export function buildTriageSessionConfig(input: TriageSessionInput): SessionStar
     disallowedTools: READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
     skills: NO_SKILLS,
-    agents: feasibilityAgents(driver, deep),
+    ...analysisAgents(confined, () => feasibilityAgents(driver, deep)),
   };
 }
 
@@ -246,13 +253,17 @@ export interface SplitSessionInput {
   serviceTier?: "default" | "fast";
   /** Which agent drives the split (codex = read-only sandbox). */
   driver: Orchestrator;
+  /** Confined analysis of an untrusted remote card. */
+  confined?: boolean;
 }
 
 /** Config for a read-only ticket-split session (no worktree/slot; only `submit_split` is gated in). */
 export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartConfig {
-  const { ticketId, cwd, model, effort, serviceTier = "default", driver } = input;
+  const { ticketId, cwd, model, effort, serviceTier = "default", driver, confined } = input;
+  const confinement = confined === true ? { confined: true } : {};
   if (driver === "codex") {
     return {
+      ...confinement,
       ticketId,
       slotId: SPLIT_SLOT_ID,
       cwd,
@@ -266,6 +277,7 @@ export function buildSplitSessionConfig(input: SplitSessionInput): SessionStartC
     };
   }
   return {
+    ...confinement,
     ticketId,
     slotId: SPLIT_SLOT_ID,
     cwd,
@@ -395,11 +407,13 @@ export interface FeasibilitySessionInput {
   effort: string | null;
   serviceTier?: "default" | "fast";
   driver: Orchestrator;
+  /** Confined single-agent analysis of an untrusted remote card (no scouts). */
+  confined?: boolean;
 }
 
 /** Config for a read-only batch feasibility session (fans out a scout then a verifier per ticket). */
 export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): SessionStartConfig {
-  const { batchId, cwd, model, effort, serviceTier = "default", driver } = input;
+  const { batchId, cwd, model, effort, serviceTier = "default", driver, confined } = input;
   return {
     ticketId: batchId,
     slotId: FEASIBILITY_SLOT_ID,
@@ -416,7 +430,7 @@ export function buildFeasibilitySessionConfig(input: FeasibilitySessionInput): S
     allowedTools: [...(driver === "codex" ? CODEX_ANALYSIS_TOOLS : READONLY_TOOLS), "Agent"],
     disallowedTools: driver === "codex" ? CODEX_ANALYSIS_DISALLOWED : READONLY_FANOUT_DISALLOWED,
     permissionDeny: DENIED_BUILTIN_AGENTS.map((name) => `Agent(${name})`),
-    agents: feasibilityAgents(driver, false),
+    ...analysisAgents(confined, () => feasibilityAgents(driver, false)),
     skills: NO_SKILLS,
   };
 }

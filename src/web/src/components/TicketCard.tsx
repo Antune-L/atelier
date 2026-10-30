@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { isDependencyReady } from "@shared/dependencies";
+import { isRemoteTicket, needsRemoteApproval } from "@shared/startBlocker";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { summarizeSessionCosts } from "@shared/pricing";
 
@@ -148,6 +149,8 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
           <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
           <span>{KIND_LABELS[ticket.kind]}</span>
           {fromAudit && <span className="rounded border border-border px-1">audit</span>}
+          {isRemoteTicket(ticket) && <span className="rounded border border-border px-1">distant</span>}
+          {ticket.column === "todo" && needsRemoteApproval(ticket) && scheduledLaunch?.kind !== "due" && <span className="text-warning">approbation requise</span>}
           {ticket.slotId !== null && <span>slot-{ticket.slotId}</span>}
           <span>{elapsedLabel}</span>
           {ticket.pendingQuestions > 0 && <span className="text-warning">{ticket.pendingQuestions} question(s)</span>}

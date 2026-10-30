@@ -1,5 +1,6 @@
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { Ticket } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -11,6 +12,8 @@ import type { SystemAdapter } from "../system/index.ts";
 
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildReformulatePrompt } from "./reformulate.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
+import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
 
@@ -31,7 +34,7 @@ export class ReformulateManager {
     private readonly system: SystemAdapter,
     private readonly hub: ClientHub,
     private readonly notifier: Notifier,
-    private readonly snapshots: Pick<RepoSnapshots, "acquire">,
+    private readonly snapshots: Pick<RepoSnapshots, "acquire" | "repoMutex">,
   ) {}
 
   /** Kick off the background reformulation; the result lands on the ticket via `pushTicket`. */
@@ -53,29 +56,50 @@ export class ReformulateManager {
 
   private async run(ticket: Ticket, generation: number): Promise<void> {
     const project = getProject(ticket.project);
-    const execution = resolveTicketExecution(ticket, "one-shot", {
+    const remote = isRemoteTicket(ticket);
+    const execution = resolveTicketExecution(withRemoteAnalysisEngine(ticket), "one-shot", {
       model: MODELS.triage,
       effort: MODELS.triageEffort,
     });
-    let lease: SnapshotLease | null = null;
+    const baseBranch = resolveAnalysisBaseBranch(ticket, project, this.store);
+    let lease: SnapshotLease | RemoteAnalysisCopy | null = null;
     try {
       await assertExecutionAvailable(this.system, execution);
-      // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
-      lease = await this.snapshots.acquire({
-        projectKey: ticket.project,
-        repoPath: project.repoPath,
-        baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
-        fetch: true,
-        requireFetch: true,
-      });
-      const cwd = lease.cwd;
+      let cwd: string;
+      let imageLines: string[] = [];
+      if (remote && !this.system.dryRun) {
+        // A remote card reads its own isolated copy, never the shared snapshot.
+        lease = await acquireRemoteAnalysisCopy({
+          store: this.store,
+          system: this.system,
+          repoMutex: this.snapshots.repoMutex,
+          provider: execution.provider,
+          repoPath: project.repoPath,
+          baseBranch,
+          key: ticket.id,
+        });
+        cwd = lease.cwd;
+        imageLines = await copyRemoteImages([ticket.description], cwd);
+      } else {
+        // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
+        lease = await this.snapshots.acquire({
+          projectKey: ticket.project,
+          repoPath: project.repoPath,
+          baseBranch,
+          fetch: true,
+          requireFetch: true,
+        });
+        cwd = lease.cwd;
+      }
+      const prompt = appendPromptLines(buildReformulatePrompt(ticket), imageLines);
       const markdown = await runRecordedAction(this.store, ticket.id, execution, (onEvent) => this.system.reformulate({
         cwd,
-        prompt: buildReformulatePrompt(ticket),
+        prompt,
         provider: execution.provider,
         model: execution.model,
         effort: execution.effort,
         serviceTier: execution.serviceTier,
+        ...(remote ? { confined: true } : {}),
         onEvent,
       }), "ticket");
       // The ticket may have been deleted while the query ran: skip persistence if it is gone.

@@ -43,6 +43,7 @@ import type {
 } from "./agentSession.ts";
 import { SUBAGENT_DEFAULT_LABEL } from "./agentSession.ts";
 import { ensureClaudeBinary } from "./claudeBinary.ts";
+import { CLAUDE_CONFINED_DISALLOWED, CLAUDE_CONFINED_ENV, CLAUDE_CONFINED_TOOLS, CONFINED_ANALYSIS_INSTRUCTIONS, CONFINED_READ_DENIAL } from "./confinedPolicy.ts";
 import { AUTONOMOUS_NATIVE_DELEGATION_DENIAL, watchAutonomousPermission } from "./autonomousPermission.ts";
 import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
 import { GH_AUTH_DENIAL_REASON, GH_AUTH_PERMISSION_DENY, isGhAuthCommand } from "./github/ghAuthGuard.ts";
@@ -62,7 +63,6 @@ const SDK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 const NO_VERIFY_PATTERN = /--no-verify\b/;
 const bashCommandSchema = z.object({ command: z.string() });
 
-const SCOPED_READ_TOOLS = ["Read", "Glob", "Grep"];
 const SCOPED_READ_ROLE_POLICIES: Partial<Record<AgentSessionRole, { readScopeDenial: string; instructions: string }>> = {
   "quality-validator": {
     readScopeDenial: "Quality inspection is restricted to repository files under the validation workspace.",
@@ -74,15 +74,20 @@ const SCOPED_READ_ROLE_POLICIES: Partial<Record<AgentSessionRole, { readScopeDen
   },
 };
 
-function scopedReadHook(options: AgentSessionOptions, reportedDenials: Set<string>, reason: string): HookCallback {
+const CONFINED_READ_POLICY = { readScopeDenial: CONFINED_READ_DENIAL, instructions: CONFINED_ANALYSIS_INSTRUCTIONS };
+
+interface ScopedReadDenial {
+  toolName: string;
+  blockReason: QualityPermissionBlockReason | null;
+  nativeId: string;
+}
+
+function scopedReadHook(cwd: string, reason: string, onDenied: (denial: ScopedReadDenial) => void): HookCallback {
   return async (input) => {
     if (input.hook_event_name !== "PreToolUse") return {};
     let blockReason: QualityPermissionBlockReason | null = null;
-    if (qualityReadToolAllowed(options.cwd, input.tool_name, input.tool_input, (denied) => { blockReason ??= denied; })) return {};
-    if (!reportedDenials.has(input.tool_use_id)) {
-      reportedDenials.add(input.tool_use_id);
-      reportPermissionDenial(options, { toolName: input.tool_name, command: null, reason, blockReason, nativeId: input.tool_use_id });
-    }
+    if (qualityReadToolAllowed(cwd, input.tool_name, input.tool_input, (denied) => { blockReason ??= denied; })) return {};
+    onDenied({ toolName: input.tool_name, blockReason, nativeId: input.tool_use_id });
     return { hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
@@ -142,6 +147,29 @@ export function buildSettings(allow?: string[], deny?: string[]): Pick<Options, 
   if (deny && deny.length > 0) permissions.deny = deny;
   if (permissions.allow || permissions.deny) settings.permissions = permissions;
   return { settings };
+}
+
+/**
+ * Query options of a confined one-shot (reformulation, feasibility answers of a remote card): no host
+ * settings, hooks or MCP servers, built-in tools reduced to Read/Glob/Grep scoped to `cwd`.
+ */
+export function confinedOneShotOptions(cwd: string): Pick<Options, "settingSources" | "strictMcpConfig" | "mcpServers" | "tools" | "allowedTools" | "disallowedTools" | "hooks" | "systemPrompt" | "skills"> {
+  return {
+    settingSources: [],
+    strictMcpConfig: true,
+    mcpServers: {},
+    tools: CLAUDE_CONFINED_TOOLS,
+    allowedTools: CLAUDE_CONFINED_TOOLS,
+    disallowedTools: CLAUDE_CONFINED_DISALLOWED,
+    skills: [],
+    hooks: { PreToolUse: [{ matcher: CLAUDE_CONFINED_TOOLS.join("|"), hooks: [scopedReadHook(cwd, CONFINED_READ_DENIAL, () => {})] }] },
+    systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: CONFINED_ANALYSIS_INSTRUCTIONS },
+  };
+}
+
+/** Environment additions of a confined Claude run (claude.ai connectors off). */
+export function confinedClaudeEnv(environment: Record<string, string | undefined>): Record<string, string | undefined> {
+  return { ...environment, ...CLAUDE_CONFINED_ENV };
 }
 
 export function toSdkAgents(agents: Record<string, AgentSubagentDefinition>): SdkAgents {
@@ -248,10 +276,12 @@ export function createSdkAgentSession(
       };
     }),
   );
-  const mcpServer = createSdkMcpServer({ name: MCP_SERVER_NAME, version: "0.0.0", tools });
+  const confined = opts.confined === true;
+  // NOTE(ali): a confined session has no ToolSearch, so its result tools must never be deferred.
+  const mcpServer = createSdkMcpServer({ name: MCP_SERVER_NAME, version: "0.0.0", tools, ...(confined ? { alwaysLoad: true } : {}) });
 
   const extraMcpServers: NonNullable<Options["mcpServers"]> = {};
-  for (const [name, def] of Object.entries(opts.extraMcpServers ?? {})) {
+  for (const [name, def] of Object.entries(confined ? {} : opts.extraMcpServers ?? {})) {
     if (def.type === "http") {
       const headers: Record<string, string> = {};
       if (def.bearerTokenEnvVar) {
@@ -305,7 +335,19 @@ export function createSdkAgentSession(
   };
   if (opts.blockReviewPublishing) preToolUseHooks.push(denyReviewPublishingHook);
   if (opts.blockTypecheck) preToolUseHooks.push(denyTypecheckHook(opts.cwd));
-  const scopedReadPolicy = opts.role === undefined ? undefined : SCOPED_READ_ROLE_POLICIES[opts.role];
+  const scopedReadPolicy = confined ? CONFINED_READ_POLICY : opts.role === undefined ? undefined : SCOPED_READ_ROLE_POLICIES[opts.role];
+  const reportScopedRead = (reason: string) => (denial: ScopedReadDenial): void => {
+    if (reportedDenials.has(denial.nativeId)) return;
+    reportedDenials.add(denial.nativeId);
+    reportPermissionDenial(opts, { toolName: denial.toolName, command: null, reason, blockReason: denial.blockReason, nativeId: denial.nativeId });
+  };
+  const allowedTools = confined
+    ? [...workerToolNames(workerTools), ...CLAUDE_CONFINED_TOOLS]
+    : [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])];
+  const disallowedTools = confined ? [...new Set([...(opts.disallowedTools ?? []), ...CLAUDE_CONFINED_DISALLOWED])] : opts.disallowedTools;
+  const skills = confined ? [] : opts.skills;
+  const agents = confined ? undefined : opts.agents;
+  const environment = scrubAmbientGithubTokens({ ...envWithProjectNode(opts.cwd), ...opts.environment });
   const queryOptions: Options = {
     abortController,
     cwd: opts.cwd,
@@ -315,29 +357,29 @@ export function createSdkAgentSession(
     // discovered — `skills` below is only a filter over what `settingSources` finds, not a source. It
     // also merges the user's `~/.claude/settings.json` (permissions/hooks/plugins) AND
     // `~/.claude/CLAUDE.md` into the session, hence the reviewer carve-out in settingSourcesForRole.
-    settingSources: settingSourcesForRole(opts.role),
+    settingSources: confined ? [] : settingSourcesForRole(opts.role),
     permissionMode: opts.permissionMode,
     mcpServers: { ...(workerTools.length > 0 ? { [MCP_SERVER_NAME]: mcpServer } : {}), ...extraMcpServers },
-    allowedTools: [...workerToolNames(workerTools), ...(opts.allowedTools ?? [])],
+    allowedTools,
     includePartialMessages: false,
     // Sessions run tools (lefthook, oxlint…) under the project's `.nvmrc` Node, not the nvm default.
     // An attached project's GH_CONFIG_DIR must not be overridden by an ambient GH_TOKEN/GITHUB_TOKEN.
-    env: scrubAmbientGithubTokens({ ...envWithProjectNode(opts.cwd), ...opts.environment }),
+    env: confined ? confinedClaudeEnv(environment) : environment,
     stderr: () => {},
     hooks: { PreToolUse: [
       ...(opts.executionGuard ? [{ matcher: ".*", hooks: [autonomousHook] }] : []),
       { matcher: "Bash", hooks: preToolUseHooks },
-      ...(scopedReadPolicy ? [{ matcher: SCOPED_READ_TOOLS.join("|"), hooks: [scopedReadHook(opts, reportedDenials, scopedReadPolicy.readScopeDenial)] }] : []),
+      ...(scopedReadPolicy ? [{ matcher: CLAUDE_CONFINED_TOOLS.join("|"), hooks: [scopedReadHook(opts.cwd, scopedReadPolicy.readScopeDenial, reportScopedRead(scopedReadPolicy.readScopeDenial))] }] : []),
     ] },
     ...(sdkEffort ? { effort: sdkEffort } : {}),
     // `gh auth` is denied to every Claude session (settings rule + the PreToolUse hook above).
     ...buildSettings(opts.permissionAllow, [...(opts.permissionDeny ?? []), GH_AUTH_PERMISSION_DENY]),
-    ...(opts.disallowedTools ? { disallowedTools: opts.disallowedTools } : {}),
-    ...(opts.skills ? { skills: opts.skills } : {}),
-    ...(opts.agents ? { agents: toSdkAgents(opts.agents) } : {}),
+    ...(disallowedTools ? { disallowedTools } : {}),
+    ...(skills ? { skills } : {}),
+    ...(agents ? { agents: toSdkAgents(agents) } : {}),
     ...(opts.outputSchema ? { outputFormat: { type: "json_schema", schema: opts.outputSchema } } : {}),
     ...(scopedReadPolicy ? {
-      tools: SCOPED_READ_TOOLS,
+      tools: CLAUDE_CONFINED_TOOLS,
       strictMcpConfig: true,
       systemPrompt: { type: "preset", preset: "claude_code", excludeDynamicSections: true, append: scopedReadPolicy.instructions },
     } : {}),

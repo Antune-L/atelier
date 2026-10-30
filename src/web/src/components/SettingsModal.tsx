@@ -25,6 +25,7 @@ import { availableSkillProviders } from "@shared/skills";
 import { VpsUpdateSettings } from "@/components/VpsUpdateSettings";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
+import { RemoteMcpSettings } from "@/components/RemoteMcpSettings";
 import { CoolifySettings } from "@/components/CoolifySettings";
 import { GithubAccountsSettings } from "@/components/GithubAccountsSettings";
 import { ProfilesSettings } from "@/components/ProfilesSettings";
@@ -179,6 +180,7 @@ function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSection
   if (sectionId === "skills") return <SkillsSettings query={query} />;
   if (sectionId === "coolify") return <CoolifySettings query={query} />;
   if (sectionId === "github") return <GithubAccountsSettings query={query} />;
+  if (sectionId === "remoteMcp") return <RemoteMcpSettings query={query} />;
   return <McpSettings query={query} />;
 }
 

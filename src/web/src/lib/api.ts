@@ -5,6 +5,7 @@ import type { AutonomousResumeInput, AutonomousWorkspaces } from "@shared/autono
 
 import type {
   AnalyzeTicketsInput,
+  ApproveRemoteStartInput,
   FeasibilityAnswerBatchInput,
   FeasibilityAnswerInput,
   AppSettings,
@@ -314,6 +315,8 @@ export const api = {
     request(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   scheduleTicket: (id: string, scheduledStartAt: number | null): Promise<Ticket> =>
     request(`/api/tickets/${id}/schedule`, { method: "PUT", body: JSON.stringify({ scheduledStartAt } satisfies ScheduleTicketInput) }),
+  approveRemoteStart: (id: string, reviewed: ApproveRemoteStartInput): Promise<Ticket> =>
+    request(`/api/tickets/${id}/approve-remote-start`, { method: "POST", body: JSON.stringify(reviewed) }),
   moveTicket: (id: string, column: Column, confirmed = false): Promise<Ticket> =>
     request(`/api/tickets/${id}/move`, { method: "POST", body: JSON.stringify({ column, confirmed }) }),
   addComment: (id: string, input: CreateCommentInput): Promise<Comment> =>

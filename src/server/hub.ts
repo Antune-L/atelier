@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 
 import { EMPTY_AUDIT_OVERVIEW } from "../shared/audit.ts";
 import type { AuditOverview } from "../shared/audit.ts";
+import { isRemoteTicket } from "../shared/startBlocker.ts";
 import type { Automation, NotificationSoundKind, Comment, Conversation, ConversationMessage, PrdDocumentRecord, Slot, Ticket, WorktreeSession, WsClientEvent } from "../shared/schemas.ts";
 
 import type { Store } from "./db/store.ts";
@@ -81,6 +82,9 @@ export class ClientHub {
 
   pushComment(comment: Comment): void {
     this.broadcast({ type: "comment", comment });
+    if (comment.author === "user") return;
+    const ticket = this.store.getTicket(comment.ticketId);
+    if (ticket !== null && isRemoteTicket(ticket)) this.pushTicket(ticket);
   }
 
   pushSlots(slots: Slot[]): void {

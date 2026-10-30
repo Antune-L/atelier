@@ -58,6 +58,8 @@ export interface SessionStartConfig {
   permissionMode: AgentPermissionMode;
   /** Structurally read-only session (Codex read-only sandbox; Claude enforces via tool gating). */
   readOnly?: boolean;
+  /** Confined analysis of an untrusted remote card (see AgentSessionOptions.confined). */
+  confined?: boolean;
   blockReviewPublishing?: boolean;
   blockTypecheck?: boolean;
   /** Emit `context_usage` events for the live session (Atelier only). */
@@ -447,6 +449,7 @@ export class SessionHub {
         generation,
         permissionMode: config.permissionMode,
         ...(config.readOnly !== undefined ? { readOnly: config.readOnly } : {}),
+        ...(config.confined ? { confined: true } : {}),
         ...(config.blockReviewPublishing ? { blockReviewPublishing: true } : {}),
         ...(config.blockTypecheck ? { blockTypecheck: true } : {}),
         ...(config.reportContextUsage ? { reportContextUsage: true } : {}),

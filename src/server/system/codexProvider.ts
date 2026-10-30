@@ -50,6 +50,8 @@ import {
   type CodexCommandHook,
 } from "./codexHookTrust.ts";
 import { hasExplicitCodexApiKey } from "./codexRuntime.ts";
+import { CODEX_CONFINED_PROFILE, CONFINED_ANALYSIS_INSTRUCTIONS, codexConfinedProfile } from "./confinedPolicy.ts";
+import type { CodexConfigTable } from "./confinedPolicy.ts";
 import { scrubAmbientGithubTokens } from "./github/accountEnv.ts";
 import { GH_AUTH_DENIAL_REASON, isGhAuthCommand } from "./github/ghAuthGuard.ts";
 import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
@@ -67,7 +69,8 @@ const ISOLATED_ROLE_INSTRUCTIONS: Partial<Record<AgentSessionRole, string>> = {
   auditor: AUDITOR_INSTRUCTIONS,
 };
 
-function isolatedThreadOptions(role: AgentSessionRole | undefined): { ephemeral?: true; developerInstructions?: string } {
+function isolatedThreadOptions(role: AgentSessionRole | undefined, confined: boolean): { ephemeral?: true; developerInstructions?: string } {
+  if (confined) return { ephemeral: true, developerInstructions: CONFINED_ANALYSIS_INSTRUCTIONS };
   const instructions = role === undefined ? undefined : ISOLATED_ROLE_INSTRUCTIONS[role];
   return instructions === undefined ? {} : { ephemeral: true, developerInstructions: instructions };
 }
@@ -110,9 +113,19 @@ const configReadResponseSchema = z.object({
   config: z
     .object({
       mcp_servers: z.record(z.string(), z.unknown()).optional(),
+      permissions: z.record(z.string(), z.unknown()).nullable().optional(),
+      shell_environment_policy: z.object({ set: z.record(z.string(), z.unknown()).nullable().optional() }).passthrough().nullable().optional(),
     })
     .passthrough(),
 });
+const hooksListResponseSchema = z.object({
+  data: z.array(z.object({ hooks: z.array(z.object({ key: z.string(), enabled: z.boolean() }).passthrough()) }).passthrough()),
+});
+const confinedThreadResponseSchema = threadResponseSchema.extend({
+  sandbox: z.object({ type: z.string(), networkAccess: z.unknown().optional(), writableRoots: z.array(z.string()).optional() }).passthrough(),
+  activePermissionProfile: z.object({ id: z.string() }).passthrough().nullable().optional(),
+});
+const CONFINED_SANDBOX_TYPES = new Set(["readOnly", "workspaceWrite"]);
 const skillsResponseSchema = z.object({
   data: z.array(
     z.object({
@@ -325,22 +338,55 @@ function buildMcpServers(
       required: true,
     });
   }
+  if (options.confined === true) return servers;
   for (const [name, definition] of Object.entries(options.extraMcpServers ?? {})) {
     setConfigEntry(servers, name, mcpConfig(definition));
   }
   return servers;
 }
 
-async function inheritedMcpServerNames(
+async function readBaseConfig(
   connection: CodexAppServerConnection,
   cwd: string,
-): Promise<string[]> {
+): Promise<z.infer<typeof configReadResponseSchema>["config"]> {
   const response = await connection.request(
     "config/read",
     { cwd, includeLayers: false },
     configReadResponseSchema,
   );
-  return Object.keys(response.config.mcp_servers ?? {});
+  return response.config;
+}
+
+/**
+ * Fail closed before any ticket text is sent: the session layer merges recursively into the base
+ * configuration, so a pre-existing profile of the same name, inherited shell `set` entries or any
+ * enabled hook (hooks run outside the sandbox) would widen the confined policy.
+ */
+async function assertConfinedBaseConfig(
+  connection: CodexAppServerConnection,
+  cwd: string,
+  config: z.infer<typeof configReadResponseSchema>["config"],
+): Promise<void> {
+  if (config.permissions && Object.hasOwn(config.permissions, CODEX_CONFINED_PROFILE)) {
+    throw new Error(`Analyse confinée refusée : un profil Codex « ${CODEX_CONFINED_PROFILE} » existe déjà dans la configuration.`);
+  }
+  if (Object.keys(config.shell_environment_policy?.set ?? {}).length > 0) {
+    throw new Error("Analyse confinée refusée : shell_environment_policy.set est défini dans la configuration Codex.");
+  }
+  const hooks = await connection.request("hooks/list", { cwds: [cwd] }, hooksListResponseSchema);
+  const enabled = hooks.data.flatMap((entry) => entry.hooks).filter((hook) => hook.enabled);
+  if (enabled.length > 0) {
+    throw new Error(`Analyse confinée refusée : hooks Codex hérités actifs (${enabled.map((hook) => hook.key).join(", ")}).`);
+  }
+}
+
+function assertConfinedThread(response: z.infer<typeof confinedThreadResponseSchema>): void {
+  const { sandbox, activePermissionProfile } = response;
+  const networkOff = sandbox.networkAccess === undefined || sandbox.networkAccess === false || sandbox.networkAccess === "restricted";
+  const noExtraWrites = (sandbox.writableRoots ?? []).length === 0;
+  if (activePermissionProfile?.id !== CODEX_CONFINED_PROFILE || !CONFINED_SANDBOX_TYPES.has(sandbox.type) || !networkOff || !noExtraWrites) {
+    throw new Error(`Analyse confinée refusée : configuration Codex effective inattendue (profil ${activePermissionProfile?.id ?? "aucun"}, sandbox ${sandbox.type}).`);
+  }
 }
 
 function tomlString(value: string): string {
@@ -378,7 +424,9 @@ function prepareAgents(
   agents: Record<string, AgentSubagentDefinition> | undefined,
   role: AgentSessionOptions["role"],
   serviceTier: "default" | "fast",
+  confined: boolean,
 ): PreparedAgents {
+  if (confined) return { config: { enabled: false }, cleanup: () => {} };
   const definitions = Object.entries(agents ?? {});
   if (definitions.length === 0) {
     if (role === "feasibility") {
@@ -549,7 +597,7 @@ try {
   const scoutTypes = Object.entries(options.agents ?? {})
     .filter(([, definition]) => definition.role === "scout")
     .map(([name]) => name);
-  const restrictAllSubagents = options.readOnly === true && (options.role === "triage" || options.role === "feasibility" || options.role === "auditor");
+  const restrictAllSubagents = options.confined === true || (options.readOnly === true && (options.role === "triage" || options.role === "feasibility" || options.role === "auditor"));
   writeFileSync(policyPath, codexCommandPolicyScript(options.permissionAllow, scoutTypes, restrictAllSubagents, options.role === "implementer", options.role === "quality-validator", options.cwd), {
     encoding: "utf8",
     mode: 0o600,
@@ -634,16 +682,17 @@ async function prepareSkills(
   connection: CodexAppServerConnection,
   options: AgentSessionOptions,
 ): Promise<{ config: ConfigValue[]; inputs: SkillInput[] } | null> {
-  if (options.skills === undefined) return null;
+  const requested = options.confined === true ? [] : options.skills;
+  if (requested === undefined) return null;
   const response = await connection.request(
     "skills/list",
     { cwds: [options.cwd], forceReload: false },
     skillsResponseSchema,
   );
   const skills = response.data.flatMap((entry) => entry.skills);
-  const selected = new Set(options.skills);
+  const selected = new Set(requested);
   const available = new Set(skills.map((skill) => skill.name));
-  const missing = options.skills.filter((name) => !available.has(name));
+  const missing = requested.filter((name) => !available.has(name));
   if (missing.length > 0) throw new Error(`Skills Codex introuvables : ${missing.join(", ")}`);
   return {
     config: skills.map((skill) => ({ path: skill.path, enabled: selected.has(skill.name) })),
@@ -661,6 +710,7 @@ function threadConfig(
   skills: ConfigValue[] | null,
   hooks: ConfigObject,
   gitWritableRoots: string[],
+  confinedProfile: CodexConfigTable | null,
 ): ConfigObject {
   const config: ConfigObject = {
     allow_login_shell: false,
@@ -688,7 +738,39 @@ function threadConfig(
   if (Object.keys(servers).length > 0) config.mcp_servers = servers;
   if (agents) config.agents = agents;
   if (skills) config.skills = { config: skills };
+  if (confinedProfile) applyConfinedConfig(config, confinedProfile, options.serviceTier === "fast");
   return config;
+}
+
+/**
+ * Confined analysis of an untrusted card: a named permission profile replaces the legacy sandbox
+ * (no `sandbox` param is sent), and every optional capability that could read or leak outside the
+ * isolated copy is switched off. `features.hooks` stays on: it carries kanban's command filter.
+ */
+function applyConfinedConfig(config: ConfigObject, profile: CodexConfigTable, fastMode: boolean): void {
+  delete config.sandbox_workspace_write;
+  config.default_permissions = CODEX_CONFINED_PROFILE;
+  config.permissions = { [CODEX_CONFINED_PROFILE]: profile };
+  config.web_search = "disabled";
+  config.shell_environment_policy = { inherit: "core", ignore_default_excludes: false };
+  config.features = {
+    hooks: true,
+    plugins: false,
+    apps: false,
+    multi_agent: false,
+    multi_agent_v2: false,
+    memories: false,
+    skill_mcp_dependency_install: false,
+    use_legacy_landlock: false,
+    fast_mode: fastMode,
+  };
+  config.agents = { enabled: false };
+  const skills = config.skills;
+  config.skills = {
+    ...(skills !== undefined && typeof skills === "object" && !Array.isArray(skills) ? skills : {}),
+    include_instructions: false,
+    bundled: { enabled: false },
+  };
 }
 
 function usageForModel(options: AgentSessionOptions, usage: AgentTurnUsage | undefined): Record<string, AgentTurnUsage> {
@@ -708,6 +790,7 @@ function createCodexAgentSession(
   const childThreads = new Set<string>();
   const childLabels = new Map<string, string>();
   const activeChildren = new Set<string>();
+  const confined = options.confined === true;
   const workerTools = workerToolsForRole(options.role);
   const hasWorkerServer = options.disableWorkerTools !== true && workerTools.length > 0;
   const workerToken = hasWorkerServer ? nanoid(32) : null;
@@ -1297,7 +1380,7 @@ function createCodexAgentSession(
     let lastStderr = "";
     try {
       options.executionGuard?.assertAllowed();
-      preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default");
+      preparedAgents = prepareAgents(options.agents, options.role, options.serviceTier ?? "default", confined);
       preparedHook = prepareNoVerifyHook(options);
       // An attached project's GH_CONFIG_DIR must not be overridden by an ambient GH_TOKEN/GITHUB_TOKEN.
       const environment = scrubAmbientGithubTokens({ ...(dependencies.projectEnvironment ?? envWithProjectNode)(options.cwd), ...options.environment });
@@ -1305,10 +1388,12 @@ function createCodexAgentSession(
       // explicitly — it is the one KANBAN_* var the Codex child genuinely needs (MCP bearer token).
       if (workerToken) environment[WORKER_TOKEN_ENV] = workerToken;
       options.executionGuard?.assertAllowed();
+      const binaryPath = (dependencies.resolveBinary ?? resolveCodexBinary)();
       const liveConnection = await (dependencies.connect ?? connectCodexAppServer)({
-        binaryPath: (dependencies.resolveBinary ?? resolveCodexBinary)(),
+        binaryPath,
         cwd: options.cwd,
         env: environment,
+        ...(confined ? { experimentalApi: true } : {}),
         onNotification: handleNotification,
         onStderr: (line) => {
           lastStderr = line;
@@ -1326,7 +1411,9 @@ function createCodexAgentSession(
         reportFatal(new Error(`Codex App Server arrêté de façon inattendue (code ${exitCode})`));
         cleanup();
       });
-      const inheritedServerNames = await inheritedMcpServerNames(connection, options.cwd);
+      const baseConfig = await readBaseConfig(connection, options.cwd);
+      if (confined) await assertConfinedBaseConfig(connection, options.cwd, baseConfig);
+      const inheritedServerNames = Object.keys(baseConfig.mcp_servers ?? {});
       if (closing) {
         await finishConnection();
         return;
@@ -1347,7 +1434,10 @@ function createCodexAgentSession(
         preparedSkills?.config ?? null,
         preparedHook.config,
         gitWritableRoots,
+        confined ? codexConfinedProfile({ workspace: options.cwd, binaryPath, environment }) : null,
       );
+      const sandbox = confined ? {} : { sandbox: options.readOnly ? "read-only" : "workspace-write" };
+      const responseSchema = confined ? confinedThreadResponseSchema : threadResponseSchema;
       const modelProvider = hasExplicitCodexApiKey(environment) ? API_KEY_PROVIDER_ID : undefined;
       const response = options.resumeSessionId
         ? await connection.request(
@@ -1359,11 +1449,11 @@ function createCodexAgentSession(
               serviceTier: options.serviceTier ?? "default",
               cwd: options.cwd,
               approvalPolicy: "never",
-              sandbox: options.readOnly ? "read-only" : "workspace-write",
+              ...sandbox,
               config,
               excludeTurns: true,
             },
-            threadResponseSchema,
+            responseSchema,
           )
         : await connection.request(
             "thread/start",
@@ -1373,13 +1463,14 @@ function createCodexAgentSession(
               serviceTier: options.serviceTier ?? "default",
               cwd: options.cwd,
               approvalPolicy: "never",
-              sandbox: options.readOnly ? "read-only" : "workspace-write",
+              ...sandbox,
               config,
               threadSource: "appServer",
-              ...isolatedThreadOptions(options.role),
+              ...isolatedThreadOptions(options.role, confined),
             },
-            threadResponseSchema,
+            responseSchema,
           );
+      if (confined) assertConfinedThread(confinedThreadResponseSchema.parse(response));
       if (closing) {
         await finishConnection();
         return;

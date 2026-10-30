@@ -1,6 +1,6 @@
 import { isCodexFastServiceTier } from "../../shared/codexCapabilities.ts";
-import type { CodexEffort, CodexModel, FeasibilityEngine, Orchestrator } from "../../shared/constants.ts";
-import type { Ticket } from "../../shared/schemas.ts";
+import type { CodexEffort, CodexModel, FeasibilityEngine, Implementer, Orchestrator } from "../../shared/constants.ts";
+import type { Profile, Ticket } from "../../shared/schemas.ts";
 import { MODELS } from "../config.ts";
 import type { AgentSessionRole } from "../system/agentSession.ts";
 import type { SystemAdapter } from "../system/types.ts";
@@ -47,6 +47,33 @@ const CODEX_LAUNCH_STATUS_MESSAGES = {
   temporarily_unavailable: "Service Codex temporairement indisponible",
   error: "Vérification Codex impossible",
 } as const;
+
+type EngineAvailabilityReader = Pick<SystemAdapter, "checkCodexRuntime" | "checkClaudeAvailable">;
+
+const ENGINE_UNAVAILABLE_MESSAGES: Record<Implementer, string> = {
+  claude: "Claude n'est pas disponible sur cette machine",
+  codex: "Codex n'est pas prêt sur cette machine",
+  composer: "Composer (Cursor CLI) n'est pas disponible sur cette machine",
+};
+
+async function isEngineAvailable(system: EngineAvailabilityReader, composerAvailable: boolean, engine: Implementer): Promise<boolean> {
+  if (engine === "claude") return system.checkClaudeAvailable();
+  if (engine === "composer") return composerAvailable;
+  return (await system.checkCodexRuntime(true)).status === "ready";
+}
+
+/** Null when every engine of the remote cards profile can run on this host, else the first refusal. */
+export async function remoteMcpProfileEngineError(
+  system: EngineAvailabilityReader,
+  composerAvailable: boolean,
+  profile: Pick<Profile, "orchestrator" | "implementer">,
+): Promise<string | null> {
+  const engines = [...new Set<Implementer>([profile.orchestrator, profile.implementer])];
+  for (const engine of engines) {
+    if (!(await isEngineAvailable(system, composerAvailable, engine))) return ENGINE_UNAVAILABLE_MESSAGES[engine];
+  }
+  return null;
+}
 
 /** Refuse a stale Codex model/effort pair immediately before its session starts. */
 export async function assertExecutionAvailable(

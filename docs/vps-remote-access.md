@@ -146,6 +146,89 @@ The check must print `200`. A `403` means the guard still refuses the hostname: 
    - `systemctl show kanban -p InaccessiblePaths` lists `/etc/cloudflared`.
    - The SSH tunnel of A6 still works.
 
+## Remote MCP (milestone 1)
+
+This section lets Claude Code and Codex on the Mac call a restricted MCP server on the VPS (three tools: `list_projects`, `list_tickets`, `create_todo_ticket`) through Cloudflare Access Managed OAuth: Access acts as the OAuth server (the login service that issues tokens to the CLI clients), so neither the Mac nor the VPS stores a secret for it. The VPS side, the board settings, the activation sequence and the qualification are in [vps-install.md](./vps-install.md#remote-mcp-milestone-1). Follow the activation sequence there: the Access policy below is attached only for qualification, then for production.
+
+Extra placeholders: `<mcp-host>` is a dedicated hostname for the MCP server (for example `kanban-mcp.<domain>`), `<mcp-port>` the local port chosen in `/etc/kanban/kanban.env`, and `<mcp-aud>` the AUD tag of the MCP application.
+
+Why a dedicated hostname: OAuth discovery lives at the root of the hostname (`/.well-known/...`), so the MCP server cannot share `<kanban-host>` under a path. Use a first-level subdomain of `<domain>`: a two-level subdomain needs an advanced certificate.
+
+What protects what:
+- Access only issues a token to `<email>` signed in with Google and the Access second factor, and re-evaluates the policy each time the client refreshes its access token (15 minutes).
+- `cloudflared` validates the Access token for this application before forwarding a request, and Kanban validates it again (`Cf-Access-Jwt-Assertion` header, team keys, AUD of this application).
+- The listener only binds `127.0.0.1:<mcp-port>`, only accepts `Host: <mcp-host>`, only serves `POST /mcp` and only exposes the three tools. It never uses `KANBAN_MCP_TOKEN` or the `Authorization` header, which OAuth occupies.
+- Cards created this way carry the **distant** tag and show **approbation requise**: they cannot start before you click **Approuver le démarrage** on the card, and their analyses run confined. The allowed projects and the remote cards profile are set in **Réglages > MCP distant** on the board.
+
+### MCP 1. Access application
+
+In **Zero Trust > Access controls > Applications**, select **Create new application > Self-hosted and private > Add public hostname**:
+1. Hostname: `<mcp-host>`, with no path. Do not reuse or edit the board application of step 5.
+2. Policy, action **Allow**, with the same rules as step 5: **Include > Emails** `<email>` only, **Require > Login Methods** Google, and **Override global multi-factor authentication settings (MFA)** with MFA required. No other policy, and no Bypass or Service Auth policy. Keep this policy off the application until step 4 of the activation sequence.
+3. Login methods: Google only.
+4. In the **Advanced settings** tab, turn on **Managed OAuth**, then:
+   - turn on **Allow localhost clients** (Claude Code calls back on `http://localhost:<port>/callback`) and **Allow loopback clients** (Codex calls back on `http://127.0.0.1:<port>/callback`);
+   - **Grant session duration**: 2 weeks. This is how long the OAuth refresh token stays valid, so how often you log in again;
+   - **Access token lifetime**: 15 minutes. This bounds how long a removed policy can still be used.
+5. Save, then copy the **Application Audience (AUD) Tag** of this application: it is `<mcp-aud>`, different from the board's AUD. The team domain is `<team>.cloudflareaccess.com` (step 1).
+
+### MCP 2. Tunnel route
+
+On the tunnel (**Networking > Tunnels > kanban-vps**), tab **Routes**, **Add route > Published application**:
+- Subdomain and domain: `<mcp-host>`, no path.
+- Service URL: `http://127.0.0.1:<mcp-port>`.
+- **Additional application settings > Access**: turn on the token validation (Protect with Access) with team name `<team>` and `<mcp-aud>`.
+
+The `cloudflared-kanban` unit already reaches `127.0.0.1`: nothing changes in its unit.
+
+### MCP 3. Bot Fight Mode
+
+Bot Fight Mode may challenge command-line clients, and WAF custom rules cannot skip it. Check that it does not apply to `<mcp-host>`: if it does, an OAuth login or the public probe of `kanban-upgrade` fails.
+
+### MCP 4. Check the public answer
+
+From the Mac, without any login:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' https://<mcp-host>/mcp
+curl -s https://<mcp-host>/.well-known/oauth-authorization-server
+```
+
+The first command must print `401`. The second must return JSON metadata that includes a `registration_endpoint`: both clients need it to register themselves.
+
+### MCP 5. Connect the Mac clients
+
+Use the name `kanban-vps`: `kanban` is already the local server. Set up only the client or clients you use (Claude Code only, Codex only, or both); each client keeps its own login.
+
+Claude Code:
+
+```bash
+claude mcp add --transport http --scope user kanban-vps https://<mcp-host>/mcp
+claude mcp login kanban-vps
+```
+
+Codex:
+
+```bash
+codex mcp add kanban-vps --url https://<mcp-host>/mcp
+codex mcp login kanban-vps
+```
+
+`codex mcp add` may start the login itself; `codex mcp login` is then only needed later. Each login opens the browser on the Access page: sign in with Google, then the Access second factor. Tokens go to the macOS Keychain.
+
+Do not set `--bearer-token-env-var` (`bearer_token_env_var`), `http_headers_helper`, an `Authorization` header or `--oauth-resource` on `kanban-vps`: in Codex they disable OAuth, and in Claude Code a configured `Authorization` header replaces OAuth.
+
+Check with `claude mcp list` and `codex mcp list`. Claude Code cannot run the OAuth flow inside `claude -p` or Agent SDK sessions: log in interactively first, after which those sessions reuse the stored token.
+
+**Log in again about every 2 weeks**, when the grant expires: `claude mcp login kanban-vps` (or `/mcp` then **Re-authenticate** inside a session) and `codex mcp login kanban-vps`. Access tokens refresh silently in between. To disconnect a Mac client: `claude mcp logout kanban-vps`, `codex mcp logout kanban-vps`.
+
+### MCP kill switch
+
+1. Remove (or disable) the policy of the `<mcp-host>` application. New logins fail at once; an access token already issued keeps working until its next refresh, so for at most the access-token lifetime (15 minutes).
+2. For an immediate cut, also delete the `<mcp-host>` route of the tunnel, or on the VPS remove the `KANBAN_REMOTE_MCP_PORT` line from `/etc/kanban/kanban.env` and run `sudo systemctl restart kanban`: the listener does not start without it.
+
+Whether **Revoke existing tokens** on the application also ends the OAuth grants is not documented. Rely on the policy until the qualification has measured it.
+
 ## Optional hardening
 
 - **Country in the policy.** Add **Require > Country** with your country to the Access policy. Access re-evaluates it on every request, so a stolen session used from abroad is cut. Abroad or behind a foreign VPN, use the SSH tunnel.

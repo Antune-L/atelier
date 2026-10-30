@@ -15,7 +15,8 @@ export type SettingsSectionId =
   | "skills"
   | "coolify"
   | "github"
-  | "mcp";
+  | "mcp"
+  | "remoteMcp";
 
 export interface SettingsSection {
   id: SettingsSectionId;
@@ -108,6 +109,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "MCP",
     group: "Connexions",
     keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur", "outil", "client", "renouveler", "maintenance", "copier", "secret", "jeton d’accès", "adresse de connexion"],
+  },
+  {
+    id: "remoteMcp",
+    label: "MCP distant",
+    group: "Connexions",
+    keywords: ["mcp", "distant", "remote", "projets autorisés", "profil des cartes distantes", "approbation", "VPS"],
   },
   {
     id: "coolify",

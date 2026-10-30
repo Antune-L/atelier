@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { feasibilityAnswerRunsSchema } from "../../shared/schemas.ts";
+import { feasibilityAnswerRunsSchema, ticketOriginSchema } from "../../shared/schemas.ts";
 
 import { AUTONOMOUS_DEFAULT_MAX_STARTS, AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS, autonomousMaxStartsSchema, autonomousFinalizationMinutesSchema, autonomousMaxPublicationAttemptsSchema, AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousDeliverySchema, autonomousMaxCorrectionsSchema, autonomousStateSchema, autonomousTimeoutMinutesSchema } from "../../shared/autonomous.ts";
 
@@ -148,6 +148,8 @@ const ticketRowSchema = z.object({
   implementation_finished_at: z.number().nullable(),
   scheduled_start_at: z.number().int().nullable(),
   scheduled_start_missed_at: z.number().int().nullable(),
+  origin: ticketOriginSchema.nullable(),
+  remote_approved_at: z.number().int().nullable(),
   created_at: z.number(),
   updated_at: z.number(),
 });
@@ -449,6 +451,8 @@ export function mapTicketRow(raw: unknown, pendingQuestions: number): Ticket {
     implementationFinishedAt: row.implementation_finished_at,
     scheduledStartAt: row.scheduled_start_at,
     scheduledStartMissedAt: row.scheduled_start_missed_at,
+    origin: row.origin,
+    remoteApprovedAt: row.remote_approved_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

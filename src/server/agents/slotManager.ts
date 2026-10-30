@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { isDependencyReady } from "../../shared/dependencies.ts";
-import { startBlocker } from "../../shared/startBlocker.ts";
+import { needsRemoteApproval, startBlocker } from "../../shared/startBlocker.ts";
 import { canUpdateDependencyBase } from "../../shared/ticketMerge.ts";
 import type { UpdateDependencyBaseResult } from "../../shared/ticketMerge.ts";
 import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
@@ -95,6 +95,7 @@ const UNRESOLVED_IMPLEMENTATION_DELIVERY_REASON = "Unresolved implementation obl
 const WORKTREE_SESSION_PREFIX = "worktree";
 const PR_DESCRIPTION_APPLY_FAILED_EVENT = "pr_description_apply_failed";
 const QUEUED_RESUMED_EVENT = "queued_resumed";
+const REMOTE_APPROVAL_REQUIRED_ERROR = "Carte distante : approuve son démarrage avant de la lancer.";
 const QUEUED_RESUME_MAX_AGE_DAYS = 7;
 const QUEUED_RESUME_MAX_AGE_MS = QUEUED_RESUME_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
 const MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT = "merge_skipped_after_review_limit";
@@ -606,7 +607,12 @@ export class SlotManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket) return;
     if (ticket.column === "abandoned" || ticket.column === "merged") return;
-    if (startBlocker(ticket, this.store.getDependencyParent(ticket)) === "triage") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+    const blocker = startBlocker(ticket, this.store.getDependencyParent(ticket));
+    if (blocker === "triage") throw new Error("Analyse en cours : attends le verdict avant de lancer l'implémentation.");
+    if (blocker === "approval") {
+      this.parkUnapprovedRemoteTicket(ticket);
+      throw new Error(REMOTE_APPROVAL_REQUIRED_ERROR);
+    }
     this.assertStartReady(ticket);
     if (ticket.autonomous) {
       const autonomousError = autonomousOptionsError(ticket, projectVcsProvider(ticket.project));
@@ -750,6 +756,13 @@ export class SlotManager {
     this.lifecycle.markLaunchFailed(ticketId, null, getErrorMessage(error), error);
   }
 
+  /** Defensive return to todo: an unapproved remote card never stays queued or reaches a slot. */
+  private parkUnapprovedRemoteTicket(ticket: Ticket): void {
+    const queued = this.queue.indexOf(ticket.id);
+    if (queued !== -1) this.queue.splice(queued, 1);
+    if (ticket.column === "implementing" && ticket.slotId === null) this.touch(this.store.updateTicket(ticket.id, { column: "todo", stage: null }));
+  }
+
   private assertStartReady(ticket: Ticket): void {
     if (this.updatingDependencyBases.has(ticket.id)) throw new Error("Mise à jour de la base en cours. Attends la fin avant de relancer le ticket.");
     const parent = this.store.getDependencyParent(ticket);
@@ -776,6 +789,10 @@ export class SlotManager {
     for (const child of this.store.listDependents(parentId)) {
       try {
         if (child.column !== "todo" || !isDependencyReady(child, this.store.getDependencyParent(child))) continue;
+        if (needsRemoteApproval(child)) {
+          this.deferredDependents.add(child.id);
+          continue;
+        }
         if (child.scheduledStartAt !== null && child.scheduledStartAt > Date.now()) continue;
         if (child.triageStatus === "running") {
           this.deferredDependents.add(child.id);
@@ -2472,6 +2489,10 @@ export class SlotManager {
     const resumed: string[] = [];
     const skipped: string[] = [];
     for (const ticket of candidates) {
+      if (needsRemoteApproval(ticket)) {
+        this.parkUnapprovedRemoteTicket(ticket);
+        continue;
+      }
       if (ticket.implementingStartedAt === null || ticket.implementingStartedAt < cutoff) {
         skipped.push(ticket.id);
         continue;

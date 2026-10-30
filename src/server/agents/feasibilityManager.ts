@@ -8,6 +8,7 @@ import {
 } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { FeasibilityResult, Ticket, TriageResult } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
 
@@ -24,12 +25,15 @@ import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildFeasibilityBatchContract } from "./contract.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
+import { RemoteAnalysisRefusedError, admitRemoteAnalysis, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
 import { buildFeasibilitySessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 
 const log = createLogger("feasibility");
 const MAX_CONCURRENT_BATCHES = 2;
 const MAX_TICKETS_PER_BATCH = 4;
+/** A remote card is analysed alone: one confined attempt per card, no cross-card context. */
+const MAX_REMOTE_TICKETS_PER_BATCH = 1;
 
 /** Stub verdict persisted in dry-run so the board stays exercisable without spawning claude. */
 const DRY_RUN_VERDICT: TriageResult = {
@@ -72,6 +76,8 @@ interface FeasibilitySession {
   attempt: number;
   timer: ReturnType<typeof setTimeout> | null;
   workspace: AnalysisWorkspace | null;
+  remote: boolean;
+  releaseRemote: (() => void) | null;
 }
 
 export interface FeasibilityGroup {
@@ -79,6 +85,8 @@ export interface FeasibilityGroup {
   project: ProjectConfig;
   baseBranch: string;
   execution: ResolvedExecution;
+  /** Remote-origin cards: confined analysis, never batched with local cards. */
+  remote: boolean;
 }
 
 interface QueuedFeasibility extends FeasibilityGroup {
@@ -99,12 +107,13 @@ export function groupFeasibilityTickets(tickets: Ticket[], baseBranchOf: (ticket
     const execution = resolveFeasibilityExecution(ticket, "feasibility");
     const project = getProject(ticket.project);
     const baseBranch = baseBranchOf(ticket, project);
-    const key = [ticket.project, baseBranch, execution.provider, execution.model, execution.effort ?? "", execution.serviceTier].join("\u0000");
+    const remote = isRemoteTicket(ticket);
+    const key = [ticket.project, baseBranch, execution.provider, execution.model, execution.effort ?? "", execution.serviceTier, ticket.origin ?? ""].join("\u0000");
     const existing = groups.get(key);
     if (existing) {
       existing.ticketIds.push(ticket.id);
     } else {
-      groups.set(key, { ticketIds: [ticket.id], project, baseBranch, execution });
+      groups.set(key, { ticketIds: [ticket.id], project, baseBranch, execution, remote });
     }
   }
   return { groups: [...groups.values()], invalidTicketIds };
@@ -176,8 +185,9 @@ export class FeasibilityBatchManager {
     );
     for (const ticketId of invalidTicketIds) this.failTicket(ticketId, "projet inconnu");
     for (const group of groups) {
-      for (let offset = 0; offset < group.ticketIds.length; offset += MAX_TICKETS_PER_BATCH) {
-        const ids = group.ticketIds.slice(offset, offset + MAX_TICKETS_PER_BATCH);
+      const batchSize = group.remote ? MAX_REMOTE_TICKETS_PER_BATCH : MAX_TICKETS_PER_BATCH;
+      for (let offset = 0; offset < group.ticketIds.length; offset += batchSize) {
+        const ids = group.ticketIds.slice(offset, offset + batchSize);
         for (const id of ids) this.scheduledTickets.add(id);
         this.pending.push({ ...group, ticketIds: ids, attempt: 0 });
       }
@@ -185,17 +195,33 @@ export class FeasibilityBatchManager {
     this.drainQueue();
   }
 
-  /** Reserve capacity during asynchronous startup as well as for the entire live session. */
+  /**
+   * Reserve local capacity during asynchronous startup as well as for the entire live session.
+   * Remote batches launch at once and queue on the single remote analysis lock instead, so they
+   * never hold a local slot and local feasibility never waits behind them.
+   */
   private drainQueue(): void {
-    while (!this.stopped && this.sessions.size + this.launching < MAX_CONCURRENT_BATCHES) {
-      const group = this.pending.shift();
+    let index = 0;
+    while (!this.stopped && index < this.pending.length) {
+      const group = this.pending[index];
       if (!group) return;
-      this.launching += 1;
+      if (!group.remote && this.localBatchCount() >= MAX_CONCURRENT_BATCHES) {
+        index += 1;
+        continue;
+      }
+      this.pending.splice(index, 1);
+      if (!group.remote) this.launching += 1;
       void this.spawnBatch(group).finally(() => {
-        this.launching -= 1;
+        if (!group.remote) this.launching -= 1;
         this.drainQueue();
       });
     }
+  }
+
+  private localBatchCount(): number {
+    let count = this.launching;
+    for (const session of this.sessions.values()) if (!session.remote) count += 1;
+    return count;
   }
 
   /**
@@ -204,7 +230,7 @@ export class FeasibilityBatchManager {
    * spawn routes to `retryOrFail` WITH the known ids so a throw before registration can't lose them.
    */
   private async spawnBatch(group: QueuedFeasibility): Promise<void> {
-    const { ticketIds, project, baseBranch, execution, attempt } = group;
+    const { ticketIds, project, baseBranch, execution, attempt, remote } = group;
     const batchId = `${FEASIBILITY_BATCH_PREFIX}${nanoid(8)}`;
     const tickets = ticketIds
       .map((id) => this.store.getTicket(id))
@@ -221,6 +247,11 @@ export class FeasibilityBatchManager {
     try {
       await assertExecutionAvailable(this.system, execution);
       if (this.stopped) return;
+      const releaseRemote = remote ? await admitRemoteAnalysis(this.store, execution.provider) : null;
+      if (this.stopped) {
+        releaseRemote?.();
+        return;
+      }
       const session: FeasibilitySession = {
         ticketIds: tickets.map((ticket) => ticket.id),
         ticketVersions,
@@ -230,15 +261,21 @@ export class FeasibilityBatchManager {
         attempt,
         timer: null,
         workspace: null,
+        remote,
+        releaseRemote,
       };
       this.sessions.set(batchId, session);
       session.workspace = await prepareAnalysisWorkspace(this.system, this.repoMutex, project.repoPath, baseBranch, batchId);
       if (this.stopped || this.sessions.get(batchId) !== session) {
         void releaseAnalysisWorkspace(this.system, this.repoMutex, session.workspace);
+        releaseRemote?.();
         return;
       }
       const commentsByTicket = new Map(tickets.map((ticket) => [ticket.id, this.store.listComments(ticket.id)]));
-      const prompt = buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider, commentsByTicket);
+      const imageLines = remote
+        ? await copyRemoteImages(tickets.flatMap((ticket) => [ticket.description, ...(commentsByTicket.get(ticket.id) ?? []).map((comment) => comment.body)]), session.workspace.cwd)
+        : [];
+      const prompt = appendPromptLines(buildFeasibilityBatchContract(tickets, project, baseBranch, execution.provider, commentsByTicket, remote), imageLines);
       session.timer = setTimeout(
         () => void this.handleBatchFailure(batchId, "délai de faisabilité dépassé"),
         FEASIBILITY_TIMEOUT_MS,
@@ -252,6 +289,7 @@ export class FeasibilityBatchManager {
           effort: execution.effort,
           serviceTier: execution.serviceTier,
           driver: execution.provider,
+          confined: remote,
         }),
         {
           onFailure: (reason) => void this.handleBatchFailure(batchId, reason),
@@ -263,8 +301,22 @@ export class FeasibilityBatchManager {
       log.info("contrat de faisabilité délivré", { batchId });
     } catch (error) {
       this.cleanup(batchId);
+      if (error instanceof RemoteAnalysisRefusedError) {
+        this.failRefused(tickets.map((ticket) => ticket.id), batchId, error.message);
+        return;
+      }
       await this.retryOrFail({ ...group, ticketIds: tickets.map((ticket) => ticket.id) }, batchId, getErrorMessage(error), ticketVersions);
     }
+  }
+
+  /** A refused remote attempt (quota, sandbox probe) fails its cards at once, without relaunch. */
+  private failRefused(ticketIds: string[], batchId: string, reason: string): void {
+    for (const ticketId of ticketIds) {
+      this.failTicket(ticketId, reason);
+      this.scheduledTickets.delete(ticketId);
+    }
+    this.store.logEvent(null, "feasibility_batch_failed", { batchId, reason });
+    log.warn("analyse distante refusée", { batchId, reason });
   }
 
   /** Worker submitted the aggregated verdicts: persist each, mark missing tickets failed, tear down. */
@@ -337,6 +389,7 @@ export class FeasibilityBatchManager {
       if (entry.timer) clearTimeout(entry.timer);
       this.sessionHub.disconnect(batchId);
       if (entry.workspace) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
+      entry.releaseRemote?.();
     }
     this.sessions.clear();
     this.ticketToBatch.clear();
@@ -379,9 +432,9 @@ export class FeasibilityBatchManager {
   private async handleBatchFailure(batchId: string, reason: string): Promise<void> {
     const session = this.sessions.get(batchId);
     if (!session) return;
-    const { ticketIds, ticketVersions, project, baseBranch, execution, attempt } = session;
+    const { ticketIds, ticketVersions, project, baseBranch, execution, attempt, remote } = session;
     this.cleanup(batchId, "failed");
-    await this.retryOrFail({ ticketIds, project, baseBranch, execution, attempt }, batchId, reason, ticketVersions);
+    await this.retryOrFail({ ticketIds, project, baseBranch, execution, attempt, remote }, batchId, reason, ticketVersions);
   }
 
   /**
@@ -425,6 +478,7 @@ export class FeasibilityBatchManager {
     const entry = this.sessions.get(batchId);
     if (entry?.timer) clearTimeout(entry.timer);
     if (entry?.workspace) void releaseAnalysisWorkspace(this.system, this.repoMutex, entry.workspace);
+    entry?.releaseRemote?.();
     this.sessions.delete(batchId);
     for (const [ticketId, id] of this.ticketToBatch) {
       if (id === batchId) this.ticketToBatch.delete(ticketId);

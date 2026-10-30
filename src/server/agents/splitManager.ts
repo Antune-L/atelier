@@ -1,6 +1,7 @@
 import { SPLIT_TIMEOUT_MS } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import type { SplitResult } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { MODELS, getProject, isProjectKey } from "../config.ts";
 
 import type { Store } from "../db/store.ts";
@@ -8,6 +9,8 @@ import { createLogger } from "../logger.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
+import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { buildSplitSessionConfig } from "./sessionConfig.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
@@ -39,8 +42,8 @@ interface PendingSplit {
  */
 export class SplitManager {
   private readonly pending = new Map<string, PendingSplit>();
-  /** Snapshot lease held by each in-flight split, released on every terminal path. */
-  private readonly leases = new Map<string, SnapshotLease>();
+  /** Snapshot lease (or isolated copy of a remote card) held by each in-flight split, released on every terminal path. */
+  private readonly leases = new Map<string, SnapshotLease | RemoteAnalysisCopy>();
   /** Tickets between the concurrency guard and their session start. */
   private readonly launching = new Set<string>();
 
@@ -48,7 +51,7 @@ export class SplitManager {
     private readonly store: Store,
     private readonly system: SystemAdapter,
     private readonly sessionHub: SessionHub,
-    private readonly snapshots: Pick<RepoSnapshots, "acquire">,
+    private readonly snapshots: Pick<RepoSnapshots, "acquire" | "repoMutex">,
   ) {}
 
   /** Start the read-only split session, inject its prompt, and resolve once `submit_split` arrives. */
@@ -77,24 +80,42 @@ export class SplitManager {
 
     const splitLanguage = this.store.getAppSettings().triageLanguage;
     // A codex-orchestrated ticket splits on Codex too (its knobs), so Claude never enters its pipeline.
-    const execution = resolveTicketExecution(ticket, "split", {
+    const remote = isRemoteTicket(ticket);
+    const execution = resolveTicketExecution(withRemoteAnalysisEngine(ticket), "split", {
       model: MODELS.triage,
       effort: MODELS.triageEffort,
     });
     const driver = execution.provider;
-    const prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
+    let prompt = buildSplitChannelPrompt(ticket, project, splitLanguage, driver);
+    const baseBranch = resolveAnalysisBaseBranch(ticket, project, this.store);
     this.launching.add(ticketId);
-    let lease: SnapshotLease;
+    let lease: SnapshotLease | RemoteAnalysisCopy;
     try {
       await assertExecutionAvailable(this.system, execution);
-      // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
-      lease = await this.snapshots.acquire({
-        projectKey: ticket.project,
-        repoPath: project.repoPath,
-        baseBranch: resolveAnalysisBaseBranch(ticket, project, this.store),
-        fetch: true,
-        requireFetch: true,
-      });
+      if (remote) {
+        lease = await acquireRemoteAnalysisCopy({
+          store: this.store,
+          system: this.system,
+          repoMutex: this.snapshots.repoMutex,
+          provider: driver,
+          repoPath: project.repoPath,
+          baseBranch,
+          key: ticketId,
+        });
+        prompt = appendPromptLines(prompt, await copyRemoteImages([ticket.description], lease.cwd).catch((error: unknown) => {
+          lease.release();
+          throw error;
+        }));
+      } else {
+        // Read a frozen origin/<base> snapshot: the local main checkout is never pulled by Kanban.
+        lease = await this.snapshots.acquire({
+          projectKey: ticket.project,
+          repoPath: project.repoPath,
+          baseBranch,
+          fetch: true,
+          requireFetch: true,
+        });
+      }
     } finally {
       this.launching.delete(ticketId);
     }
@@ -110,6 +131,7 @@ export class SplitManager {
             effort: execution.effort,
             serviceTier: execution.serviceTier,
             driver,
+            confined: remote,
           }),
           { onFailure: (reason) => this.failPending(ticketId, reason) },
         );

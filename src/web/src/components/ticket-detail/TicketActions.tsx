@@ -15,6 +15,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
+import { needsRemoteApproval } from "@shared/startBlocker";
 import { canMergePr, canResolveConflicts, canUpdateDependencyBase } from "@shared/ticketMerge";
 
 import { LaunchSplitButton } from "@/components/ticket-detail/LaunchSplitButton";
@@ -285,13 +286,36 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
     });
   }
 
+  const awaitingApproval = ticket.column === "todo" && needsRemoteApproval(ticket);
+  if (awaitingApproval) {
+    actions.push({
+      id: "approve-remote-start",
+      label: "Approuver le démarrage",
+      Icon: Check,
+      title: "Carte créée par le MCP distant : relis-la avant d'autoriser son lancement",
+      confirm: {
+        title: "Approuver le démarrage",
+        description: "Cette carte a été créée à distance. Une fois approuvée, elle pourra être lancée, programmée ou démarrée par sa dépendance. Modifier son titre ou sa description retire l'approbation.",
+        confirmLabel: "Approuver",
+      },
+      run: async () => {
+        try {
+          await api.approveRemoteStart(ticket.id, { title: ticket.title, description: ticket.description });
+        } catch (error) {
+          ctx.onError(errorMessage(error, "Approbation refusée"));
+        }
+      },
+    });
+  }
+
   if (ticket.column === "todo") {
     const scheduledAt = ticket.scheduledStartAt;
     actions.push({
       id: IMPLEMENT_ACTION_ID,
       label: scheduledAt === null ? "Lancer l'implémentation" : "Lancer maintenant",
       Icon: Rocket,
-      disabled: ticket.triageStatus === "running",
+      title: awaitingApproval ? "Approbation requise avant le lancement" : undefined,
+      disabled: ticket.triageStatus === "running" || awaitingApproval,
       confirm: {
         title: scheduledAt === null ? "Lancer l'implémentation" : "Lancer maintenant",
         description:

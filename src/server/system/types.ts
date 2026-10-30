@@ -179,6 +179,8 @@ export interface ValidationDependencyResult {
 export interface ReformulateOptions {
   provider?: Orchestrator;
   onEvent?: (event: AgentSessionEvent) => void;
+  /** Confined one-shot on an isolated copy (untrusted remote card), on both providers. */
+  confined?: boolean;
   cwd: string;
   prompt: string;
   model: string;

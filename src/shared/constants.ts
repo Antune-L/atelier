@@ -316,6 +316,12 @@ export const CUSTOM_PROFILE_LABEL = "Personnalisé";
 export const KINDS = ["feature", "review", "ask", "clean"] as const;
 export type Kind = (typeof KINDS)[number];
 
+export const TICKET_ORIGINS = ["remote"] as const;
+export type TicketOrigin = (typeof TICKET_ORIGINS)[number];
+export const REMOTE_TICKET_ORIGIN = "remote" satisfies TicketOrigin;
+export const REMOTE_MCP_COUNTER_KINDS = ["creations", "analyses"] as const;
+export type RemoteMcpCounterKind = (typeof REMOTE_MCP_COUNTER_KINDS)[number];
+
 /** Local branch suffix for a clean (PR cleaner) worktree: keeps it distinct from the PR head branch (which may already be checked out in another worktree) while still pushing back to the PR head. */
 export const CLEANER_BRANCH_SUFFIX = "-cleaner";
 
@@ -421,6 +427,8 @@ export const CODEX_EFFORT_META_KEY = "codex_effort";
 /** `meta` table key holding the persisted default Codex fast-mode preference. */
 export const CODEX_FAST_META_KEY = "codex_fast";
 export const QUALITY_OWNER_META_KEY = "quality_owner";
+export const REMOTE_MCP_PROJECT_IDS_META_KEY = "remote_mcp_project_ids";
+export const REMOTE_MCP_CARDS_PROFILE_META_KEY = "remote_mcp_cards_profile_id";
 /** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
 export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
 /**

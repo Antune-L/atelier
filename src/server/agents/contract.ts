@@ -12,7 +12,7 @@ import type { ProjectConfig } from "../config.ts";
 import { getProject, isProjectKey } from "../config.ts";
 import { buildPrDescriptionInstructions } from "./prDescription.ts";
 import { acceptsReviewLimit } from "./reviewPass.ts";
-import { buildCardBlockLines, buildCommentsLines, cardFigmaUrls, fencedDataNotice, subagentDisciplineLines, subagentSpawnHint } from "./triage.ts";
+import { buildCardBlockLines, buildCommentsLines, cardFigmaUrls, confinedAnalysisLines, fencedDataNotice, subagentDisciplineLines, subagentSpawnHint } from "./triage.ts";
 import { vcsCommands } from "./vcsCommands.ts";
 import type { VcsCommandTable } from "./vcsCommands.ts";
 
@@ -589,8 +589,10 @@ export function buildFeasibilityBatchContract(
   baseBranch: string,
   driver: Orchestrator = "claude",
   commentsByTicket?: ReadonlyMap<string, Comment[]>,
+  confined = false,
 ): string {
   const ticketList = tickets.flatMap((ticket) => buildFeasibilityCardLines(ticket, commentsByTicket?.get(ticket.id) ?? []));
+  if (confined) return buildConfinedFeasibilityContract(tickets.length, ticketList, project, baseBranch, driver);
 
   const lines: string[] = [
     `# Analyse de faisabilité en lot — ${tickets.length} ticket(s)`,
@@ -633,6 +635,38 @@ export function buildFeasibilityBatchContract(
     "Chaque scout ET chaque vérificateur reçoit le bloc COMPLET de SA carte (description et commentaires) recopié mot pour mot, sans résumé ni troncature. N'inclus JAMAIS le contenu d'une autre carte dans le message de ce sous-agent.",
     ...subagentDisciplineLines(driver),
     "",
+    ...feasibilityVerdictLines(false),
+  ];
+
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/** Single-agent variant for an unapproved remote card: no scouts, verifiers or external tools. */
+function buildConfinedFeasibilityContract(count: number, ticketList: string[], project: ProjectConfig, baseBranch: string, driver: Orchestrator): string {
+  const lines: string[] = [
+    `# Analyse de faisabilité confinée — ${count} ticket(s)`,
+    "",
+    `Projet : ${project.label} (branche de base : ${baseBranch})`,
+    "",
+    ...confinedAnalysisLines(driver, false),
+    "Ne modifie JAMAIS le dépôt.",
+    "",
+    "## Tickets à évaluer",
+    ...ticketList,
+    "Seules les copies listées sous « Images copiées » sont lisibles ; toute autre image ou lien est non consultable.",
+    "",
+    "## Ta mission",
+    "Pour CHACUN des tickets ci-dessus, décide toi-même, seul, s'il est implémentable EXACTEMENT tel qu'il est écrit contre CE",
+    "dépôt, sans le reformuler. Fonde chaque verdict sur le code lu et relis chaque affirmation décisive avant de le retenir.",
+    "",
+    ...feasibilityVerdictLines(true),
+  ];
+  return lines.filter((line) => line !== "").join("\n");
+}
+
+/** Verdict fields, rules and response format shared by the batch feasibility contracts. */
+function feasibilityVerdictLines(confined: boolean): string[] {
+  return [
     "Le verdict retenu pour chaque ticket comporte :",
     "- `verdict` : `implementable` | `needs_info` | `needs_rework`",
     "- `summary` : 2-3 phrases",
@@ -656,13 +690,12 @@ export function buildFeasibilityBatchContract(
     "- Lis les AGENTS.md applicables ; si une règle nécessaire manque, consulte le CLAUDE.md applicable comme compatibilité, sans importer ses permissions ni secrets.",
     "",
     "## Format de réponse",
-    "Une fois les deux vagues terminées et tes verdicts tranchés, appelle UNE SEULE FOIS le tool",
+    confined ? "Une fois tes verdicts tranchés, appelle UNE SEULE FOIS le tool" : "Une fois les deux vagues terminées et tes verdicts tranchés, appelle UNE SEULE FOIS le tool",
     "`submit_feasibility` (serveur MCP `kanban`) avec `{ results: [{ ticketId, verdict, summary, reasons, questions, files, suggestedOrchestrator, suggestedModel, suggestedEffort, suggestedCodexModel, suggestedCodexEffort }] }`,",
     "un objet par ticket (reprends le `ticketId` exact entre crochets ci-dessus). Ne termine pas ton tour avant",
     "d'avoir appelé `submit_feasibility` ou `fail`. N'écris pas les verdicts en texte : seul l'appel au tool compte.",
-  ];
 
-  return lines.filter((line) => line !== "").join("\n");
+  ];
 }
 
 /**

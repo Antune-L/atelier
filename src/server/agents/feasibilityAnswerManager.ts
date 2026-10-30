@@ -2,13 +2,18 @@ import { ACTIVE_STAGES } from "../../shared/constants.ts";
 import { getErrorMessage } from "../../shared/errors.ts";
 import { feasibilityAnswerBatchInputSchema, feasibilityAnswerInputSchema, parseTriageReport } from "../../shared/schemas.ts";
 import type { FeasibilityAnswerBatchInput, FeasibilityAnswerInput, FeasibilityAnswerRun, Ticket } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
+import { KeyedMutex } from "../mutex.ts";
 import { runRecordedAction } from "../recordedAction.ts";
 import type { SystemAdapter } from "../system/types.ts";
+import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
+import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 
 export class FeasibilityAnswerError extends Error {
   constructor(readonly status: 404 | 409, message: string) { super(message); }
@@ -44,7 +49,13 @@ export function buildFeasibilityAnswerPrompt(ticket: Ticket, runs: FeasibilityAn
 
 /** Durable answer association; synchronous claims and completion checks precede every write. */
 export class FeasibilityAnswerManager {
-  constructor(private readonly store: Store, private readonly system: SystemAdapter, private readonly hub: ClientHub) {}
+  constructor(
+    private readonly store: Store,
+    private readonly system: SystemAdapter,
+    private readonly hub: ClientHub,
+    /** The repo mutex shared with slot creation, for the isolated copy of a remote card. */
+    private readonly repoMutex: KeyedMutex = new KeyedMutex(),
+  ) {}
 
   start(ticketId: string, input: FeasibilityAnswerInput): string {
     const { revision, reportVersion, questionIndex, answer } = feasibilityAnswerInputSchema.parse(input);
@@ -86,10 +97,29 @@ export class FeasibilityAnswerManager {
 
   private async run(ticket: Ticket, runs: FeasibilityAnswerRun[], execution: ResolvedExecution, cwd: string): Promise<void> {
     const runIds = new Set(runs.map((run) => run.id));
+    const remote = isRemoteTicket(ticket);
+    const isolation: { copy: RemoteAnalysisCopy | null } = { copy: null };
     try {
       const markdown = await runRecordedAction(this.store, ticket.id, execution, async (onEvent) => {
         await assertExecutionAvailable(this.system, execution);
-        const output = await this.system.reformulate({ cwd, prompt: buildFeasibilityAnswerPrompt(ticket, runs), ...execution, onEvent });
+        let sessionCwd = cwd;
+        let imageLines: string[] = [];
+        if (remote && !this.system.dryRun && isProjectKey(ticket.project)) {
+          // A remote card is answered on its own isolated copy, never on the main checkout.
+          isolation.copy = await acquireRemoteAnalysisCopy({
+            store: this.store,
+            system: this.system,
+            repoMutex: this.repoMutex,
+            provider: execution.provider,
+            repoPath: cwd,
+            baseBranch: resolveAnalysisBaseBranch(ticket, getProject(ticket.project), this.store),
+            key: ticket.id,
+          });
+          sessionCwd = isolation.copy.cwd;
+          imageLines = await copyRemoteImages([ticket.description], sessionCwd);
+        }
+        const prompt = appendPromptLines(buildFeasibilityAnswerPrompt(ticket, runs), imageLines);
+        const output = await this.system.reformulate({ cwd: sessionCwd, prompt, ...execution, ...(remote ? { confined: true } : {}), onEvent });
         if (!output.trim()) throw new Error("The agent returned an empty description");
         const imagePaths = ticket.description.match(/\/[^\s"'<>()[\]]+\.(?:png|jpe?g|gif|webp|svg|avif)/gi) ?? [];
         if (imagePaths.some((path) => !output.includes(path))) throw new Error("The agent removed an existing image path");
@@ -110,6 +140,8 @@ export class FeasibilityAnswerManager {
       this.hub.pushTicket(updated);
     } catch (error) {
       this.fail(ticket.id, runIds, getErrorMessage(error));
+    } finally {
+      isolation.copy?.release();
     }
   }
 

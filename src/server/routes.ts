@@ -7,10 +7,10 @@ import { nanoid } from "nanoid";
 import { autonomousResumeSchema } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SCHEDULED_START_MIN_LEAD_MS, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
 import { isSplitMother } from "../shared/dependencies.ts";
-import { startBlocker } from "../shared/startBlocker.ts";
+import { isRemoteTicket, startBlocker } from "../shared/startBlocker.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
 import type { CodexRuntimeStatus } from "../shared/codexCapabilities.ts";
-import { assertExecutionAvailable, resolveExecution } from "./agents/executionConfig.ts";
+import { assertExecutionAvailable, remoteMcpProfileEngineError, resolveExecution } from "./agents/executionConfig.ts";
 import { QUALITY_BROWSER_CLEANUP_MARKER } from "./agents/qualityValidator.ts";
 import { QUALITY_NATIVE_CLEANUP_DIRECTORY } from "./agents/qualitySession.ts";
 import { runRecordedAction } from "./recordedAction.ts";
@@ -20,6 +20,7 @@ import { resolvePrTargetBaseBranch } from "./agents/baseBranch.ts";
 import type { MergePrResult } from "../shared/ticketMerge.ts";
 import {
   analyzeTicketsSchema,
+  approveRemoteStartSchema,
   consolidatePrdSchema,
   createAskSchema,
   createAutomationSchema,
@@ -221,6 +222,12 @@ const HTTP_CONFLICT = 409;
 const HTTP_INTERNAL_ERROR = 500;
 const HTTP_BAD_GATEWAY = 502;
 const SCHEDULED_START_SET_EVENT = "scheduled_start_set";
+const REMOTE_START_APPROVED_EVENT = "remote_start_approved";
+const REMOTE_APPROVAL_REQUIRED = "carte distante : approuve son démarrage avant de la lancer";
+const REMOTE_APPROVAL_STALE_MESSAGE = "La carte a changé depuis son affichage : relis son titre et sa description avant de l'approuver.";
+const REMOTE_PROFILE_DELETE_REFUSED = "Ce profil est utilisé pour les cartes du MCP distant : choisis-en un autre dans Réglages > MCP distant avant de le supprimer.";
+const REMOTE_PROFILE_NOT_FOUND = "profil des cartes distantes introuvable";
+const REMOTE_PROJECT_UNKNOWN = "projet inconnu dans la liste du MCP distant";
 const SCHEDULED_START_CANCELLED_EVENT = "scheduled_start_cancelled";
 
 /** Shared bullet list describing the target PR of a review/clean card. */
@@ -459,6 +466,8 @@ function splitChildDefaults(ticket: Ticket): Pick<
   | "codexImplementerModel"
   | "codexImplementerEffort"
   | "codexImplementerFast"
+  | "feasibilityEngine"
+  | "origin"
 > {
   return {
     externalUrl: null,
@@ -484,6 +493,8 @@ function splitChildDefaults(ticket: Ticket): Pick<
     codexImplementerModel: ticket.codexImplementerModel,
     codexImplementerEffort: ticket.codexImplementerEffort,
     codexImplementerFast: ticket.codexImplementerFast,
+    feasibilityEngine: isRemoteTicket(ticket) ? ticket.feasibilityEngine : null,
+    origin: ticket.origin,
   };
 }
 
@@ -1300,9 +1311,17 @@ export function createApiRoutes(deps: RouteDeps) {
       };
     })
     .get("/settings", () => store.getAppSettings())
-    .patch("/settings", ({ body, set }) => {
+    .patch("/settings", async ({ body, set }) => {
       const parsed = updateAppSettingsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (parsed.data.remoteMcpProjectIds?.some((id) => !isProjectKey(id))) return jsonError(set, HTTP_BAD_REQUEST, REMOTE_PROJECT_UNKNOWN);
+      const profileId = parsed.data.remoteMcpCardsProfileId;
+      if (profileId !== undefined && profileId !== null) {
+        const profile = store.getProfile(profileId);
+        if (!profile) return jsonError(set, HTTP_BAD_REQUEST, REMOTE_PROFILE_NOT_FOUND);
+        const engineError = await remoteMcpProfileEngineError(deps.system, deps.composerAvailable, profile);
+        if (engineError !== null) return jsonError(set, HTTP_CONFLICT, engineError);
+      }
       return store.updateAppSettings(parsed.data);
     })
     .get("/profiles", () => store.listProfiles())
@@ -1329,6 +1348,7 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .delete("/profiles/:id", ({ params, set }) => {
       if (!store.getProfile(params.id)) return jsonError(set, HTTP_NOT_FOUND, "profil introuvable");
+      if (store.getAppSettings().remoteMcpCardsProfileId === params.id) return jsonError(set, HTTP_CONFLICT, REMOTE_PROFILE_DELETE_REFUSED);
       store.deleteProfile(params.id);
       return { ok: true };
     })
@@ -1654,7 +1674,7 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .patch("/tickets/:id", ({ params, body, set }) => {
       try {
-        return ticketOperations.updateTicket(params.id, body);
+        return ticketOperations.updateTicket(params.id, body, { humanEdit: true });
       } catch (error) {
         if (error instanceof TicketOperationError) return ticketOperationError(set, error);
         throw error;
@@ -1676,6 +1696,20 @@ export function createApiRoutes(deps: RouteDeps) {
       hub.pushTicket(updated);
       store.logEvent(params.id, scheduledStartAt === null ? SCHEDULED_START_CANCELLED_EVENT : SCHEDULED_START_SET_EVENT, { scheduledStartAt });
       return updated;
+    })
+    .post("/tickets/:id/approve-remote-start", ({ params, body, set }) => {
+      const ticket = store.getTicket(params.id);
+      if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
+      const parsed = approveRemoteStartSchema.safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
+      if (!isRemoteTicket(ticket)) return jsonError(set, HTTP_CONFLICT, "seule une carte distante demande une approbation");
+      if (ticket.column !== "todo" || ticket.archived) return jsonError(set, HTTP_CONFLICT, "seule une carte distante « À faire » peut être approuvée");
+      const approved = store.approveRemoteTicket(params.id, parsed.data);
+      if (approved === null) return jsonError(set, HTTP_CONFLICT, REMOTE_APPROVAL_STALE_MESSAGE);
+      store.logEvent(params.id, REMOTE_START_APPROVED_EVENT, { approvedAt: approved.remoteApprovedAt });
+      hub.pushTicket(approved);
+      slots.resumeDeferredDependent(params.id);
+      return approved;
     })
     .post("/tickets/:id/move", async ({ params, body, set }) => {
       const ticket = store.getTicket(params.id);
@@ -1721,6 +1755,7 @@ export function createApiRoutes(deps: RouteDeps) {
         if (blocker === "triage") {
           return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de lancer l'implémentation");
         }
+        if (blocker === "approval") return jsonError(set, HTTP_CONFLICT, REMOTE_APPROVAL_REQUIRED);
         if (blocker === "dependency") {
           return jsonError(set, HTTP_CONFLICT, "en attente de la PR du ticket dont il dépend");
         }
@@ -1863,6 +1898,7 @@ export function createApiRoutes(deps: RouteDeps) {
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
       const blocker = startBlocker(ticket, store.getDependencyParent(ticket));
       if (blocker === "triage") return jsonError(set, HTTP_CONFLICT, "analyse en cours : attends le verdict avant de relancer l'implémentation");
+      if (blocker === "approval") return jsonError(set, HTTP_CONFLICT, REMOTE_APPROVAL_REQUIRED);
       if (blocker === "dependency") return jsonError(set, HTTP_CONFLICT, "en attente de la livraison du ticket dont il dépend");
       await slots.retry(params.id);
       return store.getTicket(params.id);

@@ -80,6 +80,8 @@ const BASE_TICKET: Ticket = {
   implementationFinishedAt: null,
   scheduledStartAt: null,
   scheduledStartMissedAt: null,
+  origin: null,
+  remoteApprovedAt: null,
   sessionUsage: {},
   createdAt: 1,
   updatedAt: 1,

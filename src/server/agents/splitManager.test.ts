@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { initProjectRegistry } from "../config.ts";
 import { createDatabase } from "../db/schema.ts";
 import { Store } from "../db/store.ts";
+import { KeyedMutex } from "../mutex.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 
@@ -29,6 +30,7 @@ class CapturingSystem extends FakeSystemAdapter {
 /** Holds every acquire until `open()`, like a slow fetch under the repo mutex. */
 class GatedSnapshots {
   readonly calls: AcquireSnapshotInput[] = [];
+  readonly repoMutex = new KeyedMutex();
   live = 0;
   private gate: Promise<void>;
   open: () => void = () => undefined;

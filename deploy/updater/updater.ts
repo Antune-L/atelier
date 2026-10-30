@@ -29,8 +29,8 @@ let keysAt = 0;
 let active = false;
 let status: { phase: string; target: string | null; progress: string; updatedAt: number; exitCode: number | null } = { phase: "idle", target: null, progress: "Ready", updatedAt: Date.now(), exitCode: null };
 
-function persist(phase: string, progress: string, target: string | null = status.target, exitCode: number | null = null): void {
-  status = { phase, target, progress: progress.slice(0, MAX_PROGRESS_LENGTH), updatedAt: Date.now(), exitCode };
+function persist(phase: string, progress: string, target: string | null = status.target, exitCode: number | null = null, updatedAt = Date.now()): void {
+  status = { phase, target, progress: progress.slice(0, MAX_PROGRESS_LENGTH), updatedAt, exitCode };
   writeFileSync(`${STATE}.tmp`, JSON.stringify(status), { mode: 0o600 });
   renameSync(`${STATE}.tmp`, STATE);
 }
@@ -43,7 +43,7 @@ try {
   }
   const target = typeof saved.target === "string" && /^[0-9a-f]{40}$/.test(saved.target) ? saved.target : null;
   if (saved.phase === "running" || saved.phase === "resolving") persist("interrupted", "Updater restarted during an update. Operator inspection is required.", target);
-  else persist(saved.phase, saved.progress, target, typeof saved.exitCode === "number" ? saved.exitCode : null);
+  else persist(saved.phase, saved.progress, target, typeof saved.exitCode === "number" ? saved.exitCode : null, typeof saved.updatedAt === "number" ? saved.updatedAt : undefined);
 } catch (error) {
   if (!(isRecord(error) && error.code === "ENOENT")) throw error;
 }

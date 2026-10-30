@@ -327,7 +327,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
         if (!isOpen) onClose();
       }}
       size={activeTab === "terminal" ? "xl" : "lg"}
-      className="w-[1280px]"
+      className="ticket-detail w-[1280px]"
       pushedBy={prdOpen ? "lg" : null}
       breadcrumb={prdOpen ? ["Ticket"] : undefined}
       title={current.title}
@@ -347,7 +347,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
         <TerminalTab ticket={current} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
-          <div className="min-w-0 shrink-0 px-4 py-3 md:flex-1 md:shrink md:overflow-y-auto">
+          <div className="order-2 min-w-0 shrink-0 px-4 py-3 md:order-1 md:flex-1 md:shrink md:overflow-y-auto">
             {(activeTab === "description" || activeTab === "prd") && (
               <TicketSectionNavigation tabs={tabs.filter((section) => section === "description" || section === "prd")} value={activeTab} onChange={selectTab} />
             )}
@@ -391,7 +391,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
             {activeTab === "validation" && <ValidationTab key={current.id} ticket={current} onOpenTerminal={tabs.includes("terminal") ? () => selectTab("terminal") : undefined} />}
             {activeTab === "verification" && <VerificationTab key={current.id} ticket={current} />}
           </div>
-          <aside className="w-full shrink-0 space-y-4 border-t border-border px-3 py-3 md:w-56 md:overflow-y-auto md:border-l md:border-t-0">
+          <aside className="order-1 w-full shrink-0 space-y-3 border-b border-border px-3 py-3 md:order-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-l md:border-t-0">
             <TicketMeta
               ticket={current}
               projects={projects}

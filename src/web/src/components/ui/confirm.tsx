@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import type { DialogProps } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const DEFAULT_CONFIRM_LABEL = "Confirmer";
@@ -155,12 +156,14 @@ export function ConfirmDialog({
   onConfirm,
   open,
   onCancel,
-}: ConfirmProps & { open: boolean; onCancel: () => void }) {
+  onCloseAutoFocus,
+}: ConfirmProps & Pick<DialogProps, "onCloseAutoFocus"> & { open: boolean; onCancel: () => void }) {
   const { pending, run } = useConfirmRunner(onConfirm, onCancel);
 
   return (
     <Dialog
       open={open}
+      onCloseAutoFocus={onCloseAutoFocus}
       onOpenChange={(next) => {
         if (!next) onCancel();
       }}

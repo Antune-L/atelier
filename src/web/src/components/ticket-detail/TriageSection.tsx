@@ -303,7 +303,7 @@ export function TriageSection({
                       </div>
                     ))}
                     {questions.length > 1 && (
-                      <div className="mt-auto flex justify-between gap-2 border-t border-border pt-3">
+                      <div className="order-first flex justify-between gap-2 border-b border-border pb-3">
                         <Button type="button" size="sm" variant="ghost" disabled={selectedQuestionIndex === 0} onClick={() => selectQuestion(selectedQuestionIndex - 1)}>
                           <ChevronLeft className="h-3.5 w-3.5" /> Précédente
                         </Button>

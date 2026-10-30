@@ -162,7 +162,7 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex min-h-16 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
+      <header className="atelier-header flex min-h-16 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
         {historyButton}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium" title={conversationTooltip(conversation.title, projectLabel)}>{conversation.title || UNTITLED_CONVERSATION_LABEL}</h2>

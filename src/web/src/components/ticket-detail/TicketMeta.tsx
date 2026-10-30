@@ -11,6 +11,7 @@ import { resolveProjectLabel } from "@/components/TicketCard";
 import { MetaRow } from "@/components/ticket-detail/MetaRow";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { Select } from "@/components/ui/select";
+import { useCompactLayout } from "@/hooks/useCompactLayout";
 import { useBoard } from "@/hooks/useBoard";
 import { auditOriginFor, formatAuditDate } from "@/lib/auditDisplay";
 import { finishedKindLabel, formatDateTime } from "@/lib/display";
@@ -67,6 +68,7 @@ function statusTitle(ticket: Ticket, locked: boolean): string | undefined {
 /** Key/value recap of the open ticket, shown in the sheet's right-hand column. */
 export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusChange, onOpenPrdOrigin, onOpenAuditOrigin }: TicketMetaProps) {
   const { conversations, audits } = useBoard();
+  const compact = useCompactLayout();
   const auditOrigin = auditOriginFor(audits, ticket.id);
   const [pending, setPending] = useState<Column | null>(null);
   const pendingConfirm = pending === null ? undefined : STATUS_CONFIRMS[pending];
@@ -125,52 +127,57 @@ export function TicketMeta({ ticket, projects, statusOptions, locked, onStatusCh
         )}
       </div>
 
-      <MetaRow label="Projet">{resolveProjectLabel(projects, ticket.project)}</MetaRow>
-      {ticket.slotId !== null && <MetaRow label="Slot">Emplacement {ticket.slotId}</MetaRow>}
-      {ticket.branch !== null && <MetaRow label="Branche">{ticket.branch}</MetaRow>}
-      <MetaRow label="Profil">{ORCHESTRATOR_LABELS[ticket.orchestrator]}</MetaRow>
-      <MetaRow label="Créé">{formatDateTime(ticket.createdAt)}</MetaRow>
-      {ticket.scheduledStartAt !== null && (
-        <MetaRow label="Lancement">
-          <span className="text-info">{formatDateTime(ticket.scheduledStartAt)}</span>
-        </MetaRow>
-      )}
-      {ticket.finishedAt !== null && (
-        <MetaRow label={finishedKindLabel(ticket)}>{formatDateTime(ticket.finishedAt)}</MetaRow>
-      )}
-      {ticket.externalUrl && (
-        <MetaRow label="Lien">
-          <a href={ticket.externalUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
-            <ExternalLink className="h-3 w-3" />
-            Externe
-          </a>
-        </MetaRow>
-      )}
-      {ticket.sourcePrdId !== null && (
-        <PrdOriginRow
-          prdId={ticket.sourcePrdId}
-          task={ticket.sourcePrdTask}
-          project={ticket.project}
-          hasConversations={conversations.some((c) => c.project === ticket.project)}
-          onOpen={onOpenPrdOrigin}
-        />
-      )}
-      {auditOrigin !== undefined && (
-        <AuditOriginRow origin={auditOrigin} projectLabel={resolveProjectLabel(projects, auditOrigin.project)} onOpen={onOpenAuditOrigin} />
-      )}
-      {ticket.reviewLevel && (
-        <MetaRow label="Relecture">
-          <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} withLabel />
-        </MetaRow>
-      )}
-      {ticket.prUrl !== null && (
-        <MetaRow label="PR">
-          <a href={ticket.prUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
-            <ExternalLink className="h-3 w-3" />
-            {ticket.prNumber === null ? "PR" : `#${ticket.prNumber}`}
-          </a>
-        </MetaRow>
-      )}
+      <details className="ticket-metadata" open={!compact}>
+        <summary className="cursor-pointer py-1 text-xs text-muted-foreground md:hidden">Informations du ticket</summary>
+        <div className="space-y-1.5">
+          <MetaRow label="Projet">{resolveProjectLabel(projects, ticket.project)}</MetaRow>
+          {ticket.slotId !== null && <MetaRow label="Slot">Emplacement {ticket.slotId}</MetaRow>}
+          {ticket.branch !== null && <MetaRow label="Branche">{ticket.branch}</MetaRow>}
+          <MetaRow label="Profil">{ORCHESTRATOR_LABELS[ticket.orchestrator]}</MetaRow>
+          <MetaRow label="Créé">{formatDateTime(ticket.createdAt)}</MetaRow>
+          {ticket.scheduledStartAt !== null && (
+            <MetaRow label="Lancement">
+              <span className="text-info">{formatDateTime(ticket.scheduledStartAt)}</span>
+            </MetaRow>
+          )}
+          {ticket.finishedAt !== null && (
+            <MetaRow label={finishedKindLabel(ticket)}>{formatDateTime(ticket.finishedAt)}</MetaRow>
+          )}
+          {ticket.externalUrl && (
+            <MetaRow label="Lien">
+              <a href={ticket.externalUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
+                <ExternalLink className="h-3 w-3" />
+                Externe
+              </a>
+            </MetaRow>
+          )}
+          {ticket.sourcePrdId !== null && (
+            <PrdOriginRow
+              prdId={ticket.sourcePrdId}
+              task={ticket.sourcePrdTask}
+              project={ticket.project}
+              hasConversations={conversations.some((c) => c.project === ticket.project)}
+              onOpen={onOpenPrdOrigin}
+            />
+          )}
+          {auditOrigin !== undefined && (
+            <AuditOriginRow origin={auditOrigin} projectLabel={resolveProjectLabel(projects, auditOrigin.project)} onOpen={onOpenAuditOrigin} />
+          )}
+          {ticket.reviewLevel && (
+            <MetaRow label="Relecture">
+              <ReviewLevelDot level={ticket.reviewLevel} reason={ticket.reviewReason} flags={ticket.reviewFlags} withLabel />
+            </MetaRow>
+          )}
+          {ticket.prUrl !== null && (
+            <MetaRow label="PR">
+              <a href={ticket.prUrl} target="_blank" rel="noopener noreferrer" className={LINK_CLASSES}>
+                <ExternalLink className="h-3 w-3" />
+                {ticket.prNumber === null ? "PR" : `#${ticket.prNumber}`}
+              </a>
+            </MetaRow>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

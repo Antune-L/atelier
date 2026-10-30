@@ -398,3 +398,106 @@
   background-color: hsl(var(--warning) / 0.7);
   color: hsl(var(--warning-foreground));
 }
+
+@media (max-width: 639px) {
+  .app-toolbar > div:has(input[aria-label="Rechercher dans la vue actuelle"]),
+  .app-toolbar > div:has(input[aria-label="Rechercher une session de travail"]) {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: nowrap;
+  }
+
+  .app-toolbar input {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .app-toolbar button[aria-label="Nouveau ticket"],
+  .app-toolbar button[aria-label="Autres outils"] {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ticket-detail > div:first-child > div:has(h2) {
+    flex-wrap: wrap;
+  }
+
+  .ticket-detail > div:first-child > div:has(h2) > h2 {
+    flex-basis: calc(100% - 48px);
+  }
+
+  .ticket-detail [role="tablist"] {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ticket-detail [role="tab"] {
+    font-size: 13px;
+  }
+
+  .new-ticket-sheet textarea {
+    min-height: 144px;
+  }
+
+  .new-ticket-sheet input,
+  .new-ticket-sheet textarea,
+  .new-ticket-sheet select {
+    font-size: 14px;
+  }
+
+  .atelier-view .atelier-chat-prose.markdown {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .app-toolbar {
+    column-gap: 8px;
+  }
+
+  .app-toolbar > button:first-child {
+    order: -2;
+  }
+
+  .app-toolbar > div:first-of-type {
+    order: -1;
+    flex: 1;
+    min-width: 0;
+    --scrollbar-size: 6px;
+    --scrollbar-inset: 1px;
+  }
+
+  .app-toolbar > div:has(> button[aria-label^="Notifications"]) {
+    order: -1;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .app-toolbar button[aria-label="Filtrer le tableau par projet"] {
+    max-width: 40vw;
+  }
+
+}
+
+.atelier-pane {
+  container-type: inline-size;
+}
+
+@container (max-width: 600px) {
+  .atelier-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .atelier-header > div:last-child {
+    flex-basis: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-left: 0;
+  }
+}
+
+.mobile-lane-tabs {
+  --scrollbar-size: 6px;
+  --scrollbar-inset: 1px;
+}

@@ -25,7 +25,7 @@ export const TICKET_TAB_LABELS: Record<TicketTab, string> = {
   terminal: "Session",
 };
 
-const TAB_CLASSES = "border-b-2 border-transparent px-1 py-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground";
+const TAB_CLASSES = "shrink-0 border-b-2 border-transparent px-1 py-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground";
 const ACTIVE_TAB_CLASSES = "border-primary text-foreground font-medium";
 
 function destinationOf(tab: TicketTab): TicketDestination | null {
@@ -60,9 +60,22 @@ export function TicketTabs({ tabs, value, onChange, questionCount, testing = fal
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 border-b border-border px-4">
-      <div role="tablist" aria-label="Destinations du ticket" className="flex items-center gap-4">
+      <div role="tablist" aria-label="Destinations du ticket" className="flex min-w-0 max-w-full items-center gap-2 overflow-x-auto sm:gap-4">
         {DESTINATIONS.map((next) => (
-          <button key={next} type="button" role="tab" aria-selected={next === destination} onClick={() => selectDestination(next)} className={cn(TAB_CLASSES, next === destination && ACTIVE_TAB_CLASSES)}>
+          <button key={next} type="button" role="tab" aria-selected={next === destination} tabIndex={next === destination || (destination === null && next === "overview") ? 0 : -1} onKeyDown={(event) => {
+            const index = DESTINATIONS.indexOf(next);
+            let target = index;
+            if (event.key === "ArrowRight") target = (index + 1) % DESTINATIONS.length;
+            else if (event.key === "ArrowLeft") target = (index + DESTINATIONS.length - 1) % DESTINATIONS.length;
+            else if (event.key === "Home") target = 0;
+            else if (event.key === "End") target = DESTINATIONS.length - 1;
+            else return;
+            event.preventDefault();
+            const selected = DESTINATIONS[target];
+            if (selected === undefined) return;
+            selectDestination(selected);
+            event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("button")[target]?.focus();
+          }} onClick={() => selectDestination(next)} className={cn(TAB_CLASSES, next === destination && ACTIVE_TAB_CLASSES)}>
             {DESTINATION_LABELS[next]}
             {next === "activity" && questionCount > 0 && <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 text-xs text-warning">{questionCount}</span>}
           </button>

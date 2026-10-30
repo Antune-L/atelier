@@ -69,7 +69,7 @@ export function Sidebar({
   const labelClasses = cn("text-xs", !expanded && "hidden", !compact && !expanded && "xl:inline");
 
   return (
-    <nav aria-label="Navigation principale" className={cn("flex shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2", compact && "hidden w-14 sm:flex", !compact && !expanded && "w-12 xl:w-40", expanded && "w-full border-r-0")}>
+    <nav aria-label="Navigation principale" className={cn("flex shrink-0 flex-col items-center gap-1 border-r bg-background px-1 py-2", compact && "hidden w-14 sm:flex", !compact && !expanded && "hidden w-12 sm:flex xl:w-40", expanded && "w-full border-r-0")}>
       <span className={cn("py-2 font-mono font-medium text-brand", compact ? "mb-3 text-lg" : "w-full px-3 text-xs tracking-wider", !compact && !expanded && "hidden xl:block")} aria-label="Atelier">
         {compact ? "A" : "ATELIER"}
       </span>

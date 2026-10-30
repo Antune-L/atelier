@@ -23,6 +23,8 @@ import { getDependencyParent } from "@/lib/ticketLookup";
 
 interface BoardColumnProps {
   column: Column;
+  compact?: boolean;
+  hidden?: boolean;
   tickets: Ticket[];
   projects: ProjectInfo[];
   /** Full-board lookup for resolving a card's dependency parent (which may live in another column). */
@@ -241,6 +243,8 @@ function groupTicketIds(group: RenderGroup): string[] {
 
 export function BoardColumn({
   column,
+  compact = false,
+  hidden = false,
   tickets,
   projects,
   ticketsById,
@@ -392,7 +396,7 @@ export function BoardColumn({
   }
 
   return (
-    <div className="flex h-full w-72 shrink-0 flex-col border-r border-border">
+    <div hidden={hidden} className={cn(hidden ? "hidden" : "flex", "h-full shrink-0 flex-col", compact ? "min-w-0 flex-1" : "w-72 border-r border-border")}>
       <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2 pt-1">
         <div className="flex items-center gap-1.5">
           {collapsible && (
@@ -435,6 +439,7 @@ export function BoardColumn({
           isOver && "bg-accent/40",
         )}
       >
+        {tickets.length === 0 && <p className="px-1 py-4 text-xs text-muted-foreground">Aucun ticket dans cette sélection.</p>}
         <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
           {renderGroups.map((group) => {
             const renderCard = (ticket: Ticket): React.ReactElement => (

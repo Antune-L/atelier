@@ -8,7 +8,7 @@ import {
 import { useMemo, useRef, useState } from "react";
 
 import type { ProjectInfo, Ticket } from "@shared/schemas";
-import { ACTIVE_STAGES, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, TERMINAL_COLUMNS, type Column } from "@shared/constants";
+import { ACTIVE_STAGES, COLUMN_LABELS, COLUMNS, COLUMN_ORDER, PR_STATE_LABELS, TERMINAL_COLUMNS, type Column } from "@shared/constants";
 import { isDependencyReady } from "@shared/dependencies";
 import { startBlocker } from "@shared/startBlocker";
 
@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { canMergePr } from "@shared/ticketMerge";
 import { api } from "@/lib/api";
 import { IMPLEMENTATION_RECOVERY_REQUIRED_MESSAGE, needsImplementationRecovery } from "@/lib/implementationRecovery";
+import { useCompactLayout } from "@/hooks/useCompactLayout";
 import { useBoard } from "@/hooks/useBoard";
 import { auditTicketIds } from "@/lib/auditDisplay";
 import { boardStore } from "@/lib/store";
@@ -58,6 +59,8 @@ function isColumn(value: string): value is Column {
 
 export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAddTicket }: BoardProps) {
   const { tickets, slots, audits, mergingTicketIds } = useBoard();
+  const compact = useCompactLayout();
+  const [selectedColumn, setSelectedColumn] = useState<Column>("todo");
   const [pendingAbandon, setPendingAbandon] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [movingAll, setMovingAll] = useState(false);
@@ -304,7 +307,9 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
     <BoardColumn
       key={column}
       column={column}
-      collapsible={!TERMINAL_COLUMNS.includes(column) && !decisionsOnly}
+      compact={compact}
+      hidden={compact && column !== selectedColumn}
+      collapsible={!compact && !TERMINAL_COLUMNS.includes(column) && !decisionsOnly}
       tickets={ticketsByColumn(column)}
       projects={projects}
       ticketsById={ticketsById}
@@ -349,16 +354,22 @@ export function Board({ projects, projectFilter, searchQuery, onOpenTicket, onAd
             {decisions.length > PINNED_DECISIONS_LIMIT && <Button size="sm" variant="ghost" onClick={() => selectDecisions(true)}>Voir les {decisions.length} décisions</Button>}
           </div>}
         </section>}
+        {compact && <nav aria-label="Colonnes du tableau" className="mobile-lane-tabs flex shrink-0 gap-2 overflow-x-auto pb-1">
+          {COLUMN_ORDER.map((column) => <button key={column} type="button" aria-current={column === selectedColumn ? "page" : undefined} onClick={() => setSelectedColumn(column)} className={column === selectedColumn ? "shrink-0 rounded-md bg-primary px-3 py-2 text-xs text-primary-foreground" : "shrink-0 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground"}>
+            {COLUMN_LABELS[column]} <span className="font-mono">{ticketsByColumn(column).length}</span>
+            {searched.some((ticket) => ticket.column === column && (ticket.column === "failed" || ticket.reviewLevel === "high")) && <span className="ml-1 text-danger" aria-label="Attention requise">●</span>}
+          </button>)}
+        </nav>}
         <div className="flex min-h-0 flex-1 overflow-x-auto">
           {ACTIVE_COLUMNS.map(renderLane)}
-        {displayedTerminalColumns.map(renderLane)}
-        <TerminalColumnsPanel
+        {(compact ? TERMINAL_COLUMNS : displayedTerminalColumns).map(renderLane)}
+        {!compact && <TerminalColumnsPanel
           columns={TERMINAL_COLUMNS}
           countByColumn={terminalCounts}
           highReviewCountByColumn={terminalHighReviewCounts}
           expanded={openTerminalColumns}
           onToggle={toggleTerminalColumn}
-        />
+        />}
       </div>
       </div>
 

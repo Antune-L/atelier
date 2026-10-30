@@ -1,6 +1,6 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -28,6 +28,7 @@ const CLOSE_CLASSES =
 export interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCloseAutoFocus?: ComponentProps<typeof DialogPrimitive.Content>["onCloseAutoFocus"];
   size?: DialogSize;
   title: ReactNode;
   description?: ReactNode;
@@ -41,6 +42,7 @@ export interface DialogProps {
 export function Dialog({
   open,
   onOpenChange,
+  onCloseAutoFocus,
   size = DEFAULT_SIZE,
   title,
   description,
@@ -60,6 +62,7 @@ export function Dialog({
         <div className={POSITIONER_CLASSES}>
           <DialogPrimitive.Content
             className={cn(CONTENT_CLASSES, DIALOG_WIDTH[size], className)}
+            onCloseAutoFocus={onCloseAutoFocus}
             onEscapeKeyDown={preventWhenBlocking}
             onPointerDownOutside={preventWhenBlocking}
             onInteractOutside={preventWhenBlocking}

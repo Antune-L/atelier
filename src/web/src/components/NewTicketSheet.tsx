@@ -279,6 +279,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
       }}
       size="lg"
       title={SHEET_TITLE}
+      className="new-ticket-sheet"
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -354,7 +355,10 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                 </div>
               </div>
             </details>
-            <ImplementationSettings agent={agent} />
+            <details className="rounded-md border border-border p-3">
+              <summary className="cursor-pointer text-sm font-medium">Profil, agents et modèles</summary>
+              <div className="mt-3"><ImplementationSettings agent={agent} /></div>
+            </details>
             <section className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
               <h3 className="text-sm font-medium">Livraison et contrôles</h3>
               <dl className="space-y-1 text-xs">
@@ -371,7 +375,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
               {autonomousOptions.autonomous && autonomousOptions.autonomousDelivery === null && <p role="alert" className="text-xs text-danger">Choisissez la livraison autonome dans les options avant de créer le ticket.</p>}
               {prOnly && <p className="text-xs text-muted-foreground">Cet environnement livre uniquement une pull request ; fusion automatique et push direct ne sont pas disponibles.</p>}
             </section>
-            <details open className="rounded-md border border-border p-3">
+            <details className="rounded-md border border-border p-3">
               <summary className="cursor-pointer text-sm font-medium">Modifier la branche, les dépendances et les options</summary>
               <div className="mt-3 space-y-4 border-t border-border pt-3">
                 <div className="space-y-1.5">

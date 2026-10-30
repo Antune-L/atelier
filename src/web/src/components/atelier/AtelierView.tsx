@@ -1,4 +1,4 @@
-import { Archive, FileText, LayoutGrid, Mail, MessageSquare, MessageSquarePlus, PanelLeftOpen, Search, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FileText, LayoutGrid, Mail, MessageSquare, MessageSquarePlus, MoreHorizontal, PanelLeftOpen, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
@@ -10,19 +10,21 @@ import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConversationPanel } from "@/components/atelier/ConversationPanel";
 import { NewConversationForm } from "@/components/atelier/NewConversationForm";
 import { PrdPanel } from "@/components/atelier/PrdPanel";
-import { SettledConversations } from "@/components/atelier/SettledConversations";
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ConfirmPopover } from "@/components/ui/confirm";
+import { ConfirmDialog } from "@/components/ui/confirm";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet } from "@/components/ui/sheet";
+import { useCompactLayout } from "@/hooks/useCompactLayout";
 import { useBoard } from "@/hooks/useBoard";
 import { useConversationDetail } from "@/hooks/useConversationDetail";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import { api } from "@/lib/api";
 import {
   ATELIER_STEPS,
+  SETTLED_PREVIEW_COUNT,
   ATELIER_STEP_LABELS,
   CONVERSATION_STATUS_VARIANTS,
   UNTITLED_CONVERSATION_LABEL,
@@ -74,6 +76,11 @@ async function findPrdConversation(candidates: Conversation[], prdId: string): P
 
 export function AtelierView({ projects, projectFilter, target, listRequest, toolbar }: AtelierViewProps) {
   const { conversations } = useBoard();
+  const compact = useCompactLayout();
+  const [historyTab, setHistoryTab] = useState<"active" | "settled">("active");
+  const [historyLimit, setHistoryLimit] = useState(SETTLED_PREVIEW_COUNT);
+  const [historyMenuId, setHistoryMenuId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const now = useTickTimer();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<AtelierStep>("conversation");
@@ -87,6 +94,8 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const composeSeq = useRef(0);
   const resolveSeq = useRef(0);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const historyMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const historySearchRef = useRef<HTMLInputElement>(null);
   const documentButtonRef = useRef<HTMLButtonElement | null>(null);
   const documentHistoryButtonRef = useRef<HTMLButtonElement>(null);
   const documentHeaderRef = useRef<HTMLElement>(null);
@@ -112,18 +121,18 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
     setStep(nextStep);
     setPrdChoice(prdId);
     setCompose(null);
-    setListOpen(false);
+    if (compact) setListOpen(false);
   };
 
   const openCompose = (seed: AtelierSeed | null): void => {
     composeSeq.current += 1;
     setCompose({ seed, key: composeSeq.current });
-    setListOpen(false);
+    if (compact) setListOpen(false);
   };
 
   const openPrdOrigin = (prdId: string, project: string): void => {
     const request = ++resolveSeq.current;
-    setListOpen(false);
+    if (compact) setListOpen(false);
     const candidates = conversations.filter((c) => c.project === project);
     void findPrdConversation(candidates, prdId).then((conversationId) => {
       if (request !== resolveSeq.current) return;
@@ -207,7 +216,7 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const defaultProject = projectFilter === ALL_PROJECTS ? null : projectFilter;
 
   const renderHistoryButton = (ref: RefObject<HTMLButtonElement>) => (
-    <Button ref={ref} size="sm" variant="outline" onClick={() => setListOpen(true)} aria-label="Ouvrir les discussions" aria-haspopup="dialog">
+    <Button ref={ref} size="sm" variant="outline" onClick={() => setListOpen((open) => !open)} aria-label={listOpen ? "Fermer les discussions" : "Ouvrir les discussions"} aria-expanded={listOpen} aria-haspopup={compact ? "dialog" : undefined}>
       <PanelLeftOpen className="h-4 w-4" />
       <span className="hidden sm:inline">Discussions</span>
       <span className="hidden font-mono text-2xs text-muted-foreground sm:inline">{total}</span>
@@ -304,7 +313,7 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
         </div>
         {showDocument && prd !== undefined && (
           <>
-            <header ref={documentHeaderRef} className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
+            <header ref={documentHeaderRef} className="atelier-header flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:gap-3 sm:px-5">
               {renderHistoryButton(documentHistoryButtonRef)}
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <h2 className="truncate text-sm font-medium" title={prd.document.title}>{prd.document.title}</h2>
@@ -337,20 +346,24 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const showConversationHeader = compose === null && conversation !== null && selectedId !== null;
 
 
-  return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <Sheet open={listOpen} onOpenChange={setListOpen} side="left" size="md" title={<>Discussions <span className="ml-1 font-normal text-muted-foreground">{total}</span></>} className="w-80" onCloseAutoFocus={(event) => { event.preventDefault(); [documentHistoryButtonRef.current, historyButtonRef.current].find(isVisible)?.focus(); }}>
-        <aside className="flex min-h-0 w-full flex-col gap-3 p-4" aria-label="Historique des discussions">
+  const historyItems = historyTab === "active" ? active : settled;
+  const history = (
+        <aside className="flex h-full min-h-0 w-full flex-col gap-3 p-3" aria-label="Historique des discussions">
           <Button size="sm" onClick={() => openCompose(null)}>
             <MessageSquarePlus className="h-4 w-4" />
             Nouvelle discussion
           </Button>
+          <nav aria-label="État des discussions" className="flex gap-2">
+            <Button size="sm" variant={historyTab === "active" ? "secondary" : "ghost"} aria-pressed={historyTab === "active"} onClick={() => { setHistoryTab("active"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Actives {unsearched.active.length}</Button>
+            <Button size="sm" variant={historyTab === "settled" ? "secondary" : "ghost"} aria-pressed={historyTab === "settled"} onClick={() => { setHistoryTab("settled"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Classées {unsearched.settled.length}</Button>
+          </nav>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
+              ref={historySearchRef}
               type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setSearch("");
               }}
@@ -361,16 +374,16 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ul className="space-y-1">
-              {total === 0 && (
+              {historyItems.length === 0 && (
                 <li className="px-2 py-3 text-xs text-muted-foreground">
                   {searchQuery !== "" ? "Aucune conversation pour cette recherche." : "Aucune conversation pour ce filtre."}
                 </li>
               )}
-              {active.map((item) => (
+              {historyItems.slice(0, historyLimit).map((item) => (
                 <li key={item.id}>
                   <div
                     className={cn(
-                      "group flex items-start gap-2 rounded-md border-l-2 px-2 py-2 transition-colors",
+                      "flex items-start gap-2 rounded-md border-l-2 px-2 py-2 transition-colors",
                       item.id === selectedId && compose === null
                         ? "border-primary bg-accent"
                         : "border-transparent hover:bg-accent/50",
@@ -401,64 +414,75 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
                         </Badge>
                       </span>
                     </button>
-                    {!item.unread && (
-                      <button
-                        type="button"
-                        aria-label="Marquer comme non lue"
-                        title="Marquer comme non lue"
-                        onClick={() => markUnread(item)}
-                        className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                      >
-                        <Mail className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      aria-label="Classer la conversation"
-                      title="Classer la conversation"
-                      onClick={() => setSettled(item, true)}
-                      className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                    <Popover
+                      open={historyMenuId === item.id}
+                      onOpenChange={(open) => setHistoryMenuId(open ? item.id : null)}
                     >
-                      <Archive className="h-3.5 w-3.5" />
-                    </button>
-                    <ConfirmPopover
-                      title="Supprimer la conversation"
-                      description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
-                      confirmLabel="Supprimer"
-                      destructive
-                      onConfirm={() => remove(item.id)}
-                    >
-                      <button
-                        type="button"
-                        aria-label="Supprimer la conversation"
-                        className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </ConfirmPopover>
+                      <PopoverTrigger>
+                        <button
+                          type="button"
+                          aria-label={`Actions de la discussion ${item.title || UNTITLED_CONVERSATION_LABEL}`}
+                          aria-haspopup="menu"
+                          onClick={(event) => { historyMenuTriggerRef.current = event.currentTarget; }}
+                          className="shrink-0 rounded-md p-2 text-muted-foreground hover:text-foreground"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent role="menu" className="min-w-48">
+                        {!item.unread && (
+                          <PopoverMenuItem role="menuitem" onClick={() => { setHistoryMenuId(null); markUnread(item); }}>
+                            <Mail className="h-3.5 w-3.5" />
+                            Marquer comme non lue
+                          </PopoverMenuItem>
+                        )}
+                        <PopoverMenuItem role="menuitem" onClick={() => { setHistoryMenuId(null); setSettled(item, !item.settled); }}>
+                          {item.settled ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                          {item.settled ? "Remettre en actif" : "Classer la conversation"}
+                        </PopoverMenuItem>
+                        <PopoverMenuItem role="menuitem" destructive onClick={() => { setHistoryMenuId(null); setDeletingId(item.id); }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Supprimer la conversation
+                        </PopoverMenuItem>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </li>
               ))}
             </ul>
-            {settled.length > 0 && (
-              <SettledConversations
-                conversations={settled}
-                selectedId={compose === null ? selectedId : null}
-                now={now}
-                projectLabel={(project) => resolveProjectLabel(projects, project)}
-                onSelect={(conversationId) => select(conversationId)}
-                onUnsettle={(item) => setSettled(item, false)}
-                onDelete={remove}
-                searching={searchQuery !== ""}
-              />
-            )}
+            {historyItems.length > historyLimit && <Button size="sm" variant="ghost" className="w-full" onClick={() => setHistoryLimit((limit) => limit + SETTLED_PREVIEW_COUNT)}>Afficher plus ({historyItems.length - historyLimit})</Button>}
           </div>
         </aside>
-      </Sheet>
+  );
 
-      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+  return (
+    <div className="atelier-view flex h-full min-h-0 min-w-0 flex-row">
+      <ConfirmDialog
+        open={deletingId !== null}
+        title="Supprimer la conversation"
+        description="Les messages et les révisions du PRD seront supprimés. Les cartes déjà créées restent sur le board."
+        confirmLabel="Supprimer"
+        destructive
+        onConfirm={() => {
+          if (deletingId !== null) return remove(deletingId);
+        }}
+        onCancel={() => setDeletingId(null)}
+        onCloseAutoFocus={(event) => {
+          const target = [historyMenuTriggerRef.current, historySearchRef.current].find(isVisible);
+          if (!isVisible(target)) return;
+          event.preventDefault();
+          target.focus();
+        }}
+      />
+      {compact ? (
+        <Sheet open={listOpen} onOpenChange={setListOpen} side="left" size="md" title="Discussions" className="w-80" onCloseAutoFocus={(event) => { event.preventDefault(); [documentHistoryButtonRef.current, historyButtonRef.current].find(isVisible)?.focus(); }}>
+          {history}
+        </Sheet>
+      ) : listOpen && <div className="flex w-72 shrink-0 flex-col border-r border-border">{history}</div>}
+
+      <section className="atelier-pane flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {!showConversationHeader && (
-          <div className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-5">
+          <div className="atelier-header flex min-h-14 shrink-0 items-center gap-2 border-b border-border px-3 py-2 sm:px-5">
             {renderHistoryButton(historyButtonRef)}
             <Button size="sm" variant="ghost" onClick={() => openCompose(null)}>
               <MessageSquarePlus className="h-4 w-4" />

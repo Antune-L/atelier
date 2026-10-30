@@ -224,7 +224,7 @@ export function App() {
           listRequest={atelierListRequest}
           toolbar={(
             <>
-              <Button ref={navigationButtonRef} variant="ghost" size="icon" className="h-8 w-8 sm:hidden" aria-label="Ouvrir la navigation" title="Navigation" onClick={() => setNavigationOpen(true)}>
+              <Button ref={navigationButtonRef} variant="ghost" size="icon" className="h-8 w-8 sm:hidden" aria-label="Ouvrir la navigation" title="Navigation" aria-expanded={navigationOpen} onClick={() => setNavigationOpen((open) => !open)}>
                 <LayoutGrid className="h-4 w-4" />
               </Button>
               <div className="hidden items-center gap-1 sm:flex">
@@ -289,7 +289,10 @@ export function App() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {view !== "atelier" && (
-          <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
+          <div className="app-toolbar flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b px-3 py-2">
+            <Button ref={navigationButtonRef} variant="ghost" size="icon" className="h-9 w-9 sm:hidden" aria-label="Ouvrir la navigation" aria-expanded={navigationOpen} onClick={() => setNavigationOpen((open) => !open)}>
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
             {view === "home" && (
               <div className="flex max-w-full items-center overflow-x-auto">
                 {HOME_VIEW_OPTIONS.map(({ value, label, Icon }) => (
@@ -312,8 +315,7 @@ export function App() {
               </div>
             )}
 
-            <SlotPips slots={slots} />
-            <HostMetricsBadge />
+            <div className="hidden items-center gap-3 sm:flex"><SlotPips slots={slots} /><HostMetricsBadge /></div>
 
             {view === "home" && (
               <div className="ml-auto flex max-w-full flex-wrap items-center gap-2">
@@ -375,7 +377,7 @@ export function App() {
             <NotificationCenter projects={projects} className={view === "home" ? undefined : "ml-auto"} />
           </div>
         )}
-        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view !== "atelier" && "p-4")}>
+        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", view !== "atelier" && "p-2 sm:p-4")}>
           <main className="min-h-0 flex-1 overflow-auto">
             {renderView()}
           </main>

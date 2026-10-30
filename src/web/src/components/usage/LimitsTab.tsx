@@ -1,10 +1,8 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
-import { isQuotaStale } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 
-import { Badge } from "@/components/ui/badge";
 import { ClaudeLoginPanel } from "@/components/usage/ClaudeLoginPanel";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { QuotaWindowBar } from "@/components/usage/QuotaWindowBar";
@@ -74,7 +72,6 @@ function ProviderQuotaCard({ view, now, login }: { view: ProviderQuotaView; now:
             </span>
           )}
           {showAge && quota.observedAt !== null && <span>{formatAgo(quota.observedAt, now)}</span>}
-          {quota !== null && quota.state !== "not_applicable" && isQuotaStale(quota, now) && <Badge variant="warning">Donnée périmée</Badge>}
         </div>
       </div>
       {quota !== null && quota.state !== "not_applicable" && quota.state !== "unauthenticated" && (

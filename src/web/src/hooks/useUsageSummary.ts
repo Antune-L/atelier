@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 
 import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
 
@@ -10,39 +10,54 @@ interface UseUsageSummaryResult {
   error: string | null;
 }
 
-/**
- * Fetches the cost/token summary for a period while `enabled`; refetches when the period,
- * `nonce` or `enabled` changes. A failed refetch keeps the previously displayed summary.
- */
+interface UsageSummaryEntry {
+  snapshot: UseUsageSummaryResult;
+  pending: Promise<void> | null;
+}
+
+const EMPTY_SNAPSHOT: UseUsageSummaryResult = { summary: null, loading: false, error: null };
+const summaries = new Map<UsagePeriod, UsageSummaryEntry>();
+const listeners = new Set<() => void>();
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+function notify(): void {
+  for (const listener of listeners) listener();
+}
+
+function refreshSummary(period: UsagePeriod): void {
+  let entry = summaries.get(period);
+  if (entry === undefined) {
+    entry = { snapshot: EMPTY_SNAPSHOT, pending: null };
+    summaries.set(period, entry);
+  }
+  if (entry.pending !== null) return;
+
+  const current = entry;
+  current.snapshot = { ...current.snapshot, loading: true, error: null };
+  current.pending = api.usageSummary(period)
+    .then((summary) => {
+      current.snapshot = { summary, loading: false, error: null };
+    })
+    .catch((err: unknown) => {
+      current.snapshot = { ...current.snapshot, loading: false, error: err instanceof Error ? err.message : "échec du chargement" };
+    })
+    .finally(() => {
+      current.pending = null;
+      notify();
+    });
+  notify();
+}
+
 export function useUsageSummary(period: UsagePeriod, nonce: number, enabled: boolean): UseUsageSummaryResult {
-  const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const snapshot = useSyncExternalStore(subscribe, () => summaries.get(period)?.snapshot ?? EMPTY_SNAPSHOT);
 
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      return;
-    }
-    let active = true;
-    setLoading(true);
-    api
-      .usageSummary(period)
-      .then((data) => {
-        if (!active) return;
-        setSummary(data);
-        setError(null);
-      })
-      .catch((err: unknown) => {
-        if (active) setError(err instanceof Error ? err.message : "échec du chargement");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+    if (enabled) refreshSummary(period);
   }, [period, nonce, enabled]);
 
-  return { summary, loading, error };
+  return { ...snapshot, loading: enabled && snapshot.loading };
 }

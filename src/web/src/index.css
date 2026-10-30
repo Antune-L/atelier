@@ -439,12 +439,6 @@
     min-height: 144px;
   }
 
-  .new-ticket-sheet input,
-  .new-ticket-sheet textarea,
-  .new-ticket-sheet select {
-    font-size: 14px;
-  }
-
   .atelier-view .atelier-chat-prose.markdown {
     font-size: 14px;
     line-height: 1.6;
@@ -500,4 +494,12 @@
 .mobile-lane-tabs {
   --scrollbar-size: 6px;
   --scrollbar-inset: 1px;
+}
+
+@media (max-width: 1023px), (any-pointer: coarse) {
+  :root input:not([type="checkbox"], [type="radio"], [type="color"], [type="file"], [type="range"], [type="button"], [type="submit"], [type="reset"]),
+  :root textarea,
+  :root select {
+    font-size: 16px;
+  }
 }

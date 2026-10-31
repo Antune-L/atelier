@@ -7,6 +7,7 @@ import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import type { ReviewFlag, ReviewLevel } from "../../shared/constants.ts";
 import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, sendToMacArgsSchema, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
 import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
+import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { OUTBOX_ITEM_ID_PREFIXES, macOutboxDraftSchema } from "../../shared/vpsBridge.ts";
 import {
   askUserArgsSchema,
@@ -86,6 +87,7 @@ function formatPrdDocumentIssues(issues: readonly { path: readonly PropertyKey[]
 const NUDGE_MESSAGE =
   "Ton tour s'est terminé sans appeler done(), fail() ou ask_user(). Termine le protocole : appelle le tool approprié maintenant.";
 const SLOW_COORDINATOR_TOOL_MS = 15_000;
+const SEND_TO_MAC_REMOTE_CARD_REFUSAL = "send_to_mac is unavailable for remote-origin cards.";
 const NO_PROTOCOL_STALL_REASON = "tour terminé sans protocole";
 const REVIEW_GATE_REJECTED_EVENT = "review_gate_rejected";
 const AUTONOMOUS_DELIVERY_POLL_MS = 5_000;
@@ -1059,10 +1061,6 @@ export class AgentCoordinator {
     return this.delegation.readReviewResults(ctx.ticketId, parsed.data.passId ?? null);
   }
 
-  /**
-   * Applies extra review passes the user granted in an answer to one of the agent's questions.
-   * The question must belong to this ticket and be answered; each question backs a single grant.
-   */
   private handleSendToMac(ctx: SessionToolCall): ToolResult {
     const parsed = sendToMacArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };
@@ -1070,6 +1068,8 @@ export class AgentCoordinator {
     const draft = macOutboxDraftSchema.safeParse(fields);
     if (!draft.success) return { ok: false, result: draft.error.issues[0]?.message ?? "invalid input" };
     if (!macOutboxAvailable(this.store)) return { ok: false, result: "send_to_mac is unavailable: this board has no published Mac catalogue." };
+    const ticket = this.store.getTicket(ctx.ticketId);
+    if (!ticket || isRemoteTicket(ticket)) return { ok: false, result: SEND_TO_MAC_REMOTE_CARD_REFUSAL };
     try {
       const { created, item } = enqueueMacOutboxItem(this.store, {
         id: `${OUTBOX_ITEM_ID_PREFIXES.agent}${ctx.ticketId}:${requestId}`,
@@ -1087,6 +1087,10 @@ export class AgentCoordinator {
     }
   }
 
+  /**
+   * Applies extra review passes the user granted in an answer to one of the agent's questions.
+   * The question must belong to this ticket and be answered; each question backs a single grant.
+   */
   private handleGrantReviewPasses(ctx: SessionToolCall): ToolResult {
     const parsed = grantReviewPassesArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };

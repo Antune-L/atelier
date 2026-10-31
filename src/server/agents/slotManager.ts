@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { isDependencyReady } from "../../shared/dependencies.ts";
-import { needsRemoteApproval, startBlocker } from "../../shared/startBlocker.ts";
+import { isRemoteTicket, needsRemoteApproval, startBlocker } from "../../shared/startBlocker.ts";
 import { canUpdateDependencyBase } from "../../shared/ticketMerge.ts";
 import type { UpdateDependencyBaseResult } from "../../shared/ticketMerge.ts";
 import type { AutonomousWorkspaces } from "../../shared/autonomous.ts";
@@ -1356,7 +1356,7 @@ export class SlotManager {
         vcsProvider: projectVcsProvider(ticket.project),
         // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
         ...(opts?.resume && ticket.sessionId && executionTicket.orchestrator === ticket.orchestrator ? { resumeSessionId: ticket.sessionId } : {}),
-      }), extraWorkerTools: macOutboxWorkerTools(this.store), ...(opts?.executionGuard ? { executionGuard: opts.executionGuard } : {}) },
+      }), extraWorkerTools: isRemoteTicket(ticket) ? [] : macOutboxWorkerTools(this.store), ...(opts?.executionGuard ? { executionGuard: opts.executionGuard } : {}) },
     );
   }
 

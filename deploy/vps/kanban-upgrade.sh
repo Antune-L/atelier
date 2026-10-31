@@ -118,7 +118,7 @@ as_root_git() {
 }
 
 fetch_bridge() {
-  bridge_work="$(mktemp -d)"
+  bridge_work="$(mktemp -d)" && [[ -d "$bridge_work" ]] || return 1
   as_root_git init --quiet --bare "$bridge_work/repo"
   as_root_git -C "$bridge_work/repo" fetch --quiet --depth 1 "$REPO_URL" "$1" \
     && as_root_git -C "$bridge_work/repo" show "$1:$BRIDGE_SOURCE" >"$bridge_work/kanban-bridge" \

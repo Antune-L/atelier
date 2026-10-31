@@ -8,10 +8,11 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 - Phase 1 committed as `16531a3`: S1, N2-1, N2-2, N2-3 (code + `docs/mac-remote-access.md`), N2-4 (UI bits + checklist). Live checks (Cloudflare refusals, phone checklist) not run.
 - Phase 2 committed as `13e75fa`: S2a, S2b, S3, N3-1, N3-2.
 - Phase 3 committed as `372a23c`: N4-1, N4-4, N4-2, N4-3, N4-5, N4-6. Bridge protocol bumped to 2 (Mac and VPS must be upgraded together). Verified with temp DBs, the real bridge handler wired to `VpsLinkSync` in-process, provider fixtures and fake adapters; no real SSH, VPS, provider session or browser run.
-- Phase 4 (SETUP) done (uncommitted, awaiting review): bridge program installed at `/usr/local/bin/kanban-bridge` by `kanban-upgrade --sha`, `scripts/setup-mac-vps-link.ts`, `docs/mac-vps-link-setup.md`. Verified offline with stubbed commands only; nothing ran against the VPS, Cloudflare, launchd or the live server.
+- Phase 4 (SETUP) committed as `e9b6fea`: bridge program installed at `/usr/local/bin/kanban-bridge` by `kanban-upgrade --sha`, `scripts/setup-mac-vps-link.ts`, `docs/mac-vps-link-setup.md`. Verified offline with stubbed commands only; nothing ran against the VPS, Cloudflare, launchd or the live server.
 - Out of scope: C0 (manual test in the Finder-launched app, done by the user), N2-5 (optional hardening).
 - Rollout order: the Mac now calls `/usr/local/bin/kanban-bridge`, so install it on the VPS (`sudo kanban-upgrade --sha <sha>`, or the `install` line of vps-install.md A3) before or with the Mac update, otherwise VPS sends stay pending as `remote_missing`.
-- Next action: review and commit phase 4; on the VPS reinstall `kanban-upgrade` from the reviewed commit then `sudo kanban-upgrade --sha <sha>`; have an agent create the Cloudflare resources (docs/mac-vps-link-setup.md section 2); pipe the tunnel token and run the setup script; run C0 and the phone checklist.
+- Final pass: simplifier (`30135c5`), regression check (no confirmed regression), then `send_to_mac` refused for remote-origin cards and a `mktemp` guard in `kanban-upgrade.sh`. Checks: typecheck, lint, `bun test` (KANBAN_* stripped) 902 pass / 3 skip / 0 fail.
+- Next action: user review; on the VPS reinstall `kanban-upgrade` from the reviewed commit then `sudo kanban-upgrade --sha <sha>`; have an agent create the Cloudflare resources (docs/mac-vps-link-setup.md section 2); pipe the tunnel token and run the setup script; run C0 and the phone checklist.
 
 ## Phase 4 design (SETUP)
 

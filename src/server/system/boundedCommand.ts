@@ -24,8 +24,6 @@ export interface BoundedCommandResult {
   timeoutMs?: number;
   /** True when stdout reached `maxStdoutChars` and the command was stopped. */
   truncated?: boolean;
-  /** True when stderr reached `maxStderrChars` and the command was stopped. */
-  stderrTruncated?: boolean;
 }
 
 export interface BoundedCommandOptions extends OperationDeadlineOptions {
@@ -34,9 +32,7 @@ export interface BoundedCommandOptions extends OperationDeadlineOptions {
   timeoutMs?: number;
   /** Stop the command once stdout exceeds this many characters and return what was read. */
   maxStdoutChars?: number;
-  /** Stop the command once stderr exceeds this many characters and return what was read. */
   maxStderrChars?: number;
-  /** Text written to the child's stdin, which is then closed; omitted leaves stdin ignored. */
   stdin?: string;
 }
 
@@ -99,7 +95,6 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
       timedOut,
       ...(options.timeoutMs !== undefined || options.deadlineAt !== undefined ? { timeoutMs } : {}),
       ...(stdout.truncated ? { truncated: true } : {}),
-      ...(stderr.truncated ? { stderrTruncated: true } : {}),
     };
   } finally {
     clearTimeout(timer);

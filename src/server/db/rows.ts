@@ -235,7 +235,13 @@ const vpsOutboxReceiptRowSchema = z.object({
   created_at: z.number(),
 });
 
-export function mapVpsOutboxReceiptRow(raw: unknown): { outboxId: string; ticketId: string; createdAt: number } {
+export interface VpsOutboxReceipt {
+  outboxId: string;
+  ticketId: string;
+  createdAt: number;
+}
+
+export function mapVpsOutboxReceiptRow(raw: unknown): VpsOutboxReceipt {
   const row = vpsOutboxReceiptRowSchema.parse(raw);
   return { outboxId: row.outbox_id, ticketId: row.ticket_id, createdAt: row.created_at };
 }

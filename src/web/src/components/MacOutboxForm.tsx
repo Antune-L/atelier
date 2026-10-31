@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
-import { deriveTitleFromDescription } from "@shared/schemas";
+import { draftTitle } from "@shared/vpsBridge";
 import type { MacOutboxItem, MacOutboxState } from "@shared/vpsBridge";
 
 import { OtherBoardDraftFields, boardProjectOptionLabel } from "@/components/BoardTargetSelect";
+import type { OtherBoardFormProps } from "@/components/BoardTargetSelect";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -27,10 +27,6 @@ const ITEM_SOURCE_LABELS: Record<MacOutboxItem["source"], string> = {
   agent: "par un agent",
 };
 
-function itemTitle(item: MacOutboxItem): string {
-  return item.title.trim() || deriveTitleFromDescription(item.description);
-}
-
 function MacOutboxList({ items, otherBoardUrl }: { items: MacOutboxItem[]; otherBoardUrl: string | null }) {
   return (
     <section className="space-y-2 rounded-md border border-border p-3">
@@ -38,7 +34,7 @@ function MacOutboxList({ items, otherBoardUrl }: { items: MacOutboxItem[]; other
       <ul className="space-y-2">
         {items.map((item) => (
           <li key={item.id} className="space-y-0.5 text-xs">
-            <p className="font-medium text-foreground">{itemTitle(item)}</p>
+            <p className="font-medium text-foreground">{draftTitle(item)}</p>
             <p className="text-muted-foreground">
               {item.projectLabel ?? item.project} · {ITEM_STATUS_LABELS[item.status]}
               {item.receivedAt !== null && ` le ${formatDateTime(item.receivedAt)}`} · envoyée le {formatDateTime(item.createdAt)} {ITEM_SOURCE_LABELS[item.source]}
@@ -56,17 +52,7 @@ function MacOutboxList({ items, otherBoardUrl }: { items: MacOutboxItem[]; other
   );
 }
 
-interface MacOutboxFormProps {
-  header: ReactNode;
-  title: string;
-  onTitleChange: (title: string) => void;
-  description: string;
-  onDescriptionChange: (description: string) => void;
-  onDraftSent: () => void;
-  onClose: () => void;
-}
-
-export function MacOutboxForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: MacOutboxFormProps) {
+export function MacOutboxForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: OtherBoardFormProps) {
   const { settings } = useAppSettings();
   const otherBoardUrl = safeOtherBoardUrl(settings?.otherBoardUrl);
   const [loadKey, setLoadKey] = useState(0);
@@ -103,7 +89,7 @@ export function MacOutboxForm({ header, title, onTitleChange, description, onDes
     void api
       .enqueueMacOutbox({ clientId, project, title, description })
       .then(({ item }) => {
-        setSentTitle(itemTitle(item));
+        setSentTitle(draftTitle(item));
         setClientId(crypto.randomUUID());
         onDraftSent();
         refresh();

@@ -413,11 +413,11 @@ EOF
   exit 2
 fi
 
-# j. The bridge program follows the release only once it is healthy; a rollback keeps the previous program.
+# NOTE(ali): the bridge program follows the release only once it is healthy; a rollback keeps the previous program.
 step "Checking the bridge program"
 sync_bridge "$sha"
 
-# k. Retention: never removes the new or the previous release; backups are pruned as the service user.
+# j. Retention: never removes the new or the previous release; backups are pruned as the service user.
 step "Pruning old releases and backups"
 kept=0
 while IFS= read -r dir; do

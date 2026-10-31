@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
-import { deriveTitleFromDescription } from "@shared/schemas";
+import { draftTitle } from "@shared/vpsBridge";
 import type { BoardProject, VpsAnalysisMode, VpsCreateTicketResponse, VpsPendingSend } from "@shared/vpsBridge";
 
 import { OtherBoardDraftFields, boardProjectOptionLabel } from "@/components/BoardTargetSelect";
+import type { OtherBoardFormProps } from "@/components/BoardTargetSelect";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -21,22 +21,7 @@ const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
   failed: "Refusé par le VPS",
 };
 
-function sendTitle(send: VpsPendingSend): string {
-  return send.draft.title.trim() || deriveTitleFromDescription(send.draft.description);
-}
-
-interface VpsTicketFormProps {
-  header: ReactNode;
-  title: string;
-  onTitleChange: (title: string) => void;
-  description: string;
-  onDescriptionChange: (description: string) => void;
-  onDraftSent: () => void;
-  onClose: () => void;
-}
-
-/** "Board cible: VPS" mode of the creation form: TODO cards on the VPS board, with or without analysis. */
-export function VpsTicketForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: VpsTicketFormProps) {
+export function VpsTicketForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: OtherBoardFormProps) {
   const { settings } = useAppSettings();
   const otherBoardUrl = safeOtherBoardUrl(settings?.otherBoardUrl);
   const [loadKey, setLoadKey] = useState(0);
@@ -55,7 +40,6 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
     void api.vpsSends().then(setSends).catch((e) => setError(errorMessage(e)));
   };
 
-  // Load the VPS projects and the pending sends on mount and on each retry (no-useEffect idiom).
   if (loadedKey !== loadKey) {
     const key = loadKey;
     latestLoad.current = key;
@@ -150,7 +134,7 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
                 {sends.map((send) => (
                   <li key={send.id} className="flex flex-wrap items-start justify-between gap-2 text-xs">
                     <div className="min-w-0 flex-1 space-y-0.5">
-                      <p className="font-medium text-foreground">{sendTitle(send)}</p>
+                      <p className="font-medium text-foreground">{draftTitle(send.draft)}</p>
                       <p className="text-muted-foreground">
                         {send.projectLabel ?? send.draft.project} · {SEND_STATUS_LABELS[send.status]} · {send.attempts} essai(s){send.draft.analysis === "analyze" ? " · avec analyse" : ""}
                       </p>

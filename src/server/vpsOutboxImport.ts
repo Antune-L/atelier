@@ -1,5 +1,5 @@
 import { REMOTE_TICKET_ORIGIN } from "../shared/constants.ts";
-import { outboxRequestId } from "../shared/vpsBridge.ts";
+import { OUTBOX_REASON_MAX_LENGTH, outboxRequestId } from "../shared/vpsBridge.ts";
 import type { BridgeOutboxItem, OutboxAck } from "../shared/vpsBridge.ts";
 
 import { createLogger } from "./logger.ts";
@@ -8,7 +8,6 @@ import type { RemoteCardAdmissionDeps } from "./remoteMcp/admission.ts";
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
-const REJECTION_REASON_MAX_LENGTH = 500;
 const NO_PROFILE_REASON = "Aucun profil de cartes distantes sur le Mac : choisissez-le dans Réglages › MCP distant du Mac, puis renvoyez la carte.";
 const log = createLogger("vps-outbox-import");
 
@@ -21,7 +20,7 @@ function received(id: string, macTicketId: string): OutboxAck {
 }
 
 function rejected(id: string, reason: string): OutboxAck {
-  return { id, status: "rejected", reason: reason.slice(0, REJECTION_REASON_MAX_LENGTH) };
+  return { id, status: "rejected", reason: reason.slice(0, OUTBOX_REASON_MAX_LENGTH) };
 }
 
 function projectNotAllowedReason(project: string): string {

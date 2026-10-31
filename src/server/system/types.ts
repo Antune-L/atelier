@@ -314,7 +314,6 @@ export interface SpawnShellOptions {
 
 export interface SystemAdapter {
   vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
-  /** Mac to VPS bridge over non-interactive SSH; the dry-run adapter never spawns `ssh`. */
   runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult>;
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;

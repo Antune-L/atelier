@@ -164,7 +164,6 @@ interface PaneReader {
 interface RouteDeps {
   previews?: PreviewManager;
   audits?: AuditManager;
-  /** Mac-only link to the VPS board; absent on the cloud host. */
   vpsLink?: VpsLinkSync;
   quality?: QualityManager;
   qualityArtifactDirectory?: string;

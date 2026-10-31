@@ -1,11 +1,11 @@
 import { sshHostAliasSchema } from "../../shared/boardLink.ts";
-import { deriveTitleFromDescription } from "../../shared/schemas.ts";
 import {
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_REQUEST_ID_PREFIX,
   bridgeCataloguePublishInputSchema,
   bridgeCreateTicketInputSchema,
   bridgeOutboxAckInputSchema,
+  draftTitle,
 } from "../../shared/vpsBridge.ts";
 import type { BoardProject, BridgeEnvelope, VpsCreatedTicket } from "../../shared/vpsBridge.ts";
 
@@ -34,7 +34,6 @@ function invalidInput(issues: readonly { message: string }[]): BridgeEnvelope {
   return rejected("INVALID_INPUT", issues[0]?.message ?? "invalid input");
 }
 
-/** Dry-run bridge: never spawns `ssh`, answers like a VPS with two projects and idempotent creation. */
 export class FakeVpsBridge {
   private readonly created = new Map<string, { payload: string; ticket: VpsCreatedTicket }>();
 
@@ -73,7 +72,7 @@ export class FakeVpsBridge {
     }
     const ticket = {
       id: `${FAKE_TICKET_ID_PREFIX}${requestId.slice(BRIDGE_REQUEST_ID_PREFIX.length)}`,
-      title: draft.title.trim() || deriveTitleFromDescription(draft.description),
+      title: draftTitle(draft),
       project: draft.project,
     };
     this.created.set(requestId, { payload, ticket });

@@ -79,10 +79,7 @@ export interface VpsLinkSyncDeps {
   composerAvailable: boolean;
 }
 
-/**
- * Mac-side link to the VPS board: sends N3 creations over the SSH bridge, keeps the unconfirmed ones in
- * `vps_pending_sends` and retries them with the same request id on a 5-minute task, without expiry.
- */
+// NOTE(ali): unconfirmed sends stay in `vps_pending_sends` and are retried with the same request id on every sync, without expiry.
 export class VpsLinkSync {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running: Promise<void> | null = null;

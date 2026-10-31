@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { boardNameSchema } from "./boardLink.ts";
 import { CROSS_BOARD_CLIENT_ID_PATTERN, CROSS_BOARD_DESCRIPTION_MAX_LENGTH, CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH, VCS_PROVIDERS } from "./constants.ts";
+import { deriveTitleFromDescription } from "./schemas.ts";
 
 // NOTE: bump on any breaking change to an op, its input or its output; the Mac refuses a VPS reporting another version.
 export const BRIDGE_PROTOCOL_VERSION = 2;
@@ -10,7 +11,6 @@ export const BRIDGE_OPS = ["version", "list_projects", "create_ticket", "catalog
 export type BridgeOp = (typeof BRIDGE_OPS)[number];
 
 export const BRIDGE_REQUEST_ID_PREFIX = "mac:";
-const BRIDGE_REQUEST_SUFFIX_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 export const BRIDGE_MAX_REQUEST_BYTES = 256 * 1024;
 
 export const VPS_ANALYSIS_MODES = ["none", "analyze"] as const;
@@ -38,6 +38,10 @@ function hasTitleOrDescription(input: { title: string; description: string }): b
   return input.title.trim().length > 0 || input.description.trim().length > 0;
 }
 
+export function draftTitle(draft: { title: string; description: string }): string {
+  return draft.title.trim() || deriveTitleFromDescription(draft.description);
+}
+
 const TITLE_OR_DESCRIPTION_ISSUE = { message: "title or description required", path: ["title"] };
 
 export const vpsTicketDraftSchema = vpsTicketDraftFields.strict().refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
@@ -45,7 +49,7 @@ export type VpsTicketDraft = z.infer<typeof vpsTicketDraftSchema>;
 
 export const bridgeCreateTicketInputSchema = vpsTicketDraftFields.extend({
   requestId: z.string().refine(
-    (value) => value.startsWith(BRIDGE_REQUEST_ID_PREFIX) && BRIDGE_REQUEST_SUFFIX_PATTERN.test(value.slice(BRIDGE_REQUEST_ID_PREFIX.length)),
+    (value) => value.startsWith(BRIDGE_REQUEST_ID_PREFIX) && CROSS_BOARD_CLIENT_ID_PATTERN.test(value.slice(BRIDGE_REQUEST_ID_PREFIX.length)),
     { message: `requestId must be ${BRIDGE_REQUEST_ID_PREFIX}<id>` },
   ),
 }).strict().refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
@@ -101,7 +105,7 @@ export type VpsCreateTicketResponse = z.infer<typeof vpsCreateTicketResponseSche
 
 const OUTBOX_ITEM_ID_MAX_LENGTH = 200;
 const OUTBOX_ITEM_ID_PATTERN = /^[A-Za-z0-9:_-]+$/;
-const OUTBOX_REASON_MAX_LENGTH = 500;
+export const OUTBOX_REASON_MAX_LENGTH = 500;
 const MAC_TICKET_ID_MAX_LENGTH = 64;
 export const MAC_CATALOGUE_MAX_PROJECTS = 200;
 export const OUTBOX_FETCH_MAX_ITEMS = 50;

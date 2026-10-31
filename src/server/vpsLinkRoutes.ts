@@ -48,7 +48,7 @@ async function handle<T>(set: StatusSetter, action: () => T | Promise<T>): Promi
   }
 }
 
-/** Mac-only routes of the "Board cible" VPS mode; never mounted on the cloud host. */
+// NOTE(ali): Mac-only routes of the "Board cible" VPS mode; never mounted on the cloud host.
 export function createVpsLinkRoutes({ vpsLink }: { vpsLink: VpsLinkSync }) {
   return new Elysia({ prefix: "/vps-link" })
     .get("/projects", ({ set }) => handle(set, () => vpsLink.listProjects()))

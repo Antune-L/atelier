@@ -78,6 +78,7 @@ import { createLogger } from "../logger.ts";
 import { safeJsonParse } from "../system/boundedCommand.ts";
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
 import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapMacOutboxRow, mapVpsOutboxReceiptRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
+import type { VpsOutboxReceipt } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -1896,8 +1897,6 @@ export class Store {
       .run(id, REMOTE_TICKET_ORIGIN);
   }
 
-  // ---- Mac to VPS pending sends ----
-
   createVpsPendingSend(input: { id: string; requestId: string; draft: VpsTicketDraft; projectLabel: string | null }): VpsPendingSend {
     this.db
       .query("INSERT INTO vps_pending_sends (id, request_id, payload_json, project_label, created_at) VALUES (?, ?, ?, ?, ?)")
@@ -1977,7 +1976,7 @@ export class Store {
       .run(ack.status, macTicketId, reason, at, ack.id).changes > 0;
   }
 
-  getVpsOutboxReceipt(outboxId: string): { outboxId: string; ticketId: string; createdAt: number } | null {
+  getVpsOutboxReceipt(outboxId: string): VpsOutboxReceipt | null {
     const raw = this.db.query("SELECT * FROM vps_outbox_receipts WHERE outbox_id = ?").get(outboxId);
     return raw ? mapVpsOutboxReceiptRow(raw) : null;
   }

@@ -14,9 +14,9 @@ const VPS_BRIDGE_MAX_STDOUT_CHARS = 1_000_000;
 const VPS_BRIDGE_MAX_STDERR_CHARS = 4_000;
 const VPS_BRIDGE_DETAIL_MAX_CHARS = 300;
 const EXIT_SSH_FAILURE = 255;
-const EXIT_BRIDGE_USAGE = 64;
-const EXIT_NOT_EXECUTABLE = 126;
-const EXIT_NOT_FOUND = 127;
+export const EXIT_BRIDGE_USAGE = 64;
+export const EXIT_NOT_EXECUTABLE = 126;
+export const EXIT_NOT_FOUND = 127;
 const SSH_AUTH_FAILURE_PATTERN = /permission denied|too many authentication failures|no mutual signature/i;
 const SSH_HOST_KEY_FAILURE_PATTERN = /host key verification failed|remote host identification has changed|host key is known for/i;
 
@@ -66,10 +66,7 @@ export function parseBridgeOutput(stdout: string): VpsBridgeResult {
   return envelope.success ? { ok: true, envelope: envelope.data } : failure("bad_output", "");
 }
 
-/**
- * Runs one bridge op on the VPS over non-interactive SSH. The alias and the op are the only argv values
- * after the fixed program; the JSON input travels on stdin so card content never reaches an argv.
- */
+// NOTE(ali): the JSON input travels on stdin so card content never reaches an argv.
 export async function runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult> {
   const alias = sshHostAliasSchema.safeParse(call.hostAlias);
   if (!alias.success) return failure("invalid_request", "invalid SSH host alias");

@@ -1,23 +1,23 @@
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 
+import { CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH } from "@shared/constants";
+
 import { boardStore } from "@/lib/store";
 
 const NEW_TICKET_HASH_PREFIX = "#new=";
 const TICKET_HASH_PREFIX = "#ticket=";
 const HASH_MAX_LENGTH = 200_000;
-const PREFILL_TITLE_MAX_LENGTH = 500;
 const PREFILL_DESCRIPTION_MAX_LENGTH = 50_000;
-const PREFILL_PROJECT_MAX_LENGTH = 200;
 const TICKET_ID_MAX_LENGTH = 200;
 const TICKET_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const INVALID_LINK_TITLE = "Lien ignoré";
 const INVALID_LINK_BODY = "Ce lien est mal formé ou trop long.";
 
 const ticketPrefillSchema = z.object({
-  title: z.string().max(PREFILL_TITLE_MAX_LENGTH).default(""),
+  title: z.string().max(CROSS_BOARD_TITLE_MAX_LENGTH).default(""),
   description: z.string().max(PREFILL_DESCRIPTION_MAX_LENGTH).default(""),
-  project: z.string().trim().min(1).max(PREFILL_PROJECT_MAX_LENGTH).nullish().transform((value) => value ?? null),
+  project: z.string().trim().min(1).max(CROSS_BOARD_PROJECT_KEY_MAX_LENGTH).nullish().transform((value) => value ?? null),
 });
 
 const ticketIdSchema = z.string().trim().min(1).max(TICKET_ID_MAX_LENGTH).regex(TICKET_ID_PATTERN);
@@ -45,7 +45,6 @@ function parseJson(raw: string): unknown {
   }
 }
 
-/** Link opening `ticketId` on the board served at `boardUrl`. */
 export function boardTicketUrl(boardUrl: string, ticketId: string): string {
   const url = new URL(boardUrl);
   url.hash = `${TICKET_HASH_PREFIX.slice(1)}${encodeURIComponent(ticketId)}`;

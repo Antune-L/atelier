@@ -1,8 +1,6 @@
 #!/bin/sh
-# Fixed Mac-to-VPS bridge program, run by the Mac as `ssh <alias> /usr/local/bin/kanban-bridge <op>`.
-# kanban-upgrade installs it there from the reviewed commit (root:root 0755), never from a release tree.
-# It accepts one allowlisted operation, forwards the JSON request read on stdin to the Kanban bridge socket and
-# prints the JSON response. Card content only travels on stdin and stdout, never in argv.
+# NOTE(ali): run by the Mac as `ssh <alias> /usr/local/bin/kanban-bridge <op>`; kanban-upgrade installs it from the
+# reviewed commit (root:root 0755), never from a release tree. Card content only travels on stdin and stdout, never in argv.
 # NOTE(ali): Exit codes read by src/server/system/vpsBridge.ts: 0 response printed, 64 unknown operation or bad
 # usage (the Mac reports a version mismatch), 69 bridge socket unavailable, other non-zero codes are curl errors.
 # NOTE(ali): PROGRAM_VERSION and the operation list must match BRIDGE_PROTOCOL_VERSION and BRIDGE_OPS in

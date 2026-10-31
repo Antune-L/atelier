@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { VCS_PROVIDER_LABELS } from "@shared/constants";
 import type { BoardProject } from "@shared/vpsBridge";
 
@@ -36,6 +38,16 @@ export function BoardTargetSelect({ cloudHost, value, onChange }: BoardTargetSel
       />
     </div>
   );
+}
+
+export interface OtherBoardFormProps {
+  header: ReactNode;
+  title: string;
+  onTitleChange: (title: string) => void;
+  description: string;
+  onDescriptionChange: (description: string) => void;
+  onDraftSent: () => void;
+  onClose: () => void;
 }
 
 export function boardProjectOptionLabel(project: BoardProject): string {

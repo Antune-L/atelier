@@ -132,10 +132,7 @@ export interface BridgeListener {
   stop(): Promise<void>;
 }
 
-/**
- * Serves the bridge ops on a dedicated Unix socket next to the UI socket. cloudflared and the TCP
- * listener only reach the UI socket, so neither ever routes a bridge op.
- */
+// NOTE(ali): a dedicated Unix socket; cloudflared and the TCP listener only reach the UI socket, so neither ever routes a bridge op.
 export function startBridgeListener(uiSocketPath: string, deps: BridgeHandlerDeps): BridgeListener {
   const socketPath = join(dirname(uiSocketPath), BRIDGE_SOCKET_FILENAME);
   rmSync(socketPath, { force: true });

@@ -26,6 +26,8 @@ import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, confinedClaudeEnv, confinedOneShotOptions, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
 import { requestVpsUpdate } from "./vpsUpdate.ts";
+import { runVpsBridge } from "./vpsBridge.ts";
+import type { VpsBridgeCall, VpsBridgeResult } from "./vpsBridge.ts";
 import { requestCoolify } from "./coolifyClient.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import { inspectPreviewReadiness, readPreviewBranchSource, readPreviewRepository, readPreviewSource } from "./previewSource.ts";
@@ -253,6 +255,10 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
 export class RealSystemAdapter implements SystemAdapter {
   vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus> {
     return requestVpsUpdate(action, assertion);
+  }
+
+  runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult> {
+    return runVpsBridge(call);
   }
 
   readonly dryRun = false;

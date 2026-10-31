@@ -12,6 +12,8 @@ import { MediaUploadButton } from "@/components/MediaUploadButton";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { SchedulePane } from "@/components/SchedulePane";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
+import { BoardTargetSelect, VpsTicketForm } from "@/components/VpsTicketForm";
+import type { BoardTarget } from "@/components/VpsTicketForm";
 import { Button } from "@/components/ui/button";
 import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -19,7 +21,9 @@ import { Sheet } from "@/components/ui/sheet";
 import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { useBoard } from "@/hooks/useBoard";
+import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
 import type { TicketPrefill } from "@/lib/boardHash";
@@ -130,6 +134,11 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuPane | null>(null);
+  const { cloudHost } = useCapabilities();
+  const { settings } = useAppSettings();
+  const vpsTargetAvailable = !cloudHost && Boolean(settings?.sshHostAlias);
+  const [boardTarget, setBoardTarget] = useState<BoardTarget>("local");
+  const targetSelector = vpsTargetAvailable ? <BoardTargetSelect value={boardTarget} onChange={setBoardTarget} /> : null;
 
   // Load the project's branches for the base-branch picker on open and on each
   // project change (mirrors ReviewPrPanel's no-useEffect load-on-render pattern).
@@ -290,6 +299,26 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
 
   const submitDisabled = busy || (!title.trim() && !description.trim()) || !project || (autonomousOptions.autonomous && (!autonomousEligible || autonomousOptions.autonomousDelivery === null));
 
+  if (vpsTargetAvailable && boardTarget === "vps") {
+    return (
+      <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }} size="lg" title={SHEET_TITLE} className="new-ticket-sheet">
+        <VpsTicketForm
+          header={targetSelector}
+          title={title}
+          onTitleChange={setTitle}
+          description={description}
+          onDescriptionChange={setDescription}
+          onDraftSent={() => {
+            clearTitle();
+            clearDescription();
+            setDraftReplaced(false);
+          }}
+          onClose={onClose}
+        />
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet
       open={open}
@@ -303,6 +332,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
+            {targetSelector}
             <p className="text-xs text-muted-foreground">Ticket d’implémentation · créez une carte à préparer ou lancez son exécution.</p>
             <ProjectSelect
               id="project"

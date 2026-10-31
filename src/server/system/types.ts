@@ -24,6 +24,7 @@ import type { PrSnapshot, ReviewRequestSnapshot } from "./vcs/types.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import type { CoolifyRequest, CoolifyResponse } from "./coolifyClient.ts";
 import type { PreviewReadiness, PreviewRecord } from "../../shared/preview.ts";
+import type { VpsBridgeCall, VpsBridgeResult } from "./vpsBridge.ts";
 
 export interface GitWorktreeAddOptions {
   repoPath: string;
@@ -313,6 +314,8 @@ export interface SpawnShellOptions {
 
 export interface SystemAdapter {
   vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
+  /** Mac to VPS bridge over non-interactive SSH; the dry-run adapter never spawns `ssh`. */
+  runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult>;
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;
   readPreviewRepository?(repoPath: string): Promise<{ repository: string; host: string; visibility: "public" | "private" }>;

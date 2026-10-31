@@ -39,9 +39,9 @@ function jsonRpcError(code: number, message: string): Response {
   return Response.json({ jsonrpc: "2.0", id: null, error: { code, message } }, { status: HTTP_BAD_REQUEST });
 }
 
-async function readBoundedBody(request: Request): Promise<string | null> {
+export async function readBoundedBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<string | null> {
   const declared = Number(request.headers.get("content-length") ?? 0);
-  if (!Number.isFinite(declared) || declared > MAX_BODY_BYTES) return null;
+  if (!Number.isFinite(declared) || declared > maxBytes) return null;
   const reader = request.body?.getReader();
   if (reader === undefined) return "";
   const chunks: Uint8Array[] = [];
@@ -50,7 +50,7 @@ async function readBoundedBody(request: Request): Promise<string | null> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel();
       return null;
     }

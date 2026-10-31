@@ -7,6 +7,8 @@ import { auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema
 import type { AuditFinding, AuditProjectSettings, AuditProjectState, AuditRun } from "../../shared/audit.ts";
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
+import { VPS_SEND_STATUSES, vpsTicketDraftSchema } from "../../shared/vpsBridge.ts";
+import type { VpsPendingSend } from "../../shared/vpsBridge.ts";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
 import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, FinishedSubagent, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
@@ -165,6 +167,33 @@ export type TicketCreationRequestRow = z.infer<typeof ticketCreationRequestRowSc
 
 export function mapTicketCreationRequestRow(raw: unknown): TicketCreationRequestRow {
   return ticketCreationRequestRowSchema.parse(raw);
+}
+
+const vpsPendingSendRowSchema = z.object({
+  id: z.string(),
+  request_id: z.string(),
+  payload_json: z.string(),
+  project_label: z.string().nullable(),
+  status: z.enum(VPS_SEND_STATUSES),
+  attempts: z.number(),
+  last_error: z.string().nullable(),
+  last_attempt_at: z.number().nullable(),
+  created_at: z.number(),
+});
+
+export function mapVpsPendingSendRow(raw: unknown): VpsPendingSend {
+  const row = vpsPendingSendRowSchema.parse(raw);
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    draft: vpsTicketDraftSchema.parse(JSON.parse(row.payload_json)),
+    projectLabel: row.project_label,
+    status: row.status,
+    attempts: row.attempts,
+    lastError: row.last_error,
+    lastAttemptAt: row.last_attempt_at,
+    createdAt: row.created_at,
+  };
 }
 
 const commentRowSchema = z.object({

@@ -24,6 +24,8 @@ export interface BoundedCommandResult {
   timeoutMs?: number;
   /** True when stdout reached `maxStdoutChars` and the command was stopped. */
   truncated?: boolean;
+  /** True when stderr reached `maxStderrChars` and the command was stopped. */
+  stderrTruncated?: boolean;
 }
 
 export interface BoundedCommandOptions extends OperationDeadlineOptions {
@@ -32,9 +34,13 @@ export interface BoundedCommandOptions extends OperationDeadlineOptions {
   timeoutMs?: number;
   /** Stop the command once stdout exceeds this many characters and return what was read. */
   maxStdoutChars?: number;
+  /** Stop the command once stderr exceeds this many characters and return what was read. */
+  maxStderrChars?: number;
+  /** Text written to the child's stdin, which is then closed; omitted leaves stdin ignored. */
+  stdin?: string;
 }
 
-async function readStdout(stream: ReadableStream<Uint8Array>, maxChars: number | undefined, onLimit: () => void): Promise<{ text: string; truncated: boolean }> {
+async function readBounded(stream: ReadableStream<Uint8Array>, maxChars: number | undefined, onLimit: () => void): Promise<{ text: string; truncated: boolean }> {
   if (maxChars === undefined) return { text: await new Response(stream).text(), truncated: false };
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -65,7 +71,7 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
   const timeoutMs = options.deadlineAt === undefined ? commandTimeoutMs : Math.min(commandTimeoutMs, options.deadlineAt - Date.now());
   const proc = Bun.spawn(args, {
     cwd,
-    stdin: "ignore",
+    stdin: options.stdin === undefined ? "ignore" : new Blob([options.stdin]),
     stdout: "pipe",
     stderr: "pipe",
     ...(options.env ? { env: options.env } : {}),
@@ -81,18 +87,19 @@ export async function runBoundedCommand(args: string[], cwd: string, options: Bo
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
       proc.exited,
-      readStdout(proc.stdout, options.maxStdoutChars, () => proc.kill(FORCE_KILL_SIGNAL)),
-      new Response(proc.stderr).text(),
+      readBounded(proc.stdout, options.maxStdoutChars, () => proc.kill(FORCE_KILL_SIGNAL)),
+      readBounded(proc.stderr, options.maxStderrChars, () => proc.kill(FORCE_KILL_SIGNAL)),
     ]);
     options.signal?.throwIfAborted();
     if (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt) timedOut = true;
     return {
       exitCode,
       stdout: stdout.text,
-      stderr,
+      stderr: stderr.text,
       timedOut,
       ...(options.timeoutMs !== undefined || options.deadlineAt !== undefined ? { timeoutMs } : {}),
       ...(stdout.truncated ? { truncated: true } : {}),
+      ...(stderr.truncated ? { stderrTruncated: true } : {}),
     };
   } finally {
     clearTimeout(timer);

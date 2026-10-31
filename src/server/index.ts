@@ -67,6 +67,8 @@ import { createTicketOperations } from "./ticketOperations.ts";
 import type { TerminalSocket } from "./terminalManager.ts";
 import { TerminalSessionManager } from "./terminalManager.ts";
 import { UPLOADS_DIR, serveUpload } from "./uploads.ts";
+import { startBridgeListener } from "./vpsBridgeServer.ts";
+import { VpsLinkSync } from "./vpsLinkSync.ts";
 import { WorkerMcpManager } from "./workerMcp.ts";
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -399,6 +401,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     if (preview && preview.cleanupStatus !== "complete") await previewManager.stop(preview.id);
     await qualityManager.cancel(ticketId);
   });
+  const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
@@ -451,6 +454,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     feasibilityAnswers: feasibilityAnswerManager,
     automations: automationManager,
     audits: auditManager,
+    ...(vpsLinkSync === null ? {} : { vpsLink: vpsLinkSync }),
     projectRoot: dataRoot,
     resourcesRoot,
     composerAvailable,
@@ -568,6 +572,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     uiServer = Bun.serve<SocketData>({ unix: socketPath, idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS, fetch: handleRequest, websocket });
     chmodSync(socketPath, UI_SOCKET_MODE);
   }
+  const bridgeListener = socketPath !== null && isCloudHost() ? startBridgeListener(socketPath, ticketOperations) : null;
   const remoteMcpListener = remoteMcpConfig === null
     ? null
     : startRemoteMcpListener(remoteMcpConfig, { store, operations: ticketOperations, system, composerAvailable });
@@ -580,6 +585,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
   if (!isCloudHost()) prNotificationMonitor.start();
+  vpsLinkSync?.start();
 
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
@@ -607,6 +613,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       await previewManager.shutdown();
       await qualityManager.shutdown();
       await prNotificationMonitor.stop();
+      await vpsLinkSync?.stop();
       watchdog.stop();
       atelierManager.stop();
       repoSnapshots.stop();
@@ -618,6 +625,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       if (remoteMcpListener !== null) await remoteMcpListener.stop();
       if (uiServer !== null) await uiServer.stop(true);
       if (socketPath !== null) rmSync(socketPath, { force: true });
+      await bridgeListener?.stop();
       await triageManager.teardownAll();
       await feasibilityManager.teardownAll();
       sessionHub.disconnectAll();

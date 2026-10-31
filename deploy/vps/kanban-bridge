@@ -1,0 +1,33 @@
+#!/bin/sh
+# Fixed Mac-to-VPS bridge program, run by the Mac as `ssh <alias> /opt/kanban/current/deploy/vps/kanban-bridge <op>`.
+# It accepts one allowlisted operation, forwards the JSON request read on stdin to the Kanban bridge socket and
+# prints the JSON response. Card content only travels on stdin and stdout, never in argv.
+# NOTE(ali): Exit codes read by src/server/system/vpsBridge.ts: 0 response printed, 64 unknown operation or bad
+# usage (the Mac reports a version mismatch), 69 bridge socket unavailable, other non-zero codes are curl errors.
+set -eu
+
+readonly SOCKET=/run/kanban/bridge.sock
+readonly TIMEOUT_SECONDS=30
+readonly EXIT_USAGE=64
+readonly EXIT_UNAVAILABLE=69
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: kanban-bridge <operation>" >&2
+  exit "$EXIT_USAGE"
+fi
+
+case "$1" in
+  version | list_projects | create_ticket) op="$1" ;;
+  *)
+    echo "kanban-bridge: unknown operation" >&2
+    exit "$EXIT_USAGE"
+    ;;
+esac
+
+if [ ! -S "$SOCKET" ]; then
+  echo "kanban-bridge: the Kanban bridge socket is unavailable" >&2
+  exit "$EXIT_UNAVAILABLE"
+fi
+
+exec curl --silent --show-error --max-time "$TIMEOUT_SECONDS" --unix-socket "$SOCKET" \
+  --header 'content-type: application/json' --data-binary @- "http://kanban-bridge/ops/$op"

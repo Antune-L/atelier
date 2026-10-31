@@ -229,6 +229,15 @@ Check with `claude mcp list` and `codex mcp list`. Claude Code cannot run the OA
 
 Whether **Revoke existing tokens** on the application also ends the OAuth grants is not documented. Rely on the policy until the qualification has measured it.
 
+## Mac bridge socket
+
+The Mac board creates VPS cards ("Board cible: VPS") by running `ssh <alias> /opt/kanban/current/deploy/vps/kanban-bridge <op>` with the JSON request on stdin. Every release installs that program, so there is nothing to install by hand; the SSH user only needs the `kanban` group, like for `ui.sock`.
+
+- On the cloud host, Kanban serves the bridge operations (`version`, `list_projects`, `create_ticket`) on a second socket, `/run/kanban/bridge.sock` (mode 660, group `kanban`), next to `ui.sock`. Neither `ui.sock` nor the TCP listener routes them.
+- **Never point a cloudflared ingress rule at `bridge.sock`.** The connector belongs to the `kanban` group and could open it; the tunnel must keep `unix:/run/kanban/ui.sock` as its only service.
+- Never replace the bridge with a permanent `ssh -L` forward: it would publish the whole VPS API on a Mac port.
+- The Mac checks `BRIDGE_PROTOCOL_VERSION` (`src/shared/vpsBridge.ts`) through the `version` op before any other op and refuses a VPS on another version: upgrade both sides.
+
 ## Optional hardening
 
 - **Country in the policy.** Add **Require > Country** with your country to the Access policy. Access re-evaluates it on every request, so a stolen session used from abroad is cut. Abroad or behind a foreign VPN, use the SSH tunnel.

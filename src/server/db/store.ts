@@ -50,6 +50,7 @@ import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "../../shared/boardLink.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
+import type { VpsPendingSend, VpsTicketDraft } from "../../shared/vpsBridge.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
 import { AUDIT_ACTIVE_RUN_STATUSES, AUDIT_DAY_MS, AUDIT_OBSERVATION_DAYS, auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema, auditRunSchema, updateAuditProjectSettingsSchema } from "../../shared/audit.ts";
@@ -74,7 +75,7 @@ import type { ProjectConfig, ProjectKey } from "../config.ts";
 import { createLogger } from "../logger.ts";
 
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
-import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -1876,6 +1877,37 @@ export class Store {
     this.db
       .query(`UPDATE tickets SET remote_approved_at = NULL WHERE id = ? AND origin = ? AND ${COLUMN_TO_DB} = 'todo' AND remote_approved_at IS NOT NULL`)
       .run(id, REMOTE_TICKET_ORIGIN);
+  }
+
+  // ---- Mac to VPS pending sends ----
+
+  createVpsPendingSend(input: { id: string; requestId: string; draft: VpsTicketDraft; projectLabel: string | null }): VpsPendingSend {
+    this.db
+      .query("INSERT INTO vps_pending_sends (id, request_id, payload_json, project_label, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(input.id, input.requestId, JSON.stringify(input.draft), input.projectLabel, Date.now());
+    const send = this.getVpsPendingSend(input.id);
+    if (send === null) throw new Error(`envoi VPS introuvable après création : ${input.id}`);
+    return send;
+  }
+
+  getVpsPendingSend(id: string): VpsPendingSend | null {
+    const raw = this.db.query("SELECT * FROM vps_pending_sends WHERE id = ?").get(id);
+    return raw ? mapVpsPendingSendRow(raw) : null;
+  }
+
+  listVpsPendingSends(): VpsPendingSend[] {
+    return this.db.query("SELECT * FROM vps_pending_sends ORDER BY created_at ASC").all().map(mapVpsPendingSendRow);
+  }
+
+  recordVpsSendAttempt(id: string, outcome: { status: VpsPendingSend["status"]; lastError: string }): VpsPendingSend | null {
+    this.db
+      .query("UPDATE vps_pending_sends SET status = ?, attempts = attempts + 1, last_error = ?, last_attempt_at = ? WHERE id = ?")
+      .run(outcome.status, outcome.lastError, Date.now(), id);
+    return this.getVpsPendingSend(id);
+  }
+
+  deleteVpsPendingSend(id: string): boolean {
+    return this.db.query("DELETE FROM vps_pending_sends WHERE id = ?").run(id).changes > 0;
   }
 
   // ---- Remote MCP call journal ----

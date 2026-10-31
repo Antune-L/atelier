@@ -5,9 +5,18 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 ## Current summary
 
 - Branch: `feat/mac-vps-link`, from `main` at `4f629e5`.
-- Done cards (uncommitted, awaiting review): S1, N2-1, N2-2, N2-3 (code + `docs/mac-remote-access.md`), N2-4 (UI bits + checklist). Live checks (Cloudflare refusals, phone checklist) not run.
+- Phase 1 committed as `16531a3`: S1, N2-1, N2-2, N2-3 (code + `docs/mac-remote-access.md`), N2-4 (UI bits + checklist). Live checks (Cloudflare refusals, phone checklist) not run.
+- Phase 2 done (uncommitted, awaiting review): S2a, S2b, S3, N3-1, N3-2. Verified with fake adapter, a stub `ssh` on PATH and local Unix sockets only; no real SSH, VPS or browser run.
 - Out of scope: C0 (manual test in the Finder-launched app, done by the user), N2-5 (optional hardening).
-- Next action: review and commit phase 1, then run the Mac tunnel setup and the acceptance checks of `docs/mac-remote-access.md` section 7.
+- Next action: review and commit phase 2, deploy a release on the VPS (installs `kanban-bridge` and creates `bridge.sock`), then try "Board cible: VPS" from the Finder-launched Mac app (C0 conditions). Phase 3: N4 outbox ops on the same bridge and the same `VpsLinkSync` task.
+
+## Phase 2 design (S2a, S2b, S3, N3)
+
+- S2a: `runBoundedCommand` gained `stdin` and `maxStderrChars`. `SystemAdapter.runVpsBridge` (`src/server/system/vpsBridge.ts`) runs `ssh <NON_INTERACTIVE_SSH_OPTIONS from previewCleanup> <alias> /opt/kanban/current/deploy/vps/kanban-bridge <op>` with the JSON on stdin, 45 s budget, bounded stdout/stderr, and classifies failures (`auth`, `host_key`, `unreachable`, `timeout`, `remote_missing`, `version_mismatch`, `remote_unavailable`, `bad_output`, `invalid_request`). The fake (`fakeVpsBridge.ts`) never spawns; `KANBAN_FAKE_VPS_BRIDGE_FAILURE=<kind>` simulates a failure.
+- S2b: `deploy/vps/kanban-bridge` (POSIX sh + `curl --unix-socket`, curl is already used by `kanban-upgrade.sh`) allowlists the op, exits 64 on unknown op and 69 when the socket is missing. On the cloud host with `KANBAN_SOCKET` set, the server opens a second socket `bridge.sock` next to `ui.sock` (0660) served by `vpsBridgeServer.ts` only; ui.sock and TCP never route `/ops/*`. Op registry = `BRIDGE_OPS` + a `Record<BridgeOp, handler>`. `BRIDGE_PROTOCOL_VERSION` lives in `src/shared/vpsBridge.ts`; the Mac checks it via `version` (cached 5 min per alias).
+- S3: table `vps_pending_sends` (row validated in `rows.ts`, mutations in `store.ts`). `VpsLinkSync` (Mac only, started in `index.ts` when not cloud host) stores the send before the first attempt, retries pending rows with the same `mac:<id>` every 5 min, stops a tick at the first transport failure, marks a VPS rejection `failed`, deletes the row on success. No expiry. Routes `/api/vps-link/{projects,tickets,sends}`.
+- N3-1: `create_ticket` takes exactly `requestId`, `project`, `title`, `description`, `analysis` (`none` | `analyze`), strict; calls `TicketOperations.createTodoTicket` with `afterCreate` `none` or `analyze`, normal origin, project defaults (incl. `defaultAutoMerge`). `list_projects` returns non-hidden projects with key, label, base branch and VCS provider.
+- N3-2: `VpsTicketForm.tsx` renders in `NewTicketSheet` when the "Board cible" selector (shown only when `!cloudHost` and `sshHostAlias` is set) is on VPS. Local mode is unchanged apart from the selector. Acknowledgement links to `otherBoardUrl#ticket=<id>`.
 
 ## Plan adaptations due to 4f629e5 (PR-only mode removed)
 
@@ -25,9 +34,17 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 - `POST /api/native/pick-folder` and `canPickFolder` now require a loopback Host header.
 - cloudflared keys `originRequest.access.{required,teamName,audTag}` checked against the Cloudflare docs (context7).
 
+- Throwaway checks (deleted): bridge handler on a temp DB, 17/17 (version, strict inputs, unknown op 404, GitHub and Azure creation, replay returns the same card, changed content under the same requestId is `CONFLICT`, analysis only when asked, card TODO with `origin` null and the project `defaultAutoMerge`); `VpsLinkSync` on the fake adapter, 13/13 (pending on failure, retry with the same requestId after a lost answer yields one card, version mismatch, background rejection becomes `failed`); real runner with a stub `ssh` and the bridge script on a temp socket, 15/15 (card content absent from argv, socket mode 660, error classification, exit 64 and 69).
+- A dry-run server boot with the new code reached "backend prêt" on an isolated port and data root.
+
 ## Open issues
 
 - The isolated cloudflared refusal test relies on Cloudflare forwarding a client-supplied `Cf-Access-Jwt-Assertion` on a hostname without an Access application; unverified, the doc has a positive control that detects it.
 - Terminal keyboard behaviour on mobile browsers is unverified.
+- Phase 2 UI not verified in a browser (the isolated-server probe was refused by the session's permission classifier).
+- Real SSH from the Finder-launched app (C0), StrictHostKeyChecking=yes against the user's known_hosts and the VPS release containing `kanban-bridge` with its exec bit are unverified live.
+- `ticket_creation_requests` is deleted with its card (`ON DELETE CASCADE`): if the VPS created the card, the answer was lost and the card was deleted before the Mac retry, the retry creates a new card.
+- The analysis mode is not part of the idempotency payload: a replay with the same requestId and another analysis mode returns the existing card. The Mac never changes a stored send, so this cannot happen through the bridge.
+- When the VPS is unreachable at form time, the VPS project list fails and the form cannot be submitted; there is no cached catalogue (sends that fail after the list loaded do become pending).
 
 ## History

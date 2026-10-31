@@ -20,6 +20,7 @@ import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts"
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive } from "./boundedCommand.ts";
 import { createFakeCoolifyTransport } from "./coolifyClient.ts";
+import { FakeVpsBridge } from "./fakeVpsBridge.ts";
 import { FakeGithubAccountRegistry } from "./github/accounts.ts";
 import type { GithubAccountRegistry } from "./github/accounts.ts";
 import { plannedClonePath } from "./github/clone.ts";
@@ -64,6 +65,7 @@ import type {
 } from "./types.ts";
 import { FAKE_PR_BODY, FakeVcsClient } from "./vcs/fake.ts";
 import type { PrSnapshot, ReviewRequestSnapshot, VcsClient } from "./vcs/types.ts";
+import type { VpsBridgeCall, VpsBridgeResult } from "./vpsBridge.ts";
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -126,6 +128,11 @@ const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n-
 export class FakeSystemAdapter implements SystemAdapter {
   vpsUpdate(_action: VpsUpdateAction, _assertion: string): Promise<VpsUpdateStatus> {
     return Promise.resolve({ phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });
+  }
+
+  private readonly vpsBridge = new FakeVpsBridge();
+  runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult> {
+    return Promise.resolve(this.vpsBridge.run(call));
   }
 
   readonly coolifyRequest = createFakeCoolifyTransport();

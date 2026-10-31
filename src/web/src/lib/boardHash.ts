@@ -45,6 +45,13 @@ function parseJson(raw: string): unknown {
   }
 }
 
+/** Link opening `ticketId` on the board served at `boardUrl`. */
+export function boardTicketUrl(boardUrl: string, ticketId: string): string {
+  const url = new URL(boardUrl);
+  url.hash = `${TICKET_HASH_PREFIX.slice(1)}${encodeURIComponent(ticketId)}`;
+  return url.href;
+}
+
 export function parseBoardHash(hash: string): BoardHashTarget | null {
   const isNew = hash.startsWith(NEW_TICKET_HASH_PREFIX);
   if (!isNew && !hash.startsWith(TICKET_HASH_PREFIX)) return null;

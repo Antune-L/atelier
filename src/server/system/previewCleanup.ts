@@ -13,7 +13,7 @@ const LOCAL_COOLIFY_SERVER_ADDRESS = "host.docker.internal";
 const DNS_TIMEOUT_MS = 2_000;
 const DNS_TRIES = 1;
 export const CLEANUP_RESULT_SCHEMA = z.object({ complete: z.boolean(), reason: z.string().nullable(), retryable: z.boolean().optional() }).strict();
-const SSH_OPTIONS = [
+export const NON_INTERACTIVE_SSH_OPTIONS = [
   "-T",
   "-o", "BatchMode=yes",
   "-o", "StrictHostKeyChecking=yes",
@@ -75,12 +75,12 @@ export async function verifyPreviewCleanup(options: PreviewCleanupOptions): Prom
   const mode = options.removeOwnedResources ? "remove" : "verify";
   const command = `sudo -n python3 -c 'import base64; exec(base64.b64decode("${encodedScript}"))' ${options.appUuid} ${mode} ${deploymentUuids.join(" ")}`;
   try {
-    const sshConfig = await runBoundedCommand(["ssh", "-G", ...SSH_OPTIONS, options.sshHostAlias], process.cwd());
+    const sshConfig = await runBoundedCommand(["ssh", "-G", ...NON_INTERACTIVE_SSH_OPTIONS, options.sshHostAlias], process.cwd());
     const hostname = hostnameFromSshConfig(sshConfig.stdout);
     if (sshConfig.timedOut || sshConfig.exitCode !== 0 || !await matchesPreviewServer(hostname, options)) {
       return { complete: false, reason: "The SSH target does not match the recorded Coolify deployment server address." };
     }
-    const result = await runBoundedCommand(["ssh", ...SSH_OPTIONS, options.sshHostAlias, command], process.cwd());
+    const result = await runBoundedCommand(["ssh", ...NON_INTERACTIVE_SSH_OPTIONS, options.sshHostAlias, command], process.cwd());
     if (result.timedOut || result.exitCode !== 0) return { complete: false, reason: "SSH preview cleanup verification failed or timed out." };
     const parsed = CLEANUP_RESULT_SCHEMA.safeParse(safeJsonParse(result.stdout.trim()));
     if (!parsed.success) return { complete: false, reason: "Remote preview cleanup returned invalid verification evidence." };

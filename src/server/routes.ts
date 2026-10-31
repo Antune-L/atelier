@@ -92,7 +92,6 @@ import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { quotaProviderSchema } from "../shared/providerQuota.ts";
 import type { LastProviderQuotaResponse, ProviderQuota } from "../shared/providerQuota.ts";
 import { DEFAULT_USAGE_PERIOD, summarizeProviderUsage, usagePeriodSchema, usagePeriodStart } from "../shared/providerUsage.ts";
-import type { HistoryUsageEntry } from "../shared/providerUsage.ts";
 import { claudeLoginCodeSchema } from "../shared/claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../shared/claudeLogin.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
@@ -148,8 +147,7 @@ interface PaneReader {
   checkClaudeAvailable(): Promise<boolean>;
   readClaudeUsage(): Promise<ProviderQuota>;
   readCodexQuota(): Promise<ProviderQuota>;
-  readLocalUsageHistory(): Promise<HistoryUsageEntry[]>;
-  readUsageHistory?(): Promise<LocalUsageReadResult>;
+  readUsageHistory(): Promise<LocalUsageReadResult>;
   startClaudeLogin(): ClaudeLoginStatus;
   submitClaudeLoginCode(code: string): ClaudeLoginStatus;
   cancelClaudeLogin(): ClaudeLoginStatus;
@@ -1412,9 +1410,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/usage/summary", async ({ query, set }) => {
       const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);
       if (!period.success) return jsonError(set, HTTP_BAD_REQUEST, "période invalide");
-      const history = deps.system.readUsageHistory
-        ? await deps.system.readUsageHistory()
-        : { entries: await deps.system.readLocalUsageHistory(), files: 0, failedFiles: 0, failedRoots: 0 };
+      const history = await deps.system.readUsageHistory();
       const now = Date.now();
       return {
         ...summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now, {

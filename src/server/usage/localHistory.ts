@@ -33,6 +33,11 @@ const MAX_HISTORY_FILES = 25_000;
 const MAX_HISTORY_DIRECTORIES = 25_000;
 const MAX_HISTORY_FILE_BYTES = 128 * 1024 * 1024;
 const MAX_HISTORY_READ_BYTES = 4 * 1024 * 1024 * 1024;
+const HISTORY_READ_CONCURRENCY = 4;
+const NOT_PROCESSED = new Error("not processed");
+// NOTE(ali): a line can only yield an entry (Claude) or change parser state (Codex) when it contains one of these literals.
+const CLAUDE_LINE_KEYWORDS = ['"usage"'];
+const CODEX_LINE_KEYWORDS = ['"session_meta"', '"turn_context"', '"token_count"'];
 
 const claudeLineSchema = z.object({
   type: z.literal("assistant"),
@@ -65,16 +70,16 @@ function parseJson(line: string): unknown {
   }
 }
 
-function* linesOf(text: string): Generator<unknown> {
+function* linesOf(text: string, keywords: readonly string[]): Generator<unknown> {
   for (const line of text.split("\n")) {
-    if (line.trim() !== "") yield parseJson(line);
+    if (keywords.some((keyword) => line.includes(keyword))) yield parseJson(line);
   }
 }
 
 /** Claude assistant lines with usage; `dedupKey` lets the merge drop calls repeated across files. */
 export function parseClaudeHistory(text: string): LocalUsageEntry[] {
   const entries: LocalUsageEntry[] = [];
-  for (const raw of linesOf(text)) {
+  for (const raw of linesOf(text, CLAUDE_LINE_KEYWORDS)) {
     const parsed = claudeLineSchema.safeParse(raw);
     if (!parsed.success) continue;
     const line = parsed.data;
@@ -137,7 +142,7 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
   let serviceTier: string | null = null;
   let lastTotal: number | null = null;
   let eventIndex = 0;
-  for (const raw of linesOf(text)) {
+  for (const raw of linesOf(text, CODEX_LINE_KEYWORDS)) {
     const parsed = codexLineSchema.safeParse(raw);
     if (!parsed.success) continue;
     const line = parsed.data;
@@ -186,9 +191,12 @@ export function parseCodexHistory(text: string, path: string): LocalUsageEntry[]
   return entries;
 }
 
-interface CachedFile {
+interface FileStats {
   size: number;
   mtimeMs: number;
+}
+
+interface CachedFile extends FileStats {
   entries: LocalUsageEntry[];
 }
 
@@ -226,24 +234,34 @@ export class LocalUsageHistory {
         failedRoots += 1;
         continue;
       }
-      for (const path of files) {
+      const statted = await mapInOrder(files, (path) => this.fs.stat(path));
+      // NOTE(ali): skip and budget decisions stay in sorted path order so caps and dedup are deterministic.
+      const selected: { path: string; stats: FileStats }[] = [];
+      for (const { item: path, result: stats } of statted) {
         seen.add(path);
-        try {
-          const stats = await this.fs.stat(path);
-          if (since !== undefined && stats.mtimeMs < since) continue;
-          if (seen.size > MAX_HISTORY_FILES || stats.size > MAX_HISTORY_FILE_BYTES || bytesByProvider[provider] + stats.size > MAX_HISTORY_READ_BYTES) {
-            failedFiles += 1;
-            continue;
-          }
-          bytesByProvider[provider] += stats.size;
-          const parsed = await this.entriesOf(provider, path);
-          // Append one by one: spreading a huge file's entries into push() overflows the argument limit.
-          for (const entry of parsed) {
-            if (since === undefined || entry.timestamp >= since) entries.push(entry);
-          }
-        } catch {
+        if (stats instanceof Error) {
           failedFiles += 1;
           this.cache.delete(path);
+          continue;
+        }
+        if (since !== undefined && stats.mtimeMs < since) continue;
+        if (seen.size > MAX_HISTORY_FILES || stats.size > MAX_HISTORY_FILE_BYTES || bytesByProvider[provider] + stats.size > MAX_HISTORY_READ_BYTES) {
+          failedFiles += 1;
+          continue;
+        }
+        bytesByProvider[provider] += stats.size;
+        selected.push({ path, stats });
+      }
+      const parsedFiles = await mapInOrder(selected, ({ path, stats }) => this.entriesOf(provider, path, stats));
+      for (const { item, result: parsed } of parsedFiles) {
+        if (parsed instanceof Error) {
+          failedFiles += 1;
+          this.cache.delete(item.path);
+          continue;
+        }
+        // Append one by one: spreading a huge file's entries into push() overflows the argument limit.
+        for (const entry of parsed) {
+          if (since === undefined || entry.timestamp >= since) entries.push(entry);
         }
       }
     }
@@ -253,8 +271,7 @@ export class LocalUsageHistory {
     return { entries, files: seen.size, failedFiles, failedRoots };
   }
 
-  private async entriesOf(provider: Orchestrator, path: string): Promise<LocalUsageEntry[]> {
-    const { size, mtimeMs } = await this.fs.stat(path);
+  private async entriesOf(provider: Orchestrator, path: string, { size, mtimeMs }: FileStats): Promise<LocalUsageEntry[]> {
     const cached = this.cache.get(path);
     if (cached && cached.size === size && cached.mtimeMs === mtimeMs) return cached.entries;
     const text = await this.fs.readText(path);
@@ -262,6 +279,22 @@ export class LocalUsageHistory {
     this.cache.set(path, { size, mtimeMs, entries: parsed });
     return parsed;
   }
+}
+
+async function mapInOrder<T, R>(items: readonly T[], task: (item: T) => Promise<R>): Promise<{ item: T; result: R | Error }[]> {
+  const settled: { item: T; result: R | Error }[] = items.map((item) => ({ item, result: NOT_PROCESSED }));
+  const queue = settled.values();
+  const worker = async (): Promise<void> => {
+    for (const slot of queue) {
+      try {
+        slot.result = await task(slot.item);
+      } catch (error) {
+        slot.result = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(HISTORY_READ_CONCURRENCY, items.length) }, worker));
+  return settled;
 }
 
 /** History roots from the environment, following each CLI's own overrides. */

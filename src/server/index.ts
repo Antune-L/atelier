@@ -586,6 +586,12 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
   if (!isCloudHost()) prNotificationMonitor.start();
   vpsLinkSync?.start();
+  if (!system.dryRun) {
+    void system.readUsageHistory().then(
+      (history) => log.info("historique de consommation préchargé", { files: history.files, entries: history.entries.length }),
+      (error: unknown) => log.warn("préchargement de l'historique de consommation impossible", { error: getErrorMessage(error) }),
+    );
+  }
 
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.

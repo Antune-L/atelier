@@ -811,7 +811,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   /** Fixed entries relative to now (like the fake quotas), never reads ~/.claude nor ~/.codex. */
-  async readLocalUsageHistory(): Promise<HistoryUsageEntry[]> {
+  private fakeHistoryEntries(): HistoryUsageEntry[] {
     const now = Date.now();
     const entry = (provider: Orchestrator, sessionId: string, ageMs: number, model: string, speed: string, tokens: HistoryUsageEntry["tokens"]): HistoryUsageEntry => ({
       provider, sessionId, timestamp: now - ageMs, model, speed, fast: speed !== "standard", tokens, dedupKey: `${sessionId}:${ageMs}:${model}:${speed}`,
@@ -869,8 +869,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   async readUsageHistory(): Promise<LocalUsageReadResult> {
-    const entries = await this.readLocalUsageHistory();
-    return { entries, files: 2, failedFiles: 0, failedRoots: 0 };
+    return { entries: this.fakeHistoryEntries(), files: 2, failedFiles: 0, failedRoots: 0 };
   }
 
   async gitCurrentBranch(): Promise<string> {

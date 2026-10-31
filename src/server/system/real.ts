@@ -44,7 +44,6 @@ import { readClaudeUsageLive } from "./claudeQuota.ts";
 import { ClaudeLoginManager, spawnClaudeLoginProcess } from "./claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
 import { USAGE_HISTORY_RETENTION_MS } from "../../shared/providerUsage.ts";
-import type { HistoryUsageEntry } from "../../shared/providerUsage.ts";
 import { createLocalUsageHistory } from "../usage/localHistory.ts";
 import type { LocalUsageHistory, LocalUsageReadResult } from "../usage/localHistory.ts";
 import type { ProviderQuota } from "../../shared/providerQuota.ts";
@@ -308,6 +307,7 @@ export class RealSystemAdapter implements SystemAdapter {
   private readonly providers: Record<"claude" | "codex", AgentProvider>;
   private readonly codexCapabilities = new CapabilityCache(probeCodexRuntime);
   private localUsageHistory: LocalUsageHistory | null = null;
+  private usageHistoryRead: Promise<LocalUsageReadResult> | null = null;
   private claudeLogin: ClaudeLoginManager | null = null;
   private readonly delegationWorkspace = new DelegationWorkspace();
   private readonly shellStartupDirectories = new Map<string, string>();
@@ -1568,18 +1568,15 @@ export class RealSystemAdapter implements SystemAdapter {
     });
   }
 
-  /** One long-lived reader so unchanged history files are served from its per-file cache. */
-  async readLocalUsageHistory(): Promise<HistoryUsageEntry[]> {
-    this.localUsageHistory ??= createLocalUsageHistory(process.env, homedir());
-    try {
-      return (await this.localUsageHistory.read()).entries;
-    } catch (error) {
-      log.warn("lecture de l'historique local impossible", { reason: getErrorMessage(error) });
-      return [];
-    }
+  /** One long-lived reader so unchanged history files are served from its per-file cache; concurrent calls share one scan. */
+  readUsageHistory(): Promise<LocalUsageReadResult> {
+    this.usageHistoryRead ??= this.scanUsageHistory().finally(() => {
+      this.usageHistoryRead = null;
+    });
+    return this.usageHistoryRead;
   }
 
-  async readUsageHistory(): Promise<LocalUsageReadResult> {
+  private async scanUsageHistory(): Promise<LocalUsageReadResult> {
     this.localUsageHistory ??= createLocalUsageHistory(process.env, homedir());
     return this.localUsageHistory.read(undefined, Date.now() - USAGE_HISTORY_RETENTION_MS);
   }

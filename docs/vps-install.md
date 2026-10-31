@@ -79,7 +79,7 @@ sudo kanban-release "$sha"
 
 `kanban-release` and `kanban-upgrade` never update themselves from a release. To update them, rerun the two `install` lines with a newly reviewed `sha`.
 
-The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only when that commit was named with `--sha`, after the health checks pass; a plain `sudo kanban-upgrade` on the tip of `main` only reports a difference. The first time, or by hand:
+The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only with `--sha <sha> --install-bridge`, after the health checks pass. Without `--install-bridge`, including the update button of [vps-app-updates.md](./vps-app-updates.md), which passes `--sha` with the tip of `main` it resolved, it only reports a difference. The first time, or by hand:
 
 ```bash
 git -C ~/kanban-admin show "$sha:deploy/vps/kanban-bridge" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/bin/kanban-bridge
@@ -414,6 +414,7 @@ The command prints each step and the commit before and after:
 
 Options:
 - `--sha <full-commit-sha>` upgrades to that commit instead of the tip of `main`.
+- `--install-bridge`, with `--sha`, also installs the bridge program of that reviewed commit (A3).
 - `--force` upgrades even if work is running; that work is interrupted. Without it, the command refuses and lists what runs.
 
 Root never opens the database: every query and the backup run as `kanban`. Between the check (step 5) and the stop (step 7), an automation or autonomous delivery can still start. This is accepted because you run the command yourself; there is no drain mode.
@@ -422,7 +423,7 @@ Root never opens the database: every query and the backup run as `kanban`. Betwe
 
 Exit codes: `0` upgraded or already current, `1` failed, `2` the rollback health check failed too, `64` bad usage, `75` active work prevented the upgrade before stopping the service (retryable).
 
-**Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3. `kanban-bridge` is installed by `sudo kanban-upgrade --sha <sha>` (A3).
+**Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3. `kanban-bridge` is installed by `sudo kanban-upgrade --sha <sha> --install-bridge` (A3).
 
 **Updating units and broker files.** `kanban-upgrade` does not copy them either. When a commit changes `deploy/vps` or `deploy/preview-broker`, copy the changed files from `/opt/kanban/current` again as in A5, B1 and B2, run `sudo systemctl daemon-reload`, then restart the affected services.
 

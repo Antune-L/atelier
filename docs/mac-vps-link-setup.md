@@ -17,7 +17,7 @@ Placeholders are those of [mac-remote-access.md](./mac-remote-access.md#what-pro
 
 - The VPS runs Kanban as in [vps-install.md](./vps-install.md) and its board is published as in [vps-remote-access.md](./vps-remote-access.md) steps 1 to 6: Zero Trust team `<team>`, Google as the only login method, MFA methods allowed.
 - `<alias>` is in `~/.ssh/config` with a key that works without a prompt: `ssh -o BatchMode=yes <alias> true` succeeds from a terminal on the Mac. The SSH user is in the `kanban` group on the VPS.
-- The VPS release and the bridge program match the Mac (protocol 2): on the VPS, `sudo kanban-upgrade --sha <sha>` with the reviewed commit installs both ([vps-install.md](./vps-install.md#a3-install-the-root-scripts-and-a-release)).
+- The VPS release and the bridge program match the Mac (protocol 2): on the VPS, `sudo kanban-upgrade --sha <sha> --install-bridge` with the reviewed commit installs both ([vps-install.md](./vps-install.md#a3-install-the-root-scripts-and-a-release)).
 - On the Mac: Homebrew, and the desktop app open (the script talks to its local API on `127.0.0.1:52817`).
 
 ## 2. Cloudflare resources (agent with the Cloudflare MCP)
@@ -92,7 +92,7 @@ It runs every step, fixes what it can and prints a checklist (`ok`, `fixed`, `MI
 | Repo | `deploy/vps/kanban-bridge` version and operations match `src/shared/vpsBridge.ts` | none |
 | VPS | non-interactive SSH (`BatchMode=yes`, the options of the bridge), SSH user in `kanban` | none |
 | VPS | `/health` through `/run/kanban/ui.sock` answers 200 | none |
-| VPS | `/usr/local/bin/kanban-bridge program-version` equals the Mac protocol | none: `sudo kanban-upgrade --sha <sha>` on the VPS |
+| VPS | `/usr/local/bin/kanban-bridge program-version` equals the Mac protocol | none: `sudo kanban-upgrade --sha <sha> --install-bridge` on the VPS |
 | VPS | the `version` bridge operation answers the Mac protocol through `bridge.sock` | none |
 | Final | an unauthenticated `https://<mac-host>/` is refused: a redirect to `*.cloudflareaccess.com`, or 401/403 | none |
 

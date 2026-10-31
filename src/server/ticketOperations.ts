@@ -12,6 +12,7 @@ import {
   updateTicketSchema,
 } from "../shared/schemas.ts";
 import type { Profile, ProjectInfo, Ticket } from "../shared/schemas.ts";
+import { remoteAnalysisRefusal } from "./agents/remoteAnalysis.ts";
 import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
 import { TicketCreationRequestConflictError } from "./db/store.ts";
@@ -471,7 +472,7 @@ export class TicketOperations {
   private afterCreate(ticket: Ticket, followUp: CreateTodoTicketFollowUp): Ticket {
     if (followUp === "start" && startBlocker(ticket, this.deps.store.getDependencyParent(ticket)) === null) return this.enqueueAndStart(ticket.id);
     this.deps.hub.pushTicket(ticket);
-    if (followUp === "analyze") startFeasibilityInBackground(this.deps.feasibility, [ticket.id], ticket.project);
+    if (followUp === "analyze" && remoteAnalysisRefusal(ticket) === null) startFeasibilityInBackground(this.deps.feasibility, [ticket.id], ticket.project);
     return ticket;
   }
 

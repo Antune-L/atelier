@@ -4,6 +4,7 @@ import { useState } from "react";
 import { TERMINAL_STAGES } from "@shared/constants";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 
+import { AgentPairLabel } from "@/components/AgentPairLabel";
 import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import { TerminalView } from "@/components/TerminalView";
@@ -15,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { useBoard } from "@/hooks/useBoard";
 import { useTickTimer } from "@/hooks/useTickTimer";
 import {
-  agentPairLabel,
   formatDateTime,
   formatRelativeDuration,
   isStageAnimated,
@@ -89,7 +89,7 @@ function AgentCard({ ticket, projectLabel, projectColor, onOpen }: AgentCardProp
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <span style={projectColor ? { color: projectColor } : undefined}>{projectLabel}</span>
-        <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
+        <AgentPairLabel orchestrator={ticket.orchestrator} implementer={ticket.implementer} />
         <TicketBadges ticket={ticket} />
       </div>
       <p className="mt-4 text-sm font-medium">{ticket.stage === null ? "Aucune étape enregistrée" : stageLabel(ticket.stage)}</p>

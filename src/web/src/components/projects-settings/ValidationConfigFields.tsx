@@ -1,7 +1,9 @@
+import { useState } from "react";
+
 import { QUALITY_DEFAULT_HEALTH_PATH, QUALITY_DEFAULT_TIMEOUT_MS, projectValidationSchema } from "@shared/quality";
 import type { ProjectValidation } from "@shared/quality";
 
-import { Field } from "@/components/projects-settings/ProjectPanelParts";
+import { FeatureRow, Field, type FeatureStatus } from "@/components/projects-settings/ProjectPanelParts";
 import { Input, Textarea } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 
@@ -52,37 +54,53 @@ export function validationDraftConfig(draft: ValidationDraft): ProjectValidation
   }
 }
 
+const INVALID_MESSAGE = "Vérifiez le chemin, le délai positif et l’objet JSON des variables.";
+
+function validationStatus(enabled: boolean, invalid: boolean): FeatureStatus {
+  if (!enabled) return { label: "Désactivée", variant: "outline" };
+  if (invalid) return { label: "À corriger", variant: "warning" };
+  return { label: "Activée", variant: "success" };
+}
+
+function validationDescription(value: ValidationDraft, invalid: boolean): string {
+  if (!value.enabled) return "Vérifier l’application avec un agent distinct avant sa livraison.";
+  if (invalid) return INVALID_MESSAGE;
+  const start = value.startCommand.trim() === "" ? "Démarrage non défini" : "Démarrage défini";
+  return `${start} · ${value.requireBehavioral ? "Parcours exigés" : "Parcours facultatifs"}`;
+}
+
 interface ValidationConfigFieldsProps {
   value: ValidationDraft;
   onChange: (value: ValidationDraft) => void;
   startCommandHint?: string;
   composeFile?: string | null;
+  pending?: boolean;
 }
 
-export function ValidationConfigFields({ value, onChange, startCommandHint, composeFile }: ValidationConfigFieldsProps) {
+export function ValidationConfigFields({ value, onChange, startCommandHint, composeFile, pending = false }: ValidationConfigFieldsProps) {
+  const [open, setOpen] = useState(false);
   const invalid = value.enabled && validationDraftConfig(value) === null;
-  let configurationStatus = "Désactivée";
-  if (value.enabled) configurationStatus = invalid ? "À corriger" : "Activée";
 
   return (
-    <section className="flex flex-col gap-3 border-t border-border pt-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-medium">Validation indépendante</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Configurez les contrôles à demander à un agent distinct.</p>
-        </div>
+    <FeatureRow
+      title="Validation indépendante"
+      status={validationStatus(value.enabled, invalid)}
+      pending={pending}
+      description={validationDescription(value, invalid)}
+      open={open || invalid}
+      toggleDisabled={invalid}
+      onToggle={() => setOpen(!open)}
+    >
+      <label className="flex items-center gap-2 text-sm">
         <Switch aria-label="Activer la validation indépendante" checked={value.enabled} onCheckedChange={(enabled) => onChange({ ...value, enabled })} />
-      </div>
+        Demander une validation indépendante
+      </label>
+      <p className="text-xs text-muted-foreground">Configurez les contrôles à demander à un agent distinct. Enregistrée avec les réglages du projet.</p>
       <div className="rounded-md border bg-muted/30 p-3 text-xs">
-        <p className="font-medium">{configurationStatus}</p>
         {value.enabled ? (
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
-            <span>{value.startCommand.trim() === "" ? "Démarrage non défini" : "Commande de démarrage définie"}</span>
-            <span>{value.isolated ? "Environnement isolé" : "Environnement partagé"}</span>
-            <span>{value.requireBehavioral ? "Parcours exigés" : "Parcours facultatifs"}</span>
-          </div>
+          <p className="text-muted-foreground">{value.isolated ? "Environnement isolé" : "Environnement partagé"}</p>
         ) : (
-          <p className="mt-1 text-muted-foreground">La validation indépendante ne sera pas demandée pour ce projet.</p>
+          <p className="text-muted-foreground">La validation indépendante ne sera pas demandée pour ce projet.</p>
         )}
         {!value.enabled && startCommandHint && (
           <p className="mt-1 text-muted-foreground">
@@ -139,9 +157,9 @@ export function ValidationConfigFields({ value, onChange, startCommandHint, comp
               </div>
             </div>
           </details>
-          {invalid && <p role="alert" className="text-xs text-danger">Vérifiez le chemin, le délai positif et l’objet JSON des variables.</p>}
+          {invalid && <p role="alert" className="text-xs text-danger">{INVALID_MESSAGE}</p>}
         </>
       )}
-    </section>
+    </FeatureRow>
   );
 }

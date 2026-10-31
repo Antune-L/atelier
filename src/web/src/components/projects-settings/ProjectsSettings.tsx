@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { ManagedProject } from "@shared/schemas";
 
 import { ProjectList } from "@/components/projects-settings/ProjectList";
 import { ProjectPanel } from "@/components/projects-settings/ProjectPanel";
+import { Button } from "@/components/ui/button";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { refreshProjects } from "@/hooks/useProjects";
 import { api } from "@/lib/api";
@@ -18,6 +19,7 @@ import {
   type FilteredProjectGroup,
 } from "@/lib/projectGroups";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
+import { cn } from "@/lib/utils";
 
 const REFERENCE_COMMIT_TIMEOUT_MS = 120000;
 const REORDER_ERROR = "Erreur lors de la réorganisation";
@@ -62,6 +64,9 @@ export function ProjectsSettings() {
   const [mutationBusy, setMutationBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [showHidden, setShowHidden] = useState(readShowHidden);
+  const [mobileListOpen, setMobileListOpen] = useState(false);
+  const projectListId = useId();
+  const mobileProjectPicker = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -209,38 +214,60 @@ export function ProjectsSettings() {
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold">Projets</h3>
-        <p className="text-sm text-muted-foreground">Dépôts sur lesquels les agents peuvent travailler.</p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold">Projets</h3>
+          <p className="hidden text-sm text-muted-foreground min-[720px]:block">Dépôts sur lesquels les agents peuvent travailler.</p>
+        </div>
+        {!showCreate && <Button size="sm" onClick={() => setCreating(true)}>Ajouter un projet</Button>}
       </div>
 
+      {!showCreate && (
+        <Button
+          ref={mobileProjectPicker}
+          variant="outline"
+          className="w-full justify-between min-[720px]:hidden"
+          aria-label="Choisir un projet"
+          aria-expanded={mobileListOpen}
+          aria-controls={projectListId}
+          onClick={() => setMobileListOpen((open) => !open)}
+        >
+          <span className="min-w-0 truncate">{panelProject?.label ?? "Vos projets"}</span>
+          <span className="ml-2 shrink-0 text-xs text-muted-foreground">{mobileListOpen ? "Fermer" : "Changer"}</span>
+        </Button>
+      )}
+
       <div className="flex flex-col gap-4 min-[720px]:flex-row min-[720px]:items-start">
-        {!showCreate && <ProjectList
-          totalCount={projects.length}
-          hiddenCount={hiddenCount}
-          groups={listGroups}
-          selectedKey={panelProject?.key ?? null}
-          referenceTimeoutMs={referenceCommitTimeout(projects)}
-          busy={mutationBusy}
-          createDisabled={showCreate}
-          query={query}
-          searchActive={normalizedQuery !== ""}
-          showHidden={showHidden}
-          onQueryChange={setQuery}
-          onShowHiddenChange={changeShowHidden}
-          onCreate={() => setCreating(true)}
-          onSelect={(key) => {
-            setCreating(false);
-            setSelectedKey(key);
-          }}
-          onToggleVisibility={(project) => void toggleVisibility(project)}
-          onGroupColorChange={(group, color) => void updateGroupColor(group, color)}
-          onProjectColorChange={(project, color) => void updateProjectColor(project, color)}
-          onGroupMove={(activeKey, overKey) => void persistOrder(moveGroup(allGroups, activeKey, overKey))}
-          onProjectMove={(group, activeKey, overKey) =>
-            void persistOrder(moveVisibleProject(projects, group, activeKey, overKey))
-          }
-        />}
+        {!showCreate && (
+          <div id={projectListId} className={cn("min-w-0 min-[720px]:w-60 min-[720px]:shrink-0 min-[720px]:self-stretch", !mobileListOpen && "hidden min-[720px]:block")}>
+            <ProjectList
+              totalCount={projects.length}
+              hiddenCount={hiddenCount}
+              groups={listGroups}
+              selectedKey={panelProject?.key ?? null}
+              referenceTimeoutMs={referenceCommitTimeout(projects)}
+              busy={mutationBusy}
+              query={query}
+              searchActive={normalizedQuery !== ""}
+              showHidden={showHidden}
+              onQueryChange={setQuery}
+              onShowHiddenChange={changeShowHidden}
+              onSelect={(key) => {
+                setCreating(false);
+                setSelectedKey(key);
+                setMobileListOpen(false);
+                mobileProjectPicker.current?.focus();
+              }}
+              onToggleVisibility={(project) => void toggleVisibility(project)}
+              onGroupColorChange={(group, color) => void updateGroupColor(group, color)}
+              onProjectColorChange={(project, color) => void updateProjectColor(project, color)}
+              onGroupMove={(activeKey, overKey) => void persistOrder(moveGroup(allGroups, activeKey, overKey))}
+              onProjectMove={(group, activeKey, overKey) =>
+                void persistOrder(moveVisibleProject(projects, group, activeKey, overKey))
+              }
+            />
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">{renderPanel()}</div>
       </div>

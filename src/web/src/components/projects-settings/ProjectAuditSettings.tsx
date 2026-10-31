@@ -16,7 +16,7 @@ import { addDays, isWeekendDateKey, upcomingAuditSlots, zonedDateKey } from "@sh
 import { DEFAULT_VCS_PROVIDER } from "@shared/constants";
 import type { ProjectInfo } from "@shared/schemas";
 
-import { AdvancedSection } from "@/components/projects-settings/ProjectPanelParts";
+import { AdvancedSection, FeatureRow, type FeatureStatus } from "@/components/projects-settings/ProjectPanelParts";
 import { Button } from "@/components/ui/button";
 import { ConfirmPopover } from "@/components/ui/confirm";
 import { BranchCombobox, Input } from "@/components/ui/input";
@@ -64,6 +64,15 @@ interface ProjectAuditSettingsProps {
   project: AuditSettingsProject;
   /** Hidden when the section is already shown inside the Audits view. */
   showAuditsLink?: boolean;
+  collapsible?: boolean;
+}
+
+const AUDIT_DESCRIPTION = "Relit à intervalle régulier les commits fusionnés sur la branche et ne signale que les problèmes bloquants vérifiés : sécurité, logique métier, régressions, intégrité des données.";
+const AUDIT_SUMMARY = "Repérer les problèmes bloquants dans les commits fusionnés.";
+
+function auditStatus(supported: boolean, enabled: boolean): FeatureStatus {
+  if (!supported) return { label: "Non disponible", variant: "outline" };
+  return enabled ? { label: "Activé", variant: "success" } : { label: "Désactivé", variant: "outline" };
 }
 
 function clampAutoLaunch(value: number): number {
@@ -99,7 +108,8 @@ function SettingRow({ label, children }: { label: string; children: ReactNode })
 }
 
 /** Self-saving "Audit planifié" section of a project, next to the Coolify previews. */
-export function ProjectAuditSettings({ project, showAuditsLink = true }: ProjectAuditSettingsProps) {
+export function ProjectAuditSettings({ project, showAuditsLink = true, collapsible = false }: ProjectAuditSettingsProps) {
+  const [rowOpen, setRowOpen] = useState(false);
   const { audits } = useBoard();
   const capabilities = useCapabilities();
   const now = useTickTimer();
@@ -182,16 +192,14 @@ export function ProjectAuditSettings({ project, showAuditsLink = true }: Project
     ? "Serveur toujours allumé : l'audit part à l'heure prévue."
     : "L'app doit être ouverte à l'heure de l'audit, sinon il est rattrapé au démarrage.";
 
-  return (
-    <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-1">
-          <h4 className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4 text-primary" />Audit planifié</h4>
-          <p className={HINT_CLASSES}>Relit à intervalle régulier les commits fusionnés sur la branche et ne signale que les problèmes bloquants vérifiés : sécurité, logique métier, régressions, intégrité des données.</p>
-        </div>
-        <Switch aria-label="Activer l'audit planifié" checked={supported && current.enabled} disabled={!supported || busy} onCheckedChange={toggleEnabled} />
-      </div>
-      {!supported && <p className="text-sm text-muted-foreground">{AUDIT_UNSUPPORTED_MESSAGE}</p>}
+  const enableSwitch = (
+    <Switch aria-label="Activer l'audit planifié" checked={supported && current.enabled} disabled={!supported || busy} onCheckedChange={toggleEnabled} />
+  );
+  const icon = <ShieldCheck className="size-4 text-primary" />;
+
+  const body = (
+    <>
+      {!supported && !collapsible && <p className="text-sm text-muted-foreground">{AUDIT_UNSUPPORTED_MESSAGE}</p>}
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {supported && (
         <>
@@ -346,6 +354,43 @@ export function ProjectAuditSettings({ project, showAuditsLink = true }: Project
           )}
         </>
       )}
+    </>
+  );
+
+  if (collapsible) {
+    const nextRun = view?.nextRunAt != null ? ` · prochain audit ${formatAuditDayTime(view.nextRunAt)}` : "";
+    let description = AUDIT_UNSUPPORTED_MESSAGE;
+    if (supported) description = savedSettings.enabled ? `${formatAuditCadence(savedSettings)}${nextRun}` : AUDIT_SUMMARY;
+    return (
+      <FeatureRow
+        title="Audit planifié"
+        icon={icon}
+        status={auditStatus(supported, savedSettings.enabled)}
+        pending={dirty}
+        description={description}
+        open={rowOpen}
+        onToggle={() => setRowOpen((open) => !open)}
+      >
+        <label className="flex items-center gap-2 text-sm">
+          {enableSwitch}
+          Activer l'audit planifié
+        </label>
+        {supported && <p className={HINT_CLASSES}>{AUDIT_DESCRIPTION}</p>}
+        {body}
+      </FeatureRow>
+    );
+  }
+
+  return (
+    <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h4 className="flex items-center gap-2 text-sm font-medium">{icon}Audit planifié</h4>
+          <p className={HINT_CLASSES}>{AUDIT_DESCRIPTION}</p>
+        </div>
+        {enableSwitch}
+      </div>
+      {body}
     </section>
   );
 }

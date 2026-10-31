@@ -174,9 +174,9 @@ export function McpSettings({ query = "" }: { query?: string }) {
     <div className="space-y-4">
       {header}
       <div className="space-y-4 rounded-lg border p-4">
-        <div className="space-y-2">
+        <div className="flex flex-col items-start gap-3">
           <Label>Votre client</Label>
-          <Tabs options={MCP_CLIENT_OPTIONS} value={clientKind} onChange={setClientKind} aria-label="Client MCP" />
+          <Tabs options={MCP_CLIENT_OPTIONS} value={clientKind} onChange={setClientKind} aria-label="Client MCP" className="max-w-full" />
           <p className="text-xs text-muted-foreground">Ajoutez Atelier comme serveur MCP distant. Le jeton Bearer est le secret qui autorise l'accès.</p>
         </div>
         {clientKind !== "manual" && (

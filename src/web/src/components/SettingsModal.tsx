@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -46,8 +46,16 @@ import { codexEffortTabOptions, codexModelTabOptions, isCodexFastAvailable } fro
 import { THEMES, THEME_PALETTES, type Theme } from "@/lib/theme";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
-import { matchingSettingsSection, sectionMatches, SETTINGS_GROUPS, SETTINGS_SECTIONS } from "@/lib/settingsSearch";
-import type { SettingsSectionId } from "@/lib/settingsSearch";
+import {
+  categorySections,
+  matchingSettingsSection,
+  sectionNameMatches,
+  sectionMatches,
+  SETTINGS_CATEGORIES,
+  settingsSection,
+  visibleSettingsSections,
+} from "@/lib/settingsSearch";
+import type { SettingsCategory, SettingsSection, SettingsSectionId } from "@/lib/settingsSearch";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: TabOption<Theme>[] = THEMES.map((theme) => ({ value: theme.value, label: theme.label }));
@@ -72,21 +80,43 @@ interface SettingsModalProps {
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [sectionId, setSectionId] = useState<SettingsSectionId>("appearance");
+  const [lastSubpages, setLastSubpages] = useState<Partial<Record<SettingsCategory, SettingsSectionId>>>({});
   const [search, setSearch] = useState("");
+  const { cloudHost } = useCapabilities();
   const profiles = useProfiles();
   const projects = useProjects();
   const query = normalizeSearch(search);
+  const sections = visibleSettingsSections(cloudHost);
+  const visibleSectionId = sections.some((section) => section.id === sectionId) ? sectionId : "appearance";
+  const selectedSection = settingsSection(visibleSectionId);
+  const category = selectedSection?.category;
+  const panelQuery = selectedSection !== undefined && sectionNameMatches(selectedSection, query) ? "" : query;
+  const subpages = category === undefined ? [] : categorySections(sections, category);
   const counts: Partial<Record<SettingsSectionId, number>> = {
     profiles: profiles.length,
     projects: projects.length,
+  };
+
+  const selectSection = (id: SettingsSectionId): void => {
+    setSectionId(id);
+    const nextCategory = settingsSection(id)?.category;
+    if (nextCategory !== undefined) setLastSubpages((previous) => ({ ...previous, [nextCategory]: id }));
+  };
+
+  const selectCategory = (nextCategory: SettingsCategory): void => {
+    const remembered = lastSubpages[nextCategory];
+    const leaves = categorySections(sections, nextCategory);
+    const rememberedVisible = leaves.find((section) => section.id === remembered)?.id;
+    const destination = rememberedVisible ?? leaves[0]?.id;
+    if (destination !== undefined) selectSection(destination);
   };
 
   const changeSearch = (value: string): void => {
     setSearch(value);
     const nextQuery = normalizeSearch(value);
     if (nextQuery === "") return;
-    const firstMatch = matchingSettingsSection(nextQuery);
-    if (firstMatch !== undefined) setSectionId(firstMatch);
+    const firstMatch = matchingSettingsSection(nextQuery, sections);
+    if (firstMatch !== undefined) selectSection(firstMatch);
   };
 
   return (
@@ -99,34 +129,91 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     >
       <div className="flex flex-col gap-5 md:flex-row">
         <SettingsNav
-          sectionId={sectionId}
-          onSelect={setSectionId}
+          sections={sections}
+          sectionId={visibleSectionId}
+          onSelectSection={selectSection}
+          onSelectCategory={selectCategory}
           query={query}
           counts={counts}
           search={search}
           onSearchChange={changeSearch}
         />
-        <div className="min-w-0 flex-1">
-          <SettingsSectionPanel sectionId={sectionId} query={query} />
+        <div className="min-w-0 flex-1 space-y-4">
+          {category !== undefined && subpages.length > 1 && (
+            <SettingsSubpageTabs
+              category={category}
+              subpages={subpages}
+              sectionId={visibleSectionId}
+              counts={counts}
+              onSelect={selectSection}
+            />
+          )}
+          <SettingsSectionPanel sectionId={visibleSectionId} query={panelQuery} />
         </div>
       </div>
     </Dialog>
   );
 }
 
+type SettingsCounts = Partial<Record<SettingsSectionId, number>>;
+
+interface SettingsNavButtonProps {
+  label: string;
+  active: boolean;
+  count?: number;
+  indented?: boolean;
+  onClick: () => void;
+}
+
+function SettingsNavButton({ label, active, count, indented = false, onClick }: SettingsNavButtonProps) {
+  const revealActive = useCallback((button: HTMLButtonElement | null): void => {
+    if (!active || button === null) return;
+    const list = button.closest("ul");
+    if (list === null || list.scrollWidth <= list.clientWidth) return;
+    const itemBounds = button.getBoundingClientRect();
+    const listBounds = list.getBoundingClientRect();
+    list.scrollLeft += itemBounds.left - listBounds.left - (list.clientWidth - itemBounds.width) / 2;
+  }, [active]);
+
+  return (
+    <button
+      ref={revealActive}
+      type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+        indented && "md:pl-5",
+      )}
+    >
+      <span className="whitespace-nowrap md:whitespace-normal">{label}</span>
+      {count !== undefined && <span className={cn("font-mono text-2xs", active ? "opacity-70" : "text-muted-foreground")}>{count}</span>}
+    </button>
+  );
+}
+
 interface SettingsNavProps {
+  sections: SettingsSection[];
   sectionId: SettingsSectionId;
-  onSelect: (id: SettingsSectionId) => void;
+  onSelectSection: (id: SettingsSectionId) => void;
+  onSelectCategory: (category: SettingsCategory) => void;
   query: string;
-  counts: Partial<Record<SettingsSectionId, number>>;
+  counts: SettingsCounts;
   search: string;
   onSearchChange: (value: string) => void;
 }
 
-function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChange }: SettingsNavProps) {
-  const { cloudHost } = useCapabilities();
+function SettingsNav({ sections, sectionId, onSelectSection, onSelectCategory, query, counts, search, onSearchChange }: SettingsNavProps) {
+  const activeCategory = settingsSection(sectionId)?.category;
+  const entries = SETTINGS_CATEGORIES.map((category) => {
+    const leaves = categorySections(sections, category);
+    const matches = matchesQuery(query, category) ? leaves : leaves.filter((section) => sectionMatches(section, query));
+    return { category, leaves, matches };
+  }).filter((entry) => entry.matches.length > 0);
+
   return (
-    <nav aria-label="Sections des réglages" className="flex w-full shrink-0 flex-col gap-3 md:w-48">
+    <nav aria-label="Sections des réglages" className="flex w-full shrink-0 flex-col gap-3 md:w-44">
       <div className="relative">
         <Search
           className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -140,32 +227,73 @@ function SettingsNav({ sectionId, onSelect, query, counts, search, onSearchChang
           className="h-7 w-full pl-7 text-xs"
         />
       </div>
-      {SETTINGS_GROUPS.map((group) => (
-        <div key={group} className="flex flex-wrap items-stretch gap-1 md:flex-col md:gap-0">
-          <p className={cn("hidden px-1 pb-1 md:block", FIELD_LABEL_CLASSES)}>{group}</p>
-          {SETTINGS_SECTIONS.filter((section) => section.group === group && (section.id !== "vps" || cloudHost)).map((section) => {
-            const active = section.id === sectionId;
-            const count = counts[section.id];
+      <ul className={cn("flex items-stretch gap-1 md:flex-col md:flex-nowrap md:overflow-visible", query === "" ? "flex-nowrap overflow-x-auto" : "flex-wrap")}>
+        {entries.map(({ category, leaves, matches }) => {
+          const [singleLeaf] = leaves;
+          if (query === "" || leaves.length === 1) {
             return (
-              <button
-                key={section.id}
-                type="button"
-                aria-current={active ? "page" : undefined}
-                onClick={() => onSelect(section.id)}
-                className={cn(
-                  "flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm font-medium transition-colors",
-                  active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  !sectionMatches(section, query) && "opacity-40",
-                )}
-              >
-                <span>{section.label}</span>
-                {count !== undefined && <span className={cn("font-mono text-2xs", active ? "opacity-70" : "text-muted-foreground")}>{count}</span>}
-              </button>
+              <li key={category} className="flex flex-col">
+                <SettingsNavButton
+                  label={category}
+                  active={category === activeCategory}
+                  count={leaves.length === 1 && singleLeaf !== undefined ? counts[singleLeaf.id] : undefined}
+                  onClick={() => onSelectCategory(category)}
+                />
+              </li>
             );
-          })}
-        </div>
-      ))}
+          }
+          return (
+            <li key={category} className="flex w-full flex-col gap-1 md:gap-0">
+              <p className={cn("px-1 pb-1 pt-1", FIELD_LABEL_CLASSES)}>{category}</p>
+              <ul aria-label={category} className="flex flex-wrap gap-1 md:flex-col md:flex-nowrap md:gap-0">
+                {matches.map((section) => (
+                  <li key={section.id} className="flex flex-col">
+                    <SettingsNavButton
+                      label={section.label}
+                      active={section.id === sectionId}
+                      count={counts[section.id]}
+                      indented
+                      onClick={() => onSelectSection(section.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+      {entries.length === 0 && <p className="px-1 text-sm text-muted-foreground">{NO_MATCH_MESSAGE}</p>}
     </nav>
+  );
+}
+
+interface SettingsSubpageTabsProps {
+  category: SettingsCategory;
+  subpages: SettingsSection[];
+  sectionId: SettingsSectionId;
+  counts: SettingsCounts;
+  onSelect: (id: SettingsSectionId) => void;
+}
+
+function SettingsSubpageTabs({ category, subpages, sectionId, counts, onSelect }: SettingsSubpageTabsProps) {
+  return (
+    <div className="space-y-3 border-b pb-3">
+      <h2 className="text-lg font-semibold">{category}</h2>
+      <nav aria-label={`Sous-sections ${category}`}>
+        <ul className="flex flex-nowrap gap-1 overflow-x-auto">
+          {subpages.map((section) => (
+            <li key={section.id} className="flex">
+              <SettingsNavButton
+                label={section.label}
+                active={section.id === sectionId}
+                count={counts[section.id]}
+                onClick={() => onSelect(section.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
   );
 }
 
@@ -318,7 +446,7 @@ function AgentDefaultsSettings({ query }: { query: string }) {
                 onChange={(value) => void patchAppSettings({ implementEffort: value })}
                 label="Effort d'implémentation"
               />
-              <p className="w-full text-xs text-muted-foreground">Les valeurs Codex se règlent dans Fournisseurs ; un profil fixe l'agent utilisé.</p>
+              <p className="w-full text-xs text-muted-foreground">Les valeurs Codex se règlent dans Agents › Fournisseurs ; un profil fixe l'agent utilisé.</p>
             </DefaultsStageRow>
           )}
           {showCommit && (
@@ -463,7 +591,7 @@ function ProvidersSettings({ query }: { query: string }) {
         searching={query !== ""}
       >
         <p className="text-xs text-muted-foreground">{claudeAvailable ? "Programme Claude résolu dans le SDK (bibliothèque de l'agent) ou l'installation utilisateur." : "Claude introuvable : il sera téléchargé au premier lancement d'agent."}</p>
-        <p className="text-xs text-muted-foreground">Les modèles Claude se règlent dans Agents par défaut et dans chaque profil.</p>
+        <p className="text-xs text-muted-foreground">Les modèles Claude se règlent dans Agents › Par défaut et dans chaque profil.</p>
       </ProviderRow>
       <ProviderRow
         name="Codex"

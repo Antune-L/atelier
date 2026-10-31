@@ -19,9 +19,11 @@ import {
   FolderStep,
   InspectionBanners,
   RepoPathInput,
+  SummaryItem,
   suggestionHint,
   type FolderSourceMode,
 } from "@/components/projects-settings/ProjectPanelParts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
 import { ProjectAuditSettings } from "@/components/projects-settings/ProjectAuditSettings";
@@ -110,9 +112,7 @@ export function ProjectPanel({
   const [step, setStep] = useState<CreateStep>(project === null ? "folder" : "form");
   const [inspection, setInspection] = useState<RepoInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [identityOpen, setIdentityOpen] = useState(false);
-  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [repoOpen, setRepoOpen] = useState(false);
   const [validation, setValidation] = useState(() => validationDraft(project?.validation));
   const [validationInspection, setValidationInspection] = useState<RepoInspection | null>(null);
   const validationInspectionGeneration = useRef(0);
@@ -160,7 +160,6 @@ export function ProjectPanel({
   const labelOrigin = suggestionHint(inspection?.label, label);
   const deliveryOrigin = [suggestionHint(inspection?.baseBranch, baseBranch), suggestionHint(inspection?.vcsProvider, vcsProvider)]
     .filter(Boolean).join(SUMMARY_SEPARATOR);
-  const advancedSummary = `Délai de préparation ${timeoutValue} ${unit}`;
 
   const clearConnection = (): void => {
     connectionGeneration.current += 1;
@@ -220,7 +219,7 @@ export function ProjectPanel({
 
   const enterForm = (result: RepoInspection, account: string | null): void => {
     applyInspection(result, account);
-    setDeliveryOpen(deliveryNeedsReview(result));
+    setRepoOpen(deliveryNeedsReview(result));
     setStep("form");
     const detected = result.vcsProvider;
     if (result.isGitRepo && detected !== null) {
@@ -421,48 +420,25 @@ export function ProjectPanel({
     );
   }
 
-  const advancedFields = (
-    <>
-      <Field label="Délai de préparation (setup + installation)">
-        <div className="flex w-full items-center gap-2">
-          <Input
-            type="number"
-            min={1}
-            step={1}
-            className="w-28"
-            value={timeoutValue}
-            onChange={(e) => setTimeoutValue(e.target.value)}
-          />
-          <Select
-            value={unit}
-            onChange={(e) => setUnit(e.target.value === "s" ? "s" : "min")}
-            aria-label="Unité du délai"
-          >
-            {TIMEOUT_UNITS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </Field>
-    </>
-  );
-
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border bg-muted/20 p-5">
+      <div className="space-y-2 py-1">
         {creating && <p className="mb-2 text-xs font-medium text-muted-foreground">Étape 2 sur 2 · Confirmer le projet</p>}
+        {project !== null && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>{normalizedGroup || "Sans groupe"}</span>
+            {project.hidden && <Badge variant="outline">Masqué</Badge>}
+          </div>
+        )}
         <Input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="Nom du projet"
           aria-label="Nom du projet"
-          className="-mx-2 h-auto border-transparent bg-transparent px-2 py-1 text-lg font-semibold shadow-none hover:border-input focus-visible:border-input"
+          className="-mx-2 h-auto border-transparent bg-transparent px-2 py-1 text-2xl font-semibold shadow-none hover:border-input focus-visible:border-input"
         />
         {labelOrigin && <p className="mt-1 text-xs text-muted-foreground">Nom {labelOrigin}</p>}
-        <p className="mt-1 break-all text-xs text-muted-foreground">{repoPath}</p>
-        <p className="mt-3 text-sm">{VCS_PROVIDER_LABELS[vcsProvider]} · branche {baseBranch || "à renseigner"}</p>
+        {project !== null && <p className="mt-1 text-sm text-muted-foreground">Le nécessaire pour travailler sur ce projet.</p>}
         {creating && <p className="mt-2 text-xs text-muted-foreground">Les valeurs ci-dessous sont proposées depuis le dépôt. Vérifiez-les, puis confirmez l’ajout. Aucune commande de démarrage n’a été exécutée.</p>}
       </div>
 
@@ -472,14 +448,25 @@ export function ProjectPanel({
 
       <div className="flex flex-col gap-3">
         <AdvancedSection
-          title="Groupe et dossier"
-          open={identityOpen}
-          onToggle={() => setIdentityOpen((open) => !open)}
+          title="Dépôt et livraison"
+          open={repoOpen || baseBranch.trim() === ""}
+          onToggle={() => setRepoOpen((open) => !open)}
           summary={
-            <div className="space-y-1">
-              <p>{normalizedGroup || "Sans groupe"}</p>
-              {identityOrigin && <p>{identityOrigin}</p>}
-              <p className="break-all">{repoPath}</p>
+            <div className="flex w-full flex-col gap-2">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+                <SummaryItem label="Hébergement">{VCS_PROVIDER_LABELS[vcsProvider]}</SummaryItem>
+                <SummaryItem label="Branche cible">{baseBranch || "À renseigner"}</SummaryItem>
+                {vcsProvider === "github" && (
+                  <SummaryItem label="Compte GitHub">{githubAccount ?? "Compte par défaut de la machine"}</SummaryItem>
+                )}
+                {project !== null && (
+                  <SummaryItem label="Délai de préparation">{timeoutValue} {unit}</SummaryItem>
+                )}
+              </div>
+              <code className="break-all text-xs">{repoPath}</code>
+              {identityOrigin && <p>Groupe {identityOrigin}</p>}
+              {deliveryOrigin && <p>{deliveryOrigin}</p>}
+              <p role="status" className={hint.className}>{hint.message}</p>
             </div>
           }
         >
@@ -517,25 +504,12 @@ export function ProjectPanel({
             Analyse du dépôt…
           </p>
         )}
-        </AdvancedSection>
-        <AdvancedSection
-          title="Livraison"
-          open={deliveryOpen || baseBranch.trim() === ""}
-          onToggle={() => setDeliveryOpen((open) => !open)}
-          summary={
-            <div className="space-y-1">
-              <p>{VCS_PROVIDER_LABELS[vcsProvider]} · {baseBranch || "Branche à renseigner"}{vcsProvider === "github" && ` · ${githubAccount ?? "compte de la machine"}`}</p>
-              {deliveryOrigin && <p>{deliveryOrigin}</p>}
-              <p role="status" className={hint.className}>{hint.message}</p>
-            </div>
-          }
-        >
         <Field label="Branche de base" hint={suggestionHint(inspection?.baseBranch, baseBranch)}>
           <div className="w-full" onFocus={() => void loadSavedBranches()}>
             <BranchCombobox
               id={BASE_BRANCH_INPUT_ID}
               value={baseBranch}
-              onChange={setBaseBranch}
+              onChange={(value) => { setRepoOpen(true); setBaseBranch(value); }}
               options={branchOptions}
               placeholder="main"
             />
@@ -604,26 +578,51 @@ export function ProjectPanel({
             </div>
           </Field>
         )}
-        </AdvancedSection>
         {project !== null && (
-          <>
-            <AdvancedSection
-              title="Réglages avancés"
-              open={advancedOpen}
-              summary={advancedSummary}
-              onToggle={() => setAdvancedOpen((open) => !open)}
-            >
-              {advancedFields}
-            </AdvancedSection>
+          <Field label="Délai de préparation (setup + installation)">
+            <div className="flex w-full items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                className="w-28"
+                value={timeoutValue}
+                onChange={(e) => setTimeoutValue(e.target.value)}
+              />
+              <Select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value === "s" ? "s" : "min")}
+                aria-label="Unité du délai"
+              >
+                {TIMEOUT_UNITS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </Field>
+        )}
+        </AdvancedSection>
+        {creating && (
+          <p className="text-xs text-muted-foreground">Validation, prévisualisations et audit se configurent après l’ajout du projet.</p>
+        )}
+        {project !== null && (
+          <section className="flex flex-col gap-3 pt-2">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Fonctions du projet</h3>
+              <p className="text-xs text-muted-foreground">Leur état reste visible. Chacune a sa propre portée d’enregistrement.</p>
+            </div>
             <ValidationConfigFields
               value={validation}
               onChange={changeValidation}
               startCommandHint={suggestionHint(validationInspection?.validationStartCommand, validation.startCommand)}
               composeFile={validationInspection?.composeFile ?? null}
+              pending={validationDirty}
             />
             <ProjectPreviewSettings key={project.key} project={project} />
-            <ProjectAuditSettings key={project.key} project={project} />
-          </>
+            <ProjectAuditSettings key={project.key} project={project} collapsible />
+          </section>
         )}
       </div>
 

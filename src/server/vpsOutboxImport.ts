@@ -8,7 +8,7 @@ import type { RemoteCardAdmissionDeps, RemoteCardsProfileResolution } from "./re
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
-const NO_PROFILE_REASON = "Aucun profil de cartes distantes sur le Mac : choisissez-le dans Réglages › MCP distant du Mac, puis renvoyez la carte.";
+const NO_PROFILE_REASON = "Aucun profil de cartes distantes sur le Mac : choisissez-le dans Réglages › MCP et accès distants › Cartes entrantes du Mac, puis renvoyez la carte.";
 const log = createLogger("vps-outbox-import");
 
 export interface VpsOutboxImportDeps extends RemoteCardAdmissionDeps {
@@ -24,7 +24,7 @@ function rejected(id: string, reason: string): OutboxAck {
 }
 
 function projectNotAllowedReason(project: string): string {
-  return `Projet non autorisé sur le Mac : ${project}. Cochez-le dans Réglages › MCP distant du Mac, puis renvoyez la carte.`;
+  return `Projet non autorisé sur le Mac : ${project}. Cochez-le dans Réglages › MCP et accès distants › Cartes entrantes du Mac, puis renvoyez la carte.`;
 }
 
 // NOTE(ali): the Mac-side admission of one VPS outbox item. Only the project, title and description are honoured; the project is

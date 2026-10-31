@@ -5,7 +5,7 @@ import type { CoolifyPrivateKey, PreviewGithubSourceResolution, PreviewProjectSe
 import type { ManagedProject } from "@shared/schemas";
 
 import { PreviewQualificationPanel } from "@/components/projects-settings/PreviewQualificationPanel";
-import { AdvancedSection } from "@/components/projects-settings/ProjectPanelParts";
+import { AdvancedSection, FeatureRow, type FeatureStatus } from "@/components/projects-settings/ProjectPanelParts";
 import { PreviewReadinessStatus } from "@/components/PreviewReadinessStatus";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,17 @@ import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
 import { previewApi } from "@/lib/previewApi";
 import { PREVIEW_DEPLOY_KEY_SOURCE_ERROR, PREVIEW_DEPLOY_KEY_SOURCE_LABELS, PREVIEW_GITHUB_SOURCE_ERROR, PREVIEW_GITHUB_SOURCE_LABELS, PREVIEW_PRIVATE_KEYS_ERROR } from "@/lib/previewDisplay";
 
+const PREVIEW_DESCRIPTION = "Un environnement temporaire par branche ou pull request, depuis son dernier commit.";
+const PREVIEW_UNSUPPORTED_MESSAGE = "Azure DevOps n'est pas disponible pour les prévisualisations. Son support est prévu en V2.";
+
+function previewStatus(supported: boolean, settings: PreviewProjectSettings | null, error: string | null): FeatureStatus {
+  if (!supported) return { label: "Non disponible", variant: "outline" };
+  if (settings === null) return error ? { label: "Indisponible", variant: "danger" } : { label: "Chargement…", variant: "outline" };
+  return settings.enabled ? { label: "Activées", variant: "success" } : { label: "Désactivées", variant: "outline" };
+}
+
 export function ProjectPreviewSettings({ project }: { project: ManagedProject }) {
+  const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<PreviewProjectSettings | null>(null);
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [accessOpen, setAccessOpen] = useState(false);
@@ -137,15 +147,19 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
   }
 
   return (
-    <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-1">
-          <h4 className="flex items-center gap-2 text-sm font-medium"><Cloud className="size-4 text-primary" />Prévisualisations Coolify</h4>
-          <p className="text-xs text-muted-foreground">Un environnement temporaire par branche ou pull request, depuis son dernier commit.</p>
-        </div>
+    <FeatureRow
+      title="Prévisualisations Coolify"
+      icon={<Cloud className="size-4 text-primary" />}
+      status={previewStatus(supported, settings, error)}
+      pending={dirty}
+      description={supported ? PREVIEW_DESCRIPTION : PREVIEW_UNSUPPORTED_MESSAGE}
+      open={open}
+      onToggle={() => setOpen((current) => !current)}
+    >
+      <label className="flex items-center gap-2 text-sm">
         <Switch aria-label="Activer les prévisualisations Coolify" checked={draft?.enabled ?? false} disabled={!supported || draft === null || busy} onCheckedChange={(enabled) => { if (draft !== null) setDraft({ ...draft, enabled }); }} />
-      </div>
-      {!supported && <p className="text-sm text-muted-foreground">Azure DevOps n'est pas disponible pour les prévisualisations. Son support est prévu en V2.</p>}
+        Activer les prévisualisations Coolify
+      </label>
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
       {supported && draft === null && !error && <p className="text-xs text-muted-foreground">Chargement…</p>}
       {supported && draft !== null && (
@@ -235,6 +249,6 @@ export function ProjectPreviewSettings({ project }: { project: ManagedProject })
           {preparationMessage && <p role="status" className="text-sm text-primary">{preparationMessage}</p>}
         </>
       )}
-    </section>
+    </FeatureRow>
   );
 }

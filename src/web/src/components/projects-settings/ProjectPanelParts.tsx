@@ -1,9 +1,10 @@
 import { ChevronRight, FolderOpen } from "lucide-react";
-import type { KeyboardEvent, ReactNode } from "react";
+import { useId, type KeyboardEvent, type ReactNode } from "react";
 
 import type { RepoInspectionSource } from "@shared/constants";
 import type { RepoInspection } from "@shared/schemas";
 
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Tabs, type TabOption } from "@/components/ui/tabs";
@@ -203,6 +204,15 @@ export function InspectionBanners({ inspection, onOpenExisting }: InspectionBann
   );
 }
 
+export function SummaryItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="min-w-0 text-sm text-foreground">{children}</span>
+    </div>
+  );
+}
+
 interface AdvancedSectionProps {
   open: boolean;
   summary: ReactNode;
@@ -231,6 +241,49 @@ export function AdvancedSection({ open, summary, title = "Avancé", onToggle, ch
         </button>
       </div>
       {open && children}
+    </section>
+  );
+}
+
+export interface FeatureStatus {
+  label: string;
+  variant: BadgeVariant;
+}
+
+interface FeatureRowProps {
+  title: string;
+  icon?: ReactNode;
+  status: FeatureStatus;
+  pending?: boolean;
+  description: string;
+  open: boolean;
+  toggleDisabled?: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+export function FeatureRow({ title, icon, status, pending = false, description, open, toggleDisabled = false, onToggle, children }: FeatureRowProps) {
+  const contentId = useId();
+  const toggleLabel = open ? "Replier" : "Configurer";
+  return (
+    <section className="border-t border-border py-4">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <h4 className="flex flex-wrap items-center gap-2 text-sm font-medium">
+            {icon}
+            {title}
+            <Badge variant={status.variant}>{status.label}</Badge>
+            {pending && <Badge variant="info">Non enregistré</Badge>}
+          </h4>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Button variant="outline" size="sm" disabled={toggleDisabled} aria-disabled={toggleDisabled} aria-expanded={open} aria-controls={contentId} aria-label={`${toggleLabel} : ${title}`} onClick={onToggle}>
+          {toggleLabel}
+        </Button>
+      </div>
+      <div id={contentId} hidden={!open} className="mt-4 space-y-3">
+        {children}
+      </div>
     </section>
   );
 }

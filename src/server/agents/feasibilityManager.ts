@@ -247,7 +247,7 @@ export class FeasibilityBatchManager {
     try {
       await assertExecutionAvailable(this.system, execution);
       if (this.stopped) return;
-      const releaseRemote = remote ? await admitRemoteAnalysis(this.store, execution.provider) : null;
+      const releaseRemote = remote ? await admitRemoteAnalysis(execution.provider) : null;
       if (this.stopped) {
         releaseRemote?.();
         return;
@@ -309,7 +309,7 @@ export class FeasibilityBatchManager {
     }
   }
 
-  /** A refused remote attempt (quota, sandbox probe) fails its cards at once, without relaunch. */
+  /** A refused remote attempt (failed sandbox probe) fails its cards at once, without relaunch. */
   private failRefused(ticketIds: string[], batchId: string, reason: string): void {
     for (const ticketId of ticketIds) {
       this.failTicket(ticketId, reason);

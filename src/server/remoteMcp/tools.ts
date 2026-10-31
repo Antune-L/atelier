@@ -17,10 +17,7 @@ import type { SystemAdapter } from "../system/types.ts";
 import { TicketOperationError, frozenAgentsOfProfile } from "../ticketOperations.ts";
 import type { FrozenTicketAgents, TicketOperations } from "../ticketOperations.ts";
 
-import { remoteMcpQuotaDay, remoteMcpQuotaResetAt } from "./quotaDay.ts";
-
 const REQUEST_ID_PREFIX = "mcp:";
-const CREATIONS_COUNTER = "creations";
 const MAX_PROJECT_KEY_LENGTH = 128;
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 20_000;
@@ -42,7 +39,7 @@ const ERROR_MESSAGES = {
   internal: "internal server error",
 } as const;
 
-type RemoteMcpOutcome = "ok" | "replay" | "invalid_input" | "denied" | "conflict" | "quota_exhausted" | "unavailable" | "error";
+type RemoteMcpOutcome = "ok" | "replay" | "invalid_input" | "denied" | "conflict" | "unavailable" | "error";
 
 const projectKeySchema = z.string().min(1).max(MAX_PROJECT_KEY_LENGTH).describe("Key of a project returned by list_projects.");
 const columnSchema = z.enum(COLUMNS);
@@ -113,7 +110,6 @@ export interface RemoteMcpToolsDeps {
   operations: TicketOperations;
   system: Pick<SystemAdapter, "checkCodexRuntime" | "checkClaudeAvailable">;
   composerAvailable: boolean;
-  dailyCreations: number;
   now?: () => number;
 }
 
@@ -271,22 +267,11 @@ class RemoteMcpTools {
     return frozenAgentsOfProfile(profile);
   }
 
-  private assertCreationQuota(requestKey: string): void {
-    if (this.hasCreationRequest(requestKey)) return;
-    const now = this.now();
-    if (this.deps.store.remoteMcpCount(remoteMcpQuotaDay(now), CREATIONS_COUNTER) < this.deps.dailyCreations) return;
-    const resetAt = new Date(remoteMcpQuotaResetAt(now)).toISOString();
-    throw new RemoteToolError("QUOTA_EXHAUSTED", `daily card creation quota reached; it resets at ${resetAt}`, "quota_exhausted");
-  }
-
   private async createTodoTicket(input: z.infer<typeof createTodoTicketInputSchema>): Promise<{ created: boolean; ticket: Ticket }> {
     this.assertAllowed(input.project);
     const requestKey = `${REQUEST_ID_PREFIX}${input.requestId}`;
-    this.assertCreationQuota(requestKey);
     const frozenAgents = this.hasCreationRequest(requestKey) ? undefined : await this.resolveProfileAgents();
-    // NOTE(ali): from the quota check to the counter increment everything stays synchronous, so concurrent calls cannot overshoot the quota.
     this.assertAllowed(input.project);
-    this.assertCreationQuota(requestKey);
     const replayedTicketId = this.creationRequestTicketId(requestKey);
     if (replayedTicketId !== null && this.deps.store.getTicket(replayedTicketId) === null) {
       throw new RemoteToolError("CONFLICT", ERROR_MESSAGES.requestConflict, "conflict");
@@ -294,10 +279,7 @@ class RemoteMcpTools {
     const result = this.createOrReplay({ ...input, requestId: requestKey }, frozenAgents);
     const ticket = this.deps.store.getTicket(result.ticket.id);
     if (ticket === null) throw new Error("remote ticket missing after creation");
-    if (result.created) {
-      this.deps.store.remoteMcpIncrement(remoteMcpQuotaDay(this.now()), CREATIONS_COUNTER);
-      return { created: true, ticket };
-    }
+    if (result.created) return { created: true, ticket };
     if (!isRemoteTicket(ticket) || !this.allowedProjects().has(ticket.project)) {
       throw new RemoteToolError("CONFLICT", ERROR_MESSAGES.requestConflict, "conflict");
     }

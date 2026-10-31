@@ -70,7 +70,6 @@ export class ReformulateManager {
       if (remote && !this.system.dryRun) {
         // A remote card reads its own isolated copy, never the shared snapshot.
         lease = await acquireRemoteAnalysisCopy({
-          store: this.store,
           system: this.system,
           repoMutex: this.snapshots.repoMutex,
           provider: execution.provider,

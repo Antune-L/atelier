@@ -26,8 +26,6 @@ const JSON_RPC_INVALID_REQUEST = -32600;
 
 const log = createLogger("remote-mcp");
 
-export type RemoteMcpListenerDeps = Omit<RemoteMcpToolsDeps, "dailyCreations">;
-
 export interface RemoteMcpListener {
   port: number;
   stop(): Promise<void>;
@@ -73,8 +71,7 @@ function parseSingleMessage(body: string): { message: unknown } | { error: Respo
   return { message };
 }
 
-export function createRemoteMcpHandler(config: RemoteMcpConfig, deps: RemoteMcpListenerDeps, verifier: AccessJwtVerifier) {
-  const toolsDeps: RemoteMcpToolsDeps = { ...deps, dailyCreations: config.dailyCreations };
+export function createRemoteMcpHandler(config: RemoteMcpConfig, deps: RemoteMcpToolsDeps, verifier: AccessJwtVerifier) {
   return async (request: Request, peerAddress: string | null): Promise<Response> => {
     if (peerAddress === null || !isLoopbackHost(peerAddress)) return errorResponse(HTTP_FORBIDDEN, "forbidden");
     if (request.headers.get("host")?.toLowerCase() !== config.hostname) return errorResponse(HTTP_FORBIDDEN, "forbidden");
@@ -88,12 +85,12 @@ export function createRemoteMcpHandler(config: RemoteMcpConfig, deps: RemoteMcpL
     }
     const parsed = parseSingleMessage(body);
     if ("error" in parsed) return parsed.error;
-    return serveStatelessMcp(createRemoteMcpServer(toolsDeps), request, parsed.message);
+    return serveStatelessMcp(createRemoteMcpServer(deps), request, parsed.message);
   };
 }
 
 /** Starts the dedicated remote MCP listener on 127.0.0.1; null when the port cannot be bound. */
-export function startRemoteMcpListener(config: RemoteMcpConfig, deps: RemoteMcpListenerDeps): RemoteMcpListener | null {
+export function startRemoteMcpListener(config: RemoteMcpConfig, deps: RemoteMcpToolsDeps): RemoteMcpListener | null {
   const verifier = new AccessJwtVerifier({ teamDomain: config.teamDomain, aud: config.aud });
   const handle = createRemoteMcpHandler(config, deps, verifier);
   let server: Server<undefined>;

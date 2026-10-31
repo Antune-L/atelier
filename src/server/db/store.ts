@@ -41,7 +41,7 @@ import {
   TRIAGE_MODEL_META_KEY,
 } from "../../shared/constants.ts";
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
-import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, RemoteMcpCounterKind, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
+import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
@@ -1873,18 +1873,7 @@ export class Store {
       .run(id, REMOTE_TICKET_ORIGIN);
   }
 
-  // ---- Remote MCP admission: daily counters and call journal ----
-
-  remoteMcpCount(day: string, kind: RemoteMcpCounterKind): number {
-    return this.scalar("SELECT count AS n FROM remote_mcp_counters WHERE day = ? AND kind = ?", day, kind);
-  }
-
-  remoteMcpIncrement(day: string, kind: RemoteMcpCounterKind): number {
-    this.db
-      .query("INSERT INTO remote_mcp_counters (day, kind, count) VALUES (?, ?, 1) ON CONFLICT(day, kind) DO UPDATE SET count = count + 1")
-      .run(day, kind);
-    return this.remoteMcpCount(day, kind);
-  }
+  // ---- Remote MCP call journal ----
 
   recordRemoteMcpCall(call: RemoteMcpCallInput): void {
     this.db

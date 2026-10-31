@@ -4,8 +4,6 @@ import { createLogger } from "../logger.ts";
 
 const MIN_PORT = 1;
 const MAX_PORT = 65_535;
-const DEFAULT_DAILY_CREATIONS = 20;
-const MAX_DAILY_CREATIONS = 10_000;
 const MAX_AUD_LENGTH = 256;
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const AUD_PATTERN = /^[A-Za-z0-9]+$/;
@@ -16,12 +14,11 @@ export const REMOTE_MCP_ENV = {
   hostname: "KANBAN_REMOTE_MCP_HOSTNAME",
   teamDomain: "KANBAN_REMOTE_MCP_ACCESS_TEAM_DOMAIN",
   aud: "KANBAN_REMOTE_MCP_ACCESS_AUD",
-  dailyCreations: "KANBAN_REMOTE_MCP_DAILY_CREATIONS",
 } as const;
 
 const REQUIRED_KEYS = [REMOTE_MCP_ENV.port, REMOTE_MCP_ENV.hostname, REMOTE_MCP_ENV.teamDomain, REMOTE_MCP_ENV.aud];
 
-export const decimalSchema = (min: number, max: number) => z.string()
+const decimalSchema = (min: number, max: number) => z.string()
   .regex(DECIMAL_PATTERN)
   .transform(Number)
   .pipe(z.number().int().min(min).max(max));
@@ -33,7 +30,6 @@ const remoteMcpConfigSchema = z.object({
   hostname: hostnameSchema,
   teamDomain: hostnameSchema,
   aud: z.string().min(1).max(MAX_AUD_LENGTH).regex(AUD_PATTERN),
-  dailyCreations: decimalSchema(1, MAX_DAILY_CREATIONS).default(DEFAULT_DAILY_CREATIONS),
 });
 
 export type RemoteMcpConfig = z.infer<typeof remoteMcpConfigSchema>;
@@ -58,7 +54,6 @@ export function readRemoteMcpConfig(env: Record<string, string | undefined> = pr
     hostname: envValue(env, REMOTE_MCP_ENV.hostname),
     teamDomain: envValue(env, REMOTE_MCP_ENV.teamDomain),
     aud: envValue(env, REMOTE_MCP_ENV.aud),
-    dailyCreations: envValue(env, REMOTE_MCP_ENV.dailyCreations),
   });
   if (!parsed.success) {
     const invalid = [...new Set(parsed.error.issues.map((issue) => String(issue.path[0] ?? "")))];

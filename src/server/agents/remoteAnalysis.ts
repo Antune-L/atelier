@@ -1,7 +1,7 @@
 /**
- * Admission of analyses of remote cards (created through the remote MCP listener): the daily
- * attempt quota, one remote analysis at a time, the analysis engine, and the image copies placed
- * in the run's isolated workspace.
+ * Admission of analyses of remote cards (created through the remote MCP listener): one remote
+ * analysis at a time, the analysis engine, and the image copies placed in the run's isolated
+ * workspace.
  */
 
 import { copyFile, mkdir, realpath, stat } from "node:fs/promises";
@@ -11,19 +11,12 @@ import type { Orchestrator } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { PROJECT_ROOT } from "../config.ts";
-import type { Store } from "../db/store.ts";
 import type { KeyedMutex } from "../mutex.ts";
-import { decimalSchema } from "../remoteMcp/config.ts";
-import { remoteMcpQuotaDay, remoteMcpQuotaResetTimeUtc } from "../remoteMcp/quotaDay.ts";
 import { ensureCodexConfinedSandbox } from "../remoteMcp/sandboxMonitor.ts";
 import { UPLOADS_DIR } from "../uploads.ts";
 
 import { prepareAnalysisWorkspace, releaseAnalysisWorkspace } from "./analysisWorkspace.ts";
 import type { AnalysisSystem } from "./analysisWorkspace.ts";
-
-export const REMOTE_ANALYSES_ENV = "KANBAN_REMOTE_MCP_DAILY_ANALYSES";
-const DEFAULT_DAILY_ANALYSES = 10;
-const MAX_DAILY_ANALYSES = 10_000;
 
 const COPIED_IMAGES_DIR = ".kanban-remote-images";
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -32,20 +25,13 @@ const UPLOADS_URL_PREFIX = `/${UPLOADS_DIR}/`;
 const MAX_COPIED_IMAGES = 10;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
-/** A refused remote analysis (quota, failed sandbox probe): final for this attempt, never retried. */
+/** A refused remote analysis (failed sandbox probe): final for this attempt, never retried. */
 export class RemoteAnalysisRefusedError extends Error {}
-
-export type RemoteAnalysisStore = Pick<Store, "remoteMcpCount" | "remoteMcpIncrement">;
 
 /** Remote cards reformulate and split on their analysis engine, never on a later-edited orchestrator. */
 export function withRemoteAnalysisEngine(ticket: Ticket): Ticket {
   if (!isRemoteTicket(ticket)) return ticket;
   return { ...ticket, orchestrator: ticket.feasibilityEngine ?? ticket.orchestrator };
-}
-
-export function remoteDailyAnalysesLimit(environment: Record<string, string | undefined> = process.env): number {
-  const parsed = decimalSchema(1, MAX_DAILY_ANALYSES).safeParse(environment[REMOTE_ANALYSES_ENV]?.trim());
-  return parsed.success ? parsed.data : DEFAULT_DAILY_ANALYSES;
 }
 
 const waiters: Array<() => void> = [];
@@ -71,23 +57,15 @@ function acquireRemoteAnalysisSlot(): Promise<() => void> {
 
 /**
  * Admit one real analysis attempt of a remote card: waits for the single remote slot, runs a Codex
- * attempt only once the confined sandbox probe passed (waiting for or running it), then counts the
- * attempt against the daily quota. Returns the slot release, to call when the attempt settles;
- * throws a French message when refused.
+ * attempt only once the confined sandbox probe passed (waiting for or running it). Returns the slot
+ * release, to call when the attempt settles; throws a French message when refused.
  */
-export async function admitRemoteAnalysis(store: RemoteAnalysisStore, provider: Orchestrator, now: () => number = Date.now): Promise<() => void> {
+export async function admitRemoteAnalysis(provider: Orchestrator): Promise<() => void> {
   const release = await acquireRemoteAnalysisSlot();
   try {
     if (provider === "codex" && !(await ensureCodexConfinedSandbox())) {
       throw new RemoteAnalysisRefusedError("Analyse distante refusée : le bac à sable Codex confiné n'est pas vérifié (vérification échouée ou impossible).");
     }
-    const at = now();
-    const day = remoteMcpQuotaDay(at);
-    const limit = remoteDailyAnalysesLimit();
-    if (store.remoteMcpCount(day, "analyses") >= limit) {
-      throw new RemoteAnalysisRefusedError(`Quota quotidien d'analyses distantes épuisé (${limit}) : reprise à ${remoteMcpQuotaResetTimeUtc(at)}.`);
-    }
-    store.remoteMcpIncrement(day, "analyses");
     return release;
   } catch (error) {
     release();
@@ -101,7 +79,6 @@ export interface RemoteAnalysisCopy {
 }
 
 export interface RemoteAnalysisCopyInput {
-  store: RemoteAnalysisStore;
   system: AnalysisSystem;
   repoMutex: KeyedMutex;
   provider: Orchestrator;
@@ -115,8 +92,8 @@ export interface RemoteAnalysisCopyInput {
  * snapshot or the main checkout). `release` frees the copy and the remote slot.
  */
 export async function acquireRemoteAnalysisCopy(input: RemoteAnalysisCopyInput): Promise<RemoteAnalysisCopy> {
-  const { store, system, repoMutex, provider, repoPath, baseBranch, key } = input;
-  const releaseRemote = await admitRemoteAnalysis(store, provider);
+  const { system, repoMutex, provider, repoPath, baseBranch, key } = input;
+  const releaseRemote = await admitRemoteAnalysis(provider);
   try {
     const workspace = await prepareAnalysisWorkspace(system, repoMutex, repoPath, baseBranch, key);
     return {

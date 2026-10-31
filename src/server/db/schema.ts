@@ -461,12 +461,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS quality_iterations_active_pr_idx ON quality_it
   WHERE pr_url IS NOT NULL AND status IN ('queued', 'correcting', 'verifying');
 CREATE INDEX IF NOT EXISTS quality_iterations_ticket_idx ON quality_iterations(ticket_id, created_at);
 
-CREATE TABLE IF NOT EXISTS remote_mcp_counters (
-  day TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  count INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (day, kind)
-);
+DROP TABLE IF EXISTS remote_mcp_counters;
 
 CREATE TABLE IF NOT EXISTS remote_mcp_calls (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

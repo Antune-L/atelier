@@ -109,7 +109,7 @@ export class TriageManager {
       await assertExecutionAvailable(this.system, execution);
       const driver = execution.provider;
       const remote = isRemoteTicket(ticket);
-      if (remote) releaseRemote = await admitRemoteAnalysis(this.store, driver);
+      if (remote) releaseRemote = await admitRemoteAnalysis(driver);
       const workspace = await prepareAnalysisWorkspace(this.system, this.repoMutex, project.repoPath, baseBranch, ticketId);
       if (this.stopped) {
         void releaseAnalysisWorkspace(this.system, this.repoMutex, workspace);

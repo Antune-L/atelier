@@ -283,8 +283,8 @@ The second command caches the pinned Playwright MCP for the `kanban` user, becau
 This lets Claude Code or Codex on the Mac list projects and cards and create TODO cards on the VPS board, through a dedicated listener behind Cloudflare Access Managed OAuth. It is independent of Phase B. The Cloudflare side, the Mac clients and the kill switch are in [vps-remote-access.md](./vps-remote-access.md#remote-mcp-milestone-1), which must already be done up to step 12 for the board.
 
 What the VPS adds:
-- A second listener on `127.0.0.1:<mcp-port>`, started only when the four `KANBAN_REMOTE_MCP_*` connection lines below are set. It never starts on the Mac or in tests.
-- Only the projects you allow are visible, every card it creates is marked remote and waits for your approval before any start, and daily quotas cap creations and analyses (reset at midnight UTC).
+- A second listener on `127.0.0.1:<mcp-port>`, started only when the four `KANBAN_REMOTE_MCP_*` lines below are set. It never starts on the Mac or in tests.
+- Only the projects you allow are visible, and every card it creates is marked remote and waits for your approval before any start. Remote analyses run one at a time.
 - Analyses of remote cards run confined, with the engine of the remote cards profile. With Codex, that needs the bubblewrap sandbox: `/health` reports its probe as `remoteMcp.sandbox`.
 
 ### M1. Engines: Claude only, Codex only, or both
@@ -310,11 +310,9 @@ KANBAN_REMOTE_MCP_PORT=<mcp-port>
 KANBAN_REMOTE_MCP_HOSTNAME=<mcp-host>
 KANBAN_REMOTE_MCP_ACCESS_TEAM_DOMAIN=<team>.cloudflareaccess.com
 KANBAN_REMOTE_MCP_ACCESS_AUD=<mcp-aud>
-KANBAN_REMOTE_MCP_DAILY_CREATIONS=20
-KANBAN_REMOTE_MCP_DAILY_ANALYSES=10
 ```
 
-The last two lines are the defaults and can be omitted. `<mcp-aud>` is the AUD tag of the MCP application, not the board's.
+If `/etc/kanban/kanban.env` still has `KANBAN_REMOTE_MCP_DAILY_CREATIONS` or `KANBAN_REMOTE_MCP_DAILY_ANALYSES` lines from an earlier release, remove them: they are ignored. `<mcp-aud>` is the AUD tag of the MCP application, not the board's.
 
 Reinstall `kanban-upgrade` from the reviewed commit, so the upgrade checks the remote MCP (A3), then restart:
 
@@ -362,7 +360,7 @@ An automatic rollback by `kanban-upgrade` after a failed remote MCP check only r
 
 ### M6. Accepted limits
 
-- Codex on the Mac in full-access mode calls `create_todo_ticket` without asking you. Claude Code is asked to confirm it, because the tool is marked as requiring user interaction. The server-side guards (allow-list, approval, quotas, confinement) carry the security.
+- Codex on the Mac in full-access mode calls `create_todo_ticket` without asking you. Claude Code is asked to confirm it, because the tool is marked as requiring user interaction. The server-side guards (owner-only Access, allow-list, approval, confinement) carry the security.
 - Processes of the `kanban` user, agents included, can change the allowed projects, approvals and remote cards profile: they reach the same socket and database as the service.
 - Logins expire about every 2 weeks per client and must be redone on the Mac.
 - Cloudflare terminates TLS and sees the MCP traffic.
@@ -373,7 +371,7 @@ Record the delivered revision, the commands run, and the positive and negative r
 
 - `kanban-upgrade` passes the remote MCP checks: local `401` without assertion, local `GET` `405`, public `401`, sandbox not `failed`.
 - For each client used (Claude Code, Codex, or both): OAuth login with the exact Google account and the Access second factor; tool discovery shows exactly `list_projects`, `list_tickets` and `create_todo_ticket`; a creation in the allowed test project works; a replay with the same `requestId` returns the same card without a duplicate.
-- Refusals: a project that is not allowed, an unknown field, another path, `GET` or `DELETE` on `/mcp`, another Google account, a login without the second factor, and a call over quota (the error gives the reset time).
+- Refusals: a project that is not allowed, an unknown field, another path, `GET` or `DELETE` on `/mcp`, another Google account, and a login without the second factor.
 - A remote card shows **distant** and **approbation requise**, cannot start before **Approuver le démarrage**, and shows **approbation requise** again when its title or description is edited.
 - The engine of the profile analyses a trapped TODO on the real VPS: it gives a verdict without reading a witness file outside its confined copy and without network access.
 - The origin receives the Access assertion and `cloudflared` validates it: a call through `<mcp-host>` with a valid login succeeds, the same call on the local port without assertion gets `401`.

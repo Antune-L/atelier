@@ -319,8 +319,6 @@ export type Kind = (typeof KINDS)[number];
 export const TICKET_ORIGINS = ["remote"] as const;
 export type TicketOrigin = (typeof TICKET_ORIGINS)[number];
 export const REMOTE_TICKET_ORIGIN = "remote" satisfies TicketOrigin;
-export const REMOTE_MCP_COUNTER_KINDS = ["creations", "analyses"] as const;
-export type RemoteMcpCounterKind = (typeof REMOTE_MCP_COUNTER_KINDS)[number];
 
 /** Local branch suffix for a clean (PR cleaner) worktree: keeps it distinct from the PR head branch (which may already be checked out in another worktree) while still pushing back to the PR head. */
 export const CLEANER_BRANCH_SUFFIX = "-cleaner";

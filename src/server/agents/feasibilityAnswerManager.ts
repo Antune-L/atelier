@@ -107,7 +107,6 @@ export class FeasibilityAnswerManager {
         if (remote && !this.system.dryRun && isProjectKey(ticket.project)) {
           // A remote card is answered on its own isolated copy, never on the main checkout.
           isolation.copy = await acquireRemoteAnalysisCopy({
-            store: this.store,
             system: this.system,
             repoMutex: this.repoMutex,
             provider: execution.provider,

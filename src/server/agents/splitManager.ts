@@ -94,7 +94,6 @@ export class SplitManager {
       await assertExecutionAvailable(this.system, execution);
       if (remote) {
         lease = await acquireRemoteAnalysisCopy({
-          store: this.store,
           system: this.system,
           repoMutex: this.snapshots.repoMutex,
           provider: driver,

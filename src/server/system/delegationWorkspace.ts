@@ -93,6 +93,14 @@ const ARCHIVE_CONTENT = "worktree";
 const ARCHIVE_BUNDLE = "repository.bundle";
 const ARCHIVE_JOURNAL = "journal.json";
 const ARCHIVE_DIRECTORY_MODE = 0o700;
+const ARCHIVE_KEY_PATTERN = /^[a-f0-9]{64}$/;
+const ARCHIVE_RETENTION_PER_TICKET = 3;
+const ARCHIVE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+// Installed dependencies are regenerable: they are neither archived nor fingerprinted, at any depth.
+function isArchiveExcluded(name: string, atRoot: boolean): boolean {
+  return name === DEPENDENCIES_DIR || (atRoot && name === ".git");
+}
 
 function isValidRelativePath(path: string): boolean {
   return Boolean(path) && !isAbsolute(path) && !path.includes("\\")
@@ -269,12 +277,12 @@ async function snapshot(root: string, paths: Iterable<string>): Promise<Map<stri
   return states;
 }
 
-async function archiveFingerprint(root: string): Promise<string> {
+export async function archiveFingerprint(root: string): Promise<string> {
   const hash = createHash("sha256");
   async function visit(directory: string, relative: string): Promise<void> {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (!relative && entry.name === ".git") continue;
+      if (isArchiveExcluded(entry.name, !relative)) continue;
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       const info = await lstat(join(root, path));
       hash.update(JSON.stringify([path, info.mode & FILE_MODE_MASK]));
@@ -290,11 +298,13 @@ async function archiveFingerprint(root: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function copyArchiveContents(source: string, target: string): Promise<void> {
+export async function copyArchiveContents(source: string, target: string): Promise<void> {
   await mkdir(target, { recursive: true });
   for (const entry of await readdir(source)) {
-    if (entry === ".git") continue;
-    await cp(join(source, entry), join(target, entry), { recursive: true, verbatimSymlinks: true });
+    if (isArchiveExcluded(entry, true)) continue;
+    await cp(join(source, entry), join(target, entry), {
+      recursive: true, verbatimSymlinks: true, filter: (path) => !isArchiveExcluded(basename(path), false),
+    });
   }
 }
 
@@ -333,6 +343,10 @@ const archiveManifestSchema = z.object({
   head: z.string().nullable(), createdAt: z.number(),
 });
 
+/**
+ * Restores a recovery archive into `destination`. The restored content has no `node_modules`:
+ * the caller must run `bun install` in the destination afterwards.
+ */
 export async function restoreImplementationRecoveryArchive(archivePath: string, destination: string): Promise<void> {
   if (await lstatIfExists(destination)) throw new Error("La destination de restauration existe déjà.");
   const manifest = archiveManifestSchema.parse(JSON.parse(await readFile(join(archivePath, ARCHIVE_MANIFEST), "utf8")));
@@ -350,6 +364,54 @@ export async function restoreImplementationRecoveryArchive(archivePath: string, 
   if (await archiveFingerprint(destination) !== manifest.contentFingerprint) {
     throw new Error("La restauration ne correspond pas au contenu préservé.");
   }
+}
+
+/**
+ * Deletes this slot's archives beyond the most recent ones of their ticket or older than the retention
+ * window. Only archives whose bundle verifies are deleted; `keepPath` is never touched.
+ * Must run under the slot lock; errors are swallowed per archive.
+ */
+export async function pruneImplementationRecoveryArchives(root: string, slotPath: string, keepPath: string, now = Date.now()): Promise<string[]> {
+  const groups = new Map<string, { path: string; manifest: z.infer<typeof archiveManifestSchema> }[]>();
+  for (const name of await readdirIfExists(root)) {
+    if (!ARCHIVE_KEY_PATTERN.test(name)) continue;
+    const path = join(root, name);
+    try {
+      const info = await lstat(path);
+      if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      const parsed = archiveManifestSchema.safeParse(safeJsonParse(await readFile(join(path, ARCHIVE_MANIFEST), "utf8")));
+      if (!parsed.success || resolve(parsed.data.originalSlot) !== resolve(slotPath)) continue;
+      const group = groups.get(parsed.data.ticketId) ?? [];
+      group.push({ path, manifest: parsed.data });
+      groups.set(parsed.data.ticketId, group);
+    } catch {
+      continue;
+    }
+  }
+  const removed: string[] = [];
+  for (const group of groups.values()) {
+    group.sort((left, right) => right.manifest.createdAt - left.manifest.createdAt);
+    for (const [index, { path, manifest }] of group.entries()) {
+      if (resolve(path) === resolve(keepPath) || !manifest.head) continue;
+      if (index < ARCHIVE_RETENTION_PER_TICKET && now - manifest.createdAt <= ARCHIVE_RETENTION_MS) continue;
+      try {
+        await verifyArchiveBundle(path, manifest.head);
+        await rm(path, { recursive: true, force: true });
+        removed.push(path);
+      } catch {
+        continue;
+      }
+    }
+  }
+  if (removed.length) {
+    try {
+      const directory = await open(root, "r");
+      try { await directory.sync(); } finally { await directory.close(); }
+    } catch {
+      // Best-effort sync: the deletions already happened.
+    }
+  }
+  return removed;
 }
 
 async function ensureParentDirectory(root: string, path: string, create: boolean): Promise<void> {
@@ -1000,6 +1062,7 @@ export class DelegationWorkspace {
       || (journalHash && createHash("sha256").update(await readFile(`${cwd}${JOURNAL_SUFFIX}`)).digest("hex") !== journalHash)) {
       throw new Error("Le lot a changé après sa préservation ; nettoyage refusé.");
     }
+    await pruneImplementationRecoveryArchives(root, slotPath, archivePath).catch(() => []);
     return {
       ticketId: manifest.ticketId, label: manifest.label, cycleId: manifest.cycleId,
       archivePath, journalPath: journal ? join(archivePath, ARCHIVE_JOURNAL) : null, verified: true, unchanged: false,

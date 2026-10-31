@@ -16,7 +16,6 @@ import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import type { TicketTab } from "@/components/ticket-detail/TicketTabs";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
-import { useCapabilities } from "@/hooks/useCapabilities";
 import { REVIEW_FLAG_LABELS, formatDateTime } from "@/lib/display";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 
@@ -78,7 +77,6 @@ function formatErrorDetails(details: ErrorDetails): string {
 }
 
 export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: OverviewTabProps) {
-  const { prOnly } = useCapabilities();
   const isTodo = ticket.column === "todo";
   const showSummary = ticket.agentSummary !== null && SUMMARY_COLUMNS.includes(ticket.column);
   const recordedModels = [...new Set(Object.values(ticket.sessionUsage).flatMap((usage) => Object.keys(usage)))];
@@ -86,7 +84,6 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
   if (ticket.autoMerge || (ticket.autonomous && ticket.autonomousDelivery === "merge")) requestedDelivery = "Fusion après contrôles";
   if (ticket.stealth) requestedDelivery = "Relecture locale avant création de PR";
   if (ticket.directPush) requestedDelivery = "Push direct sur la branche de base";
-  const effectiveDelivery = prOnly ? "PR uniquement sur cet hôte" : requestedDelivery;
 
   return (
     <div className="space-y-5 pb-4">
@@ -109,7 +106,6 @@ export function OverviewTab({ ticket, projects, locked, onNavigate, triage }: Ov
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>Proposition de modification</span>{ticket.prUrl !== null ? <a href={ticket.prUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">{ticket.prNumber === null ? "Ouvrir la PR" : `Ouvrir la PR #${ticket.prNumber}`}<ExternalLink className="size-3.5" aria-hidden /></a> : <span className="text-muted-foreground">Aucune PR associée</span>}</div>
         {ticket.reviewLevel && <ReviewLevelRow ticket={ticket} level={ticket.reviewLevel} />}
         <div className="flex flex-wrap justify-between gap-2 text-sm"><span>Livraison demandée</span><span>{requestedDelivery}</span></div>
-        <div className="flex flex-wrap justify-between gap-2 text-sm"><span>Mode effectif de cet hôte</span><span>{effectiveDelivery}</span></div>
         {ticket.column === "merged" ? <p className="text-xs text-muted-foreground">Le ticket est marqué comme fusionné. Ce statut reste distinct des preuves de validation.</p> : <p className="text-xs text-muted-foreground">La présence d’une PR ne confirme pas la validation ni la possibilité de fusion. Les réserves sont dans Contrôles.</p>}
         {ticket.column !== "todo" && <Button variant="outline" size="sm" onClick={() => onNavigate("validation")}>Voir les preuves et réserves</Button>}
       </section>}

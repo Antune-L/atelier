@@ -15,7 +15,6 @@ import type { OpenPr, RepoInspection, SkillStatus, VcsConnectionResult } from ".
 import { SKILL_MANIFEST_FILE, SKILL_REQUIREMENTS } from "../../shared/skills.ts";
 import type { CodexRuntimeStatus } from "../../shared/codexCapabilities.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
-import { isCloudHost, PR_ONLY_MESSAGE } from "../hostRole.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
@@ -1433,16 +1432,6 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   async mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
-    // Sole guard of the automatic merge paths (auto-merge, autonomous delivery) on a cloud host.
-    if (isCloudHost()) return { ok: false, reason: PR_ONLY_MESSAGE };
-    return this.mergeAndDeleteBranch(slotPath, branch, prUrl, provider, expected);
-  }
-
-  async mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
-    return this.mergeAndDeleteBranch(slotPath, branch, prUrl, provider);
-  }
-
-  private async mergeAndDeleteBranch(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult> {
     const account = await githubAccountGate(slotPath);
     if (account) return account;
     const merged = await this.vcs(provider).mergePr(slotPath, prUrl, expected);

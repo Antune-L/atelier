@@ -725,11 +725,6 @@ export class FakeSystemAdapter implements SystemAdapter {
     return this.vcs(provider).mergePr(slotPath, prUrl, expected);
   }
 
-  async mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult> {
-    this.log("mergePrOnUserRequest", { slotPath, branch, prUrl });
-    return this.vcs(provider).mergePr(slotPath, prUrl);
-  }
-
   async readPr(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrSnapshot> {
     this.log("readPr", { repoPath, prUrl });
     return this.vcs(provider).readPr(repoPath, prUrl);

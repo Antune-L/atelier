@@ -501,11 +501,6 @@ export interface SystemAdapter {
   // ---- auto-merge (opt-in per ticket) ----
   /** Mark the PR ready (no-op if already), merge it into its base branch, and delete its remote branch. */
   mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider, expected?: MergePrExpectation): Promise<DoneGateResult>;
-  /**
-   * Same merge as `mergePr`, triggered by the user's "Merger la PR" button. It is the only merge
-   * path still allowed on a cloud host, so only the manual `POST /tickets/:id/merge` route may call it.
-   */
-  mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   readPr(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrSnapshot>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
 

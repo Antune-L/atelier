@@ -76,7 +76,7 @@ import type { TriageManager } from "./agents/triageManager.ts";
 import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import type { VpsUpdateAction, VpsUpdateStatus } from "../shared/vpsUpdate.ts";
-import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
+import { isCloudHost } from "./hostRole.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
 import { withSiblingGroup } from "./system/repoInspection.ts";
@@ -130,7 +130,7 @@ interface PaneReader {
   testVcsConnection(repoPath: string, provider: VcsProvider): Promise<VcsConnectionResult>;
   inspectRepo(repoPath: string, context: RepoInspectionContext): Promise<Omit<RepoInspection, "existingProjectKey">>;
   readPrMergeability(repoPath: string, prUrl: string, provider: VcsProvider): Promise<PrMergeability>;
-  mergePrOnUserRequest(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
+  mergePr(slotPath: string, branch: string, prUrl: string, provider: VcsProvider): Promise<DoneGateResult>;
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
@@ -437,10 +437,7 @@ async function failSplitMother(deps: RouteDeps, ticket: Ticket, reason: string):
   hub.pushTicket(failed);
 }
 
-/**
- * Default pipeline toggles a split child inherits (the family runs auto-merge stacked PRs). A cloud
- * host only delivers PRs, so its children start without auto-merge or direct push.
- */
+/** Default pipeline toggles a split child inherits (the family runs auto-merge stacked PRs). */
 function splitChildDefaults(ticket: Ticket): Pick<
   NewTicket,
   | "externalUrl"
@@ -474,7 +471,7 @@ function splitChildDefaults(ticket: Ticket): Pick<
     project: ticket.project,
     prdEnabled: false,
     prDraft: true,
-    autoMerge: !isCloudHost(),
+    autoMerge: true,
     addScreenshots: false,
     verifyFeature: false,
     argusMultiLoop: false,
@@ -941,8 +938,6 @@ function createAtelierRoutes(deps: RouteDeps) {
       const { options, start } = parsed.data;
       const pairError = agentPairError(set, options.orchestrator, options.implementer);
       if (pairError) return pairError;
-      const deliveryError = deliveryPolicyError(options);
-      if (deliveryError) return jsonError(set, HTTP_BAD_REQUEST, deliveryError);
       const drafts = prdCardDrafts(record.document, parsed.data);
       if (typeof drafts === "string") return jsonError(set, HTTP_BAD_REQUEST, drafts);
       const overrides = new Map<string, NonNullable<CreateTicketsFromPrdInput["overrides"]>[number]>();
@@ -1305,7 +1300,7 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultCodexFast: MODELS.codexFast,
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
         canPickFolder: deps.pickFolder != null,
-        prOnly: isCloudHost(),
+        cloudHost: isCloudHost(),
         githubAvailable: await deps.system.checkGithubAvailable(),
         skills: await deps.system.checkSkills(),
       };
@@ -1512,9 +1507,6 @@ export function createApiRoutes(deps: RouteDeps) {
       if (blankTitleRows.length > 0) {
         return jsonError(set, HTTP_BAD_REQUEST, `titre manquant aux lignes : ${blankTitleRows.join(", ")}`);
       }
-      const deliveryError = deliveryPolicyError(input);
-      if (deliveryError) return jsonError(set, HTTP_BAD_REQUEST, deliveryError);
-
       const directPush = input.directPush;
       const resultingStealth = directPush ? false : input.stealth;
       const created: Ticket[] = [];
@@ -1874,7 +1866,7 @@ export function createApiRoutes(deps: RouteDeps) {
         }
         const refreshedGate = await slots.verifyDependencyDelivery(ticket, project.repoPath, prUrl);
         if (!refreshedGate.ok) return jsonError(set, HTTP_CONFLICT, refreshedGate.reason);
-        const merge = await deps.system.mergePrOnUserRequest(project.repoPath, branch, prUrl, project.vcsProvider);
+        const merge = await deps.system.mergePr(project.repoPath, branch, prUrl, project.vcsProvider);
         if (merge.ok) {
           store.logEvent(params.id, MANUAL_MERGED_EVENT, { prUrl });
           const merged = await slots.markMerged(params.id);

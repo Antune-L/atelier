@@ -16,7 +16,6 @@ import type { SlotManager } from "./agents/slotManager.ts";
 import { getProject, isProjectKey, isQualityOwner, listProjectKeys, MODELS, NOT_QUALITY_OWNER_MESSAGE } from "./config.ts";
 import { TicketCreationRequestConflictError } from "./db/store.ts";
 import type { NewTicket, Store, TicketPatch } from "./db/store.ts";
-import { deliveryPolicyError, isCloudHost } from "./hostRole.ts";
 import type { ClientHub } from "./hub.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -26,8 +25,6 @@ export function autonomousPilotEnabled(vcsProvider: string): boolean {
 }
 
 export function autonomousOptionsError(input: { autoMerge?: boolean; autonomous?: boolean; autonomousDelivery?: "pr_only" | "merge" | null; kind?: string; stealth?: boolean; directPush?: boolean; implementer?: string; dependsOn?: string | null; childOrder?: number | null }, vcsProvider: string): string | null {
-  const deliveryError = deliveryPolicyError(input);
-  if (deliveryError !== null) return deliveryError;
   if (!input.autonomous) return null;
   if (vcsProvider !== "github") return "The autonomous pilot requires GitHub and a prepared Coolify preview.";
   if (!isQualityOwner()) return NOT_QUALITY_OWNER_MESSAGE;
@@ -418,7 +415,7 @@ export class TicketOperations {
     const stealth = directPush ? false : (normalized.stealth ?? false);
     const autoMerge = normalized.autonomous || stealth || directPush
       ? false
-      : (normalized.autoMerge ?? (isCloudHost() ? false : project.defaultAutoMerge));
+      : (normalized.autoMerge ?? project.defaultAutoMerge);
     const ticketInput: NewTicket = {
       title,
       description: normalized.description,

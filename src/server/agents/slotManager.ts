@@ -28,7 +28,6 @@ import { MODELS, SLOTS_ROOT, getProject, isProjectKey, projectVcsProvider } from
 import type { ProjectConfig } from "../config.ts";
 
 import type { ReviewPass, Store } from "../db/store.ts";
-import { isCloudHost } from "../hostRole.ts";
 import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
@@ -1820,7 +1819,7 @@ export class SlotManager {
     if (currentTicket.autonomous) {
       const identity = await this.verifyAutonomousPr(currentTicket, path, prUrl);
       if (!identity.ok) return { ok: false, reason: identity.reason, slotReleased: false };
-      if (currentTicket.autonomousDelivery === "merge" && !isCloudHost()) {
+      if (currentTicket.autonomousDelivery === "merge") {
         if (!isProjectKey(currentTicket.project) || !currentTicket.autonomousState?.revision) return { ok: false, reason: "Autonomous merge revision is unavailable.", slotReleased: false };
         const project = getProject(currentTicket.project);
         const merged = await this.system.readPr(path, prUrl, project.vcsProvider);
@@ -1849,7 +1848,7 @@ export class SlotManager {
       }
     } else if (options.skipMerge && currentTicket.resolvingConflicts) {
       this.store.logEvent(ticketId, currentTicket.reviewLevel === "high" ? MERGE_SKIPPED_REVIEW_LEVEL_HIGH_EVENT : MERGE_SKIPPED_AFTER_REVIEW_LIMIT_EVENT, { prUrl });
-    } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete) && !isCloudHost()) {
+    } else if (!options.skipMerge && (currentTicket.autoMerge || currentTicket.resolvingConflicts) && currentTicket.kind === "feature" && (!quality?.enabled || quality.complete)) {
       const finalGate = await this.verifyDependencyDelivery(currentTicket, path, prUrl);
       if (!finalGate.ok) return { ok: false, reason: finalGate.reason, slotReleased: false };
       log.info("auto-merge de la PR", { ticketId, prUrl });

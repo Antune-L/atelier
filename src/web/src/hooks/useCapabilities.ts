@@ -20,7 +20,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   defaultCodexFast: false,
   canUpdate: false,
   canPickFolder: false,
-  prOnly: false,
+  cloudHost: false,
   githubAvailable: false,
   skills: [],
 };

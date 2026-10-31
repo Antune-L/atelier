@@ -5,7 +5,7 @@ import { AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES,
 import { isNotionUrl } from "@shared/notion";
 import type { ProjectInfo } from "@shared/schemas";
 
-import { AutonomousOptions, autonomousEligibility, prOnlyAutonomousOptions } from "@/components/AutonomousOptions";
+import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
 import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { ImplementationSettings } from "@/components/ImplementationSettings";
 import { ProjectSelect } from "@/components/ProjectSelect";
@@ -19,7 +19,6 @@ import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
-import { useCapabilities } from "@/hooks/useCapabilities";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
 import { dependencyCandidates } from "@/lib/display";
@@ -85,23 +84,19 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   // Tracks the latest requested project so an out-of-order branch fetch is dropped.
   const latestBranchKey = useRef<string | null>(null);
   const [optionsKey, setOptionsKey] = useState(0);
-  // A cloud host refuses auto-merge, direct push and merge delivery: force them off, not only hide them.
-  const { prOnly } = useCapabilities();
-  const [autonomousChoice, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousMaxStarts: AUTONOMOUS_DEFAULT_MAX_STARTS, autonomousFinalizationMinutes: AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, autonomousMaxPublicationAttempts: AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS });
-  const autonomousOptions = prOnlyAutonomousOptions(autonomousChoice, prOnly);
+  const [autonomousOptions, setAutonomousOptions] = useState<AutonomousOptionValues>({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousMaxStarts: AUTONOMOUS_DEFAULT_MAX_STARTS, autonomousFinalizationMinutes: AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, autonomousMaxPublicationAttempts: AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS });
   const [prdEnabled, setPrdEnabled] = useState(false);
   const [prDraft, setPrDraft] = useState(true);
   // null = untouched → fall back to the selected project's configured default.
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = !prOnly && (autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false);
+  const autoMerge = (autoMergeChoice ?? selectedProject?.defaultAutoMerge ?? false);
   // Screenshots are unavailable when auto-merge is on (the PR is merged before a human reads it).
   const addScreenshots =
     !autoMerge && (selectedProject?.defaultAddScreenshots ?? false);
   const [verifyFeature, setVerifyFeature] = useState(false);
   const [argusMultiLoop, setArgusMultiLoop] = useState(false);
   const [stealth, setStealth] = useState(false);
-  const [directPushChoice, setDirectPush] = useState(false);
-  const directPush = !prOnly && directPushChoice;
+  const [directPush, setDirectPush] = useState(false);
   const { tickets } = useBoard();
   const [dependsOn, setDependsOn] = useState<string | null>(null);
   const dependsCandidates = dependencyCandidates(tickets, project, null);
@@ -373,7 +368,6 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
               {autonomousOptions.autonomous && <p className="text-xs text-muted-foreground">Exécution autonome · {autonomousOptions.autonomousMaxCorrections} correction(s) maximum · {autonomousOptions.autonomousTimeoutMinutes} minutes.</p>}
               {autonomousOptions.autonomous && !autonomousEligible && <p role="alert" className="text-xs text-danger">{autonomousAvailability.reason}</p>}
               {autonomousOptions.autonomous && autonomousOptions.autonomousDelivery === null && <p role="alert" className="text-xs text-danger">Choisissez la livraison autonome dans les options avant de créer le ticket.</p>}
-              {prOnly && <p className="text-xs text-muted-foreground">Cet environnement livre uniquement une pull request ; fusion automatique et push direct ne sont pas disponibles.</p>}
             </section>
             <details className="rounded-md border border-border p-3">
               <summary className="cursor-pointer text-sm font-medium">Modifier la branche, les dépendances et les options</summary>
@@ -416,7 +410,6 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                     onChange: (autonomous) => updateAutonomousOptions({ ...autonomousOptions, autonomous }),
                   }}
                   key={optionsKey}
-                  prOnly={prOnly}
                   headingId="ticket-options-heading"
                   values={{
                     prdEnabled,
@@ -439,7 +432,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                     }
                   }}
                 >
-                  <AutonomousOptions id="new-autonomous" values={autonomousOptions} prOnly={prOnly} onChange={updateAutonomousOptions} />
+                  <AutonomousOptions id="new-autonomous" values={autonomousOptions} onChange={updateAutonomousOptions} />
                 </TicketOptionsToggleGroup>
               </div>
             </details>

@@ -90,7 +90,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
   const [agent, setAgent] = useState<AtelierAgentSettings>(() => defaultAgentSettings(conversation.orchestrator, capabilities.defaultCodexFast));
   const [prDraft, setPrDraft] = useState(true);
   const [autoMergeChoice, setAutoMergeChoice] = useState<boolean | null>(null);
-  const autoMerge = !capabilities.prOnly && (autoMergeChoice ?? project?.defaultAutoMerge ?? false);
+  const autoMerge = autoMergeChoice ?? project?.defaultAutoMerge ?? false;
   const { busy, error, run } = useBusyAction();
   const [created, setCreated] = useState<Ticket[]>([]);
 
@@ -246,7 +246,7 @@ export function CardsPanel({ conversation, prd, projects, onBackToPrd }: CardsPa
             <div className="mt-3 space-y-4">
               <AtelierAgentFields value={agent} onChange={(patch) => setAgent((prev) => ({ ...prev, ...patch }))} />
               <div className="flex flex-wrap items-center gap-2"><Switch checked={prDraft && !autoMerge} disabled={autoMerge} onCheckedChange={setPrDraft} aria-labelledby={`${id}-draft`} /><span id={`${id}-draft`} className="text-sm">PR en draft</span></div>
-              {!capabilities.prOnly && <div className="flex flex-wrap items-center gap-2"><Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-labelledby={`${id}-merge`} /><span id={`${id}-merge`} className="text-sm">Merge automatique</span></div>}
+              <div className="flex flex-wrap items-center gap-2"><Switch checked={autoMerge} onCheckedChange={setAutoMergeChoice} aria-labelledby={`${id}-merge`} /><span id={`${id}-merge`} className="text-sm">Merge automatique</span></div>
             </div>
           </details>
           <details className="rounded-lg border border-border p-3">

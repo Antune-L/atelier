@@ -117,7 +117,7 @@ function LaunchMenu({ projects }: { projects: ProjectInfo[] }) {
 /** Audits: enabled projects, the run history and the selected run's findings side by side. */
 export function AuditsView({ projects, target }: AuditsViewProps) {
   const { audits } = useBoard();
-  const { prOnly } = useCapabilities();
+  const { cloudHost } = useCapabilities();
   const [projectFilter, setProjectFilter] = useState<string>(ALL_FILTER);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(ALL_FILTER);
   const [hideEmpty, setHideEmpty] = useState(false);
@@ -213,7 +213,7 @@ export function AuditsView({ projects, target }: AuditsViewProps) {
         <span className="ml-auto" />
         <LaunchMenu projects={enabledProjects} />
       </div>
-      {!prOnly && <p className="text-2xs text-muted-foreground">Chaque poste a sa propre base : seuls les audits exécutés ici apparaissent.</p>}
+      {!cloudHost && <p className="text-2xs text-muted-foreground">Chaque poste a sa propre base : seuls les audits exécutés ici apparaissent.</p>}
 
       {empty ? (
         <div className="flex flex-col items-center gap-2 px-6 py-16 text-center text-xs text-muted-foreground">

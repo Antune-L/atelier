@@ -3,14 +3,14 @@
 This guide installs a second, independent Kanban instance on an Ubuntu 24.04 or 26.04 VPS that already runs Coolify. Cards created on the VPS board keep running while the Mac is off.
 
 Two phases:
-- **Phase A** runs ordinary cards in PR-only mode, without previews.
+- **Phase A** runs ordinary cards, without previews.
 - **Phase B** adds Devin cards with Coolify previews on the same VPS, through a preview broker.
 
 ## What protects what
 
 - The service and its agents run as `kanban`, a user with no sudo, no docker group and no SSH key. Agents can read the service's data and provider logins, but nothing on the VPS that leads to root.
 - The interface is only reachable through a Unix socket that you open with an SSH tunnel. No port is published. To open it from any device instead, see [vps-remote-access.md](./vps-remote-access.md).
-- On this host (`KANBAN_HOST_ROLE=cloud`), Kanban refuses every automatic merge and direct push: auto-merge, direct push, autonomous merge delivery and the re-merge after a conflict resolution. Cards end with a pull request that you merge yourself, either on the forge or with the **Merger la PR** button on the board, which stays allowed. The board hides the refused options on this host.
+- This host (`KANBAN_HOST_ROLE=cloud`) offers the same delivery options as the Mac: auto-merge, direct push, autonomous merge delivery and the re-merge after a conflict resolution. An agent that runs unattended can therefore merge or push to the base branch under the owner's GitHub identity with no human review. The owner accepted this risk on 2026-10-31.
 - Only one host runs quality validations and Devin cards. Set this in **Settings → Agents par défaut → Validation qualité sur ce poste** on each host.
 - In Phase B, the Coolify token lives in the preview broker, under the `kanban-preview` user. The broker only creates Dockerfile previews from its own configuration and only touches resources it created. A root helper cleans leftovers after checking the broker's registry.
 
@@ -168,7 +168,7 @@ To open the board from a phone or any browser behind a Google login, follow [vps
 
 - From the Mac, `curl -s -o /dev/null -w '%{http_code}\n' http://<vps>:52817/health` fails to connect: nothing is published.
 - On the VPS, `curl -s http://127.0.0.1:52817/api/settings` returns `forbidden`: the API only answers on the socket.
-- A card created with auto-merge, direct push or autonomous merge delivery is refused. A normal card ends with an open pull request, with your Mac off. Clicking **Merger la PR** on that card merges it.
+- A normal card ends with an open pull request, with your Mac off. Clicking **Merger la PR** on that card merges it.
 - `sudo systemctl restart kanban` interrupts the running card, which can be resumed without a duplicate PR.
 
 ## GitHub accounts and cloned projects

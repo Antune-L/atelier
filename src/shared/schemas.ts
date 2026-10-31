@@ -1061,8 +1061,8 @@ export const capabilitiesSchema = z.object({
   canUpdate: z.boolean(),
   /** Desktop app: the native folder picker (POST /api/native/pick-folder) is wired. */
   canPickFolder: z.boolean(),
-  /** Cloud host: only PRs are delivered (no auto-merge, direct push or autonomous merge); manual merge stays allowed. */
-  prOnly: z.boolean(),
+  /** Server runs with KANBAN_HOST_ROLE=cloud (always-on VPS). */
+  cloudHost: z.boolean(),
   /** The `gh` CLI is available, enabling the « Depuis GitHub » project mode. Never carries a login or token. */
   githubAvailable: z.boolean(),
 });

@@ -57,8 +57,6 @@ interface TicketOptionsToggleGroupProps {
     unavailableReason: string | null;
     onChange: (enabled: boolean) => void;
   };
-  /** Cloud host: hide auto-merge and direct push, which the server refuses there. */
-  prOnly?: boolean;
   children?: ReactNode;
 }
 
@@ -87,7 +85,6 @@ export function TicketOptionsToggleGroup({
   className,
   autonomous = false,
   autonomousControl,
-  prOnly = false,
   children,
 }: TicketOptionsToggleGroupProps) {
   const prDraftBeforeAutoMerge = useRef(values.prDraft);
@@ -189,18 +186,16 @@ export function TicketOptionsToggleGroup({
             Ouvrir la PR en draft
           </OptionToggleLabel>
         </ToggleGroupItem>
-        {!prOnly && (
-          <ToggleGroupItem
-            value={TICKET_OPTION.autoMerge}
-            disabled={autonomous || values.stealth || values.directPush}
-            aria-label="Merge automatique de la PR"
-            className={OPTION_ITEM_CLASS}
-          >
-            <OptionToggleLabel icon={GitMerge}>
-              Merge automatique de la PR
-            </OptionToggleLabel>
-          </ToggleGroupItem>
-        )}
+        <ToggleGroupItem
+          value={TICKET_OPTION.autoMerge}
+          disabled={autonomous || values.stealth || values.directPush}
+          aria-label="Merge automatique de la PR"
+          className={OPTION_ITEM_CLASS}
+        >
+          <OptionToggleLabel icon={GitMerge}>
+            Merge automatique de la PR
+          </OptionToggleLabel>
+        </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.stealth}
           disabled={autonomous || values.autoMerge || values.directPush}
@@ -209,16 +204,14 @@ export function TicketOptionsToggleGroup({
         >
           <OptionToggleLabel icon={EyeOff}>À review (sans PR)</OptionToggleLabel>
         </ToggleGroupItem>
-        {!prOnly && (
-          <ToggleGroupItem
-            value={TICKET_OPTION.directPush}
-            disabled={autonomous || values.autoMerge || values.stealth}
-            aria-label="Push direct (sans PR)"
-            className={OPTION_ITEM_CLASS}
-          >
-            <OptionToggleLabel icon={Upload}>Push direct (sans PR)</OptionToggleLabel>
-          </ToggleGroupItem>
-        )}
+        <ToggleGroupItem
+          value={TICKET_OPTION.directPush}
+          disabled={autonomous || values.autoMerge || values.stealth}
+          aria-label="Push direct (sans PR)"
+          className={OPTION_ITEM_CLASS}
+        >
+          <OptionToggleLabel icon={Upload}>Push direct (sans PR)</OptionToggleLabel>
+        </ToggleGroupItem>
         <ToggleGroupItem
           value={TICKET_OPTION.verify}
           aria-label="Test approfondi"

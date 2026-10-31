@@ -178,7 +178,7 @@ export function ProjectAuditSettings({ project, showAuditsLink = true }: Project
     if (started) setRunMessage("Audit lancé. Suivez-le dans la vue Audits.");
   };
 
-  const executionHint = capabilities.prOnly
+  const executionHint = capabilities.cloudHost
     ? "Serveur toujours allumé : l'audit part à l'heure prévue."
     : "L'app doit être ouverte à l'heure de l'audit, sinon il est rattrapé au démarrage.";
 

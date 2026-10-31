@@ -50,7 +50,8 @@ import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "../../shared/boardLink.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
-import type { VpsPendingSend, VpsTicketDraft } from "../../shared/vpsBridge.ts";
+import { bridgeCataloguePublishInputSchema } from "../../shared/vpsBridge.ts";
+import type { BridgeCataloguePublishInput, MacOutboxItem, OutboxAck, VpsPendingSend, VpsTicketDraft } from "../../shared/vpsBridge.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
 import type { ImplementationQueueLot } from "../../shared/implementationQueue.ts";
 import { AUDIT_ACTIVE_RUN_STATUSES, AUDIT_DAY_MS, AUDIT_OBSERVATION_DAYS, auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema, auditRunSchema, updateAuditProjectSettingsSchema } from "../../shared/audit.ts";
@@ -74,8 +75,9 @@ import { DEFAULT_MODELS, applyAppSettingsToModels } from "../config.ts";
 import type { ProjectConfig, ProjectKey } from "../config.ts";
 import { createLogger } from "../logger.ts";
 
+import { safeJsonParse } from "../system/boundedCommand.ts";
 import { minimizeQualityAction, redactSecrets } from "../system/secretRedaction.ts";
-import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
+import { mapAuditFindingRow, mapAuditProjectSettingsRow, mapAuditProjectStateRow, mapAuditRunRow, mapQualityActionRow, mapQualityRequestRow, mapPrNotificationRow, mapPrNotificationSyncRow, mapAgentMessageRow, mapAutomationRow, mapAutomationRunRow, mapCommentRow, mapConversationMessageRow, mapConversationRow, mapExecutionRunRow, mapImplementationPlanRow, mapImplementationQueueRow, mapPrdDocumentRow, mapPreviewProjectSettingsRow, mapPreviewRow, mapProfileRow, mapProjectRow, mapQualityCriteriaSnapshotRow, mapQualityEvidenceRow, mapQualityIterationRow, mapQualityValidationRunRow, mapReviewApprovalRow, mapReviewPassRow, mapSlotRow, mapTicketCreationRequestRow, mapTicketRow, mapMacOutboxRow, mapVpsOutboxReceiptRow, mapVpsPendingSendRow, mapWorktreeSessionRow } from "./rows.ts";
 
 export type SlotStatus = Slot["status"];
 
@@ -89,6 +91,19 @@ export interface CreateQualityIterationInput {
   retryOfIterationId?: string;
   trigger?: QualityIterationTrigger;
   evidenceIds?: string[];
+}
+
+const MAC_CATALOGUE_META_KEY = "mac_catalogue";
+const storedMacCatalogueSchema = bridgeCataloguePublishInputSchema.extend({ publishedAt: z.number() });
+export type StoredMacCatalogue = z.infer<typeof storedMacCatalogueSchema>;
+
+export type NewMacOutboxItem = Pick<MacOutboxItem, "id" | "project" | "projectLabel" | "title" | "description" | "source" | "sourceTicketId">;
+
+export class MacOutboxConflictError extends Error {
+  constructor(id: string) {
+    super(`l'identifiant d'envoi ${id} a déjà été utilisé avec un contenu différent`);
+    this.name = "MacOutboxConflictError";
+  }
 }
 
 export class TicketCreationRequestConflictError extends Error {
@@ -1554,7 +1569,7 @@ export class Store {
     return this.finalizeCreate(id, "createTicket", { title: input.title });
   }
 
-  createTicketIdempotent(requestId: string, payload: string, input: NewTicket): { created: boolean; ticket: Ticket } {
+  createTicketIdempotent(requestId: string, payload: string, input: NewTicket, inTransaction?: (ticket: Ticket) => void): { created: boolean; ticket: Ticket } {
     return this.transaction(() => {
       const raw = this.db
         .query("SELECT * FROM ticket_creation_requests WHERE request_id = ?")
@@ -1564,12 +1579,14 @@ export class Store {
         if (existing.payload !== payload) throw new TicketCreationRequestConflictError(requestId);
         const ticket = this.getTicket(existing.ticket_id);
         if (!ticket) throw new Error(`createTicketIdempotent: ticket ${existing.ticket_id} introuvable`);
+        inTransaction?.(ticket);
         return { created: false, ticket };
       }
       const ticket = this.createTicket(input);
       this.db
         .query("INSERT INTO ticket_creation_requests (request_id, payload, ticket_id, created_at) VALUES (?, ?, ?, ?)")
         .run(requestId, payload, ticket.id, Date.now());
+      inTransaction?.(ticket);
       return { created: true, ticket };
     });
   }
@@ -1908,6 +1925,65 @@ export class Store {
 
   deleteVpsPendingSend(id: string): boolean {
     return this.db.query("DELETE FROM vps_pending_sends WHERE id = ?").run(id).changes > 0;
+  }
+
+  getMacCatalogue(): StoredMacCatalogue | null {
+    const stored = this.getMeta(MAC_CATALOGUE_META_KEY);
+    if (stored === null) return null;
+    const parsed = storedMacCatalogueSchema.safeParse(safeJsonParse(stored));
+    return parsed.success ? parsed.data : null;
+  }
+
+  publishMacCatalogue(input: BridgeCataloguePublishInput, publishedAt: number): void {
+    this.setMeta(MAC_CATALOGUE_META_KEY, JSON.stringify(storedMacCatalogueSchema.parse({ ...input, publishedAt })));
+  }
+
+  enqueueMacOutboxItem(input: NewMacOutboxItem): { created: boolean; item: MacOutboxItem } {
+    return this.transaction(() => {
+      const existing = this.getMacOutboxItem(input.id);
+      if (existing !== null) {
+        if (existing.project !== input.project || existing.title !== input.title || existing.description !== input.description) {
+          throw new MacOutboxConflictError(input.id);
+        }
+        return { created: false, item: existing };
+      }
+      this.db
+        .query("INSERT INTO mac_outbox (id, project, project_label, title, description, source, source_ticket_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(input.id, input.project, input.projectLabel, input.title, input.description, input.source, input.sourceTicketId, Date.now());
+      const item = this.getMacOutboxItem(input.id);
+      if (item === null) throw new Error(`envoi vers le Mac introuvable après création : ${input.id}`);
+      return { created: true, item };
+    });
+  }
+
+  getMacOutboxItem(id: string): MacOutboxItem | null {
+    const raw = this.db.query("SELECT * FROM mac_outbox WHERE id = ?").get(id);
+    return raw ? mapMacOutboxRow(raw) : null;
+  }
+
+  listPendingMacOutbox(limit: number): MacOutboxItem[] {
+    return this.db.query("SELECT * FROM mac_outbox WHERE status = 'pending' ORDER BY created_at ASC, id ASC LIMIT ?").all(limit).map(mapMacOutboxRow);
+  }
+
+  listMacOutbox(limit: number): MacOutboxItem[] {
+    return this.db.query("SELECT * FROM mac_outbox ORDER BY created_at DESC, id DESC LIMIT ?").all(limit).map(mapMacOutboxRow);
+  }
+
+  acknowledgeMacOutboxItem(ack: OutboxAck, at: number): boolean {
+    const macTicketId = ack.status === "received" ? ack.macTicketId : null;
+    const reason = ack.status === "rejected" ? ack.reason : null;
+    return this.db
+      .query("UPDATE mac_outbox SET status = ?, mac_ticket_id = ?, reason = ?, received_at = ? WHERE id = ? AND status = 'pending'")
+      .run(ack.status, macTicketId, reason, at, ack.id).changes > 0;
+  }
+
+  getVpsOutboxReceipt(outboxId: string): { outboxId: string; ticketId: string; createdAt: number } | null {
+    const raw = this.db.query("SELECT * FROM vps_outbox_receipts WHERE outbox_id = ?").get(outboxId);
+    return raw ? mapVpsOutboxReceiptRow(raw) : null;
+  }
+
+  recordVpsOutboxReceipt(outboxId: string, ticketId: string): void {
+    this.db.query("INSERT INTO vps_outbox_receipts (outbox_id, ticket_id, created_at) VALUES (?, ?, ?)").run(outboxId, ticketId, Date.now());
   }
 
   // ---- Remote MCP call journal ----

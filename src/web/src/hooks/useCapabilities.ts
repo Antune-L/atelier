@@ -21,6 +21,7 @@ const UNKNOWN_CAPABILITIES: Capabilities = {
   canUpdate: false,
   canPickFolder: false,
   cloudHost: false,
+  macOutbox: false,
   activePublicHostname: null,
   githubAvailable: false,
   skills: [],

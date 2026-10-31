@@ -12,7 +12,7 @@ import type { SystemAdapter } from "../system/index.ts";
 
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildReformulatePrompt } from "./reformulate.ts";
-import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, assertRemoteAnalysisAllowed, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
 import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { assertExecutionAvailable, resolveTicketExecution } from "./executionConfig.ts";
@@ -64,6 +64,7 @@ export class ReformulateManager {
     const baseBranch = resolveAnalysisBaseBranch(ticket, project, this.store);
     let lease: SnapshotLease | RemoteAnalysisCopy | null = null;
     try {
+      assertRemoteAnalysisAllowed(ticket);
       await assertExecutionAvailable(this.system, execution);
       let cwd: string;
       let imageLines: string[] = [];

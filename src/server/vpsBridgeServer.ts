@@ -8,13 +8,17 @@ import { getErrorMessage } from "../shared/errors.ts";
 import {
   BRIDGE_MAX_REQUEST_BYTES,
   BRIDGE_PROTOCOL_VERSION,
+  bridgeCataloguePublishInputSchema,
   bridgeCreateTicketInputSchema,
   bridgeEmptyInputSchema,
+  bridgeOutboxAckInputSchema,
   isBridgeOp,
 } from "../shared/vpsBridge.ts";
 import type { BridgeEnvelope, BridgeErrorCode, BridgeOp } from "../shared/vpsBridge.ts";
 
+import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
+import { acknowledgeMacOutbox, fetchMacOutbox, publishMacCatalogue } from "./macOutbox.ts";
 import { readBoundedBody } from "./remoteMcp/listener.ts";
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
@@ -42,6 +46,11 @@ class BridgeOpError extends Error {
 
 type BridgeOpHandler = (input: unknown) => unknown;
 
+export interface BridgeHandlerDeps {
+  operations: TicketOperations;
+  store: Store;
+}
+
 function parseInput<T>(schema: ZodType<T>, input: unknown): T {
   const parsed = schema.safeParse(input);
   if (!parsed.success) throw new BridgeOpError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "invalid input");
@@ -49,7 +58,7 @@ function parseInput<T>(schema: ZodType<T>, input: unknown): T {
 }
 
 // NOTE: the op registry; adding an op is one entry in BRIDGE_OPS plus its handler here (the Record type enforces both).
-function createBridgeOpHandlers(operations: TicketOperations): Record<BridgeOp, BridgeOpHandler> {
+function createBridgeOpHandlers({ operations, store }: BridgeHandlerDeps): Record<BridgeOp, BridgeOpHandler> {
   return {
     version: (input) => {
       parseInput(bridgeEmptyInputSchema, input);
@@ -71,6 +80,12 @@ function createBridgeOpHandlers(operations: TicketOperations): Record<BridgeOp, 
       );
       return { created: result.created, ticket: { id: result.ticket.id, title: result.ticket.title, project: result.ticket.project } };
     },
+    catalogue_publish: (input) => publishMacCatalogue(store, parseInput(bridgeCataloguePublishInputSchema, input)),
+    outbox_fetch: (input) => {
+      parseInput(bridgeEmptyInputSchema, input);
+      return { items: fetchMacOutbox(store) };
+    },
+    outbox_ack: (input) => ({ acknowledged: acknowledgeMacOutbox(store, parseInput(bridgeOutboxAckInputSchema, input).acks) }),
   };
 }
 
@@ -91,8 +106,8 @@ function parseBody(body: string): unknown {
   }
 }
 
-export function createBridgeHandler(operations: TicketOperations): (request: Request) => Promise<Response> {
-  const handlers = createBridgeOpHandlers(operations);
+export function createBridgeHandler(deps: BridgeHandlerDeps): (request: Request) => Promise<Response> {
+  const handlers = createBridgeOpHandlers(deps);
   return async (request) => {
     const pathname = new URL(request.url).pathname;
     const op = pathname.startsWith(BRIDGE_OP_PATH_PREFIX) ? pathname.slice(BRIDGE_OP_PATH_PREFIX.length) : "";
@@ -121,10 +136,10 @@ export interface BridgeListener {
  * Serves the bridge ops on a dedicated Unix socket next to the UI socket. cloudflared and the TCP
  * listener only reach the UI socket, so neither ever routes a bridge op.
  */
-export function startBridgeListener(uiSocketPath: string, operations: TicketOperations): BridgeListener {
+export function startBridgeListener(uiSocketPath: string, deps: BridgeHandlerDeps): BridgeListener {
   const socketPath = join(dirname(uiSocketPath), BRIDGE_SOCKET_FILENAME);
   rmSync(socketPath, { force: true });
-  const handle = createBridgeHandler(operations);
+  const handle = createBridgeHandler(deps);
   const server: Server<undefined> = Bun.serve({ unix: socketPath, maxRequestBodySize: BRIDGE_MAX_REQUEST_BYTES, fetch: handle });
   chmodSync(socketPath, BRIDGE_SOCKET_MODE);
   log.info("socket du pont Mac prêt", { socketPath });

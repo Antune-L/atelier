@@ -31,6 +31,7 @@ import type { ReviewPass, Store } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
+import { macOutboxWorkerTools } from "../macOutbox.ts";
 import { KeyedMutex } from "../mutex.ts";
 import type { Notifier } from "../notifier.ts";
 import { autonomousOptionsError } from "../ticketOperations.ts";
@@ -1355,7 +1356,7 @@ export class SlotManager {
         vcsProvider: projectVcsProvider(ticket.project),
         // A Codex relaunch resumes the persisted thread so the reclaimed session keeps its context.
         ...(opts?.resume && ticket.sessionId && executionTicket.orchestrator === ticket.orchestrator ? { resumeSessionId: ticket.sessionId } : {}),
-      }), ...(opts?.executionGuard ? { executionGuard: opts.executionGuard } : {}) },
+      }), extraWorkerTools: macOutboxWorkerTools(this.store), ...(opts?.executionGuard ? { executionGuard: opts.executionGuard } : {}) },
     );
   }
 

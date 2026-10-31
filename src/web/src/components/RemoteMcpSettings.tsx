@@ -30,7 +30,7 @@ export function RemoteMcpSettings({ query = "" }: { query?: string }) {
     <div className="space-y-4">
       <SectionHeader
         title="MCP distant"
-        subtitle="Clients distants : lecture des projets autorisés et création de cartes À faire. Une carte distante ne démarre qu'après ton approbation."
+        subtitle="Clients distants : lecture des projets autorisés et création de cartes À faire. Sur le Mac, ces projets et ce profil servent aussi aux cartes envoyées depuis la boîte d'envoi du VPS. Une carte distante ne démarre qu'après ton approbation."
       />
       {showProjects && (
         <fieldset className="space-y-2 rounded-lg border p-4">

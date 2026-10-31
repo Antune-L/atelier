@@ -203,6 +203,7 @@ export interface AgentSessionOptions {
    * in-process worker tools today.
    */
   disableWorkerTools?: boolean;
+  extraWorkerTools?: WorkerToolName[];
   /**
    * Pre-approved permission rules (SDK `settings.permissions.allow`), e.g. `Bash(git commit:*)`. Under
    * `dontAsk` these auto-run and everything else is denied — the bash allowlist the old tmux sessions

@@ -183,6 +183,7 @@ export interface CreateTodoTicketOptions {
   origin?: TicketOrigin | null;
   /** Agent settings copied verbatim from a source (profile or parent card); excluded from the idempotency payload. */
   frozenAgents?: FrozenTicketAgents;
+  inTransaction?: (ticket: Ticket) => void;
 }
 
 type AgentSettingsSource = Required<Omit<FrozenTicketAgents, "feasibilityEngine">>;
@@ -455,7 +456,7 @@ export class TicketOperations {
       origin: options.origin ?? null,
     };
     try {
-      const result = this.deps.store.createTicketIdempotent(normalized.requestId, payload, ticketInput);
+      const result = this.deps.store.createTicketIdempotent(normalized.requestId, payload, ticketInput, options.inTransaction);
       if (!result.created) return { created: false, ticket: compactTicket(result.ticket) };
       const ticket = this.afterCreate(result.ticket, options.afterCreate ?? "analyze");
       return { created: true, ticket: compactTicket(ticket) };

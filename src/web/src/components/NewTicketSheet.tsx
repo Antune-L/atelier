@@ -12,8 +12,10 @@ import { MediaUploadButton } from "@/components/MediaUploadButton";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { SchedulePane } from "@/components/SchedulePane";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
-import { BoardTargetSelect, VpsTicketForm } from "@/components/VpsTicketForm";
-import type { BoardTarget } from "@/components/VpsTicketForm";
+import { BoardTargetSelect } from "@/components/BoardTargetSelect";
+import type { BoardTarget } from "@/components/BoardTargetSelect";
+import { MacOutboxForm } from "@/components/MacOutboxForm";
+import { VpsTicketForm } from "@/components/VpsTicketForm";
 import { Button } from "@/components/ui/button";
 import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -134,11 +136,11 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuPane | null>(null);
-  const { cloudHost } = useCapabilities();
+  const { cloudHost, macOutbox } = useCapabilities();
   const { settings } = useAppSettings();
-  const vpsTargetAvailable = !cloudHost && Boolean(settings?.sshHostAlias);
+  const otherTargetAvailable = cloudHost ? macOutbox : Boolean(settings?.sshHostAlias);
   const [boardTarget, setBoardTarget] = useState<BoardTarget>("local");
-  const targetSelector = vpsTargetAvailable ? <BoardTargetSelect value={boardTarget} onChange={setBoardTarget} /> : null;
+  const targetSelector = otherTargetAvailable ? <BoardTargetSelect cloudHost={cloudHost} value={boardTarget} onChange={setBoardTarget} /> : null;
 
   // Load the project's branches for the base-branch picker on open and on each
   // project change (mirrors ReviewPrPanel's no-useEffect load-on-render pattern).
@@ -299,10 +301,11 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
 
   const submitDisabled = busy || (!title.trim() && !description.trim()) || !project || (autonomousOptions.autonomous && (!autonomousEligible || autonomousOptions.autonomousDelivery === null));
 
-  if (vpsTargetAvailable && boardTarget === "vps") {
+  if (otherTargetAvailable && boardTarget === "other") {
+    const OtherBoardForm = cloudHost ? MacOutboxForm : VpsTicketForm;
     return (
       <Sheet open={open} onOpenChange={(next) => { if (!next) onClose(); }} size="lg" title={SHEET_TITLE} className="new-ticket-sheet">
-        <VpsTicketForm
+        <OtherBoardForm
           header={targetSelector}
           title={title}
           onTitleChange={setTitle}

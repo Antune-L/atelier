@@ -12,7 +12,7 @@ import type { SystemAdapter } from "../system/types.ts";
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
-import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages, remoteAnalysisRefusal } from "./remoteAnalysis.ts";
 import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 
 export class FeasibilityAnswerError extends Error {
@@ -73,6 +73,8 @@ export class FeasibilityAnswerManager {
     if (!ticket) throw new FeasibilityAnswerError(404, "Ticket not found");
     if (!isProjectKey(ticket.project)) throw new FeasibilityAnswerError(404, "Project not found");
     if (!eligible(ticket)) throw new FeasibilityAnswerError(409, "Ticket is not eligible for feasibility answers");
+    const refusal = remoteAnalysisRefusal(ticket);
+    if (refusal !== null) throw new FeasibilityAnswerError(409, refusal);
     if (ticket.feasibilityAnswers.some((run) => run.status === "running")) throw new FeasibilityAnswerError(409, "An answer is already running");
     if (ticket.feasibilityRevision !== parsed.revision || ticket.feasibilityReportVersion !== parsed.reportVersion) {
       throw new FeasibilityAnswerError(409, "The ticket or feasibility report changed. Reload before submitting");

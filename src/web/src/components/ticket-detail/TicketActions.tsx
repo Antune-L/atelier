@@ -18,6 +18,7 @@ import type { Ticket } from "@shared/schemas";
 import { needsRemoteApproval } from "@shared/startBlocker";
 import { canMergePr, canResolveConflicts, canUpdateDependencyBase } from "@shared/ticketMerge";
 
+import { resolveProjectLabel } from "@/components/TicketCard";
 import { LaunchSplitButton } from "@/components/ticket-detail/LaunchSplitButton";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,7 @@ import {
   ConfirmPopover,
 } from "@/components/ui/confirm";
 import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
+import { useProjects } from "@/hooks/useProjects";
 import { api } from "@/lib/api";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
 import { formatScheduleDate, formatScheduleTime } from "@/lib/scheduledLaunch";
@@ -82,7 +84,9 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
   const hasConflicts = conflictTicketId === ticket.id;
   // Read from the store so the spinner survives closing and reopening the detail mid-merge.
   const merging = useSyncExternalStore(boardStore.subscribe, () => boardStore.getSnapshot().mergingTicketIds.has(ticket.id));
+  const projectLabel = resolveProjectLabel(useProjects(), ticket.project);
   const actions = buildActions(ticket, {
+    projectLabel,
     onRefresh,
     onClose,
     onError,
@@ -249,6 +253,7 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
 }
 
 interface ActionContext {
+  projectLabel: string;
   onRefresh: () => void;
   onClose: () => void;
   onError: (message: string) => void;
@@ -285,10 +290,10 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
       id: "approve-remote-start",
       label: "Approuver le démarrage",
       Icon: Check,
-      title: "Carte créée par le MCP distant : relis-la avant d'autoriser son lancement",
+      title: "Carte créée à distance (MCP distant ou boîte d'envoi du VPS) : relis-la avant d'autoriser son lancement",
       confirm: {
         title: "Approuver le démarrage",
-        description: "Cette carte a été créée à distance. Une fois approuvée, elle pourra être lancée, programmée ou démarrée par sa dépendance. Modifier son titre ou sa description retire l'approbation.",
+        description: `Projet : ${ctx.projectLabel} (${ticket.project}). Cette carte a été créée à distance. Une fois approuvée, elle pourra être lancée, programmée ou démarrée par sa dépendance. Modifier son titre ou sa description retire l'approbation.`,
         confirmLabel: "Approuver",
       },
       run: async () => {

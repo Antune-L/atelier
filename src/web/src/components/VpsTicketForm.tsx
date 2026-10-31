@@ -2,42 +2,24 @@ import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
-import { VCS_PROVIDER_LABELS } from "@shared/constants";
 import { deriveTitleFromDescription } from "@shared/schemas";
-import type { VpsAnalysisMode, VpsCreateTicketResponse, VpsPendingSend, VpsProject } from "@shared/vpsBridge";
+import type { BoardProject, VpsAnalysisMode, VpsCreateTicketResponse, VpsPendingSend } from "@shared/vpsBridge";
 
+import { OtherBoardDraftFields, boardProjectOptionLabel } from "@/components/BoardTargetSelect";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
-import { Tabs } from "@/components/ui/tabs";
-import type { TabOption } from "@/components/ui/tabs";
 import { useAppSettings } from "@/hooks/useAppSettings";
 import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
 
-export type BoardTarget = "local" | "vps";
-
-const BOARD_TARGET_OPTIONS: readonly TabOption<BoardTarget>[] = [
-  { value: "local", label: "Ce Mac" },
-  { value: "vps", label: "VPS" },
-];
-
 const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
   pending: "En attente du VPS",
   failed: "Refusé par le VPS",
 };
-
-export function BoardTargetSelect({ value, onChange }: { value: BoardTarget; onChange: (target: BoardTarget) => void }) {
-  return (
-    <div className="space-y-1.5">
-      <span id="board-target-label" className={FIELD_LABEL_CLASSES}>Board cible</span>
-      <Tabs aria-labelledby="board-target-label" options={BOARD_TARGET_OPTIONS} value={value} onChange={onChange} />
-    </div>
-  );
-}
 
 function sendTitle(send: VpsPendingSend): string {
   return send.draft.title.trim() || deriveTitleFromDescription(send.draft.description);
@@ -60,7 +42,7 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
   const [loadKey, setLoadKey] = useState(0);
   const [loadedKey, setLoadedKey] = useState<number | null>(null);
   const latestLoad = useRef(0);
-  const [projects, setProjects] = useState<VpsProject[] | null>(null);
+  const [projects, setProjects] = useState<BoardProject[] | null>(null);
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const [sends, setSends] = useState<VpsPendingSend[]>([]);
@@ -142,7 +124,7 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
                 {projects?.length === 0 && <option value="">Aucun projet sur le VPS</option>}
                 {projects?.map((candidate) => (
                   <option key={candidate.key} value={candidate.key}>
-                    {candidate.label} · {VCS_PROVIDER_LABELS[candidate.vcsProvider]} · {candidate.baseBranch}
+                    {boardProjectOptionLabel(candidate)}
                   </option>
                 ))}
               </Select>
@@ -153,21 +135,14 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
               </div>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="vps-description" className={FIELD_LABEL_CLASSES}>Quel résultat souhaitez-vous ?</Label>
-            <Textarea
-              id="vps-description"
-              value={description}
-              onChange={(e) => onDescriptionChange(e.target.value)}
-              className="min-h-48"
-              placeholder="Décrivez le résultat attendu, le contexte et les critères de réussite…"
-            />
-            <p className="text-xs text-muted-foreground">Markdown accepté. Les images collées ne sont pas envoyées au VPS.</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="vps-title" className={FIELD_LABEL_CLASSES}>Titre (optionnel)</Label>
-            <Input id="vps-title" value={title} onChange={(e) => onTitleChange(e.target.value)} placeholder="Titre du ticket (déduit de la description si vide)" />
-          </div>
+          <OtherBoardDraftFields
+            idPrefix="vps"
+            title={title}
+            onTitleChange={onTitleChange}
+            description={description}
+            onDescriptionChange={onDescriptionChange}
+            boardLabel="VPS"
+          />
           {sends.length > 0 && (
             <section className="space-y-2 rounded-md border border-border p-3">
               <h3 className="text-sm font-medium">Envois vers le VPS non confirmés ({sends.length})</h3>

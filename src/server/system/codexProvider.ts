@@ -58,7 +58,7 @@ import { agentBaseEnv, envWithProjectNode } from "./nvmNode.ts";
 import { permissionDenialSchema, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { REVIEW_PUBLISHING_DENIAL_REASON, reviewPublishingDenyPatterns } from "./reviewPublishingGuard.ts";
 import type { ApiDenyPatterns } from "./reviewPublishingGuard.ts";
-import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, workerToolsForSession } from "./sessionRolePolicy.ts";
 import type { AgentSessionRole } from "./agentSession.ts";
 import { typecheckDenyPatterns, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
@@ -791,8 +791,8 @@ function createCodexAgentSession(
   const childLabels = new Map<string, string>();
   const activeChildren = new Set<string>();
   const confined = options.confined === true;
-  const workerTools = workerToolsForRole(options.role);
-  const hasWorkerServer = options.disableWorkerTools !== true && workerTools.length > 0;
+  const workerTools = workerToolsForSession(options);
+  const hasWorkerServer = workerTools.length > 0;
   const workerToken = hasWorkerServer ? nanoid(32) : null;
   let preparedAgents: PreparedAgents = { config: null, cleanup: () => {} };
   let preparedHook: PreparedHook = { config: {}, drainDenials: () => {}, cleanup: () => {} };

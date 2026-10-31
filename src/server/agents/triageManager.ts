@@ -16,7 +16,7 @@ import { ANALYSIS_WORKSPACES_ROOT, prepareAnalysisWorkspace, releaseAnalysisWork
 import type { AnalysisWorkspace } from "./analysisWorkspace.ts";
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
-import { admitRemoteAnalysis, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
+import { admitRemoteAnalysis, appendPromptLines, copyRemoteImages, remoteAnalysisRefusal } from "./remoteAnalysis.ts";
 import { buildTriageSessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 import { buildTriageChannelPrompt, buildTriagePlusChannelPrompt } from "./triage.ts";
@@ -78,6 +78,11 @@ export class TriageManager {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) {
       await this.failTriage(ticketId, "projet inconnu");
+      return;
+    }
+    const refusal = remoteAnalysisRefusal(ticket);
+    if (refusal !== null) {
+      await this.failTriage(ticketId, refusal);
       return;
     }
     const project = getProject(ticket.project);

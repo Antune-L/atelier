@@ -5,8 +5,9 @@ import type { AutonomousPlanInput, AutonomousResumeInput } from "../../shared/au
 import { ACTIVE_STAGES, ATELIER_SLOT_ID, AUTO_NUDGE_MAX, DEFAULT_PLAN_PARALLEL_IMPLEMENTERS, FEASIBILITY_SLOT_ID, MAX_PARALLEL_IMPLEMENTERS, RECLAIM_IDLE_MS, SPLIT_SLOT_ID, TRIAGE_SLOT_ID } from "../../shared/constants.ts";
 import { getErrorMessage, getErrorStack } from "../../shared/errors.ts";
 import type { ReviewFlag, ReviewLevel } from "../../shared/constants.ts";
-import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
+import { ATELIER_BOARD_TOOL_NAMES, AUTONOMOUS_UNIT_TEST_LOT, deliverAutonomousArgsSchema, qualityArgsSchema, readyForReviewArgsSchema, REVIEW_REASON_MAX_LENGTH, sendToMacArgsSchema, validateAutonomousArgsSchema } from "../../shared/protocol.ts";
 import type { Ticket, WorkerToolName } from "../../shared/schemas.ts";
+import { OUTBOX_ITEM_ID_PREFIXES, macOutboxDraftSchema } from "../../shared/vpsBridge.ts";
 import {
   askUserArgsSchema,
   delegateImplementationArgsSchema,
@@ -32,6 +33,7 @@ import type { Store, TicketPatch } from "../db/store.ts";
 import type { ClientHub } from "../hub.ts";
 import type { TicketLifecycle } from "../lifecycle.ts";
 import { createLogger } from "../logger.ts";
+import { MacOutboxError, enqueueMacOutboxItem, macOutboxAvailable } from "../macOutbox.ts";
 import type { Notifier } from "../notifier.ts";
 import type { AgentTurnUsage } from "../system/agentSession.ts";
 import { hasStructuredPrDescription, maxReviewLevel } from "../system/vcs/prDescription.ts";
@@ -484,6 +486,7 @@ export class AgentCoordinator {
     atelier_ticket_action: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     atelier_settle_conversation: () => ({ ok: false, result: "Reserved for Atelier sessions." }),
     submit_prd_document: () => ({ ok: false, result: "submit_prd_document non supporté ici : réservé aux sessions de l'Atelier." }),
+    send_to_mac: (ctx) => this.handleSendToMac(ctx),
   };
 
   private async handleSubmitAutonomousPlan(ctx: SessionToolCall): Promise<ToolResult> {
@@ -1060,6 +1063,30 @@ export class AgentCoordinator {
    * Applies extra review passes the user granted in an answer to one of the agent's questions.
    * The question must belong to this ticket and be answered; each question backs a single grant.
    */
+  private handleSendToMac(ctx: SessionToolCall): ToolResult {
+    const parsed = sendToMacArgsSchema.safeParse(ctx.args);
+    if (!parsed.success) return { ok: false, result: parsed.error.message };
+    const { requestId, ...fields } = parsed.data;
+    const draft = macOutboxDraftSchema.safeParse(fields);
+    if (!draft.success) return { ok: false, result: draft.error.issues[0]?.message ?? "invalid input" };
+    if (!macOutboxAvailable(this.store)) return { ok: false, result: "send_to_mac is unavailable: this board has no published Mac catalogue." };
+    try {
+      const { created, item } = enqueueMacOutboxItem(this.store, {
+        id: `${OUTBOX_ITEM_ID_PREFIXES.agent}${ctx.ticketId}:${requestId}`,
+        draft: draft.data,
+        source: "agent",
+        sourceTicketId: ctx.ticketId,
+      });
+      log.info("carte mise en file pour le Mac par un agent", { ticketId: ctx.ticketId, outboxId: item.id, created });
+      return { ok: true, result: JSON.stringify({ queued: true, replay: !created, outboxId: item.id, project: item.project, status: item.status }) };
+    } catch (error) {
+      if (!(error instanceof MacOutboxError)) throw error;
+      if (error.code !== "NOT_FOUND") return { ok: false, result: error.message };
+      const keys = this.store.getMacCatalogue()?.projects.map((project) => project.key) ?? [];
+      return { ok: false, result: `${error.message}. Mac catalogue keys: ${keys.join(", ")}` };
+    }
+  }
+
   private handleGrantReviewPasses(ctx: SessionToolCall): ToolResult {
     const parsed = grantReviewPassesArgsSchema.safeParse(ctx.args);
     if (!parsed.success) return { ok: false, result: parsed.error.message };

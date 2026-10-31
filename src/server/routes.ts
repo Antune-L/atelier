@@ -104,6 +104,8 @@ import { saveUpload } from "./uploads.ts";
 import { createQualityRoutes } from "./qualityRoutes.ts";
 import { createPreviewRoutes } from "./previewRoutes.ts";
 import { createAuditRoutes } from "./auditRoutes.ts";
+import { createMacOutboxRoutes } from "./macOutboxRoutes.ts";
+import { macOutboxAvailable } from "./macOutbox.ts";
 import { createVpsLinkRoutes } from "./vpsLinkRoutes.ts";
 import type { VpsLinkSync } from "./vpsLinkSync.ts";
 import type { LocalUsageReadResult } from "./usage/localHistory.ts";
@@ -1066,6 +1068,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(deps.previews ? createPreviewRoutes({ previews: deps.previews }) : new Elysia())
     .use(deps.audits ? createAuditRoutes({ audits: deps.audits }) : new Elysia())
     .use(deps.vpsLink ? createVpsLinkRoutes({ vpsLink: deps.vpsLink }) : new Elysia())
+    .use(isCloudHost() ? createMacOutboxRoutes({ store }) : new Elysia())
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.
@@ -1307,6 +1310,7 @@ export function createApiRoutes(deps: RouteDeps) {
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
         canPickFolder: deps.pickFolder != null && isLocalRequest(request),
         cloudHost: isCloudHost(),
+        macOutbox: macOutboxAvailable(store),
         activePublicHostname: normalizeDevHost(process.env.DEV_HOST),
         githubAvailable: await deps.system.checkGithubAvailable(),
         skills: await deps.system.checkSkills(),

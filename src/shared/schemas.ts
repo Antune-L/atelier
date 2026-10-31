@@ -1073,6 +1073,7 @@ export const capabilitiesSchema = z.object({
   canPickFolder: z.boolean(),
   /** Server runs with KANBAN_HOST_ROLE=cloud (always-on VPS). */
   cloudHost: z.boolean(),
+  macOutbox: z.boolean(),
   activePublicHostname: z.string().nullable(),
   /** The `gh` CLI is available, enabling the « Depuis GitHub » project mode. Never carries a login or token. */
   githubAvailable: z.boolean(),

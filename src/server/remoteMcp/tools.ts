@@ -7,15 +7,16 @@ import { getErrorMessage } from "../../shared/errors.ts";
 import { triageStatusSchema } from "../../shared/schemas.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { isRemoteTicket } from "../../shared/startBlocker.ts";
-import { remoteMcpProfileEngineError } from "../agents/executionConfig.ts";
 import { getProject, isProjectKey } from "../config.ts";
 import type { Store } from "../db/store.ts";
 import { createLogger } from "../logger.ts";
 import { createToolServer, errorResult, toolResult } from "../publicMcp.ts";
 import type { McpTextResult } from "../publicMcp.ts";
 import type { SystemAdapter } from "../system/types.ts";
-import { TicketOperationError, frozenAgentsOfProfile } from "../ticketOperations.ts";
+import { TicketOperationError } from "../ticketOperations.ts";
 import type { FrozenTicketAgents, TicketOperations } from "../ticketOperations.ts";
+
+import { remoteAllowedProjects, resolveRemoteCardsProfile } from "./admission.ts";
 
 const REQUEST_ID_PREFIX = "mcp:";
 const MAX_PROJECT_KEY_LENGTH = 128;
@@ -223,7 +224,7 @@ class RemoteMcpTools {
   }
 
   private allowedProjects(): Set<string> {
-    return new Set(this.deps.store.getAppSettings().remoteMcpProjectIds.filter(isProjectKey));
+    return remoteAllowedProjects(this.deps.store);
   }
 
   private assertAllowed(project: string): void {
@@ -256,15 +257,11 @@ class RemoteMcpTools {
   }
 
   private async resolveProfileAgents(): Promise<FrozenTicketAgents> {
-    const profileId = this.deps.store.getAppSettings().remoteMcpCardsProfileId;
-    const profile = profileId === null ? null : this.deps.store.getProfile(profileId);
-    if (profile === null) throw new RemoteToolError("UNAVAILABLE", ERROR_MESSAGES.notConfigured, "unavailable");
-    const engineError = await remoteMcpProfileEngineError(this.deps.system, this.deps.composerAvailable, profile);
-    if (engineError !== null) {
-      log.warn("moteur du profil des cartes distantes indisponible", { error: engineError });
-      throw new RemoteToolError("UNAVAILABLE", ERROR_MESSAGES.engineUnavailable, "unavailable");
-    }
-    return frozenAgentsOfProfile(profile);
+    const resolution = await resolveRemoteCardsProfile(this.deps);
+    if (resolution.ok) return resolution.agents;
+    if (resolution.reason === "not_configured") throw new RemoteToolError("UNAVAILABLE", ERROR_MESSAGES.notConfigured, "unavailable");
+    log.warn("moteur du profil des cartes distantes indisponible", { error: resolution.detail });
+    throw new RemoteToolError("UNAVAILABLE", ERROR_MESSAGES.engineUnavailable, "unavailable");
   }
 
   private async createTodoTicket(input: z.infer<typeof createTodoTicketInputSchema>): Promise<{ created: boolean; ticket: Ticket }> {

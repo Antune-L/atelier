@@ -25,7 +25,7 @@ import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
 import { buildFeasibilityBatchContract } from "./contract.ts";
 import { assertExecutionAvailable, resolveFeasibilityExecution } from "./executionConfig.ts";
 import type { ResolvedExecution } from "./executionConfig.ts";
-import { RemoteAnalysisRefusedError, admitRemoteAnalysis, appendPromptLines, copyRemoteImages } from "./remoteAnalysis.ts";
+import { RemoteAnalysisRefusedError, admitRemoteAnalysis, appendPromptLines, copyRemoteImages, remoteAnalysisRefusal } from "./remoteAnalysis.ts";
 import { buildFeasibilitySessionConfig } from "./sessionConfig.ts";
 import type { SessionHub } from "./sessionHub.ts";
 
@@ -159,7 +159,12 @@ export class FeasibilityBatchManager {
     }
     const tickets = [...new Set(ticketIds)].filter((id) => !this.scheduledTickets.has(id))
       .map((id) => this.store.getTicket(id))
-      .filter((ticket): ticket is NonNullable<typeof ticket> => ticket !== null);
+      .filter((ticket): ticket is NonNullable<typeof ticket> => ticket !== null)
+      .filter((ticket) => {
+        const refusal = remoteAnalysisRefusal(ticket);
+        if (refusal !== null) this.failTicket(ticket.id, refusal);
+        return refusal === null;
+      });
     if (tickets.length === 0) return;
 
     for (const ticket of tickets) {

@@ -527,6 +527,27 @@ CREATE TABLE IF NOT EXISTS vps_pending_sends (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mac_outbox (
+  id TEXT PRIMARY KEY,
+  project TEXT NOT NULL,
+  project_label TEXT,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_ticket_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  mac_ticket_id TEXT,
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  received_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS vps_outbox_receipts (
+  outbox_id TEXT PRIMARY KEY,
+  ticket_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS prd_documents (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -547,6 +568,7 @@ CREATE INDEX IF NOT EXISTS idx_prd_documents_conversation ON prd_documents(conve
 CREATE INDEX IF NOT EXISTS idx_events_ticket ON events(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_events_ticket_type_id ON events(ticket_id, type, id);
 CREATE INDEX IF NOT EXISTS idx_ticket_creation_requests_ticket ON ticket_creation_requests(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_mac_outbox_status ON mac_outbox(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 CREATE INDEX IF NOT EXISTS idx_execution_runs_owner ON execution_runs(owner_type, owner_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_execution_runs_session ON execution_runs(session_id);

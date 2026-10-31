@@ -17,7 +17,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 case "$1" in
-  version | list_projects | create_ticket) op="$1" ;;
+  version | list_projects | create_ticket | catalogue_publish | outbox_fetch | outbox_ack) op="$1" ;;
   *)
     echo "kanban-bridge: unknown operation" >&2
     exit "$EXIT_USAGE"

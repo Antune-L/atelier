@@ -51,7 +51,7 @@ import { envWithProjectNode } from "./nvmNode.ts";
 import { PERMISSION_DENIAL_REASON, reportPermissionDenial } from "./permissionDiagnostics.ts";
 import { qualityReadToolAllowed } from "./qualityReadPolicy.ts";
 import { isReviewPublishingCommand, REVIEW_PUBLISHING_DENIAL_REASON } from "./reviewPublishingGuard.ts";
-import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForRole } from "./sessionRolePolicy.ts";
+import { AUDITOR_INSTRUCTIONS, QUALITY_VALIDATOR_INSTRUCTIONS, settingSourcesForRole, workerToolsForSession } from "./sessionRolePolicy.ts";
 import { launchesTypecheck, typecheckScriptNames, TYPECHECK_DENIAL_REASON } from "./typecheckGuard.ts";
 
 const log = createLogger("claude-provider");
@@ -265,7 +265,7 @@ export function createSdkAgentSession(
   }
 
   // ---- in-process MCP tools from the worker registry; each call routes back to the backend ----
-  const workerTools = opts.disableWorkerTools ? [] : workerToolsForRole(opts.role);
+  const workerTools = workerToolsForSession(opts);
   const allowedWorkerTools = new Set(workerTools);
   const tools = WORKER_TOOLS.filter((entry) => allowedWorkerTools.has(entry.name)).map((entry) =>
     tool(entry.name, entry.description, entry.argsSchema.shape, async (args) => {

@@ -7,8 +7,8 @@ import { auditFindingSchema, auditProjectSettingsSchema, auditProjectStateSchema
 import type { AuditFinding, AuditProjectSettings, AuditProjectState, AuditRun } from "../../shared/audit.ts";
 import { previewProjectSettingsSchema, previewRecordSchema } from "../../shared/preview.ts";
 import type { PreviewProjectSettings, PreviewRecord } from "../../shared/preview.ts";
-import { VPS_SEND_STATUSES, vpsTicketDraftSchema } from "../../shared/vpsBridge.ts";
-import type { VpsPendingSend } from "../../shared/vpsBridge.ts";
+import { MAC_OUTBOX_SOURCES, MAC_OUTBOX_STATUSES, VPS_SEND_STATUSES, vpsTicketDraftSchema } from "../../shared/vpsBridge.ts";
+import type { MacOutboxItem, VpsPendingSend } from "../../shared/vpsBridge.ts";
 
 import { DEFAULT_CODEX_EFFORT, DEFAULT_CODEX_MODEL, DEFAULT_VCS_PROVIDER, REVIEW_FLAGS, REVIEW_LEVELS } from "../../shared/constants.ts";
 import type { ActiveSubagent, AgentMessage, Automation, AutomationRun, Comment, Conversation, ConversationMessage, ErrorDetails, ExecutionRun, FinishedSubagent, PrdAnnotation, PrdDocumentRecord, Profile, ResearchOptions, Slot, Ticket, WorktreeSession } from "../../shared/schemas.ts";
@@ -194,6 +194,50 @@ export function mapVpsPendingSendRow(raw: unknown): VpsPendingSend {
     lastAttemptAt: row.last_attempt_at,
     createdAt: row.created_at,
   };
+}
+
+const macOutboxRowSchema = z.object({
+  id: z.string(),
+  project: z.string(),
+  project_label: z.string().nullable(),
+  title: z.string(),
+  description: z.string(),
+  source: z.enum(MAC_OUTBOX_SOURCES),
+  source_ticket_id: z.string().nullable(),
+  status: z.enum(MAC_OUTBOX_STATUSES),
+  mac_ticket_id: z.string().nullable(),
+  reason: z.string().nullable(),
+  created_at: z.number(),
+  received_at: z.number().nullable(),
+});
+
+export function mapMacOutboxRow(raw: unknown): MacOutboxItem {
+  const row = macOutboxRowSchema.parse(raw);
+  return {
+    id: row.id,
+    project: row.project,
+    projectLabel: row.project_label,
+    title: row.title,
+    description: row.description,
+    source: row.source,
+    sourceTicketId: row.source_ticket_id,
+    status: row.status,
+    macTicketId: row.mac_ticket_id,
+    reason: row.reason,
+    createdAt: row.created_at,
+    receivedAt: row.received_at,
+  };
+}
+
+const vpsOutboxReceiptRowSchema = z.object({
+  outbox_id: z.string(),
+  ticket_id: z.string(),
+  created_at: z.number(),
+});
+
+export function mapVpsOutboxReceiptRow(raw: unknown): { outboxId: string; ticketId: string; createdAt: number } {
+  const row = vpsOutboxReceiptRowSchema.parse(raw);
+  return { outboxId: row.outbox_id, ticketId: row.ticket_id, createdAt: row.created_at };
 }
 
 const commentRowSchema = z.object({

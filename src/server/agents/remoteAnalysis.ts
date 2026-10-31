@@ -11,6 +11,7 @@ import type { Orchestrator } from "../../shared/constants.ts";
 import type { Ticket } from "../../shared/schemas.ts";
 import { isRemoteTicket } from "../../shared/startBlocker.ts";
 import { PROJECT_ROOT } from "../config.ts";
+import { isCloudHost } from "../hostRole.ts";
 import type { KeyedMutex } from "../mutex.ts";
 import { ensureCodexConfinedSandbox } from "../remoteMcp/sandboxMonitor.ts";
 import { UPLOADS_DIR } from "../uploads.ts";
@@ -27,6 +28,23 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 /** A refused remote analysis (failed sandbox probe): final for this attempt, never retried. */
 export class RemoteAnalysisRefusedError extends Error {}
+
+// NOTE(ali): confined analysis (Claude tool confinement, Codex sandbox probe) is only qualified on the cloud host; flip once qualified on macOS.
+export const REMOTE_ANALYSIS_QUALIFIED_ON_MAC = false;
+export const REMOTE_ANALYSIS_UNQUALIFIED_MESSAGE = "Analyse refusée sur ce Mac : l'analyse confinée des cartes distantes n'est pas encore qualifiée sur macOS. Relisez la carte, puis approuvez-la avant de la lancer.";
+
+function remoteAnalysisQualifiedOnThisHost(): boolean {
+  return isCloudHost() || REMOTE_ANALYSIS_QUALIFIED_ON_MAC;
+}
+
+export function remoteAnalysisRefusal(ticket: Pick<Ticket, "origin">): string | null {
+  return isRemoteTicket(ticket) && !remoteAnalysisQualifiedOnThisHost() ? REMOTE_ANALYSIS_UNQUALIFIED_MESSAGE : null;
+}
+
+export function assertRemoteAnalysisAllowed(ticket: Pick<Ticket, "origin">): void {
+  const refusal = remoteAnalysisRefusal(ticket);
+  if (refusal !== null) throw new RemoteAnalysisRefusedError(refusal);
+}
 
 /** Remote cards reformulate and split on their analysis engine, never on a later-edited orchestrator. */
 export function withRemoteAnalysisEngine(ticket: Ticket): Ticket {
@@ -61,6 +79,7 @@ function acquireRemoteAnalysisSlot(): Promise<() => void> {
  * release, to call when the attempt settles; throws a French message when refused.
  */
 export async function admitRemoteAnalysis(provider: Orchestrator): Promise<() => void> {
+  if (!remoteAnalysisQualifiedOnThisHost()) throw new RemoteAnalysisRefusedError(REMOTE_ANALYSIS_UNQUALIFIED_MESSAGE);
   const release = await acquireRemoteAnalysisSlot();
   try {
     if (provider === "codex" && !(await ensureCodexConfinedSandbox())) {

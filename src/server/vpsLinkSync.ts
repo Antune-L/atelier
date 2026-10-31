@@ -4,21 +4,38 @@ import type { ZodType } from "zod";
 import { getErrorMessage } from "../shared/errors.ts";
 import {
   BRIDGE_PROTOCOL_VERSION,
+  MAC_CATALOGUE_MAX_PROJECTS,
+  bridgeCataloguePublishOutputSchema,
   bridgeCreateTicketOutputSchema,
   bridgeListProjectsOutputSchema,
+  bridgeOutboxAckOutputSchema,
+  bridgeOutboxFetchOutputSchema,
   bridgeRequestId,
   bridgeVersionOutputSchema,
   vpsTicketDraftSchema,
 } from "../shared/vpsBridge.ts";
-import type { BridgeOp, VpsCreateTicketResponse, VpsCreatedTicket, VpsPendingSend, VpsProject } from "../shared/vpsBridge.ts";
+import type {
+  BoardProject,
+  BridgeCataloguePublishInput,
+  BridgeOp,
+  OutboxAck,
+  VpsCreateTicketResponse,
+  VpsCreatedTicket,
+  VpsPendingSend,
+} from "../shared/vpsBridge.ts";
 
+import { getProject } from "./config.ts";
 import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
+import { remoteAllowedProjects } from "./remoteMcp/admission.ts";
 import type { SystemAdapter } from "./system/types.ts";
 import type { VpsBridgeFailureKind } from "./system/vpsBridge.ts";
+import type { TicketOperations } from "./ticketOperations.ts";
+import { admitVpsOutboxItem } from "./vpsOutboxImport.ts";
 
 const SYNC_INTERVAL_MS = 5 * 60_000;
 const VERSION_CHECK_TTL_MS = SYNC_INTERVAL_MS;
+const OUTBOX_MAX_PAGES_PER_SYNC = 10;
 const log = createLogger("vps-link");
 
 export type VpsLinkErrorKind = VpsBridgeFailureKind | "not_configured" | "rejected" | "not_found";
@@ -55,6 +72,13 @@ function isPermanentFailure(kind: VpsLinkErrorKind): boolean {
   return kind === "rejected" || kind === "invalid_request";
 }
 
+export interface VpsLinkSyncDeps {
+  store: Store;
+  system: Pick<SystemAdapter, "runVpsBridge" | "checkCodexRuntime" | "checkClaudeAvailable">;
+  operations: Pick<TicketOperations, "createTodoTicket">;
+  composerAvailable: boolean;
+}
+
 /**
  * Mac-side link to the VPS board: sends N3 creations over the SSH bridge, keeps the unconfirmed ones in
  * `vps_pending_sends` and retries them with the same request id on a 5-minute task, without expiry.
@@ -67,7 +91,7 @@ export class VpsLinkSync {
   private readonly projectLabels = new Map<string, string>();
   private compatibility: { alias: string; checkedAt: number } | null = null;
 
-  constructor(private readonly deps: { store: Store; system: Pick<SystemAdapter, "runVpsBridge"> }) {}
+  constructor(private readonly deps: VpsLinkSyncDeps) {}
 
   start(): void {
     if (!this.stopped) return;
@@ -82,7 +106,7 @@ export class VpsLinkSync {
     await this.running;
   }
 
-  async listProjects(): Promise<VpsProject[]> {
+  async listProjects(): Promise<BoardProject[]> {
     const { projects } = await this.call("list_projects", {}, bridgeListProjectsOutputSchema);
     for (const project of projects) this.projectLabels.set(project.key, project.label);
     return projects;
@@ -130,12 +154,56 @@ export class VpsLinkSync {
 
   private async sync(): Promise<void> {
     if (this.deps.store.getAppSettings().sshHostAlias === null) return;
+    if (!(await this.retryPendingSends())) return;
+    try {
+      await this.publishCatalogue();
+      await this.importOutbox();
+    } catch (error) {
+      if (!(error instanceof VpsLinkError)) throw error;
+      log.warn("synchronisation de la boîte d'envoi du VPS interrompue", { kind: error.kind, error: error.message });
+    }
+  }
+
+  private async retryPendingSends(): Promise<boolean> {
     for (const send of this.deps.store.listVpsPendingSends()) {
-      if (this.stopped) return;
+      if (this.stopped) return false;
       if (send.status !== "pending" || this.inFlight.has(send.id)) continue;
       const outcome = await this.deliver(send);
       if (outcome.status === "rejected") this.deps.store.recordVpsSendAttempt(send.id, { status: "failed", lastError: outcome.message });
-      if (outcome.status === "pending") return;
+      if (outcome.status === "pending") return false;
+    }
+    return !this.stopped;
+  }
+
+  private catalogue(): BridgeCataloguePublishInput {
+    const projects = [...remoteAllowedProjects(this.deps.store)].slice(0, MAC_CATALOGUE_MAX_PROJECTS).map((key) => {
+      const { label, baseBranch, vcsProvider } = getProject(key);
+      return { key, label, baseBranch, vcsProvider };
+    });
+    return { boardName: this.deps.store.getAppSettings().boardName, projects };
+  }
+
+  private async publishCatalogue(): Promise<void> {
+    const catalogue = this.catalogue();
+    await this.call("catalogue_publish", catalogue, bridgeCataloguePublishOutputSchema);
+    log.info("catalogue du Mac publié sur le VPS", { projects: catalogue.projects.length });
+  }
+
+  private async importOutbox(): Promise<void> {
+    for (let page = 0; page < OUTBOX_MAX_PAGES_PER_SYNC; page += 1) {
+      if (this.stopped) return;
+      const { items } = await this.call("outbox_fetch", {}, bridgeOutboxFetchOutputSchema);
+      if (items.length === 0) return;
+      const acks: OutboxAck[] = [];
+      for (const item of items) {
+        const ack = await admitVpsOutboxItem(this.deps, item).catch((error: unknown) => {
+          log.error("envoi du VPS non importé", { outboxId: item.id, error: getErrorMessage(error) });
+          return null;
+        });
+        if (ack !== null) acks.push(ack);
+      }
+      if (acks.length > 0) await this.call("outbox_ack", { acks }, bridgeOutboxAckOutputSchema);
+      if (acks.length < items.length) return;
     }
   }
 

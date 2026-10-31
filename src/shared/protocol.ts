@@ -18,7 +18,7 @@
 import { z } from "zod";
 
 import { autonomousPlanInputSchema } from "./autonomous.ts";
-import { COLUMNS, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, REVIEW_LEVELS, TRIAGE_VERDICTS } from "./constants.ts";
+import { COLUMNS, CROSS_BOARD_CLIENT_ID_PATTERN, CROSS_BOARD_DESCRIPTION_MAX_LENGTH, CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH, DEFAULT_IMPLEMENTATION_LOT, LOT_LABEL_MAX_LENGTH, MAX_PARALLEL_IMPLEMENTERS, REVIEW_LEVELS, TRIAGE_VERDICTS } from "./constants.ts";
 import type { Stage } from "./constants.ts";
 import { implementationPlanLotDefinitionSchema, implementationPlanParallelSchema } from "./implementationPlan.ts";
 import { prdDocumentSchema } from "./prdDocument.ts";
@@ -133,6 +133,16 @@ export const atelierTicketActionArgsSchema = atelierTicketIdSchema.extend({
 export const atelierSettleConversationArgsSchema = z.object({ authorizationQuote: atelierAuthorizationSchema }).strict();
 
 export const ATELIER_BOARD_TOOL_NAMES = ["atelier_list_tickets", "atelier_get_ticket", "atelier_create_todo", "atelier_start_ticket", "atelier_ticket_action", "atelier_settle_conversation"] satisfies readonly WorkerToolName[];
+
+
+export const sendToMacArgsSchema = z.object({
+  requestId: z.string().regex(CROSS_BOARD_CLIENT_ID_PATTERN).describe("Stable identifier for this card (letters, digits, - or _); reuse it when retrying the same send."),
+  project: z.string().trim().min(1).max(CROSS_BOARD_PROJECT_KEY_MAX_LENGTH).describe("Key of a project of the published Mac catalogue."),
+  title: z.string().max(CROSS_BOARD_TITLE_MAX_LENGTH).describe("Short title; derived from the description on the Mac when empty."),
+  description: z.string().max(CROSS_BOARD_DESCRIPTION_MAX_LENGTH).describe("Markdown description of the card for the Mac."),
+}).strict();
+
+export const CONDITIONAL_WORKER_TOOL_NAMES = ["send_to_mac"] satisfies readonly WorkerToolName[];
 
 /** Final answer an ask ticket submits (markdown); surfaced as an agent comment, closes the ticket. */
 export const submitAnswerArgsSchema = z.object({ answer: z.string().min(1) });
@@ -488,6 +498,11 @@ export const WORKER_TOOLS = [
     argsSchema: atelierSettleConversationArgsSchema,
   },
   {
+    name: "send_to_mac",
+    description: "Queue a card for the paired Mac board in the VPS outbox, only when the user asked for work on the Mac. Title, description and a Mac project key from the published Mac catalogue only. The card arrives on the Mac locked until its owner approves it; this tool cannot approve, start or track it beyond the queue. An unknown project returns the catalogue keys.",
+    argsSchema: sendToMacArgsSchema,
+  },
+  {
     name: "submit_prd_document",
     description:
       "Réservé à l'Atelier : soumet le PRD consolidé au format JSON structuré (schemaVersion 2). Le backend le valide et l'enregistre comme nouvelle révision.",
@@ -530,6 +545,7 @@ const WORKER_TOOL_NAMES = [
   "submit_feasibility",
   "submit_split",
   "submit_prd_document",
+  "send_to_mac",
   ...ATELIER_BOARD_TOOL_NAMES,
 ] as const satisfies readonly WorkerToolName[];
 

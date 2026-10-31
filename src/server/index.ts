@@ -401,7 +401,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     if (preview && preview.cleanupStatus !== "complete") await previewManager.stop(preview.id);
     await qualityManager.cancel(ticketId);
   });
-  const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system });
   const configuredMcpToken = opts.mcpToken === undefined ? process.env.KANBAN_MCP_TOKEN : opts.mcpToken;
   const mcpToken = configuredMcpToken?.trim() || null;
   const publicMcpManager = mcpToken === null
@@ -429,6 +428,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
+  const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system, operations: ticketOperations, composerAvailable });
   const remoteMcpConfig = readRemoteMcpConfig();
   void system.checkCodexRuntime().then((codex) => {
     createLogger("boot").info("Runtime Codex vérifié", { status: codex.status });
@@ -572,7 +572,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     uiServer = Bun.serve<SocketData>({ unix: socketPath, idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS, fetch: handleRequest, websocket });
     chmodSync(socketPath, UI_SOCKET_MODE);
   }
-  const bridgeListener = socketPath !== null && isCloudHost() ? startBridgeListener(socketPath, ticketOperations) : null;
+  const bridgeListener = socketPath !== null && isCloudHost() ? startBridgeListener(socketPath, { operations: ticketOperations, store }) : null;
   const remoteMcpListener = remoteMcpConfig === null
     ? null
     : startRemoteMcpListener(remoteMcpConfig, { store, operations: ticketOperations, system, composerAvailable });

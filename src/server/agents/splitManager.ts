@@ -9,7 +9,7 @@ import { createLogger } from "../logger.ts";
 import type { SystemAdapter } from "../system/index.ts";
 
 import { resolveAnalysisBaseBranch } from "./baseBranch.ts";
-import { acquireRemoteAnalysisCopy, appendPromptLines, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
+import { acquireRemoteAnalysisCopy, appendPromptLines, assertRemoteAnalysisAllowed, copyRemoteImages, withRemoteAnalysisEngine } from "./remoteAnalysis.ts";
 import type { RemoteAnalysisCopy } from "./remoteAnalysis.ts";
 import type { RepoSnapshots, SnapshotLease } from "./repoSnapshots.ts";
 import { buildSplitSessionConfig } from "./sessionConfig.ts";
@@ -60,6 +60,7 @@ export class SplitManager {
     if (!ticket || !isProjectKey(ticket.project)) {
       throw new Error("projet inconnu");
     }
+    assertRemoteAnalysisAllowed(ticket);
     const project = getProject(ticket.project);
     log.info("split démarré", { ticketId, project: ticket.project });
 

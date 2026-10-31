@@ -80,6 +80,7 @@ export interface SessionStartConfig {
   skills?: string[];
   /** Additional stdio MCP servers for the session (e.g. Playwright for verify tickets). Claude only. */
   extraMcpServers?: Record<string, StdioMcpServerDefinition>;
+  extraWorkerTools?: WorkerToolName[];
 }
 
 export interface SessionToolCall {
@@ -461,6 +462,7 @@ export class SessionHub {
         ...(config.skills ? { skills: config.skills } : {}),
         ...(config.agents ? { agents: config.agents } : {}),
         ...(config.extraMcpServers ? { extraMcpServers: config.extraMcpServers } : {}),
+        ...(config.extraWorkerTools ? { extraWorkerTools: config.extraWorkerTools } : {}),
         onToolCall: (name, args) => this.routeToolCall(config.ticketId, config.slotId, generation, name, args),
         onEvent: (event) => this.handleEvent(live, event),
       });

@@ -98,8 +98,8 @@ const ARCHIVE_RETENTION_PER_TICKET = 3;
 const ARCHIVE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 // Installed dependencies are regenerable: they are neither archived nor fingerprinted, at any depth.
-function isArchiveExcluded(name: string, atRoot: boolean): boolean {
-  return name === DEPENDENCIES_DIR || (atRoot && name === ".git");
+function isArchiveExcluded(name: string, atRoot: boolean, includeDependencies = false): boolean {
+  return (!includeDependencies && name === DEPENDENCIES_DIR) || (atRoot && name === ".git");
 }
 
 function isValidRelativePath(path: string): boolean {
@@ -277,12 +277,12 @@ async function snapshot(root: string, paths: Iterable<string>): Promise<Map<stri
   return states;
 }
 
-export async function archiveFingerprint(root: string): Promise<string> {
+export async function archiveFingerprint(root: string, includeDependencies = false): Promise<string> {
   const hash = createHash("sha256");
   async function visit(directory: string, relative: string): Promise<void> {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      if (isArchiveExcluded(entry.name, !relative)) continue;
+      if (isArchiveExcluded(entry.name, !relative, includeDependencies)) continue;
       const path = relative ? `${relative}/${entry.name}` : entry.name;
       const info = await lstat(join(root, path));
       hash.update(JSON.stringify([path, info.mode & FILE_MODE_MASK]));
@@ -296,6 +296,11 @@ export async function archiveFingerprint(root: string): Promise<string> {
   }
   await visit(root, "");
   return hash.digest("hex");
+}
+
+// Archives created before `node_modules` was excluded carry a fingerprint that includes it.
+async function archiveContentMatches(content: string, expected: string): Promise<boolean> {
+  return await archiveFingerprint(content) === expected || await archiveFingerprint(content, true) === expected;
 }
 
 export async function copyArchiveContents(source: string, target: string): Promise<void> {
@@ -351,27 +356,30 @@ export async function restoreImplementationRecoveryArchive(archivePath: string, 
   if (await lstatIfExists(destination)) throw new Error("La destination de restauration existe déjà.");
   const manifest = archiveManifestSchema.parse(JSON.parse(await readFile(join(archivePath, ARCHIVE_MANIFEST), "utf8")));
   if (!manifest.contentFingerprint || !manifest.head) throw new Error("Cette archive ne contient qu'un journal.");
-  if (await archiveFingerprint(join(archivePath, ARCHIVE_CONTENT)) !== manifest.contentFingerprint) {
+  const content = join(archivePath, ARCHIVE_CONTENT);
+  if (!await archiveContentMatches(content, manifest.contentFingerprint)) {
     throw new Error("Le contenu de l'archive a changé ; restauration refusée.");
   }
+  const restoredFingerprint = await archiveFingerprint(content);
   await verifyArchiveBundle(archivePath, manifest.head);
   await git(dirname(destination), ["clone", "--no-checkout", join(archivePath, ARCHIVE_BUNDLE), destination]);
   await git(destination, ["checkout", "--detach", manifest.head]);
   for (const entry of await readdir(destination)) {
     if (entry !== ".git") await rm(join(destination, entry), { recursive: true, force: true });
   }
-  await copyArchiveContents(join(archivePath, ARCHIVE_CONTENT), destination);
-  if (await archiveFingerprint(destination) !== manifest.contentFingerprint) {
+  await copyArchiveContents(content, destination);
+  if (await archiveFingerprint(destination) !== restoredFingerprint) {
     throw new Error("La restauration ne correspond pas au contenu préservé.");
   }
 }
 
 /**
  * Deletes this slot's archives beyond the most recent ones of their ticket or older than the retention
- * window. Only archives whose bundle verifies are deleted; `keepPath` is never touched.
+ * window. Only archives whose bundle verifies are deleted; `keepPaths` are never touched.
  * Must run under the slot lock; errors are swallowed per archive.
  */
-export async function pruneImplementationRecoveryArchives(root: string, slotPath: string, keepPath: string, now = Date.now()): Promise<string[]> {
+export async function pruneImplementationRecoveryArchives(root: string, slotPath: string, keepPaths: string[], now = Date.now()): Promise<string[]> {
+  const kept = new Set(keepPaths.map((path) => resolve(path)));
   const groups = new Map<string, { path: string; manifest: z.infer<typeof archiveManifestSchema> }[]>();
   for (const name of await readdirIfExists(root)) {
     if (!ARCHIVE_KEY_PATTERN.test(name)) continue;
@@ -392,7 +400,7 @@ export async function pruneImplementationRecoveryArchives(root: string, slotPath
   for (const group of groups.values()) {
     group.sort((left, right) => right.manifest.createdAt - left.manifest.createdAt);
     for (const [index, { path, manifest }] of group.entries()) {
-      if (resolve(path) === resolve(keepPath) || !manifest.head) continue;
+      if (kept.has(resolve(path)) || !manifest.head) continue;
       if (index < ARCHIVE_RETENTION_PER_TICKET && now - manifest.createdAt <= ARCHIVE_RETENTION_MS) continue;
       try {
         await verifyArchiveBundle(path, manifest.head);
@@ -678,7 +686,7 @@ export class DelegationWorkspace {
           try {
             const contentInfo = await lstatIfExists(join(archivePath, ARCHIVE_CONTENT));
             const contentMatches = manifest.contentFingerprint === null || contentInfo?.isDirectory() === true && !contentInfo.isSymbolicLink()
-              && await archiveFingerprint(join(archivePath, ARCHIVE_CONTENT)) === manifest.contentFingerprint;
+              && await archiveContentMatches(join(archivePath, ARCHIVE_CONTENT), manifest.contentFingerprint);
             const bundlePath = join(archivePath, ARCHIVE_BUNDLE);
             const bundleInfo = await lstatIfExists(bundlePath);
             const bundle = manifest.head && bundleInfo?.isFile() && !bundleInfo.isSymbolicLink()
@@ -970,7 +978,8 @@ export class DelegationWorkspace {
 
   private async cleanup(opts: ImplementationLotOptions): Promise<void> {
     const cwd = workspacePath(opts);
-    await this.archiveWorkspace(cwd, opts.slotPath);
+    const archive = await this.archiveWorkspace(cwd, opts.slotPath);
+    await this.pruneArchives(opts.slotPath, archive ? [archive] : []);
     await this.removeWorktree(opts.slotPath, cwd);
     await rm(`${cwd}${JOURNAL_SUFFIX}`, { force: true });
   }
@@ -995,7 +1004,14 @@ export class DelegationWorkspace {
       const archive = await this.archiveWorkspace(cwd, opts.slotPath);
       if (archive) archives.push(archive);
     }
+    await this.pruneArchives(opts.slotPath, archives);
     return archives;
+  }
+
+  // Runs once per preservation pass so that no archive of the current pass is pruned.
+  private async pruneArchives(slotPath: string, kept: ImplementationRecoveryArchive[]): Promise<void> {
+    const root = join(dirname(slotPath), ARCHIVE_DIRECTORY);
+    await pruneImplementationRecoveryArchives(root, slotPath, kept.map((archive) => archive.archivePath)).catch(() => []);
   }
 
   private async archiveWorkspace(cwd: string, slotPath: string): Promise<ImplementationRecoveryArchive | null> {
@@ -1062,7 +1078,6 @@ export class DelegationWorkspace {
       || (journalHash && createHash("sha256").update(await readFile(`${cwd}${JOURNAL_SUFFIX}`)).digest("hex") !== journalHash)) {
       throw new Error("Le lot a changé après sa préservation ; nettoyage refusé.");
     }
-    await pruneImplementationRecoveryArchives(root, slotPath, archivePath).catch(() => []);
     return {
       ticketId: manifest.ticketId, label: manifest.label, cycleId: manifest.cycleId,
       archivePath, journalPath: journal ? join(archivePath, ARCHIVE_JOURNAL) : null, verified: true, unchanged: false,

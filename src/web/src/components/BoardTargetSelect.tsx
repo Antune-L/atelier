@@ -28,7 +28,7 @@ interface BoardTargetSelectProps {
 
 export function BoardTargetSelect({ cloudHost, value, onChange }: BoardTargetSelectProps) {
   return (
-    <div className="space-y-1.5">
+    <div className="flex flex-col items-start gap-1.5">
       <span id="board-target-label" className={FIELD_LABEL_CLASSES}>Board cible</span>
       <Tabs
         aria-labelledby="board-target-label"

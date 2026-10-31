@@ -53,9 +53,11 @@ umask 022
 
 usage() {
   echo "usage: $0 [--sha <full 40-character commit sha> [--install-bridge]] [--force]" >&2
+  echo "       $0 --check-idle" >&2
   echo "  --sha             upgrade to this commit instead of the tip of main" >&2
   echo "  --install-bridge  also install the bridge program of that reviewed commit" >&2
   echo "  --force           upgrade even if cards, validations, previews or slots are active" >&2
+  echo "  --check-idle      only list running work: exit 0 when idle, $EXIT_ACTIVE_WORK when something runs" >&2
   exit 64
 }
 
@@ -68,6 +70,7 @@ fail() {
 requested_sha=""
 install_bridge=0
 force=0
+check_idle=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sha)
@@ -83,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       force=1
       shift
       ;;
+    --check-idle)
+      check_idle=1
+      shift
+      ;;
     -h | --help) usage ;;
     *) usage ;;
   esac
@@ -91,6 +98,9 @@ if [[ -n "$requested_sha" && ! "$requested_sha" =~ ^[0-9a-f]{40}$ ]]; then
   usage
 fi
 if [[ $install_bridge -eq 1 && -z "$requested_sha" ]]; then
+  usage
+fi
+if [[ $check_idle -eq 1 && ( -n "$requested_sha" || $force -eq 1 ) ]]; then
   usage
 fi
 [[ $EUID -eq 0 ]] || fail "run as root"
@@ -102,6 +112,34 @@ as_service() {
 
 # Strips control characters from text read out of the kanban-owned database before printing it.
 sanitize() { tr -cd '[:print:]\n'; }
+
+# Lists running execution runs, quality validations, preview operations and busy slots, read-only as kanban.
+list_active_work() {
+  local active_query="
+SELECT 'execution run ' || e.id || ' (' || e.owner_type || ' ' || e.owner_id || ', ' || e.role || ')'
+  FROM execution_runs e
+  WHERE e.status = 'running' AND NOT EXISTS (
+    SELECT 1 FROM conversations c
+    WHERE e.owner_type = 'conversation' AND e.role = 'atelier'
+      AND c.id = e.owner_id AND e.session_id IS NOT NULL AND c.session_id = e.session_id
+      AND c.orchestrator = e.orchestrator AND c.session_status = 'idle'
+      AND CASE WHEN json_valid(c.active_subagents)
+        THEN json_type(c.active_subagents) = 'array' AND json_array_length(c.active_subagents) = 0
+        ELSE 0 END
+  )
+UNION ALL
+SELECT 'quality validation ' || id || ' (ticket ' || ticket_id || ', ' || status || ')'
+  FROM quality_validation_runs WHERE status IN ('queued', 'running')
+UNION ALL
+SELECT 'preview ' || id || ' (project ' || project || ', ticket ' || COALESCE(ticket_id, '-') || ', '
+    || json_extract(payload_json, '\$.status') || ')'
+  FROM preview_runs
+  WHERE json_extract(payload_json, '\$.status') IN ('queued', 'provisioning', 'building', 'deploying', 'stopping')
+UNION ALL
+SELECT 'slot ' || id || ' (ticket ' || COALESCE(ticket_id, '-') || ')'
+  FROM slots WHERE status = 'busy';"
+  as_service sqlite3 -readonly -init /dev/null -batch -noheader "$DB" "$active_query" 2>&1 | sanitize
+}
 
 switch_current() {
   ln -sfn "$1" "$CURRENT.tmp"
@@ -115,6 +153,7 @@ free_mb() { df -Pm -- "$1" | awk 'NR == 2 { print $4 }'; }
 # installed with --install-bridge next to the commit named with --sha. --sha alone is not an approval: the update
 # button passes it with the tip of main it resolved. Without --install-bridge the program is compared and reported.
 bridge_work=""
+bridge_install_failed=0
 cleanup_bridge() {
   if [[ -n "$bridge_work" ]]; then
     rm -rf -- "$bridge_work"
@@ -143,6 +182,9 @@ bridge_is_current() {
 sync_bridge() {
   if [[ ! -s "$bridge_work/kanban-bridge" ]]; then
     echo "    warning: cannot read $BRIDGE_SOURCE at $1; $BRIDGE_DEST was left unchanged"
+    if [[ $install_bridge -eq 1 ]]; then
+      bridge_install_failed=1
+    fi
     return 0
   fi
   if bridge_is_current; then
@@ -268,6 +310,17 @@ if [[ -n "$mcp_port" ]]; then
   done
 fi
 
+if [[ $check_idle -eq 1 ]]; then
+  if ! active="$(list_active_work)"; then
+    fail "cannot read the database: $active"
+  fi
+  if [[ -n "$active" ]]; then
+    echo "$active"
+    exit "$EXIT_ACTIVE_WORK"
+  fi
+  exit 0
+fi
+
 # a. One upgrade at a time. The lock lives in /run, which only root can write.
 step "Taking the upgrade lock"
 [[ ! -L "$LOCK" ]] || fail "refusing a symlinked lock file $LOCK"
@@ -291,6 +344,9 @@ if [[ "$before" == "$sha" ]]; then
   step "Checking the bridge program against $sha"
   fetch_bridge "$sha" || true
   sync_bridge "$sha"
+  if [[ $bridge_install_failed -eq 1 ]]; then
+    fail "already at $sha, but --install-bridge could not read $BRIDGE_SOURCE: $BRIDGE_DEST was not installed"
+  fi
   echo "Already at $sha. Nothing else to do."
   exit 0
 fi
@@ -320,30 +376,7 @@ fetch_bridge "$sha" || echo "    warning: cannot read $BRIDGE_SOURCE at $sha; th
 # e. Refuse while work is running. Accepted race: an automation or autonomous delivery can still start
 # between this check and the stop below; a human runs this command, and there is no drain mode.
 step "Checking for running work"
-active_query="
-SELECT 'execution run ' || e.id || ' (' || e.owner_type || ' ' || e.owner_id || ', ' || e.role || ')'
-  FROM execution_runs e
-  WHERE e.status = 'running' AND NOT EXISTS (
-    SELECT 1 FROM conversations c
-    WHERE e.owner_type = 'conversation' AND e.role = 'atelier'
-      AND c.id = e.owner_id AND e.session_id IS NOT NULL AND c.session_id = e.session_id
-      AND c.orchestrator = e.orchestrator AND c.session_status = 'idle'
-      AND CASE WHEN json_valid(c.active_subagents)
-        THEN json_type(c.active_subagents) = 'array' AND json_array_length(c.active_subagents) = 0
-        ELSE 0 END
-  )
-UNION ALL
-SELECT 'quality validation ' || id || ' (ticket ' || ticket_id || ', ' || status || ')'
-  FROM quality_validation_runs WHERE status IN ('queued', 'running')
-UNION ALL
-SELECT 'preview ' || id || ' (project ' || project || ', ticket ' || COALESCE(ticket_id, '-') || ', '
-    || json_extract(payload_json, '\$.status') || ')'
-  FROM preview_runs
-  WHERE json_extract(payload_json, '\$.status') IN ('queued', 'provisioning', 'building', 'deploying', 'stopping')
-UNION ALL
-SELECT 'slot ' || id || ' (ticket ' || COALESCE(ticket_id, '-') || ')'
-  FROM slots WHERE status = 'busy';"
-if ! active="$(as_service sqlite3 -readonly -init /dev/null -batch -noheader "$DB" "$active_query" 2>&1 | sanitize)"; then
+if ! active="$(list_active_work)"; then
   if [[ $force -eq 1 ]]; then
     echo "    warning: cannot read the database ($active); continuing because of --force"
     active=""
@@ -448,3 +481,6 @@ as_service find "$BACKUPS" -mindepth 1 -maxdepth 1 -type f -name 'kanban-*.db' -
   done
 
 echo "Upgraded $before -> $sha. Backup: $backup"
+if [[ $bridge_install_failed -eq 1 ]]; then
+  fail "--install-bridge could not read $BRIDGE_SOURCE at $sha: $BRIDGE_DEST was not installed"
+fi

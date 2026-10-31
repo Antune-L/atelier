@@ -94,7 +94,7 @@ On the VPS, store the token for a dedicated user:
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin cloudflared
-sudo install -d -m 0700 -o cloudflared -g cloudflared /etc/cloudflared
+sudo install -d -m 0750 -o root -g cloudflared /etc/cloudflared
 sudo install -m 0600 -o cloudflared -g cloudflared /dev/null /etc/cloudflared/kanban.token
 sudo nano /etc/cloudflared/kanban.token
 ```
@@ -164,7 +164,7 @@ What protects what:
 
 In **Zero Trust > Access controls > Applications**, select **Create new application > Self-hosted and private > Add public hostname**:
 1. Hostname: `<mcp-host>`, with no path. Do not reuse or edit the board application of step 5.
-2. Policy, action **Allow**, with the same rules as step 5: **Include > Emails** `<email>` only, **Require > Login Methods** Google, and **Override global multi-factor authentication settings (MFA)** with MFA required. No other policy, and no Bypass or Service Auth policy. Keep this policy off the application until step 4 of the activation sequence.
+2. Policy, action **Allow**, with the same rules as step 5: **Include > Emails** `<email>` only, **Require > Login Methods** Google, and **Override global multi-factor authentication settings (MFA)** with MFA required. No other policy, and no Bypass or Service Auth policy. Attach it from the start, as in step 1 of the [activation sequence](./vps-install.md#m4-activation-sequence): the public `401` probe of `kanban-upgrade` was only observed with it attached, and the allow-list keeps only a test project open until the qualification passes.
 3. Login methods: Google only.
 4. In the **Advanced settings** tab, turn on **Managed OAuth**, then:
    - turn on **Allow localhost clients** (Claude Code calls back on `http://localhost:<port>/callback`) and **Allow loopback clients** (Codex calls back on `http://127.0.0.1:<port>/callback`);

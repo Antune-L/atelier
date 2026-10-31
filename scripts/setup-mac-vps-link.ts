@@ -498,7 +498,7 @@ async function checkVps(alias: string): Promise<void> {
   const program = await ssh(alias, [VPS_BRIDGE_REMOTE_PROGRAM, VPS_BRIDGE_PROGRAM_VERSION_ARG]);
   const programVersion = program.stdout.trim();
   if ([EXIT_NOT_FOUND, EXIT_NOT_EXECUTABLE, EXIT_BRIDGE_USAGE].includes(program.exitCode)) {
-    report("VPS", "missing", "bridge program", `${VPS_BRIDGE_REMOTE_PROGRAM} is missing or too old: run sudo kanban-upgrade on the VPS`);
+    report("VPS", "missing", "bridge program", `${VPS_BRIDGE_REMOTE_PROGRAM} is missing or too old: run sudo kanban-upgrade --sha <sha> --install-bridge on the VPS`);
   } else if (program.exitCode !== 0) {
     report("VPS", "failed", "bridge program", shortDetail(program.stderr) || `exit ${program.exitCode}`);
   } else if (programVersion !== String(BRIDGE_PROTOCOL_VERSION)) {

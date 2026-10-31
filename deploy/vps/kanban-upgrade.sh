@@ -52,9 +52,10 @@ unset KANBAN_REPO_URL
 umask 022
 
 usage() {
-  echo "usage: $0 [--sha <full 40-character commit sha>] [--force]" >&2
-  echo "  --sha    upgrade to this commit instead of the tip of main" >&2
-  echo "  --force  upgrade even if cards, validations, previews or slots are active" >&2
+  echo "usage: $0 [--sha <full 40-character commit sha> [--install-bridge]] [--force]" >&2
+  echo "  --sha             upgrade to this commit instead of the tip of main" >&2
+  echo "  --install-bridge  also install the bridge program of that reviewed commit" >&2
+  echo "  --force           upgrade even if cards, validations, previews or slots are active" >&2
   exit 64
 }
 
@@ -65,6 +66,7 @@ fail() {
 }
 
 requested_sha=""
+install_bridge=0
 force=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || usage
       requested_sha="$2"
       shift 2
+      ;;
+    --install-bridge)
+      install_bridge=1
+      shift
       ;;
     --force)
       force=1
@@ -82,6 +88,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -n "$requested_sha" && ! "$requested_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  usage
+fi
+if [[ $install_bridge -eq 1 && -z "$requested_sha" ]]; then
   usage
 fi
 [[ $EUID -eq 0 ]] || fail "run as root"
@@ -103,7 +112,8 @@ free_mb() { df -Pm -- "$1" | awk 'NR == 2 { print $4 }'; }
 
 # NOTE(ali): D15: the bridge program runs as the SSH user, who has sudo, so it comes from the commit itself
 # (git show in a root-only scratch repository), never from the release tree the build user wrote, and it is only
-# installed from a commit named with --sha. The tip of main is compared and reported, never installed.
+# installed with --install-bridge next to the commit named with --sha. --sha alone is not an approval: the update
+# button passes it with the tip of main it resolved. Without --install-bridge the program is compared and reported.
 bridge_work=""
 cleanup_bridge() {
   if [[ -n "$bridge_work" ]]; then
@@ -139,9 +149,9 @@ sync_bridge() {
     echo "    $BRIDGE_DEST is already the version of $1"
     return 0
   fi
-  if [[ -z "$requested_sha" ]]; then
-    echo "    $BRIDGE_DEST differs from $1 and was left unchanged: only a commit named with --sha is installed."
-    echo "    Review $BRIDGE_SOURCE at $1 in your review clone, then run: sudo kanban-upgrade --sha $1"
+  if [[ $install_bridge -eq 0 ]]; then
+    echo "    $BRIDGE_DEST differs from $1 and was left unchanged: it is only installed with --install-bridge."
+    echo "    Review $BRIDGE_SOURCE at $1 in your review clone, then run: sudo kanban-upgrade --sha $1 --install-bridge"
     return 0
   fi
   install -o root -g root -m 0755 "$bridge_work/kanban-bridge" "$BRIDGE_DEST.tmp"

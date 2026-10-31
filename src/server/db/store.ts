@@ -13,6 +13,10 @@ import type { AutonomousDelivery, AutonomousState, AutonomousStartKind, Autonomo
 
 import {
   AUTO_MERGE_RESOLVE_EVENT,
+  BOARD_NAME_META_KEY,
+  BOARD_SSH_HOST_ALIAS_META_KEY,
+  OTHER_BOARD_URL_META_KEY,
+  PUBLIC_HOSTNAME_META_KEY,
   SUCCESS_COLUMNS,
   TERMINAL_STAGES,
   AUTO_RECLAIM_EVENT,
@@ -43,6 +47,7 @@ import {
 import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
+import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "../../shared/boardLink.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
 import { implementationQueueSchema } from "../../shared/implementationQueue.ts";
@@ -3104,7 +3109,23 @@ export class Store {
       qualityOwner: this.getMeta(QUALITY_OWNER_META_KEY) !== "0",
       remoteMcpProjectIds: this.remoteMcpProjectIds(),
       remoteMcpCardsProfileId: this.getMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY),
+      boardName: this.validMeta(BOARD_NAME_META_KEY, boardNameSchema),
+      otherBoardUrl: this.validMeta(OTHER_BOARD_URL_META_KEY, otherBoardUrlSchema),
+      sshHostAlias: this.validMeta(BOARD_SSH_HOST_ALIAS_META_KEY, sshHostAliasSchema),
+      publicHostname: this.validMeta(PUBLIC_HOSTNAME_META_KEY, dnsHostnameSchema),
     };
+  }
+
+  private validMeta(key: string, schema: z.ZodType<string, string>): string | null {
+    const stored = this.getMeta(key);
+    if (stored === null) return null;
+    const parsed = schema.safeParse(stored);
+    return parsed.success ? parsed.data : null;
+  }
+
+  private setOptionalMeta(key: string, value: string | null | undefined): void {
+    if (value === null) this.deleteMeta(key);
+    else if (value !== undefined) this.setMeta(key, value);
   }
 
   private remoteMcpProjectIds(): string[] {
@@ -3130,8 +3151,11 @@ export class Store {
     if (patch.codexFast !== undefined) this.setMeta(CODEX_FAST_META_KEY, patch.codexFast ? "1" : "0");
     if (patch.qualityOwner !== undefined) this.setMeta(QUALITY_OWNER_META_KEY, patch.qualityOwner ? "1" : "0");
     if (patch.remoteMcpProjectIds !== undefined) this.setMeta(REMOTE_MCP_PROJECT_IDS_META_KEY, JSON.stringify([...new Set(patch.remoteMcpProjectIds)]));
-    if (patch.remoteMcpCardsProfileId === null) this.deleteMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY);
-    else if (patch.remoteMcpCardsProfileId !== undefined) this.setMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY, patch.remoteMcpCardsProfileId);
+    this.setOptionalMeta(REMOTE_MCP_CARDS_PROFILE_META_KEY, patch.remoteMcpCardsProfileId);
+    this.setOptionalMeta(BOARD_NAME_META_KEY, patch.boardName);
+    this.setOptionalMeta(OTHER_BOARD_URL_META_KEY, patch.otherBoardUrl);
+    this.setOptionalMeta(BOARD_SSH_HOST_ALIAS_META_KEY, patch.sshHostAlias);
+    this.setOptionalMeta(PUBLIC_HOSTNAME_META_KEY, patch.publicHostname);
     const settings = this.getAppSettings();
     applyAppSettingsToModels(settings);
     return settings;

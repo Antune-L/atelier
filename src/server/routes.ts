@@ -77,6 +77,7 @@ import { ProjectInUseError } from "./db/store.ts";
 import type { NewReview, NewTicket, Store } from "./db/store.ts";
 import type { VpsUpdateAction, VpsUpdateStatus } from "../shared/vpsUpdate.ts";
 import { isCloudHost } from "./hostRole.ts";
+import { isLocalRequest, normalizeDevHost } from "./requestGuard.ts";
 import { readHostMetrics } from "./system/hostMetrics.ts";
 import type { GithubAccountRegistry } from "./system/github/accounts.ts";
 import { withSiblingGroup } from "./system/repoInspection.ts";
@@ -1247,8 +1248,8 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       return new Response(null, { status: HTTP_NO_CONTENT });
     })
-    .post("/native/pick-folder", async ({ set }) => {
-      if (!deps.pickFolder) return jsonError(set, HTTP_NOT_FOUND, "sélecteur de dossier indisponible");
+    .post("/native/pick-folder", async ({ request, set }) => {
+      if (!deps.pickFolder || !isLocalRequest(request)) return jsonError(set, HTTP_NOT_FOUND, "sélecteur de dossier indisponible");
       const path = await deps.pickFolder();
       return { path: path ?? "" };
     })
@@ -1283,7 +1284,7 @@ export function createApiRoutes(deps: RouteDeps) {
         return vcsConnectionFailure(error);
       }
     })
-    .get("/capabilities", async ({ query }) => {
+    .get("/capabilities", async ({ query, request }) => {
       const codex = await deps.system.checkCodexRuntime(query.refresh === "1");
       const claudeAvailable = await deps.system.checkClaudeAvailable();
       return {
@@ -1299,8 +1300,9 @@ export function createApiRoutes(deps: RouteDeps) {
         defaultCodexEffort: MODELS.codexEffort,
         defaultCodexFast: MODELS.codexFast,
         canUpdate: deps.onRequestUpdate != null && deps.repoRoot != null,
-        canPickFolder: deps.pickFolder != null,
+        canPickFolder: deps.pickFolder != null && isLocalRequest(request),
         cloudHost: isCloudHost(),
+        activePublicHostname: normalizeDevHost(process.env.DEV_HOST),
         githubAvailable: await deps.system.checkGithubAvailable(),
         skills: await deps.system.checkSkills(),
       };
@@ -1309,15 +1311,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .patch("/settings", async ({ body, set }) => {
       const parsed = updateAppSettingsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
-      if (parsed.data.remoteMcpProjectIds?.some((id) => !isProjectKey(id))) return jsonError(set, HTTP_BAD_REQUEST, REMOTE_PROJECT_UNKNOWN);
-      const profileId = parsed.data.remoteMcpCardsProfileId;
+      const patch = isCloudHost() ? { ...parsed.data, sshHostAlias: undefined, publicHostname: undefined } : parsed.data;
+      if (patch.remoteMcpProjectIds?.some((id) => !isProjectKey(id))) return jsonError(set, HTTP_BAD_REQUEST, REMOTE_PROJECT_UNKNOWN);
+      const profileId = patch.remoteMcpCardsProfileId;
       if (profileId !== undefined && profileId !== null) {
         const profile = store.getProfile(profileId);
         if (!profile) return jsonError(set, HTTP_BAD_REQUEST, REMOTE_PROFILE_NOT_FOUND);
         const engineError = await remoteMcpProfileEngineError(deps.system, deps.composerAvailable, profile);
         if (engineError !== null) return jsonError(set, HTTP_CONFLICT, engineError);
       }
-      return store.updateAppSettings(parsed.data);
+      return store.updateAppSettings(patch);
     })
     .get("/profiles", () => store.listProfiles())
     .post("/profiles", ({ body, set }) => {

@@ -14,7 +14,7 @@ import { getMcpSettingsClient } from "@/lib/mcpSettings";
 import { boardStore } from "@/lib/store";
 
 const DESKTOP_ONLY_MESSAGE =
-  "La gestion du jeton MCP est disponible dans l’application desktop Atelier.";
+  "Réservé à l’application desktop Atelier sur le Mac : le jeton MCP ne se consulte ni ne se renouvelle depuis un navigateur ou un téléphone.";
 
 type McpClientKind = "manual" | "claude" | "codex";
 const MCP_CLIENT_OPTIONS: TabOption<McpClientKind>[] = [

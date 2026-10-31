@@ -42,6 +42,7 @@ import { useSuppressEscapeBeep } from "@/hooks/useSuppressEscapeBeep";
 import { api } from "@/lib/api";
 import type { AtelierSeed, AtelierTarget } from "@/lib/atelier";
 import { auditsNeedAttention } from "@/lib/auditDisplay";
+import { useTicketPrefill, type TicketPrefill } from "@/lib/boardHash";
 import { boardStore, type AuditTarget } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { matchesQuery, normalizeSearch } from "@/lib/search";
@@ -92,6 +93,12 @@ export function App() {
   const [atelierListRequest, setAtelierListRequest] = useState(0);
   const [appliedAuditRequest, setAppliedAuditRequest] = useState<AuditTarget | null>(requestedAuditTarget);
   const { canUpdate } = useCapabilities();
+  const ticketPrefill = useTicketPrefill();
+  const [openedPrefill, setOpenedPrefill] = useState<TicketPrefill | null>(null);
+  if (ticketPrefill !== openedPrefill) {
+    setOpenedPrefill(ticketPrefill);
+    if (ticketPrefill !== null) setCreating(true);
+  }
 
   if (requestedAuditTarget !== appliedAuditRequest) {
     setAppliedAuditRequest(requestedAuditTarget);
@@ -389,6 +396,7 @@ export function App() {
         projects={selectableProjects}
         onClose={() => setCreating(false)}
         onOpenAtelier={openAtelierWithSeed}
+        prefill={ticketPrefill}
       />
       <ToolDialogs
         openTool={openTool}

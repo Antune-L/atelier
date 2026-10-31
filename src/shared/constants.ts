@@ -427,6 +427,10 @@ export const CODEX_FAST_META_KEY = "codex_fast";
 export const QUALITY_OWNER_META_KEY = "quality_owner";
 export const REMOTE_MCP_PROJECT_IDS_META_KEY = "remote_mcp_project_ids";
 export const REMOTE_MCP_CARDS_PROFILE_META_KEY = "remote_mcp_cards_profile_id";
+export const BOARD_NAME_META_KEY = "board_name";
+export const OTHER_BOARD_URL_META_KEY = "other_board_url";
+export const BOARD_SSH_HOST_ALIAS_META_KEY = "board_ssh_host_alias";
+export const PUBLIC_HOSTNAME_META_KEY = "public_hostname";
 /** `meta` table key flagging that the built-in Codex profile has been seeded (once). */
 export const CODEX_PROFILE_SEEDED_META_KEY = "codex_profile_seeded";
 /**

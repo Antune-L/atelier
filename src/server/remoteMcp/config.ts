@@ -1,11 +1,11 @@
 import { z } from "zod";
 
+import { dnsHostnameSchema } from "../../shared/boardLink.ts";
 import { createLogger } from "../logger.ts";
 
 const MIN_PORT = 1;
 const MAX_PORT = 65_535;
 const MAX_AUD_LENGTH = 256;
-const HOSTNAME_PATTERN = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const AUD_PATTERN = /^[A-Za-z0-9]+$/;
 const DECIMAL_PATTERN = /^\d+$/;
 
@@ -23,12 +23,10 @@ const decimalSchema = (min: number, max: number) => z.string()
   .transform(Number)
   .pipe(z.number().int().min(min).max(max));
 
-const hostnameSchema = z.string().transform((value) => value.toLowerCase()).pipe(z.string().regex(HOSTNAME_PATTERN));
-
 const remoteMcpConfigSchema = z.object({
   port: decimalSchema(MIN_PORT, MAX_PORT),
-  hostname: hostnameSchema,
-  teamDomain: hostnameSchema,
+  hostname: dnsHostnameSchema,
+  teamDomain: dnsHostnameSchema,
   aud: z.string().min(1).max(MAX_AUD_LENGTH).regex(AUD_PATTERN),
 });
 

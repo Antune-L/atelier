@@ -22,6 +22,7 @@ import {
 import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { availableSkillProviders } from "@shared/skills";
 
+import { BoardLinkSettings } from "@/components/BoardLinkSettings";
 import { VpsUpdateSettings } from "@/components/VpsUpdateSettings";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
@@ -181,6 +182,7 @@ function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSection
   if (sectionId === "coolify") return <CoolifySettings query={query} />;
   if (sectionId === "github") return <GithubAccountsSettings query={query} />;
   if (sectionId === "remoteMcp") return <RemoteMcpSettings query={query} />;
+  if (sectionId === "boardLink") return <BoardLinkSettings query={query} />;
   return <McpSettings query={query} />;
 }
 

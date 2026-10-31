@@ -50,7 +50,8 @@ export async function patchAppSettings(patch: UpdateAppSettingsInput): Promise<v
   if (previous === null) return;
   publish({ settings: { ...previous, ...patch }, error: null, saved: false });
   try {
-    await api.updateSettings(patch);
+    const settings = await api.updateSettings(patch);
+    publish({ ...state, settings });
     flashSaved();
   } catch (error) {
     publish({ settings: previous, error: errorMessage(error), saved: false });

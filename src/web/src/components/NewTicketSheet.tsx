@@ -8,6 +8,7 @@ import type { ProjectInfo } from "@shared/schemas";
 import { AutonomousOptions, autonomousEligibility } from "@/components/AutonomousOptions";
 import type { AutonomousOptionValues } from "@/components/AutonomousOptions";
 import { ImplementationSettings } from "@/components/ImplementationSettings";
+import { MediaUploadButton } from "@/components/MediaUploadButton";
 import { ProjectSelect } from "@/components/ProjectSelect";
 import { SchedulePane } from "@/components/SchedulePane";
 import { TicketOptionsToggleGroup } from "@/components/TicketOptionsToggleGroup";
@@ -21,6 +22,7 @@ import { useAgentKnobs } from "@/hooks/useAgentKnobs";
 import { useBoard } from "@/hooks/useBoard";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
+import type { TicketPrefill } from "@/lib/boardHash";
 import { dependencyCandidates } from "@/lib/display";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
@@ -38,19 +40,21 @@ type CreateMenuPane = "list" | "schedule";
 
 const CREATE_ONLY: CreateMode = { start: false, scheduledStartAt: null };
 const CREATE_AND_START: CreateMode = { start: true, scheduledStartAt: null };
+const CHOOSE_PROJECT_OPTION = { key: "", label: "Choisir un projet" };
 
 interface NewTicketSheetProps {
   open: boolean;
   projects: ProjectInfo[];
   onClose: () => void;
   onOpenAtelier?: (seed: AtelierSeed) => void;
+  prefill?: TicketPrefill | null;
 }
 
 const NEW_TICKET_TITLE_DRAFT = "new-ticket:title";
 const NEW_TICKET_URL_DRAFT = "new-ticket:external-url";
 const NEW_TICKET_DESCRIPTION_DRAFT = "new-ticket:description";
 
-export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTicketSheetProps) {
+export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill = null }: NewTicketSheetProps) {
   const notionRequest = useRef(0);
   // Drop any in-flight Notion import on each open→closed transition (no-useEffect idiom).
   const wasOpen = useRef(false);
@@ -67,7 +71,25 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
   const [description, setDescription, clearDescription] = useLocalDraft(NEW_TICKET_DESCRIPTION_DRAFT);
   // null = no explicit choice yet → fall back to the first loaded project.
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
-  const project = resolveProjectChoice(projects, projectChoice);
+  const [suggestedProject, setSuggestedProject] = useState<string | null>(null);
+  const [appliedPrefill, setAppliedPrefill] = useState<TicketPrefill | null>(null);
+  const [draftReplaced, setDraftReplaced] = useState(false);
+  if (prefill !== appliedPrefill) {
+    setAppliedPrefill(prefill);
+    if (prefill !== null) {
+      setDraftReplaced((title.trim() !== "" && title !== prefill.title) || (description.trim() !== "" && description !== prefill.description));
+      setTitle(prefill.title);
+      setDescription(prefill.description);
+      setSuggestedProject(prefill.project);
+      if (prefill.project !== null) setProjectChoice(prefill.project);
+    }
+  }
+  const suggestedProjectMissing = suggestedProject !== null && !projects.some((p) => p.key === suggestedProject);
+  const project = suggestedProjectMissing ? "" : resolveProjectChoice(projects, projectChoice);
+  const chooseProject = (key: string): void => {
+    setSuggestedProject(null);
+    setProjectChoice(key);
+  };
   const selectedProject = projects.find((p) => p.key === project);
   const notionScope = `${project}\n${externalUrl}`;
   const currentNotionScope = useRef(notionScope);
@@ -138,6 +160,8 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
     clearExternalUrl();
     setImportingNotion(false);
     clearDescription();
+    setSuggestedProject(null);
+    setDraftReplaced(false);
     setBaseBranchChoice(null);
     setAutonomousOptions({ autonomous: false, autonomousDelivery: null, autonomousMaxCorrections: AUTONOMOUS_DEFAULT_MAX_CORRECTIONS, autonomousTimeoutMinutes: AUTONOMOUS_DEFAULT_TIMEOUT_MINUTES, autonomousMaxStarts: AUTONOMOUS_DEFAULT_MAX_STARTS, autonomousFinalizationMinutes: AUTONOMOUS_DEFAULT_FINALIZATION_MINUTES, autonomousMaxPublicationAttempts: AUTONOMOUS_DEFAULT_MAX_PUBLICATION_ATTEMPTS });
     setPrdEnabled(false);
@@ -284,8 +308,11 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
               id="project"
               projects={projects}
               value={project}
-              onChange={setProjectChoice}
+              onChange={chooseProject}
+              options={suggestedProjectMissing ? [CHOOSE_PROJECT_OPTION] : undefined}
             />
+            {suggestedProjectMissing && <p role="alert" className="text-xs text-warning">Projet suggéré « {suggestedProject} » introuvable sur ce board : choisissez un projet.</p>}
+            {draftReplaced && <p role="status" className="text-xs text-muted-foreground">Le lien a remplacé le brouillon en cours.</p>}
             <div className="flex flex-1 flex-col space-y-1.5">
               <Label htmlFor="description" className={FIELD_LABEL_CLASSES}>
                 Quel résultat souhaitez-vous ?
@@ -299,6 +326,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier }: NewTi
                 placeholder="Décrivez le résultat attendu, le contexte et les critères de réussite…"
               />
               <p className="text-xs text-muted-foreground">Markdown accepté. Collez une image pour l’attacher ; les liens Figma sont conservés.</p>
+              <MediaUploadButton onUploaded={appendToDescription} onError={setError} />
               {onOpenAtelier && (
                 <Button
                   type="button"

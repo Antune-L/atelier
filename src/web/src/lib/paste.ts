@@ -30,11 +30,13 @@ export async function handleMediaPaste(
   const file = fileItem.getAsFile();
   if (!file) return false;
   event.preventDefault();
-  const result = await uploadFile(file);
-  const isImage = file.type.startsWith(IMAGE_PREFIX);
-  const line = isImage ? `![pasted-image](${result.path})` : `[pasted-file](${result.path})`;
-  appendText(line);
+  appendText(await uploadMediaReference(file, uploadFile));
   return true;
+}
+
+export async function uploadMediaReference(file: File, uploadFile: typeof api.uploadFile = api.uploadFile): Promise<string> {
+  const result = await uploadFile(file);
+  return file.type.startsWith(IMAGE_PREFIX) ? `![pasted-image](${result.path})` : `[pasted-file](${result.path})`;
 }
 
 export async function uploadAttachment(file: File): Promise<string> {

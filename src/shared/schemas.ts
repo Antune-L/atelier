@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { auditOverviewSchema, EMPTY_AUDIT_OVERVIEW } from "./audit.ts";
+import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "./boardLink.ts";
 
 import { dependencyLaunchSchema, dependencyPrObservationSchema, dependencyStatusSchema } from "./dependencyLaunch.ts";
 
@@ -186,6 +187,11 @@ export const appSettingsSchema = z.object({
   remoteMcpProjectIds: z.array(z.string().min(1)),
   /** Profile copied onto cards created remotely; null refuses remote creation. */
   remoteMcpCardsProfileId: z.string().min(1).nullable(),
+  boardName: z.string().nullable(),
+  otherBoardUrl: z.string().nullable(),
+  // NOTE: sshHostAlias and publicHostname are Mac-only; PATCH /api/settings ignores them on the cloud host.
+  sshHostAlias: z.string().nullable(),
+  publicHostname: z.string().nullable(),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
 
@@ -202,6 +208,10 @@ export const updateAppSettingsSchema = z.object({
   qualityOwner: z.boolean().optional(),
   remoteMcpProjectIds: z.array(z.string().min(1)).optional(),
   remoteMcpCardsProfileId: z.string().min(1).nullable().optional(),
+  boardName: boardNameSchema.nullable().optional(),
+  otherBoardUrl: otherBoardUrlSchema.nullable().optional(),
+  sshHostAlias: sshHostAliasSchema.nullable().optional(),
+  publicHostname: dnsHostnameSchema.nullable().optional(),
 });
 export type UpdateAppSettingsInput = z.infer<typeof updateAppSettingsSchema>;
 
@@ -1063,6 +1073,7 @@ export const capabilitiesSchema = z.object({
   canPickFolder: z.boolean(),
   /** Server runs with KANBAN_HOST_ROLE=cloud (always-on VPS). */
   cloudHost: z.boolean(),
+  activePublicHostname: z.string().nullable(),
   /** The `gh` CLI is available, enabling the « Depuis GitHub » project mode. Never carries a login or token. */
   githubAvailable: z.boolean(),
 });

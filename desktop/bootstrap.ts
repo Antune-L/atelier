@@ -1,6 +1,10 @@
+import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+
+import { dnsHostnameSchema } from "../src/shared/boardLink.ts";
+import { PUBLIC_HOSTNAME_META_KEY } from "../src/shared/constants.ts";
 
 /**
  * Desktop bootstrap. Runs before importing the server: (1) ensures the writable data dirs exist under
@@ -14,6 +18,7 @@ const MCP_TOKEN_FILE = "mcp-token";
 const MCP_TOKEN_BYTES = 32;
 const PRIVATE_FILE_MODE = 0o600;
 const UPLOADS_DIR = "uploads";
+const DATABASE_FILE = "kanban.db";
 
 export interface DesktopRoots {
   /** Read-only bundle assets: dist/web, codex-bin, templates, config.example.json. */
@@ -72,12 +77,30 @@ export function regenerateMcpToken(dataRoot: string): string {
   }
 }
 
+export function readPublicHostname(dbPath: string): string | null {
+  if (!existsSync(dbPath)) return null;
+  let db: Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true });
+    const row = db.query("SELECT value FROM meta WHERE key = ?").get(PUBLIC_HOSTNAME_META_KEY);
+    if (!row || typeof row !== "object" || !("value" in row) || typeof row.value !== "string") return null;
+    const parsed = dnsHostnameSchema.safeParse(row.value);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  } finally {
+    db?.close();
+  }
+}
+
 /**
  * Export the env the server reads at import + boot time, so a subsequent dynamic import of
  * startServer picks up the writable data dir.
  *  - KANBAN_CONFIG / KANBAN_DB → writable config + db under dataRoot
  *  - KANBAN_BUN_PATH           → the bundled bun used to spawn the worktree/user tmux shells
  *  - KANBAN_DRY_RUN=0 / KANBAN_SETUP=1 → real adapter + first-boot trust seeding
+ *  - DEV_HOST                  → the public hostname saved in Réglages, accepted by the Host/Origin
+ *                                guard; KANBAN_HOST is then dropped so the server stays on 127.0.0.1
  *
  * The agent sessions run in-process via the Agent SDK; the SDK's native `claude` binary is resolved
  * by system/claudeBinary.ts (KANBAN_CLAUDE_BINARY override → node_modules → provisioned/detected/
@@ -85,7 +108,7 @@ export function regenerateMcpToken(dataRoot: string): string {
  */
 export function applyDesktopEnv(roots: DesktopRoots, configPath: string, bunPath: string): void {
   process.env.KANBAN_CONFIG = configPath;
-  process.env.KANBAN_DB = join(roots.dataRoot, "kanban.db");
+  process.env.KANBAN_DB = join(roots.dataRoot, DATABASE_FILE);
   process.env.KANBAN_BUN_PATH = bunPath;
   if (!process.env.KANBAN_MCP_TOKEN?.trim()) {
     process.env.KANBAN_MCP_TOKEN = ensureMcpToken(roots.dataRoot);
@@ -93,4 +116,9 @@ export function applyDesktopEnv(roots: DesktopRoots, configPath: string, bunPath
   // App mode drives real tmux/claude/git; dev keeps the dry-run default untouched.
   process.env.KANBAN_DRY_RUN ??= "0";
   process.env.KANBAN_SETUP ??= "1";
+  const publicHostname = readPublicHostname(process.env.KANBAN_DB);
+  if (publicHostname !== null) {
+    process.env.DEV_HOST = publicHostname;
+    delete process.env.KANBAN_HOST;
+  }
 }

@@ -38,6 +38,16 @@ function parseOrigin(origin: string): URL | null {
   }
 }
 
+export function normalizeDevHost(devHost: string | undefined): string | null {
+  return devHost?.trim().toLowerCase() || null;
+}
+
+export function isLocalRequest(request: Request): boolean {
+  const hostHeader = request.headers.get("host");
+  const host = hostHeader === null ? null : parseHost(hostHeader);
+  return host !== null && isLoopbackHost(host.hostname);
+}
+
 export function resolveBindHost(): string {
   const configured = process.env.KANBAN_HOST?.trim();
   return configured ? configured : DEFAULT_BIND_HOST;
@@ -46,7 +56,7 @@ export function resolveBindHost(): string {
 // NOTE: Host is only enforced on a loopback bind (DNS rebinding); requests without Origin are not browser-initiated.
 export function createRequestGuard(bindHost: string, devHost: string | undefined): (request: Request) => boolean {
   const enforceHost = isLoopbackHost(bindHost);
-  const devHostname = devHost?.trim().toLowerCase() || null;
+  const devHostname = normalizeDevHost(devHost);
   const trustedOrigins = new Set([
     ...DEV_WEB_HOSTNAMES.map((hostname) => `http://${hostname}:${DEV_WEB_PORT}`),
     ...(devHostname === null ? [] : [`https://${devHostname}`]),

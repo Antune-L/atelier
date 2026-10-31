@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { Ticket } from "@shared/schemas";
 
+import { MediaUploadButton } from "@/components/MediaUploadButton";
 import { SectionHeader } from "@/components/ticket-detail/SectionHeader";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -91,6 +92,7 @@ export function DescriptionTab({ ticket, onSave }: DescriptionTabProps) {
           className="min-h-[320px]"
           placeholder="Description… (colle une image pour l'attacher ; liens Figma détectés automatiquement)"
         />
+        <MediaUploadButton onUploaded={appendMarkdown} onError={setError} />
       </div>
       {error !== null && <p className="text-sm text-danger">{error}</p>}
       {conflict && <p role="alert" className="text-sm text-warning">La description a changé depuis ce brouillon. Copiez vos modifications si nécessaire, puis cliquez sur Annuler pour charger la description actuelle avant de les réappliquer.</p>}

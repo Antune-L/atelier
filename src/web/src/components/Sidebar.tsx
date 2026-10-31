@@ -1,4 +1,5 @@
 import {
+  ArrowLeftRight,
   BarChart3,
   Gauge,
   LayoutGrid,
@@ -10,6 +11,9 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { safeOtherBoardUrl } from "@shared/boardLink";
+
+import { useAppSettings } from "@/hooks/useAppSettings";
 import { cn } from "@/lib/utils";
 
 export type SidebarView = "home" | "atelier" | "stats" | "usage" | "audits" | "automation";
@@ -46,6 +50,8 @@ const BADGE_TITLES: Partial<Record<SidebarView, string>> = {
   audits: "constats à trier",
 };
 
+const OTHER_BOARD_LABEL = "Ouvrir l'autre board";
+
 const ITEM_BASE =
   "flex h-9 w-9 items-center justify-center gap-2 rounded-md transition-colors";
 const ITEM_INACTIVE =
@@ -64,6 +70,9 @@ export function Sidebar({
   expanded = false,
   badges = {},
 }: SidebarProps): ReactNode {
+  const { settings } = useAppSettings();
+  const otherBoardUrl = safeOtherBoardUrl(settings?.otherBoardUrl);
+  const boardName = settings?.boardName ?? null;
   const compact = view === "atelier" && !expanded;
   const itemClasses = cn(ITEM_BASE, expanded && "w-full justify-start px-3", !compact && !expanded && "xl:w-full xl:justify-start xl:px-3");
   const labelClasses = cn("text-xs", !expanded && "hidden", !compact && !expanded && "xl:inline");
@@ -73,6 +82,11 @@ export function Sidebar({
       <span className={cn("py-2 font-mono font-medium text-brand", compact ? "mb-3 text-lg" : "w-full px-3 text-xs tracking-wider", !compact && !expanded && "hidden xl:block")} aria-label="Atelier">
         {compact ? "A" : "ATELIER"}
       </span>
+      {boardName !== null && !compact && (
+        <span className={cn("w-full truncate px-3 pb-2 text-xs text-muted-foreground", !expanded && "hidden xl:block")} title={boardName}>
+          {boardName}
+        </span>
+      )}
       {NAV_ENTRIES.map(({ value, label, Icon }) => {
         const badged = badges[value] === true;
         const badgeTitle = BADGE_TITLES[value];
@@ -108,6 +122,20 @@ export function Sidebar({
           <RefreshCw className={cn("h-4 w-4", updating && "animate-spin")} />
           <span className={labelClasses}>Mettre à jour</span>
         </button>
+      )}
+
+      {otherBoardUrl !== null && (
+        <a
+          href={otherBoardUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={OTHER_BOARD_LABEL}
+          aria-label={OTHER_BOARD_LABEL}
+          className={cn(itemClasses, ITEM_INACTIVE)}
+        >
+          <ArrowLeftRight className="h-4 w-4" />
+          <span className={labelClasses}>{OTHER_BOARD_LABEL}</span>
+        </a>
       )}
 
       <button

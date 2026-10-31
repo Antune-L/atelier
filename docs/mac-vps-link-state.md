@@ -5,9 +5,9 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 ## Current summary
 
 - Branch: `feat/mac-vps-link`, from `main` at `4f629e5`.
-- Done cards: none yet.
+- Done cards (uncommitted, awaiting review): S1, N2-1, N2-2, N2-3 (code + `docs/mac-remote-access.md`), N2-4 (UI bits + checklist). Live checks (Cloudflare refusals, phone checklist) not run.
 - Out of scope: C0 (manual test in the Finder-launched app, done by the user), N2-5 (optional hardening).
-- Next action: phase 1 (S1, N2-1, N2-2, N2-3, N2-4).
+- Next action: review and commit phase 1, then run the Mac tunnel setup and the acceptance checks of `docs/mac-remote-access.md` section 7.
 
 ## Plan adaptations due to 4f629e5 (PR-only mode removed)
 
@@ -19,6 +19,15 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 
 ## Verified findings
 
+- Board settings live in the `meta` table (`board_name`, `other_board_url`, `board_ssh_host_alias`, `public_hostname`), validated by `src/shared/boardLink.ts`; the SSH alias pattern and DNS hostname schema are now shared with `previewCleanup.ts` and `remoteMcp/config.ts`.
+- The desktop app reads `public_hostname` read-only from `dataRoot/kanban.db` before importing the server, exports it as `DEV_HOST`, and drops `KANBAN_HOST` when set. Restart required; Réglages shows the active hostname from `/api/capabilities`.
+- `sshHostAlias` and `publicHostname` are hidden and ignored by `PATCH /api/settings` on the cloud host.
+- `POST /api/native/pick-folder` and `canPickFolder` now require a loopback Host header.
+- cloudflared keys `originRequest.access.{required,teamName,audTag}` checked against the Cloudflare docs (context7).
+
 ## Open issues
+
+- The isolated cloudflared refusal test relies on Cloudflare forwarding a client-supplied `Cf-Access-Jwt-Assertion` on a hostname without an Access application; unverified, the doc has a positive control that detects it.
+- Terminal keyboard behaviour on mobile browsers is unverified.
 
 ## History

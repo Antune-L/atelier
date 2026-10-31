@@ -16,7 +16,8 @@ export type SettingsSectionId =
   | "coolify"
   | "github"
   | "mcp"
-  | "remoteMcp";
+  | "remoteMcp"
+  | "boardLink";
 
 export interface SettingsSection {
   id: SettingsSectionId;
@@ -109,6 +110,12 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: "MCP",
     group: "Connexions",
     keywords: ["mcp", "agent", "jeton", "token", "connexion", "adresse", "serveur", "outil", "client", "renouveler", "maintenance", "copier", "secret", "jeton d’accès", "adresse de connexion"],
+  },
+  {
+    id: "boardLink",
+    label: "Liaison des boards",
+    group: "Connexions",
+    keywords: ["autre board", "mac", "vps", "adresse", "url", "nom du board", "alias SSH", "ssh", "nom public", "tunnel", "cloudflare", "téléphone"],
   },
   {
     id: "remoteMcp",

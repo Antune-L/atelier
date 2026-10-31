@@ -3,12 +3,12 @@ import { isIP } from "node:net";
 
 import { z } from "zod";
 
+import { SSH_HOST_ALIAS_PATTERN } from "../../shared/boardLink.ts";
 import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
 import REMOTE_CLEANUP_SCRIPT from "./previewCleanup.py" with { type: "text" };
 import { hostnameFromSshConfig } from "./repoInspection.ts";
 
 const COOLIFY_APP_UUID_PATTERN = /^[a-z0-9]{24}$/;
-const SSH_HOST_ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,253}$/;
 const LOCAL_COOLIFY_SERVER_ADDRESS = "host.docker.internal";
 const DNS_TIMEOUT_MS = 2_000;
 const DNS_TRIES = 1;

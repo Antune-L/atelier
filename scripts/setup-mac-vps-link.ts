@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 
 import { z } from "zod";
 
-import { runBoundedCommand, safeJsonParse } from "../src/server/system/boundedCommand.ts";
+import { safeJsonParse } from "../src/server/system/boundedCommand.ts";
 import type { BoundedCommandResult } from "../src/server/system/boundedCommand.ts";
 import { NON_INTERACTIVE_SSH_OPTIONS } from "../src/server/system/previewCleanup.ts";
 import { EXIT_BRIDGE_USAGE, EXIT_NOT_EXECUTABLE, EXIT_NOT_FOUND, runVpsBridge, VPS_BRIDGE_PROGRAM_VERSION_ARG, VPS_BRIDGE_REMOTE_PROGRAM } from "../src/server/system/vpsBridge.ts";
@@ -15,8 +15,8 @@ import { appSettingsSchema } from "../src/shared/schemas.ts";
 import type { UpdateAppSettingsInput } from "../src/shared/schemas.ts";
 import { BRIDGE_OPS, BRIDGE_PROTOCOL_VERSION, bridgeVersionOutputSchema } from "../src/shared/vpsBridge.ts";
 
-const EXIT_INCOMPLETE = 1;
-const EXIT_USAGE = 64;
+import { EXIT_USAGE, finish, parseTunnelToken, report, run, shortDetail, sleep } from "./lib/setupReport.ts";
+
 const DEFAULT_API_URL = `http://127.0.0.1:${DEFAULT_PORT}`;
 const DATA_ROOT = join(homedir(), "Library", "Application Support", "kanban-agents");
 const DEFAULT_TOKEN_FILE = join(DATA_ROOT, "cloudflared-tunnel.token");
@@ -44,17 +44,20 @@ const HTTP_TIMEOUT_MS = 10_000;
 const CURL_MAX_TIME_SECONDS = "15";
 const HTTP_OK = "200";
 const HTTP_FORBIDDEN = "403";
-const ACCESS_REFUSAL_CODES = new Set(["401", "403"]);
 const REDIRECT_CODES = new Set(["301", "302", "303", "307", "308"]);
 const ACCESS_LOGIN_HOST_SUFFIX = ".cloudflareaccess.com";
+const ACCESS_LOGIN_PATH_PREFIX = "/cdn-cgi/access/login";
 const VPS_SERVICE_GROUP = "kanban";
 const VPS_UI_SOCKET = "/run/kanban/ui.sock";
-const VPS_HEALTH_COMMAND = `curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket ${VPS_UI_SOCKET} http://kanban/health`;
-const DETAIL_MAX_CHARS = 200;
+const VPS_API_BASE = "http://localhost";
+const VPS_CURL = `curl -s --max-time 10 --unix-socket ${VPS_UI_SOCKET} -H 'Host: localhost'`;
+const VPS_HEALTH_COMMAND = `${VPS_CURL} -o /dev/null -w '%{http_code}' ${VPS_API_BASE}/health`;
+const VPS_SETTINGS_GET_COMMAND = `${VPS_CURL} -f ${VPS_API_BASE}/api/settings`;
+const VPS_SETTINGS_PATCH_COMMAND = `${VPS_CURL} -f -X PATCH -H 'content-type: application/json' --data-binary @- ${VPS_API_BASE}/api/settings`;
+const LIST_SEPARATOR = ",";
 const BRIDGE_SOURCE_PATH = join(import.meta.dir, "..", "deploy", "vps", "kanban-bridge");
 const BRIDGE_VERSION_PATTERN = /^readonly PROGRAM_VERSION=(\d+)$/m;
 const BRIDGE_OPS_PATTERN = /^\s*((?:[a-z_]+ \| )*[a-z_]+)\) op="\$1" ;;$/m;
-const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 const SETUP_DOC = "docs/mac-vps-link-setup.md";
 
 const HELP = `Usage: bun scripts/setup-mac-vps-link.ts [options]
@@ -67,6 +70,11 @@ Options:
   --ssh-alias <alias>        ~/.ssh/config alias of the VPS (setting "Alias SSH du VPS").
   --public-hostname <host>   Public hostname of this Mac board, served by the Cloudflare tunnel.
   --board-name <name>        Name of this board (optional).
+  --allow-projects <keys>    Comma-separated Mac project keys the VPS may send cards to ("Projets exposés").
+  --remote-profile <id>      Mac profile copied onto cards that come from the VPS ("Profil des cartes distantes").
+  --vps-allow-projects <keys>  Same allowlist on the VPS board, for its remote MCP.
+  --vps-remote-profile <id>  Remote cards profile on the VPS board.
+  --access-team <team>       Zero Trust team: the Access refusal checks then require <team>.cloudflareaccess.com.
   --token-file <path>        Tunnel token file, mode 0600 (default: ${DEFAULT_TOKEN_FILE}).
   --token-stdin              Read the tunnel token on stdin and store it in the token file. Never printed.
   --api <url>                Local Kanban API (default: ${DEFAULT_API_URL}).
@@ -75,26 +83,31 @@ Options:
 Settings left out keep their current value. The Cloudflare resources (tunnel, DNS route, Access application,
 token validation) are created beforehand by following ${SETUP_DOC}.`;
 
-type Status = "ok" | "changed" | "missing" | "failed" | "skipped" | "warning";
-
-const STATUS_LABELS: Record<Status, string> = {
-  ok: "ok",
-  changed: "fixed",
-  missing: "MISSING",
-  failed: "FAILED",
-  skipped: "skipped",
-  warning: "warning",
-};
-const LABEL_WIDTH = 9;
-const BLOCKING_STATUSES = new Set<Status>(["missing", "failed"]);
-
-const linkSettingsSchema = appSettingsSchema.pick({ boardName: true, otherBoardUrl: true, sshHostAlias: true, publicHostname: true });
+const linkSettingsSchema = appSettingsSchema.pick({
+  boardName: true,
+  otherBoardUrl: true,
+  sshHostAlias: true,
+  publicHostname: true,
+  remoteMcpProjectIds: true,
+  remoteMcpCardsProfileId: true,
+});
 type LinkSettings = z.infer<typeof linkSettingsSchema>;
 type LinkSettingKey = keyof LinkSettings;
-const LINK_SETTING_KEYS = ["otherBoardUrl", "sshHostAlias", "publicHostname", "boardName"] as const satisfies readonly LinkSettingKey[];
-const OPTIONAL_SETTING_KEYS = new Set<LinkSettingKey>(["boardName"]);
+const LINK_SETTING_KEYS = [
+  "otherBoardUrl",
+  "sshHostAlias",
+  "publicHostname",
+  "boardName",
+  "remoteMcpProjectIds",
+  "remoteMcpCardsProfileId",
+] as const satisfies readonly LinkSettingKey[];
+const OPTIONAL_SETTING_KEYS = new Set<LinkSettingKey>(["boardName", "remoteMcpProjectIds", "remoteMcpCardsProfileId"]);
+const vpsSettingsSchema = appSettingsSchema.pick({ otherBoardUrl: true, remoteMcpProjectIds: true, remoteMcpCardsProfileId: true });
+type VpsSettings = z.infer<typeof vpsSettingsSchema>;
+const VPS_SETTING_KEYS = ["otherBoardUrl", "remoteMcpProjectIds", "remoteMcpCardsProfileId"] as const satisfies readonly (keyof VpsSettings)[];
+const projectKeysSchema = z.array(z.string().min(1)).min(1);
+const profileIdSchema = z.string().min(1);
 
-const tunnelTokenSchema = z.object({ a: z.string().min(1), t: z.string().uuid(), s: z.string().min(1) });
 const readyResponseSchema = z.object({ readyConnections: z.number().int() });
 
 interface Options {
@@ -102,15 +115,9 @@ interface Options {
   apiUrl: string;
   tokenFile: string;
   tokenStdin: boolean;
+  accessTeam: string | null;
   desired: Partial<LinkSettings>;
-}
-
-let blocking = 0;
-
-function report(section: string, status: Status, label: string, detail?: string): void {
-  if (BLOCKING_STATUSES.has(status)) blocking += 1;
-  const tag = `[${STATUS_LABELS[status]}]`.padEnd(LABEL_WIDTH);
-  console.log(`${tag} ${section.padEnd(8)} ${label}${detail ? ` - ${detail}` : ""}`);
+  vpsDesired: Partial<VpsSettings>;
 }
 
 function usageError(message: string): never {
@@ -118,15 +125,7 @@ function usageError(message: string): never {
   process.exit(EXIT_USAGE);
 }
 
-function shortDetail(text: string): string {
-  return text.trim().split("\n").slice(-2).join(" ").slice(0, DETAIL_MAX_CHARS);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function parseSetting<T>(schema: z.ZodType<T>, value: string | undefined, flag: string): T | undefined {
+function parseSetting<T>(schema: z.ZodType<T>, value: string | string[] | undefined, flag: string): T | undefined {
   if (value === undefined) return undefined;
   const parsed = schema.safeParse(value);
   if (!parsed.success) usageError(`invalid ${flag}`);
@@ -157,12 +156,25 @@ function parseOptions(): Options {
   if (publicHostname !== undefined) desired.publicHostname = publicHostname;
   const boardName = parseSetting(boardNameSchema, values["board-name"], "--board-name");
   if (boardName !== undefined) desired.boardName = boardName;
+  const allowProjects = parseSetting(projectKeysSchema, values["allow-projects"]?.split(LIST_SEPARATOR), "--allow-projects");
+  if (allowProjects !== undefined) desired.remoteMcpProjectIds = allowProjects;
+  const remoteProfile = parseSetting(profileIdSchema, values["remote-profile"], "--remote-profile");
+  if (remoteProfile !== undefined) desired.remoteMcpCardsProfileId = remoteProfile;
+  const vpsDesired: Partial<VpsSettings> = {};
+  const vpsAllowProjects = parseSetting(projectKeysSchema, values["vps-allow-projects"]?.split(LIST_SEPARATOR), "--vps-allow-projects");
+  if (vpsAllowProjects !== undefined) vpsDesired.remoteMcpProjectIds = vpsAllowProjects;
+  const vpsRemoteProfile = parseSetting(profileIdSchema, values["vps-remote-profile"], "--vps-remote-profile");
+  if (vpsRemoteProfile !== undefined) vpsDesired.remoteMcpCardsProfileId = vpsRemoteProfile;
+  const accessTeam = values["access-team"] ?? null;
+  if (accessTeam !== null && !/^[a-z0-9-]+$/.test(accessTeam)) usageError("invalid --access-team");
   return {
     apply: !values.check,
     apiUrl: apiUrl.replace(/\/+$/, ""),
     tokenFile: values["token-file"] ?? DEFAULT_TOKEN_FILE,
     tokenStdin: values["token-stdin"] ?? false,
+    accessTeam,
     desired,
+    vpsDesired,
   };
 }
 
@@ -175,6 +187,11 @@ function parseCliArgs() {
       "ssh-alias": { type: "string" },
       "public-hostname": { type: "string" },
       "board-name": { type: "string" },
+      "allow-projects": { type: "string" },
+      "remote-profile": { type: "string" },
+      "vps-allow-projects": { type: "string" },
+      "vps-remote-profile": { type: "string" },
+      "access-team": { type: "string" },
       "token-file": { type: "string" },
       "token-stdin": { type: "boolean" },
       api: { type: "string" },
@@ -182,10 +199,6 @@ function parseCliArgs() {
     strict: true,
     allowPositionals: false,
   });
-}
-
-function run(args: string[], timeoutMs?: number): Promise<BoundedCommandResult> {
-  return runBoundedCommand(args, process.cwd(), timeoutMs === undefined ? {} : { timeoutMs });
 }
 
 function compareVersions(left: readonly number[], right: readonly number[]): number {
@@ -208,7 +221,7 @@ async function ensureCloudflared(options: Options): Promise<string | null> {
       report("Mac", "failed", "cloudflared", "not installed and Homebrew is missing: install Homebrew or cloudflared from Cloudflare's downloads, then rerun");
       return null;
     }
-    const installed = await run([brew, "install", CLOUDFLARED], BREW_TIMEOUT_MS);
+    const installed = await run([brew, "install", CLOUDFLARED], { timeoutMs: BREW_TIMEOUT_MS });
     binary = Bun.which(CLOUDFLARED);
     if (installed.exitCode !== 0 || binary === null) {
       report("Mac", "failed", "cloudflared", `brew install cloudflared failed: ${shortDetail(installed.stderr)}`);
@@ -230,13 +243,6 @@ async function ensureCloudflared(options: Options): Promise<string | null> {
   }
   report("Mac", "ok", "cloudflared", `${label} at ${binary}`);
   return binary;
-}
-
-function parseTunnelToken(raw: string): z.infer<typeof tunnelTokenSchema> | null {
-  const token = raw.trim();
-  if (!BASE64_PATTERN.test(token)) return null;
-  const parsed = tunnelTokenSchema.safeParse(safeJsonParse(Buffer.from(token, "base64").toString("utf8")));
-  return parsed.success ? parsed.data : null;
 }
 
 function writePrivateFile(path: string, content: string): void {
@@ -421,34 +427,56 @@ async function fetchSettings(options: Options, init?: RequestInit): Promise<Link
   }
 }
 
+type SettingValue = string | readonly string[] | null;
+
+function settingText(value: SettingValue | undefined): string {
+  if (value === undefined || value === null) return "(empty)";
+  return typeof value === "string" ? value : value.join(LIST_SEPARATOR) || "(empty)";
+}
+
+function isSettingSet(value: SettingValue): boolean {
+  return typeof value === "string" || (value !== null && value.length > 0);
+}
+
+function differingKeys<K extends string>(keys: readonly K[], desired: Partial<Record<K, SettingValue>>, current: Record<K, SettingValue>): K[] {
+  return keys.filter((key) => desired[key] !== undefined && JSON.stringify(desired[key]) !== JSON.stringify(current[key]));
+}
+
+function reportSettings<K extends string>(
+  section: string,
+  keys: readonly K[],
+  before: Record<K, SettingValue>,
+  after: Record<K, SettingValue>,
+  changed: readonly K[],
+  options: { apply: boolean; optional: ReadonlySet<string> },
+): void {
+  for (const key of keys) {
+    const value = after[key];
+    if (changed.includes(key)) {
+      if (options.apply) report(section, "changed", key, `set to ${settingText(value)}`);
+      else report(section, "missing", key, `would change ${settingText(before[key])}`);
+    } else if (isSettingSet(value)) {
+      report(section, "ok", key, settingText(value));
+    } else if (options.optional.has(key)) {
+      report(section, "skipped", key, "not set (optional)");
+    } else {
+      report(section, "missing", key, "not set: pass the matching flag");
+    }
+  }
+}
+
 async function ensureSettings(options: Options): Promise<LinkSettings | null> {
   const current = await fetchSettings(options);
   if (current === null) return null;
-  const patch: UpdateAppSettingsInput = {};
-  for (const key of LINK_SETTING_KEYS) {
-    const wanted = options.desired[key];
-    if (wanted !== undefined && wanted !== current[key]) patch[key] = wanted;
-  }
+  const changed = differingKeys(LINK_SETTING_KEYS, options.desired, current);
   let settings = current;
-  const changedKeys = Object.keys(patch);
-  if (changedKeys.length > 0 && options.apply) {
+  if (changed.length > 0 && options.apply) {
+    const patch: UpdateAppSettingsInput = Object.fromEntries(changed.map((key) => [key, options.desired[key]]));
     const updated = await fetchSettings(options, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
     if (updated === null) return null;
     settings = updated;
   }
-  for (const key of LINK_SETTING_KEYS) {
-    const value = settings[key];
-    if (key in patch) {
-      if (options.apply) report("Kanban", "changed", key, `set to ${value}`);
-      else report("Kanban", "missing", key, `would change ${current[key] ?? "(empty)"} to ${patch[key]}`);
-    } else if (value !== null) {
-      report("Kanban", "ok", key, value);
-    } else if (OPTIONAL_SETTING_KEYS.has(key)) {
-      report("Kanban", "skipped", key, "not set (optional)");
-    } else {
-      report("Kanban", "missing", key, "not set: pass the matching flag");
-    }
-  }
+  reportSettings("Kanban", LINK_SETTING_KEYS, current, settings, changed, { apply: options.apply, optional: OPTIONAL_SETTING_KEYS });
   return settings;
 }
 
@@ -476,11 +504,11 @@ function checkBridgeSourceDrift(): void {
   report("Repo", "ok", "bridge program", `version ${version} and op list match src/shared/vpsBridge.ts`);
 }
 
-function ssh(alias: string, command: string[]): Promise<BoundedCommandResult> {
-  return run(["ssh", ...NON_INTERACTIVE_SSH_OPTIONS, alias, ...command]);
+function ssh(alias: string, command: string[], stdin?: string): Promise<BoundedCommandResult> {
+  return run(["ssh", ...NON_INTERACTIVE_SSH_OPTIONS, alias, ...command], stdin === undefined ? {} : { stdin });
 }
 
-async function checkVps(alias: string): Promise<void> {
+async function checkVps(options: Options, alias: string, publicHostname: string | null): Promise<void> {
   const groups = await ssh(alias, ["id", "-nG"]);
   if (groups.timedOut || groups.exitCode !== 0) {
     report("VPS", "failed", "non-interactive SSH", `ssh ${alias} failed: ${shortDetail(groups.stderr) || "timeout"}`);
@@ -516,21 +544,63 @@ async function checkVps(alias: string): Promise<void> {
   if (version === null || !version.success) report("VPS", "failed", "bridge socket", "the version op returned an error");
   else if (version.data.protocolVersion !== BRIDGE_PROTOCOL_VERSION) report("VPS", "failed", "bridge socket", `server protocol ${version.data.protocolVersion}, the Mac expects ${BRIDGE_PROTOCOL_VERSION}`);
   else report("VPS", "ok", "bridge socket", `protocol ${BRIDGE_PROTOCOL_VERSION}`);
+  await ensureVpsSettings(options, alias, publicHostname);
 }
 
-function isAccessLogin(redirect: string): boolean {
+async function readVpsSettings(alias: string): Promise<VpsSettings | null> {
+  const result = await ssh(alias, [VPS_SETTINGS_GET_COMMAND]);
+  const parsed = vpsSettingsSchema.safeParse(safeJsonParse(result.stdout));
+  if (result.exitCode !== 0 || !parsed.success) {
+    report("VPS", "failed", "settings", `GET /api/settings through ui.sock failed: ${shortDetail(result.stderr) || `exit ${result.exitCode}`}`);
+    return null;
+  }
+  return parsed.data;
+}
+
+// NOTE: the reciprocal link is only filled when empty on the VPS, so a URL set there by hand is never replaced.
+function vpsDesiredSettings(options: Options, current: VpsSettings, publicHostname: string | null): Partial<VpsSettings> {
+  const desired = { ...options.vpsDesired };
+  if (publicHostname !== null) {
+    const macUrl = `https://${publicHostname}`;
+    if (current.otherBoardUrl === null) desired.otherBoardUrl = macUrl;
+    else if (current.otherBoardUrl !== macUrl) report("VPS", "warning", "otherBoardUrl", `${current.otherBoardUrl}, not ${macUrl}: left unchanged`);
+  }
+  return desired;
+}
+
+async function ensureVpsSettings(options: Options, alias: string, publicHostname: string | null): Promise<void> {
+  const current = await readVpsSettings(alias);
+  if (current === null) return;
+  const desired = vpsDesiredSettings(options, current, publicHostname);
+  const changed = differingKeys(VPS_SETTING_KEYS, desired, current);
+  let settings = current;
+  if (changed.length > 0 && options.apply) {
+    const patch = JSON.stringify(Object.fromEntries(changed.map((key) => [key, desired[key]])));
+    const result = await ssh(alias, [VPS_SETTINGS_PATCH_COMMAND], patch);
+    const parsed = vpsSettingsSchema.safeParse(safeJsonParse(result.stdout));
+    if (result.exitCode !== 0 || !parsed.success) {
+      report("VPS", "failed", "settings", `PATCH /api/settings through ui.sock failed (a profile must exist with an available engine): exit ${result.exitCode}`);
+      return;
+    }
+    settings = parsed.data;
+  }
+  reportSettings("VPS", VPS_SETTING_KEYS, current, settings, changed, { apply: options.apply, optional: new Set(VPS_SETTING_KEYS) });
+}
+
+function isAccessLogin(redirect: string, accessTeam: string | null): boolean {
   if (!URL.canParse(redirect)) return false;
-  return new URL(redirect).hostname.endsWith(ACCESS_LOGIN_HOST_SUFFIX);
+  const url = new URL(redirect);
+  const hostMatches = accessTeam === null ? url.hostname.endsWith(ACCESS_LOGIN_HOST_SUFFIX) : url.hostname === `${accessTeam}${ACCESS_LOGIN_HOST_SUFFIX}`;
+  return url.protocol === "https:" && hostMatches && url.pathname.startsWith(ACCESS_LOGIN_PATH_PREFIX);
 }
 
-async function checkAccessRefusal(hostname: string): Promise<void> {
+// NOTE: only a redirect to the Access login proves Access is in front; a bare 403 can come from Kanban's own Host guard.
+async function checkAccessRefusal(hostname: string, accessTeam: string | null, label: string): Promise<void> {
   const [status = "", redirect = ""] = (await curlStatus(["-w", "%{http_code} %{redirect_url}", `https://${hostname}/`])).split(" ");
-  if (REDIRECT_CODES.has(status) && isAccessLogin(redirect)) {
-    report("Final", "ok", "Access refusal", `${status} to the Cloudflare Access login`);
-  } else if (ACCESS_REFUSAL_CODES.has(status)) {
-    report("Final", "ok", "Access refusal", `${status} without a session`);
+  if (REDIRECT_CODES.has(status) && isAccessLogin(redirect, accessTeam)) {
+    report("Final", "ok", label, `${status} to the Cloudflare Access login`);
   } else {
-    report("Final", "failed", "Access refusal", `https://${hostname}/ answered ${status || "nothing"}${redirect ? ` to ${redirect}` : ""} without a session`);
+    report("Final", "failed", label, `https://${hostname}/ answered ${status || "nothing"}${redirect ? ` to ${redirect}` : ""} without a session, not a redirect to the Access login`);
   }
 }
 
@@ -550,18 +620,17 @@ async function main(): Promise<void> {
   if (settings?.publicHostname) await checkActiveHostname(options, settings.publicHostname);
 
   checkBridgeSourceDrift();
-  if (settings?.sshHostAlias) await checkVps(settings.sshHostAlias);
+  if (settings?.sshHostAlias) await checkVps(options, settings.sshHostAlias, settings.publicHostname);
   else report("VPS", "skipped", "SSH checks", "no SSH alias");
 
-  if (settings?.publicHostname) await checkAccessRefusal(settings.publicHostname);
-  else report("Final", "skipped", "Access refusal", "no public hostname");
+  if (settings?.publicHostname) await checkAccessRefusal(settings.publicHostname, options.accessTeam, "Access refusal (Mac)");
+  else report("Final", "skipped", "Access refusal (Mac)", "no public hostname");
+  const vpsHostname = settings?.otherBoardUrl && URL.canParse(settings.otherBoardUrl) ? new URL(settings.otherBoardUrl).hostname : null;
+  if (vpsHostname !== null) await checkAccessRefusal(vpsHostname, options.accessTeam, "Access refusal (VPS)");
+  else report("Final", "skipped", "Access refusal (VPS)", "no other board URL");
 
   console.log(`\nC0 (SSH from the Finder-launched app, after a restart and after sleep) stays manual: ${SETUP_DOC}.`);
-  if (blocking > 0) {
-    console.log(`${blocking} item(s) missing or failing.`);
-    process.exit(EXIT_INCOMPLETE);
-  }
-  console.log("Everything is in place.");
+  finish();
 }
 
 await main();

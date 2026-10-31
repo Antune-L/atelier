@@ -5,7 +5,7 @@ This guide sets up both directions of the link between the Mac board (desktop ap
 - the Mac reaches the VPS through the SSH bridge (`ssh <alias> /usr/local/bin/kanban-bridge <op>`, see [vps-remote-access.md](./vps-remote-access.md#mac-bridge-socket)).
 
 Three actors share the work:
-1. **An agent with the Cloudflare MCP** creates the Cloudflare resources ([section 2](#2-cloudflare-resources-agent-with-the-cloudflare-mcp)). No Cloudflare API token is stored anywhere.
+1. **`scripts/setup-cloudflare.ts`** ([vps-bootstrap.md](./vps-bootstrap.md#3-cloudflare-from-the-mac)), or **an agent with the Cloudflare MCP** ([section 2](#2-cloudflare-resources-agent-with-the-cloudflare-mcp)), creates the Cloudflare resources.
 2. **You** copy the tunnel token once and run the setup script ([sections 3 and 4](#3-store-the-tunnel-token-you)).
 3. **`scripts/setup-mac-vps-link.ts`** installs and checks the Mac side and checks the VPS side. It is idempotent: a second run changes nothing.
 
@@ -87,14 +87,15 @@ It runs every step, fixes what it can and prints a checklist (`ok`, `fixed`, `MI
 | Mac | tunnel token file: regular file, yours, mode 0600, holds a tunnel token | `chmod 600` |
 | Mac | launch agent `~/Library/LaunchAgents/com.kanban-agents.cloudflared.plist` up to date and loaded | writes it, then `launchctl bootstrap` (after `bootout` when it changed) |
 | Mac | tunnel connected: `http://127.0.0.1:20249/ready` reports ready connections | none; logs in `~/Library/Logs/kanban-agents-cloudflared.log` |
-| Kanban | `otherBoardUrl`, `sshHostAlias`, `publicHostname`, `boardName` | `PATCH /api/settings` with the differing fields only |
+| Kanban | `otherBoardUrl`, `sshHostAlias`, `publicHostname`, `boardName`, and with `--allow-projects` / `--remote-profile` the projects and profile for cards coming from the VPS | `PATCH /api/settings` with the differing fields only |
 | Kanban | the running app accepts `Host: <mac-host>` on `/health` | none: quit and reopen the app after a hostname change |
 | Repo | `deploy/vps/kanban-bridge` version and operations match `src/shared/vpsBridge.ts` | none |
 | VPS | non-interactive SSH (`BatchMode=yes`, the options of the bridge), SSH user in `kanban` | none |
-| VPS | `/health` through `/run/kanban/ui.sock` answers 200 | none |
+| VPS | `/health` through `/run/kanban/ui.sock` (with `Host: localhost`) answers 200 | none |
+| VPS | `otherBoardUrl` (filled with `https://<mac-host>` when empty), `remoteMcpProjectIds`, `remoteMcpCardsProfileId` of the VPS board | `PATCH /api/settings` through `ui.sock` over SSH, differing fields only |
 | VPS | `/usr/local/bin/kanban-bridge program-version` equals the Mac protocol | none: `sudo kanban-upgrade --sha <sha> --install-bridge` on the VPS |
 | VPS | the `version` bridge operation answers the Mac protocol through `bridge.sock` | none |
-| Final | an unauthenticated `https://<mac-host>/` is refused: a redirect to `*.cloudflareaccess.com`, or 401/403 | none |
+| Final | unauthenticated `https://<mac-host>/` and the VPS board URL redirect to the Access login (`https://<team>.cloudflareaccess.com/cdn-cgi/access/login/...` with `--access-team <team>`); a bare 401 or 403 fails, since Kanban's own guard also answers 403 | none |
 
 Settings left out keep their current value, so a later run needs no flags. The script calls the local API like any local client: a loopback `Host` and no `Origin`, which Kanban's guard accepts.
 

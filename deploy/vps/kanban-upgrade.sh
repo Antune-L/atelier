@@ -115,6 +115,7 @@ free_mb() { df -Pm -- "$1" | awk 'NR == 2 { print $4 }'; }
 # installed with --install-bridge next to the commit named with --sha. --sha alone is not an approval: the update
 # button passes it with the tip of main it resolved. Without --install-bridge the program is compared and reported.
 bridge_work=""
+bridge_install_failed=0
 cleanup_bridge() {
   if [[ -n "$bridge_work" ]]; then
     rm -rf -- "$bridge_work"
@@ -143,6 +144,9 @@ bridge_is_current() {
 sync_bridge() {
   if [[ ! -s "$bridge_work/kanban-bridge" ]]; then
     echo "    warning: cannot read $BRIDGE_SOURCE at $1; $BRIDGE_DEST was left unchanged"
+    if [[ $install_bridge -eq 1 ]]; then
+      bridge_install_failed=1
+    fi
     return 0
   fi
   if bridge_is_current; then
@@ -291,6 +295,9 @@ if [[ "$before" == "$sha" ]]; then
   step "Checking the bridge program against $sha"
   fetch_bridge "$sha" || true
   sync_bridge "$sha"
+  if [[ $bridge_install_failed -eq 1 ]]; then
+    fail "already at $sha, but --install-bridge could not read $BRIDGE_SOURCE: $BRIDGE_DEST was not installed"
+  fi
   echo "Already at $sha. Nothing else to do."
   exit 0
 fi
@@ -448,3 +455,6 @@ as_service find "$BACKUPS" -mindepth 1 -maxdepth 1 -type f -name 'kanban-*.db' -
   done
 
 echo "Upgraded $before -> $sha. Backup: $backup"
+if [[ $bridge_install_failed -eq 1 ]]; then
+  fail "--install-bridge could not read $BRIDGE_SOURCE at $sha: $BRIDGE_DEST was not installed"
+fi

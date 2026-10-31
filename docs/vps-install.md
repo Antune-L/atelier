@@ -2,6 +2,8 @@
 
 This guide installs a second, independent Kanban instance on an Ubuntu 24.04 or 26.04 VPS that already runs Coolify. Cards created on the VPS board keep running while the Mac is off.
 
+On a fresh VPS, or to check an existing one, use [vps-bootstrap.md](./vps-bootstrap.md): `kanban-bootstrap` runs the root steps of this guide, installs Coolify, and `scripts/setup-cloudflare.ts` creates the Cloudflare side. This guide stays the reference for what each step does.
+
 Two phases:
 - **Phase A** runs ordinary cards, without previews.
 - **Phase B** adds Devin cards with Coolify previews on the same VPS, through a preview broker.
@@ -79,7 +81,7 @@ sudo kanban-release "$sha"
 
 `kanban-release` and `kanban-upgrade` never update themselves from a release. To update them, rerun the two `install` lines with a newly reviewed `sha`.
 
-The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only with `--sha <sha> --install-bridge`, after the health checks pass. Without `--install-bridge`, including the update button of [vps-app-updates.md](./vps-app-updates.md), which passes `--sha` with the tip of `main` it resolved, it only reports a difference. The first time, or by hand:
+The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only with `--sha <sha> --install-bridge`: after the health checks of an upgrade, or right away when that commit is already current. If the file cannot be read, the command fails. Without `--install-bridge`, including the update button of [vps-app-updates.md](./vps-app-updates.md), which passes `--sha` with the tip of `main` it resolved, it only reports a difference. The first time, or by hand:
 
 ```bash
 git -C ~/kanban-admin show "$sha:deploy/vps/kanban-bridge" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/bin/kanban-bridge
@@ -402,7 +404,7 @@ ssh -t -p <ssh-port> <vps> sudo kanban-upgrade
 
 The command prints each step and the commit before and after:
 1. Takes a lock in `/run`, so two upgrades never run at once.
-2. Reads the tip of `main` with `git ls-remote` on the hard-coded repository. It stops if that commit is already current.
+2. Reads the tip of `main` with `git ls-remote` on the hard-coded repository. If that commit is already current, it only checks the bridge program (and installs it with `--install-bridge`), then stops.
 3. Checks free disk space (3 GB on the release, build and data disks, plus the database size for the backup).
 4. Builds the release with `kanban-release --build-only` while the service keeps running. A failed build stops here: the service still runs the old release.
 5. Checks, as `kanban` and read-only, that no execution run, quality validation, preview operation or busy slot is active, and lists them otherwise.
@@ -425,7 +427,7 @@ Exit codes: `0` upgraded or already current, `1` failed, `2` the rollback health
 
 **Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3. `kanban-bridge` is installed by `sudo kanban-upgrade --sha <sha> --install-bridge` (A3).
 
-**Updating units and broker files.** `kanban-upgrade` does not copy them either. When a commit changes `deploy/vps` or `deploy/preview-broker`, copy the changed files from `/opt/kanban/current` again as in A5, B1 and B2, run `sudo systemctl daemon-reload`, then restart the affected services.
+**Updating units and broker files.** `kanban-upgrade` does not copy them either. When a commit changes `deploy/vps` or `deploy/preview-broker`, install the changed files again from the reviewed commit with `git show "$sha:<path>"`, as in A5, B1 and B2 (never from `/opt/kanban/current`), run `sudo systemctl daemon-reload`, then restart the affected services. `sudo kanban-bootstrap --sha <sha>` does this for every file it manages ([vps-bootstrap.md](./vps-bootstrap.md)).
 
 ### Manual upgrade
 

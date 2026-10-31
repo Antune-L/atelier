@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
+import { stripLocalUploadReferences } from "@/lib/paste";
 
 const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
   pending: "En attente du VPS",
@@ -31,6 +32,7 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const [sends, setSends] = useState<VpsPendingSend[]>([]);
+  const [clientId, setClientId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -54,16 +56,18 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
   }
 
   const project = projects?.find((candidate) => candidate.key === projectChoice)?.key ?? projects?.[0]?.key ?? "";
-  const submitDisabled = busy || !project || (!title.trim() && !description.trim());
+  const sentDescription = stripLocalUploadReferences(description);
+  const submitDisabled = busy || !project || (!title.trim() && !sentDescription.trim());
 
   const submit = (analysis: VpsAnalysisMode): void => {
     setMenuOpen(false);
     setError(null);
     setBusy(true);
     void api
-      .createVpsTicket({ project, title, description, analysis })
+      .createVpsTicket({ clientId, project, title, description: sentDescription, analysis })
       .then((response) => {
         setReceipt(response);
+        setClientId(crypto.randomUUID());
         onDraftSent();
         refreshSends();
       })

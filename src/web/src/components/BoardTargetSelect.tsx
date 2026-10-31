@@ -75,7 +75,7 @@ export function OtherBoardDraftFields({ idPrefix, title, onTitleChange, descript
           className="min-h-48"
           placeholder="Décrivez le résultat attendu, le contexte et les critères de réussite…"
         />
-        <p className="text-xs text-muted-foreground">Markdown accepté. Les images collées ne sont pas envoyées au {boardLabel}.</p>
+        <p className="text-xs text-muted-foreground">Markdown accepté. Les images et fichiers collés sont retirés de la description envoyée au {boardLabel}.</p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor={`${idPrefix}-title`} className={FIELD_LABEL_CLASSES}>Titre (optionnel)</Label>

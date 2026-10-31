@@ -1,4 +1,3 @@
-import { nanoid } from "nanoid";
 import type { ZodType } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
@@ -12,7 +11,7 @@ import {
   bridgeOutboxFetchOutputSchema,
   bridgeRequestId,
   bridgeVersionOutputSchema,
-  vpsTicketDraftSchema,
+  vpsCreateTicketInputSchema,
 } from "../shared/vpsBridge.ts";
 import type {
   BoardProject,
@@ -27,7 +26,7 @@ import type {
 import { getProject } from "./config.ts";
 import type { Store } from "./db/store.ts";
 import { createLogger } from "./logger.ts";
-import { remoteAllowedProjects } from "./remoteMcp/admission.ts";
+import { remoteAllowedProjects, resolveRemoteCardsProfile } from "./remoteMcp/admission.ts";
 import type { SystemAdapter } from "./system/types.ts";
 import type { VpsBridgeFailureKind } from "./system/vpsBridge.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
@@ -118,15 +117,18 @@ export class VpsLinkSync {
   }
 
   async createTicket(input: unknown): Promise<VpsCreateTicketResponse> {
-    const draft = vpsTicketDraftSchema.safeParse(input);
-    if (!draft.success) throw new VpsLinkError("invalid_request", draft.error.issues[0]?.message ?? "Requête invalide.");
+    const parsed = vpsCreateTicketInputSchema.safeParse(input);
+    if (!parsed.success) throw new VpsLinkError("invalid_request", parsed.error.issues[0]?.message ?? "Requête invalide.");
     this.hostAlias();
-    const id = nanoid();
-    const send = this.deps.store.createVpsPendingSend({
+    const { clientId: id, ...draft } = parsed.data;
+    const existing = this.deps.store.getVpsPendingSend(id);
+    if (existing?.status === "failed") throw new VpsLinkError("rejected", existing.lastError ?? "Envoi refusé par le VPS.");
+    if (existing !== null && this.inFlight.has(id)) return { status: "pending", send: existing };
+    const send = existing ?? this.deps.store.createVpsPendingSend({
       id,
       requestId: bridgeRequestId(id),
-      draft: draft.data,
-      projectLabel: this.projectLabels.get(draft.data.project) ?? null,
+      draft,
+      projectLabel: this.projectLabels.get(draft.project) ?? null,
     });
     const outcome = await this.deliver(send);
     if (outcome.status === "rejected") {
@@ -192,12 +194,14 @@ export class VpsLinkSync {
       const { items } = await this.call("outbox_fetch", {}, bridgeOutboxFetchOutputSchema);
       if (items.length === 0) return;
       const acks: OutboxAck[] = [];
+      const profile = await resolveRemoteCardsProfile(this.deps);
       for (const item of items) {
-        const ack = await admitVpsOutboxItem(this.deps, item).catch((error: unknown) => {
+        try {
+          const ack = admitVpsOutboxItem(this.deps, item, profile);
+          if (ack !== null) acks.push(ack);
+        } catch (error) {
           log.error("envoi du VPS non importé", { outboxId: item.id, error: getErrorMessage(error) });
-          return null;
-        });
-        if (ack !== null) acks.push(ack);
+        }
       }
       if (acks.length > 0) await this.call("outbox_ack", { acks }, bridgeOutboxAckOutputSchema);
       if (acks.length < items.length) return;

@@ -3,8 +3,8 @@ import { OUTBOX_REASON_MAX_LENGTH, outboxRequestId } from "../shared/vpsBridge.t
 import type { BridgeOutboxItem, OutboxAck } from "../shared/vpsBridge.ts";
 
 import { createLogger } from "./logger.ts";
-import { remoteAllowedProjects, resolveRemoteCardsProfile } from "./remoteMcp/admission.ts";
-import type { RemoteCardAdmissionDeps } from "./remoteMcp/admission.ts";
+import { remoteAllowedProjects } from "./remoteMcp/admission.ts";
+import type { RemoteCardAdmissionDeps, RemoteCardsProfileResolution } from "./remoteMcp/admission.ts";
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
 
@@ -30,17 +30,15 @@ function projectNotAllowedReason(project: string): string {
 // NOTE(ali): the Mac-side admission of one VPS outbox item. Only the project, title and description are honoured; the project is
 // re-validated against the Mac allowlist now (never the published catalogue) and the card is a locked remote card with the
 // Mac remote-cards profile, auto-merge and direct push off. Returns null to leave the item pending for the next sync.
-export async function admitVpsOutboxItem(deps: VpsOutboxImportDeps, item: BridgeOutboxItem): Promise<OutboxAck | null> {
+export function admitVpsOutboxItem(deps: VpsOutboxImportDeps, item: BridgeOutboxItem, profile: RemoteCardsProfileResolution): OutboxAck | null {
   const receipt = deps.store.getVpsOutboxReceipt(item.id);
   if (receipt !== null) return received(item.id, receipt.ticketId);
   if (!remoteAllowedProjects(deps.store).has(item.project)) return rejected(item.id, projectNotAllowedReason(item.project));
-  const profile = await resolveRemoteCardsProfile(deps);
   if (!profile.ok) {
     if (profile.reason === "not_configured") return rejected(item.id, NO_PROFILE_REASON);
     log.warn("moteur du profil des cartes distantes indisponible, envoi du VPS laissé en attente", { outboxId: item.id, error: profile.detail });
     return null;
   }
-  if (!remoteAllowedProjects(deps.store).has(item.project)) return rejected(item.id, projectNotAllowedReason(item.project));
   try {
     const { created, ticket } = deps.operations.createTodoTicket(
       {

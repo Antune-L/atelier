@@ -59,7 +59,7 @@ import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestP
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
 import { boardProjectSchema, macOutboxEnqueueResponseSchema, macOutboxStateSchema, vpsCreateTicketResponseSchema, vpsPendingSendSchema } from "@shared/vpsBridge";
-import type { BoardProject, MacOutboxEnqueueInput, MacOutboxEnqueueResponse, MacOutboxState, VpsCreateTicketResponse, VpsPendingSend, VpsTicketDraft } from "@shared/vpsBridge";
+import type { BoardProject, MacOutboxEnqueueInput, MacOutboxEnqueueResponse, MacOutboxState, VpsCreateTicketInput, VpsCreateTicketResponse, VpsPendingSend } from "@shared/vpsBridge";
 import type { HostMetrics } from "@shared/types";
 import { lastProviderQuotaResponseSchema, providerQuotaSchema } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
@@ -301,8 +301,8 @@ export const api = {
     request("/api/tickets", { method: "POST", body: JSON.stringify(input) }),
   vpsProjects: async (): Promise<BoardProject[]> =>
     z.array(boardProjectSchema).parse(await request<unknown>(`${VPS_LINK_BASE}/projects`)),
-  createVpsTicket: async (draft: VpsTicketDraft): Promise<VpsCreateTicketResponse> =>
-    vpsCreateTicketResponseSchema.parse(await request<unknown>(`${VPS_LINK_BASE}/tickets`, { method: "POST", body: JSON.stringify(draft) })),
+  createVpsTicket: async (input: VpsCreateTicketInput): Promise<VpsCreateTicketResponse> =>
+    vpsCreateTicketResponseSchema.parse(await request<unknown>(`${VPS_LINK_BASE}/tickets`, { method: "POST", body: JSON.stringify(input) })),
   vpsSends: async (): Promise<VpsPendingSend[]> =>
     z.array(vpsPendingSendSchema).parse(await request<unknown>(`${VPS_LINK_BASE}/sends`)),
   dismissVpsSend: (id: string): Promise<{ ok: boolean }> =>

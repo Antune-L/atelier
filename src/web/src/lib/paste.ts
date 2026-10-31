@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 
 const IMAGE_PREFIX = "image/";
 const VIDEO_PREFIX = "video/";
+const UPLOADS_DIR = "uploads";
+const LOCAL_UPLOAD_REFERENCE_PATTERN = new RegExp(String.raw`!?\[[^\]\n]*\]\(/(?:[^)\n]*/)?${UPLOADS_DIR}/[\w.-]+\)\n?`, "g");
 
 /** Append `markdown` on its own line to a text field value (used by the paste-to-upload handlers). */
 export function appendMarkdownLine(prev: string, markdown: string): string {
@@ -44,4 +46,8 @@ export async function uploadAttachment(file: File): Promise<string> {
   const label = file.name.replace(/[\\[\]\\\r\n]/g, "_") || "pièce jointe";
   const prefix = file.type.startsWith(IMAGE_PREFIX) ? "!" : "";
   return `${prefix}[${label}](${result.url})`;
+}
+
+export function stripLocalUploadReferences(markdown: string): string {
+  return markdown.replace(LOCAL_UPLOAD_REFERENCE_PATTERN, "");
 }

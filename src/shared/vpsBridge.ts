@@ -47,6 +47,10 @@ const TITLE_OR_DESCRIPTION_ISSUE = { message: "title or description required", p
 export const vpsTicketDraftSchema = vpsTicketDraftFields.strict().refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
 export type VpsTicketDraft = z.infer<typeof vpsTicketDraftSchema>;
 
+export const vpsCreateTicketInputSchema = vpsTicketDraftFields.extend({ clientId: z.string().regex(CROSS_BOARD_CLIENT_ID_PATTERN) }).strict()
+  .refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
+export type VpsCreateTicketInput = z.infer<typeof vpsCreateTicketInputSchema>;
+
 export const bridgeCreateTicketInputSchema = vpsTicketDraftFields.extend({
   requestId: z.string().refine(
     (value) => value.startsWith(BRIDGE_REQUEST_ID_PREFIX) && CROSS_BOARD_CLIENT_ID_PATTERN.test(value.slice(BRIDGE_REQUEST_ID_PREFIX.length)),

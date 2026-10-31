@@ -15,6 +15,7 @@ import { boardTicketUrl } from "@/lib/boardHash";
 import { formatDateTime } from "@/lib/display";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
+import { stripLocalUploadReferences } from "@/lib/paste";
 
 const ITEM_STATUS_LABELS: Record<MacOutboxItem["status"], string> = {
   pending: "En attente du Mac",
@@ -81,13 +82,14 @@ export function MacOutboxForm({ header, title, onTitleChange, description, onDes
   const catalogue = state?.catalogue ?? null;
   const projects = catalogue?.projects ?? [];
   const project = projects.find((candidate) => candidate.key === projectChoice)?.key ?? projects[0]?.key ?? "";
-  const submitDisabled = busy || !project || (!title.trim() && !description.trim());
+  const sentDescription = stripLocalUploadReferences(description);
+  const submitDisabled = busy || !project || (!title.trim() && !sentDescription.trim());
 
   const submit = (): void => {
     setError(null);
     setBusy(true);
     void api
-      .enqueueMacOutbox({ clientId, project, title, description })
+      .enqueueMacOutbox({ clientId, project, title, description: sentDescription })
       .then(({ item }) => {
         setSentTitle(draftTitle(item));
         setClientId(crypto.randomUUID());

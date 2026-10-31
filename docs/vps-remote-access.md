@@ -106,8 +106,8 @@ Paste the token on one line and save.
 Install the unit from the reviewed commit, as in A5. Reinstall `kanban.service` from the same commit too: it hides `/etc/cloudflared` from the agents.
 
 ```bash
-git -C ~/kanban-admin show "$sha:deploy/vps/cloudflared-kanban.service" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/cloudflared-kanban.service
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service
+git -C ~/kanban-admin show "$sha:deploy/vps/cloudflared-kanban.service" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin /etc/systemd/system/cloudflared-kanban.service
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now cloudflared-kanban
 sudo journalctl -u cloudflared-kanban -n 30 --no-pager

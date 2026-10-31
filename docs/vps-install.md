@@ -67,9 +67,11 @@ git -C ~/kanban-admin log --oneline origin/main
 
 Pick the reviewed commit, set `sha=<full-commit-sha>`, then install the two scripts from it and build the release:
 
+NOTE: on Ubuntu 26.04, `install` is the uutils rewrite, which fails with `No such file or directory` when the source is `/dev/stdin` and the destination already exists. The GNU version is `gnuinstall` there, so every `install` from `/dev/stdin` in this guide calls `$(command -v gnuinstall || command -v install)`, which also works on Ubuntu 24.04.
+
 ```bash
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban-release.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-release
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-release.sh" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-release
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
 sudo kanban-release "$sha"
 ```
 
@@ -80,7 +82,7 @@ sudo kanban-release "$sha"
 The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only when that commit was named with `--sha`, after the health checks pass; a plain `sudo kanban-upgrade` on the tip of `main` only reports a difference. The first time, or by hand:
 
 ```bash
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban-bridge" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/bin/kanban-bridge
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-bridge" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/bin/kanban-bridge
 /usr/local/bin/kanban-bridge program-version
 ```
 
@@ -151,7 +153,7 @@ sudo -u kanban -H git clone https://github.com/Antune-L/atelier.git /var/lib/kan
 Install the unit from the reviewed commit, then start it:
 
 ```bash
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now kanban
 sudo systemctl status kanban --no-pager
@@ -232,9 +234,9 @@ Prerequisites: Phase A works, a Coolify API token with the `read`, `write` and `
 sudo useradd --system --no-create-home --home-dir /var/lib/kanban-preview --shell /usr/sbin/nologin kanban-preview
 sudo install -d -o root -g root -m 0755 /opt/kanban-preview /etc/kanban-preview
 for file in deploy/preview-broker/broker.ts deploy/preview-broker/kanban-preview-cleanup.py src/server/system/previewCleanup.py; do
-  git -C ~/kanban-admin show "$sha:$file" | sudo install -m 0644 -o root -g root /dev/stdin "/opt/kanban-preview/$(basename "$file")"
+  git -C ~/kanban-admin show "$sha:$file" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin "/opt/kanban-preview/$(basename "$file")"
 done
-git -C ~/kanban-admin show "$sha:deploy/preview-broker/config.example.json" | sudo install -m 0600 -o root -g root /dev/stdin /etc/kanban-preview/config.json
+git -C ~/kanban-admin show "$sha:deploy/preview-broker/config.example.json" | sudo "$(command -v gnuinstall || command -v install)" -m 0600 -o root -g root /dev/stdin /etc/kanban-preview/config.json
 sudo nano /etc/kanban-preview/config.json
 ```
 
@@ -246,10 +248,10 @@ Install the broker units and the `kanban.service` drop-in from the reviewed comm
 
 ```bash
 for unit in kanban-preview-broker.service kanban-preview-cleanup.socket kanban-preview-cleanup@.service; do
-  git -C ~/kanban-admin show "$sha:deploy/vps/$unit" | sudo install -m 0644 -o root -g root /dev/stdin "/etc/systemd/system/$unit"
+  git -C ~/kanban-admin show "$sha:deploy/vps/$unit" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin "/etc/systemd/system/$unit"
 done
 sudo install -d -o root -g root -m 0755 /etc/systemd/system/kanban.service.d
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service.d/preview-broker.conf" | sudo install -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service.d/preview-broker.conf
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban.service.d/preview-broker.conf" | sudo "$(command -v gnuinstall || command -v install)" -m 0644 -o root -g root /dev/stdin /etc/systemd/system/kanban.service.d/preview-broker.conf
 sudo systemctl daemon-reload
 sudo systemctl enable --now kanban-preview-cleanup.socket kanban-preview-broker.service
 sudo systemctl restart kanban
@@ -326,7 +328,7 @@ If `/etc/kanban/kanban.env` still has `KANBAN_REMOTE_MCP_DAILY_CREATIONS` or `KA
 Reinstall `kanban-upgrade` from the reviewed commit, so the upgrade checks the remote MCP (A3), then restart:
 
 ```bash
-git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-upgrade.sh" | sudo "$(command -v gnuinstall || command -v install)" -m 0755 -o root -g root /dev/stdin /usr/local/sbin/kanban-upgrade
 sudo systemctl restart kanban
 ```
 

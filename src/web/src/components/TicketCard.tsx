@@ -9,10 +9,10 @@ import { isRemoteTicket, needsRemoteApproval } from "@shared/startBlocker";
 import type { ProjectInfo, Ticket } from "@shared/schemas";
 import { summarizeSessionCosts } from "@shared/pricing";
 
+import { AgentPairLabel } from "@/components/AgentPairLabel";
 import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { StageProgressBar } from "@/components/StageProgressBar";
 import {
-  agentPairLabel,
   formatDuration,
   formatRelativeDuration,
   formatUsd,
@@ -213,7 +213,7 @@ export function TicketCard({ ticket, projectLabel, projectColor, parent, fromAud
         </div>
 
         <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-2xs text-muted-foreground">
-          <span>{agentPairLabel(ticket.orchestrator, ticket.implementer)}</span>
+          <AgentPairLabel orchestrator={ticket.orchestrator} implementer={ticket.implementer} />
           <span>{ticketDeliveryLabel(ticket)}</span>
           <span>{ticketCostLabel(ticket)}</span>
         </div>

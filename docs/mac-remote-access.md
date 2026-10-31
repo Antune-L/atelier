@@ -2,6 +2,8 @@
 
 This guide puts the board of the desktop app on the Mac behind a dedicated Cloudflare Tunnel and an owner-only Cloudflare Access application, so it opens at `https://<mac-host>` from any browser, phone included. It mirrors [vps-remote-access.md](./vps-remote-access.md): read its steps 1 to 6 first, they are reused here as they are.
 
+[mac-vps-link-setup.md](./mac-vps-link-setup.md) automates this guide with a remotely managed tunnel: an agent creates the Cloudflare resources through the Cloudflare MCP, and `scripts/setup-mac-vps-link.ts` installs the connector and fills the settings. It replaces steps 1 to 6 below, with the same Access rules as step 1; step 7 (acceptance checks) still applies.
+
 The board, its API and its terminal give a shell as the Mac user, who holds the SSH key of the VPS. The owner accepted this exposure on 2026-10-31, with a short Access session.
 
 ## What protects what

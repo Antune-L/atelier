@@ -231,7 +231,7 @@ Whether **Revoke existing tokens** on the application also ends the OAuth grants
 
 ## Mac bridge socket
 
-The Mac board creates VPS cards ("Board cible: VPS") by running `ssh <alias> /opt/kanban/current/deploy/vps/kanban-bridge <op>` with the JSON request on stdin. Every release installs that program, so there is nothing to install by hand; the SSH user only needs the `kanban` group, like for `ui.sock`.
+The Mac board creates VPS cards ("Board cible: VPS") by running `ssh <alias> /usr/local/bin/kanban-bridge <op>` with the JSON request on stdin. The SSH user can use sudo, so that program is installed like the other root-reachable files, from a commit you name: `sudo kanban-upgrade --sha <sha>` installs it from that commit (root:root 0755), and a plain `sudo kanban-upgrade` only reports a difference ([vps-install.md](./vps-install.md#a3-install-the-root-scripts-and-a-release)). The SSH user only needs the `kanban` group, like for `ui.sock`. `kanban-bridge program-version` prints the version of the installed program; `bun scripts/setup-mac-vps-link.ts --check` on the Mac compares it with the Mac ([mac-vps-link-setup.md](./mac-vps-link-setup.md)).
 
 - On the cloud host, Kanban serves the bridge operations (`version`, `list_projects`, `create_ticket`, `catalogue_publish`, `outbox_fetch`, `outbox_ack`) on a second socket, `/run/kanban/bridge.sock` (mode 660, group `kanban`), next to `ui.sock`. Neither `ui.sock` nor the TCP listener routes them.
 - **Never point a cloudflared ingress rule at `bridge.sock`.** The connector belongs to the `kanban` group and could open it; the tunnel must keep `unix:/run/kanban/ui.sock` as its only service.

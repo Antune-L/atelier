@@ -6,8 +6,9 @@ import { runBoundedCommand, safeJsonParse } from "./boundedCommand.ts";
 import type { BoundedCommandResult } from "./boundedCommand.ts";
 import { NON_INTERACTIVE_SSH_OPTIONS } from "./previewCleanup.ts";
 
-// NOTE: installed by every VPS release (kanban-release copies the repository); see deploy/vps/kanban-bridge.
-export const VPS_BRIDGE_REMOTE_PROGRAM = "/opt/kanban/current/deploy/vps/kanban-bridge";
+// NOTE: installed by kanban-upgrade from the reviewed commit (root:root 0755); see deploy/vps/kanban-bridge.
+export const VPS_BRIDGE_REMOTE_PROGRAM = "/usr/local/bin/kanban-bridge";
+export const VPS_BRIDGE_PROGRAM_VERSION_ARG = "program-version";
 const VPS_BRIDGE_TIMEOUT_MS = 45_000;
 const VPS_BRIDGE_MAX_STDOUT_CHARS = 1_000_000;
 const VPS_BRIDGE_MAX_STDERR_CHARS = 4_000;

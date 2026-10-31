@@ -37,6 +37,9 @@ readonly HTTP_UNAUTHORIZED=401
 readonly HTTP_METHOD_NOT_ALLOWED=405
 readonly SANDBOX_FAILED=failed
 readonly SANDBOX_PENDING=pending
+readonly BRIDGE_SOURCE=deploy/vps/kanban-bridge
+readonly BRIDGE_DEST=/usr/local/bin/kanban-bridge
+readonly BRIDGE_OWNER_MODE='root:root 755'
 # NOTE(ali): Prints remoteMcp.sandbox from the /health JSON on stdin, empty when absent or not a short word.
 readonly SANDBOX_FIELD_PY='import json, re, sys
 body = json.load(sys.stdin)
@@ -97,6 +100,54 @@ switch_current() {
 }
 
 free_mb() { df -Pm -- "$1" | awk 'NR == 2 { print $4 }'; }
+
+# NOTE(ali): D15: the bridge program runs as the SSH user, who has sudo, so it comes from the commit itself
+# (git show in a root-only scratch repository), never from the release tree the build user wrote, and it is only
+# installed from a commit named with --sha. The tip of main is compared and reported, never installed.
+bridge_work=""
+cleanup_bridge() {
+  if [[ -n "$bridge_work" ]]; then
+    rm -rf -- "$bridge_work"
+  fi
+}
+trap cleanup_bridge EXIT
+
+as_root_git() {
+  env -i PATH="$SAFE_PATH" HOME=/nonexistent GIT_TERMINAL_PROMPT=0 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git "$@"
+}
+
+fetch_bridge() {
+  bridge_work="$(mktemp -d)"
+  as_root_git init --quiet --bare "$bridge_work/repo"
+  as_root_git -C "$bridge_work/repo" fetch --quiet --depth 1 "$REPO_URL" "$1" \
+    && as_root_git -C "$bridge_work/repo" show "$1:$BRIDGE_SOURCE" >"$bridge_work/kanban-bridge" \
+    && [[ -s "$bridge_work/kanban-bridge" ]]
+}
+
+bridge_is_current() {
+  [[ -f "$BRIDGE_DEST" && ! -L "$BRIDGE_DEST" ]] && cmp -s "$bridge_work/kanban-bridge" "$BRIDGE_DEST" \
+    && [[ "$(stat -c '%U:%G %a' "$BRIDGE_DEST")" == "$BRIDGE_OWNER_MODE" ]]
+}
+
+sync_bridge() {
+  if [[ ! -s "$bridge_work/kanban-bridge" ]]; then
+    echo "    warning: cannot read $BRIDGE_SOURCE at $1; $BRIDGE_DEST was left unchanged"
+    return 0
+  fi
+  if bridge_is_current; then
+    echo "    $BRIDGE_DEST is already the version of $1"
+    return 0
+  fi
+  if [[ -z "$requested_sha" ]]; then
+    echo "    $BRIDGE_DEST differs from $1 and was left unchanged: only a commit named with --sha is installed."
+    echo "    Review $BRIDGE_SOURCE at $1 in your review clone, then run: sudo kanban-upgrade --sha $1"
+    return 0
+  fi
+  install -o root -g root -m 0755 "$bridge_work/kanban-bridge" "$BRIDGE_DEST.tmp"
+  mv -f -- "$BRIDGE_DEST.tmp" "$BRIDGE_DEST"
+  echo "    installed $BRIDGE_DEST from $1"
+}
 
 # Prints the last value of a variable in the service environment file, without quotes or spaces.
 env_file_value() {
@@ -227,7 +278,10 @@ before="$(basename "$previous")"
 echo "    current: $before"
 echo "    target:  $sha"
 if [[ "$before" == "$sha" ]]; then
-  echo "Already at $sha. Nothing to do."
+  step "Checking the bridge program against $sha"
+  fetch_bridge "$sha" || true
+  sync_bridge "$sha"
+  echo "Already at $sha. Nothing else to do."
   exit 0
 fi
 
@@ -250,6 +304,8 @@ if ! env -i PATH="$SAFE_PATH" "$RELEASE_BIN" --build-only "$sha"; then
 fi
 target="$RELEASES/$sha"
 [[ -d "$target" && ! -L "$target" ]] || fail "build did not produce $target. The service still runs $before"
+step "Reading the bridge program from $sha"
+fetch_bridge "$sha" || echo "    warning: cannot read $BRIDGE_SOURCE at $sha; the bridge program will be left unchanged"
 
 # e. Refuse while work is running. Accepted race: an automation or autonomous delivery can still start
 # between this check and the stop below; a human runs this command, and there is no drain mode.
@@ -357,7 +413,11 @@ EOF
   exit 2
 fi
 
-# j. Retention: never removes the new or the previous release; backups are pruned as the service user.
+# j. The bridge program follows the release only once it is healthy; a rollback keeps the previous program.
+step "Checking the bridge program"
+sync_bridge "$sha"
+
+# k. Retention: never removes the new or the previous release; backups are pruned as the service user.
 step "Pruning old releases and backups"
 kept=0
 while IFS= read -r dir; do

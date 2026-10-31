@@ -77,6 +77,15 @@ sudo kanban-release "$sha"
 
 `kanban-release` and `kanban-upgrade` never update themselves from a release. To update them, rerun the two `install` lines with a newly reviewed `sha`.
 
+The Mac-to-VPS bridge program `/usr/local/bin/kanban-bridge` is run by the SSH user, who has sudo, so it follows the same rule. `kanban-upgrade` reads it from the target commit itself (never from the release tree) and installs it, root:root 0755, only when that commit was named with `--sha`, after the health checks pass; a plain `sudo kanban-upgrade` on the tip of `main` only reports a difference. The first time, or by hand:
+
+```bash
+git -C ~/kanban-admin show "$sha:deploy/vps/kanban-bridge" | sudo install -m 0755 -o root -g root /dev/stdin /usr/local/bin/kanban-bridge
+/usr/local/bin/kanban-bridge program-version
+```
+
+The Mac side of the link is set up with [mac-vps-link-setup.md](./mac-vps-link-setup.md).
+
 ### A4. Logins for the `kanban` user
 
 **GitHub.** Open a terminal on the VPS under the `kanban` OS user. Start the [interactive browser login documented by gh](https://cli.github.com/manual/gh_auth_login) there, choose the repository host and use the intended GitHub identity in the browser. Complete the flow initiated on the server: opening a token page or logging in on your client alone does not authenticate the server.
@@ -411,7 +420,7 @@ Root never opens the database: every query and the backup run as `kanban`. Betwe
 
 Exit codes: `0` upgraded or already current, `1` failed, `2` the rollback health check failed too, `64` bad usage, `75` active work prevented the upgrade before stopping the service (retryable).
 
-**Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3.
+**Updating the scripts.** `kanban-upgrade` and `kanban-release` never update themselves. When a reviewed commit changes them, reinstall them with the two `install` lines from A3. `kanban-bridge` is installed by `sudo kanban-upgrade --sha <sha>` (A3).
 
 **Updating units and broker files.** `kanban-upgrade` does not copy them either. When a commit changes `deploy/vps` or `deploy/preview-broker`, copy the changed files from `/opt/kanban/current` again as in A5, B1 and B2, run `sudo systemctl daemon-reload`, then restart the affected services.
 

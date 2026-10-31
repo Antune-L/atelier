@@ -412,7 +412,7 @@ The command prints each step and the commit before and after:
 7. Stops `kanban`, points `/opt/kanban/current` at the new release, and starts it.
 8. Requires 5 consecutive healthy answers from `GET /health` on `127.0.0.1` and the service port (`PORT` from the unit or `/etc/kanban/kanban.env`, else 52817), spread over about 20 seconds, with the unit active. It gives up after 2 minutes.
    When `KANBAN_REMOTE_MCP_PORT` is set in `/etc/kanban/kanban.env`, it then checks the [remote MCP](#remote-mcp-milestone-1) for up to 1 minute: a local `POST /mcp` (`tools/list`, `Host: <mcp-host>`, no Access assertion) answers `401`, a local `GET /mcp` answers `405`, a public `POST https://<mcp-host>/mcp` without a token answers `401`, and `/health` reports `remoteMcp.sandbox` neither `failed` nor `pending`. Any failure rolls back like a failed health check. A partial remote MCP configuration (port without hostname, team domain or AUD) stops the command before the service is touched.
-9. Keeps the 5 most recent releases and the 10 most recent backups. The current and previous releases are never removed.
+9. Keeps the 2 most recent releases and the 10 most recent backups. The current and previous releases are never removed.
 
 Options:
 - `--sha <full-commit-sha>` upgrades to that commit instead of the tip of `main`.

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +85,21 @@ describe("implementation recovery archive content", () => {
     expect((await readdir(destination)).includes("node_modules")).toBe(false);
     expect((await git(destination, ["rev-parse", "HEAD"])).trim()).toBe(head);
   });
+
+  test("restores a legacy archive whose content and fingerprint include node_modules", async () => {
+    const { repo, head } = await createRepository();
+    const archive = join(root, "archive");
+    await cp(repo, join(archive, "worktree"), { recursive: true, verbatimSymlinks: true, filter: (path) => !path.endsWith("/.git") });
+    await git(repo, ["bundle", "create", join(archive, "repository.bundle"), "HEAD"]);
+    await writeFile(join(archive, "manifest.json"), JSON.stringify({
+      ticketId: "t1", label: "lot", originalWorkspace: repo, originalSlot: join(root, "slot-1"),
+      journalHash: null, contentFingerprint: await archiveFingerprint(repo, true), head, createdAt: Date.now(),
+    }));
+    const destination = join(root, "restored");
+    await restoreImplementationRecoveryArchive(archive, destination);
+    expect(await Bun.file(join(destination, "src", "index.ts")).text()).toBe("export const changed = true;\n");
+    expect((await readdir(destination)).includes("node_modules")).toBe(false);
+  });
 });
 
 describe("pruneImplementationRecoveryArchives", () => {
@@ -109,7 +124,7 @@ describe("pruneImplementationRecoveryArchives", () => {
     await mkdir(join(archiveRoot, "pending-xyz"));
     const keepPath = paths[9] ?? "";
 
-    const removed = await pruneImplementationRecoveryArchives(archiveRoot, slotPath, keepPath, now);
+    const removed = await pruneImplementationRecoveryArchives(archiveRoot, slotPath, [keepPath], now);
 
     expect(removed.sort()).toEqual([paths[3] ?? "", paths[6] ?? ""].sort());
     const remaining = await readdir(archiveRoot);

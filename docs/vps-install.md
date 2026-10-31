@@ -417,6 +417,7 @@ The command prints each step and the commit before and after:
 Options:
 - `--sha <full-commit-sha>` upgrades to that commit instead of the tip of `main`.
 - `--install-bridge`, with `--sha`, also installs the bridge program of that reviewed commit (A3).
+- `--check-idle` only lists the running work (the check of step 5) and exits `0` when idle, `75` otherwise. `kanban-bootstrap` uses it before a restart.
 - `--force` upgrades even if work is running; that work is interrupted. Without it, the command refuses and lists what runs.
 
 Root never opens the database: every query and the backup run as `kanban`. Between the check (step 5) and the stop (step 7), an automation or autonomous delivery can still start. This is accepted because you run the command yourself; there is no drain mode.

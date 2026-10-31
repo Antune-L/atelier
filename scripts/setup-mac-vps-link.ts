@@ -445,16 +445,15 @@ function differingKeys<K extends string>(keys: readonly K[], desired: Partial<Re
 function reportSettings<K extends string>(
   section: string,
   keys: readonly K[],
-  before: Record<K, SettingValue>,
-  after: Record<K, SettingValue>,
+  settings: { before: Record<K, SettingValue>; after: Record<K, SettingValue>; desired: Partial<Record<K, SettingValue>> },
   changed: readonly K[],
   options: { apply: boolean; optional: ReadonlySet<string> },
 ): void {
   for (const key of keys) {
-    const value = after[key];
+    const value = settings.after[key];
     if (changed.includes(key)) {
       if (options.apply) report(section, "changed", key, `set to ${settingText(value)}`);
-      else report(section, "missing", key, `would change ${settingText(before[key])}`);
+      else report(section, "missing", key, `would change ${settingText(settings.before[key])} to ${settingText(settings.desired[key])}`);
     } else if (isSettingSet(value)) {
       report(section, "ok", key, settingText(value));
     } else if (options.optional.has(key)) {
@@ -476,7 +475,7 @@ async function ensureSettings(options: Options): Promise<LinkSettings | null> {
     if (updated === null) return null;
     settings = updated;
   }
-  reportSettings("Kanban", LINK_SETTING_KEYS, current, settings, changed, { apply: options.apply, optional: OPTIONAL_SETTING_KEYS });
+  reportSettings("Kanban", LINK_SETTING_KEYS, { before: current, after: settings, desired: options.desired }, changed, { apply: options.apply, optional: OPTIONAL_SETTING_KEYS });
   return settings;
 }
 
@@ -584,7 +583,7 @@ async function ensureVpsSettings(options: Options, alias: string, publicHostname
     }
     settings = parsed.data;
   }
-  reportSettings("VPS", VPS_SETTING_KEYS, current, settings, changed, { apply: options.apply, optional: new Set(VPS_SETTING_KEYS) });
+  reportSettings("VPS", VPS_SETTING_KEYS, { before: current, after: settings, desired }, changed, { apply: options.apply, optional: new Set(VPS_SETTING_KEYS) });
 }
 
 function isAccessLogin(redirect: string, accessTeam: string | null): boolean {

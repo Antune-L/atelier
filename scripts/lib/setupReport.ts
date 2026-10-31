@@ -51,7 +51,7 @@ export function run(args: string[], options: Pick<BoundedCommandOptions, "timeou
   return runBoundedCommand(args, process.cwd(), options);
 }
 
-const tunnelTokenSchema = z.object({ a: z.string().min(1), t: z.string().uuid(), s: z.string().min(1) });
+const tunnelTokenSchema = z.object({ a: z.string().min(1), t: z.uuid(), s: z.string().min(1) });
 type TunnelToken = z.infer<typeof tunnelTokenSchema>;
 
 export function parseTunnelToken(raw: string): TunnelToken | null {

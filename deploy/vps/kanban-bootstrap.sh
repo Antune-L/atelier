@@ -43,6 +43,12 @@ readonly COOLIFY_CUSTOM_COMPOSE=/data/coolify/source/docker-compose.custom.yml
 readonly COOLIFY_ADMIN_ENV=/root/coolify-admin.env
 readonly COOLIFY_CONTAINER=coolify
 readonly COOLIFY_DIRECT_PORTS="8000 6001 6002"
+readonly UPGRADE_BIN=/usr/local/sbin/kanban-upgrade
+readonly EXIT_ACTIVE_WORK=75
+# NOTE(ali): restarts asked by an earlier run survive until done; /run is root-only and cleared at boot, when the
+# services start with the new configuration anyway.
+readonly PENDING_KANBAN_RESTART=/run/kanban-bootstrap.restart-kanban
+readonly PENDING_BROKER_RESTART=/run/kanban-bootstrap.restart-broker
 # NOTE(ali): appended to the random part so the generated password always has upper case, lower case, a digit and a
 # symbol, whatever Coolify's password rules are.
 readonly COOLIFY_PASSWORD_SUFFIX=-Kb7
@@ -142,7 +148,7 @@ readonly HOSTNAME_PATTERN='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[
 [[ -z "$board_host" || "$board_host" =~ $HOSTNAME_PATTERN ]] || usage
 [[ -z "$mcp_host" || "$mcp_host" =~ $HOSTNAME_PATTERN ]] || usage
 [[ -z "$team_domain" || "$team_domain" =~ $HOSTNAME_PATTERN ]] || usage
-[[ -z "$mcp_port" || "$mcp_port" =~ ^[0-9]{2,5}$ ]] || usage
+[[ -z "$mcp_port" || ( "$mcp_port" =~ ^[1-9][0-9]{0,4}$ && "$mcp_port" -le 65535 ) ]] || usage
 [[ -z "$mcp_aud" || "$mcp_aud" =~ ^[0-9a-f]{64}$ ]] || usage
 [[ -z "$coolify_email" || "$coolify_email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || usage
 [[ -z "$admin_user" || "$admin_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || usage
@@ -243,19 +249,31 @@ ensure_commit_file() {
   report changed "$section" "$dest" "installed from $sha"
 }
 
-# <owner> is user or user:group.
+# <owner> is user or user:group. Directories of the service user are made by that user, never by root: it owns
+# their parent and could swap one for a symlink, which a root chown would follow.
 ensure_dir() {
   local path="$1" owner="$2" mode="$3" section="$4" user group
   user="${owner%%:*}"
   group="${owner#*:}"
-  if [[ -d "$path" && ! -L "$path" && "$(stat -c '%U:%G %a' "$path")" == "$user:$group ${mode#0}" ]]; then
+  if [[ -L "$path" ]]; then
+    report failed "$section" "$path" "is a symlink; remove it"
+    return 0
+  fi
+  if [[ -d "$path" && "$(stat -c '%U:%G %a' "$path")" == "$user:$group ${mode#0}" ]]; then
     return 0
   fi
   if [[ $apply -eq 0 ]]; then
     report missing "$section" "$path" "not a $user:$group directory with mode $mode"
     return 0
   fi
-  install -d -o "$user" -g "$group" -m "$mode" "$path"
+  if [[ "$owner" == "$SERVICE_USER" ]]; then
+    if ! as_service install -d -m "$mode" "$path" || ! as_service chmod "$mode" "$path"; then
+      report failed "$section" "$path" "$SERVICE_USER cannot create it with mode $mode"
+      return 0
+    fi
+  else
+    install -d -o "$user" -g "$group" -m "$mode" "$path"
+  fi
   report changed "$section" "$path" "$user:$group $mode"
 }
 
@@ -297,8 +315,11 @@ ensure_packages() {
     apt-get update >/dev/null
     apt_updated=1
   fi
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" >/dev/null
-  report changed "$section" "packages" "installed ${missing[*]}"
+  if DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" >/dev/null; then
+    report changed "$section" "packages" "installed ${missing[*]}"
+  else
+    report failed "$section" "packages" "apt-get install ${missing[*]} failed"
+  fi
 }
 
 # Sets KEY=VALUE in the service environment file, replacing an existing line. Sets restart_kanban on change.
@@ -400,7 +421,7 @@ write_coolify_admin_env() {
 
 stage_coolify() {
   if coolify_present; then
-    report ok Coolify "installed" "detected in $COOLIFY_SOURCE; the installer is never run again here"
+    report ok Coolify "installed" "$(docker ps --filter "name=^$COOLIFY_CONTAINER\$" --format '{{.Image}}' 2>/dev/null || true); the installer is not run again here"
     if [[ -f "$COOLIFY_ADMIN_ENV" ]]; then
       report warning Coolify "$COOLIFY_ADMIN_ENV" "move the admin password to your password manager, then delete the file"
     fi
@@ -492,11 +513,10 @@ ensure_apparmor_profile() {
     report missing Kanban "AppArmor bwrap profile" "$APPARMOR_PROFILE"
     return 0
   fi
-  install -m 0644 "$APPARMOR_EXTRA" "$APPARMOR_PROFILE"
-  if apparmor_parser -r "$APPARMOR_PROFILE" >/dev/null 2>&1; then
+  if install -m 0644 "$APPARMOR_EXTRA" "$APPARMOR_PROFILE" && apparmor_parser -r "$APPARMOR_PROFILE" >/dev/null 2>&1; then
     report changed Kanban "AppArmor bwrap profile" "installed and loaded"
   else
-    report failed Kanban "AppArmor bwrap profile" "installed, but apparmor_parser -r $APPARMOR_PROFILE failed"
+    report failed Kanban "AppArmor bwrap profile" "installing $APPARMOR_EXTRA or apparmor_parser -r failed"
   fi
 }
 
@@ -511,8 +531,11 @@ ensure_bun() {
     report missing Kanban "bun" "${current:-absent}, expected $BUN_VERSION"
     return 0
   fi
-  curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v$BUN_VERSION" >/dev/null
-  report changed Kanban "bun" "installed $BUN_VERSION"
+  if curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v$BUN_VERSION" >/dev/null; then
+    report changed Kanban "bun" "installed $BUN_VERSION"
+  else
+    report failed Kanban "bun" "the bun.sh installer failed"
+  fi
 }
 
 check_service_user_isolation() {
@@ -808,27 +831,60 @@ stage_previews() {
   report warning Previews "Coolify side" "API enabled, IP allowlist, token, source and board settings stay manual (docs/vps-bootstrap.md)"
 }
 
-# Starts what is not running and restarts only what changed: kanban only with --restart, since it stops running cards.
+# Prints the running work and fails when anything runs or the check itself fails (kanban-upgrade --check-idle).
+running_work() {
+  local output status=0
+  output="$("$UPGRADE_BIN" --check-idle 2>&1)" || status=$?
+  if [[ $status -eq 0 ]]; then
+    return 0
+  fi
+  if [[ $status -eq $EXIT_ACTIVE_WORK ]]; then
+    echo "work is running: $(tr '\n' ';' <<<"$output")"
+  else
+    echo "cannot check running work: $output"
+  fi
+  return 1
+}
+
+# Restarts <unit> when a restart is pending and nothing runs. Kanban also needs --restart, since it stops cards.
+restart_when_idle() {
+  local unit="$1" pending="$2" needs_flag="$3" busy
+  [[ -f "$pending" ]] || return 0
+  if [[ $needs_flag -eq 1 && $allow_restart -eq 0 ]]; then
+    report missing Services "$unit" "configuration changed: when no card runs, rerun with --restart"
+    return 0
+  fi
+  if ! busy="$(running_work)"; then
+    report missing Services "$unit" "restart pending, $busy; rerun when idle"
+    return 0
+  fi
+  systemctl restart "$unit"
+  rm -f -- "$pending"
+  report changed Services "$unit" "restarted for the new configuration"
+}
+
+# Starts what is not running and restarts what changed, now or in an earlier run, once nothing runs.
 apply_services() {
   [[ $apply -eq 1 ]] || return 0
   reload_units
+  if [[ $restart_kanban -eq 1 ]]; then
+    touch "$PENDING_KANBAN_RESTART"
+  fi
+  if [[ $restart_broker -eq 1 ]]; then
+    touch "$PENDING_BROKER_RESTART"
+  fi
   if [[ -L "$CURRENT" ]]; then
     if ! systemctl is-active --quiet "$SERVICE"; then
       ensure_enabled "$SERVICE" Services
-    elif [[ $restart_kanban -eq 1 && $allow_restart -eq 1 ]]; then
-      systemctl restart "$SERVICE"
-      report changed Services "$SERVICE" "restarted for the new configuration"
-    elif [[ $restart_kanban -eq 1 ]]; then
-      report missing Services "$SERVICE" "configuration changed: when no card runs, rerun with --restart"
+      rm -f -- "$PENDING_KANBAN_RESTART"
+    else
+      restart_when_idle "$SERVICE" "$PENDING_KANBAN_RESTART" 1
     fi
   fi
   if [[ $with_previews -eq 1 && -f "$BROKER_CONFIG" ]]; then
     ensure_enabled "$CLEANUP_SOCKET" Services
     ensure_enabled "$BROKER_SERVICE" Services
-    if [[ $restart_broker -eq 1 ]]; then
-      systemctl restart "$BROKER_SERVICE"
-      report changed Services "$BROKER_SERVICE" "restarted"
-    fi
+    restart_when_idle "$BROKER_SERVICE" "$PENDING_BROKER_RESTART" 0
   fi
   if [[ -n "$board_host" && -s "$CONNECTOR_TOKEN" ]]; then
     ensure_enabled "$CONNECTOR_SERVICE" Services
@@ -839,9 +895,14 @@ apply_services() {
   fi
 }
 
+# Prints the last value of <key> in the service environment file, without quotes or spaces.
+env_value() {
+  sed -n "s/^[[:space:]]*$1=//p" "$ENV_FILE" 2>/dev/null | tail -n 1 | tr -d "\"' " || true
+}
+
 service_port() {
   local port
-  port="$(sed -n 's/^PORT=//p' "$ENV_FILE" 2>/dev/null | tail -n 1 || true)"
+  port="$(env_value PORT)"
   [[ "$port" =~ ^[0-9]+$ ]] && echo "$port" || echo "$DEFAULT_PORT"
 }
 
@@ -849,7 +910,10 @@ socket_status() {
   curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "$UI_SOCKET" -H "Host: $1" "http://$1/health" || true
 }
 
+# Checks the configured connector hostname and remote MCP too, even when this run did not pass their options.
 final_checks() {
+  local check_host="${board_host:-$(env_value DEV_HOST)}" check_mcp_host="${mcp_host:-$(env_value KANBAN_REMOTE_MCP_HOSTNAME)}"
+  local check_mcp_port="${mcp_port:-$(env_value KANBAN_REMOTE_MCP_PORT)}"
   if ! systemctl is-active --quiet "$SERVICE"; then
     report failed Checks "$SERVICE" "not active: journalctl -u $SERVICE"
     return 0
@@ -868,17 +932,22 @@ final_checks() {
   else
     report failed Checks "ui.sock" "/health answers ${code:-nothing}"
   fi
-  if [[ -n "$board_host" ]]; then
-    code="$(socket_status "$board_host")"
+  if [[ -n "$check_host" ]]; then
+    code="$(socket_status "$check_host")"
     if [[ "$code" == "$HTTP_OK" ]]; then
-      report ok Checks "DEV_HOST" "the service accepts Host: $board_host"
+      report ok Checks "DEV_HOST" "the service accepts Host: $check_host"
     else
-      report failed Checks "DEV_HOST" "Host: $board_host answers ${code:-nothing}: restart kanban when idle"
+      report failed Checks "DEV_HOST" "Host: $check_host answers ${code:-nothing}: restart kanban when idle"
+    fi
+    if systemctl is-active --quiet "$CONNECTOR_SERVICE"; then
+      report ok Checks "$CONNECTOR_SERVICE" "active"
+    else
+      report failed Checks "$CONNECTOR_SERVICE" "not active: journalctl -u $CONNECTOR_SERVICE"
     fi
   fi
-  if [[ -n "$mcp_host" ]]; then
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H "Host: $mcp_host" -H 'Content-Type: application/json' \
-      -H 'Accept: application/json, text/event-stream' --data "$MCP_TOOLS_LIST" "http://127.0.0.1:$mcp_port/mcp" || true)"
+  if [[ -n "$check_mcp_host" && -n "$check_mcp_port" ]]; then
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST -H "Host: $check_mcp_host" -H 'Content-Type: application/json' \
+      -H 'Accept: application/json, text/event-stream' --data "$MCP_TOOLS_LIST" "http://127.0.0.1:$check_mcp_port/mcp" || true)"
     if [[ "$code" == "$HTTP_UNAUTHORIZED" ]]; then
       report ok Checks "remote MCP listener" "POST without an Access assertion answers $HTTP_UNAUTHORIZED"
     else

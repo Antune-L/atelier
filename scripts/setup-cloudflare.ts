@@ -27,6 +27,7 @@ const APP_LAUNCHER_TYPE = "app_launcher";
 const SELF_HOSTED_TYPE = "self_hosted";
 const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
+const MAX_PORT = 65_535;
 const SETUP_DOC = "docs/vps-bootstrap.md";
 
 const HELP = `Usage:
@@ -224,14 +225,14 @@ function parseOptions(values: ReturnType<typeof parseCliArgs>["values"]): Option
   const zone = hostname(values.zone, "--zone");
   const email = values.email;
   if (zone === undefined) usageError("--zone is required");
-  if (email === undefined || !z.string().email().safeParse(email).success) usageError("--email must be the allowed email");
+  if (email === undefined || !z.email().safeParse(email).success) usageError("--email must be the allowed email");
   const routes: Route[] = [];
   const boardHost = hostname(values["board-host"], "--board-host");
   if (boardHost !== undefined) routes.push({ kind: "board", hostname: boardHost, tunnel: DEFAULT_VPS_TUNNEL, service: VPS_BOARD_SERVICE });
   const mcpHost = hostname(values["mcp-host"], "--mcp-host");
   if (mcpHost !== undefined) {
     const port = Number(values["mcp-port"]);
-    if (!Number.isInteger(port) || port <= 0) usageError("--mcp-host needs --mcp-port");
+    if (!Number.isInteger(port) || port <= 0 || port > MAX_PORT) usageError("--mcp-host needs a valid --mcp-port");
     routes.push({ kind: "mcp", hostname: mcpHost, tunnel: DEFAULT_VPS_TUNNEL, service: `http://127.0.0.1:${port}` });
   }
   const macHost = hostname(values["mac-host"], "--mac-host");
@@ -423,14 +424,19 @@ function ruleProblem(rule: IngressRule | undefined, route: Route, team: string, 
   return null;
 }
 
-async function ensureTunnel(context: Context, name: string, routes: Route[], audByHost: Map<string, string>): Promise<string | null> {
+interface TunnelState {
+  id: string | null;
+  routesValid: boolean;
+}
+
+async function ensureTunnel(context: Context, name: string, routes: Route[], audByHost: Map<string, string>): Promise<TunnelState> {
   const account = `/accounts/${context.options.accountId}`;
   const tunnels = await listAll(tunnelSchema, `${account}/cfd_tunnel?is_deleted=false&name=${encodeURIComponent(name)}`);
   let tunnel = tunnels.find((candidate) => candidate.name === name);
   if (tunnel === undefined) {
     if (!context.options.apply) {
       report("Tunnel", "missing", name, "not created");
-      return null;
+      return { id: null, routesValid: false };
     }
     // NOTE: the create answer also carries the tunnel token; only id and name are parsed, nothing else is kept.
     tunnel = await create(tunnelSchema, `${account}/cfd_tunnel`, { name, config_src: "cloudflare" });
@@ -449,7 +455,7 @@ async function ensureTunnel(context: Context, name: string, routes: Route[], aud
     });
     await cloudflare("PUT", configPath, { config: { ingress: [...rules, { service: CATCH_ALL_SERVICE }] } });
     report("Tunnel", "changed", `${name} routes`, ready.map((route) => route.hostname).join(", "));
-    return tunnel.id;
+    return { id: tunnel.id, routesValid: true };
   }
   let complete = true;
   for (const route of routes) {
@@ -462,17 +468,18 @@ async function ensureTunnel(context: Context, name: string, routes: Route[], aud
       report("Tunnel", isEmpty ? "missing" : "failed", `${name} route ${route.hostname}`, isEmpty ? problem : `${problem}; fix it in the dashboard`);
     }
   }
-  return complete ? tunnel.id : null;
+  return { id: tunnel.id, routesValid: complete };
 }
 
-async function ensureDnsRecord(context: Context, route: Route, tunnelId: string | null): Promise<void> {
+// NOTE: an existing record is compared with the real tunnel target; route validity only gates creating one.
+async function ensureDnsRecord(context: Context, route: Route, tunnel: TunnelState): Promise<void> {
   const path = `/zones/${context.zoneId}/dns_records`;
   const label = `DNS ${route.hostname}`;
   const records = await listAll(dnsRecordSchema, `${path}?name.exact=${encodeURIComponent(route.hostname)}`);
-  const target = tunnelId === null ? null : `${tunnelId}${TUNNEL_TARGET_SUFFIX}`;
+  const target = tunnel.id === null ? null : `${tunnel.id}${TUNNEL_TARGET_SUFFIX}`;
   const [record] = records;
   if (record === undefined) {
-    if (target === null) {
+    if (target === null || !tunnel.routesValid) {
       report("DNS", "missing", label, "waits for the Access application and the tunnel route");
     } else if (!context.options.apply) {
       report("DNS", "missing", label, "not created");
@@ -510,8 +517,8 @@ async function audit(options: Options): Promise<void> {
   const tunnelNames = [...new Set(options.routes.map((route) => route.tunnel))];
   for (const name of tunnelNames) {
     const routes = options.routes.filter((route) => route.tunnel === name);
-    const tunnelId = await ensureTunnel(context, name, routes, audByHost);
-    for (const route of routes) await ensureDnsRecord(context, route, tunnelId);
+    const tunnel = await ensureTunnel(context, name, routes, audByHost);
+    for (const route of routes) await ensureDnsRecord(context, route, tunnel);
   }
   await checkZone(context);
   if (options.routes.some((route) => route.kind === "board")) {

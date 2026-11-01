@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
 import { stripLocalUploadReferences } from "@shared/uploadReferences";
@@ -12,10 +12,13 @@ import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useKeyedLoad } from "@/hooks/useKeyedLoad";
 import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
+
+const VPS_PROJECTS_LOAD_KEY = "vps-projects";
 
 const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
   pending: "En attente du VPS",
@@ -25,11 +28,6 @@ const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
 export function VpsTicketForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: OtherBoardFormProps) {
   const { settings } = useAppSettings();
   const otherBoardUrl = safeOtherBoardUrl(settings?.otherBoardUrl);
-  const [loadKey, setLoadKey] = useState(0);
-  const [loadedKey, setLoadedKey] = useState<number | null>(null);
-  const latestLoad = useRef(0);
-  const [projects, setProjects] = useState<BoardProject[] | null>(null);
-  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const [sends, setSends] = useState<VpsPendingSend[]>([]);
   const [clientId, setClientId] = useState(() => crypto.randomUUID());
@@ -42,18 +40,10 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
     void api.vpsSends().then(setSends).catch((e) => setError(errorMessage(e)));
   };
 
-  if (loadedKey !== loadKey) {
-    const key = loadKey;
-    latestLoad.current = key;
-    setLoadedKey(key);
-    setProjects(null);
-    setProjectsError(null);
-    void api
-      .vpsProjects()
-      .then((list) => latestLoad.current === key && setProjects(list))
-      .catch((e) => latestLoad.current === key && setProjectsError(errorMessage(e)));
+  const { data: projects, error: projectsError, reload: reloadProjects } = useKeyedLoad<BoardProject[]>(VPS_PROJECTS_LOAD_KEY, () => {
     refreshSends();
-  }
+    return api.vpsProjects();
+  });
 
   const project = projects?.find((candidate) => candidate.key === projectChoice)?.key ?? projects?.[0]?.key ?? "";
   const sentDescription = stripLocalUploadReferences(description);
@@ -119,7 +109,7 @@ export function VpsTicketForm({ header, title, onTitleChange, description, onDes
             ) : (
               <div className="flex flex-wrap items-center gap-2">
                 <p role="alert" className="text-xs text-danger">Projets du VPS indisponibles : {projectsError}</p>
-                <Button type="button" size="sm" variant="outline" onClick={() => setLoadKey((key) => key + 1)}>Réessayer</Button>
+                <Button type="button" size="sm" variant="outline" onClick={reloadProjects}>Réessayer</Button>
               </div>
             )}
           </div>

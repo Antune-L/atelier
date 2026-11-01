@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
 import type { Ticket } from "@shared/schemas";
@@ -7,6 +7,7 @@ import type { MacOutboxItem, VpsPendingSend } from "@shared/vpsBridge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useKeyedLoad } from "@/hooks/useKeyedLoad";
 import { useOtherBoardLink } from "@/hooks/useOtherBoardLink";
 import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
@@ -23,7 +24,8 @@ async function loadTransferEntry(cloudHost: boolean, ticketId: string): Promise<
     const item = items.find((candidate) => candidate.source === TRANSFER_SOURCE && candidate.sourceTicketId === ticketId);
     return item === undefined ? null : { board: "mac", item };
   }
-  const send = (await api.vpsSends()).find((candidate) => candidate.sourceTicketId === ticketId);
+  const sends = (await api.vpsSends()).filter((candidate) => candidate.sourceTicketId === ticketId);
+  const send = sends.find((candidate) => candidate.status === "pending") ?? sends.at(-1);
   return send === undefined ? null : { board: "vps", send };
 }
 
@@ -62,31 +64,25 @@ function PendingTransfer({ message, detail, actionLabel, confirmDescription, onC
 export function CardTransferStatus({ ticket }: { ticket: Ticket }) {
   const { cloudHost, available } = useOtherBoardLink();
   const { settings } = useAppSettings();
-  const loadKey = `${ticket.id}:${ticket.updatedAt}`;
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
-  const latestLoad = useRef<string | null>(null);
-  const [entry, setEntry] = useState<TransferEntry | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  if (available && loadedKey !== loadKey) {
-    const key = loadKey;
-    latestLoad.current = key;
-    setLoadedKey(key);
-    void loadTransferEntry(cloudHost, ticket.id)
-      .then((next) => latestLoad.current === key && setEntry(next))
-      .catch((e) => latestLoad.current === key && setError(errorMessage(e)));
-  }
+  const { data: entry, error: loadError, reload } = useKeyedLoad<TransferEntry | null>(
+    `${ticket.id}:${ticket.updatedAt}`,
+    () => loadTransferEntry(cloudHost, ticket.id),
+    available,
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
   if (!available) return null;
 
   const act = async (action: () => Promise<unknown>): Promise<void> => {
-    setError(null);
+    setActionError(null);
     try {
       await action();
     } catch (e) {
-      setError(errorMessage(e));
+      setActionError(errorMessage(e));
     }
-    setLoadedKey(null);
+    reload();
   };
+
+  const error = actionError ?? loadError;
 
   const errorLine = error === null ? null : <p role="alert" className="text-xs text-danger">{error}</p>;
 

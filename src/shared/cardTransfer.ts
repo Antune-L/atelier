@@ -5,7 +5,6 @@ import { stripLocalUploadReferences } from "./uploadReferences.ts";
 
 export const CARD_TRANSFERRED_EVENT = "transferred";
 export const CARD_TRANSFER_REVERTED_EVENT = "transfer_reverted";
-export const CARD_TRANSFER_EVENTS = [CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT] as const;
 
 export const CARD_TRANSFER_BOARDS = ["vps", "mac"] as const;
 export type CardTransferBoard = (typeof CARD_TRANSFER_BOARDS)[number];
@@ -60,7 +59,7 @@ export function cardTransferDraft(ticket: Pick<Ticket, "title" | "description">)
   return { title: ticket.title, description: stripLocalUploadReferences(ticket.description) };
 }
 
-export function hasAuditFindingMarker(ticket: Pick<Ticket, "description">): boolean {
+function hasAuditFindingMarker(ticket: Pick<Ticket, "description">): boolean {
   return findAuditMarker(ticket.description) !== null;
 }
 

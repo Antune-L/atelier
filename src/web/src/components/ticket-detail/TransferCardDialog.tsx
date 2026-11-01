@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { CARD_TRANSFER_BOARD_LABELS } from "@shared/cardTransfer";
 import type { Ticket } from "@shared/schemas";
@@ -11,9 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useKeyedLoad } from "@/hooks/useKeyedLoad";
 import { api } from "@/lib/api";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES } from "@/lib/overlayStyles";
+
+const MAC_PROJECTS_LOAD_KEY = "mac-projects";
+const VPS_PROJECTS_LOAD_KEY = "vps-projects";
 
 const ANALYSIS_LABELS: Record<VpsAnalysisMode, string> = {
   none: "Ne pas analyser",
@@ -40,27 +44,12 @@ export function TransferCardDialog({ ticket, cloudHost, onClose }: TransferCardD
   const board = CARD_TRANSFER_BOARD_LABELS[cloudHost ? "mac" : "vps"];
   const remote = isRemoteTicket(ticket);
   const offersAnalysis = !cloudHost && !remote;
-  const [loadKey, setLoadKey] = useState(0);
-  const [loadedKey, setLoadedKey] = useState<number | null>(null);
-  const latestLoad = useRef(0);
-  const [projects, setProjects] = useState<BoardProject[] | null>(null);
-  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const { data: projects, error: projectsError, reload: reloadProjects } = useKeyedLoad<BoardProject[]>(cloudHost ? MAC_PROJECTS_LOAD_KEY : VPS_PROJECTS_LOAD_KEY, () => loadTargetProjects(cloudHost));
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<VpsAnalysisMode>("none");
   const [clientId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (loadedKey !== loadKey) {
-    const key = loadKey;
-    latestLoad.current = key;
-    setLoadedKey(key);
-    setProjects(null);
-    setProjectsError(null);
-    void loadTargetProjects(cloudHost)
-      .then((list) => latestLoad.current === key && setProjects(list))
-      .catch((e) => latestLoad.current === key && setProjectsError(errorMessage(e)));
-  }
 
   const preselected = projects?.find((candidate) => candidate.key === ticket.project)?.key ?? projects?.[0]?.key ?? "";
   const project = projects?.find((candidate) => candidate.key === projectChoice)?.key ?? preselected;
@@ -109,7 +98,7 @@ export function TransferCardDialog({ ticket, cloudHost, onClose }: TransferCardD
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <p role="alert" className="text-xs text-danger">Projets du {board} indisponibles : {projectsError}</p>
-            <Button type="button" size="sm" variant="outline" onClick={() => setLoadKey((key) => key + 1)}>Réessayer</Button>
+            <Button type="button" size="sm" variant="outline" onClick={reloadProjects}>Réessayer</Button>
           </div>
         )}
       </div>

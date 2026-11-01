@@ -185,7 +185,7 @@ export class VpsLinkSync {
 
   private revertTransferOf(send: VpsPendingSend, reason: string): void {
     if (send.sourceTicketId === null) return;
-    this.deps.lifecycle.revertTransfer(send.sourceTicketId, TRANSFER_BOARD, reason);
+    this.deps.lifecycle.revertTransfer(send.sourceTicketId, TRANSFER_BOARD, send.id, reason);
   }
 
   private schedule(delay: number): void {
@@ -248,9 +248,10 @@ export class VpsLinkSync {
   }
 
   private async retryPendingSends(): Promise<boolean> {
-    for (const send of this.deps.store.listVpsPendingSends()) {
+    for (const listed of this.deps.store.listVpsPendingSends()) {
       if (this.stopped) return false;
-      if (send.status !== "pending" || this.inFlight.has(send.id)) continue;
+      const send = this.deps.store.getVpsPendingSend(listed.id);
+      if (send === null || send.status !== "pending" || this.inFlight.has(send.id)) continue;
       const outcome = await this.deliver(send);
       if (outcome.status === "rejected") {
         this.deps.store.recordVpsSendAttempt(send.id, { status: "failed", lastError: outcome.message });

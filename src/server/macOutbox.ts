@@ -132,7 +132,7 @@ function revertRefusedTransfer(deps: MacOutboxAckDeps, itemId: string, reason: s
   const item = deps.store.getMacOutboxItem(itemId);
   if (item === null || item.source !== TRANSFER_SOURCE || item.sourceTicketId === null) return;
   try {
-    deps.lifecycle.revertTransfer(item.sourceTicketId, TRANSFER_BOARD, reason);
+    deps.lifecycle.revertTransfer(item.sourceTicketId, TRANSFER_BOARD, item.id, reason);
   } catch (error) {
     log.error("carte transférée non rétablie après refus du Mac", { outboxId: itemId, ticketId: item.sourceTicketId, error: getErrorMessage(error) });
   }

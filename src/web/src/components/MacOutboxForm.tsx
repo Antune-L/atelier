@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
 import { stripLocalUploadReferences } from "@shared/uploadReferences";
@@ -11,11 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useAppSettings } from "@/hooks/useAppSettings";
+import { useKeyedLoad } from "@/hooks/useKeyedLoad";
 import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
 import { formatDateTime } from "@/lib/display";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
+
+const MAC_OUTBOX_LOAD_KEY = "mac-outbox";
 
 const ITEM_STATUS_LABELS: Record<MacOutboxItem["status"], string> = {
   pending: "En attente du Mac",
@@ -57,28 +60,13 @@ function MacOutboxList({ items, otherBoardUrl }: { items: MacOutboxItem[]; other
 export function MacOutboxForm({ header, title, onTitleChange, description, onDescriptionChange, onDraftSent, onClose }: OtherBoardFormProps) {
   const { settings } = useAppSettings();
   const otherBoardUrl = safeOtherBoardUrl(settings?.otherBoardUrl);
-  const [loadKey, setLoadKey] = useState(0);
-  const [loadedKey, setLoadedKey] = useState<number | null>(null);
-  const latestLoad = useRef(0);
-  const [state, setState] = useState<MacOutboxState | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const { data: state, error: loadError, reload: refresh } = useKeyedLoad<MacOutboxState>(MAC_OUTBOX_LOAD_KEY, () => api.macOutbox());
   const [projectChoice, setProjectChoice] = useState<string | null>(null);
   const [clientId, setClientId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTitle, setSentTitle] = useState<string | null>(null);
 
-  if (loadedKey !== loadKey) {
-    const key = loadKey;
-    latestLoad.current = key;
-    setLoadedKey(key);
-    setLoadError(null);
-    void api
-      .macOutbox()
-      .then((loaded) => latestLoad.current === key && setState(loaded))
-      .catch((e) => latestLoad.current === key && setLoadError(errorMessage(e)));
-  }
-  const refresh = (): void => setLoadKey((key) => key + 1);
 
   const catalogue = state?.catalogue ?? null;
   const projects = catalogue?.projects ?? [];

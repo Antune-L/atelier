@@ -127,7 +127,8 @@ const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verifie
 const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
 const reviewFileHashesSchema = z.record(z.string(), z.string());
 const implementationLotEventRowSchema = z.object({ type: z.string(), payload: z.string() });
-const transferEventRowSchema = z.object({ ticket_id: z.string(), type: z.string() });
+const transferEventRowSchema = z.object({ ticket_id: z.string(), type: z.string(), payload: z.string().nullable() });
+const transferEventPayloadSchema = z.object({ sendId: z.string() });
 const implementationLotEventSchema = z.object({
   label: z.string().default(DEFAULT_IMPLEMENTATION_LOT),
   files: z.array(z.string()).optional(),
@@ -1943,7 +1944,7 @@ export class Store {
   listTransferredTicketIds(): Set<string> {
     const latest = new Map<string, string>();
     const rows = this.db
-      .query("SELECT ticket_id, type FROM events WHERE ticket_id IS NOT NULL AND type IN (?, ?) ORDER BY id ASC")
+      .query("SELECT ticket_id, type, payload FROM events WHERE ticket_id IS NOT NULL AND type IN (?, ?) ORDER BY id ASC")
       .all(CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT);
     for (const row of rows) {
       const parsed = transferEventRowSchema.safeParse(row);
@@ -1952,12 +1953,14 @@ export class Store {
     return new Set([...latest].filter(([, type]) => type === CARD_TRANSFERRED_EVENT).map(([ticketId]) => ticketId));
   }
 
-  /** True when the card's latest transfer event is a transfer that was never reverted. */
-  isTransferOutstanding(ticketId: string): boolean {
+  /** Send id of the card's latest transfer when it was never reverted, else null. */
+  outstandingTransferSendId(ticketId: string): string | null {
     const latest = transferEventRowSchema.safeParse(this.db
-      .query("SELECT ticket_id, type FROM events WHERE ticket_id = ? AND type IN (?, ?) ORDER BY id DESC LIMIT 1")
+      .query("SELECT ticket_id, type, payload FROM events WHERE ticket_id = ? AND type IN (?, ?) ORDER BY id DESC LIMIT 1")
       .get(ticketId, CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT));
-    return latest.success && latest.data.type === CARD_TRANSFERRED_EVENT;
+    if (!latest.success || latest.data.type !== CARD_TRANSFERRED_EVENT || latest.data.payload === null) return null;
+    const payload = transferEventPayloadSchema.safeParse(safeJsonParse(latest.data.payload));
+    return payload.success ? payload.data.sendId : null;
   }
 
   getMacCatalogue(): StoredMacCatalogue | null {

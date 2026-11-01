@@ -9,6 +9,8 @@ import type { Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { Notifier } from "./notifier.ts";
 
+const TRANSFER_MOVED_BACK_REASON = "carte déplacée à la main hors des Abandonnés";
+
 export interface CardTransferTarget {
   board: CardTransferBoard;
   sendId: string;
@@ -122,6 +124,10 @@ export class TicketLifecycle {
 
   /** Manual board move (drag): set the target column, push. */
   moveColumn(ticketId: string, column: Ticket["column"]): Ticket {
+    const current = this.store.getTicket(ticketId);
+    if (current?.column === "abandoned" && column !== "abandoned" && this.store.outstandingTransferSendId(ticketId) !== null) {
+      this.store.logEvent(ticketId, CARD_TRANSFER_REVERTED_EVENT, { reason: TRANSFER_MOVED_BACK_REASON });
+    }
     const ticket = this.store.updateTicket(ticketId, { column });
     this.hub.pushTicket(ticket);
     return ticket;
@@ -148,11 +154,11 @@ export class TicketLifecycle {
 
   /**
    * Bring back a transferred card after a definitive refusal: todo again, end dates cleared, `transfer_reverted`
-   * event and comment. No-op unless the card is still abandoned with an unreverted transfer.
+   * event and comment. No-op unless the card is still abandoned and `sendId` is its latest unreverted transfer.
    */
-  revertTransfer(ticketId: string, board: CardTransferBoard, reason: string): Ticket | null {
+  revertTransfer(ticketId: string, board: CardTransferBoard, sendId: string, reason: string): Ticket | null {
     const current = this.store.getTicket(ticketId);
-    if (current === null || current.column !== "abandoned" || !this.store.isTransferOutstanding(ticketId)) return null;
+    if (current === null || current.column !== "abandoned" || this.store.outstandingTransferSendId(ticketId) !== sendId) return null;
     const { ticket, comment } = this.store.transaction(() => {
       const ticket = this.store.updateTicket(ticketId, { column: "todo", stage: null, finishedAt: null, implementationFinishedAt: null });
       this.store.logEvent(ticketId, CARD_TRANSFER_REVERTED_EVENT, { board, reason });

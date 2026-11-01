@@ -572,7 +572,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     uiServer = Bun.serve<SocketData>({ unix: socketPath, idleTimeout: SERVER_IDLE_TIMEOUT_SECONDS, fetch: handleRequest, websocket });
     chmodSync(socketPath, UI_SOCKET_MODE);
   }
-  const bridgeListener = socketPath !== null && isCloudHost() ? startBridgeListener(socketPath, { operations: ticketOperations, store }) : null;
+  const bridgeListener = socketPath !== null && isCloudHost() ? startBridgeListener(socketPath, { operations: ticketOperations, store, lifecycle }) : null;
   const remoteMcpListener = remoteMcpConfig === null
     ? null
     : startRemoteMcpListener(remoteMcpConfig, { store, operations: ticketOperations, system, composerAvailable });

@@ -1067,7 +1067,7 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(deps.previews ? createPreviewRoutes({ previews: deps.previews }) : new Elysia())
     .use(deps.audits ? createAuditRoutes({ audits: deps.audits }) : new Elysia())
     .use(deps.vpsLink ? createVpsLinkRoutes({ vpsLink: deps.vpsLink }) : new Elysia())
-    .use(isCloudHost() ? createMacOutboxRoutes({ store }) : new Elysia())
+    .use(isCloudHost() ? createMacOutboxRoutes({ store, lifecycle }) : new Elysia())
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.

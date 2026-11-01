@@ -1,6 +1,15 @@
+import { getErrorMessage } from "../shared/errors.ts";
 import { CONDITIONAL_WORKER_TOOL_NAMES } from "../shared/protocol.ts";
 import type { WorkerToolName } from "../shared/protocol.ts";
-import { MAC_CATALOGUE_STALE_AFTER_MS, OUTBOX_FETCH_MAX_CHARS, OUTBOX_FETCH_MAX_ITEMS, outboxItemIdSchema } from "../shared/vpsBridge.ts";
+import {
+  MAC_CATALOGUE_STALE_AFTER_MS,
+  OUTBOX_FETCH_MAX_CHARS,
+  OUTBOX_FETCH_MAX_ITEMS,
+  OUTBOX_ITEM_ID_PREFIXES,
+  macOutboxDraftSchema,
+  macOutboxTransferInputSchema,
+  outboxItemIdSchema,
+} from "../shared/vpsBridge.ts";
 import type {
   BridgeCataloguePublishInput,
   BridgeOutboxItem,
@@ -12,11 +21,25 @@ import type {
   OutboxAck,
 } from "../shared/vpsBridge.ts";
 
+import { prepareCardTransfer } from "./cardTransfer.ts";
 import { MacOutboxConflictError } from "./db/store.ts";
 import type { Store } from "./db/store.ts";
 import { isCloudHost } from "./hostRole.ts";
+import type { TicketLifecycle } from "./lifecycle.ts";
+import { createLogger } from "./logger.ts";
 
 const MAC_OUTBOX_LIST_LIMIT = 100;
+const TRANSFER_SOURCE = "transfer";
+const TRANSFER_BOARD = "mac";
+const TRANSFER_CANCELLED_REASON = "envoi annulé depuis le VPS (si le Mac l'avait déjà relevé, la carte peut exister des deux côtés).";
+const log = createLogger("mac-outbox");
+
+export interface MacOutboxTransferDeps {
+  store: Store;
+  lifecycle: Pick<TicketLifecycle, "transferOut" | "revertTransfer">;
+}
+
+export type MacOutboxAckDeps = { store: Store; lifecycle: Pick<TicketLifecycle, "revertTransfer"> };
 
 export type MacOutboxErrorCode = "INVALID_INPUT" | "NOT_FOUND" | "CONFLICT" | "UNAVAILABLE";
 
@@ -95,7 +118,51 @@ export function fetchMacOutbox(store: Store): BridgeOutboxItem[] {
   return items;
 }
 
-export function acknowledgeMacOutbox(store: Store, acks: readonly OutboxAck[]): number {
+// NOTE(ali): a refused transfer brings its card back after the ack transaction; a failed revival never fails the ack.
+export function acknowledgeMacOutbox(deps: MacOutboxAckDeps, acks: readonly OutboxAck[]): number {
   const at = Date.now();
-  return store.transaction(() => acks.filter((ack) => store.acknowledgeMacOutboxItem(ack, at)).length);
+  const applied = deps.store.transaction(() => acks.filter((ack) => deps.store.acknowledgeMacOutboxItem(ack, at)));
+  for (const ack of applied) {
+    if (ack.status === "rejected") revertRefusedTransfer(deps, ack.id, ack.reason);
+  }
+  return applied.length;
+}
+
+function revertRefusedTransfer(deps: MacOutboxAckDeps, itemId: string, reason: string): void {
+  const item = deps.store.getMacOutboxItem(itemId);
+  if (item === null || item.source !== TRANSFER_SOURCE || item.sourceTicketId === null) return;
+  try {
+    deps.lifecycle.revertTransfer(item.sourceTicketId, TRANSFER_BOARD, reason);
+  } catch (error) {
+    log.error("carte transférée non rétablie après refus du Mac", { outboxId: itemId, ticketId: item.sourceTicketId, error: getErrorMessage(error) });
+  }
+}
+
+// NOTE(ali): the card leaves this board (abandoned) in the same transaction as its outbox entry; the Mac answers at its next sync.
+export function transferCardToMac(deps: MacOutboxTransferDeps, ticketId: string, input: unknown): { created: boolean; item: MacOutboxItem } {
+  const parsed = macOutboxTransferInputSchema.safeParse(input);
+  if (!parsed.success) throw new MacOutboxError("INVALID_INPUT", parsed.error.issues[0]?.message ?? "Requête invalide.");
+  const { clientId, project } = parsed.data;
+  const { draft } = prepareCardTransfer(deps.store, ticketId);
+  const checked = macOutboxDraftSchema.safeParse({ project, ...draft });
+  if (!checked.success) throw new MacOutboxError("INVALID_INPUT", checked.error.issues[0]?.message ?? "Requête invalide.");
+  const id = `${OUTBOX_ITEM_ID_PREFIXES.transfer}${clientId}`;
+  const projectLabel = deps.store.getMacCatalogue()?.projects.find((candidate) => candidate.key === project)?.label ?? project;
+  return deps.lifecycle.transferOut(
+    ticketId,
+    { board: TRANSFER_BOARD, sendId: id, projectLabel },
+    () => enqueueMacOutboxItem(deps.store, { id, draft: checked.data, source: TRANSFER_SOURCE, sourceTicketId: ticketId }),
+  );
+}
+
+export function cancelMacOutboxTransfer(deps: MacOutboxAckDeps, itemId: string): MacOutboxItem {
+  const item = deps.store.getMacOutboxItem(itemId);
+  if (item === null) throw new MacOutboxError("NOT_FOUND", "Envoi introuvable.");
+  if (item.source !== TRANSFER_SOURCE) throw new MacOutboxError("CONFLICT", "Seul l'envoi d'une carte existante peut être annulé.");
+  const cancelled = deps.store.acknowledgeMacOutboxItem({ id: itemId, status: "rejected", reason: TRANSFER_CANCELLED_REASON }, Date.now());
+  if (!cancelled) throw new MacOutboxError("CONFLICT", "Le Mac a déjà répondu à cet envoi.");
+  revertRefusedTransfer(deps, itemId, TRANSFER_CANCELLED_REASON);
+  const updated = deps.store.getMacOutboxItem(itemId);
+  if (updated === null) throw new MacOutboxError("NOT_FOUND", "Envoi introuvable.");
+  return updated;
 }

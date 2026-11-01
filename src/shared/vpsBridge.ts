@@ -127,8 +127,9 @@ export const OUTBOX_FETCH_MAX_CHARS = 400_000;
 // NOTE(ali): the Mac publishes every 5 minutes while awake; a sleeping Mac is the normal case, so only a day without any publication is flagged.
 export const MAC_CATALOGUE_STALE_AFTER_MS = 24 * 60 * 60_000;
 
-export const OUTBOX_ITEM_ID_PREFIXES = { board: "board:", agent: "agent:" } as const;
-export const MAC_OUTBOX_SOURCES = ["board", "agent"] as const;
+export const OUTBOX_ITEM_ID_PREFIXES = { board: "board:", agent: "agent:", transfer: "transfer:" } as const;
+// NOTE(ali): the source stays on the VPS; it never crosses the bridge (bridgeOutboxItemSchema omits it).
+export const MAC_OUTBOX_SOURCES = ["board", "agent", "transfer"] as const;
 export type MacOutboxSource = (typeof MAC_OUTBOX_SOURCES)[number];
 export const MAC_OUTBOX_STATUSES = ["pending", "received", "rejected"] as const;
 
@@ -142,6 +143,9 @@ export type MacOutboxDraft = z.infer<typeof macOutboxDraftSchema>;
 export const macOutboxEnqueueInputSchema = macOutboxDraftFields.extend({ clientId: outboxClientIdSchema }).strict()
   .refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
 export type MacOutboxEnqueueInput = z.infer<typeof macOutboxEnqueueInputSchema>;
+
+export const macOutboxTransferInputSchema = z.object({ clientId: outboxClientIdSchema, project: macOutboxDraftFields.shape.project }).strict();
+export type MacOutboxTransferInput = z.infer<typeof macOutboxTransferInputSchema>;
 
 export const bridgeCataloguePublishInputSchema = z.object({
   boardName: boardNameSchema.nullable(),

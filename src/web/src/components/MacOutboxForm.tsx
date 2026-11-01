@@ -26,6 +26,7 @@ const ITEM_STATUS_LABELS: Record<MacOutboxItem["status"], string> = {
 const ITEM_SOURCE_LABELS: Record<MacOutboxItem["source"], string> = {
   board: "depuis le board",
   agent: "par un agent",
+  transfer: "carte transférée",
 };
 
 function MacOutboxList({ items, otherBoardUrl }: { items: MacOutboxItem[]; otherBoardUrl: string | null }) {

@@ -18,6 +18,7 @@ import {
 import type { BridgeEnvelope, BridgeErrorCode, BridgeOp } from "../shared/vpsBridge.ts";
 
 import type { Store } from "./db/store.ts";
+import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { acknowledgeMacOutbox, fetchMacOutbox, publishMacCatalogue } from "./macOutbox.ts";
 import { readBoundedBody } from "./remoteMcp/listener.ts";
@@ -51,6 +52,7 @@ type BridgeOpHandler = (input: unknown) => unknown;
 export interface BridgeHandlerDeps {
   operations: TicketOperations;
   store: Store;
+  lifecycle: Pick<TicketLifecycle, "revertTransfer">;
 }
 
 function parseInput<T>(schema: ZodType<T>, input: unknown): T {
@@ -60,7 +62,7 @@ function parseInput<T>(schema: ZodType<T>, input: unknown): T {
 }
 
 // NOTE: the op registry; adding an op is one entry in BRIDGE_OPS plus its handler here (the Record type enforces both).
-function createBridgeOpHandlers({ operations, store }: BridgeHandlerDeps): Record<BridgeOp, BridgeOpHandler> {
+function createBridgeOpHandlers({ operations, store, lifecycle }: BridgeHandlerDeps): Record<BridgeOp, BridgeOpHandler> {
   return {
     version: (input) => {
       parseInput(bridgeEmptyInputSchema, input);
@@ -87,7 +89,7 @@ function createBridgeOpHandlers({ operations, store }: BridgeHandlerDeps): Recor
       parseInput(bridgeEmptyInputSchema, input);
       return { items: fetchMacOutbox(store) };
     },
-    outbox_ack: (input) => ({ acknowledged: acknowledgeMacOutbox(store, parseInput(bridgeOutboxAckInputSchema, input).acks) }),
+    outbox_ack: (input) => ({ acknowledged: acknowledgeMacOutbox({ store, lifecycle }, parseInput(bridgeOutboxAckInputSchema, input).acks) }),
     usage_publish: (input) => publishMacUsage(store, parseInput(bridgeUsagePublishInputSchema, input)),
   };
 }

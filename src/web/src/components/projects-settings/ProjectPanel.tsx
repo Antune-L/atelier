@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button";
 import { ProjectPreviewSettings } from "@/components/projects-settings/ProjectPreviewSettings";
 import { ProjectAuditSettings } from "@/components/projects-settings/ProjectAuditSettings";
 import { ConfirmPopover } from "@/components/ui/confirm";
-import { BranchCombobox, Input } from "@/components/ui/input";
+import { BranchCombobox, Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SettingsFooter } from "@/components/ui/settings";
 import { ValidationConfigFields, validationDraft, validationDraftConfig, type ValidationDraft } from "@/components/projects-settings/ValidationConfigFields";
@@ -47,6 +47,8 @@ const PROJECT_GROUP_LIST_ID = "project-group-suggestions";
 const SUMMARY_SEPARATOR = " · ";
 const MACHINE_ACCOUNT_VALUE = "";
 const BASE_BRANCH_INPUT_ID = "project-base-branch";
+const INSTRUCTIONS_INPUT_ID = "project-instructions";
+const INSTRUCTIONS_HELP_ID = "project-instructions-help";
 
 type CreateStep = "folder" | "form";
 
@@ -99,6 +101,8 @@ export function ProjectPanel({
 
   const [label, setLabel] = useState(project?.label ?? "");
   const [group, setGroup] = useState(project?.group ?? "");
+  const [instructions, setInstructions] = useState(project?.instructions ?? "");
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [repoPath, setRepoPath] = useState(project?.repoPath ?? "");
   const [baseBranch, setBaseBranch] = useState(project?.baseBranch ?? "");
   const [vcsProvider, setVcsProvider] = useState<VcsProvider>(project?.vcsProvider ?? DEFAULT_VCS_PROVIDER);
@@ -138,6 +142,7 @@ export function ProjectPanel({
     project === null ||
     label !== project.label ||
     group !== (project.group ?? "") ||
+    instructions !== (project.instructions ?? "") ||
     repoPath !== project.repoPath ||
     commitTimeoutMs !== String(project.commitTimeoutMs) ||
     baseBranch !== project.baseBranch ||
@@ -307,6 +312,7 @@ export function ProjectPanel({
     const patch: UpdateProjectInput = {};
     if (label !== current.label) patch.label = label.trim();
     if (group !== (current.group ?? "")) patch.group = normalizedGroup || null;
+    if (instructions !== (current.instructions ?? "")) patch.instructions = instructions.trim() || null;
     if (repoPath !== current.repoPath) patch.repoPath = repoPath.trim();
     if (baseBranch !== current.baseBranch) patch.baseBranch = baseBranch.trim();
     if (commitTimeoutMs !== String(current.commitTimeoutMs)) patch.commitTimeoutMs = Number(commitTimeoutMs);
@@ -324,6 +330,7 @@ export function ProjectPanel({
       commitTimeoutMs: Number(commitTimeoutMs),
       vcsProvider,
       ...(normalizedGroup !== "" ? { group: normalizedGroup } : {}),
+      ...(instructions.trim() !== "" ? { instructions: instructions.trim() } : {}),
       ...(vcsProvider === "github" && githubAccount !== null ? { githubAccount } : {}),
     };
     if (!grouped) input.color = pickProjectColor(projects.map((managedProject) => managedProject.color));
@@ -335,6 +342,7 @@ export function ProjectPanel({
     const saved = await api.updateProject(current.key, buildPatch(current));
     setLabel(saved.label);
     setGroup(saved.group ?? "");
+    setInstructions(saved.instructions ?? "");
     setRepoPath(saved.repoPath);
     setBaseBranch(saved.baseBranch);
     setVcsProvider(saved.vcsProvider);
@@ -603,6 +611,29 @@ export function ProjectPanel({
             </div>
           </Field>
         )}
+        </AdvancedSection>
+        <AdvancedSection
+          title="Instructions aux agents"
+          open={instructionsOpen}
+          onToggle={() => setInstructionsOpen((open) => !open)}
+          summary={<p className="min-w-0 truncate">{instructions.trim() || "Aucune consigne supplémentaire."}</p>}
+        >
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={INSTRUCTIONS_INPUT_ID} className="text-xs text-muted-foreground">
+              Consignes supplémentaires pour les agents qui travaillent sur ce projet.
+            </Label>
+            <Textarea
+              id={INSTRUCTIONS_INPUT_ID}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="Lance simplifier puis argus, et corrige les remarques pertinentes avant livraison."
+              aria-describedby={INSTRUCTIONS_HELP_ID}
+              className="min-h-40"
+            />
+            <p id={INSTRUCTIONS_HELP_ID} className="text-xs text-muted-foreground">
+              Facultatif. Laissez vide pour ne pas ajouter de consigne au projet.
+            </p>
+          </div>
         </AdvancedSection>
         {creating && (
           <p className="text-xs text-muted-foreground">Validation, prévisualisations et audit se configurent après l’ajout du projet.</p>

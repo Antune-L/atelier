@@ -635,6 +635,7 @@ export const managedProjectSchema = z.object({
   validation: projectValidationSchema.optional(),
   color: z.string().optional(),
   group: z.string().optional(),
+  instructions: z.string().optional(),
   hidden: z.boolean(),
   sortOrder: z.number().int(),
   /** GitHub account login the project runs under; null = the machine's default gh account. */
@@ -652,6 +653,7 @@ export const createProjectSchema = z.object({
   validation: projectValidationSchema.optional(),
   color: z.string().optional(),
   group: z.string().transform((value) => value.trim() || undefined).optional(),
+  instructions: z.string().transform((value) => value.trim() || undefined).optional(),
   githubAccount: githubLoginSchema.nullable().optional(),
 });
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
@@ -666,6 +668,7 @@ export const updateProjectSchema = z.object({
   validation: projectValidationSchema.nullable().optional(),
   color: z.string().optional(),
   group: z.union([z.string().transform((value) => value.trim() || null), z.null()]).optional(),
+  instructions: z.union([z.string().transform((value) => value.trim() || null), z.null()]).optional(),
   hidden: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   /** null detaches the project (machine default account); omitted leaves it unchanged. */

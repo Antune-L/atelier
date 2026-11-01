@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { vpsUpdateSchema } from "@shared/vpsUpdate";
 import type { VpsUpdateStatus } from "@shared/vpsUpdate";
@@ -114,6 +114,18 @@ export function VpsUpdateDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<VpsUpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const runningUpdatedAt = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (status === null) return;
+    if (status.phase === "resolving" || status.phase === "running") {
+      runningUpdatedAt.current = status.updatedAt;
+      return;
+    }
+    if (runningUpdatedAt.current === null || status.updatedAt < runningUpdatedAt.current) return;
+    runningUpdatedAt.current = null;
+    if (status.phase === "succeeded") window.location.reload();
+  }, [status]);
 
   useEffect(() => {
     let disposed = false;
@@ -156,7 +168,7 @@ export function VpsUpdateDialog({ onClose }: { onClose: () => void }) {
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title="Mise à jour du VPS"
-      description="Installe la dernière version. L’accès est coupé environ une minute."
+      description="Installe la dernière version. L’accès est coupé environ une minute. Cette page se rechargera automatiquement après une mise à jour réussie."
       footer={
         <>
           <Button variant="outline" onClick={onClose}>{isRunning || isFailure || error !== null ? "Fermer" : "Annuler"}</Button>

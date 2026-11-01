@@ -99,6 +99,7 @@ export class TicketOperationError extends Error {
 }
 
 export interface TicketOperationsDeps {
+  isMaintenance?: () => boolean;
   store: Store;
   hub: ClientHub;
   lifecycle: TicketLifecycle;
@@ -389,6 +390,7 @@ export class TicketOperations {
   }
 
   createTodoTicket(input: CreateTodoTicketInput, options: CreateTodoTicketOptions = {}): CreateTodoTicketResult {
+    if (options.afterCreate !== "none" && this.deps.isMaintenance?.()) throw new TicketOperationError("CONFLICT", "Maintenance in progress. No ticket was created; retry after maintenance.");
     const normalized = normalizeCreateInput(input);
     if (!isProjectKey(normalized.project)) {
       throw new TicketOperationError("INVALID_INPUT", "unknown project");
@@ -477,6 +479,7 @@ export class TicketOperations {
   }
 
   analyzeTickets(ids: string[]): AnalyzeTicketsResult {
+    if (this.deps.isMaintenance?.()) throw new TicketOperationError("CONFLICT", "Maintenance in progress. No analysis was started; retry after maintenance.");
     const startedIds: string[] = [];
     const rejected: AnalyzeTicketsResult["rejected"] = [];
     const idsByProject = new Map<string, string[]>();

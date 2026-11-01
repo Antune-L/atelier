@@ -22,6 +22,8 @@ import {
 import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { availableSkillProviders } from "@shared/skills";
 
+import { ProviderUpdates } from "@/components/ProviderUpdates";
+import { useProviderUpdates } from "@/hooks/useProviderUpdates";
 import { BoardLinkSettings } from "@/components/BoardLinkSettings";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
@@ -78,6 +80,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
+  useProviderUpdates(open);
   const [sectionId, setSectionId] = useState<SettingsSectionId>("appearance");
   const [lastSubpages, setLastSubpages] = useState<Partial<Record<SettingsCategory, SettingsSectionId>>>({});
   const [search, setSearch] = useState("");
@@ -576,6 +579,7 @@ function ProvidersSettings({ query }: { query: string }) {
 
   return (
     <div className="space-y-4">
+      <ProviderUpdates />
       <SectionHeader
         title="Agents disponibles"
         subtitle="Détection sur cette machine. Elle ne prouve pas l'exécution d'une session."

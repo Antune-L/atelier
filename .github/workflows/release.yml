@@ -63,6 +63,7 @@ jobs:
       - name: Package the DMG
         env:
           RELEASE_VERSION: ${{ steps.meta.outputs.version }}
+          ATELIER_UPDATE_SIGNING_KEY: ${{ secrets.ATELIER_UPDATE_SIGNING_KEY }}
         run: bun run release:desktop "$RELEASE_VERSION"
 
       - name: Publish the GitHub release
@@ -78,3 +79,8 @@ jobs:
           files: |
             release/Atelier-v${{ steps.meta.outputs.version }}-arm64.dmg
             release/Atelier-v${{ steps.meta.outputs.version }}-arm64.dmg.sha256
+            release/Atelier-v${{ steps.meta.outputs.version }}-arm64.app.zip
+            release/Atelier-v${{ steps.meta.outputs.version }}-arm64.app.zip.sha256
+            release/stable-macos-arm64-update.json
+            release/stable-macos-arm64-Atelier.app.tar.zst
+            release/atelier-macos-arm64.json

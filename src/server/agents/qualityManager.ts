@@ -257,7 +257,11 @@ export class QualityManager {
     this.dependencies.closeAutonomousWork = verifier;
   }
 
-  async manualStart(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, requestId: string, preview?: QualityPreviewTarget): Promise<QualityValidationRun> {
+  manualStart(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, requestId: string, preview?: QualityPreviewTarget): Promise<QualityValidationRun> {
+    return this.dependencies.system.sourceUpdateAdmission.run(() => this.manualStartAdmitted(ticketId, kind, provider, requestId, preview), false);
+  }
+
+  private async manualStartAdmitted(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, requestId: string, preview?: QualityPreviewTarget): Promise<QualityValidationRun> {
     const ticket = this.ticket(ticketId);
     const deadlineAt = Date.now() + (getProject(ticket.project).validation?.timeoutMs ?? QUALITY_DEFAULT_TIMEOUT_MS);
     const reservation = this.dependencies.store.reserveQualityRequest({ requestId, ticketId, origin: "manual", provider, kind, deadlineAt, previewId: preview?.previewId ?? null, revision: preview?.revision ?? null, parameterHash: fingerprint([ticketId, kind, provider, preview?.previewId ?? null, preview?.revision ?? null]) });
@@ -840,7 +844,11 @@ export class QualityManager {
     });
   }
 
-  private async launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget, frozenCriteria?: QualityCriteriaSnapshot, expectedRevision?: string, manual?: ManualQualityContext): Promise<QualityValidationRun> {
+  private launch(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget, frozenCriteria?: QualityCriteriaSnapshot, expectedRevision?: string, manual?: ManualQualityContext): Promise<QualityValidationRun> {
+    return this.dependencies.system.sourceUpdateAdmission.run(() => this.launchAdmitted(ticketId, kind, provider, iteration, sourcePath, preview, frozenCriteria, expectedRevision, manual));
+  }
+
+  private async launchAdmitted(ticketId: string, kind: QualityValidationRun["kind"], provider: Orchestrator | null, iteration?: QualityIteration, sourcePath?: string, preview?: QualityPreviewTarget, frozenCriteria?: QualityCriteriaSnapshot, expectedRevision?: string, manual?: ManualQualityContext): Promise<QualityValidationRun> {
     if (this.shuttingDown) throw new Error("Quality validation is shutting down.");
     if (provider !== null && !isQualityOwner()) throw new Error(NOT_QUALITY_OWNER_MESSAGE);
     if (this.active.has(ticketId)) throw new Error("A quality run is already active for this ticket.");
@@ -1027,7 +1035,11 @@ export class QualityManager {
     return false;
   }
 
-  private async execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget, manual?: ManualQualityContext): Promise<void> {
+  private execute(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget, manual?: ManualQualityContext): Promise<void> {
+    return this.dependencies.system.sourceUpdateAdmission.run(() => this.executeAdmitted(run, ticket, project, criteria, signal, iteration, preview, manual));
+  }
+
+  private async executeAdmitted(run: QualityValidationRun, ticket: Ticket, project: ProjectConfig, criteria: QualityCriteriaSnapshot | undefined, signal: AbortSignal, iteration?: QualityIteration, preview?: QualityPreviewTarget, manual?: ManualQualityContext): Promise<void> {
     const journal = this.journals.get(run.id);
     const artifactDirectory = join(this.dependencies.artifactDirectory ?? join(tmpdir(), "kanban-quality-artifacts"), run.id);
     let nativeClosureUnknown = false;

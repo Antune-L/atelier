@@ -17,6 +17,8 @@ import type { ClaudeLoginStatus } from "../../shared/claudeLogin.ts";
 import type { LocalUsageReadResult } from "../usage/localHistory.ts";
 import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 
+import type { AppUpdateTarget } from "../../shared/providerUpdates.ts";
+import type { SourceUpdateAdmission } from "./sourceUpdateAdmission.ts";
 import type { AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import type { PrSnapshot, ReviewRequestSnapshot } from "./vcs/types.ts";
@@ -312,7 +314,9 @@ export interface SpawnShellOptions {
 }
 
 export interface SystemAdapter {
-  vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
+  readonly sourceUpdateAdmission: SourceUpdateAdmission;
+  vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
+  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus>;
   runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult>;
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;

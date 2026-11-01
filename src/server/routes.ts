@@ -1,11 +1,19 @@
+import { z } from "zod";
 import { lstat, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
+import type { AppUpdateTarget } from "../shared/providerUpdates.ts";
+import type { DesktopUpdateController } from "../shared/desktopUpdate.ts";
+import { providerUpdatesSchema } from "../shared/providerUpdates.ts";
+import { ProviderUpdateService, readSourceUpdateTarget } from "./system/providerUpdates.ts";
+import { KeyedMutex } from "./mutex.ts";
+import type { SourceUpdateAdmission } from "./system/sourceUpdateAdmission.ts";
 import { autonomousResumeSchema } from "../shared/autonomous.ts";
 import { ACTIVE_STAGES, isAllowedAgentPair, PRD_SINGLE_SELECTION, SCHEDULED_START_MIN_LEAD_MS, SPLIT_BRANCH_PREFIX } from "../shared/constants.ts";
+
 import { isSplitMother } from "../shared/dependencies.ts";
 import { isRemoteTicket, startBlocker } from "../shared/startBlocker.ts";
 import type { ConversationStatus, Implementer, Orchestrator, PrdDocumentStatus, PrMergeability, PrState, Stage, VcsProvider } from "../shared/constants.ts";
@@ -92,7 +100,7 @@ import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { quotaProviderSchema } from "../shared/providerQuota.ts";
 import type { LastProviderQuotaResponse, ProviderQuota } from "../shared/providerQuota.ts";
 import { DEFAULT_USAGE_PERIOD, DEFAULT_USAGE_SCOPE, usagePeriodSchema, usageScopeSchema } from "../shared/providerUsage.ts";
-import { claudeLoginCodeSchema } from "../shared/claudeLogin.ts";
+import { claudeLoginCodeSchema, isClaudeLoginActive } from "../shared/claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../shared/claudeLogin.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
@@ -127,7 +135,10 @@ const DISALLOWED_AGENT_PAIR_MSG =
   "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).";
 
 interface PaneReader {
-  vpsUpdate?(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus>;
+  readonly dryRun: boolean;
+  readonly sourceUpdateAdmission: SourceUpdateAdmission;
+  vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
+  vpsUpdate?(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus>;
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
@@ -161,6 +172,8 @@ interface PaneReader {
 }
 
 interface RouteDeps {
+  desktopUpdates?: DesktopUpdateController;
+  repoMutex?: KeyedMutex;
   previews?: PreviewManager;
   audits?: AuditManager;
   vpsLink?: VpsLinkSync;
@@ -196,8 +209,9 @@ interface RouteDeps {
 
 /** Branch the self-update tracks; mismatch blocks the update (no auto-switch). */
 const UPDATE_BASE_BRANCH = "main";
-/** Generous bound for the pre-relaunch web + agents rebuild. */
-const UPDATE_BUILD_TIMEOUT_MS = 300_000;
+const MAINTENANCE_REFUSAL = "Maintenance in progress. No work was started; retry after maintenance.";
+// NOTE(ali): Bound each dependency installation and bundle build before relaunch.
+const UPDATE_COMMAND_TIMEOUT_MS = 300_000;
 /** Let the {ok:true} response flush before tearing the server down + relaunching. */
 const UPDATE_RELAUNCH_DELAY_MS = 200;
 /** Keep only the tail of a failed build's output in the surfaced error. */
@@ -807,6 +821,7 @@ function createAtelierRoutes(deps: RouteDeps) {
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const input = parsed.data;
       if (!isProjectKey(input.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
+      if (input.seed && deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const conversation = store.createConversation({
         project: input.project,
         title: conversationTitle(input.title, input.seed),
@@ -850,6 +865,7 @@ function createAtelierRoutes(deps: RouteDeps) {
       return { ok: true };
     })
     .post("/conversations/:id/messages", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = postConversationMessageSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
@@ -882,6 +898,7 @@ function createAtelierRoutes(deps: RouteDeps) {
     .post("/conversations/:id/settle", ({ params, set }) => setConversationSettled(params.id, true, set))
     .post("/conversations/:id/unsettle", ({ params, set }) => setConversationSettled(params.id, false, set))
     .post("/conversations/:id/consolidate", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       if (!store.getConversation(params.id)) return jsonError(set, HTTP_NOT_FOUND, CONVERSATION_NOT_FOUND);
       const parsed = consolidatePrdSchema.safeParse(body ?? {});
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
@@ -904,6 +921,7 @@ function createAtelierRoutes(deps: RouteDeps) {
       return updated;
     })
     .post("/prd/:id/regenerate", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       if (!store.getPrdDocument(params.id)) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
       try {
         void atelier.regenerate(params.id).delivered;
@@ -935,6 +953,7 @@ function createAtelierRoutes(deps: RouteDeps) {
       }
     })
     .post("/prd/:id/tickets", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const record = store.getPrdDocument(params.id);
       if (!record) return jsonError(set, HTTP_NOT_FOUND, PRD_NOT_FOUND);
       const conversation = store.getConversation(record.conversationId);
@@ -984,7 +1003,21 @@ function createAtelierRoutes(deps: RouteDeps) {
 
 export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
-  const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility });
+  const updateMutex = deps.repoMutex ?? new KeyedMutex();
+  const providerUpdates = new ProviderUpdateService();
+  let sourceTarget: AppUpdateTarget | null = null;
+  let sourceTargetAt = 0;
+  let sourceTargetPending: Promise<AppUpdateTarget> | null = null;
+  let releaseVpsMaintenance: (() => void) | null = null;
+  let vpsStartAcknowledged = false;
+  async function getSourceTarget(refresh: boolean): Promise<AppUpdateTarget> {
+    if (sourceTargetPending) return sourceTargetPending;
+    if (!refresh && sourceTarget && Date.now() - sourceTargetAt < 300_000) return sourceTarget;
+    sourceTargetPending = readSourceUpdateTarget().then((target) => { sourceTarget = target; sourceTargetAt = Date.now(); return target; }).finally(() => { sourceTargetPending = null; });
+    return sourceTargetPending;
+  }
+
+  const ticketOperations = createTicketOperations({ store, hub, lifecycle, slots, feasibility: deps.feasibility, isMaintenance: () => deps.system.sourceUpdateAdmission.isUpdating });
   const quotaService = deps.quota ?? new ProviderQuotaService({
     system: deps.system,
     persistence: {
@@ -1072,10 +1105,67 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.
+    .get("/provider-updates", async ({ query, request }) => {
+      const refresh = query.refresh === "1";
+      const system = deps.system;
+      const rowsPending = system.sourceUpdateAdmission.isUpdating
+        ? Promise.resolve(providerUpdates.snapshot())
+        : system.sourceUpdateAdmission.run(() => providerUpdates.read(system.dryRun, deps.resourcesRoot ?? deps.projectRoot, refresh), false);
+      let host: "source" | "mac" | "vps" | "browser" = "browser";
+      let target: AppUpdateTarget | null = null;
+      let available = false;
+      let message: string | null = "Ce mode ne dispose pas d'installateur. Mettez à jour l'application depuis son installation d'origine.";
+      try {
+        if (isCloudHost()) {
+          host = "vps";
+          message = "La confirmation utilise le service de mise à jour du VPS.";
+          if (!system.dryRun) {
+            target = await system.vpsUpdateTarget?.(request.headers.get("Cf-Access-Jwt-Assertion") ?? "") ?? null;
+            available = target !== null;
+            if (!target) message = "Le service root doit être mis à jour par l'opérateur pour publier sa cible.";
+          }
+        } else if (deps.repoRoot && deps.onRequestUpdate) {
+          host = "source";
+          message = "La mise à jour installe le graphe verrouillé de la version de l'application.";
+          if (!system.dryRun) { target = await getSourceTarget(refresh); available = true; }
+        } else if (deps.desktopUpdates) {
+          host = "mac";
+          if (!system.dryRun) {
+            const desktop = await deps.desktopUpdates.check(refresh);
+            if (desktop.target) target = { id: desktop.target.version, version: desktop.target.version, providers: desktop.target.providers };
+            available = desktop.phase === "available" || desktop.phase === "ready";
+            message = desktop.message;
+          }
+        }
+      } catch { message = "Cible de l'application indisponible. Vérifiez l'accès à la source ou au service de mise à jour ; aucune version compatible ne peut être confirmée."; }
+      if (system.dryRun) { available = false; message = "Simulation : aucune installation ni consultation du registre."; }
+      const rows = await rowsPending;
+      return providerUpdatesSchema.parse({ simulated: system.dryRun, checkedAt: providerUpdates.lastCheckedAt, rows, host, target, available, message, maintenance: system.sourceUpdateAdmission.isUpdating });
+    })
+    .get("/desktop-update", async ({ query, request, set }) => {
+      if (deps.system.dryRun) return jsonError(set, HTTP_CONFLICT, "Desktop updates are disabled in simulation.");
+      if (!deps.desktopUpdates || !isLocalRequest(request)) return jsonError(set, HTTP_CONFLICT, "Packaged desktop updates are unavailable.");
+      return deps.desktopUpdates.check(query.refresh === "1");
+    })
+    .post("/desktop-update/:action", async ({ params, body, request, set }) => {
+      if (deps.system.dryRun) return jsonError(set, HTTP_CONFLICT, "Desktop updates are disabled in simulation.");
+      if (!deps.desktopUpdates || !isLocalRequest(request) || request.headers.get("x-kanban-update") !== "confirm") return jsonError(set, 403, "A local desktop confirmation is required.");
+      const parsed = z.object({ target: z.string().max(128) }).safeParse(body);
+      if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "A checked release target is required.");
+      try {
+        if (params.action === "prepare") return await deps.desktopUpdates.prepare(parsed.data.target);
+        if (params.action === "install") return await deps.desktopUpdates.install(parsed.data.target);
+        return jsonError(set, HTTP_NOT_FOUND, "Unknown desktop update action.");
+      } catch (error) { return jsonError(set, HTTP_CONFLICT, getErrorMessage(error)); }
+    })
     .get("/vps-update", async ({ request }) => {
       if (!isCloudHost()) return null;
       if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
-      return Response.json(await deps.system.vpsUpdate("status", request.headers.get("Cf-Access-Jwt-Assertion") ?? ""), { headers: { "cache-control": "no-store" } });
+      const maintenance = releaseVpsMaintenance;
+      const acknowledged = vpsStartAcknowledged;
+      const status = await deps.system.vpsUpdate("status", request.headers.get("Cf-Access-Jwt-Assertion") ?? "");
+      if (maintenance && releaseVpsMaintenance === maintenance && acknowledged && status.phase === "refused") { maintenance(); releaseVpsMaintenance = null; vpsStartAcknowledged = false; }
+      return Response.json(status, { headers: { "cache-control": "no-store" } });
     })
     .post("/vps-update", async ({ request, set }) => {
       const origin = request.headers.get("origin");
@@ -1085,7 +1175,19 @@ export function createApiRoutes(deps: RouteDeps) {
         return { error: "A same-origin cloud UI confirmation is required." };
       }
       if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
-      return Response.json(await deps.system.vpsUpdate("start", request.headers.get("Cf-Access-Jwt-Assertion") ?? ""), { headers: { "cache-control": "no-store" } });
+      if (isClaudeLoginActive(deps.system.claudeLoginStatus().state)) return jsonError(set, HTTP_CONFLICT, "Finish the active Claude login before updating.");
+      const release = deps.system.sourceUpdateAdmission.tryAcquireUpdate();
+      if (!release) return jsonError(set, HTTP_CONFLICT, "Finish active provider work before updating.");
+      releaseVpsMaintenance = release;
+      vpsStartAcknowledged = false;
+      try {
+        const target = request.headers.get("x-kanban-target") ?? undefined;
+        if (target !== undefined && !/^[a-f0-9]{40}$/.test(target)) { release(); releaseVpsMaintenance = null; return jsonError(set, HTTP_BAD_REQUEST, "Invalid update target."); }
+        const status = await deps.system.vpsUpdate("start", request.headers.get("Cf-Access-Jwt-Assertion") ?? "", target);
+        vpsStartAcknowledged = status.phase === "resolving" || status.phase === "running";
+        if (status.phase === "refused" || status.phase === "idle") { release(); releaseVpsMaintenance = null; }
+        return Response.json(status, { headers: { "cache-control": "no-store" } });
+      } catch { return jsonError(set, HTTP_BAD_GATEWAY, "Update acknowledgement unavailable. Admission remains closed; inspect the updater before restarting the server."); }
     })
     .get("/host-metrics", async () => {
       const metrics = isCloudHost() ? await readHostMetrics() : null;
@@ -1395,6 +1497,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { ok: true };
     })
     .post("/automations/:id/run", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, "Maintenance in progress. This automation was not started; retry after maintenance.");
       if (!store.getAutomation(params.id)) return jsonError(set, HTTP_NOT_FOUND, "automatisation introuvable");
       void automations.runNow(params.id);
       return { started: true };
@@ -1433,6 +1536,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { ticket, comments: store.listComments(params.id) };
     })
     .post("/tickets", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = createTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
@@ -1497,6 +1601,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return parkOrStart(deps, ticket, parsed.data.start);
     })
     .post("/tickets/import", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = importTicketsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const input = parsed.data;
@@ -1557,6 +1662,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { created, feasibilityStarted: true };
     })
     .post("/tickets/analyze", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = analyzeTicketsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       return ticketOperations.analyzeTickets(parsed.data.ids);
@@ -1569,6 +1675,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return notification;
     })
     .post("/pr-notifications/:id/review", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const notification = store.listPrNotifications().find((entry) => entry.id === params.id);
       if (!notification) return jsonError(set, HTTP_NOT_FOUND, "Review notification not found");
       if (notification.resolvedAt !== null && (notification.ticketId === null || store.getTicket(notification.ticketId) === null)) return jsonError(set, HTTP_CONFLICT, "This review request is no longer active");
@@ -1591,6 +1698,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return result;
     })
     .post("/reviews", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = createReviewSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
@@ -1612,6 +1720,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return created;
     })
     .post("/cleaners", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = createCleanSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
@@ -1643,6 +1752,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return created;
     })
     .post("/asks", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = createAskSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_BAD_REQUEST, "projet inconnu");
@@ -1894,6 +2004,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return slots.updateDependencyBase(params.id);
     })
     .post("/tickets/:id/retry", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
@@ -1905,6 +2016,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/resolve-conflicts", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Itération qualité en cours.");
@@ -1927,6 +2039,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/test", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id)) return jsonError(set, HTTP_CONFLICT, "Une itération qualité occupe cette carte ; attends sa fin avant de lancer un test interactif.");
@@ -1956,6 +2069,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/create-pr", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       const eligible = ticket.column === "to_review" && ticket.stealth && ticket.slotId !== null;
@@ -1967,6 +2081,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/implementation-recovery", async ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
       const parsed = recoverImplementationPlanArgsSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
@@ -1979,6 +2094,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return slots.autonomousWorkspaces(params.id);
     })
     .post("/tickets/:id/autonomous-resume", async ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       if (!store.getTicket(params.id)) return jsonError(set, HTTP_NOT_FOUND, "Ticket not found.");
       const emptyBody = body == null || (typeof body === "object" && Object.keys(body).length === 0);
       const parsed = autonomousResumeSchema.safeParse(emptyBody ? { action: "resume" } : body);
@@ -1988,6 +2104,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/relaunch", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (store.getActiveQualityIteration(params.id) || store.getLatestQualityIteration(params.id)?.mode === "correction") return jsonError(set, HTTP_CONFLICT, "Utilise l'action dédiée à l'itération qualité.");
@@ -1999,6 +2116,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return store.getTicket(params.id);
     })
     .post("/tickets/:id/triage", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
@@ -2020,6 +2138,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { started: true };
     })
     .post("/tickets/:id/triage-plus", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
@@ -2039,6 +2158,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { started: true };
     })
     .post("/tickets/:id/split", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (ticket.kind !== "feature") return jsonError(set, HTTP_CONFLICT, "découpage réservé aux tickets feature");
@@ -2059,6 +2179,7 @@ export function createApiRoutes(deps: RouteDeps) {
       }
     })
     .post("/tickets/:id/feasibility-answers", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = feasibilityAnswerInputSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid feasibility answer");
       try {
@@ -2069,6 +2190,7 @@ export function createApiRoutes(deps: RouteDeps) {
       }
     })
     .post("/tickets/:id/feasibility-answers/batch", ({ params, body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = feasibilityAnswerBatchInputSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid feasibility answers");
       try {
@@ -2079,6 +2201,7 @@ export function createApiRoutes(deps: RouteDeps) {
       }
     })
     .post("/tickets/:id/reformulate", ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const ticket = store.getTicket(params.id);
       if (!ticket) return jsonError(set, HTTP_NOT_FOUND, "ticket introuvable");
       if (isProcessing(ticket.stage)) return jsonError(set, HTTP_CONFLICT, "ticket verrouillé (en traitement)");
@@ -2091,6 +2214,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { started: true };
     })
     .post("/notion/import", async ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = importNotionSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "URL Notion invalide");
       try {
@@ -2150,6 +2274,7 @@ export function createApiRoutes(deps: RouteDeps) {
     })
     .get("/worktree-sessions", () => slots.listWorktreeSessions())
     .post("/worktree-sessions", ({ body, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const parsed = startWorktreeSessionBodySchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       if (!isProjectKey(parsed.data.project)) return jsonError(set, HTTP_NOT_FOUND, "projet inconnu");
@@ -2167,6 +2292,7 @@ export function createApiRoutes(deps: RouteDeps) {
       return { ok: true };
     })
     .post("/worktree-sessions/:slotId/relaunch", async ({ params, set }) => {
+      if (deps.system.sourceUpdateAdmission.isUpdating) return jsonError(set, HTTP_CONFLICT, MAINTENANCE_REFUSAL);
       const slotId = Number(params.slotId);
       if (!Number.isInteger(slotId) || slotId <= 0) return jsonError(set, HTTP_BAD_REQUEST, "slotId invalide");
       await slots.relaunchWorktreeSession(slotId);
@@ -2179,57 +2305,81 @@ export function createApiRoutes(deps: RouteDeps) {
       return { path: saved.path, url: saved.url };
     })
     .get("/slots", () => store.listSlots())
-    .post("/internal/update", async ({ set }) => {
+    .post("/internal/update", async ({ body, request, set }) => {
+      if (!isLocalRequest(request)) return jsonError(set, 403, "Source updates require a local request.");
       const { onRequestUpdate, repoRoot, system } = deps;
       if (!onRequestUpdate || !repoRoot) return jsonError(set, HTTP_CONFLICT, "mise à jour indisponible");
 
-      // Guards: never touch a dirty or diverged tree.
-      const branch = await system.gitCurrentBranch(repoRoot);
-      if (branch !== UPDATE_BASE_BRANCH) {
-        return jsonError(set, HTTP_BAD_REQUEST, `branche courante « ${branch || "?"} » ≠ ${UPDATE_BASE_BRANCH} : bascule dessus avant de mettre à jour`);
-      }
-      if (!(await system.gitStatusClean(repoRoot))) {
-        return jsonError(set, HTTP_BAD_REQUEST, "arbre de travail sale : commite ou stashe tes changements avant de mettre à jour");
-      }
+      const approved = z.object({ target: z.string().regex(/^[a-f0-9]{40}$/).optional() }).safeParse(body ?? {});
+      if (!approved.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid source update target.");
+      if (approved.data.target && sourceTarget?.id !== approved.data.target) return jsonError(set, HTTP_CONFLICT, "Refresh the source target before confirming.");
+      if (isClaudeLoginActive(system.claudeLoginStatus().state)) return jsonError(set, HTTP_CONFLICT, "mise à jour refusée : une connexion Claude est en cours");
+      const releaseUpdate = system.sourceUpdateAdmission.tryAcquireUpdate();
+      if (!releaseUpdate) return jsonError(set, HTTP_CONFLICT, "mise à jour refusée : une session agent ou une mise à jour est en cours, ou une mise à jour a échoué ; ferme les sessions ou répare puis redémarre le checkout");
+      return updateMutex.run(repoRoot, async () => {
+        let mutationStarted = false;
+        try {
+          const branch = await system.gitCurrentBranch(repoRoot);
+          if (branch !== UPDATE_BASE_BRANCH) {
+            return jsonError(set, HTTP_BAD_REQUEST, `branche courante « ${branch || "?"} » ≠ ${UPDATE_BASE_BRANCH} : bascule dessus avant de mettre à jour`);
+          }
+          if (!(await system.gitStatusClean(repoRoot))) {
+            return jsonError(set, HTTP_BAD_REQUEST, "arbre de travail sale : commite ou stashe tes changements avant de mettre à jour");
+          }
 
-      // Capture HEAD before the pull so we can diff what actually changed.
-      const headResult = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
-      if (!headResult.ok) log.warn("git rev-parse HEAD a échoué, fallback relaunch", { repoRoot });
-      const beforeHash = headResult.ok ? headResult.output.trim() : null;
+          const headResult = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
+          if (!headResult.ok) return jsonError(set, HTTP_BAD_GATEWAY, "impossible de lire la révision avant mise à jour");
+          const beforeHash = headResult.output.trim();
+          if (!/^[a-f0-9]{40,64}$/.test(beforeHash)) return jsonError(set, HTTP_BAD_GATEWAY, "révision git invalide");
 
-      const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH);
-      if (!pull.ok) return jsonError(set, HTTP_BAD_REQUEST, pull.reason);
+          system.sourceUpdateAdmission.recordSourceUpdate("mutating", beforeHash);
+          mutationStarted = true;
+          const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH);
+          if (!pull.ok) throw new Error(pull.reason);
 
-      // Classify the pull: frontend-only (src/web/** exclusively) → soft reload; anything else → relaunch.
-      let frontendOnly = false;
-      if (beforeHash) {
-        const diffResult = await system.runProjectScript(
-          repoRoot,
-          `git diff --name-only ${beforeHash} HEAD`,
-          GIT_QUERY_TIMEOUT_MS,
-        );
-        if (!diffResult.ok) log.warn("git diff --name-only a échoué, fallback relaunch", { repoRoot, beforeHash });
-        const changed = diffResult.ok ? diffResult.output.trim().split("\n").filter(Boolean) : [];
-        frontendOnly = changed.length > 0 && changed.every(isWebOnlyPath);
-      }
+          if (approved.data.target) {
+            const selected = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
+            if (!selected.ok || selected.output.trim() !== approved.data.target) throw new Error("La source a changé depuis la confirmation. Vérifiez le checkout avant de redémarrer.");
+          }
+          const diffResult = await system.runProjectScript(repoRoot, `git diff --name-only ${beforeHash} HEAD`, GIT_QUERY_TIMEOUT_MS);
+          if (!diffResult.ok) throw new Error("impossible de classifier les changements");
+          const changed = diffResult.output.trim().split("\n").filter(Boolean);
+          const frontendOnly = changed.length > 0 && changed.every(isWebOnlyPath);
+          if (!frontendOnly) {
+            const install = await system.runProjectScript(repoRoot, "bun install --frozen-lockfile", UPDATE_COMMAND_TIMEOUT_MS);
+            if (!install.ok) throw new Error(`installation des dépendances échouée : ${install.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+          }
 
-      try {
-        // The server runs the agent sessions in-process from source, so a non-frontend change only
-        // needs the web bundle rebuilt; the relaunch below picks up the new server source directly.
-        const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_BUILD_TIMEOUT_MS);
-        if (!web.ok) return jsonError(set, HTTP_BAD_GATEWAY, `build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
-      } catch (error) {
-        return jsonError(set, HTTP_BAD_GATEWAY, `build interrompu : ${getErrorMessage(error)}`);
-      }
+          const web = await system.runProjectScript(repoRoot, "bun run build:web", UPDATE_COMMAND_TIMEOUT_MS);
+          if (!web.ok) throw new Error(`build:web a échoué : ${web.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+          if (!frontendOnly) {
+            const updaterBuild = await system.runProjectScript(repoRoot, "bun run build:updater", UPDATE_COMMAND_TIMEOUT_MS);
+            if (!updaterBuild.ok) throw new Error(`build:updater a échoué : ${updaterBuild.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+            const previewTools = await system.runProjectScript(repoRoot, "bun run build:preview-tools", UPDATE_COMMAND_TIMEOUT_MS);
+            if (!previewTools.ok) throw new Error(`build:preview-tools a échoué : ${previewTools.output.trim().slice(-BUILD_ERROR_TAIL)}`);
+          }
 
-      const mode: UpdateMode = frontendOnly ? "reload" : "relaunch";
-      if (frontendOnly) {
-        log.info("mise à jour frontend-only validée, soft-reload", { repoRoot, branch });
-        return { ok: true, mode };
-      }
-      log.info("mise à jour validée, relance imminente", { repoRoot, branch });
-      // Defer so this {ok:true} flushes before the server stops and the process exits.
-      setTimeout(onRequestUpdate, UPDATE_RELAUNCH_DELAY_MS);
-      return { ok: true, mode };
+          const mode: UpdateMode = frontendOnly ? "reload" : "relaunch";
+          if (frontendOnly) {
+            system.sourceUpdateAdmission.completeSourceRecovery();
+            mutationStarted = false;
+            log.info("mise à jour frontend-only validée, soft-reload", { repoRoot, branch });
+            return { ok: true, mode };
+          }
+          const completed = await system.runProjectScript(repoRoot, "git rev-parse HEAD", GIT_QUERY_TIMEOUT_MS);
+          if (!completed.ok) throw new Error("Impossible de confirmer la révision construite.");
+          system.sourceUpdateAdmission.recordSourceUpdate("ready", completed.output.trim());
+          log.info("mise à jour validée, relance imminente", { repoRoot, branch });
+          setTimeout(onRequestUpdate, UPDATE_RELAUNCH_DELAY_MS);
+          return { ok: true, mode };
+        } catch (error) {
+          const recovery = mutationStarted
+            ? " Le checkout ou les dépendances peuvent avoir changé. Les agents restent bloqués ; répare l'installation et le build dans le checkout avant de redémarrer l'application. Aucun retour arrière automatique."
+            : "";
+          return jsonError(set, HTTP_BAD_GATEWAY, `mise à jour interrompue : ${redactSecrets(getErrorMessage(error))}${recovery}`);
+        } finally {
+          if (!mutationStarted) releaseUpdate();
+        }
+      });
     });
 }

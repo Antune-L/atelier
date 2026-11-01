@@ -1,18 +1,11 @@
 import { join } from "node:path";
 
-/**
- * Dev-desktop self-update relauncher. The update endpoint already pulled + rebuilt; here we hand
- * off to a DETACHED process that outlives this one, waits for it (and its port 52817 listener) to
- * die, then re-runs `electrobun dev` in the real checkout — which rewipes build/ and rebuilds the
- * bundle from the fresh dist/. The detached + unref'd child survives our process.exit; the
- * kill-0 wait avoids the EADDRINUSE race a too-eager rebind would hit (pattern: Electrobun's
- * Updater spin-wait on the old PID).
- *
- * Agent tmux sessions are intentionally NOT torn down by the update path, so they survive the gap
- * and the fresh backend re-attaches them on boot (SlotManager.recover + worker WS reconnect).
- */
+// NOTE(ali): Source updates install the committed dependency graph and rebuild before this handoff.
+// NOTE(ali): The update admission gate excludes live provider sessions; preserved tmux shells are user shells only.
 
 const RELAUNCH_LOG = ".update.log";
+const MAX_EXIT_POLLS = 300;
+const EXIT_POLL_SECONDS = 0.2;
 /** Electrobun's bin shim (`#!/usr/bin/env node`); run from repoRoot so its projectRoot = repoRoot. */
 const ELECTROBUN_BIN = join("node_modules", ".bin", "electrobun");
 
@@ -22,12 +15,20 @@ export function spawnRelauncher(repoRoot: string): void {
   // Wait for THIS process (the dying backend) to release the port, then relaunch. stdout/stderr are
   // redirected to <repoRoot>/.update.log inside the shell so we can fully detach (ignore here).
   const script = [
-    `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done`,
-    `cd ${JSON.stringify(repoRoot)}`,
-    `exec ${JSON.stringify(bin)} dev >> ${JSON.stringify(logPath)} 2>&1`,
+    'attempt=0',
+    'while kill -0 "$4" 2>/dev/null; do',
+    `  if [ "$attempt" -ge ${MAX_EXIT_POLLS} ]; then`,
+    '    printf "%s\\n" "Source update restart timed out. Inspect the recovery receipt before retrying." >> "$3"',
+    '    exit 1',
+    '  fi',
+    '  attempt=$((attempt + 1))',
+    `  sleep ${EXIT_POLL_SECONDS}`,
+    'done',
+    'cd "$1" || exit 1',
+    'exec "$2" dev >> "$3" 2>&1',
   ].join("\n");
 
-  const proc = Bun.spawn(["sh", "-c", script], {
+  const proc = Bun.spawn(["sh", "-c", script, "atelier-relaunch", repoRoot, bin, logPath, String(process.pid)], {
     cwd: repoRoot,
     stdin: "ignore",
     stdout: "ignore",

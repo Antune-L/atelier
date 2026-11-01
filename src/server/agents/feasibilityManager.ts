@@ -150,7 +150,11 @@ export class FeasibilityBatchManager {
   }
 
   /** Mark every ticket `running`, then spawn the batch session and deliver its contract once connected. */
-  async start(ticketIds: string[], projectKey: string): Promise<void> {
+  start(ticketIds: string[], projectKey: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startAdmitted(ticketIds, projectKey));
+  }
+
+  private async startAdmitted(ticketIds: string[], projectKey: string): Promise<void> {
     if (this.stopped) return;
     if (ticketIds.length === 0) return;
     if (!isProjectKey(projectKey)) {
@@ -234,7 +238,12 @@ export class FeasibilityBatchManager {
    * once the worker connects. `attempt` tracks automatic relaunches (0 = initial). A failure to
    * spawn routes to `retryOrFail` WITH the known ids so a throw before registration can't lose them.
    */
-  private async spawnBatch(group: QueuedFeasibility): Promise<void> {
+  private spawnBatch(group: QueuedFeasibility): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.spawnBatchAdmitted(group));
+  }
+
+  private async spawnBatchAdmitted(group: QueuedFeasibility): Promise<void> {
+    if (this.stopped) return;
     const { ticketIds, project, baseBranch, execution, attempt, remote } = group;
     const batchId = `${FEASIBILITY_BATCH_PREFIX}${nanoid(8)}`;
     const tickets = ticketIds

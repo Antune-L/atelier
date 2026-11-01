@@ -20,6 +20,7 @@ export class Watchdog {
     private readonly store: Store,
     private readonly hub: ClientHub,
     private readonly notifier: Notifier,
+    private readonly maintenance: () => boolean = () => false,
   ) {}
 
   start(): void {
@@ -33,6 +34,7 @@ export class Watchdog {
   }
 
   private tick(): void {
+    if (this.maintenance()) return;
     const now = Date.now();
     for (const ticket of this.store.listTickets(false)) {
       if (ticket.stage === null || !ACTIVE_STAGES.includes(ticket.stage)) continue;

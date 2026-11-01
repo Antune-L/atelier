@@ -18,6 +18,7 @@ import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
+import { SourceUpdateAdmission } from "./sourceUpdateAdmission.ts";
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { collectGitAuditRange } from "./auditRange.ts";
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
@@ -25,7 +26,7 @@ import { assertOperationActive, BOUNDED_COMMAND_TIMEOUT_MS, boundedCommandDetail
 import { ensureClaudeBinary, resolveClaudeBinary } from "./claudeBinary.ts";
 import { claudeProvider, confinedClaudeEnv, confinedOneShotOptions, createClaudeSubagentTracker, dispatchClaudeMessage, toSdkEffort } from "./claudeProvider.ts";
 import { createCodexProvider } from "./codexProvider.ts";
-import { requestVpsUpdate } from "./vpsUpdate.ts";
+import { requestVpsUpdate, requestVpsUpdateTarget } from "./vpsUpdate.ts";
 import { runVpsBridge } from "./vpsBridge.ts";
 import type { VpsBridgeCall, VpsBridgeResult } from "./vpsBridge.ts";
 import { requestCoolify } from "./coolifyClient.ts";
@@ -252,8 +253,12 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
  * Never instantiated in the default dev/test path.
  */
 export class RealSystemAdapter implements SystemAdapter {
-  vpsUpdate(action: VpsUpdateAction, assertion: string): Promise<VpsUpdateStatus> {
-    return requestVpsUpdate(action, assertion);
+  readonly sourceUpdateAdmission = new SourceUpdateAdmission();
+  vpsUpdateTarget(assertion: string) {
+    return requestVpsUpdateTarget(assertion);
+  }
+  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus> {
+    return requestVpsUpdate(action, assertion, target);
   }
 
   runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult> {
@@ -321,7 +326,10 @@ export class RealSystemAdapter implements SystemAdapter {
     workerMcpManager: WorkerMcpManager,
     private readonly logsDirectory?: string,
   ) {
-    this.providers = { claude: claudeProvider, codex: createCodexProvider(workerMcpManager) };
+    this.providers = {
+      claude: this.sourceUpdateAdmission.provider(claudeProvider),
+      codex: this.sourceUpdateAdmission.provider(createCodexProvider(workerMcpManager)),
+    };
   }
 
   private vcs(provider: VcsProvider): VcsClient {
@@ -773,7 +781,11 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.providers[opts.provider].createSession({ ...opts, environment: { ...opts.environment, ...github } });
   }
 
-  async reformulate(opts: ReformulateOptions): Promise<string> {
+  reformulate(opts: ReformulateOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.reformulateAdmitted(opts));
+  }
+
+  private async reformulateAdmitted(opts: ReformulateOptions): Promise<string> {
     if (opts.provider === "codex") {
       return runOneShotSession(this.providers.codex, {
         provider: "codex", cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default",
@@ -799,7 +811,11 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.runOneShotQuery(opts.prompt, queryOptions, REFORMULATE_TIMEOUT_MS, "reformulation échouée", opts.onEvent);
   }
 
-  async importNotion(opts: ImportNotionOptions): Promise<string> {
+  importNotion(opts: ImportNotionOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.importNotionAdmitted(opts));
+  }
+
+  private async importNotionAdmitted(opts: ImportNotionOptions): Promise<string> {
     if (opts.provider === "codex") {
       return runOneShotSession(this.providers.codex, {
         provider: "codex", cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default",
@@ -827,7 +843,11 @@ export class RealSystemAdapter implements SystemAdapter {
     return this.runOneShotQuery(opts.prompt, queryOptions, NOTION_IMPORT_TIMEOUT_MS, "import Notion échoué", opts.onEvent);
   }
 
-  async runAutomation(opts: RunAutomationOptions): Promise<string> {
+  runAutomation(opts: RunAutomationOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.runAutomationAdmitted(opts));
+  }
+
+  private async runAutomationAdmitted(opts: RunAutomationOptions): Promise<string> {
     // A user-authored automation should be able to actually DO things (write files, run bash), so it
     // bypasses permissions and keeps the full default toolset — unlike the read-only reformulate/import.
     const sdkEffort = toSdkEffort(opts.effort);
@@ -886,6 +906,7 @@ export class RealSystemAdapter implements SystemAdapter {
       throw new Error(`${label} : ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       clearTimeout(timer);
+      session.close();
     }
 
     if (timedOut) throw new Error(`${label} : timeout (${timeoutMs}ms)`);
@@ -1541,15 +1562,23 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   checkCodexRuntime(refresh = false): Promise<CodexRuntimeStatus> {
-    return this.codexCapabilities.read(refresh);
+    return this.sourceUpdateAdmission.run(() => this.codexCapabilities.read(refresh), false);
   }
 
   readCodexQuota(): Promise<ProviderQuota> {
+    return this.sourceUpdateAdmission.run(() => this.readCodexQuotaAdmitted(), false);
+  }
+
+  private readCodexQuotaAdmitted(): Promise<ProviderQuota> {
     return readCodexQuota();
   }
 
   /** Idle SDK query (no user message, no turn) answering the `get_usage` control request; never reads ~/.claude. */
   readClaudeUsage(): Promise<ProviderQuota> {
+    return this.sourceUpdateAdmission.run(() => this.readClaudeUsageAdmitted(), false);
+  }
+
+  private readClaudeUsageAdmitted(): Promise<ProviderQuota> {
     return readClaudeUsageLive({
       environment: process.env,
       resolveBinary: resolveRunnableClaudeBinary,
@@ -1591,6 +1620,7 @@ export class RealSystemAdapter implements SystemAdapter {
   }
 
   startClaudeLogin(): ClaudeLoginStatus {
+    this.sourceUpdateAdmission.assertAvailable();
     return this.claudeLoginManager().start();
   }
 

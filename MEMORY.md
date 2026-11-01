@@ -87,3 +87,13 @@ Never add `allow-same-origin` to the mockup iframe sandbox (`MOCKUP_SANDBOX`), n
 ## Root updater capabilities on systemd 259
 
 UID 0 and CapabilityBoundingSet do not prove effective CAP_SETUID. On the VPS, systemd 259.5 started the root updater without that effective capability, causing runuser to fail before cutover. Its seccomp execution path drops CAP_SETUID unless retained in AmbientCapabilities. Preserve CAP_SETUID explicitly for this updater; retain NoNewPrivileges and all application hardening. Verify /proc service capabilities and a harmless user-switch probe separately from a real upgrade, and never reset failed updater state while an upgrade is running.
+
+## Source desktop update admission
+
+Preserved tmux shells are interactive user shells, not preserved in-process Claude/Codex sessions. Source updates must reserve provider admission before awaiting Git checks and include one-shot operations and read-only provider subprocess probes. If pulling, dependency installation or bundle building fails after mutation starts, keep admission closed until checkout repair and process restart; the old process can otherwise launch work against a partially replaced dependency tree. This process-local guard cannot coordinate another desktop process or user shell.
+
+Maintenance admission must defer owner-level preparation before validation/audit deadlines and fail no unrelated ticket merely because a provider start was denied. Track native session closure independently of a turn ending, and keep manual refusals ahead of run persistence. A packaged update must hold startup recovery until backend/native health is acknowledged; failed transaction receipts must not silently resume provider work.
+
+Electrobun 1.18.1 postBuild runs before version.json is written, so a complete update ZIP must come from the final full archive. Its mutable latest lookup and delete-before-rename apply path are not an authenticated/recoverable installer. Preserve an old-app backup, verify a publisher-signed fixed manifest, distinguish publisher signatures from Apple signing, and retain manual first adoption for an absent feed/key. Preserve the signing key across releases and clear app-owned old native-binary environment pins across replacement.
+
+- Source update maintenance must survive process death: write the data-root recovery receipt before Git/dependency mutation, keep interrupted boots closed, and clear prepared receipts only after revision, package metadata and native health checks. Never describe code restoration as database rollback.

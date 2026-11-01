@@ -97,7 +97,11 @@ export class FeasibilityAnswerManager {
     return runs.map((run) => run.id);
   }
 
-  private async run(ticket: Ticket, runs: FeasibilityAnswerRun[], execution: ResolvedExecution, cwd: string): Promise<void> {
+  private run(ticket: Ticket, runs: FeasibilityAnswerRun[], execution: ResolvedExecution, cwd: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.runAdmitted(ticket, runs, execution, cwd));
+  }
+
+  private async runAdmitted(ticket: Ticket, runs: FeasibilityAnswerRun[], execution: ResolvedExecution, cwd: string): Promise<void> {
     const runIds = new Set(runs.map((run) => run.id));
     const remote = isRemoteTicket(ticket);
     const isolation: { copy: RemoteAnalysisCopy | null } = { copy: null };

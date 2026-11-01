@@ -1,12 +1,16 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, PATHS, Utils, app } from "electrobun/bun";
+import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, PATHS, Updater, Utils, app } from "electrobun/bun";
 import { z } from "zod";
 
 import { applyDesktopEnv, ensureConfig, type DesktopRoots } from "./bootstrap.ts";
 import { createMcpSettingsController } from "./mcpSettings.ts";
 import type { AtelierDesktopRpcSchema, McpTokenSource } from "./mcpRpc.ts";
+import { createDesktopUpdates, confirmDesktopUpdateHealth } from "./updates.ts";
+import { updateReceiptSchema, UPDATE_RECEIPT } from "./updateFiles.ts";
+import { resolveCodexBinary, verifyCodexBinaryVersion } from "../src/server/system/codexBinary.ts";
+import { ensureClaudeBinary, isCompatibleCli, resolveClaudeBinary } from "../src/server/system/claudeBinary.ts";
 import { spawnRelauncher } from "./relaunch.ts";
 import { repairPath } from "./repairPath.ts";
 
@@ -182,6 +186,7 @@ async function boot(): Promise<void> {
   // 1. Bootstrap config + env BEFORE importing the server (config.ts throws at import otherwise).
   const configPath = ensureConfig(roots);
   applyDesktopEnv(roots, configPath, BUN_PATH);
+  const dryRun = process.env.KANBAN_DRY_RUN !== "0";
 
   // The `claude` binary is NOT embedded (proprietary — see claudeBinary.ts): the server provisions it
   // at boot (user install detection, else pinned npm download into dataRoot/bin). Only the Apache-2.0
@@ -196,14 +201,27 @@ async function boot(): Promise<void> {
   // exported by the dev:desktop script + the relauncher) to be a git working copy. A packaged
   // .app never sets it, so canUpdate stays false there and the button is hidden.
   const repoRoot = process.env.KANBAN_REPO_ROOT;
-  const canSelfUpdate = repoRoot != null && existsSync(join(repoRoot, ".git"));
+  const localBuild = await Updater.getLocalInfo();
+  const canSelfUpdate = localBuild.channel === "dev" && repoRoot != null && existsSync(join(repoRoot, ".git"));
 
   // Late-bound so onRequestUpdate can reference `server`/`teardown` defined just below.
   let requestUpdate: (() => void) | undefined;
 
   // 3. Dynamic import only now that config + env are in place.
   const { startServer } = await import("../src/server/index.ts");
+  const nativeHealth = async (): Promise<void> => {
+    await ensureClaudeBinary();
+    await verifyCodexBinaryVersion(resolveCodexBinary());
+    if (!await isCompatibleCli(resolveClaudeBinary())) throw new Error("Claude native compatibility check failed.");
+  };
+  const pendingUpdate = updateReceiptSchema.safeParse(await Bun.file(join(roots.dataRoot, UPDATE_RECEIPT)).json().catch(() => null));
+  const isPendingUpdate = !dryRun && !canSelfUpdate && pendingUpdate.success && pendingUpdate.data.phase === "pending";
+  const needsUpdateRecovery = !dryRun && !canSelfUpdate && pendingUpdate.success && (pendingUpdate.data.phase === "pending" || pendingUpdate.data.phase === "failed");
+  const desktopUpdates = dryRun || canSelfUpdate ? undefined : createDesktopUpdates({ ...roots, reserve: () => server.reserveUpdate(), stopAndExit: async () => { await server.stop(); process.exit(0); } });
   const server = await startServer({
+    desktopUpdates,
+    deferRecovery: needsUpdateRecovery,
+    beforeRecovery: !dryRun && (isPendingUpdate || canSelfUpdate) ? nativeHealth : undefined,
     resourcesRoot: roots.resourcesRoot,
     dataRoot: roots.dataRoot,
     // WKWebView has no web Notification API, so the front's desktop notifications are inert here.
@@ -316,6 +334,11 @@ async function boot(): Promise<void> {
       const url = externalUrlFromNewWindowEvent(event);
       if (url != null) Utils.openExternal(url);
     });
+    if (isPendingUpdate) {
+      const healthy = await confirmDesktopUpdateHealth(roots.resourcesRoot, roots.dataRoot, nativeHealth);
+      if (!healthy) throw new Error("Desktop update health acknowledgement was interrupted; operator inspection is required.");
+      await server.resumeRecovery();
+    }
   } catch (error) {
     await teardown().catch(() => undefined);
     throw error;

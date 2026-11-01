@@ -646,23 +646,34 @@ export class AuditManager {
   }
 
   private async execute(runId: string): Promise<void> {
+    if (this.stopped || this.active !== null) return;
     const active: ActiveAudit = { runId, controller: new AbortController(), reason: null };
     this.active = active;
+    try {
+      await this.system.sourceUpdateAdmission.run(() => this.executeAdmitted(active));
+    } catch (error) {
+      log.error("audit en échec", { runId, error: getErrorMessage(error) });
+      if (!this.stopped) this.failRun(runId, getErrorMessage(error, MESSAGES.unexpectedFailure));
+    } finally {
+      if (this.active === active) {
+        this.active = null;
+        if (!this.stopped) {
+          this.pushOverview();
+          this.drainQueue();
+        }
+      }
+    }
+  }
+
+  private async executeAdmitted(active: ActiveAudit): Promise<void> {
+    if (this.stopped || active.controller.signal.aborted || this.active !== active) return;
     const yieldTimer = setInterval(() => {
       if (!this.isIdle()) this.abortActive("yield");
     }, AUDIT_YIELD_CHECK_MS);
     try {
       await this.runAudit(active);
-    } catch (error) {
-      log.error("audit en échec", { runId, error: getErrorMessage(error) });
-      if (!this.stopped) this.failRun(runId, getErrorMessage(error, MESSAGES.unexpectedFailure));
     } finally {
       clearInterval(yieldTimer);
-      this.active = null;
-      if (!this.stopped) {
-        this.pushOverview();
-        this.drainQueue();
-      }
     }
   }
 

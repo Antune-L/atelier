@@ -16,6 +16,7 @@ import { CODEX_MODELS, CODEX_EFFORTS, ORCHESTRATORS } from "../../shared/constan
 import type { Orchestrator, PrMergeability, VcsProvider } from "../../shared/constants.ts";
 import { createLogger } from "../logger.ts";
 
+import { SourceUpdateAdmission } from "./sourceUpdateAdmission.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import type { AuditRange, AuditRangeInput } from "./auditRange.ts";
 import { assertOperationActive } from "./boundedCommand.ts";
@@ -126,6 +127,7 @@ const FAKE_AUDIT_FILE = "src/example.ts";
 const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n--- a/${FAKE_AUDIT_FILE}\n+++ b/${FAKE_AUDIT_FILE}\n@@ -1 +1 @@\n-export const example = 1;\n+export const example = 2;\n`;
 
 export class FakeSystemAdapter implements SystemAdapter {
+  readonly sourceUpdateAdmission = new SourceUpdateAdmission();
   vpsUpdate(_action: VpsUpdateAction, _assertion: string): Promise<VpsUpdateStatus> {
     return Promise.resolve({ phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });
   }
@@ -392,6 +394,10 @@ export class FakeSystemAdapter implements SystemAdapter {
   }
 
   startAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
+    return this.sourceUpdateAdmission.session(() => this.startAdmittedAgentSession(opts), opts.ticketId, (message) => opts.onEvent({ type: "error", message }));
+  }
+
+  private startAdmittedAgentSession(opts: AgentSessionOptions): AgentSessionHandle {
     this.log("startAgentSession", { ticketId: opts.ticketId, slotId: opts.slotId, model: opts.model, provider: opts.provider });
     // Synthetic: no real claude is spawned. Emit `init` then a couple of display-only events on the
     // next ticks so the caller can wire its handle and the live transcript viewer has something to
@@ -439,17 +445,29 @@ export class FakeSystemAdapter implements SystemAdapter {
     };
   }
 
-  async reformulate(opts: ReformulateOptions): Promise<string> {
+  reformulate(opts: ReformulateOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.reformulateAdmitted(opts));
+  }
+
+  private async reformulateAdmitted(opts: ReformulateOptions): Promise<string> {
     this.log("reformulate", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length, ...(opts.confined === true ? { confined: true } : {}) });
     return "# Besoin reformulé (simulé)\n\nReformulation simulée (dry-run).";
   }
 
-  async importNotion(opts: ImportNotionOptions): Promise<string> {
+  importNotion(opts: ImportNotionOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.importNotionAdmitted(opts));
+  }
+
+  private async importNotionAdmitted(opts: ImportNotionOptions): Promise<string> {
     this.log("importNotion", { cwd: opts.cwd, model: opts.model, effort: opts.effort, serviceTier: opts.serviceTier ?? "default", promptBytes: opts.prompt.length });
     return "## Synthèse Notion (simulée)\n\nImport Notion simulé (dry-run).";
   }
 
-  async runAutomation(opts: RunAutomationOptions): Promise<string> {
+  runAutomation(opts: RunAutomationOptions): Promise<string> {
+    return this.sourceUpdateAdmission.run(() => this.runAutomationAdmitted(opts));
+  }
+
+  private async runAutomationAdmitted(opts: RunAutomationOptions): Promise<string> {
     this.log("runAutomation", { cwd: opts.cwd, model: opts.model, effort: opts.effort, promptBytes: opts.prompt.length });
     return "Exécution simulée (dry-run) de l'automatisation.";
   }
@@ -784,7 +802,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     }));
   }
 
-  async checkCodexRuntime(): Promise<CodexRuntimeStatus> {
+  checkCodexRuntime(): Promise<CodexRuntimeStatus> {
+    return this.sourceUpdateAdmission.run(() => this.checkCodexRuntimeAdmitted(), false);
+  }
+
+  private async checkCodexRuntimeAdmitted(): Promise<CodexRuntimeStatus> {
     return {
       status: "ready", checkedAt: Date.now(), message: "Mode simulation",
       models: CODEX_MODELS.map((model) => ({
@@ -797,7 +819,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     };
   }
 
-  async readClaudeUsage(): Promise<ProviderQuota> {
+  readClaudeUsage(): Promise<ProviderQuota> {
+    return this.sourceUpdateAdmission.run(() => this.readClaudeUsageAdmitted(), false);
+  }
+
+  private async readClaudeUsageAdmitted(): Promise<ProviderQuota> {
     const now = Date.now();
     return {
       provider: "claude", state: "ok", source: "live", observedAt: now, planType: "max", message: null,
@@ -831,6 +857,7 @@ export class FakeSystemAdapter implements SystemAdapter {
   private fakeLogin: ClaudeLoginStatus = { state: "idle", url: null, expiresAt: null, message: null, oauthTokenEnvSet: false, restartRequired: false };
 
   startClaudeLogin(): ClaudeLoginStatus {
+    this.sourceUpdateAdmission.assertAvailable();
     if (isClaudeLoginActive(this.fakeLogin.state)) return this.claudeLoginStatus();
     this.fakeLogin = {
       ...this.fakeLogin, state: "awaiting_code", url: FAKE_CLAUDE_LOGIN_URL, expiresAt: Date.now() + CLAUDE_LOGIN_TIMEOUT_MS,
@@ -856,7 +883,11 @@ export class FakeSystemAdapter implements SystemAdapter {
     return { ...this.fakeLogin };
   }
 
-  async readCodexQuota(): Promise<ProviderQuota> {
+  readCodexQuota(): Promise<ProviderQuota> {
+    return this.sourceUpdateAdmission.run(() => this.readCodexQuotaAdmitted(), false);
+  }
+
+  private async readCodexQuotaAdmitted(): Promise<ProviderQuota> {
     const now = Date.now();
     return {
       provider: "codex", state: "ok", source: "live", observedAt: now, planType: "pro", message: null,

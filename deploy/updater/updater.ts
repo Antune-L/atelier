@@ -79,7 +79,7 @@ async function authenticate(token: string): Promise<boolean> {
   }
 }
 
-async function upgrade(): Promise<void> {
+async function upgrade(expectedTarget: string | null): Promise<void> {
   try {
     persist("resolving", "Resolving the main commit", null);
     const result = Bun.spawn(["/usr/bin/git", "ls-remote", REPOSITORY, "refs/heads/main"], {
@@ -91,6 +91,10 @@ async function upgrade(): Promise<void> {
     clearTimeout(timeout);
     const target = output.split(/\s/)[0];
     if (code !== 0 || !target || !/^[0-9a-f]{40}$/.test(target)) throw new Error("Cannot resolve main.");
+    if (expectedTarget !== null && target !== expectedTarget) {
+      persist("refused", "Main changed after confirmation. Refresh the target and confirm again.", target);
+      return;
+    }
     persist("running", "Starting the pinned upgrade", target);
     const child = Bun.spawn(["/usr/local/sbin/kanban-upgrade", "--sha", target], {
       env: { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, stdout: "pipe", stderr: "inherit",
@@ -119,17 +123,38 @@ async function upgrade(): Promise<void> {
   }
 }
 
+async function targetMetadata(): Promise<unknown> {
+  const response = await fetch("https://api.github.com/repos/Antune-L/atelier/commits/main", { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+  if (!response.ok) throw new Error("Cannot read the public source target.");
+  const commit: unknown = await response.json();
+  if (!isRecord(commit) || typeof commit.sha !== "string" || !/^[a-f0-9]{40}$/.test(commit.sha)) throw new Error("Invalid source target.");
+  const lockResponse = await fetch(`https://raw.githubusercontent.com/Antune-L/atelier/${commit.sha}/bun.lock`, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+  if (!lockResponse.ok) throw new Error("Cannot read the target dependency graph.");
+  const lock = await lockResponse.text();
+  if (lock.length > 4_000_000) throw new Error("Target dependency graph is too large.");
+  const claude = lock.match(/"@anthropic-ai\/claude-agent-sdk":\s*\["@anthropic-ai\/claude-agent-sdk@([^"\s]+)"/)?.[1];
+  const codex = lock.match(/"@openai\/codex-sdk":\s*\["@openai\/codex-sdk@([^"\s]+)"/)?.[1];
+  if (!claude || !codex || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(claude) || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(codex)) throw new Error("Invalid target provider versions.");
+  return { id: commit.sha, version: commit.sha.slice(0, 7), providers: { claude, codex } };
+}
+
 Bun.serve({
   unix: SOCKET,
   maxRequestBodySize: 0,
   async fetch(request) {
     const path = new URL(request.url).pathname;
-    if (!((path === "/status" && request.method === "GET") || (path === "/start" && request.method === "POST"))) return new Response(null, { status: 404 });
+    if (!(((path === "/status" || path === "/target") && request.method === "GET") || (path === "/start" && request.method === "POST"))) return new Response(null, { status: 404 });
     if (!await authenticate(request.headers.get("Cf-Access-Jwt-Assertion") ?? "")) return new Response(null, { status: 403 });
+    if (path === "/target") {
+      try { return Response.json(await targetMetadata(), { headers: { "cache-control": "no-store" } }); }
+      catch { return Response.json({ error: "Target metadata unavailable; check source access and updater adoption." }, { status: 502 }); }
+    }
     if (path === "/start") {
       if (active || status.phase === "interrupted" || status.phase === "failed") return new Response(null, { status: 409 });
+      const expectedTarget = request.headers.get("x-kanban-target");
+      if (expectedTarget !== null && !/^[a-f0-9]{40}$/.test(expectedTarget)) return new Response(null, { status: 400 });
       active = true;
-      void upgrade();
+      void upgrade(expectedTarget);
     }
     return Response.json(status, { headers: { "cache-control": "no-store" } });
   },

@@ -37,6 +37,7 @@ export default {
     identifier: "com.antune.atelier",
     version: process.env.ATELIER_VERSION ?? "0.0.0",
   },
+  release: { baseUrl: "https://github.com/Antune-L/atelier/releases/latest/download", generatePatch: false },
   scripts: {
     // Fails the build if the embedded codex binaries lost their +x bit — must run as a hook: the
     // stable pipeline re-packages the .app into a self-extracting bundle right after postBuild.
@@ -48,6 +49,11 @@ export default {
     },
     copy: {
       "dist/web": "dist/web",
+      "bun.lock": "provider-bun.lock",
+      "node_modules/@anthropic-ai/claude-agent-sdk/package.json": "provider-packages/claude.json",
+      "node_modules/@openai/codex-sdk/package.json": "provider-packages/codex.json",
+      "dist/desktop-update-trust.json": "desktop-update-trust.json",
+      "dist/updateInstaller.js": "scripts/updateInstaller.js",
       "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex": "codex-bin",
       "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex-code-mode-host": "codex-code-mode-host",
       "templates/run_composer.sh": "templates/run_composer.sh",

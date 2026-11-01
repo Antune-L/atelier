@@ -110,7 +110,7 @@ function FinishedStatus({ status }: { status: VpsUpdateStatus }) {
   return null;
 }
 
-export function VpsUpdateDialog({ onClose }: { onClose: () => void }) {
+export function VpsUpdateDialog({ onClose, target }: { onClose: () => void; target?: string }) {
   const [status, setStatus] = useState<VpsUpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -151,7 +151,7 @@ export function VpsUpdateDialog({ onClose }: { onClose: () => void }) {
     setPending(true);
     setError(null);
     try {
-      const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm" } });
+      const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm", ...(target ? { "x-kanban-target": target } : {}) } });
       setStatus(vpsUpdateSchema.parse(result));
     } catch {
       setError("La demande n’a pas été confirmée. Consultez l’état avant de réessayer : une coupure peut accompagner le redémarrage.");

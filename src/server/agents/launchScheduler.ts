@@ -32,6 +32,7 @@ export interface LaunchSchedulerDeps {
   notifier: Pick<Notifier, "notify">;
   startedAt: number;
   now?: () => number;
+  isMaintenance?: () => boolean;
 }
 
 export type ScheduledStartMissReason = "backend_down" | "late";
@@ -65,7 +66,7 @@ export class LaunchScheduler {
   }
 
   async tick(): Promise<void> {
-    if (this.ticking || this.stopped) return;
+    if (this.ticking || this.stopped || this.deps.isMaintenance?.()) return;
     this.ticking = true;
     const now = this.now();
     const previousTickAt = this.lastTickAt;

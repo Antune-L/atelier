@@ -454,7 +454,11 @@ export class SlotManager {
     this.qualityIterationVerifier = verify;
   }
 
-  async startQualityCorrection(ticketId: string, iterationId: string): Promise<void> {
+  startQualityCorrection(ticketId: string, iterationId: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startQualityCorrectionAdmitted(ticketId, iterationId));
+  }
+
+  private async startQualityCorrectionAdmitted(ticketId: string, iterationId: string): Promise<void> {
     if (this.qualityCorrectionStarts.has(ticketId)) return;
     this.qualityCorrectionStarts.add(ticketId);
     try {
@@ -593,7 +597,11 @@ export class SlotManager {
   }
 
   /** Entry point when a ticket is dragged into "À implémenter". */
-  async startTicket(ticketId: string): Promise<void> {
+  startTicket(ticketId: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startTicketAdmitted(ticketId));
+  }
+
+  private async startTicketAdmitted(ticketId: string): Promise<void> {
     try {
       await this.startReadyTicket(ticketId);
     } catch (error) {
@@ -859,7 +867,11 @@ export class SlotManager {
    * (column/stage untouched) — the `testing` flag is the only marker. Eligibility is re-checked here
    * (the route also validates) so a double click can't double-spawn.
    */
-  async startTestSession(ticketId: string): Promise<void> {
+  startTestSession(ticketId: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startTestSessionAdmitted(ticketId));
+  }
+
+  private async startTestSessionAdmitted(ticketId: string): Promise<void> {
     const ticket = this.store.getTicket(ticketId);
     if (
       !ticket ||
@@ -972,7 +984,11 @@ export class SlotManager {
    * (valid project / free slot) is re-checked here so a race can't double-spawn; the slow setup runs
    * after the slot is reserved, and self-cleans on failure. The route fire-and-forgets this.
    */
-  async startWorktreeSession(input: { project: string; baseBranch: string }): Promise<void> {
+  startWorktreeSession(input: { project: string; baseBranch: string }): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startWorktreeSessionAdmitted(input));
+  }
+
+  private async startWorktreeSessionAdmitted(input: { project: string; baseBranch: string }): Promise<void> {
     if (!isProjectKey(input.project)) {
       log.error("session worktree refusée : projet inconnu", { project: input.project });
       return;

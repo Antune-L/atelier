@@ -54,7 +54,12 @@ export class ReformulateManager {
     });
   }
 
-  private async run(ticket: Ticket, generation: number): Promise<void> {
+  private run(ticket: Ticket, generation: number): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.runAdmitted(ticket, generation));
+  }
+
+  private async runAdmitted(ticket: Ticket, generation: number): Promise<void> {
+    if (!this.store.getTicket(ticket.id) || this.generations.get(ticket.id) !== generation) return;
     const project = getProject(ticket.project);
     const remote = isRemoteTicket(ticket);
     const execution = resolveTicketExecution(withRemoteAnalysisEngine(ticket), "one-shot", {

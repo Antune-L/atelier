@@ -151,6 +151,7 @@ interface ConversationRuntime {
   steerGraceTimer: ReturnType<typeof setTimeout> | null;
   /** Tail of the conversation's deliveries: sends stay in submission order. */
   delivery: Promise<void>;
+  deliveryGeneration: number;
   /** Snapshot held by the live session; released whenever the session ends. */
   lease: SnapshotLease | null;
 }
@@ -163,6 +164,7 @@ interface SessionLaunch {
   content: string;
   messageId: string;
   runtime: ConversationRuntime;
+  isCurrent: () => boolean;
 }
 
 export type CompactOutcome =
@@ -173,7 +175,7 @@ export interface AtelierManagerDeps {
   store: Store;
   hub: ClientHub;
   sessionHub: SessionHub;
-  system: Pick<SystemAdapter, "checkCodexRuntime">;
+  system: Pick<SystemAdapter, "checkCodexRuntime"> & Partial<Pick<SystemAdapter, "sourceUpdateAdmission">>;
   snapshots: Pick<RepoSnapshots, "acquire">;
   getProject?:(key: string) => ProjectConfig | null;
   defaults?: () => ExecutionDefaults;
@@ -243,7 +245,7 @@ export class AtelierManager {
   private readonly store: Store;
   private readonly hub: ClientHub;
   private readonly sessionHub: SessionHub;
-  private readonly system: Pick<SystemAdapter, "checkCodexRuntime">;
+  private readonly system: Pick<SystemAdapter, "checkCodexRuntime"> & Partial<Pick<SystemAdapter, "sourceUpdateAdmission">>;
   private readonly snapshots: Pick<RepoSnapshots, "acquire">;
   private readonly lookupProject: (key: string) => ProjectConfig | null;
   private readonly defaults: () => ExecutionDefaults;
@@ -340,6 +342,7 @@ export class AtelierManager {
   }
 
   async interrupt(conversationId: string): Promise<void> {
+    this.invalidateDelivery(conversationId);
     await this.sessionHub.interrupt(atelierSessionKey(conversationId));
     this.flush(conversationId);
     const runtime = this.runtimes.get(conversationId);
@@ -354,6 +357,7 @@ export class AtelierManager {
   }
 
   settingsChanged(conversationId: string): void {
+    this.invalidateDelivery(conversationId);
     this.flush(conversationId);
     this.abandonSteers(conversationId, this.runtimes.get(conversationId), "réglages modifiés");
     this.closeSession(conversationId);
@@ -403,12 +407,14 @@ export class AtelierManager {
   }
 
   close(conversationId: string): void {
+    this.invalidateDelivery(conversationId);
     this.closeSession(conversationId);
     this.runtimes.delete(conversationId);
   }
 
   stop(): void {
     for (const runtime of this.runtimes.values()) {
+      runtime.deliveryGeneration += 1;
       if (runtime.flushTimer) clearTimeout(runtime.flushTimer);
       if (runtime.idleTimer) clearTimeout(runtime.idleTimer);
       if (runtime.ceilingTimer) clearTimeout(runtime.ceilingTimer);
@@ -479,22 +485,32 @@ export class AtelierManager {
   }
 
   private enqueueDelivery(conversationId: string, runtime: ConversationRuntime, content: string, messageId: string, steer: boolean): Promise<void> {
-    const delivered = runtime.delivery.then(() => this.deliver(conversationId, content, messageId, steer));
+    const generation = runtime.deliveryGeneration;
+    const isCurrent = (): boolean => this.runtimes.get(conversationId) === runtime && runtime.deliveryGeneration === generation;
+    const delivered = runtime.delivery.then(() => this.deliver(conversationId, content, messageId, steer, isCurrent));
     runtime.delivery = delivered;
     return delivered;
   }
 
-  private async deliver(conversationId: string, content: string, messageId: string, steer: boolean): Promise<void> {
+  private invalidateDelivery(conversationId: string): void {
+    const runtime = this.runtimes.get(conversationId);
+    if (runtime) runtime.deliveryGeneration += 1;
+  }
+
+  private async deliver(conversationId: string, content: string, messageId: string, steer: boolean, isCurrent: () => boolean): Promise<void> {
     try {
-      const sentAsFirstTurn = await this.ensureSession(conversationId, content, messageId);
-      if (sentAsFirstTurn) return;
+      if (!isCurrent()) return;
+      const sentAsFirstTurn = await this.ensureSession(conversationId, content, messageId, isCurrent);
+      if (!isCurrent() || sentAsFirstTurn) return;
       const history = this.historyBefore(conversationId, messageId).filter((message) => message.role === "user").map((message) => message.content).join(PART_SEPARATOR);
       const prepared = await this.prepareAttachments(content, history);
+      if (!isCurrent()) return;
       const event: ChannelEvent = steer ? { type: "chat", content: prepared.content, steer: true } : { type: "chat", content: prepared.content };
       if (!this.sessionHub.sendEvent(atelierSessionKey(conversationId), event, prepared.images)) {
         throw new Error(SESSION_UNAVAILABLE_MESSAGE);
       }
     } catch (error) {
+      if (!isCurrent()) return;
       const reason = getErrorMessage(error);
       if (steer) this.steerFailed(conversationId, messageId, reason);
       if (!steer || this.store.getConversation(conversationId)?.sessionStatus !== "running") this.markError(conversationId, reason);
@@ -584,11 +600,12 @@ export class AtelierManager {
     this.markRunning(conversationId);
   }
 
-  private async ensureSession(conversationId: string, content: string, messageId: string): Promise<boolean> {
+  private async ensureSession(conversationId: string, content: string, messageId: string, isCurrent: () => boolean): Promise<boolean> {
     const pending = this.starting.get(conversationId);
     if (pending) await pending.catch(() => false);
+    if (!isCurrent()) return false;
     if (this.sessionHub.isConnected(atelierSessionKey(conversationId))) return false;
-    const start = this.startSession(conversationId, content, messageId);
+    const start = this.startSession(conversationId, content, messageId, isCurrent);
     this.starting.set(conversationId, start);
     try {
       return await start;
@@ -597,7 +614,12 @@ export class AtelierManager {
     }
   }
 
-  private async startSession(conversationId: string, content: string, messageId: string): Promise<boolean> {
+  private startSession(conversationId: string, content: string, messageId: string, isCurrent: () => boolean): Promise<boolean> {
+    return this.system.sourceUpdateAdmission?.run(() => this.startSessionAdmitted(conversationId, content, messageId, isCurrent)) ?? this.startSessionAdmitted(conversationId, content, messageId, isCurrent);
+  }
+
+  private async startSessionAdmitted(conversationId: string, content: string, messageId: string, isCurrent: () => boolean): Promise<boolean> {
+    if (!isCurrent()) return false;
     const conversation = this.requireConversation(conversationId);
     const project = this.lookupProject(conversation.project);
     if (!project) throw new Error(`Projet inconnu : ${conversation.project}`);
@@ -614,14 +636,18 @@ export class AtelierManager {
       this.defaults(),
     );
     await assertExecutionAvailable(this.system, execution);
+    if (!isCurrent()) return false;
     const runtime = this.runtime(conversationId);
     this.releaseLease(runtime);
     const workspace = await this.openWorkspace(conversation, project, runtime);
     try {
-      return await this.launchSession({ conversation, project, execution, workspace, content, messageId, runtime });
+      if (!isCurrent()) return false;
+      return await this.launchSession({ conversation, project, execution, workspace, content, messageId, runtime, isCurrent });
     } catch (error) {
       this.releaseLease(runtime);
       throw error;
+    } finally {
+      if (!isCurrent()) this.releaseLease(runtime);
     }
   }
 
@@ -645,7 +671,7 @@ export class AtelierManager {
     return { source: "origin", cwd: lease.cwd, sha: lease.sha, committedAt: lease.committedAt, baseBranch: lease.baseBranch };
   }
 
-  private async launchSession({ conversation, project, execution, workspace, content, messageId, runtime }: SessionLaunch): Promise<boolean> {
+  private async launchSession({ conversation, project, execution, workspace, content, messageId, runtime, isCurrent }: SessionLaunch): Promise<boolean> {
     const conversationId = conversation.id;
     const resumeSessionId = execution.provider === "codex" ? conversation.sessionId : null;
     const key = atelierSessionKey(conversationId);
@@ -654,6 +680,7 @@ export class AtelierManager {
     // A resumed thread keeps its older framing in context: lead with the code it reads now.
     const payload = resumeSessionId ? `[${workspaceNote(workspace)}]${PART_SEPARATOR}${prompt}` : prompt;
     const prepared = await this.prepareAttachments(payload);
+    if (!isCurrent()) return false;
     runtime.resumed = resumeSessionId !== null;
     // The SDK emits nothing at startup: a fresh CLI process starts with no background task.
     this.resetBackground(runtime);
@@ -1065,6 +1092,7 @@ export class AtelierManager {
         splitTurnId: null,
         steerGraceTimer: null,
         delivery: Promise.resolve(),
+        deliveryGeneration: 0,
         lease: null,
       };
       this.runtimes.set(conversationId, runtime);

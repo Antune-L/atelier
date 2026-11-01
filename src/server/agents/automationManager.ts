@@ -86,7 +86,12 @@ export class AutomationManager {
     return this.run(automationId);
   }
 
-  private async run(automationId: string): Promise<void> {
+  private run(automationId: string): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.runAdmitted(automationId));
+  }
+
+  private async runAdmitted(automationId: string): Promise<void> {
+    if (this.stopped) return;
     if (this.running.has(automationId)) {
       log.info("exécution ignorée (déjà en cours)", { automationId });
       return;

@@ -3,6 +3,8 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 
+import { lockedProviderVersions } from "../shared/providerUpdates.ts";
+import type { DesktopUpdateController } from "../shared/desktopUpdate.ts";
 import type { Server, WebSocketHandler } from "bun";
 import { Elysia } from "elysia";
 
@@ -39,6 +41,7 @@ import { runFirstBootSetup } from "./boot.ts";
 import { initProjectRegistry } from "./config.ts";
 import { createDatabase } from "./db/schema.ts";
 import { Store } from "./db/store.ts";
+import { isClaudeLoginActive } from "../shared/claudeLogin.ts";
 import { isCloudHost } from "./hostRole.ts";
 import type { ClientSocket } from "./hub.ts";
 import { ClientHub } from "./hub.ts";
@@ -104,6 +107,9 @@ function resolveDataFile(explicitRoot: string | undefined, filename: string, env
  * overrides KANBAN_DB / KANBAN_CONFIG (see resolveDataFile).
  */
 export interface StartServerOptions {
+  desktopUpdates?: DesktopUpdateController;
+  beforeRecovery?: () => Promise<void>;
+  deferRecovery?: boolean;
   port?: number;
   mcpToken?: string | null;
   /** Read-only assets: dist/web, templates, the vendored composer driver (default: repo root). */
@@ -121,6 +127,8 @@ export interface StartServerOptions {
 }
 
 export interface RunningServer {
+  reserveUpdate(): (() => void) | null;
+  resumeRecovery(): Promise<void>;
   port: number;
   updateMcpToken(token: string): void;
   /** Kill detached tmux sessions backing occupied slots (desktop shutdown only). */
@@ -239,10 +247,6 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   if (process.env.KANBAN_DRY_RUN === "0") {
     configureClaudeProvisionDir(join(dataRoot, "bin"));
-    void ensureClaudeBinary().then(
-      (binary) => createLogger("boot").info("binaire claude prêt", { binary }),
-      (error: unknown) => createLogger("boot").warn("provisioning claude différé au premier lancement", { error: getErrorMessage(error) }),
-    );
   }
 
   const backendStartedAt = Date.now();
@@ -265,6 +269,25 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const workerMcpManager = new WorkerMcpManager();
   workerMcpManager.backendPort = port;
   const system = createSystemAdapter(workerMcpManager, join(dataRoot, LOGS_SUBPATH));
+  const sourceRevision = !system.dryRun && opts.repoRoot
+    ? system.sourceUpdateAdmission.configureSourceRecovery(join(dataRoot, "source-update-recovery.json"))
+    : null;
+  if (sourceRevision && opts.repoRoot) {
+    const current = await system.runProjectScript(opts.repoRoot, "git rev-parse HEAD", 10_000);
+    if (!current.ok || current.output.trim() !== sourceRevision || !await system.gitStatusClean(opts.repoRoot)) throw new Error("Source update recovery revision differs from the prepared build. Repair the checkout before restarting.");
+    const expected = lockedProviderVersions(await Bun.file(join(opts.repoRoot, "bun.lock")).text());
+    for (const [provider, name] of [["claude", "@anthropic-ai/claude-agent-sdk"], ["codex", "@openai/codex-sdk"]] satisfies ["claude" | "codex", string][]) {
+      const installed: unknown = await Bun.file(join(opts.repoRoot, "node_modules", name, "package.json")).json();
+      if (typeof installed !== "object" || installed === null || !("version" in installed) || installed.version !== expected[provider]) throw new Error("Source update installed provider graph differs from the prepared release.");
+    }
+  }
+  let releaseStartupMaintenance = opts.deferRecovery ? system.sourceUpdateAdmission.tryAcquireUpdate() : null;
+  if (!system.dryRun) {
+    void system.sourceUpdateAdmission.run(() => ensureClaudeBinary()).then(
+      (binary) => createLogger("boot").info("binaire claude prêt", { binary }),
+      (error: unknown) => createLogger("boot").warn("provisioning claude différé au premier lancement", { error: getErrorMessage(error) }),
+    );
+  }
   const clientHub = new ClientHub(store);
   // One hub owns every live SDK agent session (implementer / triage / feasibility), keyed by ticket id.
   const sessionHub = new SessionHub(system);
@@ -305,6 +328,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   triageManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
   feasibilityManager.setAnalysisSettledHandler((ticketId) => slotManager.resumeDeferredDependent(ticketId));
   const ticketOperations = createTicketOperations({
+    isMaintenance: () => system.sourceUpdateAdmission.isUpdating,
     store,
     hub: clientHub,
     lifecycle,
@@ -355,10 +379,10 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     atelierManager,
     qualityManager,
   );
-  const watchdog = new Watchdog(store, clientHub, notifier);
+  const watchdog = new Watchdog(store, clientHub, notifier, () => system.sourceUpdateAdmission.isUpdating);
   const automationManager = new AutomationManager(store, system, clientHub);
   const auditManager = new AuditManager({ store, system, hub: clientHub, notifier, repoMutex, ticketOperations, slots: slotManager });
-  const launchScheduler = new LaunchScheduler({ store, ticketOperations, slots: slotManager, hub: clientHub, notifier, startedAt: backendStartedAt });
+  const launchScheduler = new LaunchScheduler({ store, ticketOperations, slots: slotManager, hub: clientHub, notifier, startedAt: backendStartedAt, isMaintenance: () => system.sourceUpdateAdmission.isUpdating });
   const previewManager = new PreviewManager({
     store,
     config: new PreviewConfig(dataRoot, { dryRun: system.dryRun }),
@@ -411,26 +435,35 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
       system.dryRun,
     );
 
-  await runFirstBootSetup(store, system);
-  await qualityManager.recover();
-  await previewManager.recover();
-  await slotManager.recover();
-  await autonomousWorkflow.recover();
-  await triageManager.recoverStale();
-  await feasibilityManager.recoverStale();
-  reformulateManager.recoverStale();
-  feasibilityAnswerManager.recoverStale();
-  atelierManager.recoverStale();
-  repoSnapshots.start();
-  slotManager.resumeQueuedTickets();
-  watchdog.start();
-  automationManager.start();
+  await opts.beforeRecovery?.();
+  if (sourceRevision) system.sourceUpdateAdmission.completeSourceRecovery();
+  let recovery: Promise<void> | null = null;
+  const recoverApplication = (): Promise<void> => {
+    recovery ??= (async () => {
+      await runFirstBootSetup(store, system);
+      await qualityManager.recover();
+      await previewManager.recover();
+      await slotManager.recover();
+      await autonomousWorkflow.recover();
+      await triageManager.recoverStale();
+      await feasibilityManager.recoverStale();
+      reformulateManager.recoverStale();
+      feasibilityAnswerManager.recoverStale();
+      atelierManager.recoverStale();
+      repoSnapshots.start();
+      slotManager.resumeQueuedTickets();
+      watchdog.start();
+      automationManager.start();
+    })();
+    return recovery;
+  };
+  if (!opts.deferRecovery) await recoverApplication();
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
   const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system, operations: ticketOperations, lifecycle, composerAvailable });
   const remoteMcpConfig = readRemoteMcpConfig();
-  void system.checkCodexRuntime().then((codex) => {
+  if (!opts.deferRecovery) void system.checkCodexRuntime().then((codex) => {
     createLogger("boot").info("Runtime Codex vérifié", { status: codex.status });
   });
 
@@ -459,6 +492,8 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
     resourcesRoot,
     composerAvailable,
     repoRoot: opts.repoRoot,
+    repoMutex,
+    desktopUpdates: opts.desktopUpdates,
     onRequestUpdate: opts.onRequestUpdate,
     pickFolder: opts.onPickFolder,
   });
@@ -579,8 +614,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   const stopRemoteMcpSandboxMonitor = remoteMcpConfig === null ? null : startRemoteMcpSandboxMonitor({ store });
 
   store.failStaleExecutionRuns("Session interrompue par le redémarrage du serveur", staleExecutionGenerations);
-  auditManager.start();
-  launchScheduler.start();
+  if (!opts.deferRecovery) { auditManager.start(); launchScheduler.start(); }
   const log = createLogger("server");
   log.info(`backend prêt sur http://localhost:${server.port}`, { dryRun: system.dryRun });
   log.info("WebSocket prêts", { client: WS_PATH_CLIENT, terminal: WS_PATH_TERMINAL });
@@ -596,6 +630,17 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
   return {
     // Bun types server.port as optional; it is always set here, the fallback only satisfies the type.
     port: server.port ?? port,
+    reserveUpdate: () => {
+      if (isClaudeLoginActive(system.claudeLoginStatus().state) || store.listSlots().some((slot) => slot.status !== "free") || store.listActiveQualityRuns().length > 0 || store.listActiveQualityIterations().length > 0 || store.listActiveAuditRuns().length > 0) return null;
+      return system.sourceUpdateAdmission.tryAcquireUpdate();
+    },
+    async resumeRecovery() {
+      releaseStartupMaintenance?.();
+      releaseStartupMaintenance = null;
+      await recoverApplication();
+      auditManager.start();
+      launchScheduler.start();
+    },
     updateMcpToken(token: string) {
       publicMcpManager?.setToken(token);
     },

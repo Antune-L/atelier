@@ -114,7 +114,15 @@ function emitProgress(message: string): void {
 }
 
 /** Pin the winning path into the env override so the sync resolver agrees from now on. */
-function adopt(binaryPath: string): string {
+let adoptedOrigin: "provisioned" | "user" | null = null;
+
+export function claudeBinaryOrigin(): "package" | "configured" | "provisioned" | "user" {
+  if (adoptedOrigin) return adoptedOrigin;
+  return process.env[BINARY_PATH_ENV] ? "configured" : "package";
+}
+
+function adopt(binaryPath: string, origin: "provisioned" | "user"): string {
+  adoptedOrigin = origin;
   process.env[BINARY_PATH_ENV] = binaryPath;
   return binaryPath;
 }
@@ -127,12 +135,12 @@ async function provision(): Promise<string> {
   if (fromNodeModules) return fromNodeModules;
 
   const provisioned = join(provisionDir, `claude-${CLAUDE_SDK_VERSION}`);
-  if (existsSync(provisioned)) return adopt(provisioned);
+  if (existsSync(provisioned)) return adopt(provisioned, "provisioned");
 
   const detected = await detectUserInstall();
-  if (detected) return adopt(detected);
+  if (detected) return adopt(detected, "user");
 
-  return adopt(await downloadPinnedBinary());
+  return adopt(await downloadPinnedBinary(), "provisioned");
 }
 
 /** Dev/web mode: the SDK's platform package is installed. Compiled apps have no node_modules → null. */
@@ -167,7 +175,7 @@ async function detectUserInstall(): Promise<string | null> {
 }
 
 /** True when `binary --version` answers with a semver ≥ MIN_DETECTED_CLI_VERSION within the budget. */
-async function isCompatibleCli(binary: string): Promise<boolean> {
+export async function isCompatibleCli(binary: string): Promise<boolean> {
   try {
     const proc = Bun.spawn([binary, "--version"], {
       stdin: "ignore",

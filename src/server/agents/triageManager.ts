@@ -73,7 +73,12 @@ export class TriageManager {
    * Start the read-only triage SDK session and inject its prompt as the first turn. With `deep`, runs
    * the deeper "Analyse +" variant that adds two solutions scouts to the feasibility scout and verifier.
    */
-  async start(ticketId: string, opts?: { deep?: boolean }): Promise<void> {
+  start(ticketId: string, opts?: { deep?: boolean }): Promise<void> {
+    return this.system.sourceUpdateAdmission.run(() => this.startAdmitted(ticketId, opts));
+  }
+
+  private async startAdmitted(ticketId: string, opts?: { deep?: boolean }): Promise<void> {
+    if (this.stopped) return;
     const deep = opts?.deep ?? false;
     const ticket = this.store.getTicket(ticketId);
     if (!ticket || !isProjectKey(ticket.project)) {

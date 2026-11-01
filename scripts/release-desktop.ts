@@ -1,21 +1,15 @@
-/**
- * Release packaging for the desktop app (run by .github/workflows/release.yml, usable locally):
- *
- *   bun scripts/release-desktop.ts 0.1.0
- *
- * Validates the version (from the git tag, `v` already stripped), gates on Claude/Codex SDK constant
- * drift, builds the web UI + the Electrobun stable bundle with the version and
- * DMG enabled (the postBuild hook — scripts/verifyDesktopBundle.ts — asserts the embedded codex
- * binaries kept their +x bit), then normalizes the artifacts into release/: Atelier-vX.Y.Z-arm64.dmg
- * + its .sha256. `build:desktop` stays untouched for dev.
- */
-
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createPrivateKey, createPublicKey, sign } from "node:crypto";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+
+import { desktopManifestSchema, DESKTOP_MANIFEST_FILE, RELEASE_DOWNLOAD_ROOT } from "../src/shared/desktopUpdate.ts";
+import { lockedProviderVersions } from "../src/shared/providerUpdates.ts";
 
 import { CLAUDE_SDK_VERSION } from "../src/server/system/claudeBinary.ts";
 import { CODEX_SDK_VERSION } from "../src/server/system/codexBinary.ts";
 
+// NOTE(ali): Publish the same locked provider graph in the DMG, full app archive and signed update manifest.
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const REPO_ROOT = resolve(import.meta.dir, "..");
 /** electrobun's final "moving artifacts" step relocates the DMG here as `<platformPrefix>-<name>`. */
@@ -30,9 +24,10 @@ function fail(message: string): never {
 
 async function run(cmd: string[], env: Record<string, string> = {}): Promise<void> {
   console.log(`$ ${cmd.join(" ")}`);
+  const { ATELIER_UPDATE_SIGNING_KEY: _signingKey, ...environment } = process.env;
   const proc = Bun.spawn(cmd, {
     cwd: REPO_ROOT,
-    env: { ...process.env, ...env },
+    env: { ...environment, ...env },
     stdout: "inherit",
     stderr: "inherit",
   });
@@ -88,9 +83,18 @@ if (!VERSION_PATTERN.test(version)) {
 }
 
 assertSdkVersionsInSync();
+if (process.platform !== "darwin" || process.arch !== "arm64") fail("Only macOS arm64 releases are supported.");
+const privateKeyText = process.env.ATELIER_UPDATE_SIGNING_KEY;
+const privateKey = privateKeyText ? createPrivateKey(privateKeyText) : null;
+if (privateKey && privateKey.asymmetricKeyType !== "ed25519") fail("The update signing key must be Ed25519.");
+const publicKey = privateKey ? createPublicKey(privateKey.export({ type: "pkcs8", format: "pem" })).export({ type: "spki", format: "pem" }).toString() : "";
+mkdirSync(join(REPO_ROOT, "dist"), { recursive: true });
+writeFileSync(join(REPO_ROOT, "dist", "desktop-update-trust.json"), JSON.stringify({ publicKey }));
+const providers = lockedProviderVersions(readFileSync(join(REPO_ROOT, "bun.lock"), "utf8"));
 
 await run(["bun", "run", "build:web"]);
 await run(["bun", "run", "build:preview-tools"]);
+await run(["bun", "build", "desktop/updateInstaller.ts", "--target=bun", "--outfile=dist/updateInstaller.js"]);
 await run([ELECTROBUN_BIN, "build", "--env=stable"], { ATELIER_VERSION: version, ATELIER_RELEASE: "1" });
 
 if (!existsSync(BUILT_DMG)) fail(`DMG not found: ${BUILT_DMG}`);
@@ -102,3 +106,38 @@ copyFileSync(BUILT_DMG, artifactPath);
 await writeSha256(artifactPath, artifactName);
 
 console.log(`release-desktop: OK → release/${artifactName} (+ .sha256)`);
+
+const zipName = `Atelier-v${version}-arm64.app.zip`;
+const zipPath = join(RELEASE_FOLDER, zipName);
+const stage = mkdtempSync(join(tmpdir(), "atelier-release-"));
+try {
+  const tar = join(stage, "bundle.tar");
+  await run([join(REPO_ROOT, "node_modules/electrobun/dist-macos-arm64/zig-zstd"), "decompress", "-i", join(REPO_ROOT, "artifacts/stable-macos-arm64-Atelier.app.tar.zst"), "-o", tar]);
+  await run(["/usr/bin/tar", "-xf", tar, "-C", stage]);
+  const app = readdirSync(stage).find((entry) => entry === "Atelier.app");
+  if (!app) fail("Electrobun full archive did not contain Atelier.app.");
+  const local: unknown = JSON.parse(readFileSync(join(stage, app, "Contents/Resources/version.json"), "utf8"));
+  if (typeof local !== "object" || local === null || !("version" in local) || local.version !== version) fail("Full archive version mismatch.");
+  await run(["/usr/bin/ditto", "-c", "-k", "--keepParent", join(stage, app), zipPath]);
+} finally { rmSync(stage, { recursive: true, force: true }); }
+const revisionResult = Bun.spawn(["git", "rev-parse", "HEAD"], { cwd: REPO_ROOT, stdout: "pipe", stderr: "ignore" });
+const revision = (await new Response(revisionResult.stdout).text()).trim();
+if (await revisionResult.exited !== 0) fail("Cannot identify the release source revision.");
+const zip = Bun.file(zipPath);
+const hasher = new Bun.CryptoHasher("sha256");
+const zipReader = zip.stream().getReader();
+for (;;) {
+  const { done, value } = await zipReader.read();
+  if (done) break;
+  hasher.update(value);
+}
+const manifest = desktopManifestSchema.parse({ protocol: 1, platform: "macos-arm64", identifier: "com.antune.atelier", version, revision, providers, codexNative: CODEX_SDK_VERSION, bundle: `${RELEASE_DOWNLOAD_ROOT}v${version}/${zipName}`, bytes: zip.size, sha256: hasher.digest("hex") });
+const payload = JSON.stringify(manifest);
+await Bun.write(join(RELEASE_FOLDER, DESKTOP_MANIFEST_FILE), JSON.stringify({ payload, signature: privateKey ? sign(null, Buffer.from(payload), privateKey).toString("base64") : "" }));
+await writeSha256(zipPath, zipName);
+for (const name of ["stable-macos-arm64-update.json", "stable-macos-arm64-Atelier.app.tar.zst"]) {
+  const path = join(REPO_ROOT, "artifacts", name);
+  if (!existsSync(path)) fail(`Missing Electrobun release artifact: ${name}`);
+  copyFileSync(path, join(RELEASE_FOLDER, name));
+}
+console.log(`release-desktop: coherent full bundle and ${privateKey ? "signed" : "unsigned (manual installation only)"} provider manifest ready`);

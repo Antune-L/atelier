@@ -22,6 +22,7 @@ interface SidebarProps {
   view: SidebarView;
   onSelect: (view: SidebarView) => void;
   onOpenSettings: () => void;
+  onOpenVpsUpdate?: () => void;
   onUpdate?: () => void;
   updating?: boolean;
   canUpdate?: boolean;
@@ -64,6 +65,7 @@ export function Sidebar({
   view,
   onSelect,
   onOpenSettings,
+  onOpenVpsUpdate,
   onUpdate,
   updating = false,
   canUpdate = false,
@@ -136,6 +138,20 @@ export function Sidebar({
           <ArrowLeftRight className="h-4 w-4" />
           <span className={labelClasses}>{OTHER_BOARD_LABEL}</span>
         </a>
+      )}
+
+      {onOpenVpsUpdate !== undefined && (
+        <button
+          type="button"
+          onClick={onOpenVpsUpdate}
+          aria-label="Mettre à jour le VPS"
+          aria-haspopup="dialog"
+          title="Mettre à jour le VPS"
+          className={cn(itemClasses, ITEM_INACTIVE)}
+        >
+          <RefreshCw className="h-4 w-4" />
+          <span className={labelClasses}>Mettre à jour</span>
+        </button>
       )}
 
       <button

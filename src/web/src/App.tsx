@@ -23,6 +23,7 @@ import { HostMetricsBadge } from "@/components/HostMetricsBadge";
 import { StatsView } from "@/components/StatsView";
 import { TicketDetail } from "@/components/TicketDetail";
 import { UsageView } from "@/components/UsageView";
+import { VpsUpdateDialog } from "@/components/VpsUpdateDialog";
 import { ToolDialogs, TOOLS, TOOL_KINDS, type ToolKind } from "@/components/ToolDialogs";
 import { WorktreeSessionsView } from "@/components/WorktreeSessionsView";
 import { Toaster } from "@/components/Toaster";
@@ -85,6 +86,7 @@ export function App() {
   const [toolSearch, setToolSearch] = useState("");
   const [openTool, setOpenTool] = useState<ToolKind | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [vpsUpdateOpen, setVpsUpdateOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationButtonRef = useRef<HTMLButtonElement>(null);
   const [updating, setUpdating] = useState(false);
@@ -92,7 +94,7 @@ export function App() {
   const [auditTarget, setAuditTarget] = useState<AuditTarget | null>(null);
   const [atelierListRequest, setAtelierListRequest] = useState(0);
   const [appliedAuditRequest, setAppliedAuditRequest] = useState<AuditTarget | null>(requestedAuditTarget);
-  const { canUpdate } = useCapabilities();
+  const { canUpdate, cloudHost } = useCapabilities();
   const ticketPrefill = useTicketPrefill();
   const [openedPrefill, setOpenedPrefill] = useState<TicketPrefill | null>(null);
   if (ticketPrefill !== openedPrefill) {
@@ -270,6 +272,7 @@ export function App() {
         onSelect={selectView}
         badges={{ atelier: atelierUnread, audits: auditsAlert }}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenVpsUpdate={cloudHost ? () => setVpsUpdateOpen(true) : undefined}
         onUpdate={handleUpdate}
         updating={updating}
         canUpdate={canUpdate}
@@ -282,6 +285,7 @@ export function App() {
             onSelect={(nextView) => { selectView(nextView); setNavigationOpen(false); }}
             badges={{ atelier: atelierUnread, audits: auditsAlert }}
             onOpenSettings={() => { setNavigationOpen(false); setSettingsOpen(true); }}
+            onOpenVpsUpdate={cloudHost ? () => { setNavigationOpen(false); setVpsUpdateOpen(true); } : undefined}
             onUpdate={handleUpdate}
             updating={updating}
             canUpdate={canUpdate}
@@ -407,6 +411,7 @@ export function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      {cloudHost && vpsUpdateOpen && <VpsUpdateDialog onClose={() => setVpsUpdateOpen(false)} />}
       <TicketDetail
         ticket={openTicket}
         projects={projects}

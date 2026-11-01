@@ -9,12 +9,10 @@ export const SETTINGS_CATEGORIES = [
   "Intégrations",
   "MCP et accès distants",
   "Liaison des boards",
-  "Serveur VPS",
 ] as const;
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
 
 export type SettingsSectionId =
-  | "vps"
   | "appearance"
   | "defaults"
   | "quality"
@@ -38,7 +36,6 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { id: "vps", label: "Serveur VPS", category: "Serveur VPS", cloudOnly: true, keywords: ["mise à jour", "vps", "serveur", "redémarrage"] },
   {
     id: "appearance",
     label: "Apparence",

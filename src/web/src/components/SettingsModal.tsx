@@ -23,7 +23,6 @@ import { pairedRuntimeCodexEffort } from "@shared/codexCapabilities";
 import { availableSkillProviders } from "@shared/skills";
 
 import { BoardLinkSettings } from "@/components/BoardLinkSettings";
-import { VpsUpdateSettings } from "@/components/VpsUpdateSettings";
 import { CodexConnectionStatus } from "@/components/CodexConnectionStatus";
 import { McpSettings } from "@/components/McpSettings";
 import { RemoteMcpSettings } from "@/components/RemoteMcpSettings";
@@ -298,8 +297,6 @@ function SettingsSubpageTabs({ category, subpages, sectionId, counts, onSelect }
 }
 
 function SettingsSectionPanel({ sectionId, query }: { sectionId: SettingsSectionId; query: string }) {
-  const { cloudHost } = useCapabilities();
-  if (sectionId === "vps") return cloudHost ? <VpsUpdateSettings /> : null;
   if (sectionId === "appearance") return <AppearanceSettings query={query} />;
   if (sectionId === "defaults") return <AgentDefaultsSettings query={query} />;
   if (sectionId === "quality") return <QualitySettings query={query} />;

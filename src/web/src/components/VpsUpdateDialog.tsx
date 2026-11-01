@@ -5,9 +5,8 @@ import { vpsUpdateSchema } from "@shared/vpsUpdate";
 import type { VpsUpdateStatus } from "@shared/vpsUpdate";
 
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
-import { Switch } from "@/components/ui/switch";
-import { SectionHeader } from "@/components/ui/settings";
 import { request } from "@/lib/api";
 import { formatDateTime } from "@/lib/display";
 
@@ -111,13 +110,10 @@ function FinishedStatus({ status }: { status: VpsUpdateStatus }) {
   return null;
 }
 
-export function VpsUpdateSettings() {
-  const confirmationId = useId();
-  const risksId = useId();
+export function VpsUpdateDialog({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<VpsUpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [confirmed, setConfirmed] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -145,7 +141,6 @@ export function VpsUpdateSettings() {
     try {
       const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm" } });
       setStatus(vpsUpdateSchema.parse(result));
-      setConfirmed(false);
     } catch {
       setError("La demande n’a pas été confirmée. Consultez l’état avant de réessayer : une coupure peut accompagner le redémarrage.");
     } finally {
@@ -153,43 +148,43 @@ export function VpsUpdateSettings() {
     }
   }
 
-  if (status === null && error === null) return null;
   const isRunning = status?.phase === "resolving" || status?.phase === "running";
   const isFailure = status?.phase === "failed" || status?.phase === "interrupted";
   const canStart = status?.phase === "idle" || status?.phase === "succeeded" || status?.phase === "refused";
   return (
-    <section className="space-y-4 rounded-md border p-4">
-      <SectionHeader title="Mise à jour du VPS" subtitle="Installe la dernière version. L’accès est coupé environ une minute." />
-      {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={error !== null} /> : <FinishedStatus status={status} />)}
-      {!isRunning && !isFailure && (
-        <div className="space-y-3 border-t pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Switch
-                id={confirmationId}
-                checked={confirmed}
-                disabled={!canStart || pending || error !== null}
-                onCheckedChange={setConfirmed}
-                aria-describedby={risksId}
-                className="motion-reduce:transition-none [&>span]:motion-reduce:transition-none"
-              />
-              <label htmlFor={confirmationId} className="cursor-pointer text-sm leading-5">
-                Mes tâches sont terminées, j’autorise le redémarrage
-              </label>
-            </div>
-            <Button disabled={!canStart || !confirmed || pending || error !== null} onClick={() => { void start(); }}>
+    <Dialog
+      open
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title="Mise à jour du VPS"
+      description="Installe la dernière version. L’accès est coupé environ une minute."
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>{isRunning || isFailure || error !== null ? "Fermer" : "Annuler"}</Button>
+          {!isRunning && !isFailure && (
+            <Button disabled={!canStart || pending || error !== null} onClick={() => { void start(); }}>
               {pending ? "Démarrage…" : "Mettre à jour"}
             </Button>
+          )}
+        </>
+      }
+    >
+      {status === null && error === null && <p role="status" className="text-sm text-muted-foreground">Chargement de l’état de la mise à jour…</p>}
+      {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={error !== null} /> : <FinishedStatus status={status} />)}
+      {canStart && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-2 rounded-md border bg-secondary p-3 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+            <p>Terminez vos tâches avant de lancer la mise à jour.</p>
           </div>
           <details className="text-xs text-muted-foreground">
             <summary className="cursor-pointer rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Ce qui peut mal se passer</summary>
-            <p id={risksId} className="mt-2">
+            <p className="mt-2">
               La mise à jour est refusée si des tâches sont actives, mais une tâche lancée juste avant l’arrêt peut être interrompue. En cas d’échec, le retour arrière restaure le code, jamais la base de données.
             </p>
           </details>
         </div>
       )}
       {error !== null && <p role="alert" className="text-sm text-destructive">{error}</p>}
-    </section>
+    </Dialog>
   );
 }

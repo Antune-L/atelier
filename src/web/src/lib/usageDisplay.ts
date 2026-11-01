@@ -1,5 +1,6 @@
 import type { ProviderQuota, QuotaProvider, QuotaWindow, QuotaWindowPace } from "@shared/providerQuota";
-import type { DailyUsage, ProviderUsage, UsagePeriod } from "@shared/providerUsage";
+import { mergeDailyUsage } from "@shared/providerUsage";
+import type { DailyUsage, ProviderUsage, ProviderUsagePair, UsagePeriod, UsageScope, UsageSummary } from "@shared/providerUsage";
 
 import type { TabOption } from "@/components/ui/tabs";
 
@@ -44,6 +45,28 @@ export function filteredProviders(filter: UsageProviderFilter): QuotaProvider[] 
 
 export const LOCAL_HISTORY_NOTE = "Sessions Atelier et historiques disponibles sur ce serveur, y compris hors Atelier. Les autres machines, le web et le mobile ne sont pas inclus. Les coûts estimés aux tarifs API ne représentent pas la facture de l’abonnement.";
 
+export const LOCAL_AND_MAC_HISTORY_NOTE = "Sessions Atelier et historiques de ce VPS et du Mac relié, y compris hors Atelier. Le web, le mobile et Codex cloud ne sont pas inclus. Les coûts estimés aux tarifs API ne représentent pas la facture de l’abonnement.";
+
+export const USAGE_SCOPE_LABELS: Record<UsageScope, string> = { local: "Ce serveur", all: "Ce serveur + Mac" };
+
+export type UsageMachine = "server" | "mac";
+
+export const USAGE_MACHINES: readonly UsageMachine[] = ["server", "mac"];
+
+export const USAGE_MACHINE_LABELS: Record<UsageMachine, string> = { server: "VPS", mac: "Mac" };
+
+export const USAGE_MACHINE_SWATCH_CLASSES: Record<UsageMachine, string> = { server: "bg-foreground", mac: "bg-foreground/40" };
+
+export const USAGE_MACHINE_CHART_COLORS: Record<UsageMachine, string> = { server: "hsl(var(--foreground))", mac: "hsl(var(--foreground) / 0.4)" };
+
+export type UsageMachineSplit = Record<UsageMachine, ProviderUsagePair>;
+
+export function usageMachineSplit(summary: UsageSummary): UsageMachineSplit | null {
+  const machines = summary.machines;
+  if (summary.scope !== "all" || machines === undefined || machines.mac === null) return null;
+  return { server: machines.server, mac: machines.mac.providers };
+}
+
 export const QUOTA_ACCOUNT_NOTE = "Quotas des comptes connectés : ils incluent l’usage hors Atelier et sur les autres appareils pour les limites partagées par le fournisseur. Chaque fenêtre correspond à une période de l’abonnement, pas à un ticket Atelier.";
 
 export const OAUTH_TOKEN_ENV_WARNING =
@@ -75,17 +98,7 @@ export function formatDayLabel(date: string): string {
 
 /** Per-day totals summed across providers, sorted by date. */
 export function mergeDaily(usages: ProviderUsage[]): DailyUsage[] {
-  const days = new Map<string, DailyUsage>();
-  for (const usage of usages) {
-    for (const day of usage.daily) {
-      const merged = days.get(day.date) ?? { date: day.date, costUsd: 0, unpricedTokens: 0, totalTokens: 0 };
-      merged.costUsd += day.costUsd;
-      merged.unpricedTokens += day.unpricedTokens;
-      merged.totalTokens += day.totalTokens;
-      days.set(day.date, merged);
-    }
-  }
-  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return mergeDailyUsage(usages.map((usage) => usage.daily));
 }
 
 export function sessionCountText(count: number): string {
@@ -225,4 +238,16 @@ const CLOCK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minu
 
 export function formatClock(ms: number): string {
   return CLOCK_FORMATTER.format(new Date(ms));
+}
+
+const SHORT_CLOCK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit" });
+
+export function formatShortClock(ms: number): string {
+  return SHORT_CLOCK_FORMATTER.format(new Date(ms));
+}
+
+const WEEKDAY_CLOCK_FORMATTER = new Intl.DateTimeFormat("fr-FR", { weekday: "long", hour: "2-digit", minute: "2-digit" });
+
+export function formatWeekdayClock(ms: number): string {
+  return WEEKDAY_CLOCK_FORMATTER.format(new Date(ms));
 }

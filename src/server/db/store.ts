@@ -67,7 +67,8 @@ import type { ActiveSubagent, OpenPr, PrNotification, PrNotificationSyncStatus, 
 import { projectStatRecord, residualLegacyUsage } from "../../shared/statistics.ts";
 import { providerQuotaSchema } from "../../shared/providerQuota.ts";
 import type { ProviderQuota, QuotaProvider } from "../../shared/providerQuota.ts";
-import type { UsageSource } from "../../shared/providerUsage.ts";
+import { macUsageSnapshotSchema } from "../../shared/providerUsage.ts";
+import type { MacUsageSnapshot, UsageSource } from "../../shared/providerUsage.ts";
 import { QUALITY_ITERATION_ACTIVE_STATUSES, latestAcceptanceSnapshot, latestFunctionalSnapshot, projectValidationSchema, qualityCriteriaSnapshotSchema, qualityEvidenceSchema, qualityIterationSchema, qualityValidationRunSchema } from "../../shared/quality.ts";
 import type { ProjectValidation, QualityCriteriaSnapshot, QualityEvidence, QualityIteration, QualityIterationMode, QualityIterationTrigger, QualityValidationMode, QualityValidationRun, TicketQuality } from "../../shared/quality.ts";
 import { computeWorktreeAddresses } from "../agents/worktreeAddresses.ts";
@@ -97,6 +98,9 @@ export interface CreateQualityIterationInput {
 const MAC_CATALOGUE_META_KEY = "mac_catalogue";
 const storedMacCatalogueSchema = bridgeCataloguePublishInputSchema.extend({ publishedAt: z.number() });
 export type StoredMacCatalogue = z.infer<typeof storedMacCatalogueSchema>;
+const MAC_USAGE_META_KEY = "mac_usage";
+const storedMacUsageSchema = macUsageSnapshotSchema.extend({ publishedAt: z.number() });
+export type StoredMacUsage = z.infer<typeof storedMacUsageSchema>;
 
 export type NewMacOutboxItem = Pick<MacOutboxItem, "id" | "project" | "projectLabel" | "title" | "description" | "source" | "sourceTicketId">;
 
@@ -1935,6 +1939,17 @@ export class Store {
 
   publishMacCatalogue(input: BridgeCataloguePublishInput, publishedAt: number): void {
     this.setMeta(MAC_CATALOGUE_META_KEY, JSON.stringify(storedMacCatalogueSchema.parse({ ...input, publishedAt })));
+  }
+
+  getMacUsage(): StoredMacUsage | null {
+    const stored = this.getMeta(MAC_USAGE_META_KEY);
+    if (stored === null) return null;
+    const parsed = storedMacUsageSchema.safeParse(safeJsonParse(stored));
+    return parsed.success ? parsed.data : null;
+  }
+
+  publishMacUsage(snapshot: MacUsageSnapshot, publishedAt: number): void {
+    this.setMeta(MAC_USAGE_META_KEY, JSON.stringify(storedMacUsageSchema.parse({ ...snapshot, publishedAt })));
   }
 
   enqueueMacOutboxItem(input: NewMacOutboxItem): { created: boolean; item: MacOutboxItem } {

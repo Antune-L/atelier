@@ -64,6 +64,7 @@ export const speedUsageSchema = z.object({
   totalTokens: z.number().nonnegative(),
   unpricedTokens: z.number().nonnegative(),
 });
+type SpeedUsage = z.infer<typeof speedUsageSchema>;
 
 export const usageTotalsSchema = z.object({
   /** Every processed token (exclusive buckets summed). */
@@ -73,6 +74,7 @@ export const usageTotalsSchema = z.object({
   cacheCreate: z.number().nonnegative(),
   output: z.number().nonnegative(),
 });
+type UsageTotals = z.infer<typeof usageTotalsSchema>;
 
 export const providerUsageSchema = z.object({
   hasUsage: z.boolean(),
@@ -96,16 +98,47 @@ export const providerUsageSchema = z.object({
 });
 export type ProviderUsage = z.infer<typeof providerUsageSchema>;
 
+export const providerUsagePairSchema = z.object({ claude: providerUsageSchema, codex: providerUsageSchema });
+export type ProviderUsagePair = z.infer<typeof providerUsagePairSchema>;
+
+export const USAGE_SCOPES = ["local", "all"] as const;
+export const usageScopeSchema = z.enum(USAGE_SCOPES);
+export type UsageScope = z.infer<typeof usageScopeSchema>;
+export const DEFAULT_USAGE_SCOPE: UsageScope = "all";
+
+export const macUsageSnapshotSchema = z.object({
+  generatedAt: z.number(),
+  summaries: z.record(usagePeriodSchema, providerUsagePairSchema.strict()),
+}).strict();
+export type MacUsageSnapshot = z.infer<typeof macUsageSnapshotSchema>;
+
+export const macUsageSourceSchema = z.object({
+  publishedAt: z.number(),
+  stale: z.boolean(),
+  providers: providerUsagePairSchema,
+});
+export type MacUsageSource = z.infer<typeof macUsageSourceSchema>;
+
+export const usageMachinesSchema = z.object({
+  server: providerUsagePairSchema,
+  /** Null when the Mac never published its usage to this server. */
+  mac: macUsageSourceSchema.nullable(),
+});
+export type UsageMachines = z.infer<typeof usageMachinesSchema>;
+
 export const usageSummarySchema = z.object({
   period: usagePeriodSchema,
   since: z.number(),
   generatedAt: z.number(),
-  providers: z.object({ claude: providerUsageSchema, codex: providerUsageSchema }),
+  providers: providerUsagePairSchema,
   historyCoverage: z.object({
     files: z.number().int().nonnegative(),
     failedFiles: z.number().int().nonnegative(),
     failedRoots: z.number().int().nonnegative(),
   }).optional(),
+  /** Machines summed into `providers`; only set on the cloud host. */
+  scope: usageScopeSchema.optional(),
+  machines: usageMachinesSchema.optional(),
 });
 export type UsageSummary = z.infer<typeof usageSummarySchema>;
 
@@ -250,9 +283,17 @@ function collectHistoryEntries(history: UsageHistoryInput, since: number | null)
   return [...entries, ...keyedEntries.values()];
 }
 
+function usageTotalsOf(tokens: TokenBreakdown, processed: number): UsageTotals {
+  return { processed, inputCached: tokens.cacheRead, inputUncached: tokens.input, cacheCreate: tokens.cacheCreate, output: tokens.output };
+}
+
+function emptyDay(date: string): DailyUsage {
+  return { date, costUsd: 0, unpricedTokens: 0, totalTokens: 0 };
+}
+
 function addDaily(days: Map<string, DailyUsage>, timestamp: number, totalTokens: number, costUsd: number | null): void {
   const date = utcDay(timestamp);
-  const day = days.get(date) ?? { date, costUsd: 0, unpricedTokens: 0, totalTokens: 0 };
+  const day = days.get(date) ?? emptyDay(date);
   days.set(date, day);
   day.totalTokens += totalTokens;
   if (costUsd === null) day.unpricedTokens += totalTokens;
@@ -270,6 +311,15 @@ function cacheSavingsOf(entry: UsageEntry): number {
   const atCache = costBreakdownOfModel(entry.model, { input: 0, output: 0, cacheRead: entry.tokens.cacheRead, cacheCreate: 0 }, entry.fast);
   if (atInput === null || atCache === null) return 0;
   return Math.max(0, atInput.input - atCache.cacheRead);
+}
+
+function compareModelRows(a: ModelUsageRow, b: ModelUsageRow): number {
+  if (a.costUsd !== b.costUsd) {
+    if (a.costUsd === null) return 1;
+    if (b.costUsd === null) return -1;
+    return b.costUsd - a.costUsd;
+  }
+  return b.totalTokens - a.totalTokens;
 }
 
 interface RowAccumulator {
@@ -325,20 +375,13 @@ function summarizeProvider(entries: UsageEntry[]): ProviderUsage {
     const recomputed = sumOf(breakdown);
     if (recomputed > 0) addBreakdown(costByType, breakdown, entry.costUsd / recomputed);
   }
-  const models = [...rows.values()].map(({ row, days: rowDays }) => ({ ...row, daily: sortedDays(rowDays) })).sort((a, b) => {
-    if (a.costUsd !== b.costUsd) {
-      if (a.costUsd === null) return 1;
-      if (b.costUsd === null) return -1;
-      return b.costUsd - a.costUsd;
-    }
-    return b.totalTokens - a.totalTokens;
-  });
+  const models = [...rows.values()].map(({ row, days: rowDays }) => ({ ...row, daily: sortedDays(rowDays) })).sort(compareModelRows);
   const totalTokens = sumOf(tokens);
   return {
     hasUsage: models.length > 0,
     totalTokens,
     tokens,
-    totals: { processed: totalTokens, inputCached: tokens.cacheRead, inputUncached: tokens.input, cacheCreate: tokens.cacheCreate, output: tokens.output },
+    totals: usageTotalsOf(tokens, totalTokens),
     costUsd,
     partial,
     unpricedTokens,
@@ -371,5 +414,71 @@ export function summarizeProviderUsage(
       claude: summarizeProvider(entries.filter((entry) => entry.provider === "claude")),
       codex: summarizeProvider(entries.filter((entry) => entry.provider === "codex")),
     },
+  };
+}
+
+function addSpeedUsage(a: SpeedUsage, b: SpeedUsage): SpeedUsage {
+  return { costUsd: a.costUsd + b.costUsd, totalTokens: a.totalTokens + b.totalTokens, unpricedTokens: a.unpricedTokens + b.unpricedTokens };
+}
+
+function sumBreakdowns(a: TokenBreakdown, b: TokenBreakdown): TokenBreakdown {
+  const sum = { ...a };
+  addBreakdown(sum, b);
+  return sum;
+}
+
+/** Per-day totals summed across several daily series, sorted by date. */
+export function mergeDailyUsage(series: DailyUsage[][]): DailyUsage[] {
+  const days = new Map<string, DailyUsage>();
+  for (const day of series.flat()) {
+    const merged = days.get(day.date) ?? emptyDay(day.date);
+    days.set(day.date, merged);
+    merged.costUsd += day.costUsd;
+    merged.unpricedTokens += day.unpricedTokens;
+    merged.totalTokens += day.totalTokens;
+  }
+  return sortedDays(days);
+}
+
+function addNullableCost(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a + b;
+}
+
+function mergeModelRows(a: ModelUsageRow[], b: ModelUsageRow[]): ModelUsageRow[] {
+  const rows = new Map<string, ModelUsageRow>();
+  for (const row of [...a, ...b]) {
+    const key = `${row.model}\u0000${row.speed}\u0000${String(row.fast)}`;
+    const previous = rows.get(key);
+    rows.set(key, previous === undefined ? row : {
+      ...previous,
+      totalTokens: previous.totalTokens + row.totalTokens,
+      tokens: sumBreakdowns(previous.tokens, row.tokens),
+      costUsd: addNullableCost(previous.costUsd, row.costUsd),
+      daily: mergeDailyUsage([previous.daily, row.daily]),
+    });
+  }
+  return [...rows.values()].sort(compareModelRows);
+}
+
+/** Sum of two provider summaries over disjoint sessions (one per machine), sorted like a single summary. */
+export function mergeProviderUsage(a: ProviderUsage, b: ProviderUsage): ProviderUsage {
+  const tokens = sumBreakdowns(a.tokens, b.tokens);
+  const totalTokens = a.totalTokens + b.totalTokens;
+  return {
+    hasUsage: a.hasUsage || b.hasUsage,
+    totalTokens,
+    tokens,
+    totals: usageTotalsOf(tokens, totalTokens),
+    costUsd: a.costUsd + b.costUsd,
+    partial: a.partial || b.partial,
+    unpricedTokens: a.unpricedTokens + b.unpricedTokens,
+    cacheSavingsUsd: a.cacheSavingsUsd + b.cacheSavingsUsd,
+    costByType: sumBreakdowns(a.costByType, b.costByType),
+    costBySpeed: { standard: addSpeedUsage(a.costBySpeed.standard, b.costBySpeed.standard), fast: addSpeedUsage(a.costBySpeed.fast, b.costBySpeed.fast) },
+    sessionCount: a.sessionCount + b.sessionCount,
+    daily: mergeDailyUsage([a.daily, b.daily]),
+    models: mergeModelRows(a.models, b.models),
   };
 }

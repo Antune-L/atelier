@@ -12,6 +12,7 @@ import {
   bridgeCreateTicketInputSchema,
   bridgeEmptyInputSchema,
   bridgeOutboxAckInputSchema,
+  bridgeUsagePublishInputSchema,
   isBridgeOp,
 } from "../shared/vpsBridge.ts";
 import type { BridgeEnvelope, BridgeErrorCode, BridgeOp } from "../shared/vpsBridge.ts";
@@ -22,6 +23,7 @@ import { acknowledgeMacOutbox, fetchMacOutbox, publishMacCatalogue } from "./mac
 import { readBoundedBody } from "./remoteMcp/listener.ts";
 import { TicketOperationError } from "./ticketOperations.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
+import { publishMacUsage } from "./usage/summary.ts";
 
 // NOTE: deploy/vps/kanban-bridge hardcodes /run/kanban/bridge.sock, next to KANBAN_SOCKET=/run/kanban/ui.sock.
 const BRIDGE_SOCKET_FILENAME = "bridge.sock";
@@ -86,6 +88,7 @@ function createBridgeOpHandlers({ operations, store }: BridgeHandlerDeps): Recor
       return { items: fetchMacOutbox(store) };
     },
     outbox_ack: (input) => ({ acknowledged: acknowledgeMacOutbox(store, parseInput(bridgeOutboxAckInputSchema, input).acks) }),
+    usage_publish: (input) => publishMacUsage(store, parseInput(bridgeUsagePublishInputSchema, input)),
   };
 }
 

@@ -91,7 +91,7 @@ import type { ClientHub } from "./hub.ts";
 import { ProviderQuotaService } from "./quota/quotaService.ts";
 import { quotaProviderSchema } from "../shared/providerQuota.ts";
 import type { LastProviderQuotaResponse, ProviderQuota } from "../shared/providerQuota.ts";
-import { DEFAULT_USAGE_PERIOD, summarizeProviderUsage, usagePeriodSchema, usagePeriodStart } from "../shared/providerUsage.ts";
+import { DEFAULT_USAGE_PERIOD, DEFAULT_USAGE_SCOPE, usagePeriodSchema, usageScopeSchema } from "../shared/providerUsage.ts";
 import { claudeLoginCodeSchema } from "../shared/claudeLogin.ts";
 import type { ClaudeLoginStatus } from "../shared/claudeLogin.ts";
 import type { TicketLifecycle } from "./lifecycle.ts";
@@ -108,6 +108,7 @@ import { macOutboxAvailable } from "./macOutbox.ts";
 import { createVpsLinkRoutes } from "./vpsLinkRoutes.ts";
 import type { VpsLinkSync } from "./vpsLinkSync.ts";
 import type { LocalUsageReadResult } from "./usage/localHistory.ts";
+import { computeUsageSummary } from "./usage/summary.ts";
 import type { AuditManager } from "./agents/auditManager.ts";
 import type { PreviewManager } from "./previewManager.ts";
 import {
@@ -1410,15 +1411,9 @@ export function createApiRoutes(deps: RouteDeps) {
     .get("/usage/summary", async ({ query, set }) => {
       const period = usagePeriodSchema.safeParse(query.period ?? DEFAULT_USAGE_PERIOD);
       if (!period.success) return jsonError(set, HTTP_BAD_REQUEST, "période invalide");
-      const history = await deps.system.readUsageHistory();
-      const now = Date.now();
-      return {
-        ...summarizeProviderUsage(store.listUsageSources(), usagePeriodStart(period.data, now), period.data, now, {
-          entries: history.entries,
-          countedSessionIds: store.listUsageCountedSessionIds(),
-        }),
-        historyCoverage: { files: history.files, failedFiles: history.failedFiles, failedRoots: history.failedRoots },
-      };
+      const scope = usageScopeSchema.safeParse(query.scope ?? DEFAULT_USAGE_SCOPE);
+      if (!scope.success) return jsonError(set, HTTP_BAD_REQUEST, "périmètre invalide");
+      return computeUsageSummary({ store, system: deps.system }, period.data, scope.data, Date.now());
     })
     // Request bodies of the login routes are never logged nor echoed: the code is a one-time secret.
     .get("/usage/claude-login", () => deps.system.claudeLoginStatus())

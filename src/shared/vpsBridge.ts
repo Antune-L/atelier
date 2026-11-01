@@ -2,12 +2,13 @@ import { z } from "zod";
 
 import { boardNameSchema } from "./boardLink.ts";
 import { CROSS_BOARD_CLIENT_ID_PATTERN, CROSS_BOARD_DESCRIPTION_MAX_LENGTH, CROSS_BOARD_PROJECT_KEY_MAX_LENGTH, CROSS_BOARD_TITLE_MAX_LENGTH, VCS_PROVIDERS } from "./constants.ts";
+import { macUsageSnapshotSchema } from "./providerUsage.ts";
 import { deriveTitleFromDescription } from "./schemas.ts";
 
 // NOTE: bump on any breaking change to an op, its input or its output; the Mac refuses a VPS reporting another version.
 export const BRIDGE_PROTOCOL_VERSION = 2;
 
-export const BRIDGE_OPS = ["version", "list_projects", "create_ticket", "catalogue_publish", "outbox_fetch", "outbox_ack"] as const;
+export const BRIDGE_OPS = ["version", "list_projects", "create_ticket", "catalogue_publish", "outbox_fetch", "outbox_ack", "usage_publish"] as const;
 export type BridgeOp = (typeof BRIDGE_OPS)[number];
 
 export const BRIDGE_REQUEST_ID_PREFIX = "mac:";
@@ -140,6 +141,11 @@ export const bridgeCataloguePublishInputSchema = z.object({
 }).strict();
 export type BridgeCataloguePublishInput = z.infer<typeof bridgeCataloguePublishInputSchema>;
 export const bridgeCataloguePublishOutputSchema = z.object({ publishedAt: z.number() }).strict();
+
+export const bridgeUsagePublishInputSchema = macUsageSnapshotSchema;
+export const bridgeUsagePublishOutputSchema = z.object({ publishedAt: z.number() }).strict();
+// NOTE(ali): the Mac publishes its usage at most hourly while awake; two hours without a publication flags the figures as old.
+export const MAC_USAGE_STALE_AFTER_MS = 2 * 60 * 60_000;
 
 export const bridgeOutboxItemSchema = macOutboxDraftFields.extend({ id: outboxItemIdSchema, createdAt: z.number() }).strict();
 export type BridgeOutboxItem = z.infer<typeof bridgeOutboxItemSchema>;

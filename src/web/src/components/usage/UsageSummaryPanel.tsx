@@ -1,14 +1,40 @@
 import type { ReactNode } from "react";
 
-import type { UsageSummary } from "@shared/providerUsage";
+import type { QuotaProvider } from "@shared/providerQuota";
+import type { ProviderUsagePair, UsageSummary } from "@shared/providerUsage";
 
 import { Badge } from "@/components/ui/badge";
 import { DailyUsageChart } from "@/components/usage/DailyUsageChart";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
-import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent } from "@/lib/usageDisplay";
-import type { UsageProviderFilter } from "@/lib/usageDisplay";
+import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent, USAGE_MACHINE_LABELS, USAGE_MACHINE_SWATCH_CLASSES, USAGE_MACHINES, usageMachineSplit } from "@/lib/usageDisplay";
+import type { UsageMachineSplit, UsageProviderFilter } from "@/lib/usageDisplay";
 
 export type UsageMetric = "cost" | "tokens";
+
+const SPLIT_LABEL_SUFFIX = ` · ${USAGE_MACHINE_LABELS.server} + ${USAGE_MACHINE_LABELS.mac}`;
+
+function metricValue(pair: ProviderUsagePair, provider: QuotaProvider, metric: UsageMetric): number {
+  return metric === "cost" ? pair[provider].costUsd : pair[provider].totals.processed;
+}
+
+function MachineSplitRow({ split, provider, metric, format }: {
+  split: UsageMachineSplit;
+  provider: QuotaProvider;
+  metric: UsageMetric;
+  format: (value: number) => string;
+}): ReactNode {
+  const values = USAGE_MACHINES.map((machine) => ({ machine, value: metricValue(split[machine], provider, metric) }));
+  const total = values.reduce((sum, { value }) => sum + value, 0);
+  return (<>
+    <div className="ml-6 flex h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+      {values.map(({ machine, value }) => <div key={machine} className={USAGE_MACHINE_SWATCH_CLASSES[machine]} style={{ width: `${sharePercent(value, total)}%` }} />)}
+    </div>
+    <p className="pl-6 text-xs text-muted-foreground tabular-nums">
+      {values.map(({ machine, value }) => `${USAGE_MACHINE_LABELS[machine]} ${format(value)}`).join(" · ")}
+    </p>
+  </>);
+}
+
 export function UsageSummaryPanel({ summary, filter, metric }: {
   summary: UsageSummary;
   filter: UsageProviderFilter;
@@ -16,17 +42,18 @@ export function UsageSummaryPanel({ summary, filter, metric }: {
 }): ReactNode {
   const providers = filteredProviders(filter);
   const usages = providers.map((provider) => summary.providers[provider]);
-  const valueOf = (provider: (typeof providers)[number]) => metric === "cost" ? summary.providers[provider].costUsd : summary.providers[provider].totals.processed;
+  const valueOf = (provider: QuotaProvider): number => metricValue(summary.providers, provider, metric);
   const total = providers.reduce((sum, provider) => sum + valueOf(provider), 0);
   const format = metric === "cost" ? formatUsageUsd : formatCompactTokens;
   const savings = usages.reduce((sum, usage) => sum + usage.cacheSavingsUsd, 0);
   const unpriced = usages.reduce((sum, usage) => sum + usage.unpricedTokens, 0);
+  const split = usageMachineSplit(summary);
   return (<section className="overflow-hidden" aria-label={metric === "cost" ? "Coût estimé" : "Tokens traités"}>
     <div className="flex flex-col lg:flex-row">
       <div className="flex flex-col gap-6 p-6 lg:w-72 lg:shrink-0">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{metric === "cost" ? "Coût estimé · prix API" : "Tokens traités"}</span>
+            <span>{metric === "cost" ? "Coût estimé · prix API" : "Tokens traités"}{split !== null && SPLIT_LABEL_SUFFIX}</span>
             {metric === "cost" && usages.some((usage) => usage.partial) && <Badge variant="warning" title="Certains tokens ne sont pas tarifés : le total est un minimum.">partiel</Badge>}
           </div>
           <p className="text-4xl font-semibold tracking-tight tabular-nums" title={metric === "cost" ? formatUsageUsd(total) : String(total)}>{format(total)}</p>
@@ -38,6 +65,7 @@ export function UsageSummaryPanel({ summary, filter, metric }: {
                 <ProviderLogo provider={provider} />{QUOTA_PROVIDER_LABELS[provider]}</span>
               <span className="font-medium tabular-nums">{format(valueOf(provider))}</span>
             </div>
+            {split !== null && <MachineSplitRow split={split} provider={provider} metric={metric} format={format} />}
             <div className="flex justify-between pl-6 text-xs text-muted-foreground">
               <span>{sessionCountText(summary.providers[provider].sessionCount)}</span>
               <span>{formatPercent(sharePercent(valueOf(provider), total))}</span>

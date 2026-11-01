@@ -4,6 +4,13 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 
 ## Current summary
 
+- All phases (N2, N3, N4, SETUP) are merged on `main` and the link is live: the Mac publishes its catalogue to the VPS every 5 minutes.
+- Bridge protocol is 2; ops are listed in `BRIDGE_OPS` (`src/shared/vpsBridge.ts`) and mirrored in `deploy/vps/kanban-bridge`.
+- Follow-up on branch `feat/global-usage-vps`: additive op `usage_publish` (no protocol bump) so the VPS Consumption page can include the Mac's usage; see [usage.md](usage.md). Rollout: VPS first (`sudo kanban-upgrade --sha <sha>`), then the Mac.
+- History below; commit ids refer to the former `feat/mac-vps-link` branch.
+
+## Pre-merge summary (history)
+
 - Branch: `feat/mac-vps-link`, from `main` at `4f629e5`.
 - Phase 1 committed as `16531a3`: S1, N2-1, N2-2, N2-3 (code + `docs/mac-remote-access.md`), N2-4 (UI bits + checklist). Live checks (Cloudflare refusals, phone checklist) not run.
 - Phase 2 committed as `13e75fa`: S2a, S2b, S3, N3-1, N3-2.

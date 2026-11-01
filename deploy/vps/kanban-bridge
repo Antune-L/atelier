@@ -23,7 +23,7 @@ case "$1" in
     echo "$PROGRAM_VERSION"
     exit 0
     ;;
-  version | list_projects | create_ticket | catalogue_publish | outbox_fetch | outbox_ack) op="$1" ;;
+  version | list_projects | create_ticket | catalogue_publish | outbox_fetch | outbox_ack | usage_publish) op="$1" ;;
   *)
     echo "kanban-bridge: unknown operation" >&2
     exit "$EXIT_USAGE"

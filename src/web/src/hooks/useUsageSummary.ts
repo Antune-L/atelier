@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 
-import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
+import type { UsagePeriod, UsageScope, UsageSummary } from "@shared/providerUsage";
 
 import { api } from "@/lib/api";
 
@@ -16,7 +16,7 @@ interface UsageSummaryEntry {
 }
 
 const EMPTY_SNAPSHOT: UseUsageSummaryResult = { summary: null, loading: false, error: null };
-const summaries = new Map<UsagePeriod, UsageSummaryEntry>();
+const summaries = new Map<string, UsageSummaryEntry>();
 const listeners = new Set<() => void>();
 
 function subscribe(listener: () => void): () => void {
@@ -28,17 +28,22 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-function refreshSummary(period: UsagePeriod): void {
-  let entry = summaries.get(period);
+function summaryKey(period: UsagePeriod, scope: UsageScope): string {
+  return `${period}:${scope}`;
+}
+
+function refreshSummary(period: UsagePeriod, scope: UsageScope): void {
+  const key = summaryKey(period, scope);
+  let entry = summaries.get(key);
   if (entry === undefined) {
     entry = { snapshot: EMPTY_SNAPSHOT, pending: null };
-    summaries.set(period, entry);
+    summaries.set(key, entry);
   }
   if (entry.pending !== null) return;
 
   const current = entry;
   current.snapshot = { ...current.snapshot, loading: true, error: null };
-  current.pending = api.usageSummary(period)
+  current.pending = api.usageSummary(period, scope)
     .then((summary) => {
       current.snapshot = { summary, loading: false, error: null };
     })
@@ -52,12 +57,12 @@ function refreshSummary(period: UsagePeriod): void {
   notify();
 }
 
-export function useUsageSummary(period: UsagePeriod, nonce: number, enabled: boolean): UseUsageSummaryResult {
-  const snapshot = useSyncExternalStore(subscribe, () => summaries.get(period)?.snapshot ?? EMPTY_SNAPSHOT);
+export function useUsageSummary(period: UsagePeriod, scope: UsageScope, enabled: boolean): UseUsageSummaryResult {
+  const snapshot = useSyncExternalStore(subscribe, () => summaries.get(summaryKey(period, scope))?.snapshot ?? EMPTY_SNAPSHOT);
 
   useEffect(() => {
-    if (enabled) refreshSummary(period);
-  }, [period, nonce, enabled]);
+    if (enabled) refreshSummary(period, scope);
+  }, [period, scope, enabled]);
 
   return { ...snapshot, loading: enabled && snapshot.loading };
 }

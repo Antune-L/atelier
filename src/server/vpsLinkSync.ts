@@ -1,7 +1,9 @@
+
 import type { ZodType } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
 import {
+  BRIDGE_MAX_REQUEST_BYTES,
   BRIDGE_PROTOCOL_VERSION,
   MAC_CATALOGUE_MAX_PROJECTS,
   bridgeCataloguePublishOutputSchema,
@@ -10,6 +12,7 @@ import {
   bridgeOutboxAckOutputSchema,
   bridgeOutboxFetchOutputSchema,
   bridgeRequestId,
+  bridgeUsagePublishOutputSchema,
   bridgeVersionOutputSchema,
   vpsCreateTicketInputSchema,
 } from "../shared/vpsBridge.ts";
@@ -30,11 +33,13 @@ import { remoteAllowedProjects, resolveRemoteCardsProfile } from "./remoteMcp/ad
 import type { SystemAdapter } from "./system/types.ts";
 import type { VpsBridgeFailureKind } from "./system/vpsBridge.ts";
 import type { TicketOperations } from "./ticketOperations.ts";
+import { computeMacUsageSnapshot } from "./usage/summary.ts";
 import { admitVpsOutboxItem } from "./vpsOutboxImport.ts";
 
 const SYNC_INTERVAL_MS = 5 * 60_000;
 const VERSION_CHECK_TTL_MS = SYNC_INTERVAL_MS;
 const OUTBOX_MAX_PAGES_PER_SYNC = 10;
+const USAGE_PUBLISH_INTERVAL_MS = 60 * 60_000;
 const log = createLogger("vps-link");
 
 export type VpsLinkErrorKind = VpsBridgeFailureKind | "not_configured" | "rejected" | "not_found";
@@ -73,7 +78,7 @@ function isPermanentFailure(kind: VpsLinkErrorKind): boolean {
 
 export interface VpsLinkSyncDeps {
   store: Store;
-  system: Pick<SystemAdapter, "runVpsBridge" | "checkCodexRuntime" | "checkClaudeAvailable">;
+  system: Pick<SystemAdapter, "runVpsBridge" | "checkCodexRuntime" | "checkClaudeAvailable" | "readUsageHistory">;
   operations: Pick<TicketOperations, "createTodoTicket">;
   composerAvailable: boolean;
 }
@@ -86,6 +91,8 @@ export class VpsLinkSync {
   private readonly inFlight = new Set<string>();
   private readonly projectLabels = new Map<string, string>();
   private compatibility: { alias: string; checkedAt: number } | null = null;
+  private usageCheckedAt: number | null = null;
+  private readonly usageWarnings = new Set<string>();
 
   constructor(private readonly deps: VpsLinkSyncDeps) {}
 
@@ -161,6 +168,40 @@ export class VpsLinkSync {
       if (!(error instanceof VpsLinkError)) throw error;
       log.warn("synchronisation de la boîte d'envoi du VPS interrompue", { kind: error.kind, error: error.message });
     }
+    await this.publishUsage();
+  }
+
+  // NOTE(ali): best effort; a failure here never blocks sends, the catalogue or the outbox, and is retried on the next tick.
+  private async publishUsage(): Promise<void> {
+    const now = Date.now();
+    if (this.stopped || (this.usageCheckedAt !== null && now - this.usageCheckedAt < USAGE_PUBLISH_INTERVAL_MS)) return;
+    try {
+      await this.publishUsageSnapshot(now);
+      this.usageCheckedAt = now;
+    } catch (error) {
+      if (error instanceof VpsLinkError && error.kind === "version_mismatch") {
+        this.usageCheckedAt = now;
+        this.warnUsageOnce("unsupported", "le VPS ne reçoit pas encore la consommation du Mac : mettez le VPS à jour", { error: error.message });
+        return;
+      }
+      log.warn("publication de la consommation du Mac échouée", { error: getErrorMessage(error) });
+    }
+  }
+
+  private async publishUsageSnapshot(now: number): Promise<void> {
+    const snapshot = await computeMacUsageSnapshot(this.deps, now);
+    if (Buffer.byteLength(JSON.stringify(snapshot)) > BRIDGE_MAX_REQUEST_BYTES) {
+      this.warnUsageOnce("oversize", "consommation du Mac trop volumineuse pour le pont VPS, non publiée", { maxBytes: BRIDGE_MAX_REQUEST_BYTES });
+      return;
+    }
+    await this.call("usage_publish", snapshot, bridgeUsagePublishOutputSchema);
+    log.info("consommation du Mac publiée sur le VPS");
+  }
+
+  private warnUsageOnce(key: string, message: string, context: Record<string, unknown>): void {
+    if (this.usageWarnings.has(key)) return;
+    this.usageWarnings.add(key);
+    log.warn(message, context);
   }
 
   private async retryPendingSends(): Promise<boolean> {
@@ -251,7 +292,8 @@ export class VpsLinkSync {
   private async invoke<T>(alias: string, op: BridgeOp, input: unknown, schema: ZodType<T>): Promise<T> {
     const result = await this.deps.system.runVpsBridge({ hostAlias: alias, op, input });
     if (!result.ok) {
-      this.compatibility = null;
+      // NOTE(ali): an unknown op on an older VPS bridge program says nothing about the other ops, so the version check is kept.
+      if (op === "version" || result.kind !== "version_mismatch") this.compatibility = null;
       log.warn("pont VPS en échec", { op, kind: result.kind, detail: result.detail });
       throw new VpsLinkError(result.kind, FAILURE_MESSAGES[result.kind]);
     }

@@ -5,6 +5,7 @@ import {
   bridgeCataloguePublishInputSchema,
   bridgeCreateTicketInputSchema,
   bridgeOutboxAckInputSchema,
+  bridgeUsagePublishInputSchema,
   draftTitle,
 } from "../../shared/vpsBridge.ts";
 import type { BoardProject, BridgeEnvelope, VpsCreatedTicket } from "../../shared/vpsBridge.ts";
@@ -50,6 +51,10 @@ export class FakeVpsBridge {
   private outboxOp(call: VpsBridgeCall): BridgeEnvelope {
     if (call.op === "catalogue_publish") {
       const parsed = bridgeCataloguePublishInputSchema.safeParse(call.input);
+      return parsed.success ? { ok: true, result: { publishedAt: Date.now() } } : invalidInput(parsed.error.issues);
+    }
+    if (call.op === "usage_publish") {
+      const parsed = bridgeUsagePublishInputSchema.safeParse(call.input);
       return parsed.success ? { ok: true, result: { publishedAt: Date.now() } } : invalidInput(parsed.error.issues);
     }
     if (call.op === "outbox_ack") {

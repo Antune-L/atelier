@@ -64,7 +64,7 @@ import type { HostMetrics } from "@shared/types";
 import { lastProviderQuotaResponseSchema, providerQuotaSchema } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
 import { usageSummarySchema } from "@shared/providerUsage";
-import type { UsagePeriod, UsageSummary } from "@shared/providerUsage";
+import type { UsagePeriod, UsageScope, UsageSummary } from "@shared/providerUsage";
 import { claudeLoginStatusSchema } from "@shared/claudeLogin";
 import type { ClaudeLoginStatus } from "@shared/claudeLogin";
 import type { CloneProjectRequest, CloneResult, GithubAccountSummary, GithubRepoSummary } from "@shared/github";
@@ -245,8 +245,8 @@ export const api = {
     providerQuotaSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}${options?.fresh ? "?fresh=1" : ""}`)),
   usageLastLimits: async (provider: QuotaProvider): Promise<ProviderQuota | null> =>
     lastProviderQuotaResponseSchema.parse(await request<unknown>(`/api/usage/limits/${encodeURIComponent(provider)}/last`)).quota,
-  usageSummary: async (period: UsagePeriod): Promise<UsageSummary> =>
-    usageSummarySchema.parse(await request<unknown>(`/api/usage/summary?period=${encodeURIComponent(period)}`)),
+  usageSummary: async (period: UsagePeriod, scope: UsageScope): Promise<UsageSummary> =>
+    usageSummarySchema.parse(await request<unknown>(`/api/usage/summary?${new URLSearchParams({ period, scope }).toString()}`)),
   claudeLoginStatus: async (): Promise<ClaudeLoginStatus> =>
     claudeLoginStatusSchema.parse(await request<unknown>("/api/usage/claude-login")),
   startClaudeLogin: async (): Promise<ClaudeLoginStatus> =>

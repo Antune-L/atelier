@@ -1,3 +1,4 @@
+import { RefreshCw } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { DEFAULT_USAGE_PERIOD, DEFAULT_USAGE_SCOPE, USAGE_PERIODS, USAGE_SCOPES, usagePeriodSchema, usageScopeSchema } from "@shared/providerUsage";
@@ -8,6 +9,7 @@ import { LimitsTab } from "@/components/usage/LimitsTab";
 import type { ProviderQuotaView } from "@/components/usage/LimitsTab";
 import { TokensTab } from "@/components/usage/TokensTab";
 import { UsageSources } from "@/components/usage/UsageSources";
+import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useClaudeLogin } from "@/hooks/useClaudeLogin";
@@ -32,20 +34,26 @@ export function UsageView(): ReactNode {
   const [period, setPeriod] = useState<UsagePeriod>(DEFAULT_USAGE_PERIOD);
   const [filter, setFilter] = useState<UsageProviderFilter>("all");
   const [scope, setScope] = useState<UsageScope>(DEFAULT_USAGE_SCOPE);
-  const [claudeNonce, setClaudeNonce] = useState(INITIAL_QUOTA_NONCE);
+  const [quotaNonce, setQuotaNonce] = useState(INITIAL_QUOTA_NONCE);
   const [cloudHost, setCloudHost] = useState(false);
 
-  const claude = useProviderQuota("claude", claudeNonce);
-  const codex = useProviderQuota("codex", INITIAL_QUOTA_NONCE);
+  const claude = useProviderQuota("claude", quotaNonce);
+  const codex = useProviderQuota("codex", quotaNonce);
   const usage = useUsageSummary(period, scope, tab !== "limits");
   const claudeLogin = useClaudeLogin((status) => {
-    if (!status.restartRequired) setClaudeNonce((n) => n + 1);
+    if (!status.restartRequired) setQuotaNonce((n) => n + 1);
   });
   const quotaViews = ([
     { provider: "codex", ...codex },
     { provider: "claude", ...claude },
   ] satisfies ProviderQuotaView[]).filter((view) => filter === "all" || view.provider === filter);
   const lastUpdated = tab === "limits" ? latestObservedAt(quotaViews.map((view) => view.quota)) : (usage.summary?.generatedAt ?? null);
+  const refreshing = claude.loading || codex.loading || usage.loading;
+
+  const refresh = (): void => {
+    setQuotaNonce((n) => n + 1);
+    if (tab !== "limits") usage.refresh();
+  };
 
   const onPeriodChange = (value: string): void => {
     const parsed = usagePeriodSchema.safeParse(value);
@@ -85,6 +93,9 @@ export function UsageView(): ReactNode {
             Dernière mise à jour : {lastUpdated === null ? "—" : formatClock(lastUpdated)}
           </p>
         </div>
+        <Button variant="ghost" size="icon" aria-label="Actualiser la consommation" title="Actualiser la consommation" disabled={refreshing} onClick={refresh}>
+          <RefreshCw aria-hidden="true" className={cn("size-4", refreshing && "motion-safe:animate-spin")} />
+        </Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">

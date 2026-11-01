@@ -4,18 +4,22 @@ import type { UsagePeriod, UsageScope, UsageSummary } from "@shared/providerUsag
 
 import { api } from "@/lib/api";
 
-interface UseUsageSummaryResult {
+interface UsageSummarySnapshot {
   summary: UsageSummary | null;
   loading: boolean;
   error: string | null;
 }
 
+interface UseUsageSummaryResult extends UsageSummarySnapshot {
+  refresh: () => void;
+}
+
 interface UsageSummaryEntry {
-  snapshot: UseUsageSummaryResult;
+  snapshot: UsageSummarySnapshot;
   pending: Promise<void> | null;
 }
 
-const EMPTY_SNAPSHOT: UseUsageSummaryResult = { summary: null, loading: false, error: null };
+const EMPTY_SNAPSHOT: UsageSummarySnapshot = { summary: null, loading: false, error: null };
 const summaries = new Map<string, UsageSummaryEntry>();
 const listeners = new Set<() => void>();
 
@@ -64,5 +68,5 @@ export function useUsageSummary(period: UsagePeriod, scope: UsageScope, enabled:
     if (enabled) refreshSummary(period, scope);
   }, [period, scope, enabled]);
 
-  return { ...snapshot, loading: enabled && snapshot.loading };
+  return { ...snapshot, loading: enabled && snapshot.loading, refresh: () => refreshSummary(period, scope) };
 }

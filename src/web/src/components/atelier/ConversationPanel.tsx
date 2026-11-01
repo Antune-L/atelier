@@ -8,6 +8,7 @@ import type { Conversation, ConversationMessage, UpdateConversationInput } from 
 import { AtelierAgentFields } from "@/components/atelier/AtelierAgentFields";
 import { AtelierAttachments, useAtelierAttachments } from "@/components/atelier/AtelierAttachments";
 import { LiveDot } from "@/components/atelier/LiveDot";
+import { MessageNavigation } from "@/components/atelier/MessageNavigation";
 import { MockupFrame } from "@/components/atelier/MockupFrame";
 import { SubagentsPanel } from "@/components/atelier/SubagentsPanel";
 import { SubagentsSidePanel } from "@/components/atelier/SubagentsSidePanel";
@@ -43,7 +44,7 @@ interface ConversationPanelProps {
 
 const BOTTOM_THRESHOLD_PX = 24;
 const RESEARCH_OFF_LABEL = "réflexion préalable off";
-const CHAT_PROSE_CLASSES = "atelier-chat-prose min-w-0 max-w-full [&.markdown]:text-[15px] [&.markdown]:leading-[1.65]";
+const CHAT_PROSE_CLASSES = "atelier-chat-prose min-w-0 max-w-full [&.markdown]:text-[14px] [&.markdown]:leading-[1.6]";
 
 function researchSummary(conversation: Conversation): string {
   if (!conversation.researchEnabled) return RESEARCH_OFF_LABEL;
@@ -61,6 +62,7 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
   const [following, setFollowing] = useState(true);
   const threadRef = useRef<HTMLDivElement>(null);
   const pinnedToBottom = useRef(true);
+  const navigationPaused = useRef(false);
   const appendToDraft = (markdown: string): void => {
     setDraft((prev) => appendMarkdownLine(prev, markdown));
   };
@@ -92,7 +94,7 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
   const onThreadScroll = (): void => {
     const el = threadRef.current;
     if (!el) return;
-    pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
+    pinnedToBottom.current = !navigationPaused.current && el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD_PX;
     setFollowing(pinnedToBottom.current);
   };
 
@@ -110,6 +112,7 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
   };
 
   const post = async (content: string): Promise<boolean> => {
+    navigationPaused.current = false;
     pinnedToBottom.current = true;
     setFollowing(true);
     return run(() => api.atelierPostMessage(conversation.id, content), "Envoi impossible");
@@ -248,9 +251,14 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8">
-          <div className="mx-auto flex max-w-[58rem] flex-col gap-4">
+      <div className="relative flex min-h-0 flex-1">
+        <MessageNavigation messages={messages} threadRef={threadRef} onNavigate={() => {
+          navigationPaused.current = true;
+          pinnedToBottom.current = false;
+          setFollowing(false);
+        }} />
+        <div ref={threadRef} onScroll={onThreadScroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto pl-12 pr-4 py-5 sm:pl-[52px] sm:pr-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col gap-3">
             {items.length === 0 && (
               <p className="text-center text-sm text-muted-foreground">
                 Décris ton idée : l'agent pose ses questions puis t'aide à la consolider en PRD.
@@ -291,6 +299,7 @@ export function ConversationPanel({ conversation, messages, projectLabel, histor
             <span className="text-2xs">{running ? "Analyse en cours · Vous pouvez continuer à écrire." : "Entrée pour envoyer · Maj+Entrée pour une nouvelle ligne"}</span>
             {!following && (
               <Button size="sm" variant="ghost" onClick={() => {
+                navigationPaused.current = false;
                 pinnedToBottom.current = true;
                 setFollowing(true);
                 const thread = threadRef.current;
@@ -375,7 +384,7 @@ function MessageBubble({ message, agent }: { message: ConversationMessage; agent
   if (message.role === "user") {
     const steering = steeringLabel(message.steering);
     return (
-      <div className="ml-auto max-w-[80%] rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+      <div data-user-message-id={message.id} className="ml-auto max-w-[80%] rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
         {steering !== null && (
           <Badge variant="outline" className="mb-1 text-2xs text-muted-foreground">
             {steering}

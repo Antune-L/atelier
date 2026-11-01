@@ -503,3 +503,79 @@
     font-size: 16px;
   }
 }
+
+.message-navigation-scroll {
+  --message-pitch: 20px;
+  --message-half-pitch: 10px;
+  position: absolute;
+  z-index: 10;
+  top: 20px;
+  bottom: 20px;
+  left: 14px;
+  width: 24px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.message-navigation-scroll::-webkit-scrollbar { display: none; }
+.message-navigation { position: relative; }
+.message-navigation-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: var(--message-pitch);
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+}
+.message-navigation-marker > span {
+  width: 10px;
+  height: 2px;
+  background: currentColor;
+  opacity: .5;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.message-navigation-marker:hover > span,
+.message-navigation-marker:focus-visible > span { transform: scaleX(1.4); opacity: 1; }
+.message-navigation-marker:focus-visible { outline: 1px solid hsl(var(--ring)); outline-offset: -1px; }
+.message-navigation-current {
+  position: absolute;
+  top: 0;
+  left: 5px;
+  width: 14px;
+  height: 2px;
+  background: hsl(var(--foreground));
+  pointer-events: none;
+  z-index: 1;
+  transition: transform 240ms ease;
+}
+.message-navigation-preview {
+  position: absolute;
+  z-index: 20;
+  left: 44px;
+  width: min(220px, calc(100% - 56px));
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.message-navigation-preview[data-open="true"] { opacity: 1; transform: translateX(0); }
+@media (max-width: 639px) {
+  .message-navigation-scroll { --message-pitch: 24px; --message-half-pitch: 12px; left: 12px; width: 26px; }
+  .message-navigation-marker { width: 26px; }
+  .message-navigation-current { left: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-navigation-current, .message-navigation-marker > span, .message-navigation-preview { transition: none; }
+}

@@ -86,7 +86,7 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
   }))];
   const stacked = split === null ? [] : stackSeriesOf(providers);
   const stackConfig = Object.fromEntries(stacked.map((item) => [item.key, { label: seriesLabel(item), color: USAGE_PROVIDER_CHART_COLORS[item.provider] }]));
-  const stackColors = new Map(stacked.map((item) => [item.key, USAGE_PROVIDER_CHART_COLORS[item.provider]]));
+  const stackByKey = new Map(stacked.map((item) => [item.key, item]));
   const patternId = (item: StackSeries): string => `${patternPrefix}-${item.key}`.replace(/:/g, "");
   const hasUsage = providers.some((key) => summary.providers[key].hasUsage);
   const label = metric === "cost" ? "Coût estimé par jour en dollars" : "Tokens par jour";
@@ -130,10 +130,14 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
                 payload={payload.filter((item) => split === null || item.value !== 0).map((item) => ({
                   dataKey: typeof item.dataKey === "string" ? item.dataKey : undefined,
                   value: typeof item.value === "number" ? item.value : undefined,
-                  color: (typeof item.dataKey === "string" ? stackColors.get(item.dataKey) : undefined) ?? item.color,
+                  color: item.color,
                 }))}
                 label={typeof date === "string" ? DATE_FORMATTER.format(new Date(`${date}T00:00:00Z`)) : date}
                 valueFormatter={(value) => formatValue(typeof value === "number" ? value : 0)}
+                swatchFormatter={split === null ? undefined : (item) => {
+                  const series = typeof item.dataKey === "string" ? stackByKey.get(item.dataKey) : undefined;
+                  return series === undefined ? null : <MachineSwatch machine={series.machine} color={USAGE_PROVIDER_CHART_COLORS[series.provider]} />;
+                }}
               />
             )}
           />

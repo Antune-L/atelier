@@ -79,6 +79,8 @@ interface ChartTooltipContentProps {
   valueFormatter?: (value: string | number, item: TooltipPayloadItem) => ReactNode;
   /** Render an extra line under the value (e.g. sample size "n = 4"). */
   extraFormatter?: (item: TooltipPayloadItem) => ReactNode;
+  /** Replace the default solid colour swatch (e.g. a hatched one matching the series fill). */
+  swatchFormatter?: (item: TooltipPayloadItem) => ReactNode;
   hideLabel?: boolean;
 }
 
@@ -88,6 +90,7 @@ export function ChartTooltipContent({
   label,
   valueFormatter,
   extraFormatter,
+  swatchFormatter,
   hideLabel,
 }: ChartTooltipContentProps): ReactNode {
   const { config } = useChart();
@@ -103,10 +106,12 @@ export function ChartTooltipContent({
           const value = item.value ?? "";
           return (
             <div key={key} className="flex items-center gap-2">
-              <span
-                className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                style={{ backgroundColor: item.color }}
-              />
+              {swatchFormatter ? swatchFormatter(item) : (
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                  style={{ backgroundColor: item.color }}
+                />
+              )}
               <span className="text-muted-foreground">{labelNode}</span>
               <span className="ml-auto font-mono font-medium tabular-nums">
                 {valueFormatter ? valueFormatter(value, item) : value}

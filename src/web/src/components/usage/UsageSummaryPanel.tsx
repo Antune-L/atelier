@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import type { QuotaProvider } from "@shared/providerQuota";
 import type { ProviderUsagePair, UsageSummary } from "@shared/providerUsage";
 
-import { Badge } from "@/components/ui/badge";
 import { DailyUsageChart } from "@/components/usage/DailyUsageChart";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
 import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent, machineFillStyle, USAGE_MACHINE_LABELS, USAGE_MACHINES, USAGE_PROVIDER_CHART_COLORS, usageMachineSplit } from "@/lib/usageDisplay";
@@ -54,7 +53,6 @@ export function UsageSummaryPanel({ summary, filter, metric }: {
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
             <span>{metric === "cost" ? "Coût estimé · prix API" : "Tokens traités"}{split !== null && SPLIT_LABEL_SUFFIX}</span>
-            {metric === "cost" && usages.some((usage) => usage.partial) && <Badge variant="warning" title="Certains tokens ne sont pas tarifés : le total est un minimum.">partiel</Badge>}
           </div>
           <p className="text-4xl font-semibold tracking-tight tabular-nums" title={metric === "cost" ? formatUsageUsd(total) : String(total)}>{format(total)}</p>
         </div>

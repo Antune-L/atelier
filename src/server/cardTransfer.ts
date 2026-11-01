@@ -5,10 +5,19 @@ import type { Ticket } from "../shared/schemas.ts";
 import type { Store } from "./db/store.ts";
 
 const TICKET_NOT_FOUND_MESSAGE = "Carte introuvable.";
+const HTTP_NOT_FOUND = 404;
+const HTTP_CONFLICT = 409;
+
+export type CardTransferErrorCode = "NOT_FOUND" | "INELIGIBLE";
+
+export const CARD_TRANSFER_ERROR_STATUS: Record<CardTransferErrorCode, number> = {
+  NOT_FOUND: HTTP_NOT_FOUND,
+  INELIGIBLE: HTTP_CONFLICT,
+};
 
 export class CardTransferError extends Error {
   constructor(
-    readonly code: "NOT_FOUND" | "INELIGIBLE",
+    readonly code: CardTransferErrorCode,
     message: string,
   ) {
     super(message);

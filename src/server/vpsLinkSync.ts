@@ -2,6 +2,7 @@
 import type { ZodType } from "zod";
 
 import { getErrorMessage } from "../shared/errors.ts";
+import { isRemoteTicket } from "../shared/startBlocker.ts";
 import {
   BRIDGE_MAX_REQUEST_BYTES,
   BRIDGE_PROTOCOL_VERSION,
@@ -15,6 +16,8 @@ import {
   bridgeUsagePublishOutputSchema,
   bridgeVersionOutputSchema,
   vpsCreateTicketInputSchema,
+  vpsTicketDraftSchema,
+  vpsTransferTicketInputSchema,
 } from "../shared/vpsBridge.ts";
 import type {
   BoardProject,
@@ -26,8 +29,10 @@ import type {
   VpsPendingSend,
 } from "../shared/vpsBridge.ts";
 
+import { prepareCardTransfer } from "./cardTransfer.ts";
 import { getProject } from "./config.ts";
 import type { Store } from "./db/store.ts";
+import type { TicketLifecycle } from "./lifecycle.ts";
 import { createLogger } from "./logger.ts";
 import { remoteAllowedProjects, resolveRemoteCardsProfile } from "./remoteMcp/admission.ts";
 import type { SystemAdapter } from "./system/types.ts";
@@ -42,7 +47,7 @@ const OUTBOX_MAX_PAGES_PER_SYNC = 10;
 const USAGE_PUBLISH_INTERVAL_MS = 60 * 60_000;
 const log = createLogger("vps-link");
 
-export type VpsLinkErrorKind = VpsBridgeFailureKind | "not_configured" | "rejected" | "not_found";
+export type VpsLinkErrorKind = VpsBridgeFailureKind | "not_configured" | "rejected" | "not_found" | "conflict";
 
 const FAILURE_MESSAGES: Record<VpsBridgeFailureKind, string> = {
   invalid_request: "Requête refusée avant l'envoi au VPS (alias SSH invalide ou contenu trop volumineux).",
@@ -56,6 +61,10 @@ const FAILURE_MESSAGES: Record<VpsBridgeFailureKind, string> = {
   bad_output: "Réponse illisible du VPS.",
 };
 const NOT_CONFIGURED_MESSAGE = "Configurez l'alias SSH du VPS dans les réglages.";
+const SEND_ID_TAKEN_MESSAGE = "Identifiant d'envoi déjà utilisé.";
+const SEND_IN_FLIGHT_MESSAGE = "Envoi en cours vers le VPS : réessayez dans un instant.";
+const TRANSFER_DISMISSED_REASON = "envoi retiré par l'utilisateur (la carte existe peut-être déjà sur le VPS).";
+const TRANSFER_BOARD = "vps";
 
 export class VpsLinkError extends Error {
   constructor(
@@ -80,6 +89,7 @@ export interface VpsLinkSyncDeps {
   store: Store;
   system: Pick<SystemAdapter, "runVpsBridge" | "checkCodexRuntime" | "checkClaudeAvailable" | "readUsageHistory">;
   operations: Pick<TicketOperations, "createTodoTicket">;
+  lifecycle: Pick<TicketLifecycle, "transferOut" | "revertTransfer">;
   composerAvailable: boolean;
 }
 
@@ -120,7 +130,10 @@ export class VpsLinkSync {
   }
 
   dismissSend(id: string): void {
+    const send = this.deps.store.getVpsPendingSend(id);
+    if (send !== null && send.sourceTicketId !== null && this.inFlight.has(id)) throw new VpsLinkError("conflict", SEND_IN_FLIGHT_MESSAGE);
     if (!this.deps.store.deleteVpsPendingSend(id)) throw new VpsLinkError("not_found", "Envoi introuvable.");
+    if (send !== null) this.revertTransferOf(send, TRANSFER_DISMISSED_REASON);
   }
 
   async createTicket(input: unknown): Promise<VpsCreateTicketResponse> {
@@ -136,13 +149,43 @@ export class VpsLinkSync {
       requestId: bridgeRequestId(id),
       draft,
       projectLabel: this.projectLabels.get(draft.project) ?? null,
+      sourceTicketId: null,
     });
+    return this.deliverFirst(send);
+  }
+
+  // NOTE(ali): the card leaves this board (abandoned) together with the durable send, before the SSH call; a refusal brings it back.
+  async transferTicket(ticketId: string, input: unknown): Promise<VpsCreateTicketResponse> {
+    const parsed = vpsTransferTicketInputSchema.safeParse(input);
+    if (!parsed.success) throw new VpsLinkError("invalid_request", parsed.error.issues[0]?.message ?? "Requête invalide.");
+    this.hostAlias();
+    const { clientId: id, project, analysis } = parsed.data;
+    if (this.deps.store.getVpsPendingSend(id) !== null) throw new VpsLinkError("conflict", SEND_ID_TAKEN_MESSAGE);
+    const { ticket, draft } = prepareCardTransfer(this.deps.store, ticketId);
+    const checked = vpsTicketDraftSchema.safeParse({ project, ...draft, analysis: isRemoteTicket(ticket) ? "none" : analysis });
+    if (!checked.success) throw new VpsLinkError("invalid_request", checked.error.issues[0]?.message ?? "Requête invalide.");
+    const projectLabel = this.projectLabels.get(project) ?? null;
+    const send = this.deps.lifecycle.transferOut(
+      ticketId,
+      { board: TRANSFER_BOARD, sendId: id, projectLabel: projectLabel ?? project },
+      () => this.deps.store.createVpsPendingSend({ id, requestId: bridgeRequestId(id), draft: checked.data, projectLabel, sourceTicketId: ticketId }),
+    );
+    return this.deliverFirst(send);
+  }
+
+  private async deliverFirst(send: VpsPendingSend): Promise<VpsCreateTicketResponse> {
     const outcome = await this.deliver(send);
     if (outcome.status === "rejected") {
-      this.deps.store.deleteVpsPendingSend(id);
+      this.deps.store.deleteVpsPendingSend(send.id);
+      this.revertTransferOf(send, outcome.message);
       throw new VpsLinkError("rejected", outcome.message);
     }
     return outcome.status === "created" ? { status: "created", ticket: outcome.ticket } : { status: "pending", send: outcome.send };
+  }
+
+  private revertTransferOf(send: VpsPendingSend, reason: string): void {
+    if (send.sourceTicketId === null) return;
+    this.deps.lifecycle.revertTransfer(send.sourceTicketId, TRANSFER_BOARD, reason);
   }
 
   private schedule(delay: number): void {
@@ -209,7 +252,10 @@ export class VpsLinkSync {
       if (this.stopped) return false;
       if (send.status !== "pending" || this.inFlight.has(send.id)) continue;
       const outcome = await this.deliver(send);
-      if (outcome.status === "rejected") this.deps.store.recordVpsSendAttempt(send.id, { status: "failed", lastError: outcome.message });
+      if (outcome.status === "rejected") {
+        this.deps.store.recordVpsSendAttempt(send.id, { status: "failed", lastError: outcome.message });
+        this.revertTransferOf(send, outcome.message);
+      }
       if (outcome.status === "pending") return false;
     }
     return !this.stopped;

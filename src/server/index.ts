@@ -428,7 +428,7 @@ export async function startServer(opts: StartServerOptions = {}): Promise<Runnin
 
   const composerAvailable = await system.checkComposerAvailable();
   createLogger("boot").info("Composer (Cursor CLI) détecté", { composerAvailable });
-  const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system, operations: ticketOperations, composerAvailable });
+  const vpsLinkSync = isCloudHost() ? null : new VpsLinkSync({ store, system, operations: ticketOperations, lifecycle, composerAvailable });
   const remoteMcpConfig = readRemoteMcpConfig();
   void system.checkCodexRuntime().then((codex) => {
     createLogger("boot").info("Runtime Codex vérifié", { status: codex.status });

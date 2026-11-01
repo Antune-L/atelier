@@ -407,6 +407,7 @@ function isProcessing(stage: Stage | null): boolean {
 }
 
 const MARK_MERGED_FAILED = "impossible de marquer la PR comme mergée";
+const TRANSFER_PENDING_MOVE_MESSAGE = "Transfert vers l'autre board en attente : attends sa réponse ou annule l'envoi avant de déplacer la carte.";
 
 function markMergedBlocker(ticket: Ticket, store: Store): string | null {
   if (isProcessing(ticket.stage)) return "ticket en traitement : attends la fin ou abandonne-le avant de le marquer mergé";
@@ -1711,6 +1712,10 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = moveTicketSchema.safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, parsed.error.message);
       const target = parsed.data.column;
+
+      if (ticket.column === "abandoned" && target !== "abandoned" && store.hasPendingTransfer(params.id)) {
+        return jsonError(set, HTTP_CONFLICT, TRANSFER_PENDING_MOVE_MESSAGE);
+      }
 
       if (ticket.autonomous && (target === "done" || target === "merged") && ticket.autonomousState?.phase !== "completed") {
         return jsonError(set, HTTP_CONFLICT, "Autonomous delivery must verify its frozen plan and chosen outcome before completion.");

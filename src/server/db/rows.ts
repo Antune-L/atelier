@@ -179,6 +179,7 @@ const vpsPendingSendRowSchema = z.object({
   last_error: z.string().nullable(),
   last_attempt_at: z.number().nullable(),
   created_at: z.number(),
+  source_ticket_id: z.string().nullable(),
 });
 
 export function mapVpsPendingSendRow(raw: unknown): VpsPendingSend {
@@ -193,6 +194,7 @@ export function mapVpsPendingSendRow(raw: unknown): VpsPendingSend {
     lastError: row.last_error,
     lastAttemptAt: row.last_attempt_at,
     createdAt: row.created_at,
+    sourceTicketId: row.source_ticket_id,
   };
 }
 

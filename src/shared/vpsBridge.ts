@@ -52,6 +52,13 @@ export const vpsCreateTicketInputSchema = vpsTicketDraftFields.extend({ clientId
   .refine(hasTitleOrDescription, TITLE_OR_DESCRIPTION_ISSUE);
 export type VpsCreateTicketInput = z.infer<typeof vpsCreateTicketInputSchema>;
 
+export const vpsTransferTicketInputSchema = z.object({
+  clientId: z.string().regex(CROSS_BOARD_CLIENT_ID_PATTERN),
+  project: vpsTicketDraftFields.shape.project,
+  analysis: z.enum(VPS_ANALYSIS_MODES),
+}).strict();
+export type VpsTransferTicketInput = z.infer<typeof vpsTransferTicketInputSchema>;
+
 export const bridgeCreateTicketInputSchema = vpsTicketDraftFields.extend({
   requestId: z.string().refine(
     (value) => value.startsWith(BRIDGE_REQUEST_ID_PREFIX) && CROSS_BOARD_CLIENT_ID_PATTERN.test(value.slice(BRIDGE_REQUEST_ID_PREFIX.length)),
@@ -99,6 +106,7 @@ export const vpsPendingSendSchema = z.object({
   lastError: z.string().nullable(),
   lastAttemptAt: z.number().nullable(),
   createdAt: z.number(),
+  sourceTicketId: z.string().nullable(),
 });
 export type VpsPendingSend = z.infer<typeof vpsPendingSendSchema>;
 

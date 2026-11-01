@@ -524,7 +524,8 @@ CREATE TABLE IF NOT EXISTS vps_pending_sends (
   attempts INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   last_attempt_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  source_ticket_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS mac_outbox (
@@ -731,6 +732,10 @@ const CONVERSATION_MESSAGE_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "steering", ddl: "ALTER TABLE conversation_messages ADD COLUMN steering TEXT" },
 ];
 
+const VPS_PENDING_SEND_MIGRATIONS: { column: string; ddl: string }[] = [
+  { column: "source_ticket_id", ddl: "ALTER TABLE vps_pending_sends ADD COLUMN source_ticket_id TEXT" },
+];
+
 const AUDIT_STATE_MIGRATIONS: { column: string; ddl: string }[] = [
   { column: "last_scheduled_at", ddl: "ALTER TABLE audit_project_state ADD COLUMN last_scheduled_at INTEGER" },
 ];
@@ -761,6 +766,7 @@ export function createDatabase(path: string): Database {
   migrate(db, "conversations", CONVERSATION_MIGRATIONS);
   migrate(db, "conversation_messages", CONVERSATION_MESSAGE_MIGRATIONS);
   migrate(db, "audit_project_state", AUDIT_STATE_MIGRATIONS);
+  migrate(db, "vps_pending_sends", VPS_PENDING_SEND_MIGRATIONS);
   if (!reviewPassPolicyExisted) {
     db.exec(`UPDATE review_passes SET requires_approval = 0
       WHERE ticket_id IN (

@@ -48,6 +48,7 @@ import { AUTOMATION_RUNS_LIMIT } from "../../shared/constants.ts";
 import type { AgentEffort, AgentModel, AutomationRunStatus, AutomationTrigger, CodexEffort, CodexModel, Column, CommentAuthor, CommitLanguage, ConversationMessageRole, ConversationSessionStatus, ConversationStatus, FeasibilityEngine, Implementer, Orchestrator, PrdDocumentStatus, ReviewDepth, ReviewFlag, ReviewLevel, Stage, TicketOrigin, VcsProvider } from "../../shared/constants.ts";
 import { DEFAULT_VCS_PROVIDER } from "../../shared/constants.ts";
 import { boardNameSchema, dnsHostnameSchema, otherBoardUrlSchema, sshHostAliasSchema } from "../../shared/boardLink.ts";
+import { CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT } from "../../shared/cardTransfer.ts";
 import { hasUnresolvedImplementation, implementationPlanSchema } from "../../shared/implementationPlan.ts";
 import type { ImplementationPlan } from "../../shared/implementationPlan.ts";
 import { bridgeCataloguePublishInputSchema } from "../../shared/vpsBridge.ts";
@@ -1901,10 +1902,10 @@ export class Store {
       .run(id, REMOTE_TICKET_ORIGIN);
   }
 
-  createVpsPendingSend(input: { id: string; requestId: string; draft: VpsTicketDraft; projectLabel: string | null }): VpsPendingSend {
+  createVpsPendingSend(input: { id: string; requestId: string; draft: VpsTicketDraft; projectLabel: string | null; sourceTicketId: string | null }): VpsPendingSend {
     this.db
-      .query("INSERT INTO vps_pending_sends (id, request_id, payload_json, project_label, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(input.id, input.requestId, JSON.stringify(input.draft), input.projectLabel, Date.now());
+      .query("INSERT INTO vps_pending_sends (id, request_id, payload_json, project_label, source_ticket_id, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(input.id, input.requestId, JSON.stringify(input.draft), input.projectLabel, input.sourceTicketId, Date.now());
     const send = this.getVpsPendingSend(input.id);
     if (send === null) throw new Error(`envoi VPS introuvable après création : ${input.id}`);
     return send;
@@ -1928,6 +1929,20 @@ export class Store {
 
   deleteVpsPendingSend(id: string): boolean {
     return this.db.query("DELETE FROM vps_pending_sends WHERE id = ?").run(id).changes > 0;
+  }
+
+  /** A card sent to the other board whose queue entry still awaits the other board's answer (only one table is used per host). */
+  hasPendingTransfer(ticketId: string): boolean {
+    return this.scalar("SELECT COUNT(*) AS n FROM vps_pending_sends WHERE source_ticket_id = ? AND status = 'pending'", ticketId) > 0
+      || this.scalar("SELECT COUNT(*) AS n FROM mac_outbox WHERE source = 'transfer' AND source_ticket_id = ? AND status = 'pending'", ticketId) > 0;
+  }
+
+  /** True when the card's latest transfer event is a transfer that was never reverted. */
+  isTransferOutstanding(ticketId: string): boolean {
+    const raw = this.db
+      .query("SELECT type FROM events WHERE ticket_id = ? AND type IN (?, ?) ORDER BY id DESC LIMIT 1")
+      .get(ticketId, CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT);
+    return raw !== null && typeof raw === "object" && "type" in raw && raw.type === CARD_TRANSFERRED_EVENT;
   }
 
   getMacCatalogue(): StoredMacCatalogue | null {

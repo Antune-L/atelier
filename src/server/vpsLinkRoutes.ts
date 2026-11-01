@@ -2,6 +2,7 @@ import { Elysia } from "elysia";
 
 import { getErrorMessage } from "../shared/errors.ts";
 
+import { CARD_TRANSFER_ERROR_STATUS, CardTransferError } from "./cardTransfer.ts";
 import { createLogger } from "./logger.ts";
 import { VpsLinkError } from "./vpsLinkSync.ts";
 import type { VpsLinkErrorKind, VpsLinkSync } from "./vpsLinkSync.ts";
@@ -18,6 +19,7 @@ const HTTP_BAD_GATEWAY = 502;
 const VPS_LINK_ERROR_STATUS: Record<VpsLinkErrorKind, number> = {
   not_configured: HTTP_CONFLICT,
   not_found: HTTP_NOT_FOUND,
+  conflict: HTTP_CONFLICT,
   invalid_request: HTTP_BAD_REQUEST,
   rejected: HTTP_UNPROCESSABLE,
   auth: HTTP_BAD_GATEWAY,
@@ -42,6 +44,10 @@ async function handle<T>(set: StatusSetter, action: () => T | Promise<T>): Promi
       set.status = VPS_LINK_ERROR_STATUS[error.kind];
       return { error: error.message };
     }
+    if (error instanceof CardTransferError) {
+      set.status = CARD_TRANSFER_ERROR_STATUS[error.code];
+      return { error: error.message };
+    }
     log.error("requête vers le VPS échouée", { error: getErrorMessage(error) });
     set.status = HTTP_INTERNAL_ERROR;
     return { error: getErrorMessage(error) };
@@ -54,6 +60,11 @@ export function createVpsLinkRoutes({ vpsLink }: { vpsLink: VpsLinkSync }) {
     .get("/projects", ({ set }) => handle(set, () => vpsLink.listProjects()))
     .post("/tickets", ({ body, set }) => handle(set, async () => {
       const response = await vpsLink.createTicket(body);
+      set.status = response.status === "created" ? HTTP_CREATED : HTTP_ACCEPTED;
+      return response;
+    }))
+    .post("/tickets/:id/transfer", ({ params, body, set }) => handle(set, async () => {
+      const response = await vpsLink.transferTicket(params.id, body);
       set.status = response.status === "created" ? HTTP_CREATED : HTTP_ACCEPTED;
       return response;
     }))

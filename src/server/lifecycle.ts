@@ -1,3 +1,5 @@
+import { CARD_TRANSFERRED_EVENT, CARD_TRANSFER_BOARD_LABELS, CARD_TRANSFER_REVERTED_EVENT } from "../shared/cardTransfer.ts";
+import type { CardTransferBoard } from "../shared/cardTransfer.ts";
 import { TERMINAL_STAGES } from "../shared/constants.ts";
 import type { Stage } from "../shared/constants.ts";
 import { buildErrorDetails } from "../shared/errors.ts";
@@ -6,6 +8,12 @@ import type { ErrorDetails, ErrorDetailsSource, Ticket } from "../shared/schemas
 import type { Store } from "./db/store.ts";
 import type { ClientHub } from "./hub.ts";
 import type { Notifier } from "./notifier.ts";
+
+export interface CardTransferTarget {
+  board: CardTransferBoard;
+  sendId: string;
+  projectLabel: string;
+}
 
 /**
  * Owns the ticket lifecycle transitions as named domain verbs. Each verb concentrates the coupling
@@ -116,6 +124,44 @@ export class TicketLifecycle {
   moveColumn(ticketId: string, column: Ticket["column"]): Ticket {
     const ticket = this.store.updateTicket(ticketId, { column });
     this.hub.pushTicket(ticket);
+    return ticket;
+  }
+
+  /**
+   * Retire a card sent to the other board: `enqueue` writes the durable queue entry and the card moves to
+   * abandoned with a `transferred` event and a comment, all in one transaction, before any remote call.
+   */
+  transferOut<T>(ticketId: string, target: CardTransferTarget, enqueue: () => T): T {
+    const board = CARD_TRANSFER_BOARD_LABELS[target.board];
+    const { result, ticket, comment } = this.store.transaction(() => {
+      const result = enqueue();
+      const ticket = this.store.updateTicket(ticketId, { column: "abandoned", stage: null, finishedAt: Date.now() });
+      this.store.logEvent(ticketId, CARD_TRANSFERRED_EVENT, { board: target.board, sendId: target.sendId, project: target.projectLabel });
+      const body = `Carte envoyée vers le board ${board} (projet « ${target.projectLabel} »). Elle reste dans Abandonnés et revient dans « À faire » si le ${board} la refuse.`;
+      const comment = this.store.addComment(ticketId, "system", body, null);
+      return { result, ticket, comment };
+    });
+    this.hub.pushTicket(ticket);
+    this.hub.pushComment(comment);
+    return result;
+  }
+
+  /**
+   * Bring back a transferred card after a definitive refusal: todo again, end dates cleared, `transfer_reverted`
+   * event and comment. No-op unless the card is still abandoned with an unreverted transfer.
+   */
+  revertTransfer(ticketId: string, board: CardTransferBoard, reason: string): Ticket | null {
+    const current = this.store.getTicket(ticketId);
+    if (current === null || current.column !== "abandoned" || !this.store.isTransferOutstanding(ticketId)) return null;
+    const { ticket, comment } = this.store.transaction(() => {
+      const ticket = this.store.updateTicket(ticketId, { column: "todo", stage: null, finishedAt: null, implementationFinishedAt: null });
+      this.store.logEvent(ticketId, CARD_TRANSFER_REVERTED_EVENT, { board, reason });
+      const body = `Transfert vers le board ${CARD_TRANSFER_BOARD_LABELS[board]} annulé : ${reason}\n\nLa carte revient dans « À faire ».`;
+      const comment = this.store.addComment(ticketId, "system", body, null);
+      return { ticket, comment };
+    });
+    this.hub.pushTicket(ticket);
+    this.hub.pushComment(comment);
     return ticket;
   }
 

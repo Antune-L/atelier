@@ -7,6 +7,10 @@ export const CARD_TRANSFERRED_EVENT = "transferred";
 export const CARD_TRANSFER_REVERTED_EVENT = "transfer_reverted";
 export const CARD_TRANSFER_EVENTS = [CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT] as const;
 
+export const CARD_TRANSFER_BOARDS = ["vps", "mac"] as const;
+export type CardTransferBoard = (typeof CARD_TRANSFER_BOARDS)[number];
+export const CARD_TRANSFER_BOARD_LABELS: Record<CardTransferBoard, string> = { vps: "VPS", mac: "Mac" };
+
 const TRANSFERABLE_KIND = "feature";
 const TRANSFERABLE_COLUMN = "todo";
 

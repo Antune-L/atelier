@@ -15,7 +15,7 @@ const USAGE_USD_FORMATTER = new Intl.NumberFormat("fr-FR", {
 });
 const COMPACT_TOKEN_FORMATTER = new Intl.NumberFormat("fr-FR", {
   notation: "compact",
-  maximumFractionDigits: 2,
+  maximumFractionDigits: 1,
 });
 
 export function formatUsageUsd(value: number): string {

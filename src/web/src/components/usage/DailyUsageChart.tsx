@@ -5,7 +5,6 @@ import type { QuotaProvider } from "@shared/providerQuota";
 import type { UsageSummary } from "@shared/providerUsage";
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { formatTokens } from "@/lib/display";
 import { MachineSwatch } from "@/components/usage/UsageSources";
 import { filteredProviders, formatCompactTokens, formatDayLabel, formatUsageUsd, HATCH_GAP_OPACITY, HATCH_LINE_WIDTH, HATCH_SIZE, HATCHED_MACHINE, QUOTA_PROVIDER_LABELS, USAGE_MACHINE_LABELS, USAGE_MACHINES, USAGE_PROVIDER_CHART_COLORS, usageMachineSplit } from "@/lib/usageDisplay";
 import type { UsageMachine, UsageProviderFilter } from "@/lib/usageDisplay";
@@ -90,7 +89,7 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
   const patternId = (item: StackSeries): string => `${patternPrefix}-${item.key}`.replace(/:/g, "");
   const hasUsage = providers.some((key) => summary.providers[key].hasUsage);
   const label = metric === "cost" ? "Coût estimé par jour en dollars" : "Tokens par jour";
-  const formatValue = (value: number): string => metric === "cost" ? formatUsageUsd(value) : `${formatTokens(value)} tokens`;
+  const formatValue = (value: number): string => metric === "cost" ? formatUsageUsd(value) : `${formatCompactTokens(value)} tokens`;
 
   if (!hasUsage) {
     return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground" role="status">Aucun usage sur cette période.</div>;

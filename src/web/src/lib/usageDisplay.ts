@@ -55,9 +55,26 @@ export const USAGE_MACHINES: readonly UsageMachine[] = ["server", "mac"];
 
 export const USAGE_MACHINE_LABELS: Record<UsageMachine, string> = { server: "VPS", mac: "Mac" };
 
-export const USAGE_MACHINE_SWATCH_CLASSES: Record<UsageMachine, string> = { server: "bg-foreground", mac: "bg-foreground/40" };
+export const USAGE_PROVIDER_CHART_COLORS: Record<QuotaProvider, string> = { claude: "#d98a68", codex: "hsl(var(--foreground))" };
 
-export const USAGE_MACHINE_CHART_COLORS: Record<UsageMachine, string> = { server: "hsl(var(--foreground))", mac: "hsl(var(--foreground) / 0.4)" };
+export const NEUTRAL_MACHINE_COLOR = "hsl(var(--foreground))";
+
+export const HATCHED_MACHINE: UsageMachine = "server";
+
+export const HATCH_SIZE = 5;
+
+export const HATCH_LINE_WIDTH = 2;
+
+export const HATCH_GAP_OPACITY = 0.35;
+
+const PERCENT = 100;
+
+/** Mac in solid colour, VPS hatched: the same encoding in the chart, the legend and the split bars. */
+export function machineFillStyle(machine: UsageMachine, color: string): { background: string } {
+  if (machine !== HATCHED_MACHINE) return { background: color };
+  const gap = `color-mix(in srgb, ${color} ${HATCH_GAP_OPACITY * PERCENT}%, transparent)`;
+  return { background: `repeating-linear-gradient(135deg, ${color} 0 ${HATCH_LINE_WIDTH}px, ${gap} ${HATCH_LINE_WIDTH}px ${HATCH_SIZE}px)` };
+}
 
 export type UsageMachineSplit = Record<UsageMachine, ProviderUsagePair>;
 

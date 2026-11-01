@@ -2,15 +2,14 @@ import type { ReactNode } from "react";
 
 import type { MacUsageSource, UsageMachines } from "@shared/providerUsage";
 
-import { formatAgo, formatShortClock, formatWeekdayClock, USAGE_MACHINE_LABELS, USAGE_MACHINE_SWATCH_CLASSES } from "@/lib/usageDisplay";
+import { formatAgo, formatShortClock, formatWeekdayClock, machineFillStyle, NEUTRAL_MACHINE_COLOR, USAGE_MACHINE_LABELS } from "@/lib/usageDisplay";
 import type { UsageMachine } from "@/lib/usageDisplay";
-import { cn } from "@/lib/utils";
 
 const UP_TO_DATE_LABEL = "à jour";
 const MAC_UNLINKED_MESSAGE = "Mac non relié : configurez le lien Mac ↔ VPS pour l’inclure.";
 
-export function MachineSwatch({ machine }: { machine: UsageMachine }): ReactNode {
-  return <span aria-hidden="true" className={cn("inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]", USAGE_MACHINE_SWATCH_CLASSES[machine])} />;
+export function MachineSwatch({ machine, color = NEUTRAL_MACHINE_COLOR }: { machine: UsageMachine; color?: string }): ReactNode {
+  return <span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px]" style={machineFillStyle(machine, color)} />;
 }
 
 function UpToDate(): ReactNode {

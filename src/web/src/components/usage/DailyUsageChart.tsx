@@ -1,29 +1,26 @@
 import { useId, useMemo, type ReactNode } from "react";
 import { Area, Bar, CartesianGrid, ComposedChart, XAxis, YAxis } from "recharts";
 
+import type { QuotaProvider } from "@shared/providerQuota";
 import type { UsageSummary } from "@shared/providerUsage";
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
-import { MachineSwatch } from "@/components/usage/UsageSources";
 import { formatTokens } from "@/lib/display";
-import { filteredProviders, formatCompactTokens, formatDayLabel, formatUsageUsd, mergeDaily, QUOTA_PROVIDER_LABELS, USAGE_MACHINE_CHART_COLORS, USAGE_MACHINE_LABELS, USAGE_MACHINES, usageMachineSplit } from "@/lib/usageDisplay";
-import type { UsageProviderFilter } from "@/lib/usageDisplay";
+import { MachineSwatch } from "@/components/usage/UsageSources";
+import { filteredProviders, formatCompactTokens, formatDayLabel, formatUsageUsd, HATCH_GAP_OPACITY, HATCH_LINE_WIDTH, HATCH_SIZE, HATCHED_MACHINE, QUOTA_PROVIDER_LABELS, USAGE_MACHINE_LABELS, USAGE_MACHINES, USAGE_PROVIDER_CHART_COLORS, usageMachineSplit } from "@/lib/usageDisplay";
+import type { UsageMachine, UsageProviderFilter } from "@/lib/usageDisplay";
 
 const DAY_MS = 86_400_000;
-const CHART_COLORS = { claude: "#d98a68", codex: "hsl(var(--foreground))" };
 const CHART_CONFIG = {
-  claude: { label: QUOTA_PROVIDER_LABELS.claude, color: CHART_COLORS.claude },
-  codex: { label: QUOTA_PROVIDER_LABELS.codex, color: CHART_COLORS.codex },
+  claude: { label: QUOTA_PROVIDER_LABELS.claude, color: USAGE_PROVIDER_CHART_COLORS.claude },
+  codex: { label: QUOTA_PROVIDER_LABELS.codex, color: USAGE_PROVIDER_CHART_COLORS.codex },
 };
-const MACHINE_CHART_CONFIG = {
-  server: { label: USAGE_MACHINE_LABELS.server, color: USAGE_MACHINE_CHART_COLORS.server },
-  mac: { label: USAGE_MACHINE_LABELS.mac, color: USAGE_MACHINE_CHART_COLORS.mac },
-};
-const MACHINE_STACK_ID = "machine";
+const STACK_ID = "usage";
+const HATCH_ANGLE = 45;
 const TOP_BAR_RADIUS: [number, number, number, number] = [2, 2, 0, 0];
 const LINE_CURSOR = { stroke: "hsl(var(--muted-foreground))", strokeOpacity: 0.3 };
 const BAR_CURSOR = { fill: "hsl(var(--muted))", fillOpacity: 0.5 };
-const SPLIT_DESCRIPTION = `, empilé entre ${USAGE_MACHINE_LABELS.server} et ${USAGE_MACHINE_LABELS.mac}`;
+const SPLIT_DESCRIPTION = `, empilé par fournisseur puis par machine (${USAGE_MACHINE_LABELS.mac} en plein, ${USAGE_MACHINE_LABELS.server} hachuré)`;
 const CHART_MARGIN = { top: 12, right: 12, left: 0, bottom: 0 };
 const AXIS_PROPS = { tickLine: false, axisLine: false, tick: { fill: "hsl(var(--muted-foreground))", fontSize: 11 }, tickMargin: 12 };
 const DATE_FORMATTER = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
@@ -37,6 +34,21 @@ interface ChartDay {
   [series: string]: string | number;
 }
 
+interface StackSeries {
+  key: string;
+  provider: QuotaProvider;
+  machine: UsageMachine;
+}
+
+function stackSeriesOf(providers: QuotaProvider[]): StackSeries[] {
+  const bottomFirstMachines = [...USAGE_MACHINES].reverse();
+  return providers.flatMap((provider) => bottomFirstMachines.map((machine) => ({ key: `${provider}_${machine}`, provider, machine })));
+}
+
+function seriesLabel({ provider, machine }: StackSeries): string {
+  return `${QUOTA_PROVIDER_LABELS[provider]} · ${USAGE_MACHINE_LABELS[machine]}`;
+}
+
 interface DailyUsageChartProps {
   summary: UsageSummary;
   provider: UsageProviderFilter;
@@ -45,6 +57,7 @@ interface DailyUsageChartProps {
 
 export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartProps): ReactNode {
   const descriptionId = useId();
+  const patternPrefix = useId();
   const providers = filteredProviders(provider);
   const split = usageMachineSplit(summary);
   const data = useMemo(() => {
@@ -53,7 +66,7 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
     const shown = filteredProviders(provider);
     const series = machineSplit === null
       ? shown.map((key) => ({ key, daily: summary.providers[key].daily }))
-      : USAGE_MACHINES.map((key) => ({ key, daily: mergeDaily(shown.map((name) => machineSplit[key][name])) }));
+      : stackSeriesOf(shown).map((item) => ({ key: item.key, daily: machineSplit[item.machine][item.provider].daily }));
     const values = series.map(({ key, daily }) => ({ key, byDate: new Map(daily.map((day) => [day.date, day[field]])) }));
     const firstDay = Math.floor(summary.since / DAY_MS) * DAY_MS;
     const lastDay = Math.floor(summary.generatedAt / DAY_MS) * DAY_MS;
@@ -71,6 +84,10 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
     const day = data[index];
     return day ? [day.date] : [];
   }))];
+  const stacked = split === null ? [] : stackSeriesOf(providers);
+  const stackConfig = Object.fromEntries(stacked.map((item) => [item.key, { label: seriesLabel(item), color: USAGE_PROVIDER_CHART_COLORS[item.provider] }]));
+  const stackColors = new Map(stacked.map((item) => [item.key, USAGE_PROVIDER_CHART_COLORS[item.provider]]));
+  const patternId = (item: StackSeries): string => `${patternPrefix}-${item.key}`.replace(/:/g, "");
   const hasUsage = providers.some((key) => summary.providers[key].hasUsage);
   const label = metric === "cost" ? "Coût estimé par jour en dollars" : "Tokens par jour";
   const formatValue = (value: number): string => metric === "cost" ? formatUsageUsd(value) : `${formatTokens(value)} tokens`;
@@ -83,12 +100,25 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
     <div className="min-w-0">
       <p id={descriptionId} className="sr-only">{label}, pour {providers.map((key) => QUOTA_PROVIDER_LABELS[key]).join(" et ")}{split !== null && SPLIT_DESCRIPTION}. Les jours sans usage enregistré valent zéro. Les dates sont en UTC.</p>
       {split !== null && (
-        <ul className="mb-2 flex gap-4 text-xs text-muted-foreground" aria-hidden="true">
-          {USAGE_MACHINES.map((machine) => <li key={machine} className="flex items-center gap-1.5"><MachineSwatch machine={machine} />{USAGE_MACHINE_LABELS[machine]}</li>)}
+        <ul className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-hidden="true">
+          {stacked.map((item) => (
+            <li key={item.key} className="flex items-center gap-1.5">
+              <MachineSwatch machine={item.machine} color={USAGE_PROVIDER_CHART_COLORS[item.provider]} />
+              {seriesLabel(item)}
+            </li>
+          ))}
         </ul>
       )}
-      <ChartContainer config={split === null ? CHART_CONFIG : MACHINE_CHART_CONFIG} className="h-64" aria-label={label} aria-describedby={descriptionId}>
+      <ChartContainer config={split === null ? CHART_CONFIG : stackConfig} className="h-64" aria-label={label} aria-describedby={descriptionId}>
         <ComposedChart data={data} margin={CHART_MARGIN} accessibilityLayer>
+          <defs>
+            {stacked.filter((item) => item.machine === HATCHED_MACHINE).map((item) => (
+              <pattern key={item.key} id={patternId(item)} width={HATCH_SIZE} height={HATCH_SIZE} patternUnits="userSpaceOnUse" patternTransform={`rotate(${HATCH_ANGLE})`}>
+                <rect width={HATCH_SIZE} height={HATCH_SIZE} fill={USAGE_PROVIDER_CHART_COLORS[item.provider]} fillOpacity={HATCH_GAP_OPACITY} />
+                <rect width={HATCH_LINE_WIDTH} height={HATCH_SIZE} fill={USAGE_PROVIDER_CHART_COLORS[item.provider]} />
+              </pattern>
+            ))}
+          </defs>
           <CartesianGrid vertical={false} strokeDasharray="3 5" />
           <XAxis dataKey="date" ticks={ticks} tickFormatter={formatDayLabel} {...AXIS_PROPS} />
           <YAxis width={AXIS_WIDTH} domain={[0, "auto"]} tickFormatter={metric === "cost" ? formatUsageUsd : formatCompactTokens} {...AXIS_PROPS} />
@@ -97,10 +127,10 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
             content={({ active, payload, label: date }) => (
               <ChartTooltipContent
                 active={active}
-                payload={payload.map((item) => ({
+                payload={payload.filter((item) => split === null || item.value !== 0).map((item) => ({
                   dataKey: typeof item.dataKey === "string" ? item.dataKey : undefined,
                   value: typeof item.value === "number" ? item.value : undefined,
-                  color: item.color,
+                  color: (typeof item.dataKey === "string" ? stackColors.get(item.dataKey) : undefined) ?? item.color,
                 }))}
                 label={typeof date === "string" ? DATE_FORMATTER.format(new Date(`${date}T00:00:00Z`)) : date}
                 valueFormatter={(value) => formatValue(typeof value === "number" ? value : 0)}
@@ -108,10 +138,10 @@ export function DailyUsageChart({ summary, provider, metric }: DailyUsageChartPr
             )}
           />
           {split === null && providers.map((key) => (
-            <Area key={key} dataKey={key} name={QUOTA_PROVIDER_LABELS[key]} type="monotone" stroke={CHART_COLORS[key]} fill={CHART_COLORS[key]} fillOpacity={FILL_OPACITY} strokeWidth={LINE_WIDTH} dot={false} isAnimationActive={false} />
+            <Area key={key} dataKey={key} name={QUOTA_PROVIDER_LABELS[key]} type="monotone" stroke={USAGE_PROVIDER_CHART_COLORS[key]} fill={USAGE_PROVIDER_CHART_COLORS[key]} fillOpacity={FILL_OPACITY} strokeWidth={LINE_WIDTH} dot={false} isAnimationActive={false} />
           ))}
-          {split !== null && USAGE_MACHINES.map((key) => (
-            <Bar key={key} dataKey={key} name={USAGE_MACHINE_LABELS[key]} stackId={MACHINE_STACK_ID} fill={USAGE_MACHINE_CHART_COLORS[key]} radius={key === "mac" ? TOP_BAR_RADIUS : 0} isAnimationActive={false} />
+          {stacked.map((item, index) => (
+            <Bar key={item.key} dataKey={item.key} name={seriesLabel(item)} stackId={STACK_ID} fill={item.machine === HATCHED_MACHINE ? `url(#${patternId(item)})` : USAGE_PROVIDER_CHART_COLORS[item.provider]} radius={index === stacked.length - 1 ? TOP_BAR_RADIUS : 0} isAnimationActive={false} />
           ))}
         </ComposedChart>
       </ChartContainer>

@@ -6,7 +6,7 @@ import type { ProviderUsagePair, UsageSummary } from "@shared/providerUsage";
 import { Badge } from "@/components/ui/badge";
 import { DailyUsageChart } from "@/components/usage/DailyUsageChart";
 import { ProviderLogo } from "@/components/usage/ProviderLogo";
-import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent, USAGE_MACHINE_LABELS, USAGE_MACHINE_SWATCH_CLASSES, USAGE_MACHINES, usageMachineSplit } from "@/lib/usageDisplay";
+import { formatCompactTokens, formatPercent, formatUsageUsd, filteredProviders, QUOTA_PROVIDER_LABELS, sessionCountText, sharePercent, machineFillStyle, USAGE_MACHINE_LABELS, USAGE_MACHINES, USAGE_PROVIDER_CHART_COLORS, usageMachineSplit } from "@/lib/usageDisplay";
 import type { UsageMachineSplit, UsageProviderFilter } from "@/lib/usageDisplay";
 
 export type UsageMetric = "cost" | "tokens";
@@ -27,7 +27,7 @@ function MachineSplitRow({ split, provider, metric, format }: {
   const total = values.reduce((sum, { value }) => sum + value, 0);
   return (<>
     <div className="ml-6 flex h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-      {values.map(({ machine, value }) => <div key={machine} className={USAGE_MACHINE_SWATCH_CLASSES[machine]} style={{ width: `${sharePercent(value, total)}%` }} />)}
+      {values.map(({ machine, value }) => <div key={machine} style={{ ...machineFillStyle(machine, USAGE_PROVIDER_CHART_COLORS[provider]), width: `${sharePercent(value, total)}%` }} />)}
     </div>
     <p className="pl-6 text-xs text-muted-foreground tabular-nums">
       {values.map(({ machine, value }) => `${USAGE_MACHINE_LABELS[machine]} ${format(value)}`).join(" · ")}

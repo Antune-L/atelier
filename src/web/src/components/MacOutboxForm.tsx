@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
+import { stripLocalUploadReferences } from "@shared/uploadReferences";
 import { draftTitle } from "@shared/vpsBridge";
 import type { MacOutboxItem, MacOutboxState } from "@shared/vpsBridge";
 
@@ -15,7 +16,6 @@ import { boardTicketUrl } from "@/lib/boardHash";
 import { formatDateTime } from "@/lib/display";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
-import { stripLocalUploadReferences } from "@/lib/paste";
 
 const ITEM_STATUS_LABELS: Record<MacOutboxItem["status"], string> = {
   pending: "En attente du Mac",

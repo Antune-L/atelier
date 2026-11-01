@@ -3145,6 +3145,10 @@ export class Store {
     return row ? mapAuditFindingRow(row).finding : null;
   }
 
+  hasAuditFindingForTicket(ticketId: string): boolean {
+    return this.scalar("SELECT COUNT(*) AS n FROM audit_findings WHERE ticket_id = ?", ticketId) > 0;
+  }
+
   getAuditFindingCardGeneration(id: string): number {
     const row = this.db.query("SELECT * FROM audit_findings WHERE id = ?").get(id);
     return row ? mapAuditFindingRow(row).cardGeneration : 0;

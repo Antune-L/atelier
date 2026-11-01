@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import { safeOtherBoardUrl } from "@shared/boardLink";
+import { stripLocalUploadReferences } from "@shared/uploadReferences";
 import { draftTitle } from "@shared/vpsBridge";
 import type { BoardProject, VpsAnalysisMode, VpsCreateTicketResponse, VpsPendingSend } from "@shared/vpsBridge";
 
@@ -15,7 +16,6 @@ import { api } from "@/lib/api";
 import { boardTicketUrl } from "@/lib/boardHash";
 import { errorMessage } from "@/lib/errors";
 import { FIELD_LABEL_CLASSES, SHEET_FOOTER_CLASSES } from "@/lib/overlayStyles";
-import { stripLocalUploadReferences } from "@/lib/paste";
 
 const SEND_STATUS_LABELS: Record<VpsPendingSend["status"], string> = {
   pending: "En attente du VPS",

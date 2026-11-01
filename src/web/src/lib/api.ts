@@ -58,8 +58,8 @@ import type { Column, Orchestrator, PrState } from "@shared/constants";
 import { qualityActionPageSchema, qualityFollowUpResponseSchema, qualityRequestPageSchema } from "@shared/quality";
 import type { CreateQualityFollowUpInput, ManualQualityEvidenceInput, QualityFollowUpResponse, QualityIteration, QualityPreflight, QualityRequestPage, QualityResponse, QualityValidationRun, SetQualityCriteriaInput, StartQualityIterationInput } from "@shared/quality";
 import type { MergePrResult, UpdateDependencyBaseResult } from "@shared/ticketMerge";
-import { boardProjectSchema, macOutboxEnqueueResponseSchema, macOutboxStateSchema, vpsCreateTicketResponseSchema, vpsPendingSendSchema } from "@shared/vpsBridge";
-import type { BoardProject, MacOutboxEnqueueInput, MacOutboxEnqueueResponse, MacOutboxState, VpsCreateTicketInput, VpsCreateTicketResponse, VpsPendingSend } from "@shared/vpsBridge";
+import { boardProjectSchema, macOutboxEnqueueResponseSchema, macOutboxItemSchema, macOutboxStateSchema, vpsCreateTicketResponseSchema, vpsPendingSendSchema } from "@shared/vpsBridge";
+import type { BoardProject, MacOutboxEnqueueInput, MacOutboxEnqueueResponse, MacOutboxItem, MacOutboxState, MacOutboxTransferInput, VpsCreateTicketInput, VpsCreateTicketResponse, VpsPendingSend, VpsTransferTicketInput } from "@shared/vpsBridge";
 import type { HostMetrics } from "@shared/types";
 import { lastProviderQuotaResponseSchema, providerQuotaSchema } from "@shared/providerQuota";
 import type { ProviderQuota, QuotaProvider } from "@shared/providerQuota";
@@ -307,10 +307,16 @@ export const api = {
     z.array(vpsPendingSendSchema).parse(await request<unknown>(`${VPS_LINK_BASE}/sends`)),
   dismissVpsSend: (id: string): Promise<{ ok: boolean }> =>
     request(`${VPS_LINK_BASE}/sends/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  transferTicketToVps: async (id: string, input: VpsTransferTicketInput): Promise<VpsCreateTicketResponse> =>
+    vpsCreateTicketResponseSchema.parse(await request<unknown>(`${VPS_LINK_BASE}/tickets/${encodeURIComponent(id)}/transfer`, { method: "POST", body: JSON.stringify(input) })),
   macOutbox: async (): Promise<MacOutboxState> =>
     macOutboxStateSchema.parse(await request<unknown>(MAC_OUTBOX_BASE)),
   enqueueMacOutbox: async (input: MacOutboxEnqueueInput): Promise<MacOutboxEnqueueResponse> =>
     macOutboxEnqueueResponseSchema.parse(await request<unknown>(MAC_OUTBOX_BASE, { method: "POST", body: JSON.stringify(input) })),
+  transferTicketToMac: async (id: string, input: MacOutboxTransferInput): Promise<MacOutboxEnqueueResponse> =>
+    macOutboxEnqueueResponseSchema.parse(await request<unknown>(`${MAC_OUTBOX_BASE}/tickets/${encodeURIComponent(id)}/transfer`, { method: "POST", body: JSON.stringify(input) })),
+  cancelMacOutboxTransfer: async (itemId: string): Promise<MacOutboxItem> =>
+    macOutboxItemSchema.parse(await request<unknown>(`${MAC_OUTBOX_BASE}/items/${encodeURIComponent(itemId)}/cancel`, { method: "POST" })),
   importTickets: (input: ImportTicketsInput): Promise<{ created: Ticket[]; feasibilityStarted: boolean }> =>
     request("/api/tickets/import", { method: "POST", body: JSON.stringify(input) }),
   analyzeTickets: (input: AnalyzeTicketsInput): Promise<{ started: number }> =>

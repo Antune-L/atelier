@@ -19,11 +19,11 @@ export type Outcome = "success" | "failure" | "abandoned";
 
 const ABANDONED_COLUMN = "abandoned";
 
-/** Map a record's column to a terminal outcome, or null when still in progress. */
+/** Map a record's column to a terminal outcome, or null when still in progress or sent to the other board. */
 export function recordOutcome(record: StatRecord): Outcome | null {
   if (SUCCESS_COLUMNS.includes(record.column)) return "success";
   if (FAILURE_COLUMNS.includes(record.column)) return "failure";
-  if (record.column === ABANDONED_COLUMN) return "abandoned";
+  if (record.column === ABANDONED_COLUMN && !record.transferred) return "abandoned";
   return null;
 }
 

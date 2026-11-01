@@ -7,12 +7,15 @@ import {
   MoreHorizontal,
   Rocket,
   RotateCw,
+  Send,
   Split,
   Square,
   type LucideIcon,
 } from "lucide-react";
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 
+import { CARD_TRANSFER_BLOCKER_MESSAGES, cardTransferBlocker } from "@shared/cardTransfer";
+import type { CardTransferBlocker } from "@shared/cardTransfer";
 import { ACTIVE_STAGES, PR_STATE_LABELS, SPLIT_BRANCH_PREFIX } from "@shared/constants";
 import type { Ticket } from "@shared/schemas";
 import { needsRemoteApproval } from "@shared/startBlocker";
@@ -20,6 +23,7 @@ import { canMergePr, canResolveConflicts, canUpdateDependencyBase } from "@share
 
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { LaunchSplitButton } from "@/components/ticket-detail/LaunchSplitButton";
+import { TransferCardDialog } from "@/components/ticket-detail/TransferCardDialog";
 import { Button } from "@/components/ui/button";
 import {
   CONFIRM_POPOVER_CLASSES,
@@ -28,6 +32,8 @@ import {
   ConfirmPopover,
 } from "@/components/ui/confirm";
 import { Popover, PopoverContent, PopoverMenuItem, PopoverTrigger } from "@/components/ui/popover";
+import { useBoard } from "@/hooks/useBoard";
+import { useOtherBoardLink } from "@/hooks/useOtherBoardLink";
 import { useProjects } from "@/hooks/useProjects";
 import { api } from "@/lib/api";
 import { canRecoverImplementation } from "@/lib/implementationRecovery";
@@ -80,6 +86,9 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
   const [menuOpen, setMenuOpen] = useState(false);
   const [pending, setPending] = useState<TicketAction | null>(null);
   const [conflictTicketId, setConflictTicketId] = useState<string | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const otherBoard = useOtherBoardLink();
+  const { tickets } = useBoard();
 
   const hasConflicts = conflictTicketId === ticket.id;
   // Read from the store so the spinner survives closing and reopening the detail mid-merge.
@@ -93,6 +102,15 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
     onRecovery,
     hasConflicts,
     onConflicts: () => setConflictTicketId(ticket.id),
+    transfer: otherBoard.available
+      ? {
+        blocker: cardTransferBlocker(ticket, {
+          hasDependents: tickets.some((candidate) => candidate.dependsOn === ticket.id && !candidate.archived),
+          linkedToAuditFinding: false,
+        }),
+        open: () => setTransferOpen(true),
+      }
+      : null,
   }).map((action) => {
     if (!merging || !MERGE_ACTION_IDS.has(action.id)) return action;
     if (action.id !== MERGE_ACTION_ID) return { ...action, disabled: true };
@@ -237,6 +255,8 @@ export function TicketActions({ ticket, onRefresh, onClose, onError, onRecovery 
         </Popover>
       )}
 
+      {transferOpen && <TransferCardDialog ticket={ticket} cloudHost={otherBoard.cloudHost} onClose={() => setTransferOpen(false)} />}
+
       {pending !== null && pending.confirm !== undefined && pendingDialog && (
         <ConfirmDialog
           open
@@ -260,6 +280,8 @@ interface ActionContext {
   onRecovery: () => void;
   hasConflicts: boolean;
   onConflicts: () => void;
+  /** Null when the other board is not linked: the transfer action is then hidden. */
+  transfer: { blocker: CardTransferBlocker | null; open: () => void } | null;
 }
 
 const RESOLVE_CONFLICTS_FAILED_TITLE =
@@ -329,6 +351,18 @@ function buildActions(ticket: Ticket, ctx: ActionContext): TicketAction[] {
           ctx.onError(errorMessage(error, "Déplacement refusé"));
         }
       },
+    });
+  }
+
+  if (ticket.column === "todo" && ctx.transfer !== null) {
+    const { blocker, open } = ctx.transfer;
+    actions.push({
+      id: "transfer",
+      label: "Envoyer vers l'autre board",
+      Icon: Send,
+      title: blocker === null ? "Recréer la carte sur l'autre board et la retirer de celui-ci" : CARD_TRANSFER_BLOCKER_MESSAGES[blocker],
+      disabled: blocker !== null,
+      run: async () => open(),
     });
   }
 

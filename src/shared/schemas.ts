@@ -484,6 +484,8 @@ export const statRecordSchema = z.object({
   /** Known subtotal when costUsd is null because at least one usage cost is unavailable. */
   knownCostUsd: z.number().nonnegative(),
   costPartial: z.boolean(),
+  /** Sent to the other board and never brought back: its abandoned column is not an abandonment. */
+  transferred: z.boolean(),
   /** Derived total token count across all sessions; null when no usage recorded. */
   totalTokens: z.number().nullable(),
 });

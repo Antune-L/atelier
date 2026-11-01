@@ -8,6 +8,7 @@ import type { Comment, ProjectInfo, Ticket } from "@shared/schemas";
 import { PrdReviewDialog } from "@/components/PrdReviewDialog";
 import { ReviewLevelDot } from "@/components/ReviewLevelDot";
 import { ActivityTab, appendQuote } from "@/components/ticket-detail/ActivityTab";
+import { CardTransferStatus } from "@/components/ticket-detail/CardTransferStatus";
 import { DescriptionTab } from "@/components/ticket-detail/DescriptionTab";
 import { ImplementationRecovery } from "@/components/ticket-detail/ImplementationRecovery";
 import { OverviewTab } from "@/components/ticket-detail/OverviewTab";
@@ -408,6 +409,7 @@ export function TicketDetail({ ticket, projects, onClose, onOpenPrdOrigin, onOpe
               onError={setMoveError}
               onRecovery={() => selectTab("activity")}
             />
+            {current.column === "abandoned" && <CardTransferStatus key={current.id} ticket={current} />}
           </aside>
         </div>
       )}

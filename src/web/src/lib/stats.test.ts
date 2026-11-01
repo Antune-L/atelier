@@ -26,6 +26,7 @@ function record(executions: ExecutionRun[]): StatRecord {
     costUsd: null,
     knownCostUsd: 0,
     costPartial: false,
+    transferred: false,
     totalTokens: null,
   };
 }

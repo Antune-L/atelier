@@ -7,6 +7,7 @@ Plan: `plans/athena/2026-10-31-plan-mac-vps-n2-n3-n4/report.md` in the main chec
 - All phases (N2, N3, N4, SETUP) are merged on `main` and the link is live: the Mac publishes its catalogue to the VPS every 5 minutes.
 - Bridge protocol is 2; ops are listed in `BRIDGE_OPS` (`src/shared/vpsBridge.ts`) and mirrored in `deploy/vps/kanban-bridge`.
 - Follow-up on branch `feat/global-usage-vps`: additive op `usage_publish` (no protocol bump) so the VPS Consumption page can include the Mac's usage; see [usage.md](usage.md). Rollout: VPS first (`sudo kanban-upgrade --sha <sha>`), then the Mac.
+- Follow-up on branch `feat/transfer-card`: "Envoyer vers l'autre board" on an existing TODO card, no bridge change. The origin card moves to Abandonnés (`transferred` event) in the same transaction as its queue entry (`vps_pending_sends.source_ticket_id` on the Mac, `mac_outbox` source `transfer` on the VPS) and comes back to TODO (`transfer_reverted`) on a definitive refusal, a dismissed Mac send or a cancelled VPS send. Mac → VPS ships with the Mac only; VPS → Mac with the VPS only. Not exercised against a real VPS.
 - History below; commit ids refer to the former `feat/mac-vps-link` branch.
 
 ## Pre-merge summary (history)

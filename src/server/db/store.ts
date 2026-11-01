@@ -127,6 +127,7 @@ const reviewVerificationStatusSchema = z.enum(["not_needed", "pending", "verifie
 const persistedReviewFindingsSchema = z.array(reviewFindingSchema);
 const reviewFileHashesSchema = z.record(z.string(), z.string());
 const implementationLotEventRowSchema = z.object({ type: z.string(), payload: z.string() });
+const transferEventRowSchema = z.object({ ticket_id: z.string(), type: z.string() });
 const implementationLotEventSchema = z.object({
   label: z.string().default(DEFAULT_IMPLEMENTATION_LOT),
   files: z.array(z.string()).optional(),
@@ -1409,9 +1410,10 @@ export class Store {
       runs.push(execution);
       byTicket.set(execution.ownerId, runs);
     }
+    const transferred = this.listTransferredTicketIds();
     return this.db.query("SELECT * FROM tickets ORDER BY created_at ASC").all().map((row) => {
       const ticket = mapTicketRow(row, 0);
-      return projectStatRecord(ticket, byTicket.get(ticket.id) ?? []);
+      return projectStatRecord(ticket, byTicket.get(ticket.id) ?? [], transferred.has(ticket.id));
     });
   }
 
@@ -1937,12 +1939,25 @@ export class Store {
       || this.scalar("SELECT COUNT(*) AS n FROM mac_outbox WHERE source = 'transfer' AND source_ticket_id = ? AND status = 'pending'", ticketId) > 0;
   }
 
+  /** Cards whose latest transfer event is a transfer that was never reverted. */
+  listTransferredTicketIds(): Set<string> {
+    const latest = new Map<string, string>();
+    const rows = this.db
+      .query("SELECT ticket_id, type FROM events WHERE ticket_id IS NOT NULL AND type IN (?, ?) ORDER BY id ASC")
+      .all(CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT);
+    for (const row of rows) {
+      const parsed = transferEventRowSchema.safeParse(row);
+      if (parsed.success) latest.set(parsed.data.ticket_id, parsed.data.type);
+    }
+    return new Set([...latest].filter(([, type]) => type === CARD_TRANSFERRED_EVENT).map(([ticketId]) => ticketId));
+  }
+
   /** True when the card's latest transfer event is a transfer that was never reverted. */
   isTransferOutstanding(ticketId: string): boolean {
-    const raw = this.db
-      .query("SELECT type FROM events WHERE ticket_id = ? AND type IN (?, ?) ORDER BY id DESC LIMIT 1")
-      .get(ticketId, CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT);
-    return raw !== null && typeof raw === "object" && "type" in raw && raw.type === CARD_TRANSFERRED_EVENT;
+    const latest = transferEventRowSchema.safeParse(this.db
+      .query("SELECT ticket_id, type FROM events WHERE ticket_id = ? AND type IN (?, ?) ORDER BY id DESC LIMIT 1")
+      .get(ticketId, CARD_TRANSFERRED_EVENT, CARD_TRANSFER_REVERTED_EVENT));
+    return latest.success && latest.data.type === CARD_TRANSFERRED_EVENT;
   }
 
   getMacCatalogue(): StoredMacCatalogue | null {

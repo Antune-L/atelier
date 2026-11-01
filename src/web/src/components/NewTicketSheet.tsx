@@ -23,9 +23,8 @@ import { Sheet } from "@/components/ui/sheet";
 import { SplitButton, SplitMenuItem } from "@/components/ui/split-button";
 import { useLocalDraft } from "@/hooks/useLocalDraft";
 import { useAgentKnobs } from "@/hooks/useAgentKnobs";
-import { useAppSettings } from "@/hooks/useAppSettings";
 import { useBoard } from "@/hooks/useBoard";
-import { useCapabilities } from "@/hooks/useCapabilities";
+import { useOtherBoardLink } from "@/hooks/useOtherBoardLink";
 import { api } from "@/lib/api";
 import type { AtelierSeed } from "@/lib/atelier";
 import type { TicketPrefill } from "@/lib/boardHash";
@@ -136,9 +135,7 @@ export function NewTicketSheet({ open, projects, onClose, onOpenAtelier, prefill
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuPane | null>(null);
-  const { cloudHost, macOutbox } = useCapabilities();
-  const { settings } = useAppSettings();
-  const otherTargetAvailable = cloudHost ? macOutbox : Boolean(settings?.sshHostAlias);
+  const { cloudHost, available: otherTargetAvailable } = useOtherBoardLink();
   const [boardTarget, setBoardTarget] = useState<BoardTarget>("local");
   const targetSelector = otherTargetAvailable ? <BoardTargetSelect cloudHost={cloudHost} value={boardTarget} onChange={setBoardTarget} /> : null;
 

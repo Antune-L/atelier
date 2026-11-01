@@ -56,7 +56,7 @@ export function residualLegacyUsage(ticket: Ticket, executions: ExecutionRun[]):
 }
 
 /** Include unmatched legacy sessions without counting a captured execution's usage twice. */
-export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): StatRecord {
+export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[], transferred = false): StatRecord {
   const latest = executions.findLast((execution) => execution.role === "orchestrator") ?? executions[executions.length - 1];
   const hasExecutionUsage = executions.some((run) => Object.keys(run.usageByModel).length > 0);
   const legacy = residualLegacyUsage(ticket, executions);
@@ -86,6 +86,7 @@ export function projectStatRecord(ticket: Ticket, executions: ExecutionRun[]): S
     costUsd: costs.costUsd,
     knownCostUsd: costs.knownCostUsd,
     costPartial: costs.costPartial,
+    transferred,
     totalTokens,
   };
 }

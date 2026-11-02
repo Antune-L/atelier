@@ -10,6 +10,7 @@ import { LiveDot } from "@/components/atelier/LiveDot";
 import { ConversationPanel } from "@/components/atelier/ConversationPanel";
 import { NewConversationForm } from "@/components/atelier/NewConversationForm";
 import { PrdPanel } from "@/components/atelier/PrdPanel";
+import { SettledConversations } from "@/components/atelier/SettledConversations";
 import { resolveProjectLabel } from "@/components/TicketCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -346,17 +347,19 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
   const showConversationHeader = compose === null && conversation !== null && selectedId !== null;
 
 
-  const historyItems = historyTab === "active" ? active : settled;
+  const historyItems = compact && historyTab === "settled" ? settled : active;
   const history = (
         <aside className="flex h-full min-h-0 w-full flex-col gap-3 p-3" aria-label="Historique des discussions">
           <Button size="sm" onClick={() => openCompose(null)}>
             <MessageSquarePlus className="h-4 w-4" />
             Nouvelle discussion
           </Button>
-          <nav aria-label="État des discussions" className="flex gap-2">
-            <Button size="sm" variant={historyTab === "active" ? "secondary" : "ghost"} aria-pressed={historyTab === "active"} onClick={() => { setHistoryTab("active"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Actives {unsearched.active.length}</Button>
-            <Button size="sm" variant={historyTab === "settled" ? "secondary" : "ghost"} aria-pressed={historyTab === "settled"} onClick={() => { setHistoryTab("settled"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Classées {unsearched.settled.length}</Button>
-          </nav>
+          {compact && (
+            <nav aria-label="État des discussions" className="flex gap-2">
+              <Button size="sm" variant={historyTab === "active" ? "secondary" : "ghost"} aria-pressed={historyTab === "active"} onClick={() => { setHistoryTab("active"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Actives {unsearched.active.length}</Button>
+              <Button size="sm" variant={historyTab === "settled" ? "secondary" : "ghost"} aria-pressed={historyTab === "settled"} onClick={() => { setHistoryTab("settled"); setHistoryLimit(SETTLED_PREVIEW_COUNT); }}>Classées {unsearched.settled.length}</Button>
+            </nav>
+          )}
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -374,7 +377,7 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ul className="space-y-1">
-              {historyItems.length === 0 && (
+              {historyItems.length === 0 && (compact || settled.length === 0) && (
                 <li className="px-2 py-3 text-xs text-muted-foreground">
                   {searchQuery !== "" ? "Aucune conversation pour cette recherche." : "Aucune conversation pour ce filtre."}
                 </li>
@@ -451,6 +454,19 @@ export function AtelierView({ projects, projectFilter, target, listRequest, tool
               ))}
             </ul>
             {historyItems.length > historyLimit && <Button size="sm" variant="ghost" className="w-full" onClick={() => setHistoryLimit((limit) => limit + SETTLED_PREVIEW_COUNT)}>Afficher plus ({historyItems.length - historyLimit})</Button>}
+            {!compact && settled.length > 0 && (
+              <SettledConversations
+                conversations={settled}
+                selectedId={compose === null ? selectedId : null}
+                now={now}
+                projectLabel={(project) => resolveProjectLabel(projects, project)}
+                onSelect={select}
+                onUnsettle={(item) => setSettled(item, false)}
+                onMarkUnread={markUnread}
+                onDelete={remove}
+                searching={searchQuery !== ""}
+              />
+            )}
           </div>
         </aside>
   );

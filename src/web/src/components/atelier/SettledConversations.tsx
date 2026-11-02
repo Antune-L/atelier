@@ -1,4 +1,4 @@
-import { ArchiveRestore, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
+import { ArchiveRestore, ChevronDown, ChevronRight, Mail, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import type { Conversation } from "@shared/schemas";
@@ -18,14 +18,15 @@ interface SettledConversationsProps {
   projectLabel: (project: string) => string;
   onSelect: (conversationId: string) => void;
   onUnsettle: (conversation: Conversation) => void;
+  onMarkUnread: (conversation: Conversation) => void;
   onDelete: (conversationId: string) => Promise<void>;
   /** A title search is active: every match is shown, whatever the collapsed state. */
   searching: boolean;
 }
 
 /** Compact, collapsible list of settled conversations shown below the active ones. */
-export function SettledConversations({ conversations, selectedId, now, projectLabel, onSelect, onUnsettle, onDelete, searching }: SettledConversationsProps) {
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SETTLED_COLLAPSED_KEY) === "1");
+export function SettledConversations({ conversations, selectedId, now, projectLabel, onSelect, onUnsettle, onMarkUnread, onDelete, searching }: SettledConversationsProps) {
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SETTLED_COLLAPSED_KEY) !== "0");
   const [showAll, setShowAll] = useState(false);
   const expanded = searching || !collapsed;
   const shown = showAll || searching ? conversations : conversations.slice(0, SETTLED_PREVIEW_COUNT);
@@ -38,7 +39,7 @@ export function SettledConversations({ conversations, selectedId, now, projectLa
   };
 
   return (
-    <div className="mt-4 border-t border-border pt-3">
+    <div className="mt-4 pt-3">
       <button
         type="button"
         aria-expanded={expanded}
@@ -74,6 +75,17 @@ export function SettledConversations({ conversations, selectedId, now, projectLa
                   {item.unread && <span aria-label="Nouvelle réponse" className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />}
                   <span className="shrink-0 text-2xs text-muted-foreground">{formatRelativeDuration(item.updatedAt, now)}</span>
                 </button>
+                {!item.unread && (
+                  <button
+                    type="button"
+                    aria-label="Marquer comme non lue"
+                    title="Marquer comme non lue"
+                    onClick={() => onMarkUnread(item)}
+                    className="shrink-0 rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <Mail className="h-3.5 w-3.5" />
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-label="Remettre en actif"

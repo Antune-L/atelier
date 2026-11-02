@@ -128,8 +128,8 @@ const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n-
 
 export class FakeSystemAdapter implements SystemAdapter {
   readonly sourceUpdateAdmission = new SourceUpdateAdmission();
-  vpsUpdate(_action: VpsUpdateAction, _assertion: string): Promise<VpsUpdateStatus> {
-    return Promise.resolve({ phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });
+  vpsUpdate(_action: VpsUpdateAction, _assertion: string, _target?: string, attemptId?: string): Promise<VpsUpdateStatus> {
+    return Promise.resolve({ attemptId: attemptId ?? null, phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });
   }
 
   private readonly vpsBridge = new FakeVpsBridge();

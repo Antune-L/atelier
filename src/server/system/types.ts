@@ -316,7 +316,7 @@ export interface SpawnShellOptions {
 export interface SystemAdapter {
   readonly sourceUpdateAdmission: SourceUpdateAdmission;
   vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
-  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus>;
+  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string, attemptId?: string): Promise<VpsUpdateStatus>;
   runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult>;
   readonly dryRun: boolean;
   coolifyRequest?(request: CoolifyRequest): Promise<CoolifyResponse>;

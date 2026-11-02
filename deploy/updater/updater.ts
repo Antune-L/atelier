@@ -11,6 +11,7 @@ const MILLISECONDS_PER_SECOND = 1_000;
 const KEY_TTL_MS = 300_000;
 const MAX_BUFFER_LENGTH = 8_192;
 const EXIT_ACTIVE_WORK = 75;
+const ATTEMPT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const config: unknown = JSON.parse(readFileSync("/etc/kanban-updater/config.json", "utf8"));
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -27,10 +28,10 @@ const email = config.email;
 let keys: unknown[] = [];
 let keysAt = 0;
 let active = false;
-let status: { phase: string; target: string | null; progress: string; updatedAt: number; exitCode: number | null } = { phase: "idle", target: null, progress: "Ready", updatedAt: Date.now(), exitCode: null };
+let status: { attemptId: string | null; phase: string; target: string | null; progress: string; updatedAt: number; exitCode: number | null } = { attemptId: null, phase: "idle", target: null, progress: "Ready", updatedAt: Date.now(), exitCode: null };
 
 function persist(phase: string, progress: string, target: string | null = status.target, exitCode: number | null = null, updatedAt = Date.now()): void {
-  status = { phase, target, progress: progress.slice(0, MAX_PROGRESS_LENGTH), updatedAt, exitCode };
+  status = { attemptId: status.attemptId, phase, target, progress: progress.slice(0, MAX_PROGRESS_LENGTH), updatedAt, exitCode };
   writeFileSync(`${STATE}.tmp`, JSON.stringify(status), { mode: 0o600 });
   renameSync(`${STATE}.tmp`, STATE);
 }
@@ -42,6 +43,7 @@ try {
     throw new Error("Invalid persisted updater state; operator inspection is required.");
   }
   const target = typeof saved.target === "string" && /^[0-9a-f]{40}$/.test(saved.target) ? saved.target : null;
+  status.attemptId = typeof saved.attemptId === "string" && ATTEMPT_ID_PATTERN.test(saved.attemptId) ? saved.attemptId : null;
   if (saved.phase === "running" || saved.phase === "resolving") persist("interrupted", "Updater restarted during an update. Operator inspection is required.", target);
   else persist(saved.phase, saved.progress, target, typeof saved.exitCode === "number" ? saved.exitCode : null, typeof saved.updatedAt === "number" ? saved.updatedAt : undefined);
 } catch (error) {
@@ -81,7 +83,6 @@ async function authenticate(token: string): Promise<boolean> {
 
 async function upgrade(expectedTarget: string | null): Promise<void> {
   try {
-    persist("resolving", "Resolving the main commit", null);
     const result = Bun.spawn(["/usr/bin/git", "ls-remote", REPOSITORY, "refs/heads/main"], {
       env: { PATH: "/usr/bin:/bin", GIT_TERMINAL_PROMPT: "0" }, stdout: "pipe", stderr: "ignore",
     });
@@ -150,9 +151,14 @@ Bun.serve({
       catch { return Response.json({ error: "Target metadata unavailable; check source access and updater adoption." }, { status: 502 }); }
     }
     if (path === "/start") {
-      if (active || status.phase === "interrupted" || status.phase === "failed") return new Response(null, { status: 409 });
+      const attemptId = request.headers.get("x-kanban-attempt-id");
+      if (attemptId !== null && !ATTEMPT_ID_PATTERN.test(attemptId)) return new Response(null, { status: 400 });
       const expectedTarget = request.headers.get("x-kanban-target");
       if (expectedTarget !== null && !/^[a-f0-9]{40}$/.test(expectedTarget)) return new Response(null, { status: 400 });
+      if (attemptId !== null && attemptId === status.attemptId) return Response.json(status, { headers: { "cache-control": "no-store" } });
+      if (active || status.phase === "interrupted" || status.phase === "failed") return new Response(null, { status: 409 });
+      status.attemptId = attemptId ?? crypto.randomUUID();
+      persist("resolving", "Resolving the main commit", null);
       active = true;
       void upgrade(expectedTarget);
     }

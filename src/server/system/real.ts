@@ -257,8 +257,8 @@ export class RealSystemAdapter implements SystemAdapter {
   vpsUpdateTarget(assertion: string) {
     return requestVpsUpdateTarget(assertion);
   }
-  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus> {
-    return requestVpsUpdate(action, assertion, target);
+  vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string, attemptId?: string): Promise<VpsUpdateStatus> {
+    return requestVpsUpdate(action, assertion, target, attemptId);
   }
 
   runVpsBridge(call: VpsBridgeCall): Promise<VpsBridgeResult> {

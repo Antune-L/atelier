@@ -138,7 +138,7 @@ interface PaneReader {
   readonly dryRun: boolean;
   readonly sourceUpdateAdmission: SourceUpdateAdmission;
   vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
-  vpsUpdate?(action: VpsUpdateAction, assertion: string, target?: string): Promise<VpsUpdateStatus>;
+  vpsUpdate?(action: VpsUpdateAction, assertion: string, target?: string, attemptId?: string): Promise<VpsUpdateStatus>;
   capturePane(sessionName: string): Promise<string>;
   listOpenPrs(repoPath: string, provider: VcsProvider): Promise<OpenPr[]>;
   listReviewCounts(projects: { repoPath: string; provider: VcsProvider }[]): Promise<Record<string, number | null>>;
@@ -1009,7 +1009,7 @@ export function createApiRoutes(deps: RouteDeps) {
   let sourceTargetAt = 0;
   let sourceTargetPending: Promise<AppUpdateTarget> | null = null;
   let releaseVpsMaintenance: (() => void) | null = null;
-  let vpsStartAcknowledged = false;
+  let vpsMaintenanceAttempt: string | null = null;
   async function getSourceTarget(refresh: boolean): Promise<AppUpdateTarget> {
     if (sourceTargetPending) return sourceTargetPending;
     if (!refresh && sourceTarget && Date.now() - sourceTargetAt < 300_000) return sourceTarget;
@@ -1162,9 +1162,13 @@ export function createApiRoutes(deps: RouteDeps) {
       if (!isCloudHost()) return null;
       if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
       const maintenance = releaseVpsMaintenance;
-      const acknowledged = vpsStartAcknowledged;
+      const attemptId = vpsMaintenanceAttempt;
       const status = await deps.system.vpsUpdate("status", request.headers.get("Cf-Access-Jwt-Assertion") ?? "");
-      if (maintenance && releaseVpsMaintenance === maintenance && acknowledged && status.phase === "refused") { maintenance(); releaseVpsMaintenance = null; vpsStartAcknowledged = false; }
+      if (maintenance && releaseVpsMaintenance === maintenance && attemptId !== null && status.attemptId === attemptId && (status.phase === "refused" || status.phase === "succeeded")) {
+        maintenance();
+        releaseVpsMaintenance = null;
+        vpsMaintenanceAttempt = null;
+      }
       return Response.json(status, { headers: { "cache-control": "no-store" } });
     })
     .post("/vps-update", async ({ request, set }) => {
@@ -1176,16 +1180,23 @@ export function createApiRoutes(deps: RouteDeps) {
       }
       if (!deps.system.vpsUpdate) throw new Error("Updater is unavailable.");
       if (isClaudeLoginActive(deps.system.claudeLoginStatus().state)) return jsonError(set, HTTP_CONFLICT, "Finish the active Claude login before updating.");
+      const assertion = request.headers.get("Cf-Access-Jwt-Assertion") ?? "";
+      try {
+        const current = await deps.system.vpsUpdate("status", assertion);
+        if (current.attemptId === undefined) return jsonError(set, HTTP_CONFLICT, "Upgrade the root updater before starting an application update. No update was started.");
+        if (current.phase !== "idle" && current.phase !== "succeeded" && current.phase !== "refused") return jsonError(set, HTTP_CONFLICT, "Finish or inspect the existing updater operation before starting another update.");
+      } catch { return jsonError(set, HTTP_BAD_GATEWAY, "Updater status unavailable. No update was started."); }
       const release = deps.system.sourceUpdateAdmission.tryAcquireUpdate();
       if (!release) return jsonError(set, HTTP_CONFLICT, "Finish active provider work before updating.");
       releaseVpsMaintenance = release;
-      vpsStartAcknowledged = false;
+      const attemptId = crypto.randomUUID();
+      vpsMaintenanceAttempt = attemptId;
       try {
         const target = request.headers.get("x-kanban-target") ?? undefined;
-        if (target !== undefined && !/^[a-f0-9]{40}$/.test(target)) { release(); releaseVpsMaintenance = null; return jsonError(set, HTTP_BAD_REQUEST, "Invalid update target."); }
-        const status = await deps.system.vpsUpdate("start", request.headers.get("Cf-Access-Jwt-Assertion") ?? "", target);
-        vpsStartAcknowledged = status.phase === "resolving" || status.phase === "running";
-        if (status.phase === "refused" || status.phase === "idle") { release(); releaseVpsMaintenance = null; }
+        if (target !== undefined && !/^[a-f0-9]{40}$/.test(target)) { release(); releaseVpsMaintenance = null; vpsMaintenanceAttempt = null; return jsonError(set, HTTP_BAD_REQUEST, "Invalid update target."); }
+        const status = await deps.system.vpsUpdate("start", assertion, target, attemptId);
+        if (status.attemptId !== attemptId) throw new Error("Update attempt acknowledgement mismatch.");
+        if (releaseVpsMaintenance === release && (status.phase === "refused" || status.phase === "succeeded" || status.phase === "idle")) { release(); releaseVpsMaintenance = null; vpsMaintenanceAttempt = null; }
         return Response.json(status, { headers: { "cache-control": "no-store" } });
       } catch { return jsonError(set, HTTP_BAD_GATEWAY, "Update acknowledgement unavailable. Admission remains closed; inspect the updater before restarting the server."); }
     })

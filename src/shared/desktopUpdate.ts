@@ -12,6 +12,7 @@ export const desktopManifestSchema = z.object({
   identifier: z.literal("com.antune.atelier"),
   version: providerVersionSchema,
   revision: z.string().regex(/^[a-f0-9]{40}$/),
+  adoptionRunId: z.number().int().positive().optional(),
   providers: providerVersionsSchema,
   codexNative: providerVersionSchema,
   bundle: z.string(),

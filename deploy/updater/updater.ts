@@ -4,6 +4,7 @@ import { chmodSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 const SOCKET = "/run/kanban-updater/control.sock";
 const STATE = "/var/lib/kanban-updater/status.json";
 const REPOSITORY = "https://github.com/Antune-L/atelier.git";
+const INSTALLED_LOCK = "/opt/kanban/current/bun.lock";
 const TIMEOUT_MS = 10_000;
 const MAX_TOKEN_BYTES = 16_384;
 const MAX_PROGRESS_LENGTH = 512;
@@ -83,6 +84,8 @@ async function authenticate(token: string): Promise<boolean> {
 
 async function upgrade(expectedTarget: string | null): Promise<void> {
   try {
+    const approved = await targetMetadata();
+    if (!isRecord(approved) || expectedTarget === null || approved.id !== expectedTarget) throw new Error("A signed qualified target must be explicitly confirmed.");
     const result = Bun.spawn(["/usr/bin/git", "ls-remote", REPOSITORY, "refs/heads/main"], {
       env: { PATH: "/usr/bin:/bin", GIT_TERMINAL_PROMPT: "0" }, stdout: "pipe", stderr: "ignore",
     });
@@ -124,19 +127,48 @@ async function upgrade(expectedTarget: string | null): Promise<void> {
   }
 }
 
+async function readSourceMetadata(url: string, maxBytes = 4_000_000): Promise<string> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+  if (!response.ok || !response.body) throw new Error("Source metadata unavailable.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.length;
+      if (bytes > maxBytes) throw new Error("Source metadata exceeds limit.");
+      chunks.push(value);
+    }
+  } finally { await reader.cancel(); }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function targetMetadata(): Promise<unknown> {
-  const response = await fetch("https://api.github.com/repos/Antune-L/atelier/commits/main", { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-  if (!response.ok) throw new Error("Cannot read the public source target.");
-  const commit: unknown = await response.json();
+  const commit: unknown = JSON.parse(await readSourceMetadata("https://api.github.com/repos/Antune-L/atelier/commits/main"));
   if (!isRecord(commit) || typeof commit.sha !== "string" || !/^[a-f0-9]{40}$/.test(commit.sha)) throw new Error("Invalid source target.");
-  const lockResponse = await fetch(`https://raw.githubusercontent.com/Antune-L/atelier/${commit.sha}/bun.lock`, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
-  if (!lockResponse.ok) throw new Error("Cannot read the target dependency graph.");
-  const lock = await lockResponse.text();
-  if (lock.length > 4_000_000) throw new Error("Target dependency graph is too large.");
+  const lock = await readSourceMetadata(`https://raw.githubusercontent.com/Antune-L/atelier/${commit.sha}/bun.lock`);
   const claude = lock.match(/"@anthropic-ai\/claude-agent-sdk":\s*\["@anthropic-ai\/claude-agent-sdk@([^"\s]+)"/)?.[1];
   const codex = lock.match(/"@openai\/codex-sdk":\s*\["@openai\/codex-sdk@([^"\s]+)"/)?.[1];
   if (!claude || !codex || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(claude) || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(codex)) throw new Error("Invalid target provider versions.");
-  return { id: commit.sha, version: commit.sha.slice(0, 7), providers: { claude, codex } };
+  const installedLock = readFileSync(INSTALLED_LOCK, "utf8");
+  const installedClaude = installedLock.match(/"@anthropic-ai\/claude-agent-sdk":\s*\["@anthropic-ai\/claude-agent-sdk@([^"\s]+)"/)?.[1];
+  const installedCodex = installedLock.match(/"@openai\/codex-sdk":\s*\["@openai\/codex-sdk@([^"\s]+)"/)?.[1];
+  if (installedClaude === claude && installedCodex === codex) return { id: commit.sha, version: commit.sha.slice(0, 7), providers: { claude, codex } };
+  if (!isRecord(config) || typeof config.adoptionPublicKey !== "string") throw new Error("Configure the root-owned provider adoption publisher key.");
+  const releaseText = await readSourceMetadata("https://api.github.com/repos/Antune-L/atelier/releases/latest", 1_000_000);
+  const release: unknown = JSON.parse(releaseText);
+  if (!isRecord(release) || release.draft !== false || typeof release.body !== "string") throw new Error("Invalid qualification release.");
+  const envelope: unknown = JSON.parse(release.body);
+  if (!isRecord(envelope) || typeof envelope.payload !== "string" || typeof envelope.signature !== "string") throw new Error("Missing signed qualification.");
+  const key = createPublicKey(config.adoptionPublicKey);
+  if (key.asymmetricKeyType !== "ed25519" || !verify(null, Buffer.from(envelope.payload), key, Buffer.from(envelope.signature, "base64"))) throw new Error("Invalid qualification publisher.");
+  const receipt: unknown = JSON.parse(envelope.payload);
+  if (!isRecord(receipt) || receipt.protocol !== 1 || receipt.revision !== commit.sha || !isRecord(receipt.providers) || receipt.providers.claude !== claude || receipt.providers.codex !== codex
+    || !isRecord(receipt.gates) || receipt.gates.linux !== "passed" || receipt.gates.mac !== "passed" || receipt.gates.static !== "passed"
+    || receipt.lockSha256 !== new Bun.CryptoHasher("sha256").update(lock).digest("hex") || release.tag_name !== `v${receipt.version}`) throw new Error("Qualification does not match the exact source graph.");
+  return { id: commit.sha, version: receipt.version, providers: { claude, codex } };
 }
 
 Bun.serve({

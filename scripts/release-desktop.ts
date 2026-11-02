@@ -131,7 +131,7 @@ for (;;) {
   if (done) break;
   hasher.update(value);
 }
-const manifest = desktopManifestSchema.parse({ protocol: 1, platform: "macos-arm64", identifier: "com.antune.atelier", version, revision, providers, codexNative: CODEX_SDK_VERSION, bundle: `${RELEASE_DOWNLOAD_ROOT}v${version}/${zipName}`, bytes: zip.size, sha256: hasher.digest("hex") });
+const manifest = desktopManifestSchema.parse({ protocol: 1, platform: "macos-arm64", identifier: "com.antune.atelier", version, revision, adoptionRunId: process.env.ATELIER_ADOPTION_RUN_ID ? Number(process.env.ATELIER_ADOPTION_RUN_ID) : undefined, providers, codexNative: CODEX_SDK_VERSION, bundle: `${RELEASE_DOWNLOAD_ROOT}v${version}/${zipName}`, bytes: zip.size, sha256: hasher.digest("hex") });
 const payload = JSON.stringify(manifest);
 await Bun.write(join(RELEASE_FOLDER, DESKTOP_MANIFEST_FILE), JSON.stringify({ payload, signature: privateKey ? sign(null, Buffer.from(payload), privateKey).toString("base64") : "" }));
 await writeSha256(zipPath, zipName);

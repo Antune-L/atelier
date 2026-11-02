@@ -351,7 +351,7 @@ export const api = {
   checkMerged: (id: string): Promise<{ merged: boolean; state: PrState; ticket?: Ticket }> =>
     request(`/api/tickets/${id}/check-merged`, { method: "POST" }),
   appUpdate: (): Promise<{ ok: boolean; mode: UpdateMode }> =>
-    request("/api/internal/update", { method: "POST" }),
+    request("/api/internal/update", { method: "POST", headers: { "x-kanban-update": "confirm" } }),
   mergePr: (id: string): Promise<MergePrResult> =>
     request(`/api/tickets/${id}/merge`, { method: "POST" }),
   retry: (id: string): Promise<Ticket> => request(`/api/tickets/${id}/retry`, { method: "POST" }),

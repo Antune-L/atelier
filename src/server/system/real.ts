@@ -18,6 +18,7 @@ import type { CloneResult, GithubRepoSummary } from "../../shared/github.ts";
 import { createLogger } from "../logger.ts";
 import type { WorkerMcpManager } from "../workerMcp.ts";
 
+import { adoptionApi } from "./providerAdoptionTransport.ts";
 import { SourceUpdateAdmission } from "./sourceUpdateAdmission.ts";
 import type { AgentProvider, AgentSessionEvent, AgentSessionHandle, AgentSessionOptions } from "./agentSession.ts";
 import { collectGitAuditRange } from "./auditRange.ts";
@@ -253,6 +254,7 @@ async function readPackageManifest(repoPath: string): Promise<PackageManifest | 
  * Never instantiated in the default dev/test path.
  */
 export class RealSystemAdapter implements SystemAdapter {
+  providerAdoptionRequest(path: string, token: string, body?: unknown): Promise<unknown> { return adoptionApi(path, token, body); }
   readonly sourceUpdateAdmission = new SourceUpdateAdmission();
   vpsUpdateTarget(assertion: string) {
     return requestVpsUpdateTarget(assertion);
@@ -1505,8 +1507,17 @@ export class RealSystemAdapter implements SystemAdapter {
     return computeCodeSnapshot(slotPath);
   }
 
-  async gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult> {
+  async gitPullFastForward(repoPath: string, baseBranch: string, expectedSha?: string): Promise<DoneGateResult> {
     try {
+      if (expectedSha) {
+        if (!/^[a-f0-9]{40}$/.test(expectedSha)) return { ok: false, reason: "Invalid pinned source revision." };
+        const fetched = await networkGit(["-C", repoPath, "fetch", "origin", baseBranch], repoPath);
+        if (fetched.exitCode !== 0 || fetched.timedOut) return { ok: false, reason: "Cannot fetch the pinned source target." };
+        const head = await $`git -C ${repoPath} rev-parse FETCH_HEAD`.nothrow().quiet();
+        if (head.exitCode !== 0 || head.stdout.toString().trim() !== expectedSha) return { ok: false, reason: "Main advanced beyond the confirmed revision." };
+        const merged = await $`git -C ${repoPath} merge --ff-only ${expectedSha}`.nothrow().quiet();
+        return { ok: merged.exitCode === 0, reason: merged.stderr.toString() };
+      }
       const res = await networkGit(["-C", repoPath, "pull", "--ff-only", "origin", baseBranch], repoPath);
       if (res.exitCode !== 0 || res.timedOut) {
         return { ok: false, reason: `git pull --ff-only origin ${baseBranch} a échoué : ${boundedCommandDetail(res)}` };

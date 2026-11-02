@@ -314,6 +314,7 @@ export interface SpawnShellOptions {
 }
 
 export interface SystemAdapter {
+  providerAdoptionRequest(path: string, token: string, body?: unknown): Promise<unknown>;
   readonly sourceUpdateAdmission: SourceUpdateAdmission;
   vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
   vpsUpdate(action: VpsUpdateAction, assertion: string, target?: string, attemptId?: string): Promise<VpsUpdateStatus>;
@@ -544,5 +545,5 @@ export interface SystemAdapter {
   /** True when the working tree has no uncommitted changes (`git status --porcelain` empty). */
   gitStatusClean(repoPath: string): Promise<boolean>;
   /** Fast-forward-only pull of origin/<baseBranch> (never merges; blocks on divergence). */
-  gitPullFastForward(repoPath: string, baseBranch: string): Promise<DoneGateResult>;
+  gitPullFastForward(repoPath: string, baseBranch: string, expectedSha?: string): Promise<DoneGateResult>;
 }

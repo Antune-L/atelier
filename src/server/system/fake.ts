@@ -127,6 +127,7 @@ const FAKE_AUDIT_FILE = "src/example.ts";
 const FAKE_AUDIT_DIFF = `diff --git a/${FAKE_AUDIT_FILE} b/${FAKE_AUDIT_FILE}\n--- a/${FAKE_AUDIT_FILE}\n+++ b/${FAKE_AUDIT_FILE}\n@@ -1 +1 @@\n-export const example = 1;\n+export const example = 2;\n`;
 
 export class FakeSystemAdapter implements SystemAdapter {
+  providerAdoptionRequest(_path: string, _token: string, _body?: unknown): Promise<unknown> { return Promise.resolve({ simulated: true }); }
   readonly sourceUpdateAdmission = new SourceUpdateAdmission();
   vpsUpdate(_action: VpsUpdateAction, _assertion: string, _target?: string, attemptId?: string): Promise<VpsUpdateStatus> {
     return Promise.resolve({ attemptId: attemptId ?? null, phase: "idle", target: null, progress: "Dry run: no update will be started.", updatedAt: Date.now(), exitCode: null });

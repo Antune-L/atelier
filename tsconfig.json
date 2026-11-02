@@ -23,6 +23,6 @@
       "@/*": ["src/web/src/*"]
     }
   },
-  "include": ["src", "worker", "desktop", "deploy", "electrobun.config.ts"],
+  "include": ["scripts/prepareProviderAdoption.ts", "scripts/publishProviderAdoption.ts", "src", "worker", "desktop", "deploy", "electrobun.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

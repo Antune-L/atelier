@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { desktopUpdateStatusSchema } from "@shared/desktopUpdate";
 import type { DesktopUpdateStatus } from "@shared/desktopUpdate";
+import type { ProviderVersions } from "@shared/providerUpdates";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -12,10 +13,22 @@ import { refreshProviderUpdates, useProviderUpdates } from "@/hooks/useProviderU
 import { request } from "@/lib/api";
 import { formatDateTime } from "@/lib/display";
 
+const ADOPTION_PHASE_LABELS = { "setup-required": "Configuration requise", queued: "En attente", preparation: "Préparation", qualification: "Vérification des fournisseurs", build: "Construction de l’application", publication: "Publication", ready: "Prêt à installer", failed: "Échec", unknown: "Vérification en attente", unchanged: "Déjà à jour", simulated: "Simulation" };
+const PROVIDER_KEYS: Array<keyof ProviderVersions> = ["claude", "codex"];
+const ADOPTION_REASON_MESSAGES: Record<string, string> = {
+  "Configure the dedicated preparation token and publisher public key on the backend.": "La préparation automatique nécessite une configuration initiale sur cette installation.",
+  "Dedicated preparation credentials or publisher public key missing.": "Les accès de préparation ou la clé de vérification ne sont pas configurés sur cette installation.",
+  "Dispatch pending acknowledgement. Do not retry an unknown request.": "La demande attend sa confirmation. Une nouvelle préparation ne sera pas lancée tant que son état reste incertain.",
+  "Preparation unavailable. Check the dedicated service configuration.": "La préparation est indisponible. Vérifiez sa configuration initiale.",
+  "Preparation unavailable. Check dedicated credentials, workflow setup and the recorded request before retrying.": "La préparation n’a pas pu être confirmée. Vérifiez ses accès et son état avant de réessayer.",
+  "Preparation failed or was cancelled. No candidate is approved for installation.": "La préparation a échoué ou a été annulée. Aucune nouvelle version n’est prête à installer.",
+  "Exact preparation or signed qualification could not be verified. Installation remains disabled.": "La validation de cette version n’a pas pu être vérifiée. L’installation reste désactivée.",
+};
+
 const NATIVE_ORIGINS = { package: "paquet", bundled: "application", configured: "configuration", provisioned: "géré par l'application", user: "installation utilisateur", unknown: "origine inconnue", simulated: "simulation" };
 
 export function ProviderUpdates() {
-  const { data, loading, error } = useProviderUpdates();
+  const { data, adoption, loading, error } = useProviderUpdates();
   const [busy, setBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [showVps, setShowVps] = useState(false);
@@ -24,6 +37,7 @@ export function ProviderUpdates() {
   const [notice, setNotice] = useState<string | null>(null);
   const rows = data?.rows ?? [];
   const target = data?.target;
+  const candidateIsInstalled = !!adoption?.providers && PROVIDER_KEYS.every((provider) => rows.find((row) => row.provider === provider)?.installed === adoption.providers?.[provider]);
   const hasUnqualified = target !== null && target !== undefined && rows.some((row) => row.latest !== null && row.latest !== target?.providers[row.provider] && row.latest !== row.installed);
   async function update(): Promise<void> {
     if (!data || !target) return;
@@ -32,12 +46,12 @@ export function ProviderUpdates() {
     setActionError(null);
     try {
       if (data.host === "source") {
-        const result = await request("/api/internal/update", { method: "POST", body: JSON.stringify({ target: target.id }), signal: AbortSignal.timeout(700_000) });
+        const result = await request("/api/internal/update", { method: "POST", headers: { "x-kanban-update": "confirm", "x-kanban-adoption": "confirm" }, body: JSON.stringify({ target: target.id }), signal: AbortSignal.timeout(700_000) });
         if (typeof result === "object" && result !== null && "mode" in result && result.mode === "reload") window.location.reload();
         else setNotice("Redémarrage demandé. Si l'application ne revient pas, consultez .update.log dans le checkout.");
       } else if (data.host === "mac") {
         const action = desktop?.phase === "ready" ? "install" : "prepare";
-        const result = desktopUpdateStatusSchema.parse(await request(`/api/desktop-update/${action}`, { method: "POST", headers: { "x-kanban-update": "confirm" }, body: JSON.stringify({ target: target.id }), signal: AbortSignal.timeout(240_000) }));
+        const result = desktopUpdateStatusSchema.parse(await request(`/api/desktop-update/${action}`, { method: "POST", headers: { "x-kanban-update": "confirm", "x-kanban-adoption": "confirm" }, body: JSON.stringify({ target: target.id }), signal: AbortSignal.timeout(240_000) }));
         setDesktop(result);
         setNotice(result.message);
         if (result.phase === "failed") setActionError(result.message);
@@ -57,7 +71,7 @@ export function ProviderUpdates() {
         </button>
       </div>
       <div className="divide-y rounded-md border">
-        {["claude", "codex"].map((provider) => {
+        {PROVIDER_KEYS.map((provider) => {
           const row = rows.find((entry) => entry.provider === provider);
           const name = provider === "claude" ? "Claude Agent SDK" : "Codex SDK";
           return <div key={provider} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2.5">
@@ -69,15 +83,23 @@ export function ProviderUpdates() {
       </div>
       <p role="status" className="text-xs text-muted-foreground">{loading ? "Vérification en cours…" : `Dernière vérification : ${data && data.checkedAt > 0 ? formatDateTime(data.checkedAt) : "jamais"}.`}{data?.simulated && " Mode simulation."}</p>
       {target && <p className="text-xs">Inclus dans l’application cible {target.version} : Claude {target.providers.claude}, Codex {target.providers.codex}.</p>}
+      <div className="space-y-2">
+        <p className="text-xs">Préparer une version de l’application avec les dernières versions stables des deux fournisseurs. L’installation et le redémarrage demandent une confirmation séparée.</p>
+        <Button size="sm" disabled={busy || !!adoption && ["queued", "preparation", "qualification", "build", "publication", "unknown"].includes(adoption.phase)} onClick={() => {
+          setBusy(true);
+          void request("/api/provider-adoption", { method: "POST", headers: { "x-kanban-update": "confirm" }, body: JSON.stringify({ confirmed: true }) }).then(() => refreshProviderUpdates()).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : "Préparation indisponible.")).finally(() => setBusy(false));
+        }}>Préparer les derniers fournisseurs</Button>
+        {adoption && <p role="status" className="text-xs">{candidateIsInstalled ? "Fournisseurs installés" : ADOPTION_PHASE_LABELS[adoption.phase]} · {adoption.providers && `Claude ${adoption.providers.claude}, Codex ${adoption.providers.codex}`} {ADOPTION_REASON_MESSAGES[adoption.reason ?? ""] ?? adoption.reason}</p>}
+      </div>
       {hasUnqualified && <p className="text-xs text-muted-foreground">Certaines publications ne sont pas incluses dans cette version de l'application. Elles ne seront pas installées séparément.</p>}
       {data?.message && data.host !== "mac" && <p className="text-xs text-muted-foreground">{data.message}</p>}
       {data?.host === "mac" && data.message && <details className="text-xs text-muted-foreground"><summary>État de la mise à jour Mac : {data.available ? "version disponible" : "vérification ou intervention requise"}</summary><p className="mt-1 break-words">{data.message}</p></details>}
       {data?.maintenance && <p role="status" className="text-sm text-warning">Maintenance en cours ou interrompue. Les nouveaux travaux attendent ; terminez la réparation avant de redémarrer.</p>}
-      {data?.available && target && !showVps && <div className="space-y-2">
+      {data?.available && target && adoption?.phase === "ready" && !candidateIsInstalled && !showVps && <div className="space-y-2">
         {data.host !== "vps" && <label className="flex items-center gap-2 text-xs"><Switch checked={confirmed} onCheckedChange={setConfirmed} disabled={busy} aria-label="Confirmer la version et le redémarrage" />Je confirme cette version et le redémarrage de l'application.</label>}
         <Button size="sm" disabled={busy || desktop?.phase === "installing" || data.maintenance || (data.host !== "vps" && !confirmed)} onClick={() => void update()}>{busy ? "Opération en cours…" : actionLabel}</Button>
       </div>}
-      {showVps && target && <VpsUpdateDialog target={target.id} onClose={() => setShowVps(false)} />}
+      {showVps && target && <VpsUpdateDialog target={target.id} providers={target.providers} onClose={() => setShowVps(false)} />}
       {data?.host === "mac" && <a className="text-xs underline underline-offset-2" href={desktop?.manualUrl ?? "https://github.com/Antune-L/atelier/releases/latest"} target="_blank" rel="noreferrer">Téléchargement manuel de l’application complète</a>}
       {notice && <p role="status" className="text-xs text-muted-foreground">{notice}</p>}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

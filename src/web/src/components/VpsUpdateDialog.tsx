@@ -3,12 +3,14 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { vpsUpdateSchema } from "@shared/vpsUpdate";
 import type { VpsUpdateStatus } from "@shared/vpsUpdate";
+import type { ProviderVersions } from "@shared/providerUpdates";
 
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { request } from "@/lib/api";
 import { formatDateTime } from "@/lib/display";
+import { useProviderUpdates } from "@/hooks/useProviderUpdates";
 
 const REFRESH_MS = 3_000;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -110,7 +112,10 @@ function FinishedStatus({ status }: { status: VpsUpdateStatus }) {
   return null;
 }
 
-export function VpsUpdateDialog({ onClose, target }: { onClose: () => void; target?: string }) {
+export function VpsUpdateDialog({ onClose, target, providers }: { onClose: () => void; target?: string; providers?: ProviderVersions }) {
+  const { data: providerUpdates, error: targetError } = useProviderUpdates(target === undefined);
+  const confirmedTarget = target ?? providerUpdates?.target?.id;
+  const confirmedProviders = providers ?? providerUpdates?.target?.providers;
   const [status, setStatus] = useState<VpsUpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -151,7 +156,8 @@ export function VpsUpdateDialog({ onClose, target }: { onClose: () => void; targ
     setPending(true);
     setError(null);
     try {
-      const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm", ...(target ? { "x-kanban-target": target } : {}) } });
+      if (!confirmedTarget) throw new Error("No checked update target.");
+      const result: unknown = await request(UPDATE_PATH, { method: "POST", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), headers: { "x-kanban-update": "confirm", "x-kanban-target": confirmedTarget, ...(target ? { "x-kanban-adoption": "confirm" } : {}) } });
       setStatus(vpsUpdateSchema.parse(result));
     } catch {
       setError("La demande n’a pas été confirmée. Consultez l’état avant de réessayer : une coupure peut accompagner le redémarrage.");
@@ -162,13 +168,13 @@ export function VpsUpdateDialog({ onClose, target }: { onClose: () => void; targ
 
   const isRunning = status?.phase === "resolving" || status?.phase === "running";
   const isFailure = status?.phase === "failed" || status?.phase === "interrupted";
-  const canStart = status?.phase === "idle" || status?.phase === "succeeded" || status?.phase === "refused";
+  const canStart = !!confirmedTarget && (status?.phase === "idle" || status?.phase === "succeeded" || status?.phase === "refused");
   return (
     <Dialog
       open
       onOpenChange={(open) => { if (!open) onClose(); }}
       title="Mise à jour du VPS"
-      description="Installe la dernière version. L’accès est coupé environ une minute. Cette page se rechargera automatiquement après une mise à jour réussie."
+      description="Installe la version confirmée. L’accès est coupé pendant le redémarrage. Cette page se rechargera automatiquement après une mise à jour réussie."
       footer={
         <>
           <Button variant="outline" onClick={onClose}>{isRunning || isFailure || error !== null ? "Fermer" : "Annuler"}</Button>
@@ -180,6 +186,8 @@ export function VpsUpdateDialog({ onClose, target }: { onClose: () => void; targ
         </>
       }
     >
+      {confirmedTarget && <p className="text-sm">Version confirmée : <strong className="font-mono">{confirmedTarget}</strong>{confirmedProviders && <> · Claude {confirmedProviders.claude} · Codex {confirmedProviders.codex}</>}</p>}
+      {!confirmedTarget && <p role="status" className="text-sm">{targetError ?? providerUpdates?.message ?? "Vérification de la version à installer…"}</p>}
       {status === null && error === null && <p role="status" className="text-sm text-muted-foreground">Chargement de l’état de la mise à jour…</p>}
       {status !== null && (isRunning ? <RunningStatus status={status} reconnecting={error !== null} /> : <FinishedStatus status={status} />)}
       {canStart && (

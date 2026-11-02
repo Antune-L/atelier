@@ -3511,6 +3511,14 @@ export class Store {
     this.db.query("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)").run(key, value);
   }
 
+  compareAndSetMeta(key: string, expected: string | null, value: string): boolean {
+    return this.db.transaction(() => {
+      if (this.getMeta(key) !== expected) return false;
+      this.setMeta(key, value);
+      return true;
+    })();
+  }
+
   deleteMeta(key: string): void {
     this.db.query("DELETE FROM meta WHERE key = ?").run(key);
   }

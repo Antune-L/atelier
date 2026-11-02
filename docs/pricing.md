@@ -82,8 +82,9 @@ partial (known subtotal only). Never invent a zero price.
 
 ## Update procedure
 
-Required on every `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` bump and whenever a new
-model becomes selectable:
+SDK-only updates of `@anthropic-ai/claude-agent-sdk` or `@openai/codex-sdk` are independent of tariff review: they preserve the current grid and run existing pricing regressions. They do not verify current upstream tariffs, add selectable models or refresh the `Last verified` date. Unknown model usage remains explicitly unpriced and its total partial.
+
+The procedure below is required whenever a new model becomes selectable, when tariffs or cache conventions change, or during a separate tariff review:
 
 1. List the model ids the SDKs can now report (`AGENT_MODELS`, `CODEX_MODELS` and the runtime catalog).
 2. Open both pricing pages above and read the current list prices for each id, including FAST rates.

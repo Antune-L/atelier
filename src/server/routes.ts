@@ -5,9 +5,13 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { Elysia } from "elysia";
 import { nanoid } from "nanoid";
 
+import { adoptionRequestSchema } from "../shared/providerAdoption.ts";
 import type { AppUpdateTarget } from "../shared/providerUpdates.ts";
 import type { DesktopUpdateController } from "../shared/desktopUpdate.ts";
 import { providerUpdatesSchema } from "../shared/providerUpdates.ts";
+import { CLAUDE_SDK_VERSION } from "./system/claudeBinary.ts";
+import { CODEX_SDK_VERSION } from "./system/codexBinary.ts";
+import { ProviderAdoptionService } from "./system/providerAdoption.ts";
 import { ProviderUpdateService, readSourceUpdateTarget } from "./system/providerUpdates.ts";
 import { KeyedMutex } from "./mutex.ts";
 import type { SourceUpdateAdmission } from "./system/sourceUpdateAdmission.ts";
@@ -135,6 +139,7 @@ const DISALLOWED_AGENT_PAIR_MSG =
   "Combinaison orchestrateur/implémenteur non supportée : Codex orchestre uniquement Codex (la délégation croisée arrive plus tard).";
 
 interface PaneReader {
+  providerAdoptionRequest(path: string, token: string, body?: unknown): Promise<unknown>;
   readonly dryRun: boolean;
   readonly sourceUpdateAdmission: SourceUpdateAdmission;
   vpsUpdateTarget?(assertion: string): Promise<AppUpdateTarget>;
@@ -150,7 +155,7 @@ interface PaneReader {
   // Desktop self-update guards + build runner (dev desktop only).
   gitCurrentBranch(repoPath: string): Promise<string>;
   gitStatusClean(repoPath: string): Promise<boolean>;
-  gitPullFastForward(repoPath: string, baseBranch: string): Promise<{ ok: boolean; reason: string }>;
+  gitPullFastForward(repoPath: string, baseBranch: string, expectedSha?: string): Promise<{ ok: boolean; reason: string }>;
   runProjectScript(slotPath: string, command: string, timeoutMs: number): Promise<{ ok: boolean; output: string }>;
   createBranchFromBase(repoPath: string, branch: string, baseBranch: string): Promise<void>;
   reformulate(opts: ReformulateOptions): Promise<string>;
@@ -1005,6 +1010,7 @@ export function createApiRoutes(deps: RouteDeps) {
   const { store, hub, lifecycle, slots, coordinator, automations } = deps;
   const updateMutex = deps.repoMutex ?? new KeyedMutex();
   const providerUpdates = new ProviderUpdateService();
+  const adoption = new ProviderAdoptionService(store, deps.system, deps.resourcesRoot ?? deps.projectRoot);
   let sourceTarget: AppUpdateTarget | null = null;
   let sourceTargetAt = 0;
   let sourceTargetPending: Promise<AppUpdateTarget> | null = null;
@@ -1105,6 +1111,16 @@ export function createApiRoutes(deps: RouteDeps) {
     .use(createQualityRoutes({ ...deps, ticketOperations }))
     .use(createAtelierRoutes(deps))
     // Always 200 with a JSON body: `null` off-cloud so the client stops polling without a failed request.
+    .get("/provider-adoption", async ({ request, set }) => {
+      if (!isCloudHost() && !isLocalRequest(request)) return jsonError(set, 403, "Provider preparation status requires host access.");
+      return Response.json(adoption.snapshot() ? await adoption.status() : null, { headers: { "cache-control": "no-store" } });
+    })
+    .post("/provider-adoption", async ({ body, request, set }) => {
+      if (request.headers.get("x-kanban-update") !== "confirm" || (!isCloudHost() && !isLocalRequest(request))) return jsonError(set, 403, "Explicit host confirmation is required.");
+      if (isCloudHost() && request.headers.get("origin") !== `https://${request.headers.get("host")}`) return jsonError(set, 403, "Same-origin cloud confirmation is required.");
+      if (!adoptionRequestSchema.safeParse(body).success) return jsonError(set, HTTP_BAD_REQUEST, "Confirm provider preparation.");
+      return adoption.start();
+    })
     .get("/provider-updates", async ({ query, request }) => {
       const refresh = query.refresh === "1";
       const system = deps.system;
@@ -1139,6 +1155,14 @@ export function createApiRoutes(deps: RouteDeps) {
         }
       } catch { message = "Cible de l'application indisponible. Vérifiez l'accès à la source ou au service de mise à jour ; aucune version compatible ne peut être confirmée."; }
       if (system.dryRun) { available = false; message = "Simulation : aucune installation ni consultation du registre."; }
+      const candidate = adoption.snapshot();
+      if (candidate?.phase === "ready" && candidate.receipt) {
+        const receipt = candidate.receipt;
+        const candidateId = host === "mac" ? receipt.version : receipt.revision;
+        const hostReady = host === "source" || (available && target?.id === candidateId);
+        target = { id: candidateId, version: receipt.version, providers: receipt.providers };
+        available = !system.dryRun && host !== "browser" && hostReady;
+      }
       const rows = await rowsPending;
       return providerUpdatesSchema.parse({ simulated: system.dryRun, checkedAt: providerUpdates.lastCheckedAt, rows, host, target, available, message, maintenance: system.sourceUpdateAdmission.isUpdating });
     })
@@ -1153,6 +1177,12 @@ export function createApiRoutes(deps: RouteDeps) {
       const parsed = z.object({ target: z.string().max(128) }).safeParse(body);
       if (!parsed.success) return jsonError(set, HTTP_BAD_REQUEST, "A checked release target is required.");
       try {
+        if (request.headers.get("x-kanban-adoption") === "confirm") {
+          await adoption.approve(parsed.data.target, true);
+          const checked = await deps.desktopUpdates.check(true);
+          const receipt = adoption.snapshot()?.receipt;
+          if (!receipt || checked.target?.revision !== receipt.revision || JSON.stringify(checked.target.providers) !== JSON.stringify(receipt.providers)) throw new Error("Desktop artifact does not match the qualified candidate.");
+        }
         if (params.action === "prepare") return await deps.desktopUpdates.prepare(parsed.data.target);
         if (params.action === "install") return await deps.desktopUpdates.install(parsed.data.target);
         return jsonError(set, HTTP_NOT_FOUND, "Unknown desktop update action.");
@@ -1186,6 +1216,10 @@ export function createApiRoutes(deps: RouteDeps) {
         if (current.attemptId === undefined) return jsonError(set, HTTP_CONFLICT, "Upgrade the root updater before starting an application update. No update was started.");
         if (current.phase !== "idle" && current.phase !== "succeeded" && current.phase !== "refused") return jsonError(set, HTTP_CONFLICT, "Finish or inspect the existing updater operation before starting another update.");
       } catch { return jsonError(set, HTTP_BAD_GATEWAY, "Updater status unavailable. No update was started."); }
+      if (request.headers.get("x-kanban-adoption") === "confirm") {
+        try { await adoption.approve(request.headers.get("x-kanban-target") ?? ""); }
+        catch (error) { return jsonError(set, HTTP_CONFLICT, getErrorMessage(error)); }
+      }
       const release = deps.system.sourceUpdateAdmission.tryAcquireUpdate();
       if (!release) return jsonError(set, HTTP_CONFLICT, "Finish active provider work before updating.");
       releaseVpsMaintenance = release;
@@ -2323,6 +2357,15 @@ export function createApiRoutes(deps: RouteDeps) {
 
       const approved = z.object({ target: z.string().regex(/^[a-f0-9]{40}$/).optional() }).safeParse(body ?? {});
       if (!approved.success) return jsonError(set, HTTP_BAD_REQUEST, "Invalid source update target.");
+      if (request.headers.get("x-kanban-update") !== "confirm") return jsonError(set, 403, "Explicit source installation confirmation is required.");
+      if (system.dryRun) return jsonError(set, HTTP_CONFLICT, "Source installation is disabled in simulation.");
+      try {
+        sourceTarget = await getSourceTarget(true);
+        if (approved.data.target && sourceTarget.id !== approved.data.target) throw new Error("Main advanced beyond the confirmed revision.");
+        approved.data.target = sourceTarget.id;
+        const providerChange = sourceTarget.providers.claude !== CLAUDE_SDK_VERSION || sourceTarget.providers.codex !== CODEX_SDK_VERSION;
+        if (providerChange || request.headers.get("x-kanban-adoption") === "confirm") await adoption.approve(sourceTarget.id);
+      } catch (error) { return jsonError(set, HTTP_CONFLICT, getErrorMessage(error)); }
       if (approved.data.target && sourceTarget?.id !== approved.data.target) return jsonError(set, HTTP_CONFLICT, "Refresh the source target before confirming.");
       if (isClaudeLoginActive(system.claudeLoginStatus().state)) return jsonError(set, HTTP_CONFLICT, "mise à jour refusée : une connexion Claude est en cours");
       const releaseUpdate = system.sourceUpdateAdmission.tryAcquireUpdate();
@@ -2345,7 +2388,7 @@ export function createApiRoutes(deps: RouteDeps) {
 
           system.sourceUpdateAdmission.recordSourceUpdate("mutating", beforeHash);
           mutationStarted = true;
-          const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH);
+          const pull = await system.gitPullFastForward(repoRoot, UPDATE_BASE_BRANCH, approved.data.target);
           if (!pull.ok) throw new Error(pull.reason);
 
           if (approved.data.target) {

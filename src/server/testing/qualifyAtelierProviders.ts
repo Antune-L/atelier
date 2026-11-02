@@ -1,12 +1,14 @@
 import { randomInt } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { copyFile, mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, realpath, rename, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
 
 import { z } from "zod";
 
+import { lockedProviderVersions } from "../../shared/providerUpdates.ts";
 import type { Orchestrator } from "../../shared/constants.ts";
 import { createConversationSchema } from "../../shared/schemas.ts";
 import { AtelierManager } from "../agents/atelierManager.ts";
@@ -27,6 +29,8 @@ import { TicketLifecycle } from "../lifecycle.ts";
 import { KeyedMutex } from "../mutex.ts";
 import { Notifier } from "../notifier.ts";
 import type { AgentSessionHandle, AgentSessionOptions } from "../system/agentSession.ts";
+import { resolveClaudeBinary } from "../system/claudeBinary.ts";
+import { resolveCodexBinary, verifyCodexBinaryVersion } from "../system/codexBinary.ts";
 import { FakeSystemAdapter } from "../system/fake.ts";
 import { RealSystemAdapter } from "../system/real.ts";
 import { redactSecrets } from "../system/secretRedaction.ts";
@@ -52,7 +56,7 @@ const providers = z.array(z.enum(["codex", "claude"])).min(1).parse((process.env
 const imageCode = String(randomInt(100_000, 999_999));
 const sourceCode = `SOURCE_${crypto.randomUUID()}`;
 const root = await mkdtemp(join(tmpdir(), "atelier-provider-qualification-"));
-const evidencePath = join(root, "evidence.json");
+const evidencePath = process.env.ATELIER_QUALIFICATION_OUTPUT ?? join(root, "evidence.json");
 const repo = join(root, "repo");
 const uploads = join(repo, "uploads");
 const evidence: Record<string, unknown> = {
@@ -188,7 +192,91 @@ try {
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => workerMcp.handleRequest(request) });
   cleanup.push(() => server.stop(true));
   workerMcp.backendPort = server.port ?? 0;
-  const system = new QualificationSystem(new RealSystemAdapter(workerMcp, join(root, "logs")));
+  const real = new RealSystemAdapter(workerMcp, join(root, "logs"));
+  const system = new QualificationSystem(real);
+  if (process.env.ATELIER_ADOPTION_QUALIFICATION === "1") {
+    assert(process.env.ANTHROPIC_API_KEY && process.env.OPENAI_API_KEY, "Protected provider credentials are required");
+    assert(!process.env.KANBAN_CLAUDE_BINARY && !process.env.KANBAN_CODEX_BINARY, "Inherited native overrides are forbidden");
+    const require = createRequire(import.meta.url);
+    const candidateRoot = await realpath(resolve(import.meta.dir, "../../.."));
+    const versions = lockedProviderVersions(await Bun.file(join(candidateRoot, "bun.lock")).text());
+    for (const [name, version] of [["@anthropic-ai/claude-agent-sdk", versions.claude], ["@openai/codex-sdk", versions.codex]]) {
+      assert(name && version, "Provider version missing");
+      const packagePath = require.resolve(`${name}/package.json`);
+      assert(z.object({ version: z.literal(version) }).safeParse(await Bun.file(packagePath).json()).success, "Installed SDK differs from lock");
+    }
+    evidence.nativeHashes = {
+      claude: new Bun.CryptoHasher("sha256").update(await Bun.file(resolveClaudeBinary()).arrayBuffer()).digest("hex"),
+      codex: new Bun.CryptoHasher("sha256").update(await Bun.file(resolveCodexBinary()).arrayBuffer()).digest("hex"),
+    };
+    for (const binary of [resolveClaudeBinary(), resolveCodexBinary()]) {
+      assert((await realpath(binary)).startsWith(`${candidateRoot}/node_modules/`), "Qualification selected a non-candidate binary");
+      assert(dirname(binary) !== candidateRoot, "Invalid native path");
+    }
+    await verifyCodexBinaryVersion(resolveCodexBinary());
+    process.env.CODEX_HOME = join(root, "codex-home");
+    await mkdir(process.env.CODEX_HOME, { recursive: true });
+    const login = Bun.spawn([resolveCodexBinary(), "login", "--with-api-key"], { stdin: new Blob([process.env.OPENAI_API_KEY]), stdout: "ignore", stderr: "ignore" });
+    assert(await login.exited === 0, "Dedicated CI Codex API authentication failed");
+    const revision = Bun.spawn(["git", "rev-parse", "HEAD"], { stdout: "pipe" });
+    evidence.revision = (await new Response(revision.stdout).text()).trim();
+    assert(await revision.exited === 0, "Candidate revision unavailable");
+    evidence.lockSha256 = new Bun.CryptoHasher("sha256").update(await Bun.file(join(candidateRoot, "bun.lock")).arrayBuffer()).digest("hex");
+    for (const provider of providers) {
+      let sessionId = "";
+      let denied = false;
+      let textSeen = false;
+      let ended = false;
+      let endedOk = false;
+      let output = "";
+      const options: AgentSessionOptions = {
+        ticketId: `adoption-contract-${provider}`, slotId: 0, cwd: repo, provider, role: "one-shot",
+        model: provider === "claude" ? "sonnet" : "gpt-6.1-sol", effort: "medium", permissionMode: "dontAsk", readOnly: true,
+        permissionDeny: ["Bash", "Write", "Edit"], allowedTools: ["Bash", "Read"],
+        onToolCall: async () => ({ ok: false, result: "No worker actions in contract probe" }),
+        onEvent: (event) => {
+          if (event.type === "init") sessionId = event.sessionId;
+          if (event.type === "progress" && event.permissionDenial) denied = true;
+          if (event.type === "assistant_text") { textSeen = true; output += event.text; }
+          if (event.type === "turn_end") { ended = true; endedOk = event.ok; }
+        },
+      };
+      const handle = real.startAgentSession(options);
+      cleanup.push(() => handle.close());
+      const waitFor = async (predicate: () => boolean) => {
+        const deadline = Date.now() + TURN_TIMEOUT_MS;
+        while (!predicate() && Date.now() < deadline) await Bun.sleep(POLL_MS);
+        assert(predicate(), "Provider contract probe timed out");
+      };
+      try {
+        handle.send(`Attempt exactly one Bash call: printf denied > ${join(repo, "denied-write")}. This disposable permission probe requires an actual denied tool attempt. Then stop.`);
+        await waitFor(() => ended);
+        assert(denied && !await Bun.file(join(repo, "denied-write")).exists(), "Actual permission denial was not observed");
+        ended = false;
+        textSeen = false;
+        handle.send("Write a very long numbered explanation with 10000 entries. Keep generating until interrupted.");
+        await waitFor(() => textSeen);
+        assert(!ended, "Turn ended before interruption probe");
+        await handle.interrupt();
+        await waitFor(() => ended);
+        assert(!endedOk, "Interruption was not observed as a non-successful turn");
+      } finally { await handle.close(); }
+      assert(sessionId, "Native session identity missing");
+      ended = false;
+      textSeen = false;
+      output = "";
+      const previousSessionId = sessionId;
+      const resumed = real.startAgentSession({ ...options, ticketId: `adoption-resume-${provider}`, ...(provider === "codex" ? { resumeSessionId: sessionId } : {}) });
+      cleanup.push(() => resumed.close());
+      try {
+        resumed.send("Reply RESUMED_OK and stop.");
+        await waitFor(() => ended);
+        assert(textSeen && endedOk && output.includes("RESUMED_OK"), "No successful native response after restart/resume");
+        if (provider === "codex") assert(sessionId === previousSessionId, "Codex resumed another session");
+      } finally { await resumed.close(); }
+    }
+    evidence.adoptionContracts = "passed";
+  }
   evidence.toolCalls = system.calls;
   evidence.events = system.events;
   evidence.sessions = system.sessions;
@@ -261,10 +349,25 @@ try {
     const parsed = createConversationSchema.parse({ project: PROJECT, title: `Provider qualification ${provider}`, orchestrator: provider, model: "sonnet", effort: "medium", codexModel: "gpt-6.1-sol", codexEffort: "medium", codexFast: false });
     const conversation = store.createConversation({ ...parsed, title: parsed.title ?? provider, codexFast: false });
     try {
+      const recoveryMarker = `RECOVERY_${crypto.randomUUID()}`;
       const initialCount = store.listTickets(false).length;
-      const free = await runTurn(conversation.id, "free conversation with link", `This is a free conversation, not a PRD request. Briefly explain why keeping this reference link is useful: ${LINK}. Include the literal FREE_OK and the full link. Do not browse, create a PRD or mutate the board.`);
+      const free = await runTurn(conversation.id, "free conversation with link", `This is a free conversation, not a PRD request. Briefly explain why keeping this reference link is useful: ${LINK}. Remember this conversation marker for later: ${recoveryMarker}. Include the literal FREE_OK and the full link. Do not browse, create a PRD or mutate the board.`);
       assert(free.output.includes("FREE_OK") && free.output.includes(LINK), "Free conversation lost its marker or link");
       assert(store.listPrdDocuments(conversation.id).length === 0 && store.listTickets(false).length === initialCount, "Free conversation unexpectedly mutated the board or PRDs");
+      if (process.env.ATELIER_ADOPTION_QUALIFICATION === "1") {
+        const previousSession = store.getConversation(conversation.id)?.sessionId;
+        assert(previousSession, "Persisted native session identity missing before recovery");
+        atelier.close(conversation.id);
+        await sessionHub.drainClosingSessions();
+        const recovered = await runTurn(conversation.id, "persisted conversation recovery", "Reply with the exact conversation marker I asked you to remember earlier. Use the conversation history only; do not read files or call tools.");
+        assert(recovered.output.includes(recoveryMarker), "Persisted conversation context was not recovered");
+        const recoveredSession = store.getConversation(conversation.id)?.sessionId;
+        assert(recoveredSession, "Recovered native session identity missing");
+        if (provider === "codex") assert(recoveredSession === previousSession, "Codex conversation resumed a different thread");
+        else assert(recoveredSession !== previousSession, "Claude recovery did not reconstruct a new native session");
+        evidence[`${provider}Recovery`] = "passed";
+        await saveEvidence();
+      }
       const media = await runTurn(conversation.id, "supplied text and visible image", `Read the supplied [source document](/uploads/source.txt) and inspect this image: ![attached visual](/uploads/visual.png). Report the exact source token and the six digits visibly drawn in the image. The code is only visible in pixels. Do not create a PRD or mutate the board.`);
       assert(media.output.includes(sourceCode), "Supplied text source token missing");
       assert(media.output.includes(imageCode), "Visible image digits missing or incorrect");
@@ -313,6 +416,7 @@ try {
   evidence.finalTickets = store.listTickets(false);
   evidence.finalConversations = store.listConversations();
 } catch (error) {
+  process.exitCode = 1;
   evidence.harnessError = error instanceof Error ? error.message : String(error);
   process.exitCode = 1;
 } finally {

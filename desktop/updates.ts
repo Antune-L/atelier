@@ -7,6 +7,9 @@ import { Updater } from "electrobun/bun";
 
 import { DESKTOP_MANIFEST_FILE, RELEASE_LATEST_ROOT, desktopBundleUrl, desktopEnvelopeSchema, desktopManifestSchema, compareAppVersions } from "../src/shared/desktopUpdate.ts";
 import type { DesktopManifest, DesktopUpdateController, DesktopUpdateStatus } from "../src/shared/desktopUpdate.ts";
+import { lockedProviderVersions } from "../src/shared/providerUpdates.ts";
+
+import { readAdoptionReceipt } from "../src/server/system/providerAdoptionTransport.ts";
 
 import { UPDATE_HEALTH_TIMEOUT_MS, UPDATE_RECEIPT, updateHealthPath, updateReceiptSchema } from "./updateFiles.ts";
 
@@ -91,6 +94,15 @@ export function createDesktopUpdates(options: {
     if (key.asymmetricKeyType !== "ed25519" || !verify(null, Buffer.from(envelope.payload), key, Buffer.from(envelope.signature, "base64"))) throw new Error("Release publisher signature is invalid.");
     const manifest = desktopManifestSchema.parse(JSON.parse(envelope.payload));
     desktopBundleUrl(manifest);
+    const runId = manifest.adoptionRunId;
+    const installed = lockedProviderVersions(await Bun.file(join(options.resourcesRoot, "provider-bun.lock")).text());
+    const providerChange = installed.claude !== manifest.providers.claude || installed.codex !== manifest.providers.codex;
+    if (providerChange && !runId) throw new Error("Provider graph changed without qualification metadata.");
+    if (runId) {
+      const receipt = await readAdoptionReceipt(runId, trust.publicKey);
+      const artifact = receipt.artifacts.find((entry) => entry.name === `Atelier-v${manifest.version}-arm64.app.zip`);
+      if (receipt.revision !== manifest.revision || receipt.providers.claude !== manifest.providers.claude || receipt.providers.codex !== manifest.providers.codex || artifact?.sha256 !== manifest.sha256) throw new Error("Desktop artifact lacks matching provider qualification.");
+    }
     return manifest;
   }
 
@@ -153,7 +165,6 @@ export function createDesktopUpdates(options: {
       if (typeof version !== "object" || version === null || !("version" in version) || version.version !== approved.version) throw new Error("Staged runtime version mismatch.");
       await access(join(candidate, "Contents/MacOS/launcher"), constants.X_OK);
       const graph = await Bun.file(join(candidate, "Contents/Resources/app/provider-bun.lock")).text();
-      const { lockedProviderVersions } = await import("../src/shared/providerUpdates.ts");
       if (JSON.stringify(lockedProviderVersions(graph)) !== JSON.stringify(approved.providers)) throw new Error("Staged provider graph mismatch.");
       for (const binary of ["codex-bin", "codex-code-mode-host"]) await access(join(candidate, "Contents/Resources/app", binary), constants.X_OK);
       stagedApp = candidate;

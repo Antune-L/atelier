@@ -1,0 +1,117 @@
+name: provider-adoption
+run-name: Provider adoption ${{ inputs.request_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        required: true
+        type: string
+      base:
+        required: true
+        type: string
+      claude:
+        required: true
+        type: string
+      codex:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: provider-adoption
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    environment: provider-adoption
+    outputs:
+      revision: ${{ steps.candidate.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - name: Prepare exact candidate graph
+        env:
+          ADOPTION_BASE: ${{ inputs.base }}
+          CLAUDE_VERSION: ${{ inputs.claude }}
+          CODEX_VERSION: ${{ inputs.codex }}
+        run: bun scripts/prepareProviderAdoption.ts
+      - name: Persist candidate
+        id: candidate
+        run: |
+          git config user.name 'Atelier provider automation'
+          git config user.email 'provider-adoption@users.noreply.github.com'
+          git add package.json bun.lock src/server/system/claudeBinary.ts src/server/system/codexBinary.ts
+          git commit -m 'Update locked provider graph'
+          git push origin "HEAD:refs/heads/provider-adoption/$GITHUB_RUN_ID"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  qualify:
+    timeout-minutes: 45
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    environment: provider-adoption
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun test
+      - name: Qualify candidate providers
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ADOPTION_ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.ADOPTION_OPENAI_API_KEY }}
+          ATELIER_ADOPTION_QUALIFICATION: '1'
+          ATELIER_QUALIFICATION_OUTPUT: qualification.json
+        run: bun src/server/testing/qualifyAtelierProviders.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qualification-${{ matrix.os }}
+          path: qualification.json
+          if-no-files-found: error
+  publish:
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    needs: [prepare, qualify]
+    runs-on: macos-15
+    environment: provider-adoption
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: qualification-*
+          path: qualification
+      - name: Build signed complete Mac release
+        env:
+          ATELIER_UPDATE_SIGNING_KEY: ${{ secrets.ATELIER_UPDATE_SIGNING_KEY }}
+          ATELIER_ADOPTION_RUN_ID: ${{ github.run_id }}
+        run: |
+          test -n "$ATELIER_UPDATE_SIGNING_KEY"
+          bun run release:desktop "0.1.$GITHUB_RUN_ID"
+      - name: Verify, promote and publish exact candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATELIER_UPDATE_SIGNING_KEY: ${{ secrets.ATELIER_UPDATE_SIGNING_KEY }}
+          ADOPTION_REQUEST_ID: ${{ inputs.request_id }}
+          ADOPTION_BASE: ${{ inputs.base }}
+          CLAUDE_VERSION: ${{ inputs.claude }}
+          CODEX_VERSION: ${{ inputs.codex }}
+        run: bun scripts/publishProviderAdoption.ts

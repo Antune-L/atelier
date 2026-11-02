@@ -8,7 +8,7 @@ import type { ExecutionModelUsage, ModelUsage, SessionUsage, UsageByModel } from
  * (tokens = source of truth).
  *
  * Claude prices are Anthropic public list prices, expressed in USD per million tokens (MTok). Cache reads
- * bill at 0.1x the base input rate by default (Opus 5.5: 0.05x); cache writes (creation) bill at
+ * bill at 0.1x the base input rate by default (Opus 5.5: 0.05x, Fable 5.1: 0.025x); cache writes (creation) bill at
  * 1.25x. `MODEL_PRICING` overrides a family rate for specific model ids (matched by prefix so
  * dated ids like "claude-opus-5-5-20260915" resolve); anything else falls back to `PRICING`.
  *
@@ -30,6 +30,8 @@ const MTOK = 1_000_000;
 const CACHE_READ_MULTIPLIER = 0.1;
 /** Opus 5.5 cache reads bill at a lower fraction of its base input rate. */
 const OPUS_5_5_CACHE_READ_MULTIPLIER = 0.05;
+/** Fable 5.1 cache reads bill at 0.25 USD / MTok, i.e. 0.025x its base input rate. */
+const FABLE_5_1_CACHE_READ_MULTIPLIER = 0.025;
 /** Cache-creation (write) tokens bill at this fraction of the base input rate. */
 const CACHE_CREATE_MULTIPLIER = 1.25;
 
@@ -65,6 +67,9 @@ export const PRICING: Record<ModelFamily, FamilyPricing> = {
 /** Per-model-id overrides, keyed by id prefix; checked before the family table. */
 const MODEL_PRICING: Record<string, FamilyPricing> = {
   "claude-opus-5-5": familyPricing(4, 20, OPUS_5_5_CACHE_READ_MULTIPLIER),
+  "claude-sonnet-5": familyPricing(2, 10),
+  "claude-haiku-5-5": familyPricing(0.1, 0.5),
+  "claude-fable-5-1": familyPricing(10, 50, FABLE_5_1_CACHE_READ_MULTIPLIER),
 };
 
 function pricingOf(modelId: string): FamilyPricing | null {

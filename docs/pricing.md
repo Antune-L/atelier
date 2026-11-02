@@ -1,6 +1,6 @@
 # Pricing grid
 
-Last verified: 2026-10-28
+Last verified: 2026-11-02
 
 The usage page and `/stats` show an **indicative** API cost. Neither SDK reports prices for every
 run, so a local price grid lives in [`src/shared/pricing.ts`](../src/shared/pricing.ts). Tokens are
@@ -18,7 +18,19 @@ Rates are USD per million tokens (MTok), per family (`PRICING`) with per-id over
 cost = (input × in + output × out + cacheRead × in × 0.1 + cacheCreate × in × 1.25) / 1e6
 ```
 
-Opus 5.5 cache reads bill at 0.05× instead of 0.1×. Claude ignores the FAST flag.
+| Model id prefix | Input | Output | Cache read |
+| --- | --- | --- | --- |
+| `opus` family (Opus 5, 4.x) | 5 | 25 | 0.50 |
+| `claude-opus-5-5` | 4 | 20 | 0.20 (0.05×) |
+| `sonnet` family (Sonnet 4.x) | 3 | 15 | 0.30 |
+| `claude-sonnet-5` (Sonnet 5, 5.5) | 2 | 10 | 0.20 |
+| `haiku` family (Haiku 4.5) | 1 | 5 | 0.10 |
+| `claude-haiku-5-5` | 0.10 | 0.50 | 0.01 |
+| `fable` family (Fable 5) | 10 | 50 | 1.00 |
+| `claude-fable-5-1` | 10 | 50 | 0.25 (0.025×) |
+
+Cache writes stay at 1.25× input everywhere. Claude ignores the FAST flag. Haiku 5.5 bills
+0.50 / 2.50 beyond 100K-token prompts; the grid always applies the ≤100K rate.
 
 ## GPT (Codex / OpenAI)
 

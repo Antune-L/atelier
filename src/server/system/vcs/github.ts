@@ -108,8 +108,8 @@ const ghEmptyCheckRunsSchema = z.object({ total_count: z.literal(0), check_runs:
 const ghEmptyCommitStatusesSchema = z.object({ sha: z.string().min(1), total_count: z.literal(0), statuses: z.array(z.unknown()).max(0) });
 const ghSynchronousMergeSchema = z.object({ merged: z.boolean(), sha: z.string().nullable(), message: z.string() });
 const GH_REST_OPEN_STATE = "open";
+const GH_API_ERROR_DETAIL_MAX_LENGTH = 2000;
 const ghRestPullSchema = z.object({
-  base: z.object({ sha: z.string().min(1) }),
   head: z.object({ sha: z.string().min(1) }),
   user: z.object({ login: z.string() }).nullable(),
 });
@@ -122,6 +122,11 @@ const ghRestReviewSchema = z.object({
   user: z.object({ login: z.string() }).nullable(),
 });
 const ghRestReviewsSchema = z.array(ghRestReviewSchema);
+const ghRestPullFilePagesSchema = z.array(z.array(z.object({ filename: z.string(), patch: z.string().optional() })));
+const ghApiErrorBodySchema = z.object({
+  message: z.string(),
+  errors: z.array(z.unknown()).optional(),
+});
 const ghRestReviewPagesSchema = z.array(ghRestReviewsSchema);
 
 const ghPrSchema = z.object({
@@ -315,6 +320,14 @@ const PR_STATE_BY_GITHUB_STATE: Record<string, PrState> = {
 type PrHeadFailure = "unreadable" | "unexpected";
 
 type PrHeadRead = { ok: true; commitSha: string } | { ok: false; failure: PrHeadFailure };
+
+// NOTE(ali): `gh api` prints only the HTTP status on stderr; GitHub's explanation is the JSON body on stdout.
+function ghApiErrorDetail(res: BoundedCommandResult): string {
+  const body = ghApiErrorBodySchema.safeParse(safeJsonParse(res.stdout));
+  if (!body.success) return boundedCommandDetail(res);
+  const errors = body.data.errors?.length ? ` ${JSON.stringify(body.data.errors)}` : "";
+  return `${res.stderr.trim()} — ${body.data.message}${errors}`.slice(0, GH_API_ERROR_DETAIL_MAX_LENGTH);
+}
 
 function rightSideDiffLines(diff: string): Set<number> {
   const lines = new Set<number>();
@@ -815,19 +828,15 @@ export class GithubVcsClient implements VcsClient {
     }
     const parsed = ghRestPullSchema.safeParse(safeJsonParse(pull.stdout));
     if (!parsed.success || parsed.data.head.sha !== expectedCommitSha) {
-      return { ok: false, reason: "GitHub n'a pas confirmé les commits base et head du diff attendu" };
+      return { ok: false, reason: "GitHub n'a pas confirmé le commit head du diff attendu" };
     }
-    const linesByPath = new Map<string, Set<number>>();
-    for (const path of new Set(comments.map((comment) => comment.path))) {
-      const diff = await runBoundedCommand(
-        ["git", "diff", "--unified=3", "--no-renames", "--no-color", `${parsed.data.base.sha}...${expectedCommitSha}`, "--", path],
-        cwd,
-      );
-      if (diff.exitCode !== 0) {
-        return { ok: false, reason: `validation des ancres du diff impossible pour ${path} : ${boundedCommandDetail(diff)}` };
-      }
-      linesByPath.set(path, rightSideDiffLines(diff.stdout));
+    const files = await runGh(["gh", "api", `${pullApiEndpoint(endpoint)}/files?per_page=100`, "--paginate", "--slurp"], cwd);
+    if (files.exitCode !== 0) {
+      return { ok: false, reason: `lecture des fichiers de la PR GitHub impossible : ${ghApiErrorDetail(files)}` };
     }
+    const parsedFiles = ghRestPullFilePagesSchema.safeParse(safeJsonParse(files.stdout));
+    if (!parsedFiles.success) return { ok: false, reason: "réponse GitHub inattendue pour les fichiers de la PR" };
+    const linesByPath = new Map(parsedFiles.data.flat().map((file) => [file.filename, rightSideDiffLines(file.patch ?? "")]));
     const inline = comments.filter((comment) => linesByPath.get(comment.path)?.has(comment.line) === true);
     const outsideDiff = comments.filter((comment) => linesByPath.get(comment.path)?.has(comment.line) !== true);
     return { ok: true, inline, outsideDiff };
@@ -873,7 +882,7 @@ export class GithubVcsClient implements VcsClient {
         { verifyIdentity: true },
       );
       if (posted.exitCode !== 0) {
-        return { ok: false, reason: `publication de la review GitHub échouée : ${boundedCommandDetail(posted)}`, reviewId: null };
+        return { ok: false, reason: `publication de la review GitHub échouée : ${ghApiErrorDetail(posted)}`, reviewId: null };
       }
       const parsed = ghRestReviewSchema.safeParse(safeJsonParse(posted.stdout));
       if (!parsed.success || parsed.data.commit_id !== payload.commit_id || parsed.data.state !== expectedState) {

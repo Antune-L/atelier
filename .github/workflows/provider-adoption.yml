@@ -31,6 +31,14 @@ jobs:
     outputs:
       revision: ${{ steps.candidate.outputs.revision }}
     steps:
+      - name: Require authenticated qualification runners
+        env:
+          ATELIER_ADOPTION_RUNNERS_READY: ${{ vars.ATELIER_ADOPTION_RUNNERS_READY }}
+        run: |
+          if [ "$ATELIER_ADOPTION_RUNNERS_READY" != '1' ]; then
+            echo 'Configure dedicated Linux and macOS runners with existing Claude and Codex logins, then set ATELIER_ADOPTION_RUNNERS_READY=1.'
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -52,18 +60,26 @@ jobs:
           git push origin "HEAD:refs/heads/provider-adoption/$GITHUB_RUN_ID"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   qualify:
+    name: qualify (${{ matrix.os }})
     timeout-minutes: 45
     needs: prepare
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runnerOs: linux
+            runnerArch: x64
+          - os: macos-15
+            runnerOs: macOS
+            runnerArch: ARM64
+    runs-on: [self-hosted, '${{ matrix.runnerOs }}', '${{ matrix.runnerArch }}', atelier-provider-adoption]
     environment: provider-adoption
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.revision }}
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
@@ -71,8 +87,6 @@ jobs:
       - run: bun test
       - name: Qualify candidate providers
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ADOPTION_ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.ADOPTION_OPENAI_API_KEY }}
           ATELIER_ADOPTION_QUALIFICATION: '1'
           ATELIER_QUALIFICATION_OUTPUT: qualification.json
         run: bun src/server/testing/qualifyAtelierProviders.ts

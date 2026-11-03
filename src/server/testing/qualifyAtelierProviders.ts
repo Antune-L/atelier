@@ -195,7 +195,7 @@ try {
   const real = new RealSystemAdapter(workerMcp, join(root, "logs"));
   const system = new QualificationSystem(real);
   if (process.env.ATELIER_ADOPTION_QUALIFICATION === "1") {
-    assert(process.env.ANTHROPIC_API_KEY && process.env.OPENAI_API_KEY, "Protected provider credentials are required");
+    assert(!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY && !process.env.CODEX_API_KEY, "Provider adoption requires existing subscription logins; remove API-key environment variables from the runner");
     assert(!process.env.KANBAN_CLAUDE_BINARY && !process.env.KANBAN_CODEX_BINARY, "Inherited native overrides are forbidden");
     const require = createRequire(import.meta.url);
     const candidateRoot = await realpath(resolve(import.meta.dir, "../../.."));
@@ -214,10 +214,6 @@ try {
       assert(dirname(binary) !== candidateRoot, "Invalid native path");
     }
     await verifyCodexBinaryVersion(resolveCodexBinary());
-    process.env.CODEX_HOME = join(root, "codex-home");
-    await mkdir(process.env.CODEX_HOME, { recursive: true });
-    const login = Bun.spawn([resolveCodexBinary(), "login", "--with-api-key"], { stdin: new Blob([process.env.OPENAI_API_KEY]), stdout: "ignore", stderr: "ignore" });
-    assert(await login.exited === 0, "Dedicated CI Codex API authentication failed");
     const revision = Bun.spawn(["git", "rev-parse", "HEAD"], { stdout: "pipe" });
     evidence.revision = (await new Response(revision.stdout).text()).trim();
     assert(await revision.exited === 0, "Candidate revision unavailable");
